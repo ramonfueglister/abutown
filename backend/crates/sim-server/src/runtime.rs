@@ -2,7 +2,13 @@ use abutown_protocol::{
     ChunkCoordDto, ChunkSnapshotDto, HealthResponse, PROTOCOL_VERSION, ServerHelloDto,
     ServerMessageDto, TilePulseDeltaDto, WorldId, WorldSummaryDto,
 };
-use sim_core::{chunk::Chunk, ids::ChunkCoord, scheduler::ChunkActivity, tile::TileKind};
+use sim_core::{
+    chunk::Chunk,
+    ids::ChunkCoord,
+    persistence::InMemoryChunkSnapshotStore,
+    scheduler::ChunkActivity,
+    tile::TileKind,
+};
 
 use crate::chunk_registry::ChunkRegistry;
 
@@ -15,12 +21,23 @@ const SEEDED_CHUNKS: [ChunkCoord; 3] = [
 ];
 const PULSE_STRIDE: u64 = 37;
 
-#[derive(Debug)]
 pub struct SimulationRuntime {
     world_id: WorldId,
     registry: ChunkRegistry,
+    snapshot_store: InMemoryChunkSnapshotStore,
     tick: u64,
     version: u64,
+}
+
+impl std::fmt::Debug for SimulationRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimulationRuntime")
+            .field("world_id", &self.world_id)
+            .field("registry", &self.registry)
+            .field("tick", &self.tick)
+            .field("version", &self.version)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SimulationRuntime {
@@ -49,6 +66,7 @@ impl SimulationRuntime {
         Self {
             world_id: WorldId(WORLD_ID.to_string()),
             registry,
+            snapshot_store: InMemoryChunkSnapshotStore::default(),
             tick: 0,
             version: 0,
         }
@@ -79,6 +97,15 @@ impl SimulationRuntime {
 
     pub fn chunk_snapshot(&self, coord: ChunkCoord) -> Option<ChunkSnapshotDto> {
         self.registry.chunk_snapshot(&self.world_id, coord)
+    }
+
+    pub fn persist_chunk_snapshots(&mut self) -> usize {
+        self.registry
+            .write_snapshots(&self.world_id, &mut self.snapshot_store)
+    }
+
+    pub fn stored_chunk_snapshot(&self, coord: ChunkCoord) -> Option<&ChunkSnapshotDto> {
+        self.snapshot_store.read_snapshot(coord)
     }
 
     pub fn hello(&self) -> ServerMessageDto {
@@ -185,5 +212,33 @@ mod tests {
         assert_eq!(third.coord, ChunkCoordDto { x: 4, y: 5 });
         assert_eq!(fourth.tick, 4);
         assert_eq!(fourth.coord, ChunkCoordDto { x: 4, y: 4 });
+    }
+
+    #[test]
+    fn runtime_persists_loaded_chunk_snapshots_and_clears_dirty_state() {
+        let mut runtime = SimulationRuntime::new();
+
+        assert_eq!(runtime.persist_chunk_snapshots(), 3);
+
+        let visible = runtime
+            .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .expect("visible snapshot stored");
+        assert_eq!(visible.coord, ChunkCoordDto { x: 4, y: 4 });
+        assert_eq!(visible.dirty_tiles.len(), 1);
+
+        let east = runtime
+            .stored_chunk_snapshot(ChunkCoord { x: 5, y: 4 })
+            .expect("east snapshot stored");
+        assert_eq!(east.coord, ChunkCoordDto { x: 5, y: 4 });
+        assert_eq!(east.dirty_tiles.len(), 1);
+
+        assert_eq!(runtime.persist_chunk_snapshots(), 3);
+        assert!(
+            runtime
+                .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+                .expect("visible snapshot remains stored")
+                .dirty_tiles
+                .is_empty()
+        );
     }
 }
