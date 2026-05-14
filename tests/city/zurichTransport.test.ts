@@ -13,9 +13,20 @@ describe('buildZurichTransport', () => {
     expect(transport.bridges.size).toBeLessThanOrEqual(5);
     expect(transport.railCrossings.size).toBeGreaterThanOrEqual(1);
 
+    const bridgeRoads = [...transport.roads.entries()].filter(([, road]) => road.kind === 'bridge');
+    expect(bridgeRoads.length).toBeGreaterThanOrEqual(3);
+    expect(bridgeRoads.length).toBeLessThanOrEqual(5);
+    expect(bridgeRoads.length).toBe(transport.bridges.size);
+    for (const [bridgeKey] of bridgeRoads) expect(transport.bridges.has(bridgeKey)).toBe(true);
+    for (const bridgeKey of transport.bridges) expect(transport.roads.get(bridgeKey)?.kind).toBe('bridge');
+
     for (const crossingKey of transport.railCrossings) {
       expect(transport.roads.has(crossingKey)).toBe(true);
       expect(transport.rails.has(crossingKey)).toBe(true);
+    }
+
+    for (const coord of transport.arterialPaths.flat()) {
+      expect(transport.roads.has(`${coord.x}:${coord.y}`)).toBe(true);
     }
 
     let accidentalOverlap = 0;
@@ -29,7 +40,8 @@ describe('buildZurichTransport', () => {
     const world = buildZurichWorld({ seed: 1848 });
     const transport = buildZurichTransport(world);
 
-    for (const bridgeKey of transport.bridges) {
+    const bridgeRoads = [...transport.roads.entries()].filter(([, road]) => road.kind === 'bridge');
+    for (const [bridgeKey] of bridgeRoads) {
       const terrain = world.terrain.get(bridgeKey)?.kind;
       expect(['water', 'riverbank']).toContain(terrain);
     }

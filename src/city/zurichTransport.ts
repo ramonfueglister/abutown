@@ -28,9 +28,10 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
     const tileKey = key(coord);
     if (railPoints.has(tileKey) && !railCrossings.has(tileKey)) return;
     const terrain = world.terrain.get(tileKey)?.kind;
-    const kind: ZurichRoadKind = terrain === 'water' || terrain === 'riverbank' ? 'bridge' : 'street';
+    const isIntentionalBridge = INTENTIONAL_BRIDGE_KEYS.has(tileKey) && (terrain === 'water' || terrain === 'riverbank');
+    const kind: ZurichRoadKind = isIntentionalBridge ? 'bridge' : 'street';
     roadKinds.set(tileKey, kind);
-    if (kind === 'bridge' && INTENTIONAL_BRIDGE_KEYS.has(tileKey)) bridgeKeys.add(tileKey);
+    if (kind === 'bridge') bridgeKeys.add(tileKey);
   };
 
   for (const path of arterialPaths) for (const coord of path) addRoad(coord);
@@ -51,7 +52,9 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
     rails.set(tileKey, { coord, mask: maskForRail(railPoints, coord) });
   }
 
-  return { roads, rails, bridges: bridgeKeys, railCrossings, arterialPaths, railPaths };
+  const roadBackedArterialPaths = arterialPaths.map((path) => path.filter((coord) => roadKinds.has(key(coord))));
+
+  return { roads, rails, bridges: bridgeKeys, railCrossings, arterialPaths: roadBackedArterialPaths, railPaths };
 }
 
 function buildArterialPaths(world: ZurichWorld): Coord[][] {
