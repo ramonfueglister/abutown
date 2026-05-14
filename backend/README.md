@@ -30,7 +30,7 @@ In a second terminal, run the Vite client:
 npm run dev
 ```
 
-Open the Vite URL. The city should render normally and show a `RUST LIVE` badge. Chunk `4:4` is outlined from the server snapshot, and a server-driven pulse appears from `/ws` roughly once per second.
+Open the Vite URL. The city should render normally and show a `RUST LIVE` badge. Chunk `4:4` is outlined from the server snapshot, and server-driven pulses appear from `/ws` roughly once per second. The runtime currently loads three visible chunks (`4:4`, `5:4`, and `4:5`) and rotates broadcast pulses across them.
 
 Current `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
 
