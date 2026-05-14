@@ -45,7 +45,7 @@ Required server surfaces:
 - `GET /chunks/{x}/{y}`: current chunk snapshot.
 - `GET /ws`: WebSocket stream for versioned server deltas.
 
-The server owns tick/version counters and emits a low-frequency visible delta, roughly once per second. The first delta can be intentionally simple, such as a marker position or tile pulse inside chunk `0:0`. The important property is that the browser does not invent the event; it renders what Rust sends.
+The server owns tick/version counters and emits a low-frequency visible delta, roughly once per second. The first delta can be intentionally simple, such as a marker position or tile pulse inside chunk `4:4`, which aligns with the current Zurich camera focus around grid `128:128`. The important property is that the browser does not invent the event; it renders what Rust sends.
 
 ## Protocol Design
 
