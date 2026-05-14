@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use abutown_protocol::{ChunkSnapshotDto, HealthResponse, WorldSummaryDto};
+use abutown_protocol::{ChunkSnapshotDto, HealthResponse, ServerMessageDto, WorldSummaryDto};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{
+        Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     http::StatusCode,
+    response::IntoResponse,
     routing::get,
 };
 use sim_core::ids::ChunkCoord;
@@ -41,6 +45,7 @@ pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
         .route("/health", get(health))
         .route("/world", get(world))
         .route("/chunks/{x}/{y}", get(chunk))
+        .route("/ws", get(websocket))
         .with_state(state)
         .layer(CorsLayer::permissive())
 }
@@ -67,4 +72,48 @@ async fn chunk(
         .chunk_snapshot(ChunkCoord { x, y })
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| stream_world_deltas(socket, state))
+}
+
+async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
+    let hello = {
+        let runtime = state.runtime();
+        let runtime = runtime.lock().await;
+        runtime.hello()
+    };
+    if send_server_message(&mut socket, hello).await.is_err() {
+        return;
+    }
+
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    loop {
+        interval.tick().await;
+        let pulse = {
+            let runtime = state.runtime();
+            let mut runtime = runtime.lock().await;
+            runtime.next_pulse()
+        };
+
+        if send_server_message(&mut socket, pulse).await.is_err() {
+            return;
+        }
+    }
+}
+
+async fn send_server_message(
+    socket: &mut WebSocket,
+    message: ServerMessageDto,
+) -> Result<(), axum::Error> {
+    let text = match serde_json::to_string(&message) {
+        Ok(text) => text,
+        Err(error) => {
+            tracing::error!(%error, "failed to serialize websocket message");
+            return Ok(());
+        }
+    };
+
+    socket.send(Message::Text(text.into())).await
 }
