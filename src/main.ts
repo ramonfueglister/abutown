@@ -7,7 +7,7 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
-import { makeNonDespawningVehicleLoop } from './city/vehiclePaths';
+import { buildVehicleRoadLoops, hasTeleportingVehicleSegment } from './city/vehiclePaths';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -785,10 +785,11 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
     roadRoute([{ x: 47, y: 42 }, { x: 60, y: 48 }, { x: 65, y: 64 }, { x: 52, y: maxY }]),
     roadRoute([{ x: 12, y: maxY }, { x: 28, y: 68 }, { x: 46, y: 66 }, { x: 68, y: 68 }, { x: maxX, y: 70 }]),
   ];
-  const corridors = baseCorridors.flatMap((path) => [
-    makeNonDespawningVehicleLoop(path),
-    makeNonDespawningVehicleLoop([...path].reverse()),
-  ]);
+  const corridors = buildVehicleRoadLoops([
+    ...baseCorridors,
+    ...baseCorridors.map((path) => [...path].reverse()),
+  ], { roadKeys: roads, railKeys: rails });
+  if (corridors.length === 0) return [];
   return Array.from({ length: 156 }, (_, index) => {
     const path = corridors[index % corridors.length];
     return {
@@ -1113,6 +1114,27 @@ function cityDiagnostics(): Record<string, number> {
   };
 }
 
+function vehicleDiagnostics(): Record<string, number> {
+  let pathTilesOffRoad = 0;
+  let pathTilesOnRails = 0;
+  let teleportingVehiclePaths = 0;
+
+  for (const car of cars) {
+    if (hasTeleportingVehicleSegment(car.path)) teleportingVehiclePaths += 1;
+    for (const coord of car.path) {
+      const tileKey = key(coord);
+      if (!roads.has(tileKey)) pathTilesOffRoad += 1;
+      if (rails.has(tileKey)) pathTilesOnRails += 1;
+    }
+  }
+
+  return {
+    pathTilesOffRoad,
+    pathTilesOnRails,
+    teleportingVehiclePaths,
+  };
+}
+
 function key(coord: Coord): string {
   return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
 }
@@ -1190,6 +1212,7 @@ window.render_game_to_text = () =>
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
       railStations: railStations.length,
       railYardTracks: railYardPaths.length,
+      vehicleDiagnostics: vehicleDiagnostics(),
       diagnostics: cityDiagnostics(),
       camera: {
         mode: 'bounded-fixed-map',
