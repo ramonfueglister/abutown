@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 import {
   hasVisiblePixelsInEveryVehicleFrame,
   MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME,
@@ -27,10 +29,19 @@ describe('vehicle sprites', () => {
     expect(sheets.has('lorryThirdGeneration')).toBe(true);
     expect(sheets.has('polroadPrivateCars')).toBe(true);
     expect([...sheets].some((sheet) => sheet.toLowerCase().includes('toyland'))).toBe(false);
-    expect(sprites.length).toBe(425);
+    expect(sprites.length).toBe(405);
     expect(sprites.filter((sprite) => sprite.sheet === 'bus')).toHaveLength(3);
-    expect(sprites.filter((sprite) => sprite.sheet === 'polroadPrivateCars')).toHaveLength(44);
+    expect(sprites.filter((sprite) => sprite.sheet === 'polroadPrivateCars')).toHaveLength(24);
     expect(sprites.filter((sprite) => sprite.sheet !== 'bus' && sprite.sheet !== 'polroadPrivateCars')).toHaveLength(378);
+  });
+
+  it('keeps the extracted PolRoad private-car atlas free of horse-cart rows and raw remap-pink pixels', () => {
+    const pixels = readRgbaPng(new URL('../../public/polroad/polroad_private_cars.png', import.meta.url));
+
+    expect(pixels.width).toBe(8 * POLROAD_PRIVATE_CAR_FRAME_WIDTH);
+    expect(pixels.height).toBe(24 * POLROAD_PRIVATE_CAR_FRAME_HEIGHT);
+    expect(countVisiblePixels(pixels)).toBeGreaterThan(10000);
+    expect(countOpenTtdRemapPinkPixels(pixels)).toBe(0);
   });
 
   it('clips edge frames instead of rejecting real OpenGFX vehicle blocks at the atlas border', () => {
@@ -135,4 +146,104 @@ describe('vehicle sprites', () => {
 
 function vectorLength(point: { x: number; y: number }): number {
   return Math.hypot(point.x, point.y);
+}
+
+type RgbaPng = {
+  width: number;
+  height: number;
+  data: Uint8Array;
+};
+
+function readRgbaPng(url: URL): RgbaPng {
+  const buffer = readFileSync(url);
+  const signature = buffer.subarray(0, 8).toString('hex');
+  expect(signature).toBe('89504e470d0a1a0a');
+
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idatChunks: Buffer[] = [];
+
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.subarray(offset + 4, offset + 8).toString('ascii');
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    offset += 12 + length;
+
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    }
+    if (type === 'IDAT') idatChunks.push(Buffer.from(data));
+    if (type === 'IEND') break;
+  }
+
+  expect(bitDepth).toBe(8);
+  expect(colorType).toBe(6);
+
+  const inflated = inflateSync(Buffer.concat(idatChunks));
+  const bytesPerPixel = 4;
+  const stride = width * bytesPerPixel;
+  const output = new Uint8Array(width * height * bytesPerPixel);
+  let inputOffset = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    const filter = inflated[inputOffset];
+    inputOffset += 1;
+    const row = inflated.subarray(inputOffset, inputOffset + stride);
+    inputOffset += stride;
+    const outputOffset = y * stride;
+
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= bytesPerPixel ? output[outputOffset + x - bytesPerPixel] : 0;
+      const up = y > 0 ? output[outputOffset + x - stride] : 0;
+      const upLeft = y > 0 && x >= bytesPerPixel ? output[outputOffset + x - stride - bytesPerPixel] : 0;
+      output[outputOffset + x] = (row[x] + pngFilterPrediction(filter, left, up, upLeft)) & 0xff;
+    }
+  }
+
+  return { width, height, data: output };
+}
+
+function pngFilterPrediction(filter: number, left: number, up: number, upLeft: number): number {
+  if (filter === 0) return 0;
+  if (filter === 1) return left;
+  if (filter === 2) return up;
+  if (filter === 3) return Math.floor((left + up) / 2);
+  if (filter === 4) return paeth(left, up, upLeft);
+  throw new Error(`Unsupported PNG filter ${filter}`);
+}
+
+function paeth(left: number, up: number, upLeft: number): number {
+  const predictor = left + up - upLeft;
+  const leftDistance = Math.abs(predictor - left);
+  const upDistance = Math.abs(predictor - up);
+  const upLeftDistance = Math.abs(predictor - upLeft);
+  if (leftDistance <= upDistance && leftDistance <= upLeftDistance) return left;
+  if (upDistance <= upLeftDistance) return up;
+  return upLeft;
+}
+
+function countVisiblePixels(pixels: RgbaPng): number {
+  let count = 0;
+  for (let i = 3; i < pixels.data.length; i += 4) {
+    if (pixels.data[i] !== 0) count += 1;
+  }
+  return count;
+}
+
+function countOpenTtdRemapPinkPixels(pixels: RgbaPng): number {
+  let count = 0;
+  for (let i = 0; i < pixels.data.length; i += 4) {
+    const r = pixels.data[i];
+    const g = pixels.data[i + 1];
+    const b = pixels.data[i + 2];
+    const a = pixels.data[i + 3];
+    if (a !== 0 && r >= 238 && r <= 245 && g === 0 && b >= 238 && b <= 245) count += 1;
+  }
+  return count;
 }

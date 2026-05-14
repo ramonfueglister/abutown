@@ -2,7 +2,7 @@ export type ScreenPoint = { x: number; y: number };
 
 export const VEHICLE_SHEET_LAYOUTS = [
   { sheet: 'bus', rows: 3, blocks: 1, scale: 0.82 },
-  { sheet: 'polroadPrivateCars', rows: 44, blocks: 1, scale: 0.92 },
+  { sheet: 'polroadPrivateCars', rows: 24, blocks: 1, scale: 0.92 },
   { sheet: 'lorryFirstGeneration', rows: 14, blocks: 3, scale: 0.78 },
   { sheet: 'lorryFirstGenerationArctic', rows: 14, blocks: 3, scale: 0.78 },
   { sheet: 'lorryFirstGenerationTropical', rows: 14, blocks: 3, scale: 0.78 },
@@ -82,7 +82,7 @@ export function trafficVehicleSpriteDeck(sprites: readonly VehicleSprite[]): Veh
 }
 
 export function vehicleTrafficWeight(sprite: VehicleSprite): number {
-  if (sprite.sheet === 'polroadPrivateCars') return 80;
+  if (sprite.sheet === 'polroadPrivateCars') return 130;
   if (sprite.sheet === 'bus') return 3;
   if (sprite.row === 10) return 18;
   if (sprite.row === 1) return 10;
