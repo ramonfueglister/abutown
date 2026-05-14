@@ -34,6 +34,16 @@ import {
   type VehicleSheetName,
   type VehicleSprite,
 } from './render/vehicleSprites';
+import { buildTrafficIntersections } from './traffic/intersections';
+import { stepLocalTrafficAuthority } from './traffic/localTrafficAuthority';
+import {
+  createInitialTrafficRuleSnapshot,
+  type TrafficIntersection,
+  type TrafficRuleSnapshot,
+  type VehicleId,
+  trafficKey,
+} from './traffic/trafficTypes';
+import { buildTrafficRequestsForVehicles } from './traffic/vehicleTrafficRequests';
 
 type Coord = { x: number; y: number };
 type Terrain = 'grass' | 'water' | 'riverbank' | 'park';
@@ -62,6 +72,7 @@ type RailStation = {
 };
 
 type Car = {
+  id: VehicleId;
   path: Coord[];
   offset: number;
   speed: number;
@@ -206,6 +217,11 @@ const railPaths = buildRailPaths();
 const railReserved = buildRailReserved(railPaths);
 const railCrossings = buildRailCrossings();
 const roads = buildRoadNetwork();
+const trafficIntersections: TrafficIntersection[] = buildTrafficIntersections([...roads.values()].map((road) => ({
+  coord: road.coord,
+  mask: road.mask,
+})));
+const trafficIntersectionLookup = new Map(trafficIntersections.map((intersection) => [trafficKey(intersection.coord), intersection]));
 const vehicleCautionTiles = buildVehicleCautionTiles();
 const railYardPaths: Coord[][] = [];
 const rails = buildRailNetwork(railPaths);
@@ -215,6 +231,8 @@ const trees = buildTrees();
 let vehicleSprites: VehicleSprite[] = [];
 let trafficVehicleSprites: VehicleSprite[] = [];
 let cars: Car[] = [];
+let trafficRuleSnapshot: TrafficRuleSnapshot = createInitialTrafficRuleSnapshot();
+let trafficTick = 0;
 let previousTime = performance.now();
 
 void boot();
@@ -299,9 +317,28 @@ function frame(now: number): void {
 }
 
 function advanceCars(dt: number): void {
+  trafficTick += 1;
   const leaderOffsets = carLeaderOffsets(cars);
+  const trafficRequests = buildTrafficRequestsForVehicles({
+    tick: trafficTick,
+    intersections: trafficIntersectionLookup,
+    vehicles: cars.map((car) => ({
+      vehicleId: car.id,
+      path: car.path,
+      offset: car.offset,
+      speed: car.speed,
+    })),
+  });
+  const trafficResult = stepLocalTrafficAuthority({
+    snapshot: trafficRuleSnapshot,
+    tick: trafficTick,
+    requests: trafficRequests,
+  });
+  trafficRuleSnapshot = trafficResult.snapshot;
+
   for (const car of cars) {
     const leaderOffset = leaderOffsets.get(car);
+    const trafficDecision = trafficResult.decisions.get(car.id);
     const speedFactor = vehicleSpeedFactor({
       path: car.path,
       offset: car.offset,
@@ -312,12 +349,15 @@ function advanceCars(dt: number): void {
       leaderOffset,
       pathLength: car.path.length,
     });
-    const desiredAdvance = car.speed * speedFactor * followingFactor * dt;
-    const safeAdvance = Math.min(desiredAdvance, vehicleFollowingAdvanceLimit({
+    const trafficFactor = trafficDecision?.speedFactor ?? 1;
+    const desiredAdvance = car.speed * speedFactor * followingFactor * trafficFactor * dt;
+    const followingAdvanceLimit = vehicleFollowingAdvanceLimit({
       offset: car.offset,
       leaderOffset,
       pathLength: car.path.length,
-    }));
+    });
+    const trafficAdvanceLimit = trafficDecision?.maxAdvance ?? Number.POSITIVE_INFINITY;
+    const safeAdvance = Math.min(desiredAdvance, followingAdvanceLimit, trafficAdvanceLimit);
     car.offset = (car.offset + safeAdvance) % car.path.length;
   }
 }
@@ -868,6 +908,7 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
   return Array.from({ length: 156 }, (_, index) => {
     const path = corridors[index % corridors.length];
     return {
+      id: `vehicle:${index}`,
       path,
       offset: (index * 7 + Math.floor(index / corridors.length) * 3) % path.length,
       speed: 1.15 + (index % 9) * 0.13,
@@ -1237,6 +1278,14 @@ function vehicleDiagnostics(): Record<string, number> {
     illegalVehicleUTurnPaths,
     samePathGapViolations,
     minSamePathGap: Number((Number.isFinite(minSamePathGap) ? minSamePathGap : 0).toFixed(3)),
+    reservedIntersections: trafficRuleSnapshot.diagnostics.reservedIntersections,
+    yieldingVehicles: trafficRuleSnapshot.diagnostics.yieldingVehicles,
+    stoppedForTrafficRules: trafficRuleSnapshot.diagnostics.stoppedForTrafficRules,
+    blockedVehicles: trafficRuleSnapshot.diagnostics.blockedVehicles,
+    intersectionConflictsPrevented: trafficRuleSnapshot.diagnostics.intersectionConflictsPrevented,
+    expiredReservations: trafficRuleSnapshot.diagnostics.expiredReservations,
+    trafficRuleDecisionCount: trafficRuleSnapshot.diagnostics.trafficRuleDecisionCount,
+    unclassifiedTrafficRequests: trafficRuleSnapshot.diagnostics.unclassifiedTrafficRequests,
   };
 }
 

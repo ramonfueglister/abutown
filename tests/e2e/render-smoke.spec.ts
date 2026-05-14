@@ -14,6 +14,9 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadTiles).toBeGreaterThan(0);
   expect(state.city.buildings).toBeGreaterThan(0);
   expect(state.city.cars).toBeGreaterThan(0);
+  expect(state.city.vehicleDiagnostics.trafficRuleDecisionCount).toEqual(expect.any(Number));
+  expect(state.city.vehicleDiagnostics.reservedIntersections).toEqual(expect.any(Number));
+  expect(state.city.vehicleDiagnostics.stoppedForTrafficRules).toEqual(expect.any(Number));
   expect(state.city.camera.mode).toBe('bounded-fixed-map');
   expect(state.city.camera.target).toEqual(expect.objectContaining({
     x: expect.any(Number),
