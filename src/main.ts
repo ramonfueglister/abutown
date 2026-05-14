@@ -62,6 +62,23 @@ type Car = {
   sprite: VehicleSprite;
 };
 
+type GridRect = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
+
+type StaticDrawable =
+  | { type: 'rail'; coord: Coord; rail: RailTile }
+  | { type: 'road'; coord: Coord; road: RoadTile }
+  | { type: 'railStation'; coord: Coord; station: RailStation }
+  | { type: 'tree'; coord: Coord }
+  | { type: 'building'; coord: Coord; building: Building };
+
+type CarDrawable = { type: 'car'; coord: Coord; car: Car };
+type Drawable = StaticDrawable | CarDrawable;
+
 type BuildingSheetName =
   | 'houses'
   | 'oldhouses'
@@ -98,6 +115,7 @@ const CAMERA_EDGE_MARGIN = 8;
 const CAMERA_EDGE_SOFTNESS = 4;
 const CAMERA_MIN_SCALE = 0.48;
 const CAMERA_MAX_SCALE = 3.2;
+const VIEWPORT_GRID_PADDING = 9;
 const OUTSKIRTS_TILES = 12;
 const EDGE_EXIT_TILES = 7;
 const NORTH = 1;
@@ -197,6 +215,7 @@ const railYardPaths: Coord[][] = [];
 const railStations = buildRailStations();
 const buildings = zurichPlacement.buildings.map(toRuntimeBuilding);
 const trees = zurichPlacement.trees;
+const staticDrawables = buildStaticDrawables();
 let vehicleSprites: VehicleSprite[] = [];
 let cars: Car[] = [];
 let previousTime = performance.now();
@@ -297,27 +316,21 @@ function drawScene(offset: Coord): void {
   ctx.save();
   const sceneOffset = iso(offset);
   ctx.translate(sceneOffset.x, sceneOffset.y);
+  const visibleGrid = visibleGridRect();
 
-  drawOutskirtsTerrain();
-  for (let y = 0; y < HEIGHT; y += 1) {
-    for (let x = 0; x < WIDTH; x += 1) drawTerrain({ x, y });
+  drawOutskirtsTerrain(visibleGrid);
+  for (let y = Math.max(0, visibleGrid.minY); y <= Math.min(HEIGHT - 1, visibleGrid.maxY); y += 1) {
+    for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(WIDTH - 1, visibleGrid.maxX); x += 1) drawTerrain({ x, y });
   }
-  drawEdgeConnections();
+  drawEdgeConnections(visibleGrid);
 
-  const drawables = [
-    ...[...rails.values()].map((rail) => ({ type: 'rail' as const, coord: rail.coord, rail })),
-    ...[...roads.values()].map((road) => ({ type: 'road' as const, coord: road.coord, road })),
-    ...railStations.map((station) => ({ type: 'railStation' as const, coord: station.coord, station })),
-    ...trees.map((coord) => ({ type: 'tree' as const, coord })),
-    ...buildings.map((building) => ({ type: 'building' as const, coord: building.coord, building })),
-    ...cars.map((car) => ({ type: 'car' as const, coord: carPosition(car), car })),
-  ].sort((a, b) =>
-    iso(a.coord).y - iso(b.coord).y ||
-    drawPriority(a.type) - drawPriority(b.type) ||
-    a.coord.x - b.coord.x
-  );
+  const visibleStaticDrawables = staticDrawables.filter((item) => isCoordVisible(item.coord, visibleGrid));
+  const carDrawables = cars
+    .map((car) => ({ type: 'car' as const, coord: carPosition(car), car }))
+    .filter((item) => isCoordVisible(item.coord, visibleGrid))
+    .sort(compareDrawables);
 
-  for (const item of drawables) {
+  for (const item of mergeSortedDrawables(visibleStaticDrawables, carDrawables)) {
     if (item.type === 'rail') drawRail(item.rail);
     if (item.type === 'road') drawRoad(item.road);
     if (item.type === 'railStation') drawRailStation(item.station);
@@ -339,12 +352,12 @@ function drawTerrain(coord: Coord): void {
   ctx.drawImage(image, sx, 0, 64, SPRITE_H, point.x - TILE_W / 2, point.y - 12, TILE_W, SPRITE_H);
 }
 
-function drawOutskirtsTerrain(): void {
+function drawOutskirtsTerrain(visibleGrid: GridRect): void {
   const image = images.get(assetPaths.grass);
   if (!image) return;
 
-  for (let y = -OUTSKIRTS_TILES; y < HEIGHT + OUTSKIRTS_TILES; y += 1) {
-    for (let x = -OUTSKIRTS_TILES; x < WIDTH + OUTSKIRTS_TILES; x += 1) {
+  for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(HEIGHT - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
+    for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(WIDTH - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
       const coord = { x, y };
       if (isInsidePlayableMap(coord)) continue;
       const edgeDistance = distanceOutsidePlayableMap(coord);
@@ -454,12 +467,14 @@ function drawCar(car: Car): void {
   ctx.restore();
 }
 
-function drawEdgeConnections(): void {
+function drawEdgeConnections(visibleGrid: GridRect): void {
   for (const road of roads.values()) {
     for (const exit of outwardExits(road.coord, road.mask)) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
+        const coord = { x: road.coord.x + exit.dx * step, y: road.coord.y + exit.dy * step };
+        if (!isCoordVisible(coord, visibleGrid)) continue;
         drawFadingEdgeTile(step, () => drawRoad({
-          coord: { x: road.coord.x + exit.dx * step, y: road.coord.y + exit.dy * step },
+          coord,
           kind: 'street',
           mask: exit.mask,
         }));
@@ -470,8 +485,10 @@ function drawEdgeConnections(): void {
   for (const rail of rails.values()) {
     for (const exit of outwardExits(rail.coord, rail.mask)) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
+        const coord = { x: rail.coord.x + exit.dx * step, y: rail.coord.y + exit.dy * step };
+        if (!isCoordVisible(coord, visibleGrid)) continue;
         drawFadingEdgeTile(step, () => drawRail({
-          coord: { x: rail.coord.x + exit.dx * step, y: rail.coord.y + exit.dy * step },
+          coord,
           mask: exit.mask,
         }));
       }
@@ -973,6 +990,16 @@ function worldToGrid(point: Coord): Coord {
   };
 }
 
+function buildStaticDrawables(): StaticDrawable[] {
+  return [
+    ...[...rails.values()].map((rail) => ({ type: 'rail' as const, coord: rail.coord, rail })),
+    ...[...roads.values()].map((road) => ({ type: 'road' as const, coord: road.coord, road })),
+    ...railStations.map((station) => ({ type: 'railStation' as const, coord: station.coord, station })),
+    ...trees.map((coord) => ({ type: 'tree' as const, coord })),
+    ...buildings.map((building) => ({ type: 'building' as const, coord: building.coord, building })),
+  ].sort(compareDrawables);
+}
+
 function constrainCamera(allowOverscroll: boolean): void {
   constrainCameraTargetToGrid(
     camera,
@@ -988,6 +1015,26 @@ function constrainCamera(allowOverscroll: boolean): void {
       allowOverscroll,
     }
   );
+}
+
+function visibleGridRect(): GridRect {
+  const inverseScale = 1 / camera.scale;
+  const corners = [
+    worldToGrid({ x: -camera.x * inverseScale, y: -camera.y * inverseScale }),
+    worldToGrid({ x: (window.innerWidth - camera.x) * inverseScale, y: -camera.y * inverseScale }),
+    worldToGrid({ x: -camera.x * inverseScale, y: (window.innerHeight - camera.y) * inverseScale }),
+    worldToGrid({ x: (window.innerWidth - camera.x) * inverseScale, y: (window.innerHeight - camera.y) * inverseScale }),
+  ];
+  return {
+    minX: Math.floor(Math.min(...corners.map((coord) => coord.x))) - VIEWPORT_GRID_PADDING,
+    maxX: Math.ceil(Math.max(...corners.map((coord) => coord.x))) + VIEWPORT_GRID_PADDING,
+    minY: Math.floor(Math.min(...corners.map((coord) => coord.y))) - VIEWPORT_GRID_PADDING,
+    maxY: Math.ceil(Math.max(...corners.map((coord) => coord.y))) + VIEWPORT_GRID_PADDING,
+  };
+}
+
+function isCoordVisible(coord: Coord, rect: GridRect): boolean {
+  return coord.x >= rect.minX && coord.x <= rect.maxX && coord.y >= rect.minY && coord.y <= rect.maxY;
 }
 
 function isInsidePlayableMap(coord: Coord): boolean {
@@ -1026,6 +1073,33 @@ function outwardExits(coord: Coord, mask: number): { dx: number; dy: number; mas
 
 function depthSort(a: { coord: Coord }, b: { coord: Coord }): number {
   return iso(a.coord).y - iso(b.coord).y || a.coord.x - b.coord.x;
+}
+
+function compareDrawables(a: Drawable, b: Drawable): number {
+  return iso(a.coord).y - iso(b.coord).y ||
+    drawPriority(a.type) - drawPriority(b.type) ||
+    a.coord.x - b.coord.x;
+}
+
+function mergeSortedDrawables(staticItems: StaticDrawable[], carItems: CarDrawable[]): Drawable[] {
+  const result: Drawable[] = [];
+  let staticIndex = 0;
+  let carIndex = 0;
+  while (staticIndex < staticItems.length || carIndex < carItems.length) {
+    const staticItem = staticItems[staticIndex];
+    const carItem = carItems[carIndex];
+    if (!staticItem) {
+      result.push(carItem);
+      carIndex += 1;
+    } else if (!carItem || compareDrawables(staticItem, carItem) <= 0) {
+      result.push(staticItem);
+      staticIndex += 1;
+    } else {
+      result.push(carItem);
+      carIndex += 1;
+    }
+  }
+  return result;
 }
 
 function drawPriority(type: 'rail' | 'road' | 'railStation' | 'tree' | 'building' | 'car'): number {
@@ -1205,7 +1279,7 @@ window.render_game_to_text = () =>
       roadRailOverlap: zurichValidation.stats.roadRailOverlap,
       railCrossings: zurichValidation.stats.railCrossings,
       invalidBuildings: zurichValidation.stats.invalidBuildings,
-      diagnostics: cityDiagnostics(),
+      legacyDiagnostics: cityDiagnostics(),
       camera: {
         mode: 'bounded-fixed-map',
         current: { x: camera.x, y: camera.y, scale: camera.scale },
