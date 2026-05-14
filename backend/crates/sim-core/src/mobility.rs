@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use abutown_protocol::{
     AgentMobilityDto, AgentMobilityStateDto, EntityId, MobilityDeltaDto, MobilitySnapshotDto,
@@ -213,7 +213,14 @@ impl MobilityWorld {
     pub fn tick_mobility(&mut self) -> MobilityDelta {
         self.tick += 1;
         let mut changed_agents = Vec::new();
-        let mut changed_vehicles = Vec::new();
+        let mut changed_vehicle_ids = HashSet::new();
+
+        for (agent_id, vehicle_id) in self.tick_boarding() {
+            if let Some(agent) = self.agents.get(&agent_id) {
+                changed_agents.push(agent.clone());
+            }
+            changed_vehicle_ids.insert(vehicle_id);
+        }
 
         let agent_ids: Vec<AgentId> = self.agents.keys().cloned().collect();
         for agent_id in agent_ids {
@@ -224,14 +231,26 @@ impl MobilityWorld {
             }
         }
 
+        for (agent_id, vehicle_id) in self.tick_alighting() {
+            if let Some(agent) = self.agents.get(&agent_id) {
+                changed_agents.push(agent.clone());
+            }
+            changed_vehicle_ids.insert(vehicle_id);
+        }
+
         let vehicle_ids: Vec<VehicleId> = self.vehicles.keys().cloned().collect();
         for vehicle_id in vehicle_ids {
             if self.tick_vehicle(&vehicle_id) {
-                if let Some(vehicle) = self.vehicles.get(&vehicle_id) {
-                    changed_vehicles.push(vehicle.clone());
-                }
+                changed_vehicle_ids.insert(vehicle_id);
             }
         }
+
+        let mut changed_vehicle_ids: Vec<VehicleId> = changed_vehicle_ids.into_iter().collect();
+        changed_vehicle_ids.sort_by(|left, right| left.0.cmp(&right.0));
+        let changed_vehicles = changed_vehicle_ids
+            .into_iter()
+            .filter_map(|vehicle_id| self.vehicles.get(&vehicle_id).cloned())
+            .collect();
 
         MobilityDelta {
             changed_agents,
@@ -259,22 +278,27 @@ impl MobilityWorld {
             return true;
         }
 
-        let Some(PlanStage::WalkToStop { stop_id, .. }) = agent.plan.get(agent.plan_cursor) else {
-            return false;
-        };
-        let stop_id = stop_id.clone();
-        agent.plan_cursor += 1;
-        agent.state = AgentMobilityState::WaitingAtStop {
-            stop_id: stop_id.clone(),
-        };
+        match agent.plan.get(agent.plan_cursor).cloned() {
+            Some(PlanStage::WalkToStop { stop_id, .. }) => {
+                agent.plan_cursor += 1;
+                agent.state = AgentMobilityState::WaitingAtStop {
+                    stop_id: stop_id.clone(),
+                };
 
-        if let Some(stop) = self.stops.get_mut(&stop_id) {
-            if !stop.waiting_agents.contains(agent_id) {
-                stop.waiting_agents.push_back(agent_id.clone());
+                if let Some(stop) = self.stops.get_mut(&stop_id) {
+                    if !stop.waiting_agents.contains(agent_id) {
+                        stop.waiting_agents.push_back(agent_id.clone());
+                    }
+                }
+                true
             }
+            Some(PlanStage::WalkToActivity { activity_id, .. }) => {
+                agent.plan_cursor += 1;
+                agent.state = AgentMobilityState::AtActivity { activity_id };
+                true
+            }
+            _ => false,
         }
-
-        true
     }
 
     fn tick_vehicle(&mut self, vehicle_id: &VehicleId) -> bool {
@@ -296,6 +320,151 @@ impl MobilityWorld {
 
         vehicle.progress = (vehicle.progress + vehicle.speed_per_tick).min(1.0);
         true
+    }
+
+    fn tick_boarding(&mut self) -> Vec<(AgentId, VehicleId)> {
+        let mut changed = Vec::new();
+        let stop_ids: Vec<StopId> = self.stops.keys().cloned().collect();
+
+        for stop_id in stop_ids {
+            let Some((route_id, link_index, stop_progress, next_agent_id)) =
+                self.stops.get(&stop_id).and_then(|stop| {
+                    stop.waiting_agents.front().cloned().map(|agent_id| {
+                        (
+                            stop.route_id.clone(),
+                            stop.link_index,
+                            stop.progress,
+                            agent_id,
+                        )
+                    })
+                })
+            else {
+                continue;
+            };
+
+            let Some(vehicle_id) = self
+                .vehicles
+                .values()
+                .find(|vehicle| {
+                    vehicle.route_id == route_id
+                        && vehicle.link_index == link_index
+                        && vehicle.progress == stop_progress
+                        && vehicle.occupants.len() < usize::from(vehicle.capacity)
+                })
+                .map(|vehicle| vehicle.id.clone())
+            else {
+                continue;
+            };
+
+            let seat_index = {
+                let vehicle = self
+                    .vehicles
+                    .get_mut(&vehicle_id)
+                    .expect("selected vehicle exists");
+                let seat_index = vehicle.occupants.len() as u16;
+                vehicle.occupants.push(next_agent_id.clone());
+                seat_index
+            };
+
+            let stop = self.stops.get_mut(&stop_id).expect("selected stop exists");
+            let popped = stop.waiting_agents.pop_front();
+            assert_eq!(popped, Some(next_agent_id.clone()));
+
+            if let Some(agent) = self.agents.get_mut(&next_agent_id) {
+                agent.state = AgentMobilityState::InVehicle {
+                    vehicle_id: vehicle_id.clone(),
+                    seat_index,
+                };
+                changed.push((next_agent_id, vehicle_id));
+            }
+        }
+
+        changed
+    }
+
+    fn tick_alighting(&mut self) -> Vec<(AgentId, VehicleId)> {
+        let mut changed = Vec::new();
+        let vehicle_ids: Vec<VehicleId> = self.vehicles.keys().cloned().collect();
+
+        for vehicle_id in vehicle_ids {
+            let Some((route_id, link_index, progress, occupants)) =
+                self.vehicles.get(&vehicle_id).map(|vehicle| {
+                    (
+                        vehicle.route_id.clone(),
+                        vehicle.link_index,
+                        vehicle.progress,
+                        vehicle.occupants.clone(),
+                    )
+                })
+            else {
+                continue;
+            };
+
+            let Some(stop_id) = self
+                .stops
+                .values()
+                .find(|stop| {
+                    stop.route_id == route_id
+                        && stop.link_index == link_index
+                        && stop.progress == progress
+                        && stop.progress == 1.0
+                })
+                .map(|stop| stop.id.clone())
+            else {
+                continue;
+            };
+
+            for agent_id in occupants {
+                let should_alight = self
+                    .agents
+                    .get(&agent_id)
+                    .and_then(|agent| agent.plan.get(agent.plan_cursor))
+                    .is_some_and(|stage| {
+                        matches!(
+                            stage,
+                            PlanStage::RideToStop {
+                                stop_id: target_stop_id,
+                                ..
+                            } if *target_stop_id == stop_id
+                        )
+                    });
+
+                if !should_alight {
+                    continue;
+                }
+
+                if let Some(vehicle) = self.vehicles.get_mut(&vehicle_id) {
+                    vehicle
+                        .occupants
+                        .retain(|occupant_id| occupant_id != &agent_id);
+                }
+
+                if let Some(agent) = self.agents.get_mut(&agent_id) {
+                    agent.plan_cursor += 1;
+                    match agent.plan.get(agent.plan_cursor).cloned() {
+                        Some(PlanStage::WalkToActivity { link_id, .. }) => {
+                            agent.state = AgentMobilityState::Walking {
+                                link_id,
+                                progress: 0.0,
+                            };
+                        }
+                        Some(PlanStage::Activity { activity_id }) => {
+                            agent.plan_cursor += 1;
+                            agent.state = AgentMobilityState::AtActivity { activity_id };
+                        }
+                        _ => {
+                            agent.state = AgentMobilityState::Alighting {
+                                vehicle_id: vehicle_id.clone(),
+                                stop_id: stop_id.clone(),
+                            };
+                        }
+                    }
+                    changed.push((agent_id, vehicle_id.clone()));
+                }
+            }
+        }
+
+        changed
     }
 }
 
@@ -511,5 +680,63 @@ mod tests {
         assert_eq!(vehicle.progress, 0.5);
         assert_eq!(vehicle.dwell_ticks_remaining, 0);
         assert_eq!(third_delta.changed_vehicles.len(), 1);
+    }
+
+    #[test]
+    fn agent_boards_rides_alights_and_walks_to_activity() {
+        let mut world = MobilityWorld::seeded_demo();
+        let agent_id = AgentId("agent:seed:0".to_string());
+        let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
+
+        world.tick_mobility();
+        world.tick_mobility();
+
+        let waiting = world.agent(&agent_id).expect("agent exists");
+        assert_eq!(
+            waiting.state,
+            AgentMobilityState::WaitingAtStop {
+                stop_id: StopId("stop:old-town".to_string())
+            }
+        );
+
+        world.tick_mobility();
+        let boarded = world.agent(&agent_id).expect("agent exists");
+        let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
+        assert_eq!(
+            boarded.state,
+            AgentMobilityState::InVehicle {
+                vehicle_id: vehicle_id.clone(),
+                seat_index: 0
+            }
+        );
+        assert_eq!(vehicle.occupants, vec![agent_id.clone()]);
+
+        world.tick_mobility();
+        let riding = world.agent(&agent_id).expect("agent exists");
+        assert!(matches!(riding.state, AgentMobilityState::InVehicle { .. }));
+
+        world.tick_mobility();
+        let alighted = world.agent(&agent_id).expect("agent exists");
+        let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
+        assert_eq!(vehicle.occupants, Vec::<AgentId>::new());
+        assert_eq!(
+            alighted.state,
+            AgentMobilityState::Walking {
+                link_id: LinkId("link:station-to-work".to_string()),
+                progress: 0.0
+            }
+        );
+        assert_eq!(alighted.plan_cursor, 2);
+
+        world.tick_mobility();
+        world.tick_mobility();
+        let arrived = world.agent(&agent_id).expect("agent exists");
+        assert_eq!(
+            arrived.state,
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:work".to_string()
+            }
+        );
+        assert_eq!(arrived.plan_cursor, 3);
     }
 }
