@@ -53,11 +53,13 @@ impl AppState {
             interval.tick().await;
             loop {
                 interval.tick().await;
-                let pulse = {
+                let messages = {
                     let mut runtime = runtime.lock().await;
-                    runtime.next_pulse()
+                    runtime.next_server_messages()
                 };
-                let _ = deltas.send(pulse);
+                for message in messages {
+                    let _ = deltas.send(message);
+                }
             }
         });
     }

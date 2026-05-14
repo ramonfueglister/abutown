@@ -99,6 +99,13 @@ impl SimulationRuntime {
         build_mobility_delta_dto(&self.world_id, self.mobility.tick(), delta)
     }
 
+    pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {
+        vec![
+            self.next_pulse(),
+            ServerMessageDto::MobilityDelta(self.next_mobility_delta()),
+        ]
+    }
+
     pub fn hello(&self) -> ServerMessageDto {
         ServerMessageDto::Hello(ServerHelloDto {
             protocol_version: PROTOCOL_VERSION,
