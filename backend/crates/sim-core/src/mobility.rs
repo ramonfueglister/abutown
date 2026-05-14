@@ -213,6 +213,7 @@ impl MobilityWorld {
     pub fn tick_mobility(&mut self) -> MobilityDelta {
         self.tick += 1;
         let mut changed_agents = Vec::new();
+        let mut changed_vehicles = Vec::new();
 
         let agent_ids: Vec<AgentId> = self.agents.keys().cloned().collect();
         for agent_id in agent_ids {
@@ -223,9 +224,18 @@ impl MobilityWorld {
             }
         }
 
+        let vehicle_ids: Vec<VehicleId> = self.vehicles.keys().cloned().collect();
+        for vehicle_id in vehicle_ids {
+            if self.tick_vehicle(&vehicle_id) {
+                if let Some(vehicle) = self.vehicles.get(&vehicle_id) {
+                    changed_vehicles.push(vehicle.clone());
+                }
+            }
+        }
+
         MobilityDelta {
             changed_agents,
-            changed_vehicles: Vec::new(),
+            changed_vehicles,
         }
     }
 
@@ -264,6 +274,27 @@ impl MobilityWorld {
             }
         }
 
+        true
+    }
+
+    fn tick_vehicle(&mut self, vehicle_id: &VehicleId) -> bool {
+        let Some(vehicle) = self.vehicles.get_mut(vehicle_id) else {
+            return false;
+        };
+
+        if vehicle.dwell_ticks_remaining > 0 {
+            vehicle.dwell_ticks_remaining -= 1;
+            return true;
+        }
+
+        let Some(route) = self.routes.get(&vehicle.route_id) else {
+            return false;
+        };
+        if route.links.is_empty() || vehicle.progress >= 1.0 {
+            return false;
+        }
+
+        vehicle.progress = (vehicle.progress + vehicle.speed_per_tick).min(1.0);
         true
     }
 }
@@ -456,5 +487,29 @@ mod tests {
             vec![agent_id]
         );
         assert_eq!(second_delta.changed_agents.len(), 1);
+    }
+
+    #[test]
+    fn vehicle_respects_initial_dwell_then_moves_on_route() {
+        let mut world = MobilityWorld::seeded_demo();
+        let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
+
+        let first_delta = world.tick_mobility();
+        let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
+        assert_eq!(vehicle.progress, 0.0);
+        assert_eq!(vehicle.dwell_ticks_remaining, 1);
+        assert_eq!(first_delta.changed_vehicles.len(), 1);
+
+        let second_delta = world.tick_mobility();
+        let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
+        assert_eq!(vehicle.progress, 0.0);
+        assert_eq!(vehicle.dwell_ticks_remaining, 0);
+        assert_eq!(second_delta.changed_vehicles.len(), 1);
+
+        let third_delta = world.tick_mobility();
+        let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
+        assert_eq!(vehicle.progress, 0.5);
+        assert_eq!(vehicle.dwell_ticks_remaining, 0);
+        assert_eq!(third_delta.changed_vehicles.len(), 1);
     }
 }
