@@ -58,7 +58,7 @@ export type TilePulseMessage = {
 export type ServerErrorMessage = {
   type: 'error';
   protocol_version: number;
-  world_id?: string;
+  world_id?: string | null;
   code: string;
   message: string;
 };
@@ -133,7 +133,7 @@ function isServerError(value: Record<string, unknown>): value is ServerErrorMess
   return (
     value.type === 'error' &&
     typeof value.protocol_version === 'number' &&
-    (value.world_id === undefined || typeof value.world_id === 'string') &&
+    (value.world_id === undefined || value.world_id === null || typeof value.world_id === 'string') &&
     typeof value.code === 'string' &&
     typeof value.message === 'string'
   );

@@ -7,6 +7,7 @@ import {
   applyWorldSummary,
   createInitialBackendOverlayState,
 } from '../../src/backend/backendState';
+import { parseServerMessage } from '../../src/backend/protocol';
 
 class TestWebSocket extends EventTarget {
   static instances: TestWebSocket[] = [];
@@ -109,6 +110,24 @@ describe('backend overlay state', () => {
 
     expect(afterWrongWorld.pulses).toHaveLength(1);
     expect(afterWrongWorld.warning).toBe('Ignored websocket message for other-world');
+  });
+
+  it('parses server error messages with null world id', () => {
+    expect(
+      parseServerMessage({
+        type: 'error',
+        protocol_version: 1,
+        world_id: null,
+        code: 'backend_error',
+        message: 'Something failed',
+      }),
+    ).toEqual({
+      type: 'error',
+      protocol_version: 1,
+      world_id: null,
+      code: 'backend_error',
+      message: 'Something failed',
+    });
   });
 
   it('does not continue snapshot loading or open websocket when health is unhealthy', async () => {
