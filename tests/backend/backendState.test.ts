@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { startBackendBridge } from '../../src/backend/backendClient';
 import {
   applyChunkSnapshot,
   applyHealth,
@@ -7,7 +8,31 @@ import {
   createInitialBackendOverlayState,
 } from '../../src/backend/backendState';
 
+class TestWebSocket extends EventTarget {
+  static instances: TestWebSocket[] = [];
+
+  readonly url: string;
+
+  constructor(url: string) {
+    super();
+    this.url = url;
+    TestWebSocket.instances.push(this);
+  }
+
+  close(): void {
+    this.dispatchEvent(new Event('close'));
+  }
+}
+
+const flushPromises = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe('backend overlay state', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    TestWebSocket.instances = [];
+  });
+
   it('loads HTTP snapshot state without requiring websocket data', () => {
     let state = createInitialBackendOverlayState();
 
@@ -84,5 +109,92 @@ describe('backend overlay state', () => {
 
     expect(afterWrongWorld.pulses).toHaveLength(1);
     expect(afterWrongWorld.warning).toBe('Ignored websocket message for other-world');
+  });
+
+  it('does not continue snapshot loading or open websocket when health is unhealthy', async () => {
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/health')) {
+        return Response.json({
+          service: 'abutown-sim',
+          world_id: 'abutown-main',
+          ok: false,
+          protocol_version: 1,
+        });
+      }
+
+      return Response.json({
+        protocol_version: 1,
+        world_id: 'abutown-main',
+        chunk_size: 32,
+        loaded_chunks: [{ x: 4, y: 4 }],
+      });
+    });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('window', { setTimeout: vi.fn() });
+
+    const states: ReturnType<typeof createInitialBackendOverlayState>[] = [];
+    startBackendBridge({
+      baseUrl: 'http://backend.test',
+      onState: (state) => states.push(state),
+      WebSocketCtor: TestWebSocket as unknown as typeof WebSocket,
+    });
+
+    await flushPromises();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith('http://backend.test/health');
+    expect(TestWebSocket.instances).toHaveLength(0);
+    expect(states.at(-1)).toMatchObject({
+      status: 'disconnected',
+      warning: 'Backend health check failed',
+    });
+  });
+
+  it('rejects malformed HTTP DTOs before opening websocket', async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({
+        service: 'abutown-sim',
+        ok: true,
+        protocol_version: 1,
+      }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('window', { setTimeout: vi.fn() });
+
+    const states: ReturnType<typeof createInitialBackendOverlayState>[] = [];
+    startBackendBridge({
+      baseUrl: 'http://backend.test',
+      onState: (state) => states.push(state),
+      WebSocketCtor: TestWebSocket as unknown as typeof WebSocket,
+    });
+
+    await flushPromises();
+
+    expect(TestWebSocket.instances).toHaveLength(0);
+    expect(states.at(-1)).toMatchObject({
+      status: 'disconnected',
+      warning: 'Invalid health response',
+    });
+  });
+
+  it('clears a pending reconnect timer on stop', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ malformed: true })));
+
+    const clearTimeout = vi.fn();
+    vi.stubGlobal('window', {
+      clearTimeout,
+      setTimeout: vi.fn(() => 123),
+    });
+
+    const bridge = startBackendBridge({
+      baseUrl: 'http://backend.test',
+      onState: vi.fn(),
+      WebSocketCtor: TestWebSocket as unknown as typeof WebSocket,
+    });
+
+    await flushPromises();
+    bridge.stop();
+
+    expect(clearTimeout).toHaveBeenCalledWith(123);
   });
 });

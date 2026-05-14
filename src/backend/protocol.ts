@@ -65,6 +65,41 @@ export type ServerErrorMessage = {
 
 export type ServerMessage = ServerHelloMessage | TilePulseMessage | ServerErrorMessage;
 
+export function isHealthResponse(value: unknown): value is HealthResponse {
+  return (
+    isRecord(value) &&
+    typeof value.service === 'string' &&
+    typeof value.world_id === 'string' &&
+    typeof value.ok === 'boolean' &&
+    typeof value.protocol_version === 'number'
+  );
+}
+
+export function isWorldSummaryDto(value: unknown): value is WorldSummaryDto {
+  return (
+    isRecord(value) &&
+    typeof value.protocol_version === 'number' &&
+    typeof value.world_id === 'string' &&
+    typeof value.chunk_size === 'number' &&
+    Array.isArray(value.loaded_chunks) &&
+    value.loaded_chunks.every(isChunkCoord)
+  );
+}
+
+export function isChunkSnapshotDto(value: unknown): value is ChunkSnapshotDto {
+  return (
+    isRecord(value) &&
+    typeof value.protocol_version === 'number' &&
+    typeof value.world_id === 'string' &&
+    isChunkCoord(value.coord) &&
+    isChunkState(value.chunk_state) &&
+    typeof value.chunk_version === 'number' &&
+    typeof value.tile_count === 'number' &&
+    Array.isArray(value.dirty_tiles) &&
+    value.dirty_tiles.every(isTileMutation)
+  );
+}
+
 export function parseServerMessage(value: unknown): ServerMessage | undefined {
   if (!isRecord(value) || typeof value.type !== 'string') return undefined;
   if (value.type === 'hello' && isHello(value)) return value;
@@ -106,6 +141,23 @@ function isServerError(value: Record<string, unknown>): value is ServerErrorMess
 
 function isChunkCoord(value: unknown): value is ChunkCoordDto {
   return isRecord(value) && typeof value.x === 'number' && typeof value.y === 'number';
+}
+
+function isChunkState(value: unknown): value is ChunkStateDto {
+  return value === 'asleep' || value === 'warm' || value === 'active' || value === 'hot';
+}
+
+function isTileKind(value: unknown): value is TileKindDto {
+  return value === 'grass' || value === 'water' || value === 'road' || value === 'building_footprint';
+}
+
+function isTileMutation(value: unknown): value is TileMutationDto {
+  return (
+    isRecord(value) &&
+    typeof value.local_index === 'number' &&
+    isTileKind(value.kind) &&
+    typeof value.version === 'number'
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
