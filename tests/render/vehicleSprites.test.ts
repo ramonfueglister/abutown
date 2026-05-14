@@ -32,13 +32,19 @@ describe('vehicle sprites', () => {
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: -10, y: 0 }, 5)).toEqual({ x: 0, y: -5 });
   });
 
-  it('pulls top-to-bottom vehicles slightly inward from the road border', () => {
+  it('pulls isometric screen-vertical travel slightly inward while preserving the right lane', () => {
     const downwardLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: 0, y: 10 });
-    const upwardLane = screenVehicleRightLaneOffset({ x: 0, y: 10 }, { x: 0, y: 0 });
+    const upwardRightLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: 32, y: -16 });
+    const upwardLeftLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: -32, y: -16 });
 
-    expect(Math.abs(downwardLane.x)).toBeLessThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS);
-    expect(Math.abs(downwardLane.x)).toBeGreaterThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS - 1);
-    expect(upwardLane.x).toBe(ROAD_VEHICLE_LANE_OFFSET_PIXELS);
+    expect(vectorLength(downwardLane)).toBeLessThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS);
+    expect(vectorLength(downwardLane)).toBeGreaterThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS - 1);
+    expect(vectorLength(upwardRightLane)).toBeCloseTo(vectorLength(downwardLane), 3);
+    expect(vectorLength(upwardLeftLane)).toBeCloseTo(vectorLength(downwardLane), 3);
+    expect(upwardRightLane.x).toBeGreaterThan(0);
+    expect(upwardRightLane.y).toBeGreaterThan(0);
+    expect(upwardLeftLane.x).toBeGreaterThan(0);
+    expect(upwardLeftLane.y).toBeLessThan(0);
   });
 
   it('keeps the right-lane offset inside the OpenGFX road surface', () => {
@@ -58,3 +64,7 @@ describe('vehicle sprites', () => {
     expect(hasVisiblePixelsInEveryVehicleFrame([18, 12, 14])).toBe(false);
   });
 });
+
+function vectorLength(point: { x: number; y: number }): number {
+  return Math.hypot(point.x, point.y);
+}

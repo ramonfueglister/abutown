@@ -19,7 +19,7 @@ const VEHICLE_BLOCK_WIDTH = 176;
 const VEHICLE_ROW_HEIGHT = 24;
 export const ROAD_SURFACE_WIDTH_PIXELS = 18;
 export const ROAD_VEHICLE_LANE_OFFSET_PIXELS = ROAD_SURFACE_WIDTH_PIXELS / 4;
-export const DOWNWARD_VEHICLE_LANE_INSET_PIXELS = 0.75;
+export const SCREEN_VERTICAL_VEHICLE_LANE_INSET_PIXELS = 0.75;
 export const MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME = 10;
 
 const DIRECTION_RECTS: readonly Omit<VehicleFrameRect, 'y'>[] = [
@@ -85,8 +85,8 @@ export function screenRightLaneOffset(from: ScreenPoint, to: ScreenPoint, pixels
 
 export function screenVehicleRightLaneOffset(from: ScreenPoint, to: ScreenPoint): ScreenPoint {
   const dy = to.y - from.y;
-  const pixels = dy > 0
-    ? ROAD_VEHICLE_LANE_OFFSET_PIXELS - DOWNWARD_VEHICLE_LANE_INSET_PIXELS
+  const pixels = dy !== 0
+    ? ROAD_VEHICLE_LANE_OFFSET_PIXELS - SCREEN_VERTICAL_VEHICLE_LANE_INSET_PIXELS
     : ROAD_VEHICLE_LANE_OFFSET_PIXELS;
   return screenRightLaneOffset(from, to, pixels);
 }
