@@ -123,12 +123,28 @@ pub struct AgentMobilityDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentMobilityStateDto {
-    AtActivity { activity_id: String },
-    Walking { link_id: String, progress: f32 },
-    WaitingAtStop { stop_id: String },
-    Boarding { vehicle_id: EntityId, stop_id: String },
-    InVehicle { vehicle_id: EntityId, seat_index: u16 },
-    Alighting { vehicle_id: EntityId, stop_id: String },
+    AtActivity {
+        activity_id: String,
+    },
+    Walking {
+        link_id: String,
+        progress: f32,
+    },
+    WaitingAtStop {
+        stop_id: String,
+    },
+    Boarding {
+        vehicle_id: EntityId,
+        stop_id: String,
+    },
+    InVehicle {
+        vehicle_id: EntityId,
+        seat_index: u16,
+    },
+    Alighting {
+        vehicle_id: EntityId,
+        stop_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -9,20 +9,47 @@ use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentMobilityState {
-    AtActivity { activity_id: String },
-    Walking { link_id: LinkId, progress: f32 },
-    WaitingAtStop { stop_id: StopId },
-    Boarding { vehicle_id: VehicleId, stop_id: StopId },
-    InVehicle { vehicle_id: VehicleId, seat_index: u16 },
-    Alighting { vehicle_id: VehicleId, stop_id: StopId },
+    AtActivity {
+        activity_id: String,
+    },
+    Walking {
+        link_id: LinkId,
+        progress: f32,
+    },
+    WaitingAtStop {
+        stop_id: StopId,
+    },
+    Boarding {
+        vehicle_id: VehicleId,
+        stop_id: StopId,
+    },
+    InVehicle {
+        vehicle_id: VehicleId,
+        seat_index: u16,
+    },
+    Alighting {
+        vehicle_id: VehicleId,
+        stop_id: StopId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanStage {
-    WalkToStop { link_id: LinkId, stop_id: StopId },
-    RideToStop { route_id: RouteId, stop_id: StopId },
-    WalkToActivity { link_id: LinkId, activity_id: String },
-    Activity { activity_id: String },
+    WalkToStop {
+        link_id: LinkId,
+        stop_id: StopId,
+    },
+    RideToStop {
+        route_id: RouteId,
+        stop_id: StopId,
+    },
+    WalkToActivity {
+        link_id: LinkId,
+        activity_id: String,
+    },
+    Activity {
+        activity_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -224,10 +251,10 @@ impl MobilityWorld {
 
         let agent_ids: Vec<AgentId> = self.agents.keys().cloned().collect();
         for agent_id in agent_ids {
-            if self.tick_walking_agent(&agent_id) {
-                if let Some(agent) = self.agents.get(&agent_id) {
-                    changed_agents.push(agent.clone());
-                }
+            if self.tick_walking_agent(&agent_id)
+                && let Some(agent) = self.agents.get(&agent_id)
+            {
+                changed_agents.push(agent.clone());
             }
         }
 
@@ -285,10 +312,10 @@ impl MobilityWorld {
                     stop_id: stop_id.clone(),
                 };
 
-                if let Some(stop) = self.stops.get_mut(&stop_id) {
-                    if !stop.waiting_agents.contains(agent_id) {
-                        stop.waiting_agents.push_back(agent_id.clone());
-                    }
+                if let Some(stop) = self.stops.get_mut(&stop_id)
+                    && !stop.waiting_agents.contains(agent_id)
+                {
+                    stop.waiting_agents.push_back(agent_id.clone());
                 }
                 true
             }

@@ -1,0 +1,255 @@
+<!-- HTML header for doxygen 1.9.5-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US">
+<head>
+  <meta http-equiv="Content-Type" content="text/xhtml;charset=UTF-8"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=11"/>
+  <meta name="generator" content="Doxygen 1.10.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <!-- BEGIN opengraph metadata -->
+  <meta property="og:title" content="Flecs: Documentation" />
+  <meta property="og:image" content="https://www.flecs.dev/flecs/logo.png" />
+  <meta property="og:description" content="A fast entity component system (ECS) for C &amp; C++" />
+  <meta property="og:url" content="https://www.flecs.dev/" />
+  <!-- END opengraph metadata -->
+  <!-- BEGIN twitter metadata -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:image" content="https://www.flecs.dev/flecs/logo.png" />
+  <meta name="twitter:image:src" content="https://www.flecs.dev/flecs/logo.png" />
+  <meta name="twitter:title" content="Flecs: Documentation" />
+  <meta name="twitter:description" content="A fast entity component system (ECS) for C &amp; C++" />
+  <!-- END twitter metadata -->
+  <title>Flecs: Documentation</title>
+  <link href="tabs.css" rel="stylesheet" type="text/css"/>
+  <script type="text/javascript" src="jquery.js"></script>
+  <script type="text/javascript" src="dynsections.js"></script>
+  <link href="navtree.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="resize.js"></script>
+<script type="text/javascript" src="navtreedata.js"></script>
+<script type="text/javascript" src="navtree.js"></script>
+<script type="text/javascript" src="cookie.js"></script>
+  <link href="search/search.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="search/searchdata.js"></script>
+<script type="text/javascript" src="search/search.js"></script>
+  <link href="doxygen.css" rel="stylesheet" type="text/css" />
+  <link href="doxygen-awesome.css" rel="stylesheet" type="text/css"/>
+<link href="doxygen-awesome-sidebar-only.css" rel="stylesheet" type="text/css"/>
+<link href="doxygen-awesome-sidebar-only-darkmode-toggle.css" rel="stylesheet" type="text/css"/>
+<link href="flecs-snippet-tabs.css" rel="stylesheet" type="text/css"/>
+<link href="custom.css" rel="stylesheet" type="text/css"/>
+  <link rel="icon" href="logo_small.png" />
+  <script type="text/javascript" src="doxygen-awesome-darkmode-toggle.js"></script>
+  <script type="text/javascript" src="doxygen-awesome-fragment-copy-button.js"></script>
+  <script type="text/javascript" src="doxygen-awesome-paragraph-link.js"></script>
+  <script type="text/javascript" src="doxygen-awesome-interactive-toc.js"></script>
+  <script type="text/javascript" src="doxygen-awesome-tabs.js"></script>
+  <script type="text/javascript" src="flecs-snippet-tabs.js"></script>
+  <script type="text/javascript">
+      DoxygenAwesomeDarkModeToggle.init()
+      DoxygenAwesomeFragmentCopyButton.init()
+      DoxygenAwesomeParagraphLink.init()
+      DoxygenAwesomeInteractiveToc.init()
+      DoxygenAwesomeTabs.init()
+      FlecsSnippetTabs.init()
+  </script>
+</head>
+<body>
+<!-- https://tholman.com/github-corners/ -->
+<a href="https://github.com/SanderMertens/flecs" class="github-corner" title="View source on GitHub" target="_blank">
+  <svg viewBox="0 0 250 250" width="40" height="40" style="position: absolute; top: 0; border: 0; right: 0; z-index: 99;" aria-hidden="true">
+  <path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a>
+<style>
+  .github-corner:hover .octo-arm{animation:octocat-wave 560ms ease-in-out}@keyframes octocat-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-25deg)}40%,80%{transform:rotate(10deg)}}@media (max-width:500px){.github-corner:hover .octo-arm{animation:none}.github-corner .octo-arm{animation:octocat-wave 560ms ease-in-out}}
+</style>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+<div id="titlearea">
+<table cellspacing="0" cellpadding="0">
+ <tbody>
+ <tr id="projectrow">
+  <td id="projectlogo"><img alt="Logo" src="logo_small.png"/></td>
+  <td id="projectalign">
+   <div id="projectname">Flecs<span id="projectnumber">&#160;v4.1</span>
+   </div>
+   <div id="projectbrief">A fast entity component system (ECS) for C &amp; C++</div>
+  </td>
+ </tr>
+ </tbody>
+</table>
+</div>
+<!-- end header part -->
+<!-- Generated by Doxygen 1.10.0 -->
+<script type="text/javascript">
+/* @license magnet:?xt=urn:btih:d3d9a9a6595521f9666a5e94cc830dab83b65699&amp;dn=expat.txt MIT */
+var searchBox = new SearchBox("searchBox", "search/",'.html');
+/* @license-end */
+</script>
+<script type="text/javascript" src="menudata.js"></script>
+<script type="text/javascript" src="menu.js"></script>
+<script type="text/javascript">
+/* @license magnet:?xt=urn:btih:d3d9a9a6595521f9666a5e94cc830dab83b65699&amp;dn=expat.txt MIT */
+$(function() {
+  initMenu('',true,false,'search.php','Search');
+  $(function() { init_search(); });
+});
+/* @license-end */
+</script>
+<div id="main-nav"></div>
+</div><!-- top -->
+<div id="side-nav" class="ui-resizable side-nav-resizable">
+  <div id="nav-tree">
+    <div id="nav-tree-contents">
+      <div id="nav-sync" class="sync"></div>
+    </div>
+  </div>
+  <div id="splitbar" style="-moz-user-select:none;" 
+       class="ui-resizable-handle">
+  </div>
+</div>
+<script type="text/javascript">
+/* @license magnet:?xt=urn:btih:d3d9a9a6595521f9666a5e94cc830dab83b65699&amp;dn=expat.txt MIT */
+$(function(){initNavTree('md_docs_2Docs.html',''); initResizable(); });
+/* @license-end */
+</script>
+<div id="doc-content">
+<!-- window showing the filter options -->
+<div id="MSearchSelectWindow"
+     onmouseover="return searchBox.OnSearchSelectShow()"
+     onmouseout="return searchBox.OnSearchSelectHide()"
+     onkeydown="return searchBox.OnSearchSelectKey(event)">
+</div>
+
+<!-- iframe showing the search results (closed by default) -->
+<div id="MSearchResultsWindow">
+<div id="MSearchResults">
+<div class="SRPage">
+<div id="SRIndex">
+<div id="SRResults"></div>
+<div class="SRStatus" id="Loading">Loading...</div>
+<div class="SRStatus" id="Searching">Searching...</div>
+<div class="SRStatus" id="NoMatches">No Matches</div>
+</div>
+</div>
+</div>
+</div>
+
+<div><div class="header">
+  <div class="headertitle"><div class="title">Documentation</div></div>
+</div><!--header-->
+<div class="contents">
+<div class="textblock"><p><a class="anchor" id="documentation"></a> </p>
+<h1><a class="anchor" id="getting-started"></a>
+Getting Started</h1>
+<ul>
+<li><a class="el" href="md_docs_2FAQ.html">FAQ</a></li>
+<li><a class="el" href="md_docs_2Quickstart.html">Quickstart</a></li>
+<li><a class="el" href="md_docs_2DesignWithFlecs.html">Designing with Flecs</a></li>
+<li><a href="https://github.com/PreyK/Unreal-Minimum-Viable-Flecs">Getting Started with Unreal Engine</a></li>
+<li><a href="https://github.com/Reddy-dev/Unreal-Flecs">Unreal-Flecs (Unreal Engine Flecs plugin)</a></li>
+<li><a href="https://github.com/paulfigiel/godot-flecs-sample">Godot-flecs-sample (example)</a></li>
+<li><a href="https://github.com/VoxInteractive/Godot-Flecs">Flecs-Godot (GDExtension)</a></li>
+<li><a href="https://github.com/callmefloof/godot-turbo/">Godot-turbo (engine module)</a> (<a href="https://github.com/callmefloof/godot_turbo_demo_projects">demo project</a>)</li>
+<li><a href="https://github.com/kranzky/raylib-flecs-starter-kit">Getting Started with Raylib</a></li>
+<li><a href="https://github.com/ilyas-taouaou/CodotakuCMakeRepo">Getting Started with SDL3, ImGui, Sqlite</a> (<a href="https://www.youtube.com/watch?v=T32B7nf6B-8">video</a>)</li>
+<li><a href="https://github.com/james-j-obrien/flecs-sdl3-blend2d">Getting Started with SDL3, Blend2D</a></li>
+<li><a href="https://github.com/aog05/Raylib-and-Flecs-Template">Flecs an Raylib template</a></li>
+</ul>
+<h1><a class="anchor" id="manuals"></a>
+Manuals</h1>
+<ul>
+<li><a class="el" href="md_docs_2Manual.html">Manual</a></li>
+<li><a class="el" href="md_docs_2EntitiesComponents.html">Entities and Components Manual</a></li>
+<li><a class="el" href="md_docs_2Queries.html">Query Manual</a></li>
+<li><a class="el" href="md_docs_2FlecsQueryLanguage.html">Query Language Manual</a></li>
+<li><a class="el" href="md_docs_2Systems.html">Systems Manual</a></li>
+<li><a class="el" href="md_docs_2ObserversManual.html">Observers Manual</a></li>
+<li><a class="el" href="md_docs_2HierarchiesManual.html">Hierarchies Manual</a></li>
+<li><a class="el" href="md_docs_2PrefabsManual.html">Prefabs Manual</a></li>
+<li><a class="el" href="md_docs_2ComponentTraits.html">Component Traits Manual</a></li>
+<li><a class="el" href="md_docs_2Relationships.html">Relationships Manual</a></li>
+<li><a class="el" href="md_docs_2FlecsScript.html">Flecs Script Manual</a></li>
+<li><a class="el" href="md_docs_2FlecsRemoteApi.html">Flecs Remote API Manual</a></li>
+<li><a class="el" href="md_docs_2MigrationGuide.html">v3 Migration Guide</a></li>
+</ul>
+<h1><a class="anchor" id="api-reference"></a>
+API reference</h1>
+<ul>
+<li><a class="el" href="group__c.html">C API</a></li>
+<li><a class="el" href="group__cpp.html">C++ API</a></li>
+</ul>
+<h1><a class="anchor" id="examples"></a>
+Examples</h1>
+<ul>
+<li><a href="https://github.com/SanderMertens/flecs/tree/master/examples/c">C examples</a></li>
+<li><a href="https://github.com/SanderMertens/flecs/tree/master/examples/cpp">C++ examples</a></li>
+<li><a href="https://github.com/BeanCheeseBurrito/Flecs.NET/tree/main/src/Flecs.NET.Examples">C# examples</a></li>
+<li><a href="https://github.com/Indra-db/Flecs-Rust/tree/main/flecs_ecs/examples/flecs">Rust examples</a></li>
+</ul>
+<h1><a class="anchor" id="videos"></a>
+Videos</h1>
+<ul>
+<li><a href="https://www.youtube.com/watch?v=O632xG7ItL8">Setting Up The Project (E1)</a></li>
+<li><a href="https://www.youtube.com/watch?v=ph2FjgNvlO4">Creating Your First World (E2)</a></li>
+<li><a href="https://www.youtube.com/watch?v=4qtdgAN82uo">Components In Flecs (E3)</a></li>
+<li><a href="https://www.youtube.com/watch?v=u71cuiyQk-8">Tagging Your Creations (E4)</a></li>
+<li><a href="https://www.youtube.com/watch?v=fJuHMzVC_bE">Beaty Of Pairs In Flecs (E5)</a></li>
+<li><a href="https://www.youtube.com/watch?v=qz5eblX8yoc">What is a Prefab? (E6)</a></li>
+<li><a href="https://www.youtube.com/watch?v=0LscDsVy-28">Some Pointers for C (E7)</a></li>
+<li><a href="https://www.youtube.com/watch?v=PKvCpUO55yw&amp;t=216s">Demistifying Queries Part 1 (E8)</a></li>
+<li><a href="https://www.youtube.com/watch?v=4KZGkT9MqHI">Demistifying Queries Part 2 (E9)</a></li>
+<li><a href="https://www.youtube.com/watch?v=gXzgO6unZkI">Flecs Systems (E10)</a></li>
+<li><a href="https://www.youtube.com/watch?v=XaZOmWoSKfQ">Observing Changes (E11)</a></li>
+<li><a href="https://www.youtube.com/watch?v=IpuZIFcaUBU">One to Rule Them All (singletons, E12)</a></li>
+</ul>
+<p>(Shoutout to <a href="https://www.youtube.com/@jellycake222">jellycake222</a> for making the awesome tutorial series &lt;3!)</p>
+<h1><a class="anchor" id="open-source-projects"></a>
+Open Source Projects</h1>
+<ul>
+<li><a href="https://github.com/Wizard-Of-Chaos/ExShock_code">Extermination Shock Source</a></li>
+<li><a href="https://github.com/ptidejteam/ecs-survivors">ECS Survivors Source</a></li>
+<li><a href="https://www.flecs.dev/explorer/?host=flecs_explorer.wasm">Playground (Flecs Script)</a></li>
+<li><a href="https://github.com/SanderMertens/tower_defense">Tower Defense (C++)</a></li>
+<li><a href="https://github.com/flecs-hub/city">City (C)</a></li>
+</ul>
+<h1><a class="anchor" id="articles"></a>
+Articles</h1>
+<ul>
+<li><a href="https://ajmmertens.medium.com/building-an-ecs-1-where-are-my-entities-and-components-63d07c7da742">Where are my entities and components</a></li>
+<li><a href="https://ajmmertens.medium.com/building-an-ecs-2-archetypes-and-vectorization-fe21690805f9">Archetypes and vectorization</a></li>
+<li><a href="https://ajmmertens.medium.com/building-an-ecs-storage-in-pictures-642b8bfd6e04">Storage in pictures</a></li>
+<li><a href="https://ajmmertens.medium.com/doing-a-lot-with-a-little-ecs-identifiers-25a72bd2647">Making the most of entity identifiers</a></li>
+<li><a href="https://ajmmertens.medium.com/building-games-in-ecs-with-entity-relationships-657275ba2c6c">Building games in ECS with entity relationships</a></li>
+<li><a href="https://ajmmertens.medium.com/why-it-is-time-to-start-thinking-of-games-as-databases-e7971da33ac3">Why it is time to start thinking of games as databases</a></li>
+<li><a href="https://ajmmertens.medium.com/a-roadmap-to-entity-relationships-5b1d11ebb4eb">A Roadmap to ECS relationships</a></li>
+<li><a href="https://ajmmertens.medium.com/why-storing-state-machines-in-ecs-is-a-bad-idea-742de7a18e59">Why storing state machines in ECS is a bad idea</a></li>
+<li><a href="https://ajmmertens.medium.com/why-vanilla-ecs-is-not-enough-d7ed4e3bebe5">Why vanilla ECS is not enough</a></li>
+<li><a href="https://ajmmertens.medium.com/ecs-from-tool-to-paradigm-350587cdf216">ECS: From tool to paradigm</a></li>
+</ul>
+<h1><a class="anchor" id="resources"></a>
+Resources</h1>
+<h2><a class="anchor" id="resources-provided-by-the-community"></a>
+Resources provided by the community</h2>
+<p>Some of these are quite old, and might contain information that is out of date!</p>
+<ul>
+<li><a href="https://github.com/flecs-hub/flecs-systems-bgfx/tree/bgfx_imgui">Bgfx/Imgui module</a></li>
+<li><a href="https://gist.github.com/oldmanauz/b4ced44737bf9d248233538fa06a989e">Tower defense example</a></li>
+<li><a href="https://github.com/PreyK/Unreal-Minimum-Viable-Flecs">Unreal + Flecs example</a></li>
+<li><a href="https://twitter.com/ajmmertens/status/1361070033334456320">Building a space battle with Flecs in UE4</a></li>
+<li><a href="https://github.com/HeatXD/flecs_web_demo">Flecs + SDL + Web ASM example</a> (<a href="https://heatxd.github.io/flecs_web_demo/">live demo</a>)</li>
+<li><a href="https://github.com/Lexxicon/FlecsRaylib">Flecs + Raylib example</a></li>
+<li><a href="https://github.com/MrFrenik/gs_examples/blob/main/ex_demos/flecs/source/main.c">Flecs + gunslinger example</a></li>
+</ul>
+<h2><a class="anchor" id="flecs-around-the-web"></a>
+Flecs around the web</h2>
+<ul>
+<li><a href="https://discord.gg/BEzP5Rgrrp">Discord</a></li>
+<li><a href="https://ajmmertens.medium.com">Medium</a></li>
+<li><a href="https://twitter.com/ajmmertens">Twitter</a></li>
+<li><a href="https://www.reddit.com/r/flecs">Reddit</a> </li>
+</ul>
+</div></div><!-- contents -->
+</div><!-- PageDoc -->
+</div><!-- doc-content -->
+<!-- HTML footer for doxygen 1.9.5-->
+<!-- start footer part -->
+</body>
+</html>

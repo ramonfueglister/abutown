@@ -1,0 +1,890 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Bevy ECS"><title>bevy::ecs - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/static/vendored.css?0-0-0-e3981f6f5e851656470d52001364bbb946056a06-2026-05-14" media="all" /><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="bevy" data-themes="" data-resource-suffix="-20260303-1.96.0-nightly-d9563937f" data-rustdoc-version="1.96.0-nightly (d9563937f 2026-03-03)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="../../crates-20260303-1.96.0-nightly-d9563937f.js"></script><script defer src="/-/rustdoc.static/main-5013f961.js"></script><script defer src="/-/rustdoc.static/scrape-examples-2bbcccac.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-f7c3ffd8.css"></noscript><link rel="icon" href="https://bevy.org/assets/icon.png"><link rel="stylesheet" href="/-/static/rustdoc-2025-08-20.css?0-0-0-e3981f6f5e851656470d52001364bbb946056a06-2026-05-14" media="all" /><link rel="stylesheet" href="/-/static/font-awesome.css?0-0-0-e3981f6f5e851656470d52001364bbb946056a06-2026-05-14" media="all" />
+
+<link rel="search" href="/-/static/opensearch.xml" type="application/opensearchdescription+xml" title="Docs.rs" />
+
+<script type="text/javascript">(function() {
+    function applyTheme(theme) {
+        if (theme) {
+            document.documentElement.dataset.docsRsTheme = theme;
+        }
+    }
+
+    window.addEventListener("storage", ev => {
+        if (ev.key === "rustdoc-theme") {
+            applyTheme(ev.newValue);
+        }
+    });
+
+    // see ./storage-change-detection.html for details
+    window.addEventListener("message", ev => {
+        if (ev.data && ev.data.storage && ev.data.storage.key === "rustdoc-theme") {
+            applyTheme(ev.data.storage.value);
+        }
+    });
+
+    applyTheme(window.localStorage.getItem("rustdoc-theme"));
+})();</script></head><body class="rustdoc-page">
+<div class="nav-container">
+    <div class="container">
+        <div class="pure-menu pure-menu-horizontal" role="navigation" aria-label="Main navigation">
+            <form action="/releases/search"
+                  method="GET"
+                  id="nav-search-form"
+                  class="landing-search-form-nav  ">
+
+                
+                <a href="/" class="pure-menu-heading pure-menu-link docsrs-logo" aria-label="Docs.rs">
+                    <span title="Docs.rs"><span class="fa fa-solid fa-cubes " aria-hidden="true"></span></span>
+                    <span class="title">Docs.rs</span>
+                </a><ul class="pure-menu-list">
+    <script id="crate-metadata" type="application/json">
+        
+        {
+            "name": "bevy",
+            "version": "0.18.1"
+        }
+    </script><li class="pure-menu-item pure-menu-has-children crate-dropdown">
+            <a href="#" class="pure-menu-link crate-name" title="A refreshingly simple data-driven game engine and app framework">
+                <span class="fa fa-solid fa-cube " aria-hidden="true"></span>
+                <span class="title">bevy-0.18.1</span>
+            </a><div class="pure-menu-children package-details-menu">
+                
+                <ul class="pure-menu-list menu-item-divided">
+                    <li class="pure-menu-heading" id="crate-title">
+                        bevy 0.18.1
+                        <span id="clipboard" class="svg-clipboard" title="Copy crate name and version information"></span>
+                    </li><li class="pure-menu-item">
+                        <a href="/bevy/0.18.1/bevy/ecs/" class="pure-menu-link description" id="permalink" title="Get a link to this specific version"><span class="fa fa-solid fa-link " aria-hidden="true"></span> Permalink
+                        </a>
+                    </li><li class="pure-menu-item">
+                        <a href="/crate/bevy/latest" class="pure-menu-link description" title="See bevy in docs.rs">
+                            <span class="fa fa-solid fa-cube " aria-hidden="true"></span> Docs.rs crate page
+                        </a>
+                    </li><li class="pure-menu-item">
+                            <span class="pure-menu-link description license"><span class="fa fa-solid fa-scale-unbalanced-flip " aria-hidden="true"></span>
+                            <a href="https://spdx.org/licenses/MIT" class="pure-menu-sublink">MIT</a> OR <a href="https://spdx.org/licenses/Apache-2.0" class="pure-menu-sublink">Apache-2.0</a></span>
+                        </li></ul>
+
+                <div class="pure-g menu-item-divided">
+                    <div class="pure-u-1-2 right-border">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Links</li>
+
+                            <li class="pure-menu-item">
+                                    <a href="https://bevy.org" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-house " aria-hidden="true"></span> Homepage
+                                    </a>
+                                </li><li class="pure-menu-item">
+                                    <a href="https://github.com/bevyengine/bevy" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-code-branch " aria-hidden="true"></span> Repository
+                                    </a>
+                                </li><li class="pure-menu-item">
+                                <a href="https://crates.io/crates/bevy" class="pure-menu-link" title="See bevy in crates.io">
+                                    <span class="fa fa-solid fa-cube " aria-hidden="true"></span> crates.io
+                                </a>
+                            </li>
+
+                            
+                            <li class="pure-menu-item">
+                                <a href="/crate/bevy/latest/source/" title="Browse source of bevy-0.18.1" class="pure-menu-link">
+                                    <span class="fa fa-solid fa-folder-open " aria-hidden="true"></span> Source
+                                </a>
+                            </li>
+                        </ul>
+                    </div><div class="pure-u-1-2">
+                        <ul class="pure-menu-list" id="topbar-owners">
+                            <li class="pure-menu-heading">Owners</li><li class="pure-menu-item">
+                                    <a href="https://crates.io/users/cart" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-user " aria-hidden="true"></span> cart
+                                    </a>
+                                </li><li class="pure-menu-item">
+                                    <a href="https://crates.io/teams/github:bevyengine:publish" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-user " aria-hidden="true"></span> github:bevyengine:publish
+                                    </a>
+                                </li></ul>
+                    </div>
+                </div>
+
+                <div class="pure-g menu-item-divided">
+                    <div class="pure-u-1-2 right-border">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Dependencies</li>
+
+                            
+                            <li class="pure-menu-item">
+                                <div class="pure-menu pure-menu-scrollable sub-menu" tabindex="-1">
+                                    <ul class="pure-menu-list">
+                                        <li class="pure-menu-item"><a href="/bevy_internal/^0.18.0/" class="pure-menu-link">
+                bevy_internal ^0.18.0
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/tracing/^0.1/" class="pure-menu-link">
+                tracing ^0.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/accesskit/^0.21/" class="pure-menu-link">
+                accesskit ^0.21
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/anyhow/^1/" class="pure-menu-link">
+                anyhow ^1
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/argh/^0.1.12/" class="pure-menu-link">
+                argh ^0.1.12
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_animation/^0.18.0/" class="pure-menu-link">
+                bevy_animation ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_asset/^0.18.0/" class="pure-menu-link">
+                bevy_asset ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_ecs/^0.18.0/" class="pure-menu-link">
+                bevy_ecs ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_gizmos/^0.18.0/" class="pure-menu-link">
+                bevy_gizmos ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_image/^0.18.0/" class="pure-menu-link">
+                bevy_image ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_reflect/^0.18.0/" class="pure-menu-link">
+                bevy_reflect ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_render/^0.18.0/" class="pure-menu-link">
+                bevy_render ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_state/^0.18.0/" class="pure-menu-link">
+                bevy_state ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bytemuck/^1/" class="pure-menu-link">
+                bytemuck ^1
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/crossbeam-channel/^0.5.0/" class="pure-menu-link">
+                crossbeam-channel ^0.5.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/event-listener/^5.3.0/" class="pure-menu-link">
+                event-listener ^5.3.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/flate2/^1.0/" class="pure-menu-link">
+                flate2 ^1.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/futures-lite/^2.0.1/" class="pure-menu-link">
+                futures-lite ^2.0.1
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/futures-timer/^3/" class="pure-menu-link">
+                futures-timer ^3
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/gltf/^1.4/" class="pure-menu-link">
+                gltf ^1.4
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/nonmax/^0.5/" class="pure-menu-link">
+                nonmax ^0.5
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/rand/^0.9.0/" class="pure-menu-link">
+                rand ^0.9.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/rand_chacha/^0.9.0/" class="pure-menu-link">
+                rand_chacha ^0.9.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/ron/^0.12/" class="pure-menu-link">
+                ron ^0.12
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/serde/^1/" class="pure-menu-link">
+                serde ^1
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/serde_json/^1.0.140/" class="pure-menu-link">
+                serde_json ^1.0.140
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/thiserror/^2.0/" class="pure-menu-link">
+                thiserror ^2.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/bevy_dylib/^0.18.0/" class="pure-menu-link">
+                bevy_dylib ^0.18.0
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/ureq/^3.0.8/" class="pure-menu-link">
+                ureq ^3.0.8
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/getrandom/^0.3/" class="pure-menu-link">
+                getrandom ^0.3
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/wasm-bindgen/^0.2/" class="pure-menu-link">
+                wasm-bindgen ^0.2
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/web-sys/^0.3/" class="pure-menu-link">
+                web-sys ^0.3
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li>
+                                    </ul>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="pure-u-1-2">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Versions</li>
+
+                            <li class="pure-menu-item">
+                                <div class="pure-menu pure-menu-scrollable sub-menu" id="releases-list" tabindex="-1" data-url="/crate/bevy/latest/menus/releases/bevy/ecs/">
+                                    <span class="rotate"><span class="fa fa-solid fa-spinner " aria-hidden="true"></span></span>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                    
+                    
+                    <div class="pure-g">
+                        <div class="pure-u-1">
+                            <ul class="pure-menu-list">
+                                <li>
+                                    <a href="/crate/bevy/latest" class="pure-menu-link">
+                                        <b>100%</b>
+                                        of the crate is documented
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div></div>
+        </li><li class="pure-menu-item pure-menu-has-children">
+                <a href="#" class="pure-menu-link" aria-label="Platform">
+                    <span class="fa fa-solid fa-gears " aria-hidden="true"></span>
+                    <span class="title">Platform</span>
+                </a>
+
+                
+                <ul class="pure-menu-children" id="platforms" data-url="/crate/bevy/latest/menus/platforms/bevy/ecs/"><li class="pure-menu-item">
+            <a href="/crate/bevy/latest/target-redirect/bevy/ecs/" class="pure-menu-link" data-fragment="retain" rel="nofollow">x86_64-unknown-linux-gnu</a>
+        </li></ul>
+            </li><li class="pure-menu-item">
+                <a href="/crate/bevy/latest/features" title="Browse available feature flags of bevy-0.18.1" class="pure-menu-link">
+                    <span class="fa fa-solid fa-flag " aria-hidden="true"></span>
+                    <span class="title">Feature flags</span>
+                </a>
+            </li>
+        
+    
+</ul><div class="spacer"></div>
+                
+                
+
+<ul class="pure-menu-list">
+                    <li class="pure-menu-item pure-menu-has-children">
+                        <a href="#" class="pure-menu-link" aria-label="docs.rs">docs.rs</a>
+                        <ul class="pure-menu-children aligned-icons"><li class="pure-menu-item"><a class="pure-menu-link" href="/about"><span class="fa fa-solid fa-circle-info " aria-hidden="true"></span> About docs.rs</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/badges"><span class="fa fa-brands fa-fonticons " aria-hidden="true"></span> Badges</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/builds"><span class="fa fa-solid fa-gears " aria-hidden="true"></span> Builds</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/metadata"><span class="fa fa-solid fa-table " aria-hidden="true"></span> Metadata</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/redirections"><span class="fa fa-solid fa-road " aria-hidden="true"></span> Shorthand URLs</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/download"><span class="fa fa-solid fa-download " aria-hidden="true"></span> Download</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/rustdoc-json"><span class="fa fa-solid fa-file-code " aria-hidden="true"></span> Rustdoc JSON</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/releases/queue"><span class="fa fa-solid fa-gears " aria-hidden="true"></span> Build queue</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="https://foundation.rust-lang.org/policies/privacy-policy/#docs.rs" target="_blank"><span class="fa fa-solid fa-shield-halved " aria-hidden="true"></span> Privacy policy</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                <ul class="pure-menu-list"><li class="pure-menu-item pure-menu-has-children">
+                        <a href="#" class="pure-menu-link" aria-label="Rust">Rust</a>
+                        <ul class="pure-menu-children">
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://www.rust-lang.org/" target="_blank">Rust website</a></li>
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/book/" target="_blank">The Book</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/std/" target="_blank">Standard Library API Reference</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/rust-by-example/" target="_blank">Rust by Example</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/cargo/guide/" target="_blank">The Cargo Guide</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/nightly/clippy" target="_blank">Clippy Documentation</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <div id="search-input-nav">
+                    <label for="nav-search">
+                        <span class="fa fa-solid fa-magnifying-glass " aria-hidden="true"></span>
+                    </label>
+
+                    
+                    
+                    <input id="nav-search" name="query" type="text" aria-label="Find crate by search query" tabindex="-1"
+                        placeholder="Find crate"
+                        >
+                </div>
+            </form>
+        </div>
+    </div>
+</div><div class="rustdoc mod crate container-rustdoc" id="rustdoc_body_wrapper" tabindex="-1"><script async src="/-/static/menu.js?0-0-0-e3981f6f5e851656470d52001364bbb946056a06-2026-05-14"></script>
+<script async src="/-/static/index.js?0-0-0-e3981f6f5e851656470d52001364bbb946056a06-2026-05-14"></script>
+
+<iframe src="/-/storage-change-detection.html" width="0" height="0" style="display: none"></iframe><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate ecs</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><a class="logo-container" href="../../bevy/index.html"><img src="https://bevy.org/assets/icon.png" alt="logo"></a><h2><a href="../../bevy/index.html">bevy</a><span class="version">0.18.1</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#bevy-ecs" title="Bevy ECS">Bevy ECS</a><ul><li><a href="#what-is-bevy-ecs" title="What is Bevy ECS?">What is Bevy ECS?</a></li><li><a href="#ecs" title="ECS">ECS</a></li><li><a href="#concepts" title="Concepts">Concepts</a></li><li><a href="#using-bevy-ecs" title="Using Bevy ECS">Using Bevy ECS</a></li><li><a href="#features" title="Features">Features</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#macros" title="Macros">Macros</a></li><li><a href="#structs" title="Structs">Structs</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">bevy</a></div><h1>Crate <span>ecs</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/bevy_ecs/0.18.1/x86_64-unknown-linux-gnu/src/bevy_ecs/lib.rs.html#1-2080">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="bevy-ecs"><a class="doc-anchor" href="#bevy-ecs">§</a>Bevy ECS</h2>
+<p><a href="https://github.com/bevyengine/bevy#license"><img src="https://img.shields.io/badge/license-MIT%2FApache-blue.svg" alt="License" /></a>
+<a href="https://crates.io/crates/bevy_ecs"><img src="https://img.shields.io/crates/v/bevy_ecs.svg" alt="Crates.io" /></a>
+<a href="https://crates.io/crates/bevy_ecs"><img src="https://img.shields.io/crates/d/bevy_ecs.svg" alt="Downloads" /></a>
+<a href="https://docs.rs/bevy_ecs/latest/bevy_ecs/"><img src="https://docs.rs/bevy_ecs/badge.svg" alt="Docs" /></a>
+<a href="https://discord.gg/bevy"><img src="https://img.shields.io/discord/691052431525675048.svg?label=&amp;logo=discord&amp;logoColor=ffffff&amp;color=7389D8&amp;labelColor=6A7EC2" alt="Discord" /></a></p>
+<h3 id="what-is-bevy-ecs"><a class="doc-anchor" href="#what-is-bevy-ecs">§</a>What is Bevy ECS?</h3>
+<p>Bevy ECS is an Entity Component System custom-built for the <a href="https://bevy.org/">Bevy</a> game engine.
+It aims to be simple to use, ergonomic, fast, massively parallel, opinionated, and featureful.
+It was created specifically for Bevy’s needs, but it can easily be used as a standalone crate in other projects.</p>
+<h3 id="ecs"><a class="doc-anchor" href="#ecs">§</a>ECS</h3>
+<p>All app logic in Bevy uses the Entity Component System paradigm, which is often shortened to ECS. ECS is a software pattern that involves breaking your program up into Entities, Components, and Systems. Entities are unique “things” that are assigned groups of Components, which are then processed using Systems.</p>
+<p>For example, one entity might have a <code>Position</code> and <code>Velocity</code> component, whereas another entity might have a <code>Position</code> and <code>UI</code> component. You might have a movement system that runs on all entities with a Position and Velocity component.</p>
+<p>The ECS pattern encourages clean, decoupled designs by forcing you to break up your app data and logic into its core components. It also helps make your code faster by optimizing memory access patterns and making parallelism easier.</p>
+<h3 id="concepts"><a class="doc-anchor" href="#concepts">§</a>Concepts</h3>
+<p>Bevy ECS is Bevy’s implementation of the ECS pattern. Unlike other Rust ECS implementations, which often require complex lifetimes, traits, builder patterns, or macros, Bevy ECS uses normal Rust data types for all of these concepts:</p>
+<h4 id="components"><a class="doc-anchor" href="#components">§</a>Components</h4>
+<p>Components are normal Rust structs. They are data stored in a <code>World</code> and specific instances of Components correlate to Entities.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Position { x: f32, y: f32 }</code></pre></div><h4 id="worlds"><a class="doc-anchor" href="#worlds">§</a>Worlds</h4>
+<p>Entities, Components, and Resources are stored in a <code>World</code>. Worlds, much like <code>std::collections</code>’s <code>HashSet</code> and <code>Vec</code>, expose operations to insert, read, write, and remove the data they store.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::world::World;
+
+<span class="kw">let </span>world = World::default();</code></pre></div><h4 id="entities"><a class="doc-anchor" href="#entities">§</a>Entities</h4>
+<p>Entities are unique identifiers that correlate to zero or more Components.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Position { x: f32, y: f32 }
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Velocity { x: f32, y: f32 }
+
+<span class="kw">let </span><span class="kw-2">mut </span>world = World::new();
+
+<span class="kw">let </span>entity = world
+    .spawn((Position { x: <span class="number">0.0</span>, y: <span class="number">0.0 </span>}, Velocity { x: <span class="number">1.0</span>, y: <span class="number">0.0 </span>}))
+    .id();
+
+<span class="kw">let </span>entity_ref = world.entity(entity);
+<span class="kw">let </span>position = entity_ref.get::&lt;Position&gt;().unwrap();
+<span class="kw">let </span>velocity = entity_ref.get::&lt;Velocity&gt;().unwrap();</code></pre></div><h4 id="systems"><a class="doc-anchor" href="#systems">§</a>Systems</h4>
+<p>Systems are normal Rust functions. Thanks to the Rust type system, Bevy ECS can use function parameter types to determine what data needs to be sent to the system. It also uses this “data access” information to determine what Systems can run in parallel with each other.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Position { x: f32, y: f32 }
+
+<span class="kw">fn </span>print_position(query: Query&lt;(Entity, <span class="kw-2">&amp;</span>Position)&gt;) {
+    <span class="kw">for </span>(entity, position) <span class="kw">in </span><span class="kw-2">&amp;</span>query {
+        <span class="macro">println!</span>(<span class="string">"Entity {} is at position: x {}, y {}"</span>, entity, position.x, position.y);
+    }
+}</code></pre></div><h4 id="resources"><a class="doc-anchor" href="#resources">§</a>Resources</h4>
+<p>Apps often require unique resources, such as asset collections, renderers, audio servers, time, etc. Bevy ECS makes this pattern a first class citizen. <code>Resource</code> is a special kind of component that does not belong to any entity. Instead, it is identified uniquely by its type:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Resource, Default)]
+</span><span class="kw">struct </span>Time {
+    seconds: f32,
+}
+
+<span class="kw">let </span><span class="kw-2">mut </span>world = World::new();
+
+world.insert_resource(Time::default());
+
+<span class="kw">let </span>time = world.get_resource::&lt;Time&gt;().unwrap();
+
+<span class="comment">// You can also access resources from Systems
+</span><span class="kw">fn </span>print_time(time: Res&lt;Time&gt;) {
+    <span class="macro">println!</span>(<span class="string">"{}"</span>, time.seconds);
+}</code></pre></div><h4 id="schedules"><a class="doc-anchor" href="#schedules">§</a>Schedules</h4>
+<p>Schedules run a set of Systems according to some execution strategy.
+Systems can be added to any number of System Sets, which are used to control their scheduling metadata.</p>
+<p>The built in “parallel executor” considers dependencies between systems and (by default) run as many of them in parallel as possible. This maximizes performance, while keeping the system execution safe. To control the system ordering, define explicit dependencies between systems and their sets.</p>
+<h3 id="using-bevy-ecs"><a class="doc-anchor" href="#using-bevy-ecs">§</a>Using Bevy ECS</h3>
+<p>Bevy ECS should feel very natural for those familiar with Rust syntax:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Position { x: f32, y: f32 }
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Velocity { x: f32, y: f32 }
+
+<span class="comment">// This system moves each entity with a Position and Velocity component
+</span><span class="kw">fn </span>movement(<span class="kw-2">mut </span>query: Query&lt;(<span class="kw-2">&amp;mut </span>Position, <span class="kw-2">&amp;</span>Velocity)&gt;) {
+    <span class="kw">for </span>(<span class="kw-2">mut </span>position, velocity) <span class="kw">in </span><span class="kw-2">&amp;mut </span>query {
+        position.x += velocity.x;
+        position.y += velocity.y;
+    }
+}
+
+<span class="kw">fn </span>main() {
+    <span class="comment">// Create a new empty World to hold our Entities and Components
+    </span><span class="kw">let </span><span class="kw-2">mut </span>world = World::new();
+
+    <span class="comment">// Spawn an entity with Position and Velocity components
+    </span>world.spawn((
+        Position { x: <span class="number">0.0</span>, y: <span class="number">0.0 </span>},
+        Velocity { x: <span class="number">1.0</span>, y: <span class="number">0.0 </span>},
+    ));
+
+    <span class="comment">// Create a new Schedule, which defines an execution strategy for Systems
+    </span><span class="kw">let </span><span class="kw-2">mut </span>schedule = Schedule::default();
+
+    <span class="comment">// Add our system to the schedule
+    </span>schedule.add_systems(movement);
+
+    <span class="comment">// Run the schedule once. If your app has a "loop", you would run this once per loop
+    </span>schedule.run(<span class="kw-2">&amp;mut </span>world);
+}</code></pre></div><h3 id="features"><a class="doc-anchor" href="#features">§</a>Features</h3><h4 id="query-filters"><a class="doc-anchor" href="#query-filters">§</a>Query Filters</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Position { x: f32, y: f32 }
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Player;
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Alive;
+
+<span class="comment">// Gets the Position component of all Entities with Player component and without the Alive
+// component.
+</span><span class="kw">fn </span>system(query: Query&lt;<span class="kw-2">&amp;</span>Position, (With&lt;Player&gt;, Without&lt;Alive&gt;)&gt;) {
+    <span class="kw">for </span>position <span class="kw">in </span><span class="kw-2">&amp;</span>query {
+    }
+}</code></pre></div><h4 id="change-detection"><a class="doc-anchor" href="#change-detection">§</a>Change Detection</h4>
+<p>Bevy ECS tracks <em>all</em> changes to Components and Resources.</p>
+<p>Queries can filter for changed Components:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Position { x: f32, y: f32 }
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>Velocity { x: f32, y: f32 }
+
+<span class="comment">// Gets the Position component of all Entities whose Velocity has changed since the last run of the System
+</span><span class="kw">fn </span>system_changed(query: Query&lt;<span class="kw-2">&amp;</span>Position, Changed&lt;Velocity&gt;&gt;) {
+    <span class="kw">for </span>position <span class="kw">in </span><span class="kw-2">&amp;</span>query {
+    }
+}
+
+<span class="comment">// Gets the Position component of all Entities that had a Velocity component added since the last run of the System
+</span><span class="kw">fn </span>system_added(query: Query&lt;<span class="kw-2">&amp;</span>Position, Added&lt;Velocity&gt;&gt;) {
+    <span class="kw">for </span>position <span class="kw">in </span><span class="kw-2">&amp;</span>query {
+    }
+}</code></pre></div>
+<p>Resources also expose change state:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Resource)]
+</span><span class="kw">struct </span>Time(f32);
+
+<span class="comment">// Prints "time changed!" if the Time resource has changed since the last run of the System
+</span><span class="kw">fn </span>system(time: Res&lt;Time&gt;) {
+    <span class="kw">if </span>time.is_changed() {
+        <span class="macro">println!</span>(<span class="string">"time changed!"</span>);
+    }
+}</code></pre></div><h4 id="component-storage"><a class="doc-anchor" href="#component-storage">§</a>Component Storage</h4>
+<p>Bevy ECS supports multiple component storage types.</p>
+<p>Components can be stored in:</p>
+<ul>
+<li><strong>Tables</strong>: Fast and cache friendly iteration, but slower adding and removing of components. This is the default storage type.</li>
+<li><strong>Sparse Sets</strong>: Fast adding and removing of components, but slower iteration.</li>
+</ul>
+<p>Component storage types are configurable, and they default to table storage if the storage is not manually defined.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Component)]
+</span><span class="kw">struct </span>TableStoredComponent;
+
+<span class="attr">#[derive(Component)]
+#[component(storage = <span class="string">"SparseSet"</span>)]
+</span><span class="kw">struct </span>SparseStoredComponent;</code></pre></div><h4 id="component-bundles"><a class="doc-anchor" href="#component-bundles">§</a>Component Bundles</h4>
+<p>Define sets of Components that should be added together.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Default, Component)]
+</span><span class="kw">struct </span>Player;
+<span class="attr">#[derive(Default, Component)]
+</span><span class="kw">struct </span>Position { x: f32, y: f32 }
+<span class="attr">#[derive(Default, Component)]
+</span><span class="kw">struct </span>Velocity { x: f32, y: f32 }
+
+<span class="attr">#[derive(Bundle, Default)]
+</span><span class="kw">struct </span>PlayerBundle {
+    player: Player,
+    position: Position,
+    velocity: Velocity,
+}
+
+<span class="kw">let </span><span class="kw-2">mut </span>world = World::new();
+
+<span class="comment">// Spawn a new entity and insert the default PlayerBundle
+</span>world.spawn(PlayerBundle::default());
+
+<span class="comment">// Bundles play well with Rust's struct update syntax
+</span>world.spawn(PlayerBundle {
+    position: Position { x: <span class="number">1.0</span>, y: <span class="number">1.0 </span>},
+    ..Default::default()
+});</code></pre></div><h4 id="messages"><a class="doc-anchor" href="#messages">§</a>Messages</h4>
+<p>Messages offer a communication channel between one or more systems.
+They can be sent using the <code>MessageWriter</code> system parameter and received with <code>MessageReader</code>.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Message)]
+</span><span class="kw">struct </span>Message(String);
+
+<span class="kw">fn </span>writer(<span class="kw-2">mut </span>writer: MessageWriter&lt;Message&gt;) {
+    writer.write(Message(<span class="string">"Hello!"</span>.to_string()));
+}
+
+<span class="kw">fn </span>reader(<span class="kw-2">mut </span>reader: MessageReader&lt;Message&gt;) {
+    <span class="kw">for </span>Message(message) <span class="kw">in </span>reader.read() {
+        <span class="macro">println!</span>(<span class="string">"{}"</span>, message);
+    }
+}</code></pre></div><h4 id="observers"><a class="doc-anchor" href="#observers">§</a>Observers</h4>
+<p>Observers are systems that watch for a “trigger” of a specific <code>Event</code>:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(Event)]
+</span><span class="kw">struct </span>Speak {
+    message: String
+}
+
+<span class="kw">let </span><span class="kw-2">mut </span>world = World::new();
+
+world.add_observer(|event: On&lt;Speak&gt;| {
+    <span class="macro">println!</span>(<span class="string">"{}"</span>, event.message);
+});
+
+world.trigger(Speak {
+    message: <span class="string">"Hello!"</span>.to_string(),
+});</code></pre></div>
+<p>These differ from <code>MessageReader</code> and <code>MessageWriter</code> in that they are “reactive”.
+Rather than happening at a specific point in a schedule, they happen <em>immediately</em> whenever a trigger happens.
+Triggers can trigger other triggers, and they all will be evaluated at the same time!</p>
+<p>If the event is an <code>EntityEvent</code>, it can also be triggered to target specific entities:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>bevy_ecs::prelude::<span class="kw-2">*</span>;
+
+<span class="attr">#[derive(EntityEvent)]
+</span><span class="kw">struct </span>Explode {
+    entity: Entity,
+}
+
+<span class="kw">let </span><span class="kw-2">mut </span>world = World::new();
+<span class="kw">let </span>entity = world.spawn_empty().id();
+
+world.add_observer(|explode: On&lt;Explode&gt;, <span class="kw-2">mut </span>commands: Commands| {
+    <span class="macro">println!</span>(<span class="string">"Entity {} goes BOOM!"</span>, explode.entity);
+    commands.entity(explode.entity).despawn();
+});
+
+world.trigger(Explode { entity });</code></pre></div></div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="archetype/index.html" title="mod bevy::ecs::archetype">archetype</a></dt><dd>Types for defining <a href="archetype/struct.Archetype.html" title="struct bevy::ecs::archetype::Archetype"><code>Archetype</code></a>s, collections of entities that have the same set of
+components.</dd><dt><a class="mod" href="batching/index.html" title="mod bevy::ecs::batching">batching</a></dt><dd>Types for controlling batching behavior during parallel processing.</dd><dt><a class="mod" href="bundle/index.html" title="mod bevy::ecs::bundle">bundle</a></dt><dd>Types for handling <a href="../prelude/trait.Bundle.html" title="trait bevy::prelude::Bundle"><code>Bundle</code></a>s.</dd><dt><a class="mod" href="change_detection/index.html" title="mod bevy::ecs::change_detection">change_<wbr>detection</a></dt><dd>Types that detect when their internal data mutate.</dd><dt><a class="mod" href="component/index.html" title="mod bevy::ecs::component">component</a></dt><dd>Types for declaring and storing <a href="../prelude/trait.Component.html" title="trait bevy::prelude::Component"><code>Component</code></a>s.</dd><dt><a class="mod" href="entity/index.html" title="mod bevy::ecs::entity">entity</a></dt><dd>This module contains all entity types and utilities for interacting with their ids.</dd><dt><a class="mod" href="entity_disabling/index.html" title="mod bevy::ecs::entity_disabling">entity_<wbr>disabling</a></dt><dd>Disabled entities do not show up in queries unless the query explicitly mentions them.</dd><dt><a class="mod" href="error/index.html" title="mod bevy::ecs::error">error</a></dt><dd>Error handling for Bevy systems, commands, and observers.</dd><dt><a class="mod" href="event/index.html" title="mod bevy::ecs::event">event</a></dt><dd><a href="../prelude/trait.Event.html" title="trait bevy::prelude::Event"><code>Event</code></a> functionality.</dd><dt><a class="mod" href="hierarchy/index.html" title="mod bevy::ecs::hierarchy">hierarchy</a></dt><dd>The canonical “parent-child” <a href="relationship/trait.Relationship.html" title="trait bevy::ecs::relationship::Relationship"><code>Relationship</code></a> for entities, driven by
+the <a href="../prelude/struct.ChildOf.html" title="struct bevy::prelude::ChildOf"><code>ChildOf</code></a> <a href="relationship/trait.Relationship.html" title="trait bevy::ecs::relationship::Relationship"><code>Relationship</code></a> and the <a href="../prelude/struct.Children.html" title="struct bevy::prelude::Children"><code>Children</code></a> <a href="../prelude/trait.RelationshipTarget.html" title="trait bevy::prelude::RelationshipTarget"><code>RelationshipTarget</code></a>.</dd><dt><a class="mod" href="intern/index.html" title="mod bevy::ecs::intern">intern</a></dt><dd>Provides types used to statically intern immutable values.</dd><dt><a class="mod" href="label/index.html" title="mod bevy::ecs::label">label</a></dt><dd>Traits used by label implementations</dd><dt><a class="mod" href="lifecycle/index.html" title="mod bevy::ecs::lifecycle">lifecycle</a></dt><dd>This module contains various tools to allow you to react to component insertion or removal,
+as well as entity spawning and despawning.</dd><dt><a class="mod" href="message/index.html" title="mod bevy::ecs::message">message</a></dt><dd><a href="../prelude/trait.Message.html" title="trait bevy::prelude::Message"><code>Message</code></a> functionality.</dd><dt><a class="mod" href="name/index.html" title="mod bevy::ecs::name">name</a></dt><dd>Provides the <a href="../prelude/struct.Name.html" title="struct bevy::prelude::Name"><code>Name</code></a> <a href="../prelude/trait.Component.html" title="trait bevy::prelude::Component"><code>Component</code></a>, used for identifying an <a href="../prelude/struct.Entity.html" title="struct bevy::prelude::Entity"><code>Entity</code></a>.</dd><dt><a class="mod" href="never/index.html" title="mod bevy::ecs::never">never</a></dt><dd>A workaround for the <code>!</code> type in stable Rust.</dd><dt><a class="mod" href="observer/index.html" title="mod bevy::ecs::observer">observer</a></dt><dd>Observers are a push-based tool for responding to <a href="../prelude/trait.Event.html" title="trait bevy::prelude::Event"><code>Event</code></a>s. The <a href="../prelude/struct.Observer.html" title="struct bevy::prelude::Observer"><code>Observer</code></a> component holds a <a href="../prelude/trait.System.html" title="trait bevy::prelude::System"><code>System</code></a> that runs whenever a matching <a href="../prelude/trait.Event.html" title="trait bevy::prelude::Event"><code>Event</code></a>
+is triggered.</dd><dt><a class="mod" href="prelude/index.html" title="mod bevy::ecs::prelude">prelude</a></dt><dd>The ECS prelude.</dd><dt><a class="mod" href="ptr/index.html" title="mod bevy::ecs::ptr">ptr</a></dt><dd>Bevy Pointer</dd><dt><a class="mod" href="query/index.html" title="mod bevy::ecs::query">query</a></dt><dd>Contains APIs for retrieving component data from the world.</dd><dt><a class="mod" href="reflect/index.html" title="mod bevy::ecs::reflect">reflect</a><wbr><span class="stab portability" title="Available on crate feature `bevy_reflect` only"><code>bevy_reflect</code></span></dt><dd>Types that enable reflection support.</dd><dt><a class="mod" href="relationship/index.html" title="mod bevy::ecs::relationship">relationship</a></dt><dd>This module provides functionality to link entities to each other using specialized components called “relationships”. See the <a href="relationship/trait.Relationship.html" title="trait bevy::ecs::relationship::Relationship"><code>Relationship</code></a> trait for more info.</dd><dt><a class="mod" href="resource/index.html" title="mod bevy::ecs::resource">resource</a></dt><dd>Resources are unique, singleton-like data types that can be accessed from systems and stored in the <a href="../prelude/struct.World.html" title="struct bevy::prelude::World"><code>World</code></a>.</dd><dt><a class="mod" href="schedule/index.html" title="mod bevy::ecs::schedule">schedule</a></dt><dd>Contains APIs for ordering systems and executing them on a <a href="../prelude/struct.World.html" title="struct bevy::prelude::World"><code>World</code></a></dd><dt><a class="mod" href="spawn/index.html" title="mod bevy::ecs::spawn">spawn</a></dt><dd>Entity spawning abstractions, largely focused on spawning related hierarchies of entities. See <a href="../prelude/macro.related.html" title="macro bevy::prelude::related"><code>related</code></a> and <a href="../prelude/trait.SpawnRelated.html" title="trait bevy::prelude::SpawnRelated"><code>SpawnRelated</code></a>
+for the best entry points into these APIs and examples of how to use them.</dd><dt><a class="mod" href="storage/index.html" title="mod bevy::ecs::storage">storage</a></dt><dd>Storage layouts for ECS data.</dd><dt><a class="mod" href="system/index.html" title="mod bevy::ecs::system">system</a></dt><dd>Tools for controlling behavior in an ECS application.</dd><dt><a class="mod" href="traversal/index.html" title="mod bevy::ecs::traversal">traversal</a></dt><dd>A trait for components that let you traverse the ECS.</dd><dt><a class="mod" href="world/index.html" title="mod bevy::ecs::world">world</a></dt><dd>Defines the <a href="../prelude/struct.World.html" title="struct bevy::prelude::World"><code>World</code></a> and APIs for accessing it directly.</dd></dl><h2 id="macros" class="section-header">Macros<a href="#macros" class="anchor">§</a></h2><dl class="item-table"><dt><a class="macro" href="macro.children.html" title="macro bevy::ecs::children">children</a></dt><dd>Returns a <a href="spawn/struct.SpawnRelatedBundle.html" title="struct bevy::ecs::spawn::SpawnRelatedBundle"><code>SpawnRelatedBundle</code></a> that will insert the <a href="../prelude/struct.Children.html" title="struct bevy::prelude::Children"><code>Children</code></a> component, spawn a <a href="spawn/trait.SpawnableList.html" title="trait bevy::ecs::spawn::SpawnableList"><code>SpawnableList</code></a> of entities with given bundles that
+relate to the <a href="../prelude/struct.Children.html" title="struct bevy::prelude::Children"><code>Children</code></a> entity via the <a href="../prelude/struct.ChildOf.html" title="struct bevy::prelude::ChildOf"><code>ChildOf</code></a> component, and reserve space in the <a href="../prelude/struct.Children.html" title="struct bevy::prelude::Children"><code>Children</code></a> for each spawned entity.</dd><dt><a class="macro" href="macro.define_label.html" title="macro bevy::ecs::define_label">define_<wbr>label</a></dt><dd>Macro to define a new label trait</dd><dt><a class="macro" href="macro.related.html" title="macro bevy::ecs::related">related</a></dt><dd>Returns a <a href="spawn/struct.SpawnRelatedBundle.html" title="struct bevy::ecs::spawn::SpawnRelatedBundle"><code>SpawnRelatedBundle</code></a> that will insert the given <a href="../prelude/trait.RelationshipTarget.html" title="trait bevy::prelude::RelationshipTarget"><code>RelationshipTarget</code></a>, spawn a <a href="spawn/trait.SpawnableList.html" title="trait bevy::ecs::spawn::SpawnableList"><code>SpawnableList</code></a> of entities with given bundles that
+relate to the <a href="../prelude/trait.RelationshipTarget.html" title="trait bevy::prelude::RelationshipTarget"><code>RelationshipTarget</code></a> entity via the <a href="../prelude/trait.RelationshipTarget.html#associatedtype.Relationship" title="associated type bevy::prelude::RelationshipTarget::Relationship"><code>RelationshipTarget::Relationship</code></a> component, and reserve space in the <a href="../prelude/trait.RelationshipTarget.html" title="trait bevy::prelude::RelationshipTarget"><code>RelationshipTarget</code></a> for each spawned entity.</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.HotPatchChanges.html" title="struct bevy::ecs::HotPatchChanges">HotPatch<wbr>Changes</a><wbr><span class="stab portability" title="Available on crate feature `hotpatching` only"><code>hotpatching</code></span></dt><dd>Resource which “changes” when a hotpatch happens.</dd><dt><a class="struct" href="struct.HotPatched.html" title="struct bevy::ecs::HotPatched">HotPatched</a><wbr><span class="stab portability" title="Available on crate feature `hotpatching` only"><code>hotpatching</code></span></dt><dd>Event sent when a hotpatch happens.</dd></dl></section></div></main><script>
+    // Adds tags to documentation pages for common Bevy traits like `Component` or `Resource`.
+    // This makes it easier to see at a glance what types are used for.
+    //
+    // This extension is passed to `rustdoc` using the `--html-after-content` flag.
+
+    // Traits that we want to show as tags.
+    // Order determines sort order of items in listings.
+    const bevyTraits = [
+        'Plugin',
+        'PluginGroup',
+        'Component',
+        'Resource',
+        'Asset',
+        'Event',
+        'Message',
+        'ScheduleLabel',
+        'SystemSet',
+        'SystemParam',
+        'Relationship',
+        'RelationshipTarget'
+    ];
+
+    // Find all traits that are implemented by the current type.
+    const implementedBevyTraits = findImplementedBevyTraits(document);
+
+    // If we found any implemented traits, add them as tags to the top of the page.
+    if (implementedBevyTraits.size > 0) {
+        // Create a container for the tags.
+        const heading = document.body.querySelector(".main-heading h1");
+        const tagContainer = document.createElement('div');
+        tagContainer.className = 'bevy-tag-container';
+        heading.appendChild(tagContainer);
+
+        // Check if an implemented trait has a `type Mutability = Immutable` associated type.
+        // This is used to determine if a `Component` is immutable or not.
+        // TODO: Ideally we should just check the associated types of the `Component` trait,
+        //       but the docs.rs layout makes it tricky to do so in a robust way.
+        const associatedTypeHeader = document.querySelectorAll(".trait-impl.associatedtype .code-header");
+        const isImmutable = [...associatedTypeHeader].some(el => el.innerText.includes('type Mutability = Immutable'));
+
+        // Create a tag for each implemented trait.
+        for (let [tagName, href] of implementedBevyTraits) {
+            if (tagName == 'Component' & isImmutable) {
+                tagName = 'Immutable Component';
+            }
+
+            // Create the tag and append it to the container.
+            tagContainer.appendChild(createBevyTag(tagName, href));
+        }
+    }
+
+    function findImplementedBevyTraits(doc) {
+        // Traits that are implemented by the current type.
+        // The key is the trait name, and the value is the href to the trait's documentation.
+        const implementedTraits = new Map();
+
+        // Find all trait implementation headers.
+        const allTraitHeaders = doc.body.querySelectorAll(
+            '#trait-implementations-list .impl .code-header, #blanket-implementations-list .impl .code-header'
+        );
+
+        for (const header of allTraitHeaders) {
+            // We can extract the trait name by removing any generics and splitting the string by spaces.
+            // This results in ['impl', 'TraitName', 'for', 'TypeName'].
+            const traitName = removeGenerics(header.innerText).split(' ')[1].trim();
+
+            // Find the link to the trait if the anchor element exists.
+            // Otherwise, the trait is just in plain text.
+            const traitLinkEl = [...header.children].find(el => el.getAttribute('href')?.includes(`trait.${traitName}.html`));
+            const href = traitLinkEl?.getAttribute('href');
+
+            implementedTraits.set(traitName, href);
+        }
+
+        const implementedBevyTraits = new Map(
+            [...implementedTraits].filter(([traitName, _]) => bevyTraits.find((x) => x == traitName))
+        );
+
+        return implementedBevyTraits;
+    }
+
+    // Helper function to remove generics from a string of Rust code.
+    // For example, 'Vec<T>' would become 'Vec'.
+    function removeGenerics(str) {
+        // Remove the innermost generics.
+        const newStr = str.replace(/<([^<>])*>/g, '');
+
+        // If there are still generics, perform the removal again recursively.
+        if (newStr !== str) {
+            return removeGenerics(newStr);
+        }
+
+        // No more generics to remove.
+        return newStr;
+    }
+
+    // Helper function to create a tag element with the given name and href,
+    // if available.
+    function createBevyTag(tagName, href) {
+        const el = document.createElement('a');
+        const kebabCaseName = tagName.toLowerCase().replace(' ', '-');
+
+        if (href) {
+            el.setAttribute('href', href);
+        }
+
+        el.innerText = tagName;
+        el.className = `bevy-tag ${kebabCaseName}-tag`;
+        return el;
+    }
+</script>
+
+<style>
+    .bevy-tag-container {
+        padding: 0.5rem 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .bevy-tag {
+        display: flex;
+        align-items: center;
+        width: fit-content;
+        height: 1.5rem;
+        padding: 0 0.5rem;
+        border-radius: 0.75rem;
+        font-size: 1rem;
+        font-weight: normal;
+        color: white;
+    }
+
+    .bevy-tag {
+        background-color: var(--tag-color);
+    }
+
+    .component-tag,
+    .immutable-component-tag {
+        --tag-color: oklch(50% 27% 80);
+    }
+
+    .resource-tag {
+        --tag-color: oklch(50% 27% 110);
+    }
+
+    .asset-tag {
+        --tag-color: oklch(50% 27% 0);
+    }
+
+    .event-tag {
+        --tag-color: oklch(50% 27% 310);
+    }
+
+    .message-tag {
+        --tag-color: oklch(50% 27% 190);
+    }
+
+    .plugin-tag,
+    .plugingroup-tag {
+        --tag-color: oklch(50% 27% 50);
+    }
+
+    .schedulelabel-tag,
+    .systemset-tag {
+        --tag-color: oklch(50% 27% 270);
+    }
+
+    .systemparam-tag {
+        --tag-color: oklch(50% 27% 240);
+    }
+
+    .relationship-tag,
+    .relationshiptarget-tag {
+        --tag-color: oklch(50% 27% 150);
+    }
+</style>
+</div></body></html>

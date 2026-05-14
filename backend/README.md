@@ -34,6 +34,30 @@ Open the Vite URL. The city should render normally and show a `RUST LIVE` badge.
 
 Current `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
 
+## Agent Mobility Foundation
+
+The first mobility slice follows the local literature notes in
+`docs/literature/agent-simulation/README.md`.
+
+Architecture rules:
+
+- Agents are people with plans and mobility state.
+- Vehicles are separate traffic/transit entities with route, progress, capacity,
+  dwell time, and occupants.
+- Riding is represented by `AgentMobilityState::InVehicle`; the passenger
+  position is derived from the vehicle position.
+- Traffic behavior stays behind the vehicle layer. The initial slice uses
+  deterministic route movement and stop dwell time only.
+
+Targeted commands:
+
+```bash
+cargo test --manifest-path backend/Cargo.toml -p abutown-protocol mobility_
+cargo test --manifest-path backend/Cargo.toml -p sim-core mobility
+cargo test --manifest-path backend/Cargo.toml -p sim-server mobility_snapshot_is_available
+cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobility_deltas_after_hello
+```
+
 Design rules:
 
 - Rust owns hot simulation state.

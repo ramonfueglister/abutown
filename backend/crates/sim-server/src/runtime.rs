@@ -91,7 +91,11 @@ impl SimulationRuntime {
     }
 
     pub fn mobility_snapshot(&self) -> MobilitySnapshotDto {
-        build_mobility_snapshot_dto(&self.world_id, self.mobility.tick(), self.mobility.snapshot())
+        build_mobility_snapshot_dto(
+            &self.world_id,
+            self.mobility.tick(),
+            self.mobility.snapshot(),
+        )
     }
 
     pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
