@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use abutown_protocol::{ChunkSnapshotDto, WorldId};
 use sim_core::{
-    chunk::Chunk,
-    ids::ChunkCoord,
-    persistence::build_chunk_snapshot,
-    scheduler::ChunkActivity,
+    chunk::Chunk, ids::ChunkCoord, persistence::build_chunk_snapshot, scheduler::ChunkActivity,
 };
 
 #[derive(Debug)]
@@ -62,7 +59,9 @@ impl ChunkRegistry {
     }
 
     pub(crate) fn tile_count(&self, coord: ChunkCoord) -> Option<u16> {
-        self.chunks.get(&coord).map(|loaded| loaded.chunk.tile_count())
+        self.chunks
+            .get(&coord)
+            .map(|loaded| loaded.chunk.tile_count())
     }
 }
 
@@ -112,14 +111,22 @@ mod tests {
 
         assert_eq!(snapshot.coord.x, 4);
         assert_eq!(snapshot.coord.y, 4);
-        assert_eq!(snapshot.chunk_state, abutown_protocol::ChunkStateDto::Active);
+        assert_eq!(
+            snapshot.chunk_state,
+            abutown_protocol::ChunkStateDto::Active
+        );
         assert_eq!(snapshot.tile_count, 1024);
         assert_eq!(snapshot.dirty_tiles.len(), 1);
         assert_eq!(snapshot.dirty_tiles[0].local_index, 17);
-        assert_eq!(snapshot.dirty_tiles[0].kind, abutown_protocol::TileKindDto::Road);
-        assert!(registry
-            .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
-            .is_none());
+        assert_eq!(
+            snapshot.dirty_tiles[0].kind,
+            abutown_protocol::TileKindDto::Road
+        );
+        assert!(
+            registry
+                .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
+                .is_none()
+        );
     }
 
     #[test]
