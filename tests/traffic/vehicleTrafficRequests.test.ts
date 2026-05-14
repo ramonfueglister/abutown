@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildTrafficRequestsForVehicles } from '../../src/traffic/vehicleTrafficRequests';
+import {
+  buildTrafficRequestsForVehicles,
+  buildTrafficRequestsForVehiclesWithDiagnostics,
+} from '../../src/traffic/vehicleTrafficRequests';
 
 describe('vehicle traffic requests', () => {
   it('creates a reservation request for the next visible intersection ahead of a vehicle', () => {
@@ -140,6 +143,45 @@ describe('vehicle traffic requests', () => {
   });
 
   it('does not request intersections when route steps are not adjacent cardinal tiles', () => {
+    const requests = buildTrafficRequestsForVehicles({
+      tick: 30,
+      intersections: new Map([
+        ['2:0', { intersectionId: 'intersection:2:0', coord: { x: 2, y: 0 }, connectedDirections: ['west', 'south', 'east'] }],
+      ]),
+      vehicles: [
+        {
+          vehicleId: 'vehicle:5',
+          path: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }],
+          offset: 0.25,
+          speed: 1,
+        },
+      ],
+    });
+
+    expect(requests).toEqual([]);
+  });
+
+  it('reports unclassified requests when route approach or exit is not cardinal', () => {
+    const result = buildTrafficRequestsForVehiclesWithDiagnostics({
+      tick: 30,
+      intersections: new Map([
+        ['2:0', { intersectionId: 'intersection:2:0', coord: { x: 2, y: 0 }, connectedDirections: ['west', 'south', 'east'] }],
+      ]),
+      vehicles: [
+        {
+          vehicleId: 'vehicle:5',
+          path: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }],
+          offset: 0.25,
+          speed: 1,
+        },
+      ],
+    });
+
+    expect(result.requests).toEqual([]);
+    expect(result.unclassifiedTrafficRequests).toBe(1);
+  });
+
+  it('keeps the compatibility request builder returning only requests', () => {
     const requests = buildTrafficRequestsForVehicles({
       tick: 30,
       intersections: new Map([

@@ -43,7 +43,7 @@ import {
   type VehicleId,
   trafficKey,
 } from './traffic/trafficTypes';
-import { buildTrafficRequestsForVehicles } from './traffic/vehicleTrafficRequests';
+import { buildTrafficRequestsForVehiclesWithDiagnostics } from './traffic/vehicleTrafficRequests';
 
 type Coord = { x: number; y: number };
 type Terrain = 'grass' | 'water' | 'riverbank' | 'park';
@@ -320,7 +320,7 @@ function frame(now: number): void {
 function advanceCars(dt: number): void {
   trafficTick += 1;
   const leaderOffsets = carLeaderOffsets(cars);
-  const trafficRequests = buildTrafficRequestsForVehicles({
+  const trafficRequestResult = buildTrafficRequestsForVehiclesWithDiagnostics({
     tick: trafficTick,
     intersections: trafficIntersectionLookup,
     vehicles: cars.map((car) => ({
@@ -333,7 +333,8 @@ function advanceCars(dt: number): void {
   const trafficResult = stepLocalTrafficAuthority({
     snapshot: trafficRuleSnapshot,
     tick: trafficTick,
-    requests: trafficRequests,
+    requests: trafficRequestResult.requests,
+    unclassifiedTrafficRequests: trafficRequestResult.unclassifiedTrafficRequests,
   });
   trafficRuleSnapshot = trafficResult.snapshot;
 

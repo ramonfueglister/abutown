@@ -22,12 +22,22 @@ export type BuildTrafficRequestsInput = {
   ticksPerTile?: number;
 };
 
+export type BuildTrafficRequestsResult = {
+  requests: TrafficVehicleRequest[];
+  unclassifiedTrafficRequests: number;
+};
+
 export function buildTrafficRequestsForVehicles(input: BuildTrafficRequestsInput): TrafficVehicleRequest[] {
+  return buildTrafficRequestsForVehiclesWithDiagnostics(input).requests;
+}
+
+export function buildTrafficRequestsForVehiclesWithDiagnostics(input: BuildTrafficRequestsInput): BuildTrafficRequestsResult {
   const lookaheadTiles = input.lookaheadTiles ?? 2.25;
   const stopDistanceTiles = input.stopDistanceTiles ?? 0.42;
   const ticksPerTile = input.ticksPerTile ?? 8;
+  let unclassifiedTrafficRequests = 0;
 
-  return input.vehicles.flatMap((vehicle) => {
+  const requests = input.vehicles.flatMap((vehicle) => {
     if (vehicle.path.length < 3) return [];
     const routeOffset = positiveModuloFloat(vehicle.offset, vehicle.path.length);
     const currentOffset = normalizeOffset(routeOffset, vehicle.path.length);
@@ -47,7 +57,10 @@ export function buildTrafficRequestsForVehicles(input: BuildTrafficRequestsInput
       const next = vehicle.path[(pathIndex + 1) % vehicle.path.length];
       const approachEdge = directionForRoadStep(previous, coord);
       const exitEdge = directionForRoadStep(next, coord);
-      if (!approachEdge || !exitEdge) return [];
+      if (!approachEdge || !exitEdge) {
+        unclassifiedTrafficRequests += 1;
+        return [];
+      }
 
       const enterTick = input.tick + Math.max(
         1,
@@ -71,6 +84,8 @@ export function buildTrafficRequestsForVehicles(input: BuildTrafficRequestsInput
 
     return [];
   });
+
+  return { requests, unclassifiedTrafficRequests };
 }
 
 function stableVehiclePriority(vehicleId: VehicleId): number {

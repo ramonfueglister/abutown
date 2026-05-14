@@ -152,7 +152,7 @@ describe('local traffic authority', () => {
     expect(second.diagnostics.expiredReservations).toBe(1);
   });
 
-  it('reuses an existing reservation for the same vehicle', () => {
+  it('updates an existing same-vehicle reservation after revalidating conflicts', () => {
     const reservation: TrafficReservation = {
       reservationId: trafficReservationId('intersection:4:4', 'vehicle:1', 20),
       intersectionId: 'intersection:4:4',
@@ -168,15 +168,83 @@ describe('local traffic authority', () => {
     const result = stepLocalTrafficAuthority({
       snapshot: snapshotWithReservations([reservation]),
       tick: 12,
-      requests: [request({ vehicleId: 'vehicle:1', priority: 99 })],
+      requests: [request({
+        vehicleId: 'vehicle:1',
+        enterTick: 24,
+        exitTick: 30,
+        priority: 99,
+      })],
     });
 
-    expect(result.snapshot.reservations).toEqual([reservation]);
+    expect(result.snapshot.reservations).toEqual([
+      expect.objectContaining({
+        reservationId: trafficReservationId('intersection:4:4', 'vehicle:1', 24),
+        vehicleId: 'vehicle:1',
+        enterTick: 24,
+        exitTick: 30,
+        priority: 99,
+      }),
+    ]);
     expect(result.decisions.get('vehicle:1')).toEqual(expect.objectContaining({
       kind: 'go',
-      reservationId: reservation.reservationId,
+      reservationId: trafficReservationId('intersection:4:4', 'vehicle:1', 24),
     }));
     expect(result.diagnostics.intersectionConflictsPrevented).toBe(0);
+  });
+
+  it('does not reuse stale same-vehicle reservations when the current request conflicts', () => {
+    const vehicleAReservation: TrafficReservation = {
+      reservationId: trafficReservationId('intersection:4:4', 'vehicle:1', 20),
+      intersectionId: 'intersection:4:4',
+      vehicleId: 'vehicle:1',
+      enterTick: 20,
+      exitTick: 26,
+      approachEdge: 'west',
+      exitEdge: 'east',
+      conflictMask: 1,
+      priority: 1,
+    };
+    const vehicleBReservation: TrafficReservation = {
+      reservationId: trafficReservationId('intersection:4:4', 'vehicle:2', 26),
+      intersectionId: 'intersection:4:4',
+      vehicleId: 'vehicle:2',
+      enterTick: 26,
+      exitTick: 32,
+      approachEdge: 'north',
+      exitEdge: 'south',
+      conflictMask: 1,
+      priority: 2,
+    };
+
+    const result = stepLocalTrafficAuthority({
+      snapshot: snapshotWithReservations([vehicleAReservation, vehicleBReservation]),
+      tick: 12,
+      requests: [
+        request({
+          vehicleId: 'vehicle:1',
+          enterTick: 24,
+          exitTick: 30,
+          currentOffset: 2.5,
+          stopOffset: 2.58,
+        }),
+      ],
+    });
+
+    expect(result.decisions.get('vehicle:1')).toEqual(expect.objectContaining({ kind: 'stop' }));
+    expect(result.snapshot.reservations).toEqual([vehicleAReservation, vehicleBReservation]);
+    expect(result.diagnostics.intersectionConflictsPrevented).toBe(1);
+  });
+
+  it('seeds diagnostics with unclassified traffic requests from request building', () => {
+    const result = stepLocalTrafficAuthority({
+      snapshot: createInitialTrafficRuleSnapshot(),
+      tick: 10,
+      requests: [],
+      unclassifiedTrafficRequests: 3,
+    });
+
+    expect(result.diagnostics.unclassifiedTrafficRequests).toBe(3);
+    expect(result.snapshot.diagnostics.unclassifiedTrafficRequests).toBe(3);
   });
 
   it('does not reuse a same-vehicle reservation for a different intersection', () => {

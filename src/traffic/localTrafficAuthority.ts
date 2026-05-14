@@ -13,6 +13,7 @@ export type StepLocalTrafficAuthorityInput = {
   snapshot: TrafficRuleSnapshot;
   tick: number;
   requests: readonly TrafficVehicleRequest[];
+  unclassifiedTrafficRequests?: number;
 };
 
 export type StepLocalTrafficAuthorityResult = {
@@ -27,7 +28,10 @@ const MAX_CONSERVATIVE_STOP_ADVANCE_TILES = 1;
 const YIELD_SPEED_FACTOR = 0.28;
 
 export function stepLocalTrafficAuthority(input: StepLocalTrafficAuthorityInput): StepLocalTrafficAuthorityResult {
-  const diagnostics: TrafficRuleDiagnostics = { ...EMPTY_TRAFFIC_DIAGNOSTICS };
+  const diagnostics: TrafficRuleDiagnostics = {
+    ...EMPTY_TRAFFIC_DIAGNOSTICS,
+    unclassifiedTrafficRequests: input.unclassifiedTrafficRequests ?? 0,
+  };
   const activeReservations = input.snapshot.reservations.flatMap((reservation) => {
     if (reservation.exitTick <= input.tick) {
       diagnostics.expiredReservations += 1;
@@ -41,13 +45,12 @@ export function stepLocalTrafficAuthority(input: StepLocalTrafficAuthorityInput)
   for (const request of sortedTrafficRequests(input.requests)) {
     diagnostics.trafficRuleDecisionCount += 1;
 
-    const existing = nextReservations.find((reservation) => reservationMatchesRequest(reservation, request));
-    if (existing) {
-      decisions.set(request.vehicleId, goDecision(request, existing.reservationId));
-      continue;
-    }
+    const existingIndex = nextReservations.findIndex((reservation) => reservationMatchesRequest(reservation, request));
+    const comparableReservations = existingIndex === -1
+      ? nextReservations
+      : nextReservations.filter((_, index) => index !== existingIndex);
 
-    const conflict = nextReservations.find((reservation) => reservationsConflict(reservation, request));
+    const conflict = comparableReservations.find((reservation) => reservationsConflict(reservation, request));
     if (conflict) {
       diagnostics.intersectionConflictsPrevented += 1;
       diagnostics.blockedVehicles += 1;
@@ -77,7 +80,11 @@ export function stepLocalTrafficAuthority(input: StepLocalTrafficAuthorityInput)
     }
 
     const reservation = reservationForRequest(request);
-    nextReservations.push(reservation);
+    if (existingIndex === -1) {
+      nextReservations.push(reservation);
+    } else {
+      nextReservations[existingIndex] = reservation;
+    }
     decisions.set(request.vehicleId, goDecision(request, reservation.reservationId));
   }
 
@@ -134,8 +141,7 @@ function goDecision(request: TrafficVehicleRequest, reservationId: TrafficReserv
 function reservationMatchesRequest(reservation: TrafficReservation, request: TrafficVehicleRequest): boolean {
   return (
     reservation.vehicleId === request.vehicleId &&
-    reservation.intersectionId === request.intersectionId &&
-    windowsOverlap(reservation.enterTick, reservation.exitTick, request.enterTick, request.exitTick)
+    reservation.intersectionId === request.intersectionId
   );
 }
 
