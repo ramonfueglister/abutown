@@ -92,24 +92,17 @@ function splitRoadBackedPaths(paths: Coord[][], roadKinds: ReadonlyMap<string, Z
 function buildArterialPaths(world: ZurichWorld): Coord[][] {
   return [
     route([{ x: 0, y: 128 }, { x: 73, y: 124 }, { x: 112, y: 112 }, { x: 139, y: 112 }, { x: 206, y: 116 }, { x: world.width - 1, y: 121 }]),
-    route([{ x: 104, y: 0 }, { x: 111, y: 78 }, { x: 118, y: 145 }, { x: 101, y: 196 }, { x: 88, y: world.height - 1 }]),
+    route([{ x: 94, y: 0 }, { x: 101, y: 78 }, { x: 105, y: 145 }, { x: 101, y: 196 }, { x: 88, y: world.height - 1 }]),
     route([{ x: 43, y: 184 }, { x: 100, y: 196 }, { x: 151, y: 180 }, { x: 175, y: 184 }, { x: world.width - 1, y: 198 }]),
-    route([{ x: 20, y: 74 }, { x: 74, y: 125 }, { x: 118, y: 145 }, { x: 151, y: 143 }, { x: 220, y: 160 }]),
-    route([{ x: 58, y: 92 }, { x: 105, y: 92 }, { x: 152, y: 92 }, { x: 201, y: 98 }]),
   ];
 }
 
 function buildRailPaths(world: ZurichWorld): Coord[][] {
   return [
-    route([{ x: 0, y: 154 }, { x: 118, y: 154 }, { x: 175, y: 184 }, { x: world.width - 1, y: 191 }]),
-    route([{ x: 118, y: 154 }, { x: 126, y: world.height - 1 }]),
-    ...parallelStationTracks(86, 154, 66, [-8, -5, -2, 2, 5, 8]),
-    ...parallelStationTracks(136, 178, 58, [-6, -3, 0, 3, 6]),
+    route([{ x: 0, y: 170 }, { x: 80, y: 170 }, { x: 104, y: 154 }, { x: 118, y: 154 }]),
+    route([{ x: 70, y: 150 }, { x: 118, y: 150 }]),
+    route([{ x: 104, y: 154 }, { x: 82, y: 188 }, { x: 48, y: 220 }]),
   ];
-}
-
-function parallelStationTracks(startX: number, y: number, length: number, offsets: number[]): Coord[][] {
-  return offsets.map((offset) => route([{ x: startX, y: y + offset }, { x: startX + length, y: y + offset }]));
 }
 
 function addDistrictStreetPattern(world: ZurichWorld, addRoad: (coord: Coord) => void, center: Coord, radius: number, density: number): void {

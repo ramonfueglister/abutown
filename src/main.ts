@@ -7,7 +7,7 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
-import { buildOpenTtdImportedPlacement, buildOpenTtdImportedTransport, buildOpenTtdImportedWorld } from './city/openTtdImportedWorld';
+import { buildPedestrianCorridors } from './city/pedestrianCorridors';
 import { buildZurichPlacement } from './city/zurichPlacement';
 import { buildZurichTransport } from './city/zurichTransport';
 import { validateZurichCity } from './city/zurichValidation';
@@ -29,6 +29,15 @@ import {
   type VehicleSheetName,
   type VehicleSprite,
 } from './render/vehicleSprites';
+import {
+  candidateSimutransPedestrianSprites,
+  SIMUTRANS_PEDESTRIAN_ASSET_PATHS,
+  simutransPedestrianDisplayScale,
+  simutransPedestrianFrameForGridDelta,
+  simutransPedestrianFrameRect,
+  type SimutransDirection,
+  type SimutransPedestrianSprite,
+} from './render/simutransPedestrianSprites';
 
 type Coord = { x: number; y: number };
 type Terrain = 'grass' | 'water' | 'riverbank' | 'park';
@@ -63,6 +72,14 @@ type Car = {
   sprite: VehicleSprite;
 };
 
+type Pedestrian = {
+  path: Coord[];
+  offset: number;
+  speed: number;
+  laneOffset: number;
+  sprite: SimutransPedestrianSprite;
+};
+
 type GridRect = {
   minX: number;
   maxX: number;
@@ -79,7 +96,8 @@ type StaticDrawable =
   | { type: 'building'; coord: Coord; building: Building };
 
 type CarDrawable = { type: 'car'; coord: Coord; car: Car };
-type Drawable = StaticDrawable | CarDrawable;
+type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: Pedestrian };
+type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 
 type BuildingSheetName =
   | 'houses'
@@ -126,9 +144,9 @@ const SOUTH = 4;
 const WEST = 8;
 const ROAD_SPRITE_STEP = 65;
 
-const zurichWorld = buildOpenTtdImportedWorld();
-const zurichTransport = buildOpenTtdImportedTransport(zurichWorld);
-const zurichPlacement = buildOpenTtdImportedPlacement();
+const zurichWorld = buildZurichWorld({ seed: 1848 });
+const zurichTransport = buildZurichTransport(zurichWorld);
+const zurichPlacement = buildZurichPlacement(zurichWorld, zurichTransport);
 const zurichValidation = validateZurichCity(zurichWorld, zurichTransport, zurichPlacement);
 
 const WIDTH = zurichWorld.width;
@@ -213,6 +231,7 @@ const assetPaths = {
 };
 
 const images = new Map<string, HTMLCanvasElement>();
+const simutransSourceBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
 const terrain = new Map([...zurichWorld.terrain].map(([tileKey, tile]) => [tileKey, toRuntimeTerrain(tile.kind)]));
 const roads = new Map<string, RoadTile>(
   [...zurichTransport.roads].map(([tileKey, road]) => [tileKey, { coord: road.coord, kind: road.kind, mask: road.mask }])
@@ -228,9 +247,16 @@ const railStations = buildRailStations();
 const buildings = zurichPlacement.buildings.map(toRuntimeBuilding);
 const trees = zurichPlacement.trees;
 const details = zurichPlacement.details;
+const pedestrianDemandTiles = new Set<string>([
+  ...buildings.map((building) => key(building.coord)),
+  ...details.map((detail) => key(detail.coord)),
+]);
 const staticDrawables = buildStaticDrawables();
 let vehicleSprites: VehicleSprite[] = [];
+let pedestrianSprites: SimutransPedestrianSprite[] = [];
 let cars: Car[] = [];
+let pedestrians: Pedestrian[] = [];
+let pedestrianCorridorCount = 0;
 let previousTime = performance.now();
 
 void boot();
@@ -238,11 +264,14 @@ void boot();
 async function boot(): Promise<void> {
   const imageEntries = [
     ...Object.values(assetPaths).map((path) => [path, path] as const),
+    ...Object.values(SIMUTRANS_PEDESTRIAN_ASSET_PATHS).map((path) => [path, path] as const),
     ...buildingSheets.map((sheet) => [`/opengfx2/${sheet.file}`, `/opengfx2/${sheet.file}`] as const),
   ];
   await Promise.all(imageEntries.map(async ([key, path]) => images.set(key, await loadCleanImage(path))));
   vehicleSprites = usableVehicleSprites();
+  pedestrianSprites = candidateSimutransPedestrianSprites();
   cars = buildCars(vehicleSprites);
+  pedestrians = buildPedestrians(pedestrianSprites);
   resize();
   window.addEventListener('resize', resize);
   attachCamera();
@@ -306,6 +335,7 @@ function frame(now: number): void {
   const dt = Math.min(0.05, (now - previousTime) / 1000);
   previousTime = now;
   for (const car of cars) car.offset = (car.offset + car.speed * dt) % car.path.length;
+  for (const pedestrian of pedestrians) pedestrian.offset = (pedestrian.offset + pedestrian.speed * dt) % pedestrian.path.length;
   if (!camera.dragging) constrainCamera(false);
   dampCamera(camera, dt, 18);
   render();
@@ -342,8 +372,12 @@ function drawScene(offset: Coord): void {
     .map((car) => ({ type: 'car' as const, coord: carPosition(car), car }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort(compareDrawables);
+  const pedestrianDrawables = pedestrians
+    .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrianPosition(pedestrian), pedestrian }))
+    .filter((item) => isCoordVisible(item.coord, visibleGrid))
+    .sort(compareDrawables);
 
-  for (const item of mergeSortedDrawables(visibleStaticDrawables, carDrawables)) {
+  for (const item of mergeSortedDrawables(visibleStaticDrawables, [...carDrawables, ...pedestrianDrawables].sort(compareDrawables))) {
     if (item.type === 'rail') drawRail(item.rail);
     if (item.type === 'road') drawRoad(item.road);
     if (item.type === 'railStation') drawRailStation(item.station);
@@ -351,6 +385,7 @@ function drawScene(offset: Coord): void {
     if (item.type === 'tree') drawTree(item.coord);
     if (item.type === 'building') drawBuilding(item.building);
     if (item.type === 'car') drawCar(item.car);
+    if (item.type === 'pedestrian') drawPedestrian(item.pedestrian);
   }
 
   drawPerimeterMist();
@@ -553,6 +588,31 @@ function drawCar(car: Car): void {
   ctx.save();
   ctx.translate(point.x + lane.x, point.y + lane.y + 7);
   ctx.drawImage(image, rect.x, rect.y, sourceWidth, sourceHeight, -width / 2, -height, width, height);
+  ctx.restore();
+}
+
+function drawPedestrian(pedestrian: Pedestrian): void {
+  const image = images.get(SIMUTRANS_PEDESTRIAN_ASSET_PATHS[pedestrian.sprite.sheet]);
+  if (!image) return;
+  const base = Math.floor(pedestrian.offset);
+  const current = pedestrian.path[base];
+  const next = pedestrian.path[(base + 1) % pedestrian.path.length];
+  const pos = pedestrianPosition(pedestrian);
+  const point = iso(pos);
+  const currentPoint = iso(current);
+  const nextPoint = iso(next);
+  const lane = screenRightLaneOffset(currentPoint, nextPoint, 4 + pedestrian.laneOffset);
+  const direction = simutransPedestrianFrameForGridDelta({ x: next.x - current.x, y: next.y - current.y });
+  const rect = simutransPedestrianFrameRect(pedestrian.sprite, direction);
+  const visible = visibleSourceBounds(image, pedestrian.sprite, direction, rect);
+  const scale = simutransPedestrianDisplayScale(pedestrian.sprite.scale, camera.scale);
+  const width = visible.width * scale;
+  const height = visible.height * scale;
+  ctx.save();
+  ctx.translate(point.x + lane.x, point.y + lane.y + 5);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+  ctx.fillRect(-Math.max(2, width * 0.18), -Math.max(1, height * 0.08), Math.max(4, width * 0.36), Math.max(2, height * 0.1));
+  ctx.drawImage(image, visible.x, visible.y, visible.width, visible.height, -width / 2, -height, width, height);
   ctx.restore();
 }
 
@@ -946,6 +1006,58 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
   });
 }
 
+function buildPedestrians(sprites: SimutransPedestrianSprite[]): Pedestrian[] {
+  if (sprites.length === 0) return [];
+  const roadCorridors = buildPedestrianCorridors(roads, { minLength: 5, maxCorridors: 260 });
+  const urbanRoadCorridors = roadCorridors.flatMap(urbanPedestrianSegments);
+  const urbanArterials = zurichTransport.arterialPaths.flatMap(urbanPedestrianSegments);
+  const baseCorridors = [
+    ...(urbanRoadCorridors.length > 0 ? urbanRoadCorridors : roadCorridors.slice(0, 72)),
+    ...urbanArterials,
+  ];
+  if (baseCorridors.length === 0) return [];
+  const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]);
+  pedestrianCorridorCount = corridors.length;
+  const totalPathTiles = baseCorridors.reduce((sum, path) => sum + path.length, 0);
+  const pedestrianCount = Math.min(420, Math.max(220, Math.floor(totalPathTiles / 3)));
+  return Array.from({ length: pedestrianCount }, (_, index) => {
+    const path = corridors[index % corridors.length];
+    const sprite = sprites[index % sprites.length];
+    return {
+      path,
+      offset: (index * 11 + Math.floor(index / corridors.length) * 5) % path.length,
+      speed: 0.34 + (index % 9) * 0.035,
+      laneOffset: ((index % 5) - 2) * 0.45,
+      sprite,
+    };
+  });
+}
+
+function urbanPedestrianSegments(path: Coord[]): Coord[][] {
+  const segments: Coord[][] = [];
+  let current: Coord[] = [];
+
+  for (const coord of path) {
+    if (hasPedestrianDemandNearby(coord)) {
+      current.push(coord);
+      continue;
+    }
+    if (current.length >= 3) segments.push(current);
+    current = [];
+  }
+  if (current.length >= 3) segments.push(current);
+  return segments;
+}
+
+function hasPedestrianDemandNearby(coord: Coord): boolean {
+  for (let y = coord.y - 4; y <= coord.y + 4; y += 1) {
+    for (let x = coord.x - 4; x <= coord.x + 4; x += 1) {
+      if (pedestrianDemandTiles.has(key({ x, y }))) return true;
+    }
+  }
+  return false;
+}
+
 function usableVehicleSprites(): VehicleSprite[] {
   return candidateVehicleSprites().filter((sprite) => spriteHasVisiblePixels(sprite));
 }
@@ -981,6 +1093,16 @@ function carPosition(car: Car): Coord {
   return {
     x: lerp(car.path[base].x, car.path[next].x, t),
     y: lerp(car.path[base].y, car.path[next].y, t),
+  };
+}
+
+function pedestrianPosition(pedestrian: Pedestrian): Coord {
+  const base = Math.floor(pedestrian.offset);
+  const next = (base + 1) % pedestrian.path.length;
+  const t = pedestrian.offset - base;
+  return {
+    x: lerp(pedestrian.path[base].x, pedestrian.path[next].x, t),
+    y: lerp(pedestrian.path[base].y, pedestrian.path[next].y, t),
   };
 }
 
@@ -1197,35 +1319,36 @@ function compareDrawables(a: Drawable, b: Drawable): number {
     a.coord.x - b.coord.x;
 }
 
-function mergeSortedDrawables(staticItems: StaticDrawable[], carItems: CarDrawable[]): Drawable[] {
+function mergeSortedDrawables(staticItems: StaticDrawable[], dynamicItems: Array<CarDrawable | PedestrianDrawable>): Drawable[] {
   const result: Drawable[] = [];
   let staticIndex = 0;
-  let carIndex = 0;
-  while (staticIndex < staticItems.length || carIndex < carItems.length) {
+  let dynamicIndex = 0;
+  while (staticIndex < staticItems.length || dynamicIndex < dynamicItems.length) {
     const staticItem = staticItems[staticIndex];
-    const carItem = carItems[carIndex];
+    const dynamicItem = dynamicItems[dynamicIndex];
     if (!staticItem) {
-      result.push(carItem);
-      carIndex += 1;
-    } else if (!carItem || compareDrawables(staticItem, carItem) <= 0) {
+      result.push(dynamicItem);
+      dynamicIndex += 1;
+    } else if (!dynamicItem || compareDrawables(staticItem, dynamicItem) <= 0) {
       result.push(staticItem);
       staticIndex += 1;
     } else {
-      result.push(carItem);
-      carIndex += 1;
+      result.push(dynamicItem);
+      dynamicIndex += 1;
     }
   }
   return result;
 }
 
-function drawPriority(type: 'rail' | 'road' | 'railStation' | 'detail' | 'tree' | 'building' | 'car'): number {
+function drawPriority(type: 'rail' | 'road' | 'railStation' | 'detail' | 'tree' | 'building' | 'car' | 'pedestrian'): number {
   if (type === 'rail') return 0;
   if (type === 'road') return 1;
   if (type === 'railStation') return 2;
-  if (type === 'detail') return 3;
-  if (type === 'tree') return 4;
-  if (type === 'building') return 5;
-  return 6;
+  if (type === 'car') return 3;
+  if (type === 'pedestrian') return 4;
+  if (type === 'detail') return 5;
+  if (type === 'tree') return 6;
+  return 7;
 }
 
 function cardinal(coord: Coord): Coord[] {
@@ -1354,6 +1477,47 @@ function spriteSheetCellSize(totalPixels: number, frameCount: number): number {
   return Math.floor(totalPixels / frameCount);
 }
 
+function visibleSourceBounds(
+  image: HTMLCanvasElement,
+  sprite: SimutransPedestrianSprite,
+  direction: SimutransDirection,
+  rect: { x: number; y: number; width: number; height: number },
+): { x: number; y: number; width: number; height: number } {
+  const cacheKey = `${sprite.sheet}:${sprite.row}:${direction}`;
+  const cached = simutransSourceBounds.get(cacheKey);
+  if (cached) return cached;
+
+  const context = image.getContext('2d', { willReadFrequently: true });
+  if (!context) return rect;
+  const pixels = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
+  let minX = rect.width;
+  let minY = rect.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < rect.height; y += 1) {
+    for (let x = 0; x < rect.width; x += 1) {
+      const alpha = pixels[(y * rect.width + x) * 4 + 3];
+      if (alpha === 0) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  const bounds = maxX < minX
+    ? rect
+    : {
+        x: rect.x + minX,
+        y: rect.y + minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1,
+      };
+  simutransSourceBounds.set(cacheKey, bounds);
+  return bounds;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -1403,6 +1567,10 @@ window.render_game_to_text = () => {
       buildings: buildings.length,
       trees: trees.length,
       cars: cars.length,
+      pedestrians: pedestrians.length,
+      pedestrianCorridors: pedestrianCorridorCount,
+      pedestrianSprites: pedestrianSprites.length,
+      pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
       vehicleSprites: vehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
       railStations: railStations.length,
@@ -1449,5 +1617,6 @@ function detailCountsByCategory(): Record<string, number> {
 
 window.advanceTime = (ms: number) => {
   for (const car of cars) car.offset = (car.offset + car.speed * (ms / 1000)) % car.path.length;
+  for (const pedestrian of pedestrians) pedestrian.offset = (pedestrian.offset + pedestrian.speed * (ms / 1000)) % pedestrian.path.length;
   render();
 };

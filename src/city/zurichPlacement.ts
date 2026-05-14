@@ -108,10 +108,16 @@ function addStationSetpiece(world: ZurichWorld, details: ZurichDetail[], blocked
 }
 
 function addQuaySetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
-  for (let y = 112; y <= 168; y += 4) {
-    const centerX = riverCenterAt(world, y);
-    pushDetail(world, details, blocked, { x: centerX - 2, y }, 'dock', y % 12 === 0 ? 'ship' : 'quay', true);
-    pushDetail(world, details, blocked, { x: centerX + 2, y: y + 1 }, 'dock', y % 16 === 0 ? 'ship' : 'dock', true);
+  for (const mooring of [
+    { y: 116, side: -1, assets: ['quay', 'dock'] },
+    { y: 144, side: 1, assets: ['ship', 'quay'] },
+    { y: 166, side: -1, assets: ['dock', 'ship'] },
+  ] as const) {
+    const centerX = riverCenterAt(world, mooring.y);
+    const bankX = centerX + mooring.side * 3;
+    mooring.assets.forEach((asset, index) => {
+      pushDetail(world, details, blocked, { x: bankX, y: mooring.y + index }, 'dock', asset, true);
+    });
   }
 }
 
@@ -199,9 +205,9 @@ function isForestTreeTile(coord: Coord): boolean {
   const local = hash(`forest-local:${tileKey}`) % 100;
   const pocketA = hash(`forest-pocket-a:${Math.floor(coord.x / 8)}:${Math.floor(coord.y / 8)}`) % 100;
   const pocketB = hash(`forest-pocket-b:${Math.floor((coord.x + 5) / 13)}:${Math.floor((coord.y + 3) / 13)}`) % 100;
-  if (pocketA < 16) return local < 20;
-  if (pocketB > 70) return local < 92;
-  return local < 62;
+  if (pocketA < 12) return local < 34;
+  if (pocketB > 78) return local < 55;
+  return local < 18;
 }
 
 function distanceToWater(world: ZurichWorld, coord: Coord, maxDistance: number): number {

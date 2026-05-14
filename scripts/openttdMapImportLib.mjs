@@ -59,6 +59,7 @@ export function normalizeOpenTtdMap(input) {
   const roadKeys = new Set();
   const railKeys = new Set();
   const occupied = new Set();
+  let sourceTreeTiles = 0;
 
   for (let y = 0; y < targetSize; y += 1) {
     for (let x = 0; x < targetSize; x += 1) {
@@ -90,7 +91,9 @@ export function normalizeOpenTtdMap(input) {
   for (let y = 0; y < targetSize; y += 1) {
     for (let x = 0; x < targetSize; x += 1) {
       const counts = blockCounts[y * targetSize + x];
-      if ((counts.get(TILE_TREES) ?? 0) > 0) {
+      const treeCount = counts.get(TILE_TREES) ?? 0;
+      sourceTreeTiles += treeCount;
+      if (treeCount > 0) {
         const coord = findFreePlacement({ x, y }, targetSize, occupied, terrain, ['forest', 'grass'], 1);
         if (coord) {
           trees.push([coord.x, coord.y]);
@@ -98,6 +101,10 @@ export function normalizeOpenTtdMap(input) {
         }
       }
     }
+  }
+
+  if (sourceTreeTiles === 0) {
+    fillFallbackForests(targetSize, occupied, terrain, trees);
   }
 
   return {
@@ -120,6 +127,25 @@ export function normalizeOpenTtdMap(input) {
   };
 }
 
+function fillFallbackForests(targetSize, occupied, terrain, trees) {
+  const grass = DEFAULT_TERRAIN_KINDS.indexOf('grass');
+  const riverbank = DEFAULT_TERRAIN_KINDS.indexOf('riverbank');
+  for (let y = 0; y < targetSize; y += 1) {
+    for (let x = 0; x < targetSize; x += 1) {
+      const tileKey = key(x, y);
+      if (occupied.has(tileKey)) continue;
+      const terrainKind = terrain[y * targetSize + x];
+      if (terrainKind !== grass && terrainKind !== riverbank) continue;
+      const cellX = Math.floor(x / 16);
+      const cellY = Math.floor(y / 16);
+      if (hash(`fallback-forest-cell:${cellX}:${cellY}`) % 5 !== 0) continue;
+      if (hash(`fallback-forest-tile:${x}:${y}`) % 4 !== 0) continue;
+      trees.push([x, y]);
+      occupied.add(tileKey);
+    }
+  }
+}
+
 function preserveSourceCityObjects(tileTypes, sourceWidth, sourceHeight, targetSize, occupied, detailKeys, terrain, buildings, details) {
   for (let sourceY = 0; sourceY < sourceHeight; sourceY += 1) {
     const row = sourceY * sourceWidth;
@@ -132,16 +158,24 @@ function preserveSourceCityObjects(tileTypes, sourceWidth, sourceHeight, targetS
       };
 
       if (tileType === TILE_HOUSE) {
-        const coord = findFreePlacement(target, targetSize, occupied, terrain, ['grass', 'riverbank'], 5);
+        const coord = findFreePlacement(
+          target,
+          targetSize,
+          occupied,
+          terrain,
+          ['grass'],
+          8,
+          (candidate) => hasWaterClearance(candidate, targetSize, terrain, 2)
+        );
         if (!coord) continue;
         buildings.push([coord.x, coord.y, buildingSheetIndex(coord.x, coord.y), frameFor(coord.x, coord.y)]);
         occupied.add(key(coord.x, coord.y));
         continue;
       }
 
-      const detail = detailForTileType(tileType);
+      const detail = detailForTileType(tileType, tileTypes, sourceWidth, sourceHeight, sourceX, sourceY);
       if (!detail) continue;
-      const coord = findFreePlacement(target, targetSize, detailKeys, terrain, ['grass', 'riverbank', 'forest'], 3);
+      const coord = findFreePlacement(target, targetSize, detailKeys, terrain, detail.allowedTerrainKinds, 3);
       if (!coord) continue;
       details.push([coord.x, coord.y, detail.category, detail.asset]);
       detailKeys.add(key(coord.x, coord.y));
@@ -149,11 +183,71 @@ function preserveSourceCityObjects(tileTypes, sourceWidth, sourceHeight, targetS
   }
 }
 
-function detailForTileType(tileType) {
-  if (tileType === TILE_INDUSTRY) return { category: DETAIL_CATEGORIES.indexOf('industry'), asset: DETAIL_ASSETS.indexOf('factory') };
-  if (tileType === TILE_STATION) return { category: DETAIL_CATEGORIES.indexOf('station'), asset: DETAIL_ASSETS.indexOf('station-roof') };
-  if (tileType === TILE_OBJECT) return { category: DETAIL_CATEGORIES.indexOf('decor'), asset: DETAIL_ASSETS.indexOf('decor') };
+function detailForTileType(tileType, tileTypes, sourceWidth, sourceHeight, sourceX, sourceY) {
+  if (tileType === TILE_INDUSTRY) {
+    return {
+      category: DETAIL_CATEGORIES.indexOf('industry'),
+      asset: DETAIL_ASSETS.indexOf('factory'),
+      allowedTerrainKinds: ['grass', 'riverbank'],
+    };
+  }
+  if (tileType === TILE_STATION) {
+    return {
+      category: DETAIL_CATEGORIES.indexOf('station'),
+      asset: DETAIL_ASSETS.indexOf('station-roof'),
+      allowedTerrainKinds: ['grass', 'riverbank'],
+    };
+  }
+  if (tileType === TILE_OBJECT) {
+    if (hasSourceNeighbor(tileTypes, sourceWidth, sourceHeight, sourceX, sourceY, [TILE_WATER], 2)) {
+      const waterAssets = ['ship', 'dock', 'quay'];
+      return {
+        category: DETAIL_CATEGORIES.indexOf('dock'),
+        asset: DETAIL_ASSETS.indexOf(waterAssets[hash(`${sourceX}:${sourceY}:water-object`) % waterAssets.length]),
+        allowedTerrainKinds: ['water', 'riverbank', 'grass'],
+      };
+    }
+    if (hasSourceNeighbor(tileTypes, sourceWidth, sourceHeight, sourceX, sourceY, [TILE_ROAD, TILE_TUNNEL_BRIDGE], 2)) {
+      const roadDetails = [
+        { category: 'station', asset: 'road-stop' },
+        { category: 'yard', asset: 'road-depot' },
+      ];
+      const selected = roadDetails[hash(`${sourceX}:${sourceY}:road-object`) % roadDetails.length];
+      return {
+        category: DETAIL_CATEGORIES.indexOf(selected.category),
+        asset: DETAIL_ASSETS.indexOf(selected.asset),
+        allowedTerrainKinds: ['grass', 'riverbank'],
+      };
+    }
+    return {
+      category: DETAIL_CATEGORIES.indexOf('decor'),
+      asset: DETAIL_ASSETS.indexOf('decor'),
+      allowedTerrainKinds: ['grass', 'riverbank', 'forest'],
+    };
+  }
   return undefined;
+}
+
+function hasSourceNeighbor(tileTypes, sourceWidth, sourceHeight, sourceX, sourceY, wantedTypes, radius) {
+  const wanted = new Set(wantedTypes);
+  for (let y = Math.max(0, sourceY - radius); y <= Math.min(sourceHeight - 1, sourceY + radius); y += 1) {
+    const row = y * sourceWidth;
+    for (let x = Math.max(0, sourceX - radius); x <= Math.min(sourceWidth - 1, sourceX + radius); x += 1) {
+      if (x === sourceX && y === sourceY) continue;
+      if (wanted.has(tileTypes[row + x])) return true;
+    }
+  }
+  return false;
+}
+
+function hasWaterClearance(coord, size, terrain, radius) {
+  const water = DEFAULT_TERRAIN_KINDS.indexOf('water');
+  for (let y = Math.max(0, coord.y - radius); y <= Math.min(size - 1, coord.y + radius); y += 1) {
+    for (let x = Math.max(0, coord.x - radius); x <= Math.min(size - 1, coord.x + radius); x += 1) {
+      if (terrain[y * size + x] === water) return false;
+    }
+  }
+  return true;
 }
 
 export function decodeOpenTtdSavegame(filePath) {
@@ -232,7 +326,7 @@ function blockTypeFromCounts(counts) {
   return TILE_CLEAR;
 }
 
-function findFreePlacement(origin, size, occupied, terrain, allowedTerrainKinds, radius = 1) {
+function findFreePlacement(origin, size, occupied, terrain, allowedTerrainKinds, radius = 1, isSafe = () => true) {
   const allowed = new Set(allowedTerrainKinds.map((kind) => DEFAULT_TERRAIN_KINDS.indexOf(kind)));
   for (const offset of placementOffsets(radius)) {
     const x = origin.x + offset.x;
@@ -240,6 +334,7 @@ function findFreePlacement(origin, size, occupied, terrain, allowedTerrainKinds,
     if (x < 0 || y < 0 || x >= size || y >= size) continue;
     if (occupied.has(key(x, y))) continue;
     if (!allowed.has(terrain[y * size + x])) continue;
+    if (!isSafe({ x, y })) continue;
     return { x, y };
   }
   return undefined;

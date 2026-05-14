@@ -17,7 +17,7 @@ export function cleanupSpritePixels(buffer: SpritePixelBuffer): void {
 }
 
 export function isTransparentSourcePixel(r: number, g: number, b: number): boolean {
-  return (b > 190 && r < 45 && g < 80) || (r > 248 && g > 248 && b > 248);
+  return (b > 190 && r < 45 && g < 80) || (r > 248 && g > 248 && b > 248) || (r > 220 && g > 248 && b > 248);
 }
 
 function hasShapeMetadataRow(path: string): boolean {

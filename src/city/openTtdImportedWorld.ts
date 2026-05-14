@@ -10,6 +10,11 @@ type BuildingTuple = [x: number, y: number, sheetIndex: number, frame: number];
 type DetailTuple = [x: number, y: number, categoryIndex: number, assetIndex: number];
 type CoordTuple = [x: number, y: number];
 
+const NORTH = 1;
+const EAST = 2;
+const SOUTH = 4;
+const WEST = 8;
+
 type ImportedMapData = {
   id: string;
   source: string;
@@ -134,12 +139,113 @@ function zoneForKind(kind: ZurichTerrainKind): string {
 }
 
 function buildRoadCorridors(roads: ZurichTransport['roads'], world: ZurichWorld): Coord[][] {
+  const networkCorridors = buildRoadNetworkCorridors(roads, world).slice(0, 24);
+  if (networkCorridors.length > 0) return networkCorridors;
+
   const corridors: Coord[][] = [];
   const centerY = Math.floor(world.height / 2);
   const centerX = Math.floor(world.width / 2);
   corridors.push(...longRuns(roads, world.width, world.height, 'row', centerY));
   corridors.push(...longRuns(roads, world.width, world.height, 'column', centerX));
   return corridors.slice(0, 24);
+}
+
+function buildRoadNetworkCorridors(roads: ZurichTransport['roads'], world: ZurichWorld): Coord[][] {
+  const remaining = new Set(roads.keys());
+  const components: Coord[][] = [];
+
+  for (const startKey of roads.keys()) {
+    if (!remaining.has(startKey)) continue;
+    const component: Coord[] = [];
+    const queue = [roads.get(startKey)!.coord];
+    remaining.delete(startKey);
+
+    for (let index = 0; index < queue.length; index += 1) {
+      const coord = queue[index];
+      component.push(coord);
+      for (const next of roadNeighbors(coord, roads)) {
+        const nextKey = key(next);
+        if (!remaining.has(nextKey)) continue;
+        remaining.delete(nextKey);
+        queue.push(next);
+      }
+    }
+
+    if (component.length >= 8) components.push(component);
+  }
+
+  return components
+    .sort((a, b) => b.length - a.length)
+    .flatMap((component) => longestComponentPaths(component, roads, world))
+    .filter((path) => path.length >= 8);
+}
+
+function longestComponentPaths(component: Coord[], roads: ZurichTransport['roads'], world: ZurichWorld): Coord[][] {
+  const first = farthestRoadCoord(component[0], roads);
+  const second = farthestRoadCoord(first.coord, roads);
+  const path = shortestRoadPath(first.coord, second.coord, roads);
+  if (path.length < 8) return [];
+  return [path];
+}
+
+function farthestRoadCoord(start: Coord, roads: ZurichTransport['roads']): { coord: Coord; distance: number } {
+  const seen = new Set<string>([key(start)]);
+  const queue = [{ coord: start, distance: 0 }];
+  let farthest = queue[0];
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    if (current.distance > farthest.distance) farthest = current;
+    for (const next of roadNeighbors(current.coord, roads)) {
+      const nextKey = key(next);
+      if (seen.has(nextKey)) continue;
+      seen.add(nextKey);
+      queue.push({ coord: next, distance: current.distance + 1 });
+    }
+  }
+
+  return farthest;
+}
+
+function shortestRoadPath(start: Coord, end: Coord, roads: ZurichTransport['roads']): Coord[] {
+  const startKey = key(start);
+  const endKey = key(end);
+  const queue = [start];
+  const previous = new Map<string, string | undefined>([[startKey, undefined]]);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    if (key(current) === endKey) break;
+    for (const next of roadNeighbors(current, roads)) {
+      const nextKey = key(next);
+      if (previous.has(nextKey)) continue;
+      previous.set(nextKey, key(current));
+      queue.push(next);
+    }
+  }
+
+  if (!previous.has(endKey)) return [];
+  const path: Coord[] = [];
+  for (let cursor: string | undefined = endKey; cursor; cursor = previous.get(cursor)) {
+    const [x, y] = cursor.split(':').map(Number);
+    path.push({ x, y });
+  }
+  return path.reverse();
+}
+
+function roadNeighbors(coord: Coord, roads: ZurichTransport['roads']): Coord[] {
+  const road = roads.get(key(coord));
+  if (!road) return [];
+  const candidates: Array<[number, Coord]> = [
+    [NORTH, { x: coord.x, y: coord.y - 1 }],
+    [EAST, { x: coord.x + 1, y: coord.y }],
+    [SOUTH, { x: coord.x, y: coord.y + 1 }],
+    [WEST, { x: coord.x - 1, y: coord.y }],
+  ];
+
+  return candidates
+    .filter(([direction, next]) => (road.mask & direction) !== 0 && roads.has(key(next)))
+    .map(([, next]) => next);
 }
 
 function buildRailCorridors(rails: ZurichTransport['rails'], world: ZurichWorld): Coord[][] {
