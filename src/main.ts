@@ -7,6 +7,11 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
+import { buildZurichPlacement } from './city/zurichPlacement';
+import { buildZurichTransport } from './city/zurichTransport';
+import { validateZurichCity } from './city/zurichValidation';
+import { buildZurichWorld } from './city/zurichWorld';
+import type { ZurichBuilding } from './city/worldTypes';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -89,8 +94,6 @@ type DistrictSeed = {
 const TILE_W = 64;
 const TILE_H = 32;
 const SPRITE_H = 42;
-const WIDTH = 96;
-const HEIGHT = 78;
 const CAMERA_EDGE_MARGIN = 8;
 const CAMERA_EDGE_SOFTNESS = 4;
 const CAMERA_MIN_SCALE = 0.48;
@@ -102,6 +105,14 @@ const EAST = 2;
 const SOUTH = 4;
 const WEST = 8;
 const ROAD_SPRITE_STEP = 65;
+
+const zurichWorld = buildZurichWorld({ seed: 1848 });
+const zurichTransport = buildZurichTransport(zurichWorld);
+const zurichPlacement = buildZurichPlacement(zurichWorld, zurichTransport);
+const zurichValidation = validateZurichCity(zurichWorld, zurichTransport, zurichPlacement);
+
+const WIDTH = zurichWorld.width;
+const HEIGHT = zurichWorld.height;
 
 const roadFrameByMask = new Map<number, number>([
   [EAST | WEST, 0],
@@ -172,16 +183,20 @@ const assetPaths = {
 };
 
 const images = new Map<string, HTMLCanvasElement>();
-const terrain = buildTerrain();
-const railPaths = buildRailPaths();
-const railReserved = buildRailReserved(railPaths);
-const railCrossings = buildRailCrossings();
-const roads = buildRoadNetwork();
+const terrain = new Map([...zurichWorld.terrain].map(([tileKey, tile]) => [tileKey, toRuntimeTerrain(tile.kind)]));
+const roads = new Map<string, RoadTile>(
+  [...zurichTransport.roads].map(([tileKey, road]) => [tileKey, { coord: road.coord, kind: road.kind, mask: road.mask }])
+);
+const rails = new Map<string, RailTile>(
+  [...zurichTransport.rails].map(([tileKey, rail]) => [tileKey, { coord: rail.coord, mask: rail.mask }])
+);
+const railCrossings = zurichTransport.railCrossings;
+const railReserved = new Set(rails.keys());
+const railPaths = zurichTransport.railPaths;
 const railYardPaths: Coord[][] = [];
-const rails = buildRailNetwork(railPaths);
 const railStations = buildRailStations();
-const buildings = buildBuildings();
-const trees = buildTrees();
+const buildings = zurichPlacement.buildings.map(toRuntimeBuilding);
+const trees = zurichPlacement.trees;
 let vehicleSprites: VehicleSprite[] = [];
 let cars: Car[] = [];
 let previousTime = performance.now();
@@ -212,7 +227,7 @@ function resize(): void {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.imageSmoothingEnabled = false;
   if (!cameraInitialized) {
-    const focus = iso({ x: 49, y: 42 });
+    const focus = iso({ x: 128, y: 132 });
     camera.targetX = window.innerWidth / 2 - focus.x * camera.targetScale;
     camera.targetY = Math.min(445, window.innerHeight * 0.58) - focus.y * camera.targetScale;
     camera.x = camera.targetX;
@@ -337,12 +352,11 @@ function drawOutskirtsTerrain(): void {
 
       const point = iso(coord);
       const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
-      const textureShift = hash(`outskirts:${x}:${y}`) % 3;
       ctx.save();
-      ctx.globalAlpha = 0.08 + fade * 0.34;
-      ctx.drawImage(image, textureShift * 64, 0, 64, SPRITE_H, point.x - TILE_W / 2, point.y - 12, TILE_W, SPRITE_H);
-      if (hash(`outskirts-shadow:${x}:${y}`) % 5 === 0) {
-        ctx.fillStyle = `rgba(5, 7, 5, ${0.08 + (1 - fade) * 0.14})`;
+      ctx.globalAlpha = 0.05 + fade * 0.22;
+      ctx.drawImage(image, 0, 0, 64, SPRITE_H, point.x - TILE_W / 2, point.y - 12, TILE_W, SPRITE_H);
+      if (hash(`outskirts-shadow:${x}:${y}`) % 11 === 0) {
+        ctx.fillStyle = `rgba(5, 7, 5, ${0.035 + (1 - fade) * 0.055})`;
         drawIsoTile(point);
       }
       ctx.restore();
@@ -478,7 +492,7 @@ function drawPerimeterMist(): void {
   const maxY = bottom.y + padY * 1.5;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(215, 225, 203, 0.10)';
+  ctx.fillStyle = 'rgba(180, 196, 170, 0.07)';
   ctx.beginPath();
   ctx.rect(minX, minY, maxX - minX, maxY - minY);
   ctx.moveTo(top.x, top.y - 22);
@@ -488,8 +502,8 @@ function drawPerimeterMist(): void {
   ctx.closePath();
   ctx.fill('evenodd');
 
-  ctx.strokeStyle = 'rgba(237, 242, 226, 0.13)';
-  ctx.lineWidth = 76;
+  ctx.strokeStyle = 'rgba(225, 232, 212, 0.08)';
+  ctx.lineWidth = 92;
   ctx.lineJoin = 'round';
   ctx.beginPath();
   ctx.moveTo(top.x, top.y - 8);
@@ -499,6 +513,22 @@ function drawPerimeterMist(): void {
   ctx.closePath();
   ctx.stroke();
   ctx.restore();
+}
+
+function toRuntimeTerrain(kind: string): Terrain {
+  if (kind === 'water') return 'water';
+  if (kind === 'riverbank') return 'riverbank';
+  if (kind === 'park' || kind === 'forest' || kind === 'reserve' || kind === 'plaza') return 'park';
+  return 'grass';
+}
+
+function toRuntimeBuilding(building: ZurichBuilding): Building {
+  return {
+    coord: building.coord,
+    sheet: building.sheet,
+    frame: building.frame,
+    district: building.zoneId,
+  };
 }
 
 function buildTerrain(): Map<string, Terrain> {
@@ -627,9 +657,11 @@ function buildRailNetwork(paths: Coord[][]): Map<string, RailTile> {
 
 function buildRailStations(): RailStation[] {
   return [
-    { coord: { x: 42, y: 63 }, frame: 0 },
-    { coord: { x: 43, y: 63 }, frame: 0 },
-    { coord: { x: 44, y: 63 }, frame: 0 },
+    { coord: { x: 116, y: 153 }, frame: 0 },
+    { coord: { x: 117, y: 153 }, frame: 0 },
+    { coord: { x: 118, y: 153 }, frame: 0 },
+    { coord: { x: 119, y: 153 }, frame: 0 },
+    { coord: { x: 120, y: 153 }, frame: 0 },
   ];
 }
 
@@ -768,18 +800,8 @@ function buildTrees(): Coord[] {
 
 function buildCars(sprites: VehicleSprite[]): Car[] {
   if (sprites.length === 0) return [];
-  const maxX = WIDTH - 1;
-  const maxY = HEIGHT - 1;
-  const baseCorridors = [
-    linePath({ x: 0, y: 42 }, { x: maxX, y: 42 }),
-    linePath({ x: 52, y: 0 }, { x: 52, y: maxY }),
-    roadRoute([{ x: 0, y: 58 }, { x: 18, y: 54 }, { x: 36, y: 52 }, { x: 56, y: 50 }, { x: 78, y: 55 }, { x: maxX, y: 58 }]),
-    roadRoute([{ x: 6, y: 21 }, { x: 22, y: 23 }, { x: 38, y: 26 }, { x: 54, y: 23 }, { x: 75, y: 20 }, { x: maxX, y: 18 }]),
-    roadRoute([{ x: 14, y: 42 }, { x: 24, y: 48 }, { x: 32, y: 42 }, { x: 42, y: 42 }]),
-    roadRoute([{ x: 47, y: 42 }, { x: 50, y: 34 }, { x: 66, y: 30 }, { x: maxX, y: 30 }]),
-    roadRoute([{ x: 47, y: 42 }, { x: 60, y: 48 }, { x: 65, y: 64 }, { x: 52, y: maxY }]),
-    roadRoute([{ x: 12, y: maxY }, { x: 28, y: 68 }, { x: 46, y: 66 }, { x: 68, y: 68 }, { x: maxX, y: 70 }]),
-  ];
+  const baseCorridors = zurichTransport.arterialPaths.filter((path) => path.length >= 2);
+  if (baseCorridors.length === 0) return [];
   const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]);
   return Array.from({ length: 156 }, (_, index) => {
     const path = corridors[index % corridors.length];
@@ -1165,17 +1187,24 @@ window.render_game_to_text = () =>
   JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
+      worldId: zurichWorld.id,
       width: WIDTH,
       height: HEIGHT,
       roadTiles: roads.size,
       railTiles: rails.size,
       bridges: [...roads.values()].filter((road) => road.kind === 'bridge').length,
       buildings: buildings.length,
+      trees: trees.length,
       cars: cars.length,
       vehicleSprites: vehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
       railStations: railStations.length,
       railYardTracks: railYardPaths.length,
+      reserveTiles: zurichPlacement.reserveTiles.size,
+      validationErrors: zurichValidation.errors.length,
+      roadRailOverlap: zurichValidation.stats.roadRailOverlap,
+      railCrossings: zurichValidation.stats.railCrossings,
+      invalidBuildings: zurichValidation.stats.invalidBuildings,
       diagnostics: cityDiagnostics(),
       camera: {
         mode: 'bounded-fixed-map',
