@@ -8,6 +8,9 @@ type VehicleRoadSegmentOptions = {
   roadKeys: VehiclePathKeyLookup;
   railKeys?: VehiclePathKeyLookup;
   minLength?: number;
+  minLoopLength?: number;
+  allowMirroredDeadEndLoops?: boolean;
+  allowReversingLoops?: boolean;
 };
 
 export function makeNonDespawningVehicleLoop(path: readonly VehiclePathCoord[]): VehiclePathCoord[] {
@@ -42,6 +45,22 @@ export function hasIllegalVehicleUTurn(
     const current = path[i];
     const next = path[(i + 1) % path.length];
     if (key(previous) === key(next) && !isDeadEndVehicleRoadTile(current, options)) return true;
+  }
+  return false;
+}
+
+export function hasVehicleRouteReversal(path: readonly VehiclePathCoord[]): boolean {
+  if (path.length < 3) return false;
+
+  for (let i = 0; i < path.length; i += 1) {
+    const previous = path[(i - 1 + path.length) % path.length];
+    const current = path[i];
+    const next = path[(i + 1) % path.length];
+    const inboundX = Math.sign(current.x - previous.x);
+    const inboundY = Math.sign(current.y - previous.y);
+    const outboundX = Math.sign(next.x - current.x);
+    const outboundY = Math.sign(next.y - current.y);
+    if (inboundX === -outboundX && inboundY === -outboundY) return true;
   }
   return false;
 }
@@ -84,15 +103,22 @@ function buildVehicleLoopCandidates(
   segment: readonly VehiclePathCoord[],
   options: VehicleRoadSegmentOptions,
 ): VehiclePathCoord[][] {
+  const graphLoop = traceVehicleRoadLoop(segment, options);
+  if (graphLoop && isUsableVehicleLoop(graphLoop, options)) return [graphLoop];
+
+  if (options.allowMirroredDeadEndLoops === false) return [];
+
   const mirroredLoop = makeNonDespawningVehicleLoop(segment);
   if (isUsableVehicleLoop(mirroredLoop, options)) return [mirroredLoop];
-
-  const graphLoop = traceVehicleRoadLoop(segment, options);
-  return graphLoop && isUsableVehicleLoop(graphLoop, options) ? [graphLoop] : [];
+  return [];
 }
 
 function isUsableVehicleLoop(path: readonly VehiclePathCoord[], options: VehicleRoadSegmentOptions): boolean {
-  return path.length > 1 && !hasTeleportingVehicleSegment(path) && !hasIllegalVehicleUTurn(path, options);
+  const minLoopLength = options.minLoopLength ?? 2;
+  return path.length >= minLoopLength &&
+    !hasTeleportingVehicleSegment(path) &&
+    !hasIllegalVehicleUTurn(path, options) &&
+    (options.allowReversingLoops !== false || !hasVehicleRouteReversal(path));
 }
 
 function traceVehicleRoadLoop(

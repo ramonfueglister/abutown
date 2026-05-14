@@ -1129,10 +1129,17 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
   if (sprites.length === 0) return [];
   const baseCorridors = zurichTransport.arterialPaths.filter((path) => path.length >= 2);
   if (baseCorridors.length === 0) return [];
+  const edgeToEdgeCorridors = baseCorridors.filter(isMapEdgeToEdgeCorridor);
+  const vehicleCorridors = edgeToEdgeCorridors.length > 0 ? edgeToEdgeCorridors : baseCorridors;
   const corridors = buildVehicleRoadLoops([
-    ...baseCorridors,
-    ...baseCorridors.map((path) => [...path].reverse()),
-  ], { roadKeys: roads, railKeys: rails });
+    ...vehicleCorridors,
+    ...vehicleCorridors.map((path) => [...path].reverse()),
+  ], {
+    roadKeys: roads,
+    railKeys: rails,
+    minLength: 80,
+    minLoopLength: 160,
+  });
   if (corridors.length === 0) return [];
   return Array.from({ length: 156 }, (_, index) => {
     const path = corridors[index % corridors.length];
@@ -1144,6 +1151,15 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
       sprite: sprites[index % sprites.length],
     };
   });
+}
+
+function isMapEdgeToEdgeCorridor(path: readonly Coord[]): boolean {
+  if (path.length < 2) return false;
+  return isMapEdgeCoord(path[0]) && isMapEdgeCoord(path[path.length - 1]);
+}
+
+function isMapEdgeCoord(coord: Coord): boolean {
+  return coord.x === 0 || coord.y === 0 || coord.x === WIDTH - 1 || coord.y === HEIGHT - 1;
 }
 
 function buildPedestrians(sprites: SimutransPedestrianSprite[]): Pedestrian[] {

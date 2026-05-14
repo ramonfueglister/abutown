@@ -142,4 +142,20 @@ describe('vehicle paths', () => {
     ]);
     expect(loops.every((loop) => !hasIllegalVehicleUTurn(loop, { roadKeys }))).toBe(true);
   });
+
+  it('can reject mirrored dead-end ping-pong loops for persistent traffic', () => {
+    const roadKeys = new Set(['0:0', '1:0', '2:0']);
+
+    expect(buildVehicleRoadLoops([
+      [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 2, y: 0 },
+      ],
+    ], {
+      roadKeys,
+      allowMirroredDeadEndLoops: false,
+      allowReversingLoops: false,
+    })).toEqual([]);
+  });
 });
