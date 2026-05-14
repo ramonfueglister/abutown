@@ -53,6 +53,16 @@ impl InMemoryChunkSnapshotStore {
     pub fn read_snapshot(&self, coord: ChunkCoord) -> Option<&ChunkSnapshotDto> {
         self.snapshots.get(&coord)
     }
+
+    pub fn snapshot_count(&self) -> usize {
+        self.snapshots.len()
+    }
+
+    pub fn snapshot_coords(&self) -> Vec<ChunkCoord> {
+        let mut coords: Vec<ChunkCoord> = self.snapshots.keys().copied().collect();
+        coords.sort_by_key(|coord| (coord.y, coord.x));
+        coords
+    }
 }
 
 #[cfg(test)]
@@ -79,5 +89,34 @@ mod tests {
 
         chunk.clear_dirty();
         assert!(chunk.dirty_indices().is_empty());
+    }
+
+    #[test]
+    fn snapshot_store_reports_count_and_sorted_coords() {
+        let mut store = InMemoryChunkSnapshotStore::default();
+
+        let mut east = Chunk::new(ChunkCoord { x: 5, y: 4 }, 32);
+        east.set_tile_kind(0, TileKind::Water).expect("tile exists");
+        let mut visible = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        visible
+            .set_tile_kind(0, TileKind::Road)
+            .expect("tile exists");
+
+        store.write_snapshot(build_chunk_snapshot(
+            "abutown-main",
+            &east,
+            ChunkActivity::Warm,
+        ));
+        store.write_snapshot(build_chunk_snapshot(
+            "abutown-main",
+            &visible,
+            ChunkActivity::Active,
+        ));
+
+        assert_eq!(store.snapshot_count(), 2);
+        assert_eq!(
+            store.snapshot_coords(),
+            vec![ChunkCoord { x: 4, y: 4 }, ChunkCoord { x: 5, y: 4 }]
+        );
     }
 }
