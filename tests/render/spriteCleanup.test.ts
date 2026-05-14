@@ -24,4 +24,15 @@ describe('sprite cleanup', () => {
 
     expect([...data]).toEqual([220, 10, 10, 255, 80, 70, 60, 255]);
   });
+
+  it('removes Simutrans pak128 cyan sprite backgrounds', () => {
+    const data = new Uint8ClampedArray([
+      231, 255, 255, 255,
+      40, 32, 24, 255,
+    ]);
+
+    cleanupSpritePixels({ data, width: 2, height: 1, path: '/simutrans-assets/pak128-pedestrians/raw/privat-pedestrians-128.png' });
+
+    expect([...data]).toEqual([0, 0, 0, 0, 40, 32, 24, 255]);
+  });
 });

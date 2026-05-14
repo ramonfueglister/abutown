@@ -1,0 +1,95 @@
+
+                             GRFCodec - A tutorial
+
+   by [1]Josef Drexler.
+
+   This tutorial is a list of the steps you need to take to edit a GRF
+   file, and if you like, send your modifications to others.
+
+   Since all GRFCodec programs are command line utilities (no graphical
+   interface available), you have to make yourself familiar with the DOS
+   or Windows command prompt. However, that's beyond the scope of this
+   tutorial.
+
+   These are the basic steps to modifiy a GRF file:
+    1. Decode the GRF file
+    2. Edit the PCX file
+    3. Encode the GRF file
+
+1. Decode the GRF file
+
+   After installing the GRFCodec programs into your TTD folder, simply
+   run GRFCodec. At the command prompt, type
+grfcodec -d trg1.grf
+
+   This will decode trg1.grf, and put an editable PCX file in the SPRITES
+   folder.
+
+   Note that the image will be quite huge, and if you instead want to
+   split it into smaller files, use
+grfcodec -d trg1.grf -w 800 -h 600
+
+1a. Choosing a palette
+
+   Skip this step unless you find that the colours are wrong. In that
+   case, you need an extra option on the GRFCodec command line: the -p
+   option. It tells GRFCodec to choose a different palette.
+
+   After the -p option, you specify a number indicating which palette you
+   want. You have the following choice:
+
+   Number Meaning
+   1      DOS TTD
+   2      Windows TTD
+   3      DOS TTD, Candyland
+   4      Windows TTD, Candyland
+   5      TT Original
+   6      TT Original, Mars landscape
+
+   So, for example, use "-p 2" when you're decoding a file from the
+   Windows version of TTD, like so:
+grfcodec -d trg1r.grf -p 2
+
+2. Edit the PCX file
+
+   For this, you open your favourite graphics editor, like Paintshop Pro,
+   Adobe Photoshop, or any other graphics editor that can deal with PCX
+   files. (Just about all of them can.)
+
+   You should then load trg1.pcx in the SPRITES folder. Or, if you used
+   the second command above to split it into smaller files, open
+   trg10000.pcx, which is the first part. The following parts simply have
+   higher numbers.
+
+   If at this point you find that the colours are wrong, you need to
+   decode the GRF again, using a different colour palette. In that case
+   please follow the instructions in step 1a).
+
+   If however everything looks fine, you can then start changing the
+   sprites. Note that it is fairly difficult to actually change their
+   size, but changing the look is easy enough.
+
+   Once you've changed all you need, save the PCX file again.
+
+3. Encode the GRF file
+
+   This step is the reverse of step 1), it takes the PCX file(s) and
+   makes a GRF file out of them. At the command prompt enter
+grfcodec -e trg1.grf
+
+   This will take a bit longer than decoding, but shouldn't take too
+   long. Once it's done, you can start TTD and see the fruits of your
+   labour!
+
+   ______________________________________________________________________
+
+   Copyright © 1999-2003 by Josef Drexler.
+
+
+
+    Last changed on May 17 2003 15:45 EDT by [2]Josef Drexler
+
+References
+
+   1. http://www.ttdpatch.net/email.php?GRFCodec%2CTutorial
+   2. http://www.ttdpatch.net/email.php?TTDPatch%2CGRFCodec

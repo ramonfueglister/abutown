@@ -1,0 +1,239 @@
+import { distance, inside, key, type Coord, type ZurichBuilding, type ZurichBuildingSheet, type ZurichDetail, type ZurichWorld, type ZurichZone } from './worldTypes';
+import type { ZurichTransport } from './zurichTransport';
+
+export type ZurichPlacement = {
+  buildings: ZurichBuilding[];
+  trees: Coord[];
+  details: ZurichDetail[];
+  reserveTiles: Set<string>;
+};
+
+const sheetPools: Record<ZurichZone['kind'], ZurichBuildingSheet[]> = {
+  river: ['townhouses'],
+  'old-town': ['oldhouses', 'townhouses', 'shops', 'church'],
+  'rail-center': ['shops', 'flats', 'office', 'townhouses'],
+  residential: ['houses', 'cottages', 'townhouses'],
+  forest: ['cottages'],
+  park: ['church', 'cottages', 'oldhouses'],
+  industry: ['shops', 'office', 'flats'],
+  reserve: ['cottages', 'houses'],
+  civic: ['church', 'office', 'shops'],
+  waterfront: ['townhouses', 'shops', 'flats'],
+};
+
+export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransport): ZurichPlacement {
+  const blocked = new Set<string>([...transport.roads.keys(), ...transport.rails.keys()]);
+  const buildings: ZurichBuilding[] = [];
+  const trees: Coord[] = [];
+  const details: ZurichDetail[] = [];
+  const reserveTiles = new Set<string>();
+
+  for (const tile of world.terrain.values()) {
+    if (tile.kind === 'reserve') reserveTiles.add(key(tile.coord));
+    const tileKey = key(tile.coord);
+    if (tile.kind === 'forest' && isForestTreeTile(tile.coord) && !blocked.has(tileKey)) {
+      trees.push(tile.coord);
+      blocked.add(tileKey);
+    }
+    if (tile.kind === 'park' && hash(`park-tree:${tileKey}`) % 4 === 0 && !blocked.has(tileKey)) {
+      trees.push(tile.coord);
+      blocked.add(tileKey);
+    }
+  }
+
+  addDioramaDetails(world, details, blocked);
+
+  for (const zone of world.zones) {
+    if (zone.kind === 'forest' || zone.kind === 'river') continue;
+    const candidates = frontageCandidates(world, transport, blocked, zone);
+    for (const coord of candidates) {
+      if (buildings.length >= 4200) break;
+      if (blocked.has(key(coord))) continue;
+      if (zone.kind === 'reserve' && hash(`reserve-building:${key(coord)}`) % 9 !== 0) continue;
+      if (hash(`building-density:${zone.id}:${key(coord)}`) % 100 > Math.floor(zone.density * 100)) continue;
+      if (zone.kind === 'residential' && distance(coord, zone.center) > zone.radius * 0.72 && hash(`residential-edge:${zone.id}:${key(coord)}`) % 100 < 55) continue;
+      const sheets = sheetPools[zone.kind];
+      const sheet = sheets[hash(`sheet:${zone.id}:${key(coord)}`) % sheets.length];
+      buildings.push({ coord, sheet, frame: hash(`frame:${sheet}:${key(coord)}`) % frameCount(sheet), zoneId: zone.id });
+      blocked.add(key(coord));
+    }
+  }
+
+  for (const zone of world.zones) {
+    if (zone.kind === 'civic' || zone.kind === 'park' || zone.kind === 'industry') {
+      for (let index = 0; index < 80; index += 1) {
+        const coord = {
+          x: zone.center.x + ((hash(`detail-x:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
+          y: zone.center.y + ((hash(`detail-y:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
+        };
+        const tileKey = key(coord);
+        if (!inside(coord, world.width, world.height) || blocked.has(tileKey)) continue;
+        details.push({
+          coord,
+          category: zone.kind === 'industry' ? 'industry' : zone.kind === 'civic' ? 'civic' : 'park',
+          assetCategory: zone.kind === 'industry' ? 'industry' : 'decor',
+        });
+      }
+    }
+  }
+
+  return { buildings, trees, details, reserveTiles };
+}
+
+function addDioramaDetails(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
+  addStationSetpiece(world, details, blocked);
+  addQuaySetpiece(world, details, blocked);
+  addIndustrySetpiece(world, details, blocked);
+  addFieldSetpiece(world, details, blocked);
+}
+
+function addStationSetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
+  const station = world.zones.find((zone) => zone.kind === 'rail-center')?.center ?? { x: 118, y: 154 };
+  for (const y of [station.y - 8, station.y - 5, station.y - 2, station.y + 2]) {
+    for (let x = station.x - 24; x <= station.x + 24; x += 8) {
+      pushDetail(world, details, blocked, { x, y }, 'station', 'station-roof', true);
+    }
+  }
+  for (const coord of [
+    { x: station.x - 34, y: station.y + 11 },
+    { x: station.x - 28, y: station.y + 11 },
+    { x: station.x + 34, y: station.y + 9 },
+    { x: station.x + 40, y: station.y + 9 },
+  ]) {
+    pushDetail(world, details, blocked, coord, 'yard', 'rail-depot', true);
+  }
+  for (let x = station.x - 24; x <= station.x + 24; x += 8) {
+    pushDetail(world, details, blocked, { x, y: station.y - 12 }, 'station', 'road-stop', false);
+  }
+}
+
+function addQuaySetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
+  for (const mooring of [
+    { y: 116, side: -1, assets: ['quay', 'dock'] },
+    { y: 144, side: 1, assets: ['ship', 'quay'] },
+    { y: 166, side: -1, assets: ['dock', 'ship'] },
+  ] as const) {
+    const centerX = riverCenterAt(world, mooring.y);
+    const bankX = centerX + mooring.side * 3;
+    mooring.assets.forEach((asset, index) => {
+      pushDetail(world, details, blocked, { x: bankX, y: mooring.y + index }, 'dock', asset, true);
+    });
+  }
+}
+
+function addIndustrySetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
+  const industry = world.zones.find((zone) => zone.kind === 'industry')?.center ?? { x: 175, y: 184 };
+  for (let y = industry.y - 18; y <= industry.y + 18; y += 6) {
+    for (let x = industry.x - 22; x <= industry.x + 22; x += 8) {
+      const asset = (x + y) % 3 === 0 ? 'factory' : (x + y) % 3 === 1 ? 'road-depot' : 'rail-depot';
+      pushDetail(world, details, blocked, { x, y }, 'industry', asset, false);
+    }
+  }
+}
+
+function addFieldSetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
+  for (const zone of world.zones.filter((candidate) => candidate.kind === 'reserve')) {
+    for (let y = zone.center.y - zone.radius + 2; y <= zone.center.y + zone.radius - 2; y += 4) {
+      for (let x = zone.center.x - zone.radius + 2; x <= zone.center.x + zone.radius - 2; x += 4) {
+        const coord = { x, y };
+        if (distance(coord, zone.center) > zone.radius || hash(`field:${zone.id}:${key(coord)}`) % 100 > 58) continue;
+        pushDetail(world, details, blocked, coord, 'field', 'farm-field', false);
+      }
+    }
+  }
+}
+
+function pushDetail(
+  world: ZurichWorld,
+  details: ZurichDetail[],
+  blocked: Set<string>,
+  coord: Coord,
+  category: ZurichDetail['category'],
+  assetCategory: string,
+  allowBlocked: boolean,
+): void {
+  const tileKey = key(coord);
+  const terrain = world.terrain.get(tileKey)?.kind;
+  if (!inside(coord, world.width, world.height) || !terrain) return;
+  if (!allowBlocked && blocked.has(tileKey)) return;
+  if (!allowBlocked && (terrain === 'water' || terrain === 'riverbank' || terrain === 'forest')) return;
+  details.push({ coord, category, assetCategory });
+  if (!allowBlocked) blocked.add(tileKey);
+}
+
+function riverCenterAt(world: ZurichWorld, y: number): number {
+  const riverTiles = world.river.filter((coord) => coord.y === y);
+  if (riverTiles.length === 0) return 128;
+  return Math.round(riverTiles.reduce((sum, coord) => sum + coord.x, 0) / riverTiles.length);
+}
+
+function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, blocked: ReadonlySet<string>, zone: ZurichZone): Coord[] {
+  const candidates: Coord[] = [];
+  const seen = new Set<string>();
+  const offsets = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 },
+    { x: 2, y: 0 },
+    { x: -2, y: 0 },
+    { x: 0, y: 2 },
+    { x: 0, y: -2 },
+  ];
+
+  for (const road of transport.roads.values()) {
+    if (road.kind !== 'street') continue;
+    for (const offset of offsets) {
+      const coord = { x: road.coord.x + offset.x, y: road.coord.y + offset.y };
+      const tileKey = key(coord);
+      const terrain = world.terrain.get(tileKey)?.kind;
+      if (!inside(coord, world.width, world.height) || blocked.has(tileKey) || seen.has(tileKey)) continue;
+      if (terrain === 'water' || terrain === 'riverbank' || terrain === 'forest') continue;
+      if (zone.kind !== 'old-town' && zone.kind !== 'waterfront' && distanceToWater(world, coord, 2) <= 2) continue;
+      if (distance(coord, zone.center) <= zone.radius) {
+        candidates.push(coord);
+        seen.add(tileKey);
+      }
+    }
+  }
+  candidates.sort((a, b) => distance(a, zone.center) - distance(b, zone.center) || a.y - b.y || a.x - b.x);
+  return candidates;
+}
+
+function isForestTreeTile(coord: Coord): boolean {
+  const tileKey = key(coord);
+  const local = hash(`forest-local:${tileKey}`) % 100;
+  const pocketA = hash(`forest-pocket-a:${Math.floor(coord.x / 8)}:${Math.floor(coord.y / 8)}`) % 100;
+  const pocketB = hash(`forest-pocket-b:${Math.floor((coord.x + 5) / 13)}:${Math.floor((coord.y + 3) / 13)}`) % 100;
+  if (pocketA < 12) return local < 34;
+  if (pocketB > 78) return local < 55;
+  return local < 18;
+}
+
+function distanceToWater(world: ZurichWorld, coord: Coord, maxDistance: number): number {
+  for (let radius = 1; radius <= maxDistance; radius += 1) {
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      const dx = radius - Math.abs(dy);
+      if (world.terrain.get(key({ x: coord.x + dx, y: coord.y + dy }))?.kind === 'water') return radius;
+      if (dx !== 0 && world.terrain.get(key({ x: coord.x - dx, y: coord.y + dy }))?.kind === 'water') return radius;
+    }
+  }
+  return maxDistance + 1;
+}
+
+function frameCount(sheet: ZurichBuildingSheet): number {
+  if (sheet === 'church' || sheet === 'cottages') return 1;
+  if (sheet === 'townhouses' || sheet === 'modern') return 2;
+  if (sheet === 'flats') return 3;
+  if (sheet === 'houses' || sheet === 'oldhouses' || sheet === 'office' || sheet === 'tower') return 4;
+  return 6;
+}
+
+function hash(value: string): number {
+  let result = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index);
+    result = Math.imul(result, 16777619);
+  }
+  return result >>> 0;
+}

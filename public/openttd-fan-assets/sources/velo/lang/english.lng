@@ -1,0 +1,25 @@
+##grflangid 0x01
+
+#Main grf title and description
+STR_GRF_NAME				:Velo - DROP Fork
+STR_GRF_DESCRIPTION			:{BLUE}{TITLE} {VERSION}{}{WHITE}{}The bicycle experience{}{}{BROWN}By Javelin{ORANGE}NL{}Edited by Erato to work with DROP
+STR_GRF_URL					:https://github.com/javelinnl/velo
+
+#
+STR_PARAMETER_NAME	:Lane color
+STR_PARAMETER_DESC	:Red/green lane surface
+STR_PARAMETER_OPT0	:Red
+STR_PARAMETER_OPT1	:Green
+
+#Tracktypes
+
+STR_TRACK_TYPE		:Bike lane
+STR_CONSTRUCTION	:Bike lane construction
+STR_MENU			:Bike lane construction
+STR_BUILD_CAPTION	:New bicycles
+STR_AUTOREPLACE		:Bike lane
+STR_NEW_ENGINE		:Bike lane
+
+#Vehicles
+
+STR_VEH1			:Grandma bike
