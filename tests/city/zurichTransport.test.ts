@@ -13,6 +13,11 @@ describe('buildZurichTransport', () => {
     expect(transport.bridges.size).toBeLessThanOrEqual(5);
     expect(transport.railCrossings.size).toBeGreaterThanOrEqual(1);
 
+    for (const crossingKey of transport.railCrossings) {
+      expect(transport.roads.has(crossingKey)).toBe(true);
+      expect(transport.rails.has(crossingKey)).toBe(true);
+    }
+
     let accidentalOverlap = 0;
     for (const roadKey of transport.roads.keys()) {
       if (transport.rails.has(roadKey) && !transport.railCrossings.has(roadKey)) accidentalOverlap += 1;

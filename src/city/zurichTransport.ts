@@ -18,7 +18,7 @@ export type ZurichTransport = {
 export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
   const railPaths = buildRailPaths(world);
   const railPoints = new Set(railPaths.flatMap((path) => path.map(key)));
-  const railCrossings = new Set(['118:154', '151:180']);
+  const railCrossings = new Set(['118:154']);
   const roadKinds = new Map<string, ZurichRoadKind>();
   const bridgeKeys = new Set<string>();
   const arterialPaths = buildArterialPaths(world);
