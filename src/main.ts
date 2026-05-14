@@ -1,4 +1,6 @@
 import './style.css';
+import { startBackendBridge } from './backend/backendClient';
+import { createInitialBackendOverlayState, type BackendOverlayState } from './backend/backendState';
 import {
   buildingStreetFrontageOffset,
   countBuildingsWithoutDirectStreetAdjacency,
@@ -20,6 +22,7 @@ import {
   panCameraTarget,
   zoomCameraAt,
 } from './cameraController';
+import { drawBackendStatusBadge, drawBackendWorldOverlay } from './render/backendOverlay';
 import { cleanupSpritePixels } from './render/spriteCleanup';
 import {
   candidateVehicleSprites,
@@ -231,6 +234,7 @@ const details = zurichPlacement.details;
 const staticDrawables = buildStaticDrawables();
 let vehicleSprites: VehicleSprite[] = [];
 let cars: Car[] = [];
+let backendOverlayState: BackendOverlayState = createInitialBackendOverlayState();
 let previousTime = performance.now();
 
 void boot();
@@ -246,6 +250,7 @@ async function boot(): Promise<void> {
   resize();
   window.addEventListener('resize', resize);
   attachCamera();
+  startBackendBridge({ onState: (state) => { backendOverlayState = state; } });
   canvas.dataset.ready = 'true';
   requestAnimationFrame(frame);
 }
@@ -323,6 +328,7 @@ function render(): void {
 
   drawScene({ x: 0, y: 0 });
   ctx.restore();
+  drawBackendStatusBadge(ctx, backendOverlayState, { width: window.innerWidth, height: window.innerHeight });
 }
 
 function drawScene(offset: Coord): void {
@@ -353,6 +359,7 @@ function drawScene(offset: Coord): void {
     if (item.type === 'car') drawCar(item.car);
   }
 
+  drawBackendWorldOverlay(ctx, backendOverlayState, iso, TILE_W, TILE_H, performance.now());
   drawPerimeterMist();
   ctx.restore();
 }
