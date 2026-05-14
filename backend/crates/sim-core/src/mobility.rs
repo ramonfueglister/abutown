@@ -209,6 +209,63 @@ impl MobilityWorld {
             stops,
         }
     }
+
+    pub fn tick_mobility(&mut self) -> MobilityDelta {
+        self.tick += 1;
+        let mut changed_agents = Vec::new();
+
+        let agent_ids: Vec<AgentId> = self.agents.keys().cloned().collect();
+        for agent_id in agent_ids {
+            if self.tick_walking_agent(&agent_id) {
+                if let Some(agent) = self.agents.get(&agent_id) {
+                    changed_agents.push(agent.clone());
+                }
+            }
+        }
+
+        MobilityDelta {
+            changed_agents,
+            changed_vehicles: Vec::new(),
+        }
+    }
+
+    fn tick_walking_agent(&mut self, agent_id: &AgentId) -> bool {
+        let Some(agent) = self.agents.get_mut(agent_id) else {
+            return false;
+        };
+
+        let AgentMobilityState::Walking { link_id, progress } = &agent.state else {
+            return false;
+        };
+
+        let next_progress = (*progress + agent.walk_speed_per_tick).min(1.0);
+        let link_id = link_id.clone();
+
+        if next_progress < 1.0 {
+            agent.state = AgentMobilityState::Walking {
+                link_id,
+                progress: next_progress,
+            };
+            return true;
+        }
+
+        let Some(PlanStage::WalkToStop { stop_id, .. }) = agent.plan.get(agent.plan_cursor) else {
+            return false;
+        };
+        let stop_id = stop_id.clone();
+        agent.plan_cursor += 1;
+        agent.state = AgentMobilityState::WaitingAtStop {
+            stop_id: stop_id.clone(),
+        };
+
+        if let Some(stop) = self.stops.get_mut(&stop_id) {
+            if !stop.waiting_agents.contains(agent_id) {
+                stop.waiting_agents.push_back(agent_id.clone());
+            }
+        }
+
+        true
+    }
 }
 
 impl From<&AgentRecord> for AgentMobilityDto {
@@ -363,5 +420,41 @@ mod tests {
         assert_eq!(vehicle.route_id, RouteId("route:old-town-loop".to_string()));
         assert_eq!(vehicle.capacity, 4);
         assert_eq!(stop.route_id, RouteId("route:old-town-loop".to_string()));
+    }
+
+    #[test]
+    fn walking_agent_reaches_pickup_stop_and_waits() {
+        let mut world = MobilityWorld::seeded_demo();
+        let agent_id = AgentId("agent:seed:0".to_string());
+
+        let first_delta = world.tick_mobility();
+        let agent = world.agent(&agent_id).expect("agent exists");
+        assert_eq!(
+            agent.state,
+            AgentMobilityState::Walking {
+                link_id: LinkId("link:home-to-old-town-stop".to_string()),
+                progress: 0.5
+            }
+        );
+        assert_eq!(first_delta.changed_agents.len(), 1);
+
+        let second_delta = world.tick_mobility();
+        let agent = world.agent(&agent_id).expect("agent exists");
+        let stop = world
+            .stop(&StopId("stop:old-town".to_string()))
+            .expect("pickup stop exists");
+
+        assert_eq!(
+            agent.state,
+            AgentMobilityState::WaitingAtStop {
+                stop_id: StopId("stop:old-town".to_string())
+            }
+        );
+        assert_eq!(agent.plan_cursor, 1);
+        assert_eq!(
+            stop.waiting_agents.iter().cloned().collect::<Vec<_>>(),
+            vec![agent_id]
+        );
+        assert_eq!(second_delta.changed_agents.len(), 1);
     }
 }
