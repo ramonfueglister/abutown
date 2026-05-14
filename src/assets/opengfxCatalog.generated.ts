@@ -1,0 +1,4700 @@
+export type OpenGfxAssetCategory =
+  | 'terrain'
+  | 'water'
+  | 'road'
+  | 'rail'
+  | 'bridge'
+  | 'building'
+  | 'tree'
+  | 'vehicle'
+  | 'industry'
+  | 'station'
+  | 'decor'
+  | 'unknown';
+
+export type OpenGfxAsset = {
+  key: string;
+  path: string;
+  sourcePath: string;
+  fileName: string;
+  category: OpenGfxAssetCategory;
+};
+
+export const opengfxAssets: OpenGfxAsset[] = [
+  {
+    "key": "bridges__64__aqueduct_32bpp",
+    "path": "/opengfx2/all/bridges__64__aqueduct_32bpp.png",
+    "sourcePath": "graphics/bridges/64/aqueduct_32bpp.png",
+    "fileName": "aqueduct_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__aqueduct_palmask",
+    "path": "/opengfx2/all/bridges__64__aqueduct_palmask.png",
+    "sourcePath": "graphics/bridges/64/aqueduct_palmask.png",
+    "fileName": "aqueduct_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_deckmask",
+    "path": "/opengfx2/all/bridges__64__bridge_deckmask.png",
+    "sourcePath": "graphics/bridges/64/bridge_deckmask.png",
+    "fileName": "bridge_deckmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_deckonly_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_deckonly_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_deckonly_32bpp.png",
+    "fileName": "bridge_deckonly_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_girder_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_girder_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_girder_32bpp.png",
+    "fileName": "bridge_girder_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_girder_palmask",
+    "path": "/opengfx2/all/bridges__64__bridge_girder_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridge_girder_palmask.png",
+    "fileName": "bridge_girder_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_girder_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_girder_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_girder_toyland_32bpp.png",
+    "fileName": "bridge_girder_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_girder_toyland_palmask",
+    "path": "/opengfx2/all/bridges__64__bridge_girder_toyland_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridge_girder_toyland_palmask.png",
+    "fileName": "bridge_girder_toyland_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_steelfast_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_steelfast_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_steelfast_32bpp.png",
+    "fileName": "bridge_steelfast_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_steelfast_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_steelfast_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_steelfast_toyland_32bpp.png",
+    "fileName": "bridge_steelfast_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_steelslow_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_steelslow_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_steelslow_32bpp.png",
+    "fileName": "bridge_steelslow_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_steelslow_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_steelslow_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_steelslow_toyland_32bpp.png",
+    "fileName": "bridge_steelslow_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_suspension_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_suspension_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_suspension_32bpp.png",
+    "fileName": "bridge_suspension_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_suspension_palmask",
+    "path": "/opengfx2/all/bridges__64__bridge_suspension_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridge_suspension_palmask.png",
+    "fileName": "bridge_suspension_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_suspension_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_suspension_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_suspension_toyland_32bpp.png",
+    "fileName": "bridge_suspension_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_suspension_toyland_palmask",
+    "path": "/opengfx2/all/bridges__64__bridge_suspension_toyland_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridge_suspension_toyland_palmask.png",
+    "fileName": "bridge_suspension_toyland_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_template_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_template_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_template_32bpp.png",
+    "fileName": "bridge_template_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_tubular_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_tubular_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_tubular_32bpp.png",
+    "fileName": "bridge_tubular_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_tubular_palmask",
+    "path": "/opengfx2/all/bridges__64__bridge_tubular_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridge_tubular_palmask.png",
+    "fileName": "bridge_tubular_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_tubular_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_tubular_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_tubular_toyland_32bpp.png",
+    "fileName": "bridge_tubular_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_tubular_toyland_palmask",
+    "path": "/opengfx2/all/bridges__64__bridge_tubular_toyland_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridge_tubular_toyland_palmask.png",
+    "fileName": "bridge_tubular_toyland_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_wood_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_wood_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_wood_32bpp.png",
+    "fileName": "bridge_wood_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridge_wood_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridge_wood_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridge_wood_toyland_32bpp.png",
+    "fileName": "bridge_wood_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_deckmask",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_deckmask.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_deckmask.png",
+    "fileName": "bridgeramps_deckmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_deckonly_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_deckonly_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_deckonly_32bpp.png",
+    "fileName": "bridgeramps_deckonly_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_general_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_general_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_general_32bpp.png",
+    "fileName": "bridgeramps_general_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_general_palmask",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_general_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_general_palmask.png",
+    "fileName": "bridgeramps_general_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_general_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_general_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_general_toyland_32bpp.png",
+    "fileName": "bridgeramps_general_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_general_toyland_palmask",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_general_toyland_palmask.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_general_toyland_palmask.png",
+    "fileName": "bridgeramps_general_toyland_palmask.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_norecolour_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_norecolour_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_norecolour_32bpp.png",
+    "fileName": "bridgeramps_norecolour_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_wood_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_wood_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_wood_32bpp.png",
+    "fileName": "bridgeramps_wood_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__bridgeramps_wood_toyland_32bpp",
+    "path": "/opengfx2/all/bridges__64__bridgeramps_wood_toyland_32bpp.png",
+    "sourcePath": "graphics/bridges/64/bridgeramps_wood_toyland_32bpp.png",
+    "fileName": "bridgeramps_wood_toyland_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "bridges__64__extra_legs_32bpp",
+    "path": "/opengfx2/all/bridges__64__extra_legs_32bpp.png",
+    "sourcePath": "graphics/bridges/64/extra_legs_32bpp.png",
+    "fileName": "extra_legs_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "effects__64__airport_radar",
+    "path": "/opengfx2/all/effects__64__airport_radar.png",
+    "sourcePath": "graphics/effects/64/airport_radar.png",
+    "fileName": "airport_radar.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__airport_radar_32bpp",
+    "path": "/opengfx2/all/effects__64__airport_radar_32bpp.png",
+    "sourcePath": "graphics/effects/64/airport_radar_32bpp.png",
+    "fileName": "airport_radar_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__airport_windsock_32bpp",
+    "path": "/opengfx2/all/effects__64__airport_windsock_32bpp.png",
+    "sourcePath": "graphics/effects/64/airport_windsock_32bpp.png",
+    "fileName": "airport_windsock_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__explosion_large_32bpp",
+    "path": "/opengfx2/all/effects__64__explosion_large_32bpp.png",
+    "sourcePath": "graphics/effects/64/explosion_large_32bpp.png",
+    "fileName": "explosion_large_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__explosion_small_32bpp",
+    "path": "/opengfx2/all/effects__64__explosion_small_32bpp.png",
+    "sourcePath": "graphics/effects/64/explosion_small_32bpp.png",
+    "fileName": "explosion_small_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__industries_bubblegenerator_bubbles_32bpp",
+    "path": "/opengfx2/all/effects__64__industries_bubblegenerator_bubbles_32bpp.png",
+    "sourcePath": "graphics/effects/64/industries_bubblegenerator_bubbles_32bpp.png",
+    "fileName": "industries_bubblegenerator_bubbles_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__industries_copperoremine_smoke_32bpp",
+    "path": "/opengfx2/all/effects__64__industries_copperoremine_smoke_32bpp.png",
+    "sourcePath": "graphics/effects/64/industries_copperoremine_smoke_32bpp.png",
+    "fileName": "industries_copperoremine_smoke_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__industries_powerstation_smoke_32bpp",
+    "path": "/opengfx2/all/effects__64__industries_powerstation_smoke_32bpp.png",
+    "sourcePath": "graphics/effects/64/industries_powerstation_smoke_32bpp.png",
+    "fileName": "industries_powerstation_smoke_32bpp.png",
+    "category": "station"
+  },
+  {
+    "key": "effects__64__industries_powerstation_sparks",
+    "path": "/opengfx2/all/effects__64__industries_powerstation_sparks.png",
+    "sourcePath": "graphics/effects/64/industries_powerstation_sparks.png",
+    "fileName": "industries_powerstation_sparks.png",
+    "category": "station"
+  },
+  {
+    "key": "effects__64__industries_powerstation_sparks_32bpp",
+    "path": "/opengfx2/all/effects__64__industries_powerstation_sparks_32bpp.png",
+    "sourcePath": "graphics/effects/64/industries_powerstation_sparks_32bpp.png",
+    "fileName": "industries_powerstation_sparks_32bpp.png",
+    "category": "station"
+  },
+  {
+    "key": "effects__64__industries_sugarmine_sugar_32bpp",
+    "path": "/opengfx2/all/effects__64__industries_sugarmine_sugar_32bpp.png",
+    "sourcePath": "graphics/effects/64/industries_sugarmine_sugar_32bpp.png",
+    "fileName": "industries_sugarmine_sugar_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "effects__64__vehicle_breakdownsmoke_32bpp",
+    "path": "/opengfx2/all/effects__64__vehicle_breakdownsmoke_32bpp.png",
+    "sourcePath": "graphics/effects/64/vehicle_breakdownsmoke_32bpp.png",
+    "fileName": "vehicle_breakdownsmoke_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "effects__64__vehicle_running_smoke_32bpp",
+    "path": "/opengfx2/all/effects__64__vehicle_running_smoke_32bpp.png",
+    "sourcePath": "graphics/effects/64/vehicle_running_smoke_32bpp.png",
+    "fileName": "vehicle_running_smoke_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "effects__64__vehicle_running_sparks_32bpp",
+    "path": "/opengfx2/all/effects__64__vehicle_running_sparks_32bpp.png",
+    "sourcePath": "graphics/effects/64/vehicle_running_sparks_32bpp.png",
+    "fileName": "vehicle_running_sparks_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "effects__64__vehicle_running_steam_32bpp",
+    "path": "/opengfx2/all/effects__64__vehicle_running_steam_32bpp.png",
+    "sourcePath": "graphics/effects/64/vehicle_running_steam_32bpp.png",
+    "fileName": "vehicle_running_steam_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "foundations__64__foundations_arctic_32bpp",
+    "path": "/opengfx2/all/foundations__64__foundations_arctic_32bpp.png",
+    "sourcePath": "graphics/foundations/64/foundations_arctic_32bpp.png",
+    "fileName": "foundations_arctic_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "foundations__64__foundations_idmap",
+    "path": "/opengfx2/all/foundations__64__foundations_idmap.png",
+    "sourcePath": "graphics/foundations/64/foundations_idmap.png",
+    "fileName": "foundations_idmap.png",
+    "category": "unknown"
+  },
+  {
+    "key": "foundations__64__foundations_temperate_32bpp",
+    "path": "/opengfx2/all/foundations__64__foundations_temperate_32bpp.png",
+    "sourcePath": "graphics/foundations/64/foundations_temperate_32bpp.png",
+    "fileName": "foundations_temperate_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "foundations__64__foundations_toyland_32bpp",
+    "path": "/opengfx2/all/foundations__64__foundations_toyland_32bpp.png",
+    "sourcePath": "graphics/foundations/64/foundations_toyland_32bpp.png",
+    "fileName": "foundations_toyland_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "foundations__64__foundations_tropical_32bpp",
+    "path": "/opengfx2/all/foundations__64__foundations_tropical_32bpp.png",
+    "sourcePath": "graphics/foundations/64/foundations_tropical_32bpp.png",
+    "fileName": "foundations_tropical_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__bank_base_shape",
+    "path": "/opengfx2/all/industries__arctic__64__bank_base_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/bank_base_shape.png",
+    "fileName": "bank_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__bank_overlayshading",
+    "path": "/opengfx2/all/industries__arctic__64__bank_overlayshading.png",
+    "sourcePath": "graphics/industries/arctic/64/bank_overlayshading.png",
+    "fileName": "bank_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__bank_shape",
+    "path": "/opengfx2/all/industries__arctic__64__bank_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/bank_shape.png",
+    "fileName": "bank_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__bank_tilemask",
+    "path": "/opengfx2/all/industries__arctic__64__bank_tilemask.png",
+    "sourcePath": "graphics/industries/arctic/64/bank_tilemask.png",
+    "fileName": "bank_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__farm_base_shape",
+    "path": "/opengfx2/all/industries__arctic__64__farm_base_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/farm_base_shape.png",
+    "fileName": "farm_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__farm_overlaynormal",
+    "path": "/opengfx2/all/industries__arctic__64__farm_overlaynormal.png",
+    "sourcePath": "graphics/industries/arctic/64/farm_overlaynormal.png",
+    "fileName": "farm_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__farm_shape",
+    "path": "/opengfx2/all/industries__arctic__64__farm_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/farm_shape.png",
+    "fileName": "farm_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__farm_tilemask",
+    "path": "/opengfx2/all/industries__arctic__64__farm_tilemask.png",
+    "sourcePath": "graphics/industries/arctic/64/farm_tilemask.png",
+    "fileName": "farm_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__foodprocessingplant_base_shape",
+    "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_base_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_base_shape.png",
+    "fileName": "foodprocessingplant_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__foodprocessingplant_overlaynormal",
+    "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_overlaynormal.png",
+    "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_overlaynormal.png",
+    "fileName": "foodprocessingplant_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__foodprocessingplant_overlayshading",
+    "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_overlayshading.png",
+    "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_overlayshading.png",
+    "fileName": "foodprocessingplant_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__foodprocessingplant_shape",
+    "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_shape.png",
+    "fileName": "foodprocessingplant_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__forest_32bpp",
+    "path": "/opengfx2/all/industries__arctic__64__forest_32bpp.png",
+    "sourcePath": "graphics/industries/arctic/64/forest_32bpp.png",
+    "fileName": "forest_32bpp.png",
+    "category": "tree"
+  },
+  {
+    "key": "industries__arctic__64__goldmine_base_overlayalpha",
+    "path": "/opengfx2/all/industries__arctic__64__goldmine_base_overlayalpha.png",
+    "sourcePath": "graphics/industries/arctic/64/goldmine_base_overlayalpha.png",
+    "fileName": "goldmine_base_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldmine_base_overlayalpha_source",
+    "path": "/opengfx2/all/industries__arctic__64__goldmine_base_overlayalpha_source.png",
+    "sourcePath": "graphics/industries/arctic/64/goldmine_base_overlayalpha_source.png",
+    "fileName": "goldmine_base_overlayalpha_source.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldmine_base_shape",
+    "path": "/opengfx2/all/industries__arctic__64__goldmine_base_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/goldmine_base_shape.png",
+    "fileName": "goldmine_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldmine_overlaynormal",
+    "path": "/opengfx2/all/industries__arctic__64__goldmine_overlaynormal.png",
+    "sourcePath": "graphics/industries/arctic/64/goldmine_overlaynormal.png",
+    "fileName": "goldmine_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldmine_shape",
+    "path": "/opengfx2/all/industries__arctic__64__goldmine_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/goldmine_shape.png",
+    "fileName": "goldmine_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldmine_tilemask",
+    "path": "/opengfx2/all/industries__arctic__64__goldmine_tilemask.png",
+    "sourcePath": "graphics/industries/arctic/64/goldmine_tilemask.png",
+    "fileName": "goldmine_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldminewinch_animask",
+    "path": "/opengfx2/all/industries__arctic__64__goldminewinch_animask.png",
+    "sourcePath": "graphics/industries/arctic/64/goldminewinch_animask.png",
+    "fileName": "goldminewinch_animask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldminewinch_overlaynormal",
+    "path": "/opengfx2/all/industries__arctic__64__goldminewinch_overlaynormal.png",
+    "sourcePath": "graphics/industries/arctic/64/goldminewinch_overlaynormal.png",
+    "fileName": "goldminewinch_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__goldminewinch_shape",
+    "path": "/opengfx2/all/industries__arctic__64__goldminewinch_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/goldminewinch_shape.png",
+    "fileName": "goldminewinch_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__oilwells_base_shape",
+    "path": "/opengfx2/all/industries__arctic__64__oilwells_base_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/oilwells_base_shape.png",
+    "fileName": "oilwells_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__papermill_base_shape",
+    "path": "/opengfx2/all/industries__arctic__64__papermill_base_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/papermill_base_shape.png",
+    "fileName": "papermill_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__papermill_overlaynormal",
+    "path": "/opengfx2/all/industries__arctic__64__papermill_overlaynormal.png",
+    "sourcePath": "graphics/industries/arctic/64/papermill_overlaynormal.png",
+    "fileName": "papermill_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__papermill_overlayshading",
+    "path": "/opengfx2/all/industries__arctic__64__papermill_overlayshading.png",
+    "sourcePath": "graphics/industries/arctic/64/papermill_overlayshading.png",
+    "fileName": "papermill_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__papermill_shape",
+    "path": "/opengfx2/all/industries__arctic__64__papermill_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/papermill_shape.png",
+    "fileName": "papermill_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__printingworks_base_shape",
+    "path": "/opengfx2/all/industries__arctic__64__printingworks_base_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/printingworks_base_shape.png",
+    "fileName": "printingworks_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__printingworks_shape",
+    "path": "/opengfx2/all/industries__arctic__64__printingworks_shape.png",
+    "sourcePath": "graphics/industries/arctic/64/printingworks_shape.png",
+    "fileName": "printingworks_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__arctic__64__printingworks_tilemask",
+    "path": "/opengfx2/all/industries__arctic__64__printingworks_tilemask.png",
+    "sourcePath": "graphics/industries/arctic/64/printingworks_tilemask.png",
+    "fileName": "printingworks_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__resources__64__steel_32bpp",
+    "path": "/opengfx2/all/industries__resources__64__steel_32bpp.png",
+    "sourcePath": "graphics/industries/resources/64/steel_32bpp.png",
+    "fileName": "steel_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__256__bank_base_shape",
+    "path": "/opengfx2/all/industries__temperate__256__bank_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/256/bank_base_shape.png",
+    "fileName": "bank_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__256__bank_shape",
+    "path": "/opengfx2/all/industries__temperate__256__bank_shape.png",
+    "sourcePath": "graphics/industries/temperate/256/bank_shape.png",
+    "fileName": "bank_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__256__factory_base_shape",
+    "path": "/opengfx2/all/industries__temperate__256__factory_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/256/factory_base_shape.png",
+    "fileName": "factory_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__256__factory_shape",
+    "path": "/opengfx2/all/industries__temperate__256__factory_shape.png",
+    "sourcePath": "graphics/industries/temperate/256/factory_shape.png",
+    "fileName": "factory_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__bank_base_shape",
+    "path": "/opengfx2/all/industries__temperate__64__bank_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/bank_base_shape.png",
+    "fileName": "bank_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__bank_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__bank_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/bank_overlayshading.png",
+    "fileName": "bank_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__bank_shape",
+    "path": "/opengfx2/all/industries__temperate__64__bank_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/bank_shape.png",
+    "fileName": "bank_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__bank_tilemask",
+    "path": "/opengfx2/all/industries__temperate__64__bank_tilemask.png",
+    "sourcePath": "graphics/industries/temperate/64/bank_tilemask.png",
+    "fileName": "bank_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__coalmine_base_shape",
+    "path": "/opengfx2/all/industries__temperate__64__coalmine_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/coalmine_base_shape.png",
+    "fileName": "coalmine_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__coalmine_base_tilemask",
+    "path": "/opengfx2/all/industries__temperate__64__coalmine_base_tilemask.png",
+    "sourcePath": "graphics/industries/temperate/64/coalmine_base_tilemask.png",
+    "fileName": "coalmine_base_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__coalmine_idmap",
+    "path": "/opengfx2/all/industries__temperate__64__coalmine_idmap.png",
+    "sourcePath": "graphics/industries/temperate/64/coalmine_idmap.png",
+    "fileName": "coalmine_idmap.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__coalmine_overlaynormal",
+    "path": "/opengfx2/all/industries__temperate__64__coalmine_overlaynormal.png",
+    "sourcePath": "graphics/industries/temperate/64/coalmine_overlaynormal.png",
+    "fileName": "coalmine_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__coalmine_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__coalmine_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/coalmine_overlayshading.png",
+    "fileName": "coalmine_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__coalmine_shape",
+    "path": "/opengfx2/all/industries__temperate__64__coalmine_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/coalmine_shape.png",
+    "fileName": "coalmine_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__factory_base_shape",
+    "path": "/opengfx2/all/industries__temperate__64__factory_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/factory_base_shape.png",
+    "fileName": "factory_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__factory_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__factory_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/factory_overlayshading.png",
+    "fileName": "factory_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__factory_shape",
+    "path": "/opengfx2/all/industries__temperate__64__factory_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/factory_shape.png",
+    "fileName": "factory_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__factory_tilemask",
+    "path": "/opengfx2/all/industries__temperate__64__factory_tilemask.png",
+    "sourcePath": "graphics/industries/temperate/64/factory_tilemask.png",
+    "fileName": "factory_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__farm_base_shape",
+    "path": "/opengfx2/all/industries__temperate__64__farm_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/farm_base_shape.png",
+    "fileName": "farm_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__farm_overlaynormal",
+    "path": "/opengfx2/all/industries__temperate__64__farm_overlaynormal.png",
+    "sourcePath": "graphics/industries/temperate/64/farm_overlaynormal.png",
+    "fileName": "farm_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__farm_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__farm_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/farm_overlayshading.png",
+    "fileName": "farm_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__farm_shape",
+    "path": "/opengfx2/all/industries__temperate__64__farm_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/farm_shape.png",
+    "fileName": "farm_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__farm_tilemask",
+    "path": "/opengfx2/all/industries__temperate__64__farm_tilemask.png",
+    "sourcePath": "graphics/industries/temperate/64/farm_tilemask.png",
+    "fileName": "farm_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__ironoremine_base_overlayalpha",
+    "path": "/opengfx2/all/industries__temperate__64__ironoremine_base_overlayalpha.png",
+    "sourcePath": "graphics/industries/temperate/64/ironoremine_base_overlayalpha.png",
+    "fileName": "ironoremine_base_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__ironoremine_base_shape",
+    "path": "/opengfx2/all/industries__temperate__64__ironoremine_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/ironoremine_base_shape.png",
+    "fileName": "ironoremine_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__ironoremine_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__ironoremine_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/ironoremine_overlayshading.png",
+    "fileName": "ironoremine_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__ironoremine_shape",
+    "path": "/opengfx2/all/industries__temperate__64__ironoremine_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/ironoremine_shape.png",
+    "fileName": "ironoremine_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__ironoremine_tilemask",
+    "path": "/opengfx2/all/industries__temperate__64__ironoremine_tilemask.png",
+    "sourcePath": "graphics/industries/temperate/64/ironoremine_tilemask.png",
+    "fileName": "ironoremine_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oil_refinery_overlaynormal",
+    "path": "/opengfx2/all/industries__temperate__64__oil_refinery_overlaynormal.png",
+    "sourcePath": "graphics/industries/temperate/64/oil_refinery_overlaynormal.png",
+    "fileName": "oil_refinery_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oil_refinery_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__oil_refinery_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/oil_refinery_overlayshading.png",
+    "fileName": "oil_refinery_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oil_refinery_shape",
+    "path": "/opengfx2/all/industries__temperate__64__oil_refinery_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/oil_refinery_shape.png",
+    "fileName": "oil_refinery_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oilrig_overlaynormal",
+    "path": "/opengfx2/all/industries__temperate__64__oilrig_overlaynormal.png",
+    "sourcePath": "graphics/industries/temperate/64/oilrig_overlaynormal.png",
+    "fileName": "oilrig_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oilrig_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__oilrig_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/oilrig_overlayshading.png",
+    "fileName": "oilrig_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oilrig_shape",
+    "path": "/opengfx2/all/industries__temperate__64__oilrig_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/oilrig_shape.png",
+    "fileName": "oilrig_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oilrig_tilemask",
+    "path": "/opengfx2/all/industries__temperate__64__oilrig_tilemask.png",
+    "sourcePath": "graphics/industries/temperate/64/oilrig_tilemask.png",
+    "fileName": "oilrig_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oilwells_base_shape",
+    "path": "/opengfx2/all/industries__temperate__64__oilwells_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/oilwells_base_shape.png",
+    "fileName": "oilwells_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oilwells_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__oilwells_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/oilwells_overlayshading.png",
+    "fileName": "oilwells_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__oilwells_shape",
+    "path": "/opengfx2/all/industries__temperate__64__oilwells_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/oilwells_shape.png",
+    "fileName": "oilwells_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__powerstation_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__powerstation_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/powerstation_overlayshading.png",
+    "fileName": "powerstation_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "industries__temperate__64__powerstation_shape",
+    "path": "/opengfx2/all/industries__temperate__64__powerstation_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/powerstation_shape.png",
+    "fileName": "powerstation_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "industries__temperate__64__sawmill_overlaynormal",
+    "path": "/opengfx2/all/industries__temperate__64__sawmill_overlaynormal.png",
+    "sourcePath": "graphics/industries/temperate/64/sawmill_overlaynormal.png",
+    "fileName": "sawmill_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__sawmill_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__sawmill_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/sawmill_overlayshading.png",
+    "fileName": "sawmill_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__sawmill_shape",
+    "path": "/opengfx2/all/industries__temperate__64__sawmill_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/sawmill_shape.png",
+    "fileName": "sawmill_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__steelmill_base_shape",
+    "path": "/opengfx2/all/industries__temperate__64__steelmill_base_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/steelmill_base_shape.png",
+    "fileName": "steelmill_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__steelmill_overlaynormal",
+    "path": "/opengfx2/all/industries__temperate__64__steelmill_overlaynormal.png",
+    "sourcePath": "graphics/industries/temperate/64/steelmill_overlaynormal.png",
+    "fileName": "steelmill_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__steelmill_overlayshading",
+    "path": "/opengfx2/all/industries__temperate__64__steelmill_overlayshading.png",
+    "sourcePath": "graphics/industries/temperate/64/steelmill_overlayshading.png",
+    "fileName": "steelmill_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__steelmill_shape",
+    "path": "/opengfx2/all/industries__temperate__64__steelmill_shape.png",
+    "sourcePath": "graphics/industries/temperate/64/steelmill_shape.png",
+    "fileName": "steelmill_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__temperate__64__steelmill_tilemask",
+    "path": "/opengfx2/all/industries__temperate__64__steelmill_tilemask.png",
+    "sourcePath": "graphics/industries/temperate/64/steelmill_tilemask.png",
+    "fileName": "steelmill_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__battery_farm_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__battery_farm_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/battery_farm_32bpp.png",
+    "fileName": "battery_farm_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__bubble_generator_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__bubble_generator_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/bubble_generator_32bpp.png",
+    "fileName": "bubble_generator_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__bubble_generator_palmask",
+    "path": "/opengfx2/all/industries__toyland__64__bubble_generator_palmask.png",
+    "sourcePath": "graphics/industries/toyland/64/bubble_generator_palmask.png",
+    "fileName": "bubble_generator_palmask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__bubble_generator_plunger_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__bubble_generator_plunger_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/bubble_generator_plunger_32bpp.png",
+    "fileName": "bubble_generator_plunger_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__bubble_generator_plunger_palmask",
+    "path": "/opengfx2/all/industries__toyland__64__bubble_generator_plunger_palmask.png",
+    "sourcePath": "graphics/industries/toyland/64/bubble_generator_plunger_palmask.png",
+    "fileName": "bubble_generator_plunger_palmask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__bubble_generator_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__bubble_generator_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/bubble_generator_tilemask.png",
+    "fileName": "bubble_generator_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__cola_wells_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__cola_wells_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/cola_wells_32bpp.png",
+    "fileName": "cola_wells_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__cola_wells_palmask",
+    "path": "/opengfx2/all/industries__toyland__64__cola_wells_palmask.png",
+    "sourcePath": "graphics/industries/toyland/64/cola_wells_palmask.png",
+    "fileName": "cola_wells_palmask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__fizzy_drink_factory_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__fizzy_drink_factory_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/fizzy_drink_factory_32bpp.png",
+    "fileName": "fizzy_drink_factory_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__fizzy_drink_factory_palmask",
+    "path": "/opengfx2/all/industries__toyland__64__fizzy_drink_factory_palmask.png",
+    "sourcePath": "graphics/industries/toyland/64/fizzy_drink_factory_palmask.png",
+    "fileName": "fizzy_drink_factory_palmask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__fizzy_drink_factory_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__fizzy_drink_factory_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/fizzy_drink_factory_tilemask.png",
+    "fileName": "fizzy_drink_factory_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__forest_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__forest_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/forest_32bpp.png",
+    "fileName": "forest_32bpp.png",
+    "category": "tree"
+  },
+  {
+    "key": "industries__toyland__64__plastic_fountain_aboveground_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__plastic_fountain_aboveground_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/plastic_fountain_aboveground_32bpp.png",
+    "fileName": "plastic_fountain_aboveground_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "industries__toyland__64__plastic_fountain_ground_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__plastic_fountain_ground_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/plastic_fountain_ground_32bpp.png",
+    "fileName": "plastic_fountain_ground_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "industries__toyland__64__sugar_mine_stand_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stand_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/sugar_mine_stand_32bpp.png",
+    "fileName": "sugar_mine_stand_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__sugar_mine_stand_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stand_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/sugar_mine_stand_tilemask.png",
+    "fileName": "sugar_mine_stand_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__sugar_mine_stockpile_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stockpile_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/sugar_mine_stockpile_32bpp.png",
+    "fileName": "sugar_mine_stockpile_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__sugar_mine_stockpile_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stockpile_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/sugar_mine_stockpile_tilemask.png",
+    "fileName": "sugar_mine_stockpile_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__sugarmine_pile_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__sugarmine_pile_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/sugarmine_pile_32bpp.png",
+    "fileName": "sugarmine_pile_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__sugarmine_sieve_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__sugarmine_sieve_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/sugarmine_sieve_32bpp.png",
+    "fileName": "sugarmine_sieve_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__sweet_factory_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__sweet_factory_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/sweet_factory_32bpp.png",
+    "fileName": "sweet_factory_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toffee_quarry_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__toffee_quarry_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/toffee_quarry_32bpp.png",
+    "fileName": "toffee_quarry_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toffee_quarry_cutter_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__toffee_quarry_cutter_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/toffee_quarry_cutter_32bpp.png",
+    "fileName": "toffee_quarry_cutter_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toffee_quarry_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__toffee_quarry_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/toffee_quarry_tilemask.png",
+    "fileName": "toffee_quarry_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_factory_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__toy_factory_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_factory_32bpp.png",
+    "fileName": "toy_factory_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_factory_constr_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__toy_factory_constr_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_factory_constr_32bpp.png",
+    "fileName": "toy_factory_constr_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_factory_constr_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__toy_factory_constr_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_factory_constr_tilemask.png",
+    "fileName": "toy_factory_constr_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_factory_stomper_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__toy_factory_stomper_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_factory_stomper_32bpp.png",
+    "fileName": "toy_factory_stomper_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_factory_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__toy_factory_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_factory_tilemask.png",
+    "fileName": "toy_factory_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_shop_32bpp",
+    "path": "/opengfx2/all/industries__toyland__64__toy_shop_32bpp.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_shop_32bpp.png",
+    "fileName": "toy_shop_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_shop_base_shape",
+    "path": "/opengfx2/all/industries__toyland__64__toy_shop_base_shape.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_shop_base_shape.png",
+    "fileName": "toy_shop_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__toyland__64__toy_shop_tilemask",
+    "path": "/opengfx2/all/industries__toyland__64__toy_shop_tilemask.png",
+    "sourcePath": "graphics/industries/toyland/64/toy_shop_tilemask.png",
+    "fileName": "toy_shop_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__copperoremine_idmap",
+    "path": "/opengfx2/all/industries__tropical__64__copperoremine_idmap.png",
+    "sourcePath": "graphics/industries/tropical/64/copperoremine_idmap.png",
+    "fileName": "copperoremine_idmap.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__copperoremine_overlaynormal",
+    "path": "/opengfx2/all/industries__tropical__64__copperoremine_overlaynormal.png",
+    "sourcePath": "graphics/industries/tropical/64/copperoremine_overlaynormal.png",
+    "fileName": "copperoremine_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__copperoremine_overlayshading",
+    "path": "/opengfx2/all/industries__tropical__64__copperoremine_overlayshading.png",
+    "sourcePath": "graphics/industries/tropical/64/copperoremine_overlayshading.png",
+    "fileName": "copperoremine_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__copperoremine_shape",
+    "path": "/opengfx2/all/industries__tropical__64__copperoremine_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/copperoremine_shape.png",
+    "fileName": "copperoremine_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__diamondmine_base_overlayalpha",
+    "path": "/opengfx2/all/industries__tropical__64__diamondmine_base_overlayalpha.png",
+    "sourcePath": "graphics/industries/tropical/64/diamondmine_base_overlayalpha.png",
+    "fileName": "diamondmine_base_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__diamondmine_base_shape",
+    "path": "/opengfx2/all/industries__tropical__64__diamondmine_base_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/diamondmine_base_shape.png",
+    "fileName": "diamondmine_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__diamondmine_overlaynormal",
+    "path": "/opengfx2/all/industries__tropical__64__diamondmine_overlaynormal.png",
+    "sourcePath": "graphics/industries/tropical/64/diamondmine_overlaynormal.png",
+    "fileName": "diamondmine_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__diamondmine_shape",
+    "path": "/opengfx2/all/industries__tropical__64__diamondmine_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/diamondmine_shape.png",
+    "fileName": "diamondmine_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__diamondmine_tilemask",
+    "path": "/opengfx2/all/industries__tropical__64__diamondmine_tilemask.png",
+    "sourcePath": "graphics/industries/tropical/64/diamondmine_tilemask.png",
+    "fileName": "diamondmine_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__lumbermill_base_shape",
+    "path": "/opengfx2/all/industries__tropical__64__lumbermill_base_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/lumbermill_base_shape.png",
+    "fileName": "lumbermill_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__lumbermill_overlayshading",
+    "path": "/opengfx2/all/industries__tropical__64__lumbermill_overlayshading.png",
+    "sourcePath": "graphics/industries/tropical/64/lumbermill_overlayshading.png",
+    "fileName": "lumbermill_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__lumbermill_shape",
+    "path": "/opengfx2/all/industries__tropical__64__lumbermill_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/lumbermill_shape.png",
+    "fileName": "lumbermill_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__lumbermill_tilemask",
+    "path": "/opengfx2/all/industries__tropical__64__lumbermill_tilemask.png",
+    "sourcePath": "graphics/industries/tropical/64/lumbermill_tilemask.png",
+    "fileName": "lumbermill_tilemask.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__oilwells_base_shape",
+    "path": "/opengfx2/all/industries__tropical__64__oilwells_base_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/oilwells_base_shape.png",
+    "fileName": "oilwells_base_shape.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__plantations_32bpp",
+    "path": "/opengfx2/all/industries__tropical__64__plantations_32bpp.png",
+    "sourcePath": "graphics/industries/tropical/64/plantations_32bpp.png",
+    "fileName": "plantations_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "industries__tropical__64__waterprocessingplant_overlayshading",
+    "path": "/opengfx2/all/industries__tropical__64__waterprocessingplant_overlayshading.png",
+    "sourcePath": "graphics/industries/tropical/64/waterprocessingplant_overlayshading.png",
+    "fileName": "waterprocessingplant_overlayshading.png",
+    "category": "water"
+  },
+  {
+    "key": "industries__tropical__64__waterprocessingplant_shape",
+    "path": "/opengfx2/all/industries__tropical__64__waterprocessingplant_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/waterprocessingplant_shape.png",
+    "fileName": "waterprocessingplant_shape.png",
+    "category": "water"
+  },
+  {
+    "key": "industries__tropical__64__watertower_overlayshading",
+    "path": "/opengfx2/all/industries__tropical__64__watertower_overlayshading.png",
+    "sourcePath": "graphics/industries/tropical/64/watertower_overlayshading.png",
+    "fileName": "watertower_overlayshading.png",
+    "category": "water"
+  },
+  {
+    "key": "industries__tropical__64__watertower_shape",
+    "path": "/opengfx2/all/industries__tropical__64__watertower_shape.png",
+    "sourcePath": "graphics/industries/tropical/64/watertower_shape.png",
+    "fileName": "watertower_shape.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__256__canal_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__canal_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/canal_overlayalpha.png",
+    "fileName": "canal_overlayalpha.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__256__canal_sealevel_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__canal_sealevel_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/canal_sealevel_overlayalpha.png",
+    "fileName": "canal_sealevel_overlayalpha.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__256__maglev_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__maglev_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/maglev_levelcrossing_overlayalpha.png",
+    "fileName": "maglev_levelcrossing_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__256__maglev_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__maglev_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/maglev_overlayalpha.png",
+    "fileName": "maglev_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__256__maglev_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__maglev_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/maglev_toyland_overlayalpha.png",
+    "fileName": "maglev_toyland_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__256__monorail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__monorail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/monorail_levelcrossing_overlayalpha.png",
+    "fileName": "monorail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__256__monorail_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__monorail_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/monorail_overlayalpha.png",
+    "fileName": "monorail_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__256__monorail_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__monorail_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/monorail_toyland_overlayalpha.png",
+    "fileName": "monorail_toyland_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__256__rail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__rail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/rail_levelcrossing_overlayalpha.png",
+    "fileName": "rail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__256__rail_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__rail_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/rail_overlayalpha.png",
+    "fileName": "rail_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__256__rail_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__rail_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/rail_toyland_overlayalpha.png",
+    "fileName": "rail_toyland_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__256__river_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__river_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/river_overlayalpha.png",
+    "fileName": "river_overlayalpha.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__256__river_sealevel_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__river_sealevel_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/river_sealevel_overlayalpha.png",
+    "fileName": "river_sealevel_overlayalpha.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__256__road_noline_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__road_noline_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/road_noline_overlayalpha.png",
+    "fileName": "road_noline_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__256__road_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__road_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/road_overlayalpha.png",
+    "fileName": "road_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__256__road_town_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__road_town_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/road_town_overlayalpha.png",
+    "fileName": "road_town_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__256__road_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__road_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/road_toyland_overlayalpha.png",
+    "fileName": "road_toyland_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__256__toyland_maglev_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__toyland_maglev_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/toyland_maglev_levelcrossing_overlayalpha.png",
+    "fileName": "toyland_maglev_levelcrossing_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__256__toyland_monorail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__toyland_monorail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/toyland_monorail_levelcrossing_overlayalpha.png",
+    "fileName": "toyland_monorail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__256__toyland_rail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__256__toyland_rail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/256/toyland_rail_levelcrossing_overlayalpha.png",
+    "fileName": "toyland_rail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__airport_modern_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__airport_modern_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/airport_modern_overlayalpha.png",
+    "fileName": "airport_modern_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__airport_modern_overlaynormal",
+    "path": "/opengfx2/all/infrastructure__64__airport_modern_overlaynormal.png",
+    "sourcePath": "graphics/infrastructure/64/airport_modern_overlaynormal.png",
+    "fileName": "airport_modern_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__airport_modern_overlayshading",
+    "path": "/opengfx2/all/infrastructure__64__airport_modern_overlayshading.png",
+    "sourcePath": "graphics/infrastructure/64/airport_modern_overlayshading.png",
+    "fileName": "airport_modern_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__airport_old_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__airport_old_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/airport_old_overlayalpha.png",
+    "fileName": "airport_old_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__airport_old_overlayshading",
+    "path": "/opengfx2/all/infrastructure__64__airport_old_overlayshading.png",
+    "sourcePath": "graphics/infrastructure/64/airport_old_overlayshading.png",
+    "fileName": "airport_old_overlayshading.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__canal_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__canal_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/canal_overlayalpha.png",
+    "fileName": "canal_overlayalpha.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__canal_overlaynormal",
+    "path": "/opengfx2/all/infrastructure__64__canal_overlaynormal.png",
+    "sourcePath": "graphics/infrastructure/64/canal_overlaynormal.png",
+    "fileName": "canal_overlaynormal.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__canal_sealevel_overlayalpha ",
+    "path": "/opengfx2/all/infrastructure__64__canal_sealevel_overlayalpha .png",
+    "sourcePath": "graphics/infrastructure/64/canal_sealevel_overlayalpha .png",
+    "fileName": "canal_sealevel_overlayalpha .png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__canal_sealevel_overlaynormal",
+    "path": "/opengfx2/all/infrastructure__64__canal_sealevel_overlaynormal.png",
+    "sourcePath": "graphics/infrastructure/64/canal_sealevel_overlaynormal.png",
+    "fileName": "canal_sealevel_overlaynormal.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__elrail_catenary_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__elrail_catenary_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/elrail_catenary_32bpp.png",
+    "fileName": "elrail_catenary_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__elrail_masts_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__elrail_masts_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/elrail_masts_32bpp.png",
+    "fileName": "elrail_masts_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__levelcrossing_overlaynormal",
+    "path": "/opengfx2/all/infrastructure__64__levelcrossing_overlaynormal.png",
+    "sourcePath": "graphics/infrastructure/64/levelcrossing_overlaynormal.png",
+    "fileName": "levelcrossing_overlaynormal.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__maglev_bits_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__maglev_bits_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/maglev_bits_32bpp.png",
+    "fileName": "maglev_bits_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__maglev_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__maglev_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/maglev_levelcrossing_overlayalpha.png",
+    "fileName": "maglev_levelcrossing_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__maglev_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__maglev_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/maglev_overlayalpha.png",
+    "fileName": "maglev_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__maglev_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__maglev_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/maglev_toyland_overlayalpha.png",
+    "fileName": "maglev_toyland_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__monorail_bits_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__monorail_bits_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/monorail_bits_32bpp.png",
+    "fileName": "monorail_bits_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__monorail_bits_masked_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__monorail_bits_masked_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/monorail_bits_masked_32bpp.png",
+    "fileName": "monorail_bits_masked_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__monorail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__monorail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/monorail_levelcrossing_overlayalpha.png",
+    "fileName": "monorail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__monorail_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__monorail_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/monorail_overlayalpha.png",
+    "fileName": "monorail_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__monorail_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__monorail_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/monorail_toyland_overlayalpha.png",
+    "fileName": "monorail_toyland_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_bits_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__rail_bits_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/rail_bits_32bpp.png",
+    "fileName": "rail_bits_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_bits_masked_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__rail_bits_masked_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/rail_bits_masked_32bpp.png",
+    "fileName": "rail_bits_masked_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_fences_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__rail_fences_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/rail_fences_32bpp.png",
+    "fileName": "rail_fences_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_fences_toyland_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__rail_fences_toyland_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/rail_fences_toyland_32bpp.png",
+    "fileName": "rail_fences_toyland_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__rail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/rail_levelcrossing_overlayalpha.png",
+    "fileName": "rail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__rail_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/rail_overlayalpha.png",
+    "fileName": "rail_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_overlayshading",
+    "path": "/opengfx2/all/infrastructure__64__rail_overlayshading.png",
+    "sourcePath": "graphics/infrastructure/64/rail_overlayshading.png",
+    "fileName": "rail_overlayshading.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__rail_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__rail_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/rail_toyland_overlayalpha.png",
+    "fileName": "rail_toyland_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__river_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__river_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/river_overlayalpha.png",
+    "fileName": "river_overlayalpha.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__river_overlaynormal",
+    "path": "/opengfx2/all/infrastructure__64__river_overlaynormal.png",
+    "sourcePath": "graphics/infrastructure/64/river_overlaynormal.png",
+    "fileName": "river_overlaynormal.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__river_overlayshading",
+    "path": "/opengfx2/all/infrastructure__64__river_overlayshading.png",
+    "sourcePath": "graphics/infrastructure/64/river_overlayshading.png",
+    "fileName": "river_overlayshading.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__river_sealevel_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__river_sealevel_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/river_sealevel_overlayalpha.png",
+    "fileName": "river_sealevel_overlayalpha.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__river_sealevel_overlaynormal",
+    "path": "/opengfx2/all/infrastructure__64__river_sealevel_overlaynormal.png",
+    "sourcePath": "graphics/infrastructure/64/river_sealevel_overlaynormal.png",
+    "fileName": "river_sealevel_overlaynormal.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__river_sealevel_overlayshading",
+    "path": "/opengfx2/all/infrastructure__64__river_sealevel_overlayshading.png",
+    "sourcePath": "graphics/infrastructure/64/river_sealevel_overlayshading.png",
+    "fileName": "river_sealevel_overlayshading.png",
+    "category": "water"
+  },
+  {
+    "key": "infrastructure__64__road_noline_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__road_noline_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/road_noline_overlayalpha.png",
+    "fileName": "road_noline_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__road_noline_overlayshading",
+    "path": "/opengfx2/all/infrastructure__64__road_noline_overlayshading.png",
+    "sourcePath": "graphics/infrastructure/64/road_noline_overlayshading.png",
+    "fileName": "road_noline_overlayshading.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__road_oneway_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__road_oneway_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/road_oneway_32bpp.png",
+    "fileName": "road_oneway_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__road_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__road_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/road_overlayalpha.png",
+    "fileName": "road_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__road_overlayshading",
+    "path": "/opengfx2/all/infrastructure__64__road_overlayshading.png",
+    "sourcePath": "graphics/infrastructure/64/road_overlayshading.png",
+    "fileName": "road_overlayshading.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__road_reconstruction_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__road_reconstruction_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/road_reconstruction_32bpp.png",
+    "fileName": "road_reconstruction_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__road_town_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__road_town_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/road_town_overlayalpha.png",
+    "fileName": "road_town_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__road_toyland_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__road_toyland_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/road_toyland_overlayalpha.png",
+    "fileName": "road_toyland_overlayalpha.png",
+    "category": "road"
+  },
+  {
+    "key": "infrastructure__64__toyland_maglev_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__toyland_maglev_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/toyland_maglev_levelcrossing_overlayalpha.png",
+    "fileName": "toyland_maglev_levelcrossing_overlayalpha.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__toyland_monorail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__toyland_monorail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/toyland_monorail_levelcrossing_overlayalpha.png",
+    "fileName": "toyland_monorail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__toyland_rail_levelcrossing_overlayalpha",
+    "path": "/opengfx2/all/infrastructure__64__toyland_rail_levelcrossing_overlayalpha.png",
+    "sourcePath": "graphics/infrastructure/64/toyland_rail_levelcrossing_overlayalpha.png",
+    "fileName": "toyland_rail_levelcrossing_overlayalpha.png",
+    "category": "rail"
+  },
+  {
+    "key": "infrastructure__64__tram_bridge_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__tram_bridge_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/tram_bridge_32bpp.png",
+    "fileName": "tram_bridge_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "infrastructure__64__tram_bridgecatenary_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__tram_bridgecatenary_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/tram_bridgecatenary_32bpp.png",
+    "fileName": "tram_bridgecatenary_32bpp.png",
+    "category": "bridge"
+  },
+  {
+    "key": "infrastructure__64__tram_catenary_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__tram_catenary_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/tram_catenary_32bpp.png",
+    "fileName": "tram_catenary_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__tram_grass_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__tram_grass_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/tram_grass_32bpp.png",
+    "fileName": "tram_grass_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "infrastructure__64__tram_road_32bpp",
+    "path": "/opengfx2/all/infrastructure__64__tram_road_32bpp.png",
+    "sourcePath": "graphics/infrastructure/64/tram_road_32bpp.png",
+    "fileName": "tram_road_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "selectors__64__selector_autorail",
+    "path": "/opengfx2/all/selectors__64__selector_autorail.png",
+    "sourcePath": "graphics/selectors/64/selector_autorail.png",
+    "fileName": "selector_autorail.png",
+    "category": "rail"
+  },
+  {
+    "key": "selectors__64__selector_autorail_32bpp",
+    "path": "/opengfx2/all/selectors__64__selector_autorail_32bpp.png",
+    "sourcePath": "graphics/selectors/64/selector_autorail_32bpp.png",
+    "fileName": "selector_autorail_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "selectors__64__selector_halftile_32bpp",
+    "path": "/opengfx2/all/selectors__64__selector_halftile_32bpp.png",
+    "sourcePath": "graphics/selectors/64/selector_halftile_32bpp.png",
+    "fileName": "selector_halftile_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "selectors__64__selector_point_32bpp",
+    "path": "/opengfx2/all/selectors__64__selector_point_32bpp.png",
+    "sourcePath": "graphics/selectors/64/selector_point_32bpp.png",
+    "fileName": "selector_point_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "selectors__64__selector_tile_32bpp",
+    "path": "/opengfx2/all/selectors__64__selector_tile_32bpp.png",
+    "sourcePath": "graphics/selectors/64/selector_tile_32bpp.png",
+    "fileName": "selector_tile_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__base_32bpp",
+    "path": "/opengfx2/all/signals__64__base_32bpp.png",
+    "sourcePath": "graphics/signals/64/base_32bpp.png",
+    "fileName": "base_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__base_semaphore_leftside_32bpp",
+    "path": "/opengfx2/all/signals__64__base_semaphore_leftside_32bpp.png",
+    "sourcePath": "graphics/signals/64/base_semaphore_leftside_32bpp.png",
+    "fileName": "base_semaphore_leftside_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__base_semaphore_rightside_32bpp",
+    "path": "/opengfx2/all/signals__64__base_semaphore_rightside_32bpp.png",
+    "sourcePath": "graphics/signals/64/base_semaphore_rightside_32bpp.png",
+    "fileName": "base_semaphore_rightside_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__path_light_base_32bpp",
+    "path": "/opengfx2/all/signals__64__path_light_base_32bpp.png",
+    "sourcePath": "graphics/signals/64/path_light_base_32bpp.png",
+    "fileName": "path_light_base_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_leftside_oneway_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_leftside_oneway_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_leftside_oneway_32bpp.png",
+    "fileName": "pbs_semaphore_leftside_oneway_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_leftside_twoway_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_leftside_twoway_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_leftside_twoway_32bpp.png",
+    "fileName": "pbs_semaphore_leftside_twoway_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_leftside_unused_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_leftside_unused_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_leftside_unused_32bpp.png",
+    "fileName": "pbs_semaphore_leftside_unused_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_leftside_unusedalt_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_leftside_unusedalt_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_leftside_unusedalt_32bpp.png",
+    "fileName": "pbs_semaphore_leftside_unusedalt_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_rightside_oneway_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_rightside_oneway_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_rightside_oneway_32bpp.png",
+    "fileName": "pbs_semaphore_rightside_oneway_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_rightside_twoway_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_rightside_twoway_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_rightside_twoway_32bpp.png",
+    "fileName": "pbs_semaphore_rightside_twoway_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_rightside_unused_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_rightside_unused_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_rightside_unused_32bpp.png",
+    "fileName": "pbs_semaphore_rightside_unused_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pbs_semaphore_rightside_unusedalt_32bpp",
+    "path": "/opengfx2/all/signals__64__pbs_semaphore_rightside_unusedalt_32bpp.png",
+    "sourcePath": "graphics/signals/64/pbs_semaphore_rightside_unusedalt_32bpp.png",
+    "fileName": "pbs_semaphore_rightside_unusedalt_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__pre_light_base_32bpp",
+    "path": "/opengfx2/all/signals__64__pre_light_base_32bpp.png",
+    "sourcePath": "graphics/signals/64/pre_light_base_32bpp.png",
+    "fileName": "pre_light_base_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_light_combined_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_light_combined_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_light_combined_32bpp.png",
+    "fileName": "presignal_light_combined_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_light_combo_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_light_combo_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_light_combo_32bpp.png",
+    "fileName": "presignal_light_combo_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_light_entry_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_light_entry_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_light_entry_32bpp.png",
+    "fileName": "presignal_light_entry_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_light_exit_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_light_exit_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_light_exit_32bpp.png",
+    "fileName": "presignal_light_exit_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_semaphore_leftside_combo_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_semaphore_leftside_combo_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_semaphore_leftside_combo_32bpp.png",
+    "fileName": "presignal_semaphore_leftside_combo_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_semaphore_leftside_entry_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_semaphore_leftside_entry_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_semaphore_leftside_entry_32bpp.png",
+    "fileName": "presignal_semaphore_leftside_entry_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_semaphore_leftside_exit_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_semaphore_leftside_exit_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_semaphore_leftside_exit_32bpp.png",
+    "fileName": "presignal_semaphore_leftside_exit_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_semaphore_rightside_combo_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_semaphore_rightside_combo_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_semaphore_rightside_combo_32bpp.png",
+    "fileName": "presignal_semaphore_rightside_combo_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_semaphore_rightside_entry_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_semaphore_rightside_entry_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_semaphore_rightside_entry_32bpp.png",
+    "fileName": "presignal_semaphore_rightside_entry_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "signals__64__presignal_semaphore_rightside_exit_32bpp",
+    "path": "/opengfx2/all/signals__64__presignal_semaphore_rightside_exit_32bpp.png",
+    "sourcePath": "graphics/signals/64/presignal_semaphore_rightside_exit_32bpp.png",
+    "fileName": "presignal_semaphore_rightside_exit_32bpp.png",
+    "category": "unknown"
+  },
+  {
+    "key": "stations__general__256__maglevstations_shape",
+    "path": "/opengfx2/all/stations__general__256__maglevstations_shape.png",
+    "sourcePath": "graphics/stations/general/256/maglevstations_shape.png",
+    "fileName": "maglevstations_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__256__maglevtunnels_shape",
+    "path": "/opengfx2/all/stations__general__256__maglevtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/256/maglevtunnels_shape.png",
+    "fileName": "maglevtunnels_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__256__monorailstations_shape",
+    "path": "/opengfx2/all/stations__general__256__monorailstations_shape.png",
+    "sourcePath": "graphics/stations/general/256/monorailstations_shape.png",
+    "fileName": "monorailstations_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__256__monorailtunnels_shape",
+    "path": "/opengfx2/all/stations__general__256__monorailtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/256/monorailtunnels_shape.png",
+    "fileName": "monorailtunnels_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__256__nonetunnels_shape",
+    "path": "/opengfx2/all/stations__general__256__nonetunnels_shape.png",
+    "sourcePath": "graphics/stations/general/256/nonetunnels_shape.png",
+    "fileName": "nonetunnels_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__256__raildepots_shape",
+    "path": "/opengfx2/all/stations__general__256__raildepots_shape.png",
+    "sourcePath": "graphics/stations/general/256/raildepots_shape.png",
+    "fileName": "raildepots_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__256__railstations_shape",
+    "path": "/opengfx2/all/stations__general__256__railstations_shape.png",
+    "sourcePath": "graphics/stations/general/256/railstations_shape.png",
+    "fileName": "railstations_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__256__railtunnels_shape",
+    "path": "/opengfx2/all/stations__general__256__railtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/256/railtunnels_shape.png",
+    "fileName": "railtunnels_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__256__roaddepots_shape",
+    "path": "/opengfx2/all/stations__general__256__roaddepots_shape.png",
+    "sourcePath": "graphics/stations/general/256/roaddepots_shape.png",
+    "fileName": "roaddepots_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__256__roadstops_shape",
+    "path": "/opengfx2/all/stations__general__256__roadstops_shape.png",
+    "sourcePath": "graphics/stations/general/256/roadstops_shape.png",
+    "fileName": "roadstops_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__256__roadtunnels_shape",
+    "path": "/opengfx2/all/stations__general__256__roadtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/256/roadtunnels_shape.png",
+    "fileName": "roadtunnels_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__256__roadwaypoint_shape",
+    "path": "/opengfx2/all/stations__general__256__roadwaypoint_shape.png",
+    "sourcePath": "graphics/stations/general/256/roadwaypoint_shape.png",
+    "fileName": "roadwaypoint_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__docksandlocks_overlaynormal",
+    "path": "/opengfx2/all/stations__general__64__docksandlocks_overlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/docksandlocks_overlaynormal.png",
+    "fileName": "docksandlocks_overlaynormal.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__docksandlocks_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__docksandlocks_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/docksandlocks_overlayshading.png",
+    "fileName": "docksandlocks_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__docksandlocks_sealevel_overlaynormal",
+    "path": "/opengfx2/all/stations__general__64__docksandlocks_sealevel_overlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/docksandlocks_sealevel_overlaynormal.png",
+    "fileName": "docksandlocks_sealevel_overlaynormal.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__docksandlocks_sealevel_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__docksandlocks_sealevel_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/docksandlocks_sealevel_overlayshading.png",
+    "fileName": "docksandlocks_sealevel_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__docksandlocks_sealevel_shape",
+    "path": "/opengfx2/all/stations__general__64__docksandlocks_sealevel_shape.png",
+    "sourcePath": "graphics/stations/general/64/docksandlocks_sealevel_shape.png",
+    "fileName": "docksandlocks_sealevel_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__docksandlocks_shape",
+    "path": "/opengfx2/all/stations__general__64__docksandlocks_shape.png",
+    "sourcePath": "graphics/stations/general/64/docksandlocks_shape.png",
+    "fileName": "docksandlocks_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__heliport_base_shape",
+    "path": "/opengfx2/all/stations__general__64__heliport_base_shape.png",
+    "sourcePath": "graphics/stations/general/64/heliport_base_shape.png",
+    "fileName": "heliport_base_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__heliport_overlaynormal",
+    "path": "/opengfx2/all/stations__general__64__heliport_overlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/heliport_overlaynormal.png",
+    "fileName": "heliport_overlaynormal.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__heliport_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__heliport_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/heliport_overlayshading.png",
+    "fileName": "heliport_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__heliport_shape",
+    "path": "/opengfx2/all/stations__general__64__heliport_shape.png",
+    "sourcePath": "graphics/stations/general/64/heliport_shape.png",
+    "fileName": "heliport_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevdepots_overlaynormal",
+    "path": "/opengfx2/all/stations__general__64__maglevdepots_overlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/maglevdepots_overlaynormal.png",
+    "fileName": "maglevdepots_overlaynormal.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevdepots_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__maglevdepots_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/maglevdepots_overlayshading.png",
+    "fileName": "maglevdepots_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevdepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__maglevdepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/maglevdepots_regionmask.png",
+    "fileName": "maglevdepots_regionmask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevdepots_shape",
+    "path": "/opengfx2/all/stations__general__64__maglevdepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/maglevdepots_shape.png",
+    "fileName": "maglevdepots_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevstations_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__maglevstations_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/maglevstations_overlayshading.png",
+    "fileName": "maglevstations_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevstations_shape",
+    "path": "/opengfx2/all/stations__general__64__maglevstations_shape.png",
+    "sourcePath": "graphics/stations/general/64/maglevstations_shape.png",
+    "fileName": "maglevstations_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevtunnels_regionmask",
+    "path": "/opengfx2/all/stations__general__64__maglevtunnels_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/maglevtunnels_regionmask.png",
+    "fileName": "maglevtunnels_regionmask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevtunnels_regions_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__maglevtunnels_regions_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/maglevtunnels_regions_overlayshading.png",
+    "fileName": "maglevtunnels_regions_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevtunnels_shape",
+    "path": "/opengfx2/all/stations__general__64__maglevtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/64/maglevtunnels_shape.png",
+    "fileName": "maglevtunnels_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__maglevwaypoint_shape",
+    "path": "/opengfx2/all/stations__general__64__maglevwaypoint_shape.png",
+    "sourcePath": "graphics/stations/general/64/maglevwaypoint_shape.png",
+    "fileName": "maglevwaypoint_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairdepots_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__modernairdepots_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/modernairdepots_overlayshading.png",
+    "fileName": "modernairdepots_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairdepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__modernairdepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/modernairdepots_regionmask.png",
+    "fileName": "modernairdepots_regionmask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairdepots_shape",
+    "path": "/opengfx2/all/stations__general__64__modernairdepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/modernairdepots_shape.png",
+    "fileName": "modernairdepots_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairdepots_toylandoverlaynormal",
+    "path": "/opengfx2/all/stations__general__64__modernairdepots_toylandoverlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/modernairdepots_toylandoverlaynormal.png",
+    "fileName": "modernairdepots_toylandoverlaynormal.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairport_overlaynormal",
+    "path": "/opengfx2/all/stations__general__64__modernairport_overlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/modernairport_overlaynormal.png",
+    "fileName": "modernairport_overlaynormal.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairport_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__modernairport_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/modernairport_overlayshading.png",
+    "fileName": "modernairport_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairport_shape",
+    "path": "/opengfx2/all/stations__general__64__modernairport_shape.png",
+    "sourcePath": "graphics/stations/general/64/modernairport_shape.png",
+    "fileName": "modernairport_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__modernairport_toylandoverlaynormal",
+    "path": "/opengfx2/all/stations__general__64__modernairport_toylandoverlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/modernairport_toylandoverlaynormal.png",
+    "fileName": "modernairport_toylandoverlaynormal.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__monoraildepots_overlaynormal",
+    "path": "/opengfx2/all/stations__general__64__monoraildepots_overlaynormal.png",
+    "sourcePath": "graphics/stations/general/64/monoraildepots_overlaynormal.png",
+    "fileName": "monoraildepots_overlaynormal.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monoraildepots_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__monoraildepots_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/monoraildepots_overlayshading.png",
+    "fileName": "monoraildepots_overlayshading.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monoraildepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__monoraildepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/monoraildepots_regionmask.png",
+    "fileName": "monoraildepots_regionmask.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monoraildepots_shape",
+    "path": "/opengfx2/all/stations__general__64__monoraildepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/monoraildepots_shape.png",
+    "fileName": "monoraildepots_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monorailstations_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__monorailstations_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/monorailstations_overlayshading.png",
+    "fileName": "monorailstations_overlayshading.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monorailstations_shape",
+    "path": "/opengfx2/all/stations__general__64__monorailstations_shape.png",
+    "sourcePath": "graphics/stations/general/64/monorailstations_shape.png",
+    "fileName": "monorailstations_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monorailtunnels_regionmask",
+    "path": "/opengfx2/all/stations__general__64__monorailtunnels_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/monorailtunnels_regionmask.png",
+    "fileName": "monorailtunnels_regionmask.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monorailtunnels_regions_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__monorailtunnels_regions_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/monorailtunnels_regions_overlayshading.png",
+    "fileName": "monorailtunnels_regions_overlayshading.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monorailtunnels_shape",
+    "path": "/opengfx2/all/stations__general__64__monorailtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/64/monorailtunnels_shape.png",
+    "fileName": "monorailtunnels_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__monorailwaypoint_shape",
+    "path": "/opengfx2/all/stations__general__64__monorailwaypoint_shape.png",
+    "sourcePath": "graphics/stations/general/64/monorailwaypoint_shape.png",
+    "fileName": "monorailwaypoint_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__nonetunnels_regionmask",
+    "path": "/opengfx2/all/stations__general__64__nonetunnels_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/nonetunnels_regionmask.png",
+    "fileName": "nonetunnels_regionmask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__nonetunnels_regions_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__nonetunnels_regions_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/nonetunnels_regions_overlayshading.png",
+    "fileName": "nonetunnels_regions_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__nonetunnels_shape",
+    "path": "/opengfx2/all/stations__general__64__nonetunnels_shape.png",
+    "sourcePath": "graphics/stations/general/64/nonetunnels_shape.png",
+    "fileName": "nonetunnels_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairdepots_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__oldairdepots_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/oldairdepots_overlayshading.png",
+    "fileName": "oldairdepots_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairdepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__oldairdepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/oldairdepots_regionmask.png",
+    "fileName": "oldairdepots_regionmask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairdepots_shape",
+    "path": "/opengfx2/all/stations__general__64__oldairdepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/oldairdepots_shape.png",
+    "fileName": "oldairdepots_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairport_multitile_base_shape",
+    "path": "/opengfx2/all/stations__general__64__oldairport_multitile_base_shape.png",
+    "sourcePath": "graphics/stations/general/64/oldairport_multitile_base_shape.png",
+    "fileName": "oldairport_multitile_base_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairport_multitile_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__oldairport_multitile_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/oldairport_multitile_overlayshading.png",
+    "fileName": "oldairport_multitile_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairport_multitile_shape",
+    "path": "/opengfx2/all/stations__general__64__oldairport_multitile_shape.png",
+    "sourcePath": "graphics/stations/general/64/oldairport_multitile_shape.png",
+    "fileName": "oldairport_multitile_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairport_multitile_tilemask",
+    "path": "/opengfx2/all/stations__general__64__oldairport_multitile_tilemask.png",
+    "sourcePath": "graphics/stations/general/64/oldairport_multitile_tilemask.png",
+    "fileName": "oldairport_multitile_tilemask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairport_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__oldairport_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/oldairport_overlayshading.png",
+    "fileName": "oldairport_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__oldairport_shape",
+    "path": "/opengfx2/all/stations__general__64__oldairport_shape.png",
+    "sourcePath": "graphics/stations/general/64/oldairport_shape.png",
+    "fileName": "oldairport_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__raildepots_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__raildepots_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/raildepots_overlayshading.png",
+    "fileName": "raildepots_overlayshading.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__raildepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__raildepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/raildepots_regionmask.png",
+    "fileName": "raildepots_regionmask.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__raildepots_shape",
+    "path": "/opengfx2/all/stations__general__64__raildepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/raildepots_shape.png",
+    "fileName": "raildepots_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__railstations_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__railstations_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/railstations_overlayshading.png",
+    "fileName": "railstations_overlayshading.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__railstations_shape",
+    "path": "/opengfx2/all/stations__general__64__railstations_shape.png",
+    "sourcePath": "graphics/stations/general/64/railstations_shape.png",
+    "fileName": "railstations_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__railtunnels_regionmask",
+    "path": "/opengfx2/all/stations__general__64__railtunnels_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/railtunnels_regionmask.png",
+    "fileName": "railtunnels_regionmask.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__railtunnels_regions_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__railtunnels_regions_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/railtunnels_regions_overlayshading.png",
+    "fileName": "railtunnels_regions_overlayshading.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__railtunnels_shape",
+    "path": "/opengfx2/all/stations__general__64__railtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/64/railtunnels_shape.png",
+    "fileName": "railtunnels_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__railwaypoint_shape",
+    "path": "/opengfx2/all/stations__general__64__railwaypoint_shape.png",
+    "sourcePath": "graphics/stations/general/64/railwaypoint_shape.png",
+    "fileName": "railwaypoint_shape.png",
+    "category": "rail"
+  },
+  {
+    "key": "stations__general__64__roaddepots_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__roaddepots_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/roaddepots_overlayshading.png",
+    "fileName": "roaddepots_overlayshading.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__roaddepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__roaddepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/roaddepots_regionmask.png",
+    "fileName": "roaddepots_regionmask.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__roaddepots_shape",
+    "path": "/opengfx2/all/stations__general__64__roaddepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/roaddepots_shape.png",
+    "fileName": "roaddepots_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__roadstops_shape",
+    "path": "/opengfx2/all/stations__general__64__roadstops_shape.png",
+    "sourcePath": "graphics/stations/general/64/roadstops_shape.png",
+    "fileName": "roadstops_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__roadtunnels_regionmask",
+    "path": "/opengfx2/all/stations__general__64__roadtunnels_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/roadtunnels_regionmask.png",
+    "fileName": "roadtunnels_regionmask.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__roadtunnels_shape",
+    "path": "/opengfx2/all/stations__general__64__roadtunnels_shape.png",
+    "sourcePath": "graphics/stations/general/64/roadtunnels_shape.png",
+    "fileName": "roadtunnels_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__roadwaypoint_shape",
+    "path": "/opengfx2/all/stations__general__64__roadwaypoint_shape.png",
+    "sourcePath": "graphics/stations/general/64/roadwaypoint_shape.png",
+    "fileName": "roadwaypoint_shape.png",
+    "category": "road"
+  },
+  {
+    "key": "stations__general__64__shipdepots_overlayshading",
+    "path": "/opengfx2/all/stations__general__64__shipdepots_overlayshading.png",
+    "sourcePath": "graphics/stations/general/64/shipdepots_overlayshading.png",
+    "fileName": "shipdepots_overlayshading.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__shipdepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__shipdepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/shipdepots_regionmask.png",
+    "fileName": "shipdepots_regionmask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__shipdepots_shape",
+    "path": "/opengfx2/all/stations__general__64__shipdepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/shipdepots_shape.png",
+    "fileName": "shipdepots_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__tramdepots_regionmask",
+    "path": "/opengfx2/all/stations__general__64__tramdepots_regionmask.png",
+    "sourcePath": "graphics/stations/general/64/tramdepots_regionmask.png",
+    "fileName": "tramdepots_regionmask.png",
+    "category": "station"
+  },
+  {
+    "key": "stations__general__64__tramdepots_shape",
+    "path": "/opengfx2/all/stations__general__64__tramdepots_shape.png",
+    "sourcePath": "graphics/stations/general/64/tramdepots_shape.png",
+    "fileName": "tramdepots_shape.png",
+    "category": "station"
+  },
+  {
+    "key": "terrain__64__arctic_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__arctic_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/arctic_groundtiles_32bpp.png",
+    "fileName": "arctic_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__arctic_groundtiles_deserttransition_32bpp",
+    "path": "/opengfx2/all/terrain__64__arctic_groundtiles_deserttransition_32bpp.png",
+    "sourcePath": "graphics/terrain/64/arctic_groundtiles_deserttransition_32bpp.png",
+    "fileName": "arctic_groundtiles_deserttransition_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__arctic_groundtiles_rocks_32bpp",
+    "path": "/opengfx2/all/terrain__64__arctic_groundtiles_rocks_32bpp.png",
+    "sourcePath": "graphics/terrain/64/arctic_groundtiles_rocks_32bpp.png",
+    "fileName": "arctic_groundtiles_rocks_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__arctic_groundtiles_rocks_alt_32bpp",
+    "path": "/opengfx2/all/terrain__64__arctic_groundtiles_rocks_alt_32bpp.png",
+    "sourcePath": "graphics/terrain/64/arctic_groundtiles_rocks_alt_32bpp.png",
+    "fileName": "arctic_groundtiles_rocks_alt_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__arctic_groundtiles_rough_32bpp",
+    "path": "/opengfx2/all/terrain__64__arctic_groundtiles_rough_32bpp.png",
+    "sourcePath": "graphics/terrain/64/arctic_groundtiles_rough_32bpp.png",
+    "fileName": "arctic_groundtiles_rough_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__arctic_groundtiles_snow_32bpp",
+    "path": "/opengfx2/all/terrain__64__arctic_groundtiles_snow_32bpp.png",
+    "sourcePath": "graphics/terrain/64/arctic_groundtiles_snow_32bpp.png",
+    "fileName": "arctic_groundtiles_snow_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__arctic_groundtiles_snowtransition_32bpp",
+    "path": "/opengfx2/all/terrain__64__arctic_groundtiles_snowtransition_32bpp.png",
+    "sourcePath": "graphics/terrain/64/arctic_groundtiles_snowtransition_32bpp.png",
+    "fileName": "arctic_groundtiles_snowtransition_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__bareground_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__bareground_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/bareground_groundtiles_32bpp.png",
+    "fileName": "bareground_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__desert_gtdev_duneslopes_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__desert_gtdev_duneslopes_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/desert_gtdev_duneslopes_32bpp.png",
+    "fileName": "desert_gtdev_duneslopes_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__farm_gtdev_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__farm_gtdev_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/farm_gtdev_32bpp.png",
+    "fileName": "farm_gtdev_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__shore_gtdev_blendgradient_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__shore_gtdev_blendgradient_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/shore_gtdev_blendgradient_32bpp.png",
+    "fileName": "shore_gtdev_blendgradient_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__shore_gtdev_blendgradient_32bpp_whitetransp",
+    "path": "/opengfx2/all/terrain__64__blends__shore_gtdev_blendgradient_32bpp_whitetransp.png",
+    "sourcePath": "graphics/terrain/64/blends/shore_gtdev_blendgradient_32bpp_whitetransp.png",
+    "fileName": "shore_gtdev_blendgradient_32bpp_whitetransp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__snow_gtdev_finalblend_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__snow_gtdev_finalblend_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/snow_gtdev_finalblend_32bpp.png",
+    "fileName": "snow_gtdev_finalblend_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__snow_gtdev_finalblend2_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__snow_gtdev_finalblend2_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/snow_gtdev_finalblend2_32bpp.png",
+    "fileName": "snow_gtdev_finalblend2_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__snow_gtdev_gradientclouds_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__snow_gtdev_gradientclouds_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/snow_gtdev_gradientclouds_32bpp.png",
+    "fileName": "snow_gtdev_gradientclouds_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__snow_gtdev_gradientclouds2_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__snow_gtdev_gradientclouds2_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/snow_gtdev_gradientclouds2_32bpp.png",
+    "fileName": "snow_gtdev_gradientclouds2_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__snow_gtdev_tilingclouds_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__snow_gtdev_tilingclouds_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/snow_gtdev_tilingclouds_32bpp.png",
+    "fileName": "snow_gtdev_tilingclouds_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__blends__solidcolour_32bpp",
+    "path": "/opengfx2/all/terrain__64__blends__solidcolour_32bpp.png",
+    "sourcePath": "graphics/terrain/64/blends/solidcolour_32bpp.png",
+    "fileName": "solidcolour_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__farm_fences_32bpp",
+    "path": "/opengfx2/all/terrain__64__farm_fences_32bpp.png",
+    "sourcePath": "graphics/terrain/64/farm_fences_32bpp.png",
+    "fileName": "farm_fences_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__farm_fences_snow_32bpp",
+    "path": "/opengfx2/all/terrain__64__farm_fences_snow_32bpp.png",
+    "sourcePath": "graphics/terrain/64/farm_fences_snow_32bpp.png",
+    "fileName": "farm_fences_snow_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__farm_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__farm_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/farm_groundtiles_32bpp.png",
+    "fileName": "farm_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__farm_gtdev",
+    "path": "/opengfx2/all/terrain__64__farm_gtdev.png",
+    "sourcePath": "graphics/terrain/64/farm_gtdev.png",
+    "fileName": "farm_gtdev.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_blacktile_32bpp",
+    "path": "/opengfx2/all/terrain__64__general_blacktile_32bpp.png",
+    "sourcePath": "graphics/terrain/64/general_blacktile_32bpp.png",
+    "fileName": "general_blacktile_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_bridgetiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__general_bridgetiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/general_bridgetiles_32bpp.png",
+    "fileName": "general_bridgetiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_concretetiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__general_concretetiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/general_concretetiles_32bpp.png",
+    "fileName": "general_concretetiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_rockoverlay_alt_32bpp",
+    "path": "/opengfx2/all/terrain__64__general_rockoverlay_alt_32bpp.png",
+    "sourcePath": "graphics/terrain/64/general_rockoverlay_alt_32bpp.png",
+    "fileName": "general_rockoverlay_alt_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_rockoverlay_alt_palmask",
+    "path": "/opengfx2/all/terrain__64__general_rockoverlay_alt_palmask.png",
+    "sourcePath": "graphics/terrain/64/general_rockoverlay_alt_palmask.png",
+    "fileName": "general_rockoverlay_alt_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_rockoverlay_alt_snowtransition_32bpp",
+    "path": "/opengfx2/all/terrain__64__general_rockoverlay_alt_snowtransition_32bpp.png",
+    "sourcePath": "graphics/terrain/64/general_rockoverlay_alt_snowtransition_32bpp.png",
+    "fileName": "general_rockoverlay_alt_snowtransition_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_rockoverlay_alt_snowtransition_palmask",
+    "path": "/opengfx2/all/terrain__64__general_rockoverlay_alt_snowtransition_palmask.png",
+    "sourcePath": "graphics/terrain/64/general_rockoverlay_alt_snowtransition_palmask.png",
+    "fileName": "general_rockoverlay_alt_snowtransition_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_rockoverlay_coasts_alt_32bpp",
+    "path": "/opengfx2/all/terrain__64__general_rockoverlay_coasts_alt_32bpp.png",
+    "sourcePath": "graphics/terrain/64/general_rockoverlay_coasts_alt_32bpp.png",
+    "fileName": "general_rockoverlay_coasts_alt_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__general_rockoverlay_coasts_alt_palmask",
+    "path": "/opengfx2/all/terrain__64__general_rockoverlay_coasts_alt_palmask.png",
+    "sourcePath": "graphics/terrain/64/general_rockoverlay_coasts_alt_palmask.png",
+    "fileName": "general_rockoverlay_coasts_alt_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__groundtiles_gridlines",
+    "path": "/opengfx2/all/terrain__64__groundtiles_gridlines.png",
+    "sourcePath": "graphics/terrain/64/groundtiles_gridlines.png",
+    "fileName": "groundtiles_gridlines.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__ref_zaopt_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__ref_zaopt_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/ref_zaopt_groundtiles_32bpp.png",
+    "fileName": "ref_zaopt_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__shorelines_cornermarkers",
+    "path": "/opengfx2/all/terrain__64__shorelines_cornermarkers.png",
+    "sourcePath": "graphics/terrain/64/shorelines_cornermarkers.png",
+    "fileName": "shorelines_cornermarkers.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__shorelines_overlaynormal",
+    "path": "/opengfx2/all/terrain__64__shorelines_overlaynormal.png",
+    "sourcePath": "graphics/terrain/64/shorelines_overlaynormal.png",
+    "fileName": "shorelines_overlaynormal.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__shorelines_overlaynormal_old",
+    "path": "/opengfx2/all/terrain__64__shorelines_overlaynormal_old.png",
+    "sourcePath": "graphics/terrain/64/shorelines_overlaynormal_old.png",
+    "fileName": "shorelines_overlaynormal_old.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__shorelines_overlayshading",
+    "path": "/opengfx2/all/terrain__64__shorelines_overlayshading.png",
+    "sourcePath": "graphics/terrain/64/shorelines_overlayshading.png",
+    "fileName": "shorelines_overlayshading.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__shorelines_toyland_cornermarkers",
+    "path": "/opengfx2/all/terrain__64__shorelines_toyland_cornermarkers.png",
+    "sourcePath": "graphics/terrain/64/shorelines_toyland_cornermarkers.png",
+    "fileName": "shorelines_toyland_cornermarkers.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__shorelines_toyland_overlaynormal",
+    "path": "/opengfx2/all/terrain__64__shorelines_toyland_overlaynormal.png",
+    "sourcePath": "graphics/terrain/64/shorelines_toyland_overlaynormal.png",
+    "fileName": "shorelines_toyland_overlaynormal.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_forest_groundtile_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_forest_groundtile_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_forest_groundtile_32bpp.png",
+    "fileName": "temperate_forest_groundtile_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_groundtiles_32bpp.png",
+    "fileName": "temperate_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_groundtiles_deserttransition_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_groundtiles_deserttransition_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_groundtiles_deserttransition_32bpp.png",
+    "fileName": "temperate_groundtiles_deserttransition_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_groundtiles_rocks_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_groundtiles_rocks_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_groundtiles_rocks_32bpp.png",
+    "fileName": "temperate_groundtiles_rocks_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_groundtiles_rocks_alt_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_groundtiles_rocks_alt_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_groundtiles_rocks_alt_32bpp.png",
+    "fileName": "temperate_groundtiles_rocks_alt_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_groundtiles_rough_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_groundtiles_rough_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_groundtiles_rough_32bpp.png",
+    "fileName": "temperate_groundtiles_rough_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_groundtiles_snowtransition_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_groundtiles_snowtransition_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_groundtiles_snowtransition_32bpp.png",
+    "fileName": "temperate_groundtiles_snowtransition_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_park_32bpp",
+    "path": "/opengfx2/all/terrain__64__temperate_park_32bpp.png",
+    "sourcePath": "graphics/terrain/64/temperate_park_32bpp.png",
+    "fileName": "temperate_park_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__temperate_park_palmask",
+    "path": "/opengfx2/all/terrain__64__temperate_park_palmask.png",
+    "sourcePath": "graphics/terrain/64/temperate_park_palmask.png",
+    "fileName": "temperate_park_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_alt_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_alt_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_alt_groundtiles_32bpp.png",
+    "fileName": "toyland_alt_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_alt_groundtiles_rocks_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_alt_groundtiles_rocks_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_alt_groundtiles_rocks_32bpp.png",
+    "fileName": "toyland_alt_groundtiles_rocks_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_alt_shoretiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_alt_shoretiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_alt_shoretiles_32bpp.png",
+    "fileName": "toyland_alt_shoretiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_bouyonly_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_bouyonly_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_bouyonly_32bpp.png",
+    "fileName": "toyland_bouyonly_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_bouyonly_palmask",
+    "path": "/opengfx2/all/terrain__64__toyland_bouyonly_palmask.png",
+    "sourcePath": "graphics/terrain/64/toyland_bouyonly_palmask.png",
+    "fileName": "toyland_bouyonly_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_concretetiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_concretetiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_concretetiles_32bpp.png",
+    "fileName": "toyland_concretetiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_groundtiles_32bpp.png",
+    "fileName": "toyland_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_groundtiles_rocks_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_groundtiles_rocks_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_groundtiles_rocks_32bpp.png",
+    "fileName": "toyland_groundtiles_rocks_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_groundtiles_rough_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_groundtiles_rough_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_groundtiles_rough_32bpp.png",
+    "fileName": "toyland_groundtiles_rough_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_handytiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_handytiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_handytiles_32bpp.png",
+    "fileName": "toyland_handytiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_rivertiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_rivertiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_rivertiles_32bpp.png",
+    "fileName": "toyland_rivertiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_rivertiles_cbt32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_rivertiles_cbt32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_rivertiles_cbt32bpp.png",
+    "fileName": "toyland_rivertiles_cbt32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_rivertiles_palmask",
+    "path": "/opengfx2/all/terrain__64__toyland_rivertiles_palmask.png",
+    "sourcePath": "graphics/terrain/64/toyland_rivertiles_palmask.png",
+    "fileName": "toyland_rivertiles_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_shoretiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_shoretiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_shoretiles_32bpp.png",
+    "fileName": "toyland_shoretiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_towntiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_towntiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_towntiles_32bpp.png",
+    "fileName": "toyland_towntiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_watertile_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_watertile_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_watertile_32bpp.png",
+    "fileName": "toyland_watertile_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_watertile_palmask",
+    "path": "/opengfx2/all/terrain__64__toyland_watertile_palmask.png",
+    "sourcePath": "graphics/terrain/64/toyland_watertile_palmask.png",
+    "fileName": "toyland_watertile_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_watertiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_watertiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_watertiles_32bpp.png",
+    "fileName": "toyland_watertiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_watertiles_cornermarkers",
+    "path": "/opengfx2/all/terrain__64__toyland_watertiles_cornermarkers.png",
+    "sourcePath": "graphics/terrain/64/toyland_watertiles_cornermarkers.png",
+    "fileName": "toyland_watertiles_cornermarkers.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_watertiles_palmask",
+    "path": "/opengfx2/all/terrain__64__toyland_watertiles_palmask.png",
+    "sourcePath": "graphics/terrain/64/toyland_watertiles_palmask.png",
+    "fileName": "toyland_watertiles_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__toyland_yellowtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__toyland_yellowtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/toyland_yellowtiles_32bpp.png",
+    "fileName": "toyland_yellowtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_32bpp.png",
+    "fileName": "tropical_groundtiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_desert_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_desert_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_desert_32bpp.png",
+    "fileName": "tropical_groundtiles_desert_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_desertalt_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_desertalt_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_desertalt_32bpp.png",
+    "fileName": "tropical_groundtiles_desertalt_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_deserttransition_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_deserttransition_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_deserttransition_32bpp.png",
+    "fileName": "tropical_groundtiles_deserttransition_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_deserttransitionalt_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_deserttransitionalt_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_deserttransitionalt_32bpp.png",
+    "fileName": "tropical_groundtiles_deserttransitionalt_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_rocks_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_rocks_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_rocks_32bpp.png",
+    "fileName": "tropical_groundtiles_rocks_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_rocks_alt_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_rocks_alt_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_rocks_alt_32bpp.png",
+    "fileName": "tropical_groundtiles_rocks_alt_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_rough_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_rough_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_rough_32bpp.png",
+    "fileName": "tropical_groundtiles_rough_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__tropical_groundtiles_snowtransition_32bpp",
+    "path": "/opengfx2/all/terrain__64__tropical_groundtiles_snowtransition_32bpp.png",
+    "sourcePath": "graphics/terrain/64/tropical_groundtiles_snowtransition_32bpp.png",
+    "fileName": "tropical_groundtiles_snowtransition_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_bouy_32bpp",
+    "path": "/opengfx2/all/terrain__64__universal_bouy_32bpp.png",
+    "sourcePath": "graphics/terrain/64/universal_bouy_32bpp.png",
+    "fileName": "universal_bouy_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_bouy_palmask",
+    "path": "/opengfx2/all/terrain__64__universal_bouy_palmask.png",
+    "sourcePath": "graphics/terrain/64/universal_bouy_palmask.png",
+    "fileName": "universal_bouy_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_bouyonly_32bpp",
+    "path": "/opengfx2/all/terrain__64__universal_bouyonly_32bpp.png",
+    "sourcePath": "graphics/terrain/64/universal_bouyonly_32bpp.png",
+    "fileName": "universal_bouyonly_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_bouyonly_palmask",
+    "path": "/opengfx2/all/terrain__64__universal_bouyonly_palmask.png",
+    "sourcePath": "graphics/terrain/64/universal_bouyonly_palmask.png",
+    "fileName": "universal_bouyonly_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_rivertiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__universal_rivertiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/universal_rivertiles_32bpp.png",
+    "fileName": "universal_rivertiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_rivertiles_cbt32bpp",
+    "path": "/opengfx2/all/terrain__64__universal_rivertiles_cbt32bpp.png",
+    "sourcePath": "graphics/terrain/64/universal_rivertiles_cbt32bpp.png",
+    "fileName": "universal_rivertiles_cbt32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_rivertiles_palmask",
+    "path": "/opengfx2/all/terrain__64__universal_rivertiles_palmask.png",
+    "sourcePath": "graphics/terrain/64/universal_rivertiles_palmask.png",
+    "fileName": "universal_rivertiles_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_watertile_32bpp",
+    "path": "/opengfx2/all/terrain__64__universal_watertile_32bpp.png",
+    "sourcePath": "graphics/terrain/64/universal_watertile_32bpp.png",
+    "fileName": "universal_watertile_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_watertile_palmask",
+    "path": "/opengfx2/all/terrain__64__universal_watertile_palmask.png",
+    "sourcePath": "graphics/terrain/64/universal_watertile_palmask.png",
+    "fileName": "universal_watertile_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_watertiles_32bpp",
+    "path": "/opengfx2/all/terrain__64__universal_watertiles_32bpp.png",
+    "sourcePath": "graphics/terrain/64/universal_watertiles_32bpp.png",
+    "fileName": "universal_watertiles_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_watertiles_cbt32bpp",
+    "path": "/opengfx2/all/terrain__64__universal_watertiles_cbt32bpp.png",
+    "sourcePath": "graphics/terrain/64/universal_watertiles_cbt32bpp.png",
+    "fileName": "universal_watertiles_cbt32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universal_watertiles_palmask",
+    "path": "/opengfx2/all/terrain__64__universal_watertiles_palmask.png",
+    "sourcePath": "graphics/terrain/64/universal_watertiles_palmask.png",
+    "fileName": "universal_watertiles_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universalnocc_watertile_32bpp",
+    "path": "/opengfx2/all/terrain__64__universalnocc_watertile_32bpp.png",
+    "sourcePath": "graphics/terrain/64/universalnocc_watertile_32bpp.png",
+    "fileName": "universalnocc_watertile_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universalnocc_watertile_cbt32bpp",
+    "path": "/opengfx2/all/terrain__64__universalnocc_watertile_cbt32bpp.png",
+    "sourcePath": "graphics/terrain/64/universalnocc_watertile_cbt32bpp.png",
+    "fileName": "universalnocc_watertile_cbt32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universalnocc_watertile_gridline_32bpp",
+    "path": "/opengfx2/all/terrain__64__universalnocc_watertile_gridline_32bpp.png",
+    "sourcePath": "graphics/terrain/64/universalnocc_watertile_gridline_32bpp.png",
+    "fileName": "universalnocc_watertile_gridline_32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universalnocc_watertile_gridline_cbt32bpp",
+    "path": "/opengfx2/all/terrain__64__universalnocc_watertile_gridline_cbt32bpp.png",
+    "sourcePath": "graphics/terrain/64/universalnocc_watertile_gridline_cbt32bpp.png",
+    "fileName": "universalnocc_watertile_gridline_cbt32bpp.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universalnocc_watertile_gridline_palmask",
+    "path": "/opengfx2/all/terrain__64__universalnocc_watertile_gridline_palmask.png",
+    "sourcePath": "graphics/terrain/64/universalnocc_watertile_gridline_palmask.png",
+    "fileName": "universalnocc_watertile_gridline_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__universalnocc_watertile_palmask",
+    "path": "/opengfx2/all/terrain__64__universalnocc_watertile_palmask.png",
+    "sourcePath": "graphics/terrain/64/universalnocc_watertile_palmask.png",
+    "fileName": "universalnocc_watertile_palmask.png",
+    "category": "terrain"
+  },
+  {
+    "key": "terrain__64__watertiles_cornermarkers",
+    "path": "/opengfx2/all/terrain__64__watertiles_cornermarkers.png",
+    "sourcePath": "graphics/terrain/64/watertiles_cornermarkers.png",
+    "fileName": "watertiles_cornermarkers.png",
+    "category": "terrain"
+  },
+  {
+    "key": "towns__arctic__64__1x2_tallofficeblock_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__1x2_tallofficeblock_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/1x2_tallofficeblock_base_shape.png",
+    "fileName": "1x2_tallofficeblock_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__1x2_tallofficeblock_shape",
+    "path": "/opengfx2/all/towns__arctic__64__1x2_tallofficeblock_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/1x2_tallofficeblock_shape.png",
+    "fileName": "1x2_tallofficeblock_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__1x2_tallofficeblock_tilemask",
+    "path": "/opengfx2/all/towns__arctic__64__1x2_tallofficeblock_tilemask.png",
+    "sourcePath": "graphics/towns/arctic/64/1x2_tallofficeblock_tilemask.png",
+    "fileName": "1x2_tallofficeblock_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__2x1_hotel_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__2x1_hotel_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/2x1_hotel_base_shape.png",
+    "fileName": "2x1_hotel_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__2x1_hotel_overlayshading",
+    "path": "/opengfx2/all/towns__arctic__64__2x1_hotel_overlayshading.png",
+    "sourcePath": "graphics/towns/arctic/64/2x1_hotel_overlayshading.png",
+    "fileName": "2x1_hotel_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__2x1_hotel_shape",
+    "path": "/opengfx2/all/towns__arctic__64__2x1_hotel_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/2x1_hotel_shape.png",
+    "fileName": "2x1_hotel_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__2x1_hotel_tilemask",
+    "path": "/opengfx2/all/towns__arctic__64__2x1_hotel_tilemask.png",
+    "sourcePath": "graphics/towns/arctic/64/2x1_hotel_tilemask.png",
+    "fileName": "2x1_hotel_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__church_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__church_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/church_base_shape.png",
+    "fileName": "church_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__church_overlayshading",
+    "path": "/opengfx2/all/towns__arctic__64__church_overlayshading.png",
+    "sourcePath": "graphics/towns/arctic/64/church_overlayshading.png",
+    "fileName": "church_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__church_shape",
+    "path": "/opengfx2/all/towns__arctic__64__church_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/church_shape.png",
+    "fileName": "church_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__houses_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__houses_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/houses_base_shape.png",
+    "fileName": "houses_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__houses_overlayshading",
+    "path": "/opengfx2/all/towns__arctic__64__houses_overlayshading.png",
+    "sourcePath": "graphics/towns/arctic/64/houses_overlayshading.png",
+    "fileName": "houses_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__houses_shape",
+    "path": "/opengfx2/all/towns__arctic__64__houses_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/houses_shape.png",
+    "fileName": "houses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__hqs_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__hqs_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/hqs_base_shape.png",
+    "fileName": "hqs_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__largehouses_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__largehouses_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/largehouses_base_shape.png",
+    "fileName": "largehouses_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__largehouses_shape",
+    "path": "/opengfx2/all/towns__arctic__64__largehouses_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/largehouses_shape.png",
+    "fileName": "largehouses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__largeofficeblock_overlayshading",
+    "path": "/opengfx2/all/towns__arctic__64__largeofficeblock_overlayshading.png",
+    "sourcePath": "graphics/towns/arctic/64/largeofficeblock_overlayshading.png",
+    "fileName": "largeofficeblock_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__largeofficeblock_shape",
+    "path": "/opengfx2/all/towns__arctic__64__largeofficeblock_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/largeofficeblock_shape.png",
+    "fileName": "largeofficeblock_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__shopsandoffices_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__shopsandoffices_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/shopsandoffices_base_shape.png",
+    "fileName": "shopsandoffices_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__shopsandoffices_overlaynormal",
+    "path": "/opengfx2/all/towns__arctic__64__shopsandoffices_overlaynormal.png",
+    "sourcePath": "graphics/towns/arctic/64/shopsandoffices_overlaynormal.png",
+    "fileName": "shopsandoffices_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__shopsandoffices_overlayshading",
+    "path": "/opengfx2/all/towns__arctic__64__shopsandoffices_overlayshading.png",
+    "sourcePath": "graphics/towns/arctic/64/shopsandoffices_overlayshading.png",
+    "fileName": "shopsandoffices_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__shopsandoffices_shape",
+    "path": "/opengfx2/all/towns__arctic__64__shopsandoffices_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/shopsandoffices_shape.png",
+    "fileName": "shopsandoffices_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__tallofficeblock_base_shape",
+    "path": "/opengfx2/all/towns__arctic__64__tallofficeblock_base_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/tallofficeblock_base_shape.png",
+    "fileName": "tallofficeblock_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__tallofficeblock_overlayshading",
+    "path": "/opengfx2/all/towns__arctic__64__tallofficeblock_overlayshading.png",
+    "sourcePath": "graphics/towns/arctic/64/tallofficeblock_overlayshading.png",
+    "fileName": "tallofficeblock_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__arctic__64__tallofficeblock_shape",
+    "path": "/opengfx2/all/towns__arctic__64__tallofficeblock_shape.png",
+    "sourcePath": "graphics/towns/arctic/64/tallofficeblock_shape.png",
+    "fileName": "tallofficeblock_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__blender__256__1_shape",
+    "path": "/opengfx2/all/towns__blender__256__1_shape.png",
+    "sourcePath": "graphics/towns/blender/256/1_shape.png",
+    "fileName": "1_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__blender__256__2_shape",
+    "path": "/opengfx2/all/towns__blender__256__2_shape.png",
+    "sourcePath": "graphics/towns/blender/256/2_shape.png",
+    "fileName": "2_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__streetfurniture__64__town_lamp_32bpp",
+    "path": "/opengfx2/all/towns__streetfurniture__64__town_lamp_32bpp.png",
+    "sourcePath": "graphics/towns/streetfurniture/64/town_lamp_32bpp.png",
+    "fileName": "town_lamp_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "towns__streetfurniture__64__town_lamp_toyland_32bpp",
+    "path": "/opengfx2/all/towns__streetfurniture__64__town_lamp_toyland_32bpp.png",
+    "sourcePath": "graphics/towns/streetfurniture/64/town_lamp_toyland_32bpp.png",
+    "fileName": "town_lamp_toyland_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "towns__streetfurniture__64__town_tree_32bpp",
+    "path": "/opengfx2/all/towns__streetfurniture__64__town_tree_32bpp.png",
+    "sourcePath": "graphics/towns/streetfurniture/64/town_tree_32bpp.png",
+    "fileName": "town_tree_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "towns__temperate__256__2x1_hotel_shape",
+    "path": "/opengfx2/all/towns__temperate__256__2x1_hotel_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/2x1_hotel_shape.png",
+    "fileName": "2x1_hotel_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__bungalow_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__bungalow_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/bungalow_base_shape.png",
+    "fileName": "bungalow_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__bungalow_shape",
+    "path": "/opengfx2/all/towns__temperate__256__bungalow_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/bungalow_shape.png",
+    "fileName": "bungalow_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__buyland_shape",
+    "path": "/opengfx2/all/towns__temperate__256__buyland_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/buyland_shape.png",
+    "fileName": "buyland_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__churches_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__churches_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/churches_base_shape.png",
+    "fileName": "churches_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__churches_shape",
+    "path": "/opengfx2/all/towns__temperate__256__churches_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/churches_shape.png",
+    "fileName": "churches_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__cottages_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__cottages_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/cottages_base_shape.png",
+    "fileName": "cottages_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__cottages_shape",
+    "path": "/opengfx2/all/towns__temperate__256__cottages_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/cottages_shape.png",
+    "fileName": "cottages_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__demo_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__demo_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/demo_base_shape.png",
+    "fileName": "demo_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__demo_shape",
+    "path": "/opengfx2/all/towns__temperate__256__demo_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/demo_shape.png",
+    "fileName": "demo_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__flats_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__flats_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/flats_base_shape.png",
+    "fileName": "flats_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__flats_shape",
+    "path": "/opengfx2/all/towns__temperate__256__flats_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/flats_shape.png",
+    "fileName": "flats_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__houses_arranged_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__houses_arranged_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/houses_arranged_base_shape.png",
+    "fileName": "houses_arranged_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__houses_arranged_shape",
+    "path": "/opengfx2/all/towns__temperate__256__houses_arranged_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/houses_arranged_shape.png",
+    "fileName": "houses_arranged_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__houses_shape",
+    "path": "/opengfx2/all/towns__temperate__256__houses_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/houses_shape.png",
+    "fileName": "houses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__lighthouse_shape",
+    "path": "/opengfx2/all/towns__temperate__256__lighthouse_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/lighthouse_shape.png",
+    "fileName": "lighthouse_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__oldhouses_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__oldhouses_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/oldhouses_base_shape.png",
+    "fileName": "oldhouses_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__oldhouses_shape",
+    "path": "/opengfx2/all/towns__temperate__256__oldhouses_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/oldhouses_shape.png",
+    "fileName": "oldhouses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__shopsandoffices_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__shopsandoffices_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/shopsandoffices_base_shape.png",
+    "fileName": "shopsandoffices_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__shopsandoffices_shape",
+    "path": "/opengfx2/all/towns__temperate__256__shopsandoffices_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/shopsandoffices_shape.png",
+    "fileName": "shopsandoffices_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__theatreandcinema_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__theatreandcinema_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/theatreandcinema_base_shape.png",
+    "fileName": "theatreandcinema_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__theatreandcinema_shape",
+    "path": "/opengfx2/all/towns__temperate__256__theatreandcinema_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/theatreandcinema_shape.png",
+    "fileName": "theatreandcinema_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__townhouses_arranged_base_shape",
+    "path": "/opengfx2/all/towns__temperate__256__townhouses_arranged_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/townhouses_arranged_base_shape.png",
+    "fileName": "townhouses_arranged_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__townhouses_arranged_shape",
+    "path": "/opengfx2/all/towns__temperate__256__townhouses_arranged_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/townhouses_arranged_shape.png",
+    "fileName": "townhouses_arranged_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__256__townhouses_shape",
+    "path": "/opengfx2/all/towns__temperate__256__townhouses_shape.png",
+    "sourcePath": "graphics/towns/temperate/256/townhouses_shape.png",
+    "fileName": "townhouses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x1_hotel_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__2x1_hotel_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/2x1_hotel_overlaynormal.png",
+    "fileName": "2x1_hotel_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x1_hotel_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__2x1_hotel_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/2x1_hotel_overlayshading.png",
+    "fileName": "2x1_hotel_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x1_hotel_shape",
+    "path": "/opengfx2/all/towns__temperate__64__2x1_hotel_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/2x1_hotel_shape.png",
+    "fileName": "2x1_hotel_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x1_hotel_tilemask",
+    "path": "/opengfx2/all/towns__temperate__64__2x1_hotel_tilemask.png",
+    "sourcePath": "graphics/towns/temperate/64/2x1_hotel_tilemask.png",
+    "fileName": "2x1_hotel_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_base_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_base_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_base_overlaynormal.png",
+    "fileName": "2x2_mallandstadia_base_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_base_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_base_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_base_overlayshading.png",
+    "fileName": "2x2_mallandstadia_base_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_base_shape.png",
+    "fileName": "2x2_mallandstadia_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_base_tilemask",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_base_tilemask.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_base_tilemask.png",
+    "fileName": "2x2_mallandstadia_base_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_overlaynormal.png",
+    "fileName": "2x2_mallandstadia_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_overlayshading.png",
+    "fileName": "2x2_mallandstadia_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_shape",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_shape.png",
+    "fileName": "2x2_mallandstadia_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__2x2_mallandstadia_tilemask",
+    "path": "/opengfx2/all/towns__temperate__64__2x2_mallandstadia_tilemask.png",
+    "sourcePath": "graphics/towns/temperate/64/2x2_mallandstadia_tilemask.png",
+    "fileName": "2x2_mallandstadia_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__bungalow_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__bungalow_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/bungalow_base_shape.png",
+    "fileName": "bungalow_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__bungalow_shape",
+    "path": "/opengfx2/all/towns__temperate__64__bungalow_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/bungalow_shape.png",
+    "fileName": "bungalow_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__buyland_shape",
+    "path": "/opengfx2/all/towns__temperate__64__buyland_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/buyland_shape.png",
+    "fileName": "buyland_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__churches_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__churches_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/churches_base_shape.png",
+    "fileName": "churches_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__churches_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__churches_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/churches_overlaynormal.png",
+    "fileName": "churches_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__churches_shape",
+    "path": "/opengfx2/all/towns__temperate__64__churches_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/churches_shape.png",
+    "fileName": "churches_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__cottages_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__cottages_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/cottages_base_shape.png",
+    "fileName": "cottages_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__cottages_shape",
+    "path": "/opengfx2/all/towns__temperate__64__cottages_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/cottages_shape.png",
+    "fileName": "cottages_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__demo_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__demo_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/demo_base_shape.png",
+    "fileName": "demo_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__demo_shape",
+    "path": "/opengfx2/all/towns__temperate__64__demo_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/demo_shape.png",
+    "fileName": "demo_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__flats_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__flats_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/flats_base_shape.png",
+    "fileName": "flats_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__flats_shape",
+    "path": "/opengfx2/all/towns__temperate__64__flats_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/flats_shape.png",
+    "fileName": "flats_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__houses_arranged_base_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__houses_arranged_base_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/houses_arranged_base_overlaynormal.png",
+    "fileName": "houses_arranged_base_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__houses_arranged_base_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__houses_arranged_base_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/houses_arranged_base_overlayshading.png",
+    "fileName": "houses_arranged_base_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__houses_arranged_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__houses_arranged_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/houses_arranged_base_shape.png",
+    "fileName": "houses_arranged_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__houses_arranged_shape",
+    "path": "/opengfx2/all/towns__temperate__64__houses_arranged_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/houses_arranged_shape.png",
+    "fileName": "houses_arranged_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__houses_shape",
+    "path": "/opengfx2/all/towns__temperate__64__houses_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/houses_shape.png",
+    "fileName": "houses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__hqs_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__hqs_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/hqs_base_shape.png",
+    "fileName": "hqs_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__hqs_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__hqs_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/hqs_overlaynormal.png",
+    "fileName": "hqs_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__hqs_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__hqs_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/hqs_overlayshading.png",
+    "fileName": "hqs_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__hqs_shape",
+    "path": "/opengfx2/all/towns__temperate__64__hqs_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/hqs_shape.png",
+    "fileName": "hqs_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__hqs_tilemask",
+    "path": "/opengfx2/all/towns__temperate__64__hqs_tilemask.png",
+    "sourcePath": "graphics/towns/temperate/64/hqs_tilemask.png",
+    "fileName": "hqs_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__lighthouse_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__lighthouse_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/lighthouse_overlaynormal.png",
+    "fileName": "lighthouse_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__lighthouse_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__lighthouse_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/lighthouse_overlayshading.png",
+    "fileName": "lighthouse_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__lighthouse_shape",
+    "path": "/opengfx2/all/towns__temperate__64__lighthouse_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/lighthouse_shape.png",
+    "fileName": "lighthouse_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__modernoffice_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__modernoffice_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/modernoffice_base_shape.png",
+    "fileName": "modernoffice_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__modernoffice_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__modernoffice_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/modernoffice_overlayshading.png",
+    "fileName": "modernoffice_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__modernoffice_shape",
+    "path": "/opengfx2/all/towns__temperate__64__modernoffice_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/modernoffice_shape.png",
+    "fileName": "modernoffice_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__officeblocks_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__officeblocks_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/officeblocks_base_shape.png",
+    "fileName": "officeblocks_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__officeblocks_shape",
+    "path": "/opengfx2/all/towns__temperate__64__officeblocks_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/officeblocks_shape.png",
+    "fileName": "officeblocks_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__oldhouses_base_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__oldhouses_base_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/oldhouses_base_overlaynormal.png",
+    "fileName": "oldhouses_base_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__oldhouses_base_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__oldhouses_base_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/oldhouses_base_overlayshading.png",
+    "fileName": "oldhouses_base_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__oldhouses_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__oldhouses_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/oldhouses_base_shape.png",
+    "fileName": "oldhouses_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__oldhouses_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__oldhouses_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/oldhouses_overlayshading.png",
+    "fileName": "oldhouses_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__oldhouses_shape",
+    "path": "/opengfx2/all/towns__temperate__64__oldhouses_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/oldhouses_shape.png",
+    "fileName": "oldhouses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__shopsandoffices_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__shopsandoffices_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/shopsandoffices_base_shape.png",
+    "fileName": "shopsandoffices_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__shopsandoffices_shape",
+    "path": "/opengfx2/all/towns__temperate__64__shopsandoffices_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/shopsandoffices_shape.png",
+    "fileName": "shopsandoffices_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__statues_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__statues_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/statues_overlaynormal.png",
+    "fileName": "statues_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__statues_shape",
+    "path": "/opengfx2/all/towns__temperate__64__statues_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/statues_shape.png",
+    "fileName": "statues_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__tallofficeblock_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__tallofficeblock_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/tallofficeblock_base_shape.png",
+    "fileName": "tallofficeblock_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__tallofficeblock_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__tallofficeblock_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/tallofficeblock_overlayshading.png",
+    "fileName": "tallofficeblock_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__tallofficeblock_shape",
+    "path": "/opengfx2/all/towns__temperate__64__tallofficeblock_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/tallofficeblock_shape.png",
+    "fileName": "tallofficeblock_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__theatreandcinema_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__theatreandcinema_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/theatreandcinema_base_shape.png",
+    "fileName": "theatreandcinema_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__theatreandcinema_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__theatreandcinema_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/theatreandcinema_overlaynormal.png",
+    "fileName": "theatreandcinema_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__theatreandcinema_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__theatreandcinema_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/theatreandcinema_overlayshading.png",
+    "fileName": "theatreandcinema_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__theatreandcinema_shape",
+    "path": "/opengfx2/all/towns__temperate__64__theatreandcinema_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/theatreandcinema_shape.png",
+    "fileName": "theatreandcinema_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__townhouses_arranged_base_overlaynormal",
+    "path": "/opengfx2/all/towns__temperate__64__townhouses_arranged_base_overlaynormal.png",
+    "sourcePath": "graphics/towns/temperate/64/townhouses_arranged_base_overlaynormal.png",
+    "fileName": "townhouses_arranged_base_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__townhouses_arranged_base_overlayshading",
+    "path": "/opengfx2/all/towns__temperate__64__townhouses_arranged_base_overlayshading.png",
+    "sourcePath": "graphics/towns/temperate/64/townhouses_arranged_base_overlayshading.png",
+    "fileName": "townhouses_arranged_base_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__townhouses_arranged_base_shape",
+    "path": "/opengfx2/all/towns__temperate__64__townhouses_arranged_base_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/townhouses_arranged_base_shape.png",
+    "fileName": "townhouses_arranged_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__townhouses_arranged_shape",
+    "path": "/opengfx2/all/towns__temperate__64__townhouses_arranged_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/townhouses_arranged_shape.png",
+    "fileName": "townhouses_arranged_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__temperate__64__townhouses_shape",
+    "path": "/opengfx2/all/towns__temperate__64__townhouses_shape.png",
+    "sourcePath": "graphics/towns/temperate/64/townhouses_shape.png",
+    "fileName": "townhouses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__2x1_boot_32bpp",
+    "path": "/opengfx2/all/towns__toyland__64__2x1_boot_32bpp.png",
+    "sourcePath": "graphics/towns/toyland/64/2x1_boot_32bpp.png",
+    "fileName": "2x1_boot_32bpp.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__2x1_boot_tilemask",
+    "path": "/opengfx2/all/towns__toyland__64__2x1_boot_tilemask.png",
+    "sourcePath": "graphics/towns/toyland/64/2x1_boot_tilemask.png",
+    "fileName": "2x1_boot_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__church_32bpp",
+    "path": "/opengfx2/all/towns__toyland__64__church_32bpp.png",
+    "sourcePath": "graphics/towns/toyland/64/church_32bpp.png",
+    "fileName": "church_32bpp.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__company_statue_32bpp",
+    "path": "/opengfx2/all/towns__toyland__64__company_statue_32bpp.png",
+    "sourcePath": "graphics/towns/toyland/64/company_statue_32bpp.png",
+    "fileName": "company_statue_32bpp.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__hqs_overlaynormal",
+    "path": "/opengfx2/all/towns__toyland__64__hqs_overlaynormal.png",
+    "sourcePath": "graphics/towns/toyland/64/hqs_overlaynormal.png",
+    "fileName": "hqs_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__hqs_shape",
+    "path": "/opengfx2/all/towns__toyland__64__hqs_shape.png",
+    "sourcePath": "graphics/towns/toyland/64/hqs_shape.png",
+    "fileName": "hqs_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__hqs_tilemask",
+    "path": "/opengfx2/all/towns__toyland__64__hqs_tilemask.png",
+    "sourcePath": "graphics/towns/toyland/64/hqs_tilemask.png",
+    "fileName": "hqs_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__present_bow",
+    "path": "/opengfx2/all/towns__toyland__64__present_bow.png",
+    "sourcePath": "graphics/towns/toyland/64/present_bow.png",
+    "fileName": "present_bow.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__present_ribbon",
+    "path": "/opengfx2/all/towns__toyland__64__present_ribbon.png",
+    "sourcePath": "graphics/towns/toyland/64/present_ribbon.png",
+    "fileName": "present_ribbon.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__short_32bpp",
+    "path": "/opengfx2/all/towns__toyland__64__short_32bpp.png",
+    "sourcePath": "graphics/towns/toyland/64/short_32bpp.png",
+    "fileName": "short_32bpp.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__tall_32bpp",
+    "path": "/opengfx2/all/towns__toyland__64__tall_32bpp.png",
+    "sourcePath": "graphics/towns/toyland/64/tall_32bpp.png",
+    "fileName": "tall_32bpp.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__toyland__64__tall_palmask",
+    "path": "/opengfx2/all/towns__toyland__64__tall_palmask.png",
+    "sourcePath": "graphics/towns/toyland/64/tall_palmask.png",
+    "fileName": "tall_palmask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__1x2_tallofficeblock_base_shape",
+    "path": "/opengfx2/all/towns__tropical__64__1x2_tallofficeblock_base_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/1x2_tallofficeblock_base_shape.png",
+    "fileName": "1x2_tallofficeblock_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__1x2_tallofficeblock_overlayshading",
+    "path": "/opengfx2/all/towns__tropical__64__1x2_tallofficeblock_overlayshading.png",
+    "sourcePath": "graphics/towns/tropical/64/1x2_tallofficeblock_overlayshading.png",
+    "fileName": "1x2_tallofficeblock_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__1x2_tallofficeblock_shape",
+    "path": "/opengfx2/all/towns__tropical__64__1x2_tallofficeblock_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/1x2_tallofficeblock_shape.png",
+    "fileName": "1x2_tallofficeblock_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__1x2_tallofficeblock_tilemask",
+    "path": "/opengfx2/all/towns__tropical__64__1x2_tallofficeblock_tilemask.png",
+    "sourcePath": "graphics/towns/tropical/64/1x2_tallofficeblock_tilemask.png",
+    "fileName": "1x2_tallofficeblock_tilemask.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__churches_base_shape",
+    "path": "/opengfx2/all/towns__tropical__64__churches_base_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/churches_base_shape.png",
+    "fileName": "churches_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__churches_overlayshading",
+    "path": "/opengfx2/all/towns__tropical__64__churches_overlayshading.png",
+    "sourcePath": "graphics/towns/tropical/64/churches_overlayshading.png",
+    "fileName": "churches_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__churches_shape",
+    "path": "/opengfx2/all/towns__tropical__64__churches_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/churches_shape.png",
+    "fileName": "churches_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__flats_base_shape",
+    "path": "/opengfx2/all/towns__tropical__64__flats_base_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/flats_base_shape.png",
+    "fileName": "flats_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__flats_overlayshading",
+    "path": "/opengfx2/all/towns__tropical__64__flats_overlayshading.png",
+    "sourcePath": "graphics/towns/tropical/64/flats_overlayshading.png",
+    "fileName": "flats_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__flats_shape",
+    "path": "/opengfx2/all/towns__tropical__64__flats_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/flats_shape.png",
+    "fileName": "flats_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__houses_base_shape",
+    "path": "/opengfx2/all/towns__tropical__64__houses_base_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/houses_base_shape.png",
+    "fileName": "houses_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__houses_overlaynormal",
+    "path": "/opengfx2/all/towns__tropical__64__houses_overlaynormal.png",
+    "sourcePath": "graphics/towns/tropical/64/houses_overlaynormal.png",
+    "fileName": "houses_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__houses_overlayshading",
+    "path": "/opengfx2/all/towns__tropical__64__houses_overlayshading.png",
+    "sourcePath": "graphics/towns/tropical/64/houses_overlayshading.png",
+    "fileName": "houses_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__houses_shape",
+    "path": "/opengfx2/all/towns__tropical__64__houses_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/houses_shape.png",
+    "fileName": "houses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__hqs_base_shape",
+    "path": "/opengfx2/all/towns__tropical__64__hqs_base_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/hqs_base_shape.png",
+    "fileName": "hqs_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__shantyhouses_base_shape",
+    "path": "/opengfx2/all/towns__tropical__64__shantyhouses_base_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/shantyhouses_base_shape.png",
+    "fileName": "shantyhouses_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__shantyhouses_overlaynormal",
+    "path": "/opengfx2/all/towns__tropical__64__shantyhouses_overlaynormal.png",
+    "sourcePath": "graphics/towns/tropical/64/shantyhouses_overlaynormal.png",
+    "fileName": "shantyhouses_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__shantyhouses_overlayshading",
+    "path": "/opengfx2/all/towns__tropical__64__shantyhouses_overlayshading.png",
+    "sourcePath": "graphics/towns/tropical/64/shantyhouses_overlayshading.png",
+    "fileName": "shantyhouses_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__shantyhouses_shape",
+    "path": "/opengfx2/all/towns__tropical__64__shantyhouses_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/shantyhouses_shape.png",
+    "fileName": "shantyhouses_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__tallofficeblock_base_shape",
+    "path": "/opengfx2/all/towns__tropical__64__tallofficeblock_base_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/tallofficeblock_base_shape.png",
+    "fileName": "tallofficeblock_base_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__tallofficeblock_overlaynormal",
+    "path": "/opengfx2/all/towns__tropical__64__tallofficeblock_overlaynormal.png",
+    "sourcePath": "graphics/towns/tropical/64/tallofficeblock_overlaynormal.png",
+    "fileName": "tallofficeblock_overlaynormal.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__tallofficeblock_overlayshading",
+    "path": "/opengfx2/all/towns__tropical__64__tallofficeblock_overlayshading.png",
+    "sourcePath": "graphics/towns/tropical/64/tallofficeblock_overlayshading.png",
+    "fileName": "tallofficeblock_overlayshading.png",
+    "category": "building"
+  },
+  {
+    "key": "towns__tropical__64__tallofficeblock_shape",
+    "path": "/opengfx2/all/towns__tropical__64__tallofficeblock_shape.png",
+    "sourcePath": "graphics/towns/tropical/64/tallofficeblock_shape.png",
+    "fileName": "tallofficeblock_shape.png",
+    "category": "building"
+  },
+  {
+    "key": "trees__256__arctic_leaf_shape",
+    "path": "/opengfx2/all/trees__256__arctic_leaf_shape.png",
+    "sourcePath": "graphics/trees/256/arctic_leaf_shape.png",
+    "fileName": "arctic_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__256__forest_leaf_shape",
+    "path": "/opengfx2/all/trees__256__forest_leaf_shape.png",
+    "sourcePath": "graphics/trees/256/forest_leaf_shape.png",
+    "fileName": "forest_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__256__temperate_leaf_shape",
+    "path": "/opengfx2/all/trees__256__temperate_leaf_shape.png",
+    "sourcePath": "graphics/trees/256/temperate_leaf_shape.png",
+    "fileName": "temperate_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__256__toyland_leaf_shape",
+    "path": "/opengfx2/all/trees__256__toyland_leaf_shape.png",
+    "sourcePath": "graphics/trees/256/toyland_leaf_shape.png",
+    "fileName": "toyland_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__256__tropical_leaf_shape",
+    "path": "/opengfx2/all/trees__256__tropical_leaf_shape.png",
+    "sourcePath": "graphics/trees/256/tropical_leaf_shape.png",
+    "fileName": "tropical_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__256__tropical_nonleaf_shape",
+    "path": "/opengfx2/all/trees__256__tropical_nonleaf_shape.png",
+    "sourcePath": "graphics/trees/256/tropical_nonleaf_shape.png",
+    "fileName": "tropical_nonleaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__arctic_leaf_shape",
+    "path": "/opengfx2/all/trees__64__arctic_leaf_shape.png",
+    "sourcePath": "graphics/trees/64/arctic_leaf_shape.png",
+    "fileName": "arctic_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__temperate_extra_leaf_shape",
+    "path": "/opengfx2/all/trees__64__temperate_extra_leaf_shape.png",
+    "sourcePath": "graphics/trees/64/temperate_extra_leaf_shape.png",
+    "fileName": "temperate_extra_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__temperate_leaf_shape",
+    "path": "/opengfx2/all/trees__64__temperate_leaf_shape.png",
+    "sourcePath": "graphics/trees/64/temperate_leaf_shape.png",
+    "fileName": "temperate_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__toyland_leaf_shape",
+    "path": "/opengfx2/all/trees__64__toyland_leaf_shape.png",
+    "sourcePath": "graphics/trees/64/toyland_leaf_shape.png",
+    "fileName": "toyland_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__toyland_trees_32bpp",
+    "path": "/opengfx2/all/trees__64__toyland_trees_32bpp.png",
+    "sourcePath": "graphics/trees/64/toyland_trees_32bpp.png",
+    "fileName": "toyland_trees_32bpp.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__toyland_trees_nocc_32bpp",
+    "path": "/opengfx2/all/trees__64__toyland_trees_nocc_32bpp.png",
+    "sourcePath": "graphics/trees/64/toyland_trees_nocc_32bpp.png",
+    "fileName": "toyland_trees_nocc_32bpp.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__toyland_trees_nocc_snow_32bpp",
+    "path": "/opengfx2/all/trees__64__toyland_trees_nocc_snow_32bpp.png",
+    "sourcePath": "graphics/trees/64/toyland_trees_nocc_snow_32bpp.png",
+    "fileName": "toyland_trees_nocc_snow_32bpp.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__toyland_trees_palmask",
+    "path": "/opengfx2/all/trees__64__toyland_trees_palmask.png",
+    "sourcePath": "graphics/trees/64/toyland_trees_palmask.png",
+    "fileName": "toyland_trees_palmask.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__toyland_trees_snow_32bpp",
+    "path": "/opengfx2/all/trees__64__toyland_trees_snow_32bpp.png",
+    "sourcePath": "graphics/trees/64/toyland_trees_snow_32bpp.png",
+    "fileName": "toyland_trees_snow_32bpp.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__toyland_trees_snow_palmask",
+    "path": "/opengfx2/all/trees__64__toyland_trees_snow_palmask.png",
+    "sourcePath": "graphics/trees/64/toyland_trees_snow_palmask.png",
+    "fileName": "toyland_trees_snow_palmask.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__tropical_leaf_shape",
+    "path": "/opengfx2/all/trees__64__tropical_leaf_shape.png",
+    "sourcePath": "graphics/trees/64/tropical_leaf_shape.png",
+    "fileName": "tropical_leaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "trees__64__tropical_nonleaf_shape",
+    "path": "/opengfx2/all/trees__64__tropical_nonleaf_shape.png",
+    "sourcePath": "graphics/trees/64/tropical_nonleaf_shape.png",
+    "fileName": "tropical_nonleaf_shape.png",
+    "category": "tree"
+  },
+  {
+    "key": "vehicles__64__air_futuristic_32bpp",
+    "path": "/opengfx2/all/vehicles__64__air_futuristic_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/air_futuristic_32bpp.png",
+    "fileName": "air_futuristic_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__air_real_32bpp",
+    "path": "/opengfx2/all/vehicles__64__air_real_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/air_real_32bpp.png",
+    "fileName": "air_real_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__air_toyland_32bpp",
+    "path": "/opengfx2/all/vehicles__64__air_toyland_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/air_toyland_32bpp.png",
+    "fileName": "air_toyland_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__disaster_airship_32bpp",
+    "path": "/opengfx2/all/vehicles__64__disaster_airship_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/disaster_airship_32bpp.png",
+    "fileName": "disaster_airship_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__disaster_other_32bpp",
+    "path": "/opengfx2/all/vehicles__64__disaster_other_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/disaster_other_32bpp.png",
+    "fileName": "disaster_other_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__maglev_engines_32bpp",
+    "path": "/opengfx2/all/vehicles__64__maglev_engines_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/maglev_engines_32bpp.png",
+    "fileName": "maglev_engines_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__monolev_wagons_32bpp",
+    "path": "/opengfx2/all/vehicles__64__monolev_wagons_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/monolev_wagons_32bpp.png",
+    "fileName": "monolev_wagons_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__monolev_wagons_arctic_32bpp",
+    "path": "/opengfx2/all/vehicles__64__monolev_wagons_arctic_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/monolev_wagons_arctic_32bpp.png",
+    "fileName": "monolev_wagons_arctic_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__monolev_wagons_tropical_32bpp",
+    "path": "/opengfx2/all/vehicles__64__monolev_wagons_tropical_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/monolev_wagons_tropical_32bpp.png",
+    "fileName": "monolev_wagons_tropical_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__monorail_engines_32bpp",
+    "path": "/opengfx2/all/vehicles__64__monorail_engines_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/monorail_engines_32bpp.png",
+    "fileName": "monorail_engines_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_engines_arctictropic_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_engines_arctictropic_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_engines_arctictropic_32bpp.png",
+    "fileName": "rail_engines_arctictropic_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_engines_temperate_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_engines_temperate_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_engines_temperate_32bpp.png",
+    "fileName": "rail_engines_temperate_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_engines_toyland_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_engines_toyland_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_engines_toyland_32bpp.png",
+    "fileName": "rail_engines_toyland_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_engines_tropical_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_engines_tropical_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_engines_tropical_32bpp.png",
+    "fileName": "rail_engines_tropical_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_wagons_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_wagons_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_wagons_32bpp.png",
+    "fileName": "rail_wagons_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_wagons_arctic_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_wagons_arctic_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_wagons_arctic_32bpp.png",
+    "fileName": "rail_wagons_arctic_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_wagons_toyland_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_wagons_toyland_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_wagons_toyland_32bpp.png",
+    "fileName": "rail_wagons_toyland_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_wagons_toyland_palmask",
+    "path": "/opengfx2/all/vehicles__64__rail_wagons_toyland_palmask.png",
+    "sourcePath": "graphics/vehicles/64/rail_wagons_toyland_palmask.png",
+    "fileName": "rail_wagons_toyland_palmask.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__rail_wagons_tropical_32bpp",
+    "path": "/opengfx2/all/vehicles__64__rail_wagons_tropical_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/rail_wagons_tropical_32bpp.png",
+    "fileName": "rail_wagons_tropical_32bpp.png",
+    "category": "rail"
+  },
+  {
+    "key": "vehicles__64__road_buses_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_buses_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_buses_32bpp.png",
+    "fileName": "road_buses_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_firstgeneration_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_firstgeneration_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_firstgeneration_32bpp.png",
+    "fileName": "road_lorries_firstgeneration_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_firstgeneration_arctic_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_firstgeneration_arctic_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_firstgeneration_arctic_32bpp.png",
+    "fileName": "road_lorries_firstgeneration_arctic_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_firstgeneration_tropical_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_firstgeneration_tropical_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_firstgeneration_tropical_32bpp.png",
+    "fileName": "road_lorries_firstgeneration_tropical_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_secondgeneration_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_secondgeneration_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_secondgeneration_32bpp.png",
+    "fileName": "road_lorries_secondgeneration_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_secondgeneration_arctic_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_secondgeneration_arctic_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_secondgeneration_arctic_32bpp.png",
+    "fileName": "road_lorries_secondgeneration_arctic_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_secondgeneration_tropical_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_secondgeneration_tropical_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_secondgeneration_tropical_32bpp.png",
+    "fileName": "road_lorries_secondgeneration_tropical_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_thirdgeneration_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_thirdgeneration_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_thirdgeneration_32bpp.png",
+    "fileName": "road_lorries_thirdgeneration_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_thirdgeneration_arctic_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_thirdgeneration_arctic_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_thirdgeneration_arctic_32bpp.png",
+    "fileName": "road_lorries_thirdgeneration_arctic_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_lorries_thirdgeneration_tropical_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_lorries_thirdgeneration_tropical_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_lorries_thirdgeneration_tropical_32bpp.png",
+    "fileName": "road_lorries_thirdgeneration_tropical_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__road_toyland_32bpp",
+    "path": "/opengfx2/all/vehicles__64__road_toyland_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/road_toyland_32bpp.png",
+    "fileName": "road_toyland_32bpp.png",
+    "category": "road"
+  },
+  {
+    "key": "vehicles__64__tram_passenger_32bpp",
+    "path": "/opengfx2/all/vehicles__64__tram_passenger_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/tram_passenger_32bpp.png",
+    "fileName": "tram_passenger_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__tram_passenger_toyland_32bpp",
+    "path": "/opengfx2/all/vehicles__64__tram_passenger_toyland_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/tram_passenger_toyland_32bpp.png",
+    "fileName": "tram_passenger_toyland_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__vehicles_air_rotoreffect_32bpp",
+    "path": "/opengfx2/all/vehicles__64__vehicles_air_rotoreffect_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/vehicles_air_rotoreffect_32bpp.png",
+    "fileName": "vehicles_air_rotoreffect_32bpp.png",
+    "category": "vehicle"
+  },
+  {
+    "key": "vehicles__64__water_32bpp",
+    "path": "/opengfx2/all/vehicles__64__water_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/water_32bpp.png",
+    "fileName": "water_32bpp.png",
+    "category": "water"
+  },
+  {
+    "key": "vehicles__64__water_toyland_32bpp",
+    "path": "/opengfx2/all/vehicles__64__water_toyland_32bpp.png",
+    "sourcePath": "graphics/vehicles/64/water_toyland_32bpp.png",
+    "fileName": "water_toyland_32bpp.png",
+    "category": "water"
+  }
+] as const satisfies OpenGfxAsset[];
