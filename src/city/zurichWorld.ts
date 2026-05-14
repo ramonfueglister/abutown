@@ -66,18 +66,18 @@ function buildRiver(): Coord[] {
   const river: Coord[] = [];
   for (let y = 0; y < HEIGHT; y += 1) {
     const center = riverCenterX(y);
-    for (let dx = -4; dx <= 4; dx += 1) river.push({ x: center + dx, y });
+    for (let dx = -1; dx <= 1; dx += 1) river.push({ x: center + dx, y });
   }
   return river;
 }
 
 function riverCenterX(y: number): number {
-  return 128 + Math.round(Math.sin(y / 23) * 12 + Math.sin(y / 61) * 7);
+  return 128 + Math.round(Math.sin(y / 35) * 9 + Math.sin(y / 95) * 4);
 }
 
 function terrainKind(coord: Coord, riverDistance: number, riverKeys: ReadonlySet<string>, zone?: ZurichZone): ZurichTerrainKind {
   if (riverKeys.has(key(coord))) return 'water';
-  if (riverDistance <= 5) return 'riverbank';
+  if (riverDistance <= 2) return 'riverbank';
   if (zone?.kind === 'forest' && distance(coord, zone.center) <= zone.radius) return 'forest';
   if (zone?.kind === 'reserve' && distance(coord, zone.center) <= zone.radius) return 'reserve';
   if (zone?.kind === 'park' && distance(coord, zone.center) <= zone.radius) return 'park';

@@ -4,7 +4,6 @@ const NORTH = 1;
 const EAST = 2;
 const SOUTH = 4;
 const WEST = 8;
-const INTENTIONAL_BRIDGE_KEYS = new Set(['123:112', '133:145', '124:121', '137:196']);
 
 export type ZurichTransport = {
   roads: Map<string, ZurichRoadTile>;
@@ -23,19 +22,20 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
   const bridgeKeys = new Set<string>();
   const arterialPaths = buildArterialPaths(world);
 
-  const addRoad = (coord: Coord) => {
+  const addRoad = (coord: Coord, allowBridge = false) => {
     if (!inside(coord, world.width, world.height)) return;
     const tileKey = key(coord);
     if (railPoints.has(tileKey) && !railCrossings.has(tileKey)) return;
     const terrain = world.terrain.get(tileKey)?.kind;
-    const isIntentionalBridge = INTENTIONAL_BRIDGE_KEYS.has(tileKey) && (terrain === 'water' || terrain === 'riverbank');
-    if (terrain === 'water' && !isIntentionalBridge) return;
-    const kind: ZurichRoadKind = isIntentionalBridge ? 'bridge' : 'street';
+    const isBridge = allowBridge && (terrain === 'water' || terrain === 'riverbank');
+    if (terrain === 'water' && !isBridge) return;
+    const kind: ZurichRoadKind = isBridge ? 'bridge' : 'street';
+    if (roadKinds.get(tileKey) === 'bridge' && kind === 'street') return;
     roadKinds.set(tileKey, kind);
     if (kind === 'bridge') bridgeKeys.add(tileKey);
   };
 
-  for (const path of arterialPaths) for (const coord of path) addRoad(coord);
+  for (const path of arterialPaths) for (const coord of path) addRoad(coord, true);
   for (const zone of world.zones) {
     if (zone.kind === 'forest' || zone.kind === 'river') continue;
     addDistrictStreetPattern(world, addRoad, zone.center, zone.radius, zone.density);
@@ -87,6 +87,7 @@ function buildArterialPaths(world: ZurichWorld): Coord[][] {
     route([{ x: 104, y: 0 }, { x: 111, y: 78 }, { x: 118, y: 145 }, { x: 101, y: 196 }, { x: 88, y: world.height - 1 }]),
     route([{ x: 43, y: 184 }, { x: 100, y: 196 }, { x: 151, y: 180 }, { x: 175, y: 184 }, { x: world.width - 1, y: 198 }]),
     route([{ x: 20, y: 74 }, { x: 74, y: 125 }, { x: 118, y: 145 }, { x: 151, y: 143 }, { x: 220, y: 160 }]),
+    route([{ x: 58, y: 92 }, { x: 105, y: 92 }, { x: 152, y: 92 }, { x: 201, y: 98 }]),
   ];
 }
 
@@ -99,13 +100,34 @@ function buildRailPaths(world: ZurichWorld): Coord[][] {
 
 function addDistrictStreetPattern(world: ZurichWorld, addRoad: (coord: Coord) => void, center: Coord, radius: number, density: number): void {
   const arm = Math.max(8, Math.round(radius * (density > 0.8 ? 0.95 : 0.65)));
-  for (const coord of route([{ x: center.x - arm, y: center.y }, { x: center.x + arm, y: center.y }])) addRoad(coord);
-  for (const coord of route([{ x: center.x, y: center.y - Math.round(arm * 0.55) }, { x: center.x, y: center.y + Math.round(arm * 0.55) }])) addRoad(coord);
+  const curve = Math.max(2, Math.round(radius * 0.12));
+  const eastWest = route([
+    { x: center.x - arm, y: center.y },
+    { x: center.x - Math.round(arm * 0.35), y: center.y + curve },
+    { x: center.x + Math.round(arm * 0.35), y: center.y - curve },
+    { x: center.x + arm, y: center.y },
+  ]);
+  const northSouth = route([
+    { x: center.x, y: center.y - Math.round(arm * 0.55) },
+    { x: center.x + curve, y: center.y - Math.round(arm * 0.18) },
+    { x: center.x - curve, y: center.y + Math.round(arm * 0.18) },
+    { x: center.x, y: center.y + Math.round(arm * 0.55) },
+  ]);
+  for (const coord of eastWest) addRoad(coord);
+  for (const coord of northSouth) addRoad(coord);
 
   if (density > 0.72) {
     for (const offset of [-9, 9]) {
-      for (const coord of route([{ x: center.x - arm + 4, y: center.y + offset }, { x: center.x + arm - 4, y: center.y + offset }])) addRoad(coord);
-      for (const coord of route([{ x: center.x + offset, y: center.y - arm + 6 }, { x: center.x + offset, y: center.y + arm - 6 }])) addRoad(coord);
+      for (const coord of route([
+        { x: center.x - arm + 4, y: center.y + offset },
+        { x: center.x, y: center.y + offset + Math.sign(offset) * 2 },
+        { x: center.x + arm - 4, y: center.y + offset },
+      ])) addRoad(coord);
+      for (const coord of route([
+        { x: center.x + offset, y: center.y - arm + 6 },
+        { x: center.x + offset - Math.sign(offset) * 2, y: center.y },
+        { x: center.x + offset, y: center.y + arm - 6 },
+      ])) addRoad(coord);
     }
   }
 }

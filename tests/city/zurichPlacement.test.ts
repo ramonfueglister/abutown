@@ -5,6 +5,19 @@ import { buildZurichPlacement } from '../../src/city/zurichPlacement';
 import { validateZurichCity } from '../../src/city/zurichValidation';
 import { key, parseKey } from '../../src/city/worldTypes';
 
+const finishedRowColumns = {
+  houses: 4,
+  oldhouses: 4,
+  cottages: 1,
+  townhouses: 2,
+  shops: 6,
+  flats: 3,
+  office: 4,
+  modern: 2,
+  tower: 4,
+  church: 1,
+};
+
 describe('buildZurichPlacement', () => {
   it('places varied buildings, forests, and reserves without hard-rule conflicts', () => {
     const world = buildZurichWorld({ seed: 1848 });
@@ -43,6 +56,17 @@ describe('buildZurichPlacement', () => {
     const overlaps = placement.buildings.filter((building) => treeTiles.has(key(building.coord)));
 
     expect(overlaps).toEqual([]);
+  });
+
+  it('uses only finished first-row building frames to avoid mask and empty sprite tiles', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const placement = buildZurichPlacement(world, transport);
+
+    for (const building of placement.buildings) {
+      expect(building.frame).toBeGreaterThanOrEqual(0);
+      expect(building.frame).toBeLessThan(finishedRowColumns[building.sheet]);
+    }
   });
 });
 

@@ -9,16 +9,16 @@ describe('buildZurichTransport', () => {
 
     expect(transport.roads.size).toBeGreaterThan(1200);
     expect(transport.rails.size).toBeGreaterThan(180);
-    expect(transport.bridges.size).toBeGreaterThanOrEqual(3);
-    expect(transport.bridges.size).toBeLessThanOrEqual(5);
+    expect(transport.bridges.size).toBeGreaterThanOrEqual(18);
     expect(transport.railCrossings.size).toBeGreaterThanOrEqual(1);
 
     const bridgeRoads = [...transport.roads.entries()].filter(([, road]) => road.kind === 'bridge');
-    expect(bridgeRoads.length).toBeGreaterThanOrEqual(3);
-    expect(bridgeRoads.length).toBeLessThanOrEqual(5);
     expect(bridgeRoads.length).toBe(transport.bridges.size);
     for (const [bridgeKey] of bridgeRoads) expect(transport.bridges.has(bridgeKey)).toBe(true);
     for (const bridgeKey of transport.bridges) expect(transport.roads.get(bridgeKey)?.kind).toBe('bridge');
+    const bridgeSpans = connectedBridgeSpans(transport.bridges);
+    expect(bridgeSpans.length).toBeGreaterThanOrEqual(3);
+    expect(bridgeSpans.filter((span) => span.length >= 5).length).toBeGreaterThanOrEqual(3);
 
     for (const crossingKey of transport.railCrossings) {
       expect(transport.roads.has(crossingKey)).toBe(true);
@@ -59,3 +59,26 @@ describe('buildZurichTransport', () => {
     }
   });
 });
+
+function connectedBridgeSpans(bridgeKeys: ReadonlySet<string>): string[][] {
+  const remaining = new Set(bridgeKeys);
+  const spans: string[][] = [];
+  for (const start of bridgeKeys) {
+    if (!remaining.has(start)) continue;
+    const span: string[] = [];
+    const queue = [start];
+    remaining.delete(start);
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      span.push(current);
+      const [x, y] = current.split(':').map(Number);
+      for (const neighbor of [`${x + 1}:${y}`, `${x - 1}:${y}`, `${x}:${y + 1}`, `${x}:${y - 1}`]) {
+        if (!remaining.has(neighbor)) continue;
+        remaining.delete(neighbor);
+        queue.push(neighbor);
+      }
+    }
+    spans.push(span);
+  }
+  return spans;
+}

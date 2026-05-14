@@ -11,10 +11,10 @@ export type ZurichPlacement = {
 const sheetPools: Record<ZurichZone['kind'], ZurichBuildingSheet[]> = {
   river: ['townhouses'],
   'old-town': ['oldhouses', 'townhouses', 'shops', 'church'],
-  'rail-center': ['shops', 'flats', 'office', 'modern', 'tower'],
-  residential: ['houses', 'cottages', 'oldhouses', 'townhouses'],
+  'rail-center': ['shops', 'flats', 'office', 'townhouses'],
+  residential: ['houses', 'cottages', 'townhouses'],
   forest: ['cottages'],
-  park: ['church', 'oldhouses'],
+  park: ['church', 'cottages', 'oldhouses'],
   industry: ['shops', 'office', 'flats'],
   reserve: ['cottages', 'houses'],
   civic: ['church', 'office', 'shops'],
@@ -58,7 +58,7 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
 
   for (const zone of world.zones) {
     if (zone.kind === 'civic' || zone.kind === 'park' || zone.kind === 'industry') {
-      for (let index = 0; index < 60; index += 1) {
+      for (let index = 0; index < 80; index += 1) {
         const coord = {
           x: zone.center.x + ((hash(`detail-x:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
           y: zone.center.y + ((hash(`detail-y:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
@@ -110,12 +110,11 @@ function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, bloc
 }
 
 function frameCount(sheet: ZurichBuildingSheet): number {
-  if (sheet === 'church') return 3;
-  if (sheet === 'cottages') return 3;
-  if (sheet === 'townhouses') return 6;
-  if (sheet === 'modern') return 8;
-  if (sheet === 'tower') return 12;
-  return 12;
+  if (sheet === 'church' || sheet === 'cottages') return 1;
+  if (sheet === 'townhouses' || sheet === 'modern') return 2;
+  if (sheet === 'flats') return 3;
+  if (sheet === 'houses' || sheet === 'oldhouses' || sheet === 'office' || sheet === 'tower') return 4;
+  return 6;
 }
 
 function hash(value: string): number {

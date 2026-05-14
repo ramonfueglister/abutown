@@ -30,9 +30,11 @@ describe('buildZurichWorld', () => {
   it('keeps the terrain flat while reserving meaningful water and forest coverage', () => {
     const world = buildZurichWorld({ seed: 1848 });
     const terrainValues = [...world.terrain.values()];
+    const waterTiles = terrainValues.filter((tile) => tile.kind === 'water').length;
 
     expect(new Set(terrainValues.map((tile) => tile.elevation))).toEqual(new Set([0]));
-    expect(terrainValues.filter((tile) => tile.kind === 'water').length).toBeGreaterThan(1800);
+    expect(waterTiles).toBeGreaterThan(700);
+    expect(waterTiles).toBeLessThan(1100);
     expect(terrainValues.filter((tile) => tile.kind === 'forest').length).toBeGreaterThan(4500);
     expect(terrainValues.filter((tile) => tile.kind === 'reserve').length).toBeGreaterThan(2500);
   });

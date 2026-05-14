@@ -383,7 +383,11 @@ function drawRoad(road: RoadTile): void {
   ctx.save();
   if (road.kind === 'bridge') {
     const bridge = images.get(assetPaths.bridge);
-    if (bridge) ctx.drawImage(bridge, 0, 0, 64, 42, point.x - 32, point.y - 12, 64, 42);
+    if (bridge) {
+      const bridgeFrameW = spriteSheetCellSize(bridge.width, 19);
+      const bridgeFrame = road.mask & (NORTH | SOUTH) ? 1 : 0;
+      ctx.drawImage(bridge, bridgeFrame * bridgeFrameW, 0, bridgeFrameW, bridge.height, point.x - 32, point.y - 14, 64, 48);
+    }
   }
 
   if (roadImage) {
@@ -433,10 +437,16 @@ function drawTree(coord: Coord): void {
   const image = images.get(assetPaths.tree);
   if (!image) return;
   const point = iso(coord);
-  const frame = { sx: 0, sy: 0, w: 16, h: 43 };
+  const isForest = zurichWorld.terrain.get(key(coord))?.kind === 'forest';
+  const forestFrames = [
+    { sx: 0, sy: 0, w: 16, h: 43 },
+    { sx: 16, sy: 0, w: 17, h: 43 },
+    { sx: 33, sy: 0, w: 28, h: 43 },
+  ];
+  const frame = isForest ? forestFrames[hash(`tree-frame:${key(coord)}`) % forestFrames.length] : forestFrames[0];
   const jitterX = (hash(`tree-x:${key(coord)}`) % 13) - 6;
   const jitterY = (hash(`tree-y:${key(coord)}`) % 9) - 4;
-  const scale = 0.82 + (hash(`tree-scale:${key(coord)}`) % 23) / 100;
+  const scale = (isForest ? 0.98 : 0.82) + (hash(`tree-scale:${key(coord)}`) % 23) / 100;
   const w = frame.w * scale;
   const h = frame.h * scale;
   ctx.drawImage(image, frame.sx, frame.sy, frame.w, frame.h, point.x - w / 2 + jitterX, point.y - h + 7 + jitterY, w, h);
