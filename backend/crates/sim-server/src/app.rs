@@ -19,6 +19,7 @@ use crate::runtime::SimulationRuntime;
 
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_secs(1);
+const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -59,6 +60,18 @@ impl AppState {
             }
         });
     }
+
+    fn spawn_snapshot_loop(&self, snapshot_interval: Duration) {
+        let state = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(snapshot_interval);
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let _ = persist_snapshots_once(&state).await;
+            }
+        });
+    }
 }
 
 pub fn build_app() -> Router {
@@ -68,6 +81,7 @@ pub fn build_app() -> Router {
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
     let state = AppState::new(runtime);
     state.spawn_delta_loop(SIMULATION_TICK_INTERVAL);
+    state.spawn_snapshot_loop(SNAPSHOT_INTERVAL);
 
     Router::new()
         .route("/health", get(health))
@@ -130,6 +144,12 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     }
 }
 
+async fn persist_snapshots_once(state: &AppState) -> usize {
+    let runtime = state.runtime();
+    let mut runtime = runtime.lock().await;
+    runtime.persist_chunk_snapshots()
+}
+
 async fn send_server_message(
     socket: &mut WebSocket,
     message: ServerMessageDto,
@@ -138,4 +158,25 @@ async fn send_server_message(
 
     socket.send(Message::Text(text.into())).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sim_core::ids::ChunkCoord;
+
+    #[tokio::test]
+    async fn persist_snapshots_once_writes_runtime_snapshots() {
+        let state = AppState::new(SimulationRuntime::new());
+
+        assert_eq!(persist_snapshots_once(&state).await, 3);
+
+        let runtime = state.runtime();
+        let runtime = runtime.lock().await;
+        let snapshot = runtime
+            .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .expect("visible snapshot stored");
+        assert_eq!(snapshot.coord.x, 4);
+        assert_eq!(snapshot.coord.y, 4);
+    }
 }
