@@ -28,7 +28,8 @@ describe('buildZurichPlacement', () => {
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
     expect(placement.buildings.length).toBeGreaterThan(1800);
-    expect(placement.trees.length).toBeGreaterThan(3200);
+    expect(placement.trees.length).toBeGreaterThan(2600);
+    expect(placement.trees.length).toBeLessThan(6500);
     expect(placement.details.length).toBeGreaterThan(120);
     expect(placement.reserveTiles.size).toBeGreaterThan(2500);
     expect(new Set(placement.buildings.map((building) => building.sheet)).size).toBeGreaterThanOrEqual(8);
@@ -45,7 +46,8 @@ describe('buildZurichPlacement', () => {
     }
 
     expect(detailCounts.get('station') ?? 0).toBeGreaterThanOrEqual(24);
-    expect(detailCounts.get('dock') ?? 0).toBeGreaterThanOrEqual(18);
+    expect(detailCounts.get('dock') ?? 0).toBeGreaterThanOrEqual(6);
+    expect(detailCounts.get('dock') ?? 0).toBeLessThanOrEqual(10);
     expect(detailCounts.get('industry') ?? 0).toBeGreaterThanOrEqual(35);
     expect(detailCounts.get('field') ?? 0).toBeGreaterThanOrEqual(48);
   });
@@ -109,8 +111,8 @@ describe('buildZurichPlacement', () => {
 
     for (const zone of world.zones.filter((candidate) => candidate.kind === 'forest')) {
       const windows = forestWindowCounts(world, treeTiles, zone.center, zone.radius);
-      expect(windows.filter((count) => count >= 38).length).toBeGreaterThanOrEqual(20);
-      expect(windows.filter((count) => count <= 20).length).toBeGreaterThanOrEqual(4);
+      expect(windows.filter((count) => count >= 26).length).toBeGreaterThanOrEqual(8);
+      expect(windows.filter((count) => count <= 12).length).toBeGreaterThanOrEqual(8);
     }
   });
 });

@@ -9,8 +9,9 @@ describe('buildZurichTransport', () => {
     const transport = buildZurichTransport(world);
 
     expect(transport.roads.size).toBeGreaterThan(1200);
-    expect(transport.rails.size).toBeGreaterThan(650);
-    expect(transport.bridges.size).toBeGreaterThanOrEqual(18);
+    expect(transport.rails.size).toBeGreaterThan(220);
+    expect(transport.bridges.size).toBeGreaterThanOrEqual(6);
+    expect(transport.bridges.size).toBeLessThanOrEqual(12);
     expect(transport.railCrossings.size).toBeGreaterThanOrEqual(1);
 
     const bridgeRoads = [...transport.roads.entries()].filter(([, road]) => road.kind === 'bridge');
@@ -18,8 +19,10 @@ describe('buildZurichTransport', () => {
     for (const [bridgeKey] of bridgeRoads) expect(transport.bridges.has(bridgeKey)).toBe(true);
     for (const bridgeKey of transport.bridges) expect(transport.roads.get(bridgeKey)?.kind).toBe('bridge');
     const bridgeSpans = connectedBridgeSpans(transport.bridges);
-    expect(bridgeSpans.length).toBeGreaterThanOrEqual(3);
-    expect(bridgeSpans.filter((span) => span.length >= 5).length).toBeGreaterThanOrEqual(3);
+    expect(bridgeSpans.length).toBeGreaterThanOrEqual(2);
+    expect(bridgeSpans.length).toBeLessThanOrEqual(3);
+    expect(bridgeSpans.filter((span) => span.length >= 5).length).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...bridgeSpans.map((span) => span.length))).toBeLessThanOrEqual(5);
 
     for (const crossingKey of transport.railCrossings) {
       expect(transport.roads.has(crossingKey)).toBe(true);
@@ -42,6 +45,17 @@ describe('buildZurichTransport', () => {
       if (transport.rails.has(roadKey) && !transport.railCrossings.has(roadKey)) accidentalOverlap += 1;
     }
     expect(accidentalOverlap).toBe(0);
+  });
+
+  it('keeps rail off water and avoids rail-yard ladders across the city', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const railOnWater = [...transport.rails.entries()].filter(([railKey]) =>
+      ['water', 'riverbank'].includes(world.terrain.get(railKey)?.kind ?? '')
+    );
+
+    expect(railOnWater).toEqual([]);
+    expect(longRailRows(transport.rails, 40)).toHaveLength(2);
   });
 
   it('places bridge road tiles only on water or riverbank terrain', () => {
@@ -99,4 +113,10 @@ function connectedBridgeSpans(bridgeKeys: ReadonlySet<string>): string[][] {
     spans.push(span);
   }
   return spans;
+}
+
+function longRailRows(rails: ReadonlyMap<string, { coord: { x: number; y: number } }>, minTiles: number): Array<[number, number]> {
+  const rowCounts = new Map<number, number>();
+  for (const rail of rails.values()) rowCounts.set(rail.coord.y, (rowCounts.get(rail.coord.y) ?? 0) + 1);
+  return [...rowCounts].filter(([, count]) => count >= minTiles);
 }

@@ -102,6 +102,40 @@ describe('normalizeOpenTtdMap', () => {
     expect(new Set(result.buildings.map(([x, y]) => `${x}:${y}`)).size).toBe(4);
   });
 
+  test('keeps imported house tiles visually clear of water after normalization', () => {
+    const width = 8;
+    const height = 8;
+    const source = new Uint8Array(width * height).fill(0);
+    for (let y = 0; y <= 3; y += 1) {
+      for (let x = 0; x <= 3; x += 1) {
+        source[y * width + x] = 6;
+      }
+    }
+    source[4 * width + 4] = 3;
+
+    const result = normalizeOpenTtdMap({
+      id: 'water-clearance-fixture',
+      sourceWidth: width,
+      sourceHeight: height,
+      targetSize: 8,
+      tileTypes: source,
+    });
+
+    expect(result.buildings).toHaveLength(1);
+    const [buildingX, buildingY] = result.buildings[0];
+    const terrain = decodeTerrain(result.terrainRle);
+    const waterIndex = result.terrainKinds.indexOf('water');
+    const riverbankIndex = result.terrainKinds.indexOf('riverbank');
+
+    expect(terrain[buildingY * result.width + buildingX]).not.toBe(riverbankIndex);
+    for (let y = buildingY - 2; y <= buildingY + 2; y += 1) {
+      for (let x = buildingX - 2; x <= buildingX + 2; x += 1) {
+        if (x < 0 || y < 0 || x >= result.width || y >= result.height) continue;
+        expect(terrain[y * result.width + x]).not.toBe(waterIndex);
+      }
+    }
+  });
+
   test('maps source object tiles to waterfront and roadside city assets', () => {
     const width = 8;
     const height = 8;
@@ -129,4 +163,24 @@ describe('normalizeOpenTtdMap', () => {
     expect(result.details.some(([, , category, asset]) => category === 6 && [6, 7, 8].includes(asset))).toBe(true);
     expect(result.details.some(([, , category, asset]) => [5, 9].includes(category) && [3, 5].includes(asset))).toBe(true);
   });
+
+  test('fills free land with deterministic forests when a source has no tree layer', () => {
+    const width = 32;
+    const height = 32;
+    const source = new Uint8Array(width * height).fill(0);
+
+    const result = normalizeOpenTtdMap({
+      id: 'no-tree-source',
+      sourceWidth: width,
+      sourceHeight: height,
+      targetSize: 32,
+      tileTypes: source,
+    });
+
+    expect(result.trees.length).toBeGreaterThan(0);
+  });
 });
+
+function decodeTerrain(rle: Array<[number, number]>): number[] {
+  return rle.flatMap(([kind, length]) => Array.from({ length }, () => kind));
+}
