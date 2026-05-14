@@ -78,6 +78,8 @@ async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl 
     ws.on_upgrade(move |socket| stream_world_deltas(socket, state))
 }
 
+// Temporary visible-slice stream: each connection drives its own pulses. Production
+// must move ticking to one scheduler/broadcast source so client count cannot advance time.
 async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     let hello = {
         let runtime = state.runtime();
@@ -107,14 +109,9 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
 async fn send_server_message(
     socket: &mut WebSocket,
     message: ServerMessageDto,
-) -> Result<(), axum::Error> {
-    let text = match serde_json::to_string(&message) {
-        Ok(text) => text,
-        Err(error) => {
-            tracing::error!(%error, "failed to serialize websocket message");
-            return Ok(());
-        }
-    };
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let text = serde_json::to_string(&message)?;
 
-    socket.send(Message::Text(text.into())).await
+    socket.send(Message::Text(text.into())).await?;
+    Ok(())
 }
