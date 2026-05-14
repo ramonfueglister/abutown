@@ -5,7 +5,7 @@ export type VehicleRenderPose = {
   headingDelta: VehicleMotionCoord;
 };
 
-export const CURVE_EASING_WINDOW = 0.34;
+export const CURVE_EASING_WINDOW = 0.42;
 export const TURN_SPEED_FACTOR = 0.56;
 export const TURN_SPEED_LOOKAHEAD = 0.58;
 export const TURN_SPEED_RECOVERY = 0.62;
@@ -14,6 +14,9 @@ export const JUNCTION_SPEED_LOOKAHEAD = 0.62;
 export const JUNCTION_SPEED_RECOVERY = 0.42;
 export const MIN_VEHICLE_GAP_TILES = 0.72;
 export const VEHICLE_FOLLOWING_SLOWDOWN_DISTANCE_TILES = 1.5;
+
+const QUARTER_TURN_CONTROL_WEIGHT = Math.SQRT1_2;
+const CURVE_TANGENT_SAMPLE = 0.012;
 
 type VehicleRenderPoseInput = {
   path: readonly VehicleMotionCoord[];
@@ -138,17 +141,45 @@ function poseAroundCorner(
     x: corner.x + outgoing.x * CURVE_EASING_WINDOW,
     y: corner.y + outgoing.y * CURVE_EASING_WINDOW,
   };
-  const oneMinusT = 1 - curveT;
-  const position = {
-    x: oneMinusT * oneMinusT * start.x + 2 * oneMinusT * curveT * corner.x + curveT * curveT * end.x,
-    y: oneMinusT * oneMinusT * start.y + 2 * oneMinusT * curveT * corner.y + curveT * curveT * end.y,
-  };
+  const position = rationalQuadraticPoint(start, corner, end, QUARTER_TURN_CONTROL_WEIGHT, curveT);
+  const before = rationalQuadraticPoint(
+    start,
+    corner,
+    end,
+    QUARTER_TURN_CONTROL_WEIGHT,
+    clamp01(curveT - CURVE_TANGENT_SAMPLE),
+  );
+  const after = rationalQuadraticPoint(
+    start,
+    corner,
+    end,
+    QUARTER_TURN_CONTROL_WEIGHT,
+    clamp01(curveT + CURVE_TANGENT_SAMPLE),
+  );
   const headingDelta = {
-    x: 2 * oneMinusT * (corner.x - start.x) + 2 * curveT * (end.x - corner.x),
-    y: 2 * oneMinusT * (corner.y - start.y) + 2 * curveT * (end.y - corner.y),
+    x: after.x - before.x,
+    y: after.y - before.y,
   };
 
   return { position, headingDelta };
+}
+
+function rationalQuadraticPoint(
+  start: VehicleMotionCoord,
+  control: VehicleMotionCoord,
+  end: VehicleMotionCoord,
+  controlWeight: number,
+  t: number,
+): VehicleMotionCoord {
+  const oneMinusT = 1 - t;
+  const startWeight = oneMinusT * oneMinusT;
+  const middleWeight = 2 * oneMinusT * t * controlWeight;
+  const endWeight = t * t;
+  const denominator = startWeight + middleWeight + endWeight;
+  return {
+    x: (startWeight * start.x + middleWeight * control.x + endWeight * end.x) / denominator,
+    y: (startWeight * start.y + middleWeight * control.y + endWeight * end.y) / denominator,
+  };
 }
 
 function isRightAngleTurn(a: VehicleMotionCoord, b: VehicleMotionCoord): boolean {

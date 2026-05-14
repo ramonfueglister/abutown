@@ -62,6 +62,22 @@ describe('vehicleRenderPose', () => {
     expect(pose.headingDelta.y).toBeGreaterThan(pose.headingDelta.x);
   });
 
+  it('uses a constant-radius fillet through the middle of a ninety-degree turn', () => {
+    const pose = vehicleRenderPose({
+      path: [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 1, y: 1 },
+      ],
+      offset: 1,
+    });
+    const expected = CURVE_EASING_WINDOW / Math.SQRT2;
+
+    expect(pose.position.x).toBeCloseTo(1 - CURVE_EASING_WINDOW + expected, 3);
+    expect(pose.position.y).toBeCloseTo(CURVE_EASING_WINDOW - expected, 3);
+    expect(pose.headingDelta.x).toBeCloseTo(pose.headingDelta.y, 3);
+  });
+
   it('does not smooth u-turn ping-pong path endpoints into sideways arcs', () => {
     const pose = vehicleRenderPose({
       path: [
