@@ -9,7 +9,7 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
-import { buildPedestrianCorridors } from './city/pedestrianCorridors';
+import { buildPedestrianCorridors, makeNonTeleportingPedestrianLoop } from './city/pedestrianCorridors';
 import { buildVehicleRoadLoops, hasIllegalVehicleUTurn, hasTeleportingVehicleSegment } from './city/vehiclePaths';
 import { buildZurichPlacement } from './city/zurichPlacement';
 import { buildZurichTransport } from './city/zurichTransport';
@@ -1172,7 +1172,10 @@ function buildPedestrians(sprites: SimutransPedestrianSprite[]): Pedestrian[] {
     ...urbanArterials,
   ];
   if (baseCorridors.length === 0) return [];
-  const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]);
+  const corridors = baseCorridors.flatMap((path) => [
+    makeNonTeleportingPedestrianLoop(path),
+    makeNonTeleportingPedestrianLoop([...path].reverse()),
+  ]);
   pedestrianCorridorCount = corridors.length;
   const totalPathTiles = baseCorridors.reduce((sum, path) => sum + path.length, 0);
   const pedestrianCount = Math.min(420, Math.max(220, Math.floor(totalPathTiles / 3)));

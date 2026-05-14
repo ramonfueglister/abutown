@@ -31,6 +31,14 @@ export function buildPedestrianCorridors(
     .slice(0, maxCorridors);
 }
 
+export function makeNonTeleportingPedestrianLoop(path: readonly Coord[]): Coord[] {
+  if (path.length <= 2 || areAdjacent(path[0], path[path.length - 1])) return path.map(copyCoord);
+  return [
+    ...path.map(copyCoord),
+    ...path.slice(1, -1).reverse().map(copyCoord),
+  ];
+}
+
 function axisCorridors(
   roads: ReadonlyMap<string, PedestrianCorridorRoad>,
   axis: 'horizontal' | 'vertical',
@@ -77,4 +85,12 @@ function previousCoord(coord: Coord, axis: 'horizontal' | 'vertical'): Coord {
 
 function nextCoord(coord: Coord, axis: 'horizontal' | 'vertical'): Coord {
   return axis === 'horizontal' ? { x: coord.x + 1, y: coord.y } : { x: coord.x, y: coord.y + 1 };
+}
+
+function areAdjacent(a: Coord, b: Coord): boolean {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) <= 1;
+}
+
+function copyCoord(coord: Coord): Coord {
+  return { x: coord.x, y: coord.y };
 }

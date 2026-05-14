@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPedestrianCorridors } from '../../src/city/pedestrianCorridors';
+import { buildPedestrianCorridors, makeNonTeleportingPedestrianLoop } from '../../src/city/pedestrianCorridors';
 
 const NORTH = 1;
 const EAST = 2;
@@ -48,5 +48,28 @@ describe('pedestrian corridors', () => {
       { x: 4, y: 6 },
     ]);
     expect(corridors.some((path) => path.length === 2)).toBe(false);
+  });
+
+  it('mirrors open walking corridors so modulo animation cannot teleport to the start', () => {
+    const loop = makeNonTeleportingPedestrianLoop([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+      { x: 3, y: 0 },
+    ]);
+
+    expect(loop).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+      { x: 3, y: 0 },
+      { x: 2, y: 0 },
+      { x: 1, y: 0 },
+    ]);
+    for (let index = 0; index < loop.length; index += 1) {
+      const current = loop[index];
+      const next = loop[(index + 1) % loop.length];
+      expect(Math.abs(current.x - next.x) + Math.abs(current.y - next.y)).toBeLessThanOrEqual(1);
+    }
   });
 });
