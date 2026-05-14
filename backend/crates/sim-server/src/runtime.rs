@@ -3,11 +3,8 @@ use abutown_protocol::{
     ServerMessageDto, TilePulseDeltaDto, WorldId, WorldSummaryDto,
 };
 use sim_core::{
-    chunk::Chunk,
-    ids::ChunkCoord,
-    persistence::InMemoryChunkSnapshotStore,
-    scheduler::ChunkActivity,
-    tile::TileKind,
+    chunk::Chunk, ids::ChunkCoord, persistence::InMemoryChunkSnapshotStore,
+    scheduler::ChunkActivity, tile::TileKind,
 };
 
 use crate::chunk_registry::ChunkRegistry;

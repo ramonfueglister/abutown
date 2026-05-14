@@ -34,6 +34,8 @@ Open the Vite URL. The city should render normally and show a `RUST LIVE` badge.
 
 Current `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
 
+The server also runs an in-memory snapshot loop every five seconds. It writes snapshots for all loaded chunks into the current process snapshot store and clears chunk dirty flags after each successful pass. This is the first persistence boundary; Supabase/Postgres adapters remain a later slice.
+
 Design rules:
 
 - Rust owns hot simulation state.

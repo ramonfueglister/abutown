@@ -4,7 +4,7 @@ use abutown_protocol::{ChunkSnapshotDto, WorldId};
 use sim_core::{
     chunk::Chunk,
     ids::ChunkCoord,
-    persistence::{build_chunk_snapshot, InMemoryChunkSnapshotStore},
+    persistence::{InMemoryChunkSnapshotStore, build_chunk_snapshot},
     scheduler::ChunkActivity,
 };
 
