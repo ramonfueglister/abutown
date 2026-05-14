@@ -37,8 +37,10 @@ describe('vehicleRenderPose', () => {
 
     expect(pose.position.x).toBeLessThan(1);
     expect(pose.position.y).toBeGreaterThan(0);
+    expect(pose.position.y).toBeLessThan(0.1);
     expect(pose.headingDelta.x).toBeGreaterThan(0);
     expect(pose.headingDelta.y).toBeGreaterThan(0);
+    expect(pose.headingDelta.x).toBeGreaterThan(pose.headingDelta.y);
   });
 
   it('eases out of a ninety-degree turn after leaving the junction tile', () => {
@@ -51,10 +53,13 @@ describe('vehicleRenderPose', () => {
       offset: 1 + CURVE_EASING_WINDOW / 2,
     });
 
+    expect(pose.position.x).toBeGreaterThan(0.9);
     expect(pose.position.x).toBeLessThan(1);
     expect(pose.position.y).toBeGreaterThan(0);
+    expect(pose.position.y).toBeGreaterThan(0.1);
     expect(pose.headingDelta.x).toBeGreaterThan(0);
     expect(pose.headingDelta.y).toBeGreaterThan(0);
+    expect(pose.headingDelta.y).toBeGreaterThan(pose.headingDelta.x);
   });
 
   it('does not smooth u-turn ping-pong path endpoints into sideways arcs', () => {

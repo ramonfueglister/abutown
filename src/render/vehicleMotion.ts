@@ -107,12 +107,12 @@ function curvePoseNearSegmentBoundary(
 ): VehicleRenderPose | undefined {
   if (t > 1 - CURVE_EASING_WINDOW) {
     const cornerIndex = (base + 1) % path.length;
-    const pose = poseAroundCorner(path, cornerIndex, 0.5 + ((t - (1 - CURVE_EASING_WINDOW)) / CURVE_EASING_WINDOW) * 0.5);
+    const pose = poseAroundCorner(path, cornerIndex, ((t - (1 - CURVE_EASING_WINDOW)) / CURVE_EASING_WINDOW) * 0.5);
     if (pose) return pose;
   }
   if (t < CURVE_EASING_WINDOW) {
     const cornerIndex = base;
-    const pose = poseAroundCorner(path, cornerIndex, (t / CURVE_EASING_WINDOW) * 0.5);
+    const pose = poseAroundCorner(path, cornerIndex, 0.5 + (t / CURVE_EASING_WINDOW) * 0.5);
     if (pose) return pose;
   }
   return undefined;

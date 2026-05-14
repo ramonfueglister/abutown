@@ -122,16 +122,10 @@ export function clippedVehicleFrameRect(
 }
 
 export function vehicleFrameForGridDelta(delta: ScreenPoint): number {
-  const x = Math.sign(delta.x);
-  const y = Math.sign(delta.y);
-  if (x > 0 && y < 0) return 2;
-  if (x > 0 && y === 0) return 3;
-  if (x > 0 && y > 0) return 4;
-  if (x === 0 && y > 0) return 5;
-  if (x < 0 && y > 0) return 6;
-  if (x < 0 && y === 0) return 7;
-  if (x < 0 && y < 0) return 0;
-  if (x === 0 && y < 0) return 1;
+  if (delta.x !== 0 || delta.y !== 0) {
+    const angle = Math.atan2(delta.y, delta.x);
+    return positiveModulo(Math.round(angle / (Math.PI / 4)) + 3, 8);
+  }
   return vehicleFrameForScreenDelta(delta);
 }
 
@@ -169,6 +163,10 @@ export function hasVisiblePixelsInEveryVehicleFrame(frameVisiblePixels: readonly
 
 function normalizeZero(value: number): number {
   return Math.abs(value) < 0.000001 ? 0 : Number(value.toFixed(3));
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 function stableSpriteRank(sprite: VehicleSprite, spriteIndex: number, copyIndex: number): number {
