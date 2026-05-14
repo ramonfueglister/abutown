@@ -1,8 +1,15 @@
 use abutown_protocol::{
-    ChunkCoordDto, ChunkSnapshotDto, HealthResponse, PROTOCOL_VERSION, ServerHelloDto,
-    ServerMessageDto, TilePulseDeltaDto, WorldId, WorldSummaryDto,
+    ChunkCoordDto, ChunkSnapshotDto, HealthResponse, MobilityDeltaDto, MobilitySnapshotDto,
+    PROTOCOL_VERSION, ServerHelloDto, ServerMessageDto, TilePulseDeltaDto, WorldId,
+    WorldSummaryDto,
 };
-use sim_core::{chunk::Chunk, ids::ChunkCoord, scheduler::ChunkActivity, tile::TileKind};
+use sim_core::{
+    chunk::Chunk,
+    ids::ChunkCoord,
+    mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
+    scheduler::ChunkActivity,
+    tile::TileKind,
+};
 
 use crate::chunk_registry::ChunkRegistry;
 
@@ -19,6 +26,7 @@ const PULSE_STRIDE: u64 = 37;
 pub struct SimulationRuntime {
     world_id: WorldId,
     registry: ChunkRegistry,
+    mobility: MobilityWorld,
     tick: u64,
     version: u64,
 }
@@ -49,6 +57,7 @@ impl SimulationRuntime {
         Self {
             world_id: WorldId(WORLD_ID.to_string()),
             registry,
+            mobility: MobilityWorld::seeded_demo(),
             tick: 0,
             version: 0,
         }
@@ -79,6 +88,15 @@ impl SimulationRuntime {
 
     pub fn chunk_snapshot(&self, coord: ChunkCoord) -> Option<ChunkSnapshotDto> {
         self.registry.chunk_snapshot(&self.world_id, coord)
+    }
+
+    pub fn mobility_snapshot(&self) -> MobilitySnapshotDto {
+        build_mobility_snapshot_dto(&self.world_id, self.mobility.tick(), self.mobility.snapshot())
+    }
+
+    pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
+        let delta = self.mobility.tick_mobility();
+        build_mobility_delta_dto(&self.world_id, self.mobility.tick(), delta)
     }
 
     pub fn hello(&self) -> ServerMessageDto {

@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use abutown_protocol::{ChunkSnapshotDto, HealthResponse, ServerMessageDto, WorldSummaryDto};
+use abutown_protocol::{
+    ChunkSnapshotDto, HealthResponse, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
+};
 use axum::{
     Json, Router,
     extract::{
@@ -73,6 +75,7 @@ pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
         .route("/health", get(health))
         .route("/world", get(world))
         .route("/chunks/{x}/{y}", get(chunk))
+        .route("/mobility", get(mobility))
         .route("/ws", get(websocket))
         .with_state(state)
         .layer(CorsLayer::permissive())
@@ -88,6 +91,12 @@ async fn world(State(state): State<AppState>) -> Json<WorldSummaryDto> {
     let runtime = state.runtime();
     let runtime = runtime.lock().await;
     Json(runtime.world_summary())
+}
+
+async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
+    let runtime = state.runtime();
+    let runtime = runtime.lock().await;
+    Json(runtime.mobility_snapshot())
 }
 
 async fn chunk(
