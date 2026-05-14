@@ -81,6 +81,50 @@ async fn websocket_sends_hello_and_tile_pulse() {
 }
 
 #[tokio::test]
+async fn websocket_pulses_rotate_loaded_chunks() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, build_app()).await.unwrap();
+    });
+
+    let url = format!("ws://{addr}/ws");
+    let (mut stream, _) = connect_async(url).await.unwrap();
+
+    let hello = read_server_message(&mut stream).await;
+    assert!(matches!(hello, ServerMessageDto::Hello(_)));
+
+    let first = read_server_message(&mut stream).await;
+    let second = read_server_message(&mut stream).await;
+    let third = read_server_message(&mut stream).await;
+
+    let ServerMessageDto::TilePulse(first_delta) = first else {
+        panic!("first pulse expected");
+    };
+    let ServerMessageDto::TilePulse(second_delta) = second else {
+        panic!("second pulse expected");
+    };
+    let ServerMessageDto::TilePulse(third_delta) = third else {
+        panic!("third pulse expected");
+    };
+
+    assert_eq!(
+        first_delta.coord,
+        abutown_protocol::ChunkCoordDto { x: 4, y: 4 }
+    );
+    assert_eq!(
+        second_delta.coord,
+        abutown_protocol::ChunkCoordDto { x: 5, y: 4 }
+    );
+    assert_eq!(
+        third_delta.coord,
+        abutown_protocol::ChunkCoordDto { x: 4, y: 5 }
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
 async fn websocket_clients_receive_the_same_broadcast_tick() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
