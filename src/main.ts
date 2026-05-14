@@ -17,13 +17,19 @@ import {
 } from './cameraController';
 import { cleanupSpritePixels } from './render/spriteCleanup';
 import { drawPassForType, type SceneDrawableType } from './render/drawOrder';
-import { vehicleRenderPose, vehicleSpeedFactor } from './render/vehicleMotion';
+import {
+  MIN_VEHICLE_GAP_TILES,
+  vehicleFollowingAdvanceLimit,
+  vehicleFollowingSpeedFactor,
+  vehicleRenderPose,
+  vehicleSpeedFactor,
+} from './render/vehicleMotion';
 import {
   candidateVehicleSprites,
+  clippedVehicleFrameRect,
   hasVisiblePixelsInEveryVehicleFrame,
   screenVehicleRightLaneOffset,
   vehicleFrameForGridDelta,
-  vehicleFrameRect,
   type VehicleSheetName,
   type VehicleSprite,
 } from './render/vehicleSprites';
@@ -59,6 +65,12 @@ type Car = {
   offset: number;
   speed: number;
   sprite: VehicleSprite;
+};
+
+type VehiclePixelProbe = {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
 };
 
 type BuildingSheetName =
@@ -171,8 +183,19 @@ const assetPaths = {
   rail: '/opengfx2/rail_overlayalpha.png',
   railStation: '/opengfx2/railstations_shape.png',
   tree: '/opengfx2/town_tree_32bpp.png',
+};
+
+const vehicleAssetPaths: Record<VehicleSheetName, string> = {
   bus: '/opengfx2/road_buses_32bpp.png',
-  lorry: '/opengfx2/road_lorries_firstgeneration_32bpp.png',
+  lorryFirstGeneration: '/opengfx2/road_lorries_firstgeneration_32bpp.png',
+  lorryFirstGenerationArctic: '/opengfx2/road_lorries_firstgeneration_arctic_32bpp.png',
+  lorryFirstGenerationTropical: '/opengfx2/road_lorries_firstgeneration_tropical_32bpp.png',
+  lorrySecondGeneration: '/opengfx2/road_lorries_secondgeneration_32bpp.png',
+  lorrySecondGenerationArctic: '/opengfx2/road_lorries_secondgeneration_arctic_32bpp.png',
+  lorrySecondGenerationTropical: '/opengfx2/road_lorries_secondgeneration_tropical_32bpp.png',
+  lorryThirdGeneration: '/opengfx2/road_lorries_thirdgeneration_32bpp.png',
+  lorryThirdGenerationArctic: '/opengfx2/road_lorries_thirdgeneration_arctic_32bpp.png',
+  lorryThirdGenerationTropical: '/opengfx2/road_lorries_thirdgeneration_tropical_32bpp.png',
 };
 
 const images = new Map<string, HTMLCanvasElement>();
@@ -196,6 +219,7 @@ void boot();
 async function boot(): Promise<void> {
   const imageEntries = [
     ...Object.values(assetPaths).map((path) => [path, path] as const),
+    ...Object.values(vehicleAssetPaths).map((path) => [path, path] as const),
     ...buildingSheets.map((sheet) => [`/opengfx2/${sheet.file}`, `/opengfx2/${sheet.file}`] as const),
   ];
   await Promise.all(imageEntries.map(async ([key, path]) => images.set(key, await loadCleanImage(path))));
@@ -271,14 +295,46 @@ function frame(now: number): void {
 }
 
 function advanceCars(dt: number): void {
+  const leaderOffsets = carLeaderOffsets(cars);
   for (const car of cars) {
+    const leaderOffset = leaderOffsets.get(car);
     const speedFactor = vehicleSpeedFactor({
       path: car.path,
       offset: car.offset,
       cautionTileKeys: vehicleCautionTiles,
     });
-    car.offset = (car.offset + car.speed * speedFactor * dt) % car.path.length;
+    const followingFactor = vehicleFollowingSpeedFactor({
+      offset: car.offset,
+      leaderOffset,
+      pathLength: car.path.length,
+    });
+    const desiredAdvance = car.speed * speedFactor * followingFactor * dt;
+    const safeAdvance = Math.min(desiredAdvance, vehicleFollowingAdvanceLimit({
+      offset: car.offset,
+      leaderOffset,
+      pathLength: car.path.length,
+    }));
+    car.offset = (car.offset + safeAdvance) % car.path.length;
   }
+}
+
+function carLeaderOffsets(vehicleList: readonly Car[]): Map<Car, number> {
+  const byPath = new Map<readonly Coord[], Car[]>();
+  for (const car of vehicleList) {
+    const pathCars = byPath.get(car.path) ?? [];
+    pathCars.push(car);
+    byPath.set(car.path, pathCars);
+  }
+
+  const result = new Map<Car, number>();
+  for (const pathCars of byPath.values()) {
+    if (pathCars.length < 2) continue;
+    const sorted = [...pathCars].sort((a, b) => a.offset - b.offset);
+    for (let index = 0; index < sorted.length; index += 1) {
+      result.set(sorted[index], sorted[(index + 1) % sorted.length].offset);
+    }
+  }
+  return result;
 }
 
 function render(): void {
@@ -439,10 +495,10 @@ function drawCar(car: Car): void {
   const point = iso(pose.position);
   const lane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, iso(pose.headingDelta));
   const frame = vehicleFrameForGridDelta(pose.headingDelta);
-  const rect = vehicleFrameRect(car.sprite, frame);
-  if (rect.x >= image.width || rect.y >= image.height) return;
-  const sourceWidth = Math.min(rect.width, image.width - rect.x);
-  const sourceHeight = Math.min(rect.height, image.height - rect.y);
+  const rect = clippedVehicleFrameRect(car.sprite, frame, image);
+  if (!rect) return;
+  const sourceWidth = rect.width;
+  const sourceHeight = rect.height;
   const scale = car.sprite.scale;
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
@@ -817,29 +873,47 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
 }
 
 function usableVehicleSprites(): VehicleSprite[] {
-  return candidateVehicleSprites().filter((sprite) => spriteHasVisiblePixels(sprite));
+  const probes = new Map<VehicleSheetName, VehiclePixelProbe>();
+  return candidateVehicleSprites().filter((sprite) => {
+    let probe = probes.get(sprite.sheet);
+    if (!probe) {
+      const image = images.get(vehicleAssetPath(sprite.sheet));
+      if (!image) return false;
+      probe = createVehiclePixelProbe(image);
+      if (!probe) return false;
+      probes.set(sprite.sheet, probe);
+    }
+    return spriteHasVisiblePixels(sprite, probe);
+  });
 }
 
-function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
-  const image = images.get(vehicleAssetPath(sprite.sheet));
-  if (!image) return false;
+function createVehiclePixelProbe(image: HTMLCanvasElement): VehiclePixelProbe | undefined {
   const probe = document.createElement('canvas');
   probe.width = image.width;
   probe.height = image.height;
   const context = probe.getContext('2d', { willReadFrequently: true });
-  if (!context) return false;
+  if (!context) return undefined;
   context.drawImage(image, 0, 0);
+  return {
+    data: context.getImageData(0, 0, image.width, image.height).data,
+    width: image.width,
+    height: image.height,
+  };
+}
+
+function spriteHasVisiblePixels(sprite: VehicleSprite, probe: VehiclePixelProbe): boolean {
   const frameVisiblePixels: number[] = [];
   for (let frame = 0; frame < 8; frame += 1) {
-    const rect = vehicleFrameRect(sprite, frame);
-    if (rect.x + rect.width > image.width || rect.y + rect.height > image.height) {
+    const rect = clippedVehicleFrameRect(sprite, frame, probe);
+    if (!rect) {
       frameVisiblePixels.push(0);
       continue;
     }
-    const data = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
     let visiblePixels = 0;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] !== 0) visiblePixels += 1;
+    for (let y = rect.y; y < rect.y + rect.height; y += 1) {
+      for (let x = rect.x; x < rect.x + rect.width; x += 1) {
+        if (probe.data[(y * probe.width + x) * 4 + 3] !== 0) visiblePixels += 1;
+      }
     }
     frameVisiblePixels.push(visiblePixels);
   }
@@ -847,7 +921,7 @@ function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
 }
 
 function vehicleAssetPath(sheet: VehicleSheetName): string {
-  return sheet === 'bus' ? assetPaths.bus : assetPaths.lorry;
+  return vehicleAssetPaths[sheet];
 }
 
 function carPosition(car: Car): Coord {
@@ -1131,9 +1205,18 @@ function vehicleDiagnostics(): Record<string, number> {
   let pathTilesOffRoad = 0;
   let pathTilesOnRails = 0;
   let teleportingVehiclePaths = 0;
+  let samePathGapViolations = 0;
+  let minSamePathGap = Number.POSITIVE_INFINITY;
+  const leaderOffsets = carLeaderOffsets(cars);
 
   for (const car of cars) {
     if (hasTeleportingVehicleSegment(car.path)) teleportingVehiclePaths += 1;
+    const leaderOffset = leaderOffsets.get(car);
+    if (leaderOffset !== undefined) {
+      const gap = loopDistance(car.offset, leaderOffset, car.path.length);
+      minSamePathGap = Math.min(minSamePathGap, gap);
+      if (gap < MIN_VEHICLE_GAP_TILES) samePathGapViolations += 1;
+    }
     for (const coord of car.path) {
       const tileKey = key(coord);
       if (!roads.has(tileKey)) pathTilesOffRoad += 1;
@@ -1145,7 +1228,13 @@ function vehicleDiagnostics(): Record<string, number> {
     pathTilesOffRoad,
     pathTilesOnRails,
     teleportingVehiclePaths,
+    samePathGapViolations,
+    minSamePathGap: Number((Number.isFinite(minSamePathGap) ? minSamePathGap : 0).toFixed(3)),
   };
+}
+
+function loopDistance(from: number, to: number, loopLength: number): number {
+  return ((to - from) % loopLength + loopLength) % loopLength;
 }
 
 function key(coord: Coord): string {

@@ -1,5 +1,19 @@
 export type ScreenPoint = { x: number; y: number };
-export type VehicleSheetName = 'bus' | 'lorry';
+
+export const VEHICLE_SHEET_LAYOUTS = [
+  { sheet: 'bus', rows: 3, blocks: 1, scale: 0.82 },
+  { sheet: 'lorryFirstGeneration', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorryFirstGenerationArctic', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorryFirstGenerationTropical', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorrySecondGeneration', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorrySecondGenerationArctic', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorrySecondGenerationTropical', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorryThirdGeneration', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorryThirdGenerationArctic', rows: 14, blocks: 3, scale: 0.78 },
+  { sheet: 'lorryThirdGenerationTropical', rows: 14, blocks: 3, scale: 0.78 },
+] as const;
+
+export type VehicleSheetName = typeof VEHICLE_SHEET_LAYOUTS[number]['sheet'];
 
 export type VehicleSprite = {
   sheet: VehicleSheetName;
@@ -11,6 +25,11 @@ export type VehicleSprite = {
 export type VehicleFrameRect = {
   x: number;
   y: number;
+  width: number;
+  height: number;
+};
+
+type ImageBounds = {
   width: number;
   height: number;
 };
@@ -36,13 +55,11 @@ const DIRECTION_RECTS: readonly Omit<VehicleFrameRect, 'y'>[] = [
 export function candidateVehicleSprites(): VehicleSprite[] {
   const sprites: VehicleSprite[] = [];
 
-  for (let row = 0; row < 3; row += 1) {
-    sprites.push({ sheet: 'bus', row, block: 0, scale: 0.82 });
-  }
-
-  for (let row = 0; row < 14; row += 1) {
-    for (let block = 0; block < 3; block += 1) {
-      sprites.push({ sheet: 'lorry', row, block, scale: 0.78 });
+  for (const layout of VEHICLE_SHEET_LAYOUTS) {
+    for (let row = 0; row < layout.rows; row += 1) {
+      for (let block = 0; block < layout.blocks; block += 1) {
+        sprites.push({ sheet: layout.sheet, row, block, scale: layout.scale });
+      }
     }
   }
 
@@ -57,6 +74,18 @@ export function vehicleFrameRect(sprite: VehicleSprite, frame: number): VehicleF
     width: rect.width,
     height: rect.height,
   };
+}
+
+export function clippedVehicleFrameRect(
+  sprite: VehicleSprite,
+  frame: number,
+  bounds: ImageBounds,
+): VehicleFrameRect | undefined {
+  const rect = vehicleFrameRect(sprite, frame);
+  const width = Math.min(rect.width, bounds.width - rect.x);
+  const height = Math.min(rect.height, bounds.height - rect.y);
+  if (rect.x < 0 || rect.y < 0 || width <= 0 || height <= 0) return undefined;
+  return { x: rect.x, y: rect.y, width, height };
 }
 
 export function vehicleFrameForGridDelta(delta: ScreenPoint): number {

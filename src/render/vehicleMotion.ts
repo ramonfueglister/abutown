@@ -12,6 +12,8 @@ export const TURN_SPEED_RECOVERY = 0.62;
 export const JUNCTION_SPEED_FACTOR = 0.78;
 export const JUNCTION_SPEED_LOOKAHEAD = 0.62;
 export const JUNCTION_SPEED_RECOVERY = 0.42;
+export const MIN_VEHICLE_GAP_TILES = 0.72;
+export const VEHICLE_FOLLOWING_SLOWDOWN_DISTANCE_TILES = 1.5;
 
 type VehicleRenderPoseInput = {
   path: readonly VehicleMotionCoord[];
@@ -20,6 +22,12 @@ type VehicleRenderPoseInput = {
 
 type VehicleSpeedFactorInput = VehicleRenderPoseInput & {
   cautionTileKeys?: ReadonlySet<string>;
+};
+
+type VehicleFollowingSpeedFactorInput = {
+  offset: number;
+  leaderOffset?: number;
+  pathLength: number;
 };
 
 export function vehicleRenderPose(input: VehicleRenderPoseInput): VehicleRenderPose {
@@ -74,6 +82,22 @@ export function vehicleSpeedFactor(input: VehicleSpeedFactorInput): number {
     }
   }
   return Number(factor.toFixed(3));
+}
+
+export function vehicleFollowingSpeedFactor(input: VehicleFollowingSpeedFactorInput): number {
+  if (input.leaderOffset === undefined || input.pathLength <= 1) return 1;
+  const distance = forwardDistance(input.offset, input.leaderOffset, input.pathLength);
+  if (distance <= MIN_VEHICLE_GAP_TILES) return 0;
+  if (distance >= VEHICLE_FOLLOWING_SLOWDOWN_DISTANCE_TILES) return 1;
+  const progress = (distance - MIN_VEHICLE_GAP_TILES) /
+    (VEHICLE_FOLLOWING_SLOWDOWN_DISTANCE_TILES - MIN_VEHICLE_GAP_TILES);
+  return Number(smoothstep(clamp01(progress)).toFixed(3));
+}
+
+export function vehicleFollowingAdvanceLimit(input: VehicleFollowingSpeedFactorInput): number {
+  if (input.leaderOffset === undefined || input.pathLength <= 1) return Number.POSITIVE_INFINITY;
+  const distance = forwardDistance(input.offset, input.leaderOffset, input.pathLength);
+  return Math.max(0, distance - MIN_VEHICLE_GAP_TILES);
 }
 
 function curvePoseNearSegmentBoundary(

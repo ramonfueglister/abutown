@@ -3,10 +3,12 @@ import {
   hasVisiblePixelsInEveryVehicleFrame,
   MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME,
   candidateVehicleSprites,
+  clippedVehicleFrameRect,
   ROAD_SURFACE_WIDTH_PIXELS,
   ROAD_VEHICLE_LANE_OFFSET_PIXELS,
   screenVehicleRightLaneOffset,
   screenRightLaneOffset,
+  VEHICLE_SHEET_LAYOUTS,
   vehicleFrameForGridDelta,
 } from '../../src/render/vehicleSprites';
 
@@ -15,8 +17,22 @@ describe('vehicle sprites', () => {
     const sprites = candidateVehicleSprites();
     const sheets = new Set(sprites.map((sprite) => sprite.sheet));
 
-    expect(sheets).toEqual(new Set(['bus', 'lorry']));
-    expect(sprites.length).toBeGreaterThan(20);
+    expect(sheets).toEqual(new Set(VEHICLE_SHEET_LAYOUTS.map((layout) => layout.sheet)));
+    expect(sheets.has('lorryFirstGeneration')).toBe(true);
+    expect(sheets.has('lorrySecondGeneration')).toBe(true);
+    expect(sheets.has('lorryThirdGeneration')).toBe(true);
+    expect([...sheets].some((sheet) => sheet.toLowerCase().includes('toyland'))).toBe(false);
+    expect(sprites.length).toBe(381);
+    expect(sprites.filter((sprite) => sprite.sheet === 'bus')).toHaveLength(3);
+    expect(sprites.filter((sprite) => sprite.sheet !== 'bus')).toHaveLength(378);
+  });
+
+  it('clips edge frames instead of rejecting real OpenGFX vehicle blocks at the atlas border', () => {
+    expect(clippedVehicleFrameRect(
+      { sheet: 'lorryFirstGeneration', row: 0, block: 2, scale: 0.78 },
+      7,
+      { width: 523, height: 337 },
+    )).toEqual({ x: 507, y: 0, width: 16, height: 24 });
   });
 
   it('selects directional OpenGFX road-vehicle frames from grid movement', () => {
