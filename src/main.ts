@@ -29,6 +29,7 @@ import {
   clippedVehicleFrameRect,
   hasVisiblePixelsInEveryVehicleFrame,
   screenVehicleRightLaneOffset,
+  trafficVehicleSpriteDeck,
   vehicleFrameForGridDelta,
   type VehicleSheetName,
   type VehicleSprite,
@@ -211,6 +212,7 @@ const railStations = buildRailStations();
 const buildings = buildBuildings();
 const trees = buildTrees();
 let vehicleSprites: VehicleSprite[] = [];
+let trafficVehicleSprites: VehicleSprite[] = [];
 let cars: Car[] = [];
 let previousTime = performance.now();
 
@@ -224,7 +226,8 @@ async function boot(): Promise<void> {
   ];
   await Promise.all(imageEntries.map(async ([key, path]) => images.set(key, await loadCleanImage(path))));
   vehicleSprites = usableVehicleSprites();
-  cars = buildCars(vehicleSprites);
+  trafficVehicleSprites = trafficVehicleSpriteDeck(vehicleSprites);
+  cars = buildCars(trafficVehicleSprites);
   resize();
   window.addEventListener('resize', resize);
   attachCamera();
@@ -1307,6 +1310,7 @@ window.render_game_to_text = () =>
       buildings: buildings.length,
       cars: cars.length,
       vehicleSprites: vehicleSprites.length,
+      trafficVehicleSprites: trafficVehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
       railStations: railStations.length,
       railYardTracks: railYardPaths.length,

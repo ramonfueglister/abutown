@@ -8,6 +8,7 @@ import {
   ROAD_VEHICLE_LANE_OFFSET_PIXELS,
   screenVehicleRightLaneOffset,
   screenRightLaneOffset,
+  trafficVehicleSpriteDeck,
   VEHICLE_SHEET_LAYOUTS,
   vehicleFrameForGridDelta,
 } from '../../src/render/vehicleSprites';
@@ -93,6 +94,20 @@ describe('vehicle sprites', () => {
     expect(hasVisiblePixelsInEveryVehicleFrame(Array(8).fill(MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME))).toBe(true);
     expect(hasVisiblePixelsInEveryVehicleFrame([18, 12, 0, 14, 19, 20, 22, 11])).toBe(false);
     expect(hasVisiblePixelsInEveryVehicleFrame([18, 12, 14])).toBe(false);
+  });
+
+  it('weights compact road vehicles higher for city traffic without dropping cargo assets', () => {
+    const sprites = candidateVehicleSprites();
+    const deck = trafficVehicleSpriteDeck(sprites);
+    const visibleFleet = deck.slice(0, 156);
+    const compactCount = deck.filter((sprite) => sprite.row === 1 || sprite.row === 10).length;
+    const cargoCount = deck.filter((sprite) => sprite.row !== 1 && sprite.row !== 10 && sprite.sheet !== 'bus').length;
+    const visibleCompactCount = visibleFleet.filter((sprite) => sprite.row === 1 || sprite.row === 10).length;
+    const visibleCargoCount = visibleFleet.filter((sprite) => sprite.row !== 1 && sprite.row !== 10 && sprite.sheet !== 'bus').length;
+
+    expect(new Set(deck.map((sprite) => sprite.sheet))).toEqual(new Set(sprites.map((sprite) => sprite.sheet)));
+    expect(compactCount).toBeGreaterThan(cargoCount);
+    expect(visibleCompactCount).toBeGreaterThan(visibleCargoCount);
   });
 });
 

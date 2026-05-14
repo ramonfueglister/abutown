@@ -66,6 +66,25 @@ export function candidateVehicleSprites(): VehicleSprite[] {
   return sprites;
 }
 
+export function trafficVehicleSpriteDeck(sprites: readonly VehicleSprite[]): VehicleSprite[] {
+  return sprites
+    .flatMap((sprite, spriteIndex) =>
+      Array.from({ length: vehicleTrafficWeight(sprite) }, (_, copyIndex) => ({
+        sprite,
+        rank: stableSpriteRank(sprite, spriteIndex, copyIndex),
+      })),
+    )
+    .sort((a, b) => a.rank - b.rank)
+    .map((entry) => entry.sprite);
+}
+
+export function vehicleTrafficWeight(sprite: VehicleSprite): number {
+  if (sprite.sheet === 'bus') return 3;
+  if (sprite.row === 10) return 18;
+  if (sprite.row === 1) return 10;
+  return 1;
+}
+
 export function vehicleFrameRect(sprite: VehicleSprite, frame: number): VehicleFrameRect {
   const rect = DIRECTION_RECTS[((frame % DIRECTION_RECTS.length) + DIRECTION_RECTS.length) % DIRECTION_RECTS.length];
   return {
@@ -136,4 +155,14 @@ export function hasVisiblePixelsInEveryVehicleFrame(frameVisiblePixels: readonly
 
 function normalizeZero(value: number): number {
   return Math.abs(value) < 0.000001 ? 0 : Number(value.toFixed(3));
+}
+
+function stableSpriteRank(sprite: VehicleSprite, spriteIndex: number, copyIndex: number): number {
+  const value = `${sprite.sheet}:${sprite.row}:${sprite.block}:${spriteIndex}:${copyIndex}`;
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
