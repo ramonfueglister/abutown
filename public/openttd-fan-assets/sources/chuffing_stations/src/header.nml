@@ -1,0 +1,76 @@
+grf {
+    grfid: "NDY\05";
+    name: string(STR_GRF_NAME);
+    desc: string(STR_GRF_DESCRIPTION);
+    url: string(STR_GRF_WEBSITE);
+    version: 20;
+    min_compatible_version: 20;
+    param 1 {
+        param_disable_unlock_year {
+            type: bool;
+            name: string(STR_PARAM_DISABLE_UNLOCK_YEAR_NAME);
+            desc: string(STR_PARAM_DISABLE_UNLOCK_YEAR_DESCRIPTION);
+        }
+    }
+    param 2 {
+        param_set_cargo_threshold {
+            type: int;
+            name: string(STR_PARAM_SET_CARGO_THRESHOLD_NAME);
+            desc: string(STR_PARAM_SET_CARGO_THRESHOLD_DESCRIPTION);
+            min_value: 1;
+ 			      max_value: 4;
+ 			      def_value: 1;
+ 			      names: {
+		            1: string(STR_PARAM_SET_CARGO_THRESHOLD_1);
+ 	              2: string(STR_PARAM_SET_CARGO_THRESHOLD_2);
+                3: string(STR_PARAM_SET_CARGO_THRESHOLD_3);
+                4: string(STR_PARAM_SET_CARGO_THRESHOLD_4);
+ 			      };
+        }
+    }
+}
+
+if (version_openttd(1,2,0,22723) > openttd_version) {
+    error(FATAL, REQUIRES_OPENTTD, string(STR_VERSION_22723));
+}
+
+cargotable {
+    PASS
+}
+
+switch (FEAT_STATIONS, SELF, switch_intro_year_redbrick, current_year) {
+  0..1884: param[1] ? 1 : 0;
+  default: 1;
+}
+
+switch (FEAT_STATIONS, SELF, switch_intro_year_stone_extra, current_year) {
+  0..1924: param[1] ? 1 : 0;
+  default: 1;
+}
+
+switch (FEAT_STATIONS, SELF, switch_intro_year_suburban, current_year) {
+  0..1924: param[1] ? 1 : 0;
+  default: 1;
+}
+
+switch (FEAT_STATIONS, SELF, switch_intro_year_darkbrick, current_year) {
+  0..1954: param[1] ? 1 : 0;
+  default: 1;
+}
+
+switch (FEAT_STATIONS, SELF, switch_intro_year_modern, current_year) {
+  0..1964: param[1] ? 1 : 0;
+  default: 1;
+}
+
+switch (FEAT_STATIONS, SELF, switch_intro_year_express, current_year) {
+  0..1979: param[1] ? 1 : 0;
+  default: 1;
+}
+
+switch (FEAT_STATIONS, SELF, switch_intro_year_city, current_year) {
+  0..2004: param[1] ? 1 : 0;
+  default: 1;
+}
+
+/* END OF SETUP */

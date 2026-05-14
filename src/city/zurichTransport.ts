@@ -103,7 +103,13 @@ function buildRailPaths(world: ZurichWorld): Coord[][] {
   return [
     route([{ x: 0, y: 154 }, { x: 118, y: 154 }, { x: 175, y: 184 }, { x: world.width - 1, y: 191 }]),
     route([{ x: 118, y: 154 }, { x: 126, y: world.height - 1 }]),
+    ...parallelStationTracks(86, 154, 66, [-8, -5, -2, 2, 5, 8]),
+    ...parallelStationTracks(136, 178, 58, [-6, -3, 0, 3, 6]),
   ];
+}
+
+function parallelStationTracks(startX: number, y: number, length: number, offsets: number[]): Coord[][] {
+  return offsets.map((offset) => route([{ x: startX, y: y + offset }, { x: startX + length, y: y + offset }]));
 }
 
 function addDistrictStreetPattern(world: ZurichWorld, addRoad: (coord: Coord) => void, center: Coord, radius: number, density: number): void {

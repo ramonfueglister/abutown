@@ -7,11 +7,12 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
+import { buildOpenTtdImportedPlacement, buildOpenTtdImportedTransport, buildOpenTtdImportedWorld } from './city/openTtdImportedWorld';
 import { buildZurichPlacement } from './city/zurichPlacement';
 import { buildZurichTransport } from './city/zurichTransport';
 import { validateZurichCity } from './city/zurichValidation';
 import { buildZurichWorld } from './city/zurichWorld';
-import type { ZurichBuilding } from './city/worldTypes';
+import type { ZurichBuilding, ZurichDetail } from './city/worldTypes';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -73,6 +74,7 @@ type StaticDrawable =
   | { type: 'rail'; coord: Coord; rail: RailTile }
   | { type: 'road'; coord: Coord; road: RoadTile }
   | { type: 'railStation'; coord: Coord; station: RailStation }
+  | { type: 'detail'; coord: Coord; detail: ZurichDetail }
   | { type: 'tree'; coord: Coord }
   | { type: 'building'; coord: Coord; building: Building };
 
@@ -124,9 +126,9 @@ const SOUTH = 4;
 const WEST = 8;
 const ROAD_SPRITE_STEP = 65;
 
-const zurichWorld = buildZurichWorld({ seed: 1848 });
-const zurichTransport = buildZurichTransport(zurichWorld);
-const zurichPlacement = buildZurichPlacement(zurichWorld, zurichTransport);
+const zurichWorld = buildOpenTtdImportedWorld();
+const zurichTransport = buildOpenTtdImportedTransport(zurichWorld);
+const zurichPlacement = buildOpenTtdImportedPlacement();
 const zurichValidation = validateZurichCity(zurichWorld, zurichTransport, zurichPlacement);
 
 const WIDTH = zurichWorld.width;
@@ -195,6 +197,16 @@ const assetPaths = {
   road: '/opengfx2/road_town_overlayalpha.png',
   rail: '/opengfx2/rail_overlayalpha.png',
   railStation: '/opengfx2/railstations_shape.png',
+  station64: '/opengfx2/all/stations__general__64__railstations_shape.png',
+  railDepot: '/opengfx2/all/stations__general__64__raildepots_shape.png',
+  roadDepot: '/opengfx2/all/stations__general__64__roaddepots_shape.png',
+  roadStop: '/opengfx2/all/stations__general__64__roadstops_shape.png',
+  dock: '/opengfx2/all/stations__general__64__docksandlocks_shape.png',
+  ship: '/opengfx2/all/vehicles__64__water_32bpp.png',
+  factory: '/opengfx2/all/industries__temperate__64__factory_shape.png',
+  farm: '/opengfx2/all/industries__temperate__64__farm_shape.png',
+  field: '/opengfx2/all/terrain__64__farm_groundtiles_32bpp.png',
+  parkDetail: '/opengfx2/all/terrain__64__temperate_park_32bpp.png',
   tree: '/opengfx2/town_tree_32bpp.png',
   bus: '/opengfx2/road_buses_32bpp.png',
   lorry: '/opengfx2/road_lorries_firstgeneration_32bpp.png',
@@ -215,6 +227,7 @@ const railYardPaths: Coord[][] = [];
 const railStations = buildRailStations();
 const buildings = zurichPlacement.buildings.map(toRuntimeBuilding);
 const trees = zurichPlacement.trees;
+const details = zurichPlacement.details;
 const staticDrawables = buildStaticDrawables();
 let vehicleSprites: VehicleSprite[] = [];
 let cars: Car[] = [];
@@ -246,7 +259,7 @@ function resize(): void {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.imageSmoothingEnabled = false;
   if (!cameraInitialized) {
-    const focus = iso({ x: 128, y: 132 });
+    const focus = iso({ x: Math.floor(WIDTH / 2), y: Math.floor(HEIGHT / 2) });
     camera.targetX = window.innerWidth / 2 - focus.x * camera.targetScale;
     camera.targetY = Math.min(445, window.innerHeight * 0.58) - focus.y * camera.targetScale;
     camera.x = camera.targetX;
@@ -334,6 +347,7 @@ function drawScene(offset: Coord): void {
     if (item.type === 'rail') drawRail(item.rail);
     if (item.type === 'road') drawRoad(item.road);
     if (item.type === 'railStation') drawRailStation(item.station);
+    if (item.type === 'detail') drawDetail(item.detail);
     if (item.type === 'tree') drawTree(item.coord);
     if (item.type === 'building') drawBuilding(item.building);
     if (item.type === 'car') drawCar(item.car);
@@ -416,6 +430,71 @@ function drawRailStation(station: RailStation): void {
   const cellH = spriteSheetCellSize(image.height, rows);
   const point = iso(station.coord);
   ctx.drawImage(image, col * cellW, row * cellH, cellW, cellH, point.x - 33, point.y - 32, 66, 66);
+}
+
+function drawDetail(detail: ZurichDetail): void {
+  if (detail.category === 'field') {
+    drawGroundDetail(assetPaths.field, detail.coord, 19, 9);
+    return;
+  }
+  if (detail.category === 'park' || detail.category === 'civic' || detail.category === 'decor') {
+    drawGroundDetail(assetPaths.parkDetail, detail.coord, 2, 1);
+    return;
+  }
+  if (detail.assetCategory === 'station-roof') {
+    drawGridSprite(assetPaths.station64, detail.coord, 5, 4, [0, 5, 10, 15][hash(`station:${key(detail.coord)}`) % 4], 0.98, -22);
+    return;
+  }
+  if (detail.assetCategory === 'road-stop') {
+    drawGridSprite(assetPaths.roadStop, detail.coord, 10, 4, hash(`road-stop:${key(detail.coord)}`) % 20, 0.92, -28);
+    return;
+  }
+  if (detail.assetCategory === 'rail-depot') {
+    drawGridSprite(assetPaths.railDepot, detail.coord, 1, 4, hash(`rail-depot:${key(detail.coord)}`) % 4, 0.96, -42);
+    return;
+  }
+  if (detail.assetCategory === 'road-depot') {
+    drawGridSprite(assetPaths.roadDepot, detail.coord, 1, 4, hash(`road-depot:${key(detail.coord)}`) % 4, 0.92, -42);
+    return;
+  }
+  if (detail.assetCategory === 'ship') {
+    drawGridSprite(assetPaths.ship, detail.coord, 8, 4, 1 + (hash(`ship:${key(detail.coord)}`) % 22), 0.72, -36);
+    return;
+  }
+  if (detail.assetCategory === 'dock' || detail.assetCategory === 'quay') {
+    drawGridSprite(assetPaths.dock, detail.coord, 8, 4, hash(`dock:${key(detail.coord)}`) % 28, 0.98, -30);
+    return;
+  }
+  if (detail.assetCategory === 'factory') {
+    drawGridSprite(assetPaths.factory, detail.coord, 2, 3, hash(`factory:${key(detail.coord)}`) % 2, 0.9, -76);
+    return;
+  }
+  drawGridSprite(assetPaths.farm, detail.coord, 5, 1, hash(`farm:${key(detail.coord)}`) % 5, 0.86, -38);
+}
+
+function drawGroundDetail(path: string, coord: Coord, cols: number, rows: number): void {
+  const image = images.get(path);
+  if (!image) return;
+  const frame = hash(`ground-detail:${path}:${key(coord)}`) % (cols * rows);
+  const cellW = spriteSheetCellSize(image.width, cols);
+  const cellH = spriteSheetCellSize(image.height, rows);
+  const col = frame % cols;
+  const row = Math.floor(frame / cols) % rows;
+  const point = iso(coord);
+  ctx.drawImage(image, col * cellW, row * cellH, Math.min(64, cellW), Math.min(SPRITE_H, cellH), point.x - 32, point.y - 12, 64, SPRITE_H);
+}
+
+function drawGridSprite(path: string, coord: Coord, cols: number, rows: number, frame: number, scale: number, yOffset: number): void {
+  const image = images.get(path);
+  if (!image) return;
+  const col = frame % cols;
+  const row = Math.floor(frame / cols) % rows;
+  const cellW = spriteSheetCellSize(image.width, cols);
+  const cellH = spriteSheetCellSize(image.height, rows);
+  const point = iso(coord);
+  const w = cellW * scale;
+  const h = cellH * scale;
+  ctx.drawImage(image, col * cellW, row * cellH, cellW, cellH, point.x - w / 2, point.y + yOffset, w, h);
 }
 
 function drawBuilding(building: Building): void {
@@ -714,7 +793,8 @@ function buildRailStations(): RailStation[] {
   }
 
   candidates.sort((a, b) => distance(a, railCenter) - distance(b, railCenter) || a.y - b.y || a.x - b.x);
-  return candidates.slice(0, 5).map((coord) => ({ coord, frame: 0 }));
+  const stationFrames = [3, 8, 13, 1, 2];
+  return candidates.slice(0, 14).map((coord, index) => ({ coord, frame: stationFrames[index % stationFrames.length] }));
 }
 
 function addDistrictStreets(points: Map<string, RoadKind>, center: Coord, radius: number, dense: boolean): void {
@@ -1030,6 +1110,7 @@ function buildStaticDrawables(): StaticDrawable[] {
     ...[...rails.values()].map((rail) => ({ type: 'rail' as const, coord: rail.coord, rail })),
     ...[...roads.values()].map((road) => ({ type: 'road' as const, coord: road.coord, road })),
     ...railStations.map((station) => ({ type: 'railStation' as const, coord: station.coord, station })),
+    ...details.map((detail) => ({ type: 'detail' as const, coord: detail.coord, detail })),
     ...trees.map((coord) => ({ type: 'tree' as const, coord })),
     ...buildings.map((building) => ({ type: 'building' as const, coord: building.coord, building })),
   ].sort(compareDrawables);
@@ -1137,13 +1218,14 @@ function mergeSortedDrawables(staticItems: StaticDrawable[], carItems: CarDrawab
   return result;
 }
 
-function drawPriority(type: 'rail' | 'road' | 'railStation' | 'tree' | 'building' | 'car'): number {
+function drawPriority(type: 'rail' | 'road' | 'railStation' | 'detail' | 'tree' | 'building' | 'car'): number {
   if (type === 'rail') return 0;
   if (type === 'road') return 1;
   if (type === 'railStation') return 2;
-  if (type === 'tree') return 3;
-  if (type === 'building') return 4;
-  return 5;
+  if (type === 'detail') return 3;
+  if (type === 'tree') return 4;
+  if (type === 'building') return 5;
+  return 6;
 }
 
 function cardinal(coord: Coord): Coord[] {
@@ -1308,6 +1390,7 @@ declare global {
 
 window.render_game_to_text = () => {
   const legacyDiagnostics = cityDiagnostics();
+  const detailCounts = detailCountsByCategory();
   return JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
@@ -1323,7 +1406,8 @@ window.render_game_to_text = () => {
       vehicleSprites: vehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
       railStations: railStations.length,
-      railYardTracks: railYardPaths.length,
+      railYardTracks: Math.max(0, railPaths.length - 2),
+      details: detailCounts,
       reserveTiles: zurichPlacement.reserveTiles.size,
       validationErrors: zurichValidation.errors.length,
       roadRailOverlap: zurichValidation.stats.roadRailOverlap,
@@ -1354,6 +1438,14 @@ window.render_game_to_text = () => {
     },
   });
 };
+
+function detailCountsByCategory(): Record<string, number> {
+  const result: Record<string, number> = { total: details.length };
+  for (const detail of details) {
+    result[detail.category] = (result[detail.category] ?? 0) + 1;
+  }
+  return result;
+}
 
 window.advanceTime = (ms: number) => {
   for (const car of cars) car.offset = (car.offset + car.speed * (ms / 1000)) % car.path.length;

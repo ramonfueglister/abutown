@@ -1,0 +1,113 @@
+Auz Objects Towns Pre1900 -- Changelog 
+
+   Official release & discussion topic
+   https://tt-forums.net/viewtopic.php?t=75657 
+
+ v26 2024/02/24 (Page 159)
+	 [Fix] In Houses: Additional graphics fixes to apartments
+ 
+ v25 2023/04/08 (Page 159)
+	 [Add] In Parks: Playground Equipment
+	
+ v24 2023/02/17 (Page 116)
+     [Add] In Back Yards: All the back yards in the one place.
+     [Fix] Coding issue with two back yards that was not being displayed.
+	 [Fix] Shops renamed Commercials
+	 [Fix] Graveyards renamed Churches and Graves.
+
+ v23 2022/08/03 (Page 96)
+     [Add] Campers, tents, camp fires 
+
+ v22 2022/01/29 (Page 85)
+     [Add] Lawn mowers and Erato's bicycles 
+	
+ v21 2022/01/25 (Page 85)
+     [Add] Off-road parking
+	 [Add] In Camping: Fishing, tents, camp fires and vehicles near water
+	
+ v20 2021/12/20 (Page 85)
+     [Add] In Parks: water fountains, paths with stone walls
+
+ v19 2021/12/14 (Page 81)
+	 [Add] In Gardens: lawns beign mowed, gardeners watering 
+	 
+ v18 2021/11/18 (Page 74)
+	 [Add] Older-looking grave stones 
+	 [Add] In Buildings: Service Stations 
+	 [Add] In Shops: older-style shops 
+	 [Add[ In Houses: older-style houses
+	 
+ v17 2021/08/20 (Page 67)
+	 [Add] In Houses: three-story terrace houses
+	 
+ v16 2021/04/24 (Page 64)
+	 [Add] In Houses: added back yards with clothes lines & outdoor toilets
+	 
+ v15 2021/04/04 (Page 61)
+	 [Add] In Parks: Sprinkler systems for parks 
+	 [Add] George's primary school 
+	 [Add] Water towers 
+	 [Add] Cemetaries & grave stones
+	 [Add] In Shops: Added older-style buildings from AuzFarmBojects
+	 	 
+ v14 2021/01/14 (Page 55)
+	 [Add] In Gardens: flower hedges, decorative trees 
+	 
+ v13 2021/01/02 (Page 53)
+	 [Cng] New menu list organization across all NewGRFs
+	 [Cng] Main categories now: Houses, Shops, Buildings, Parks + Paths, 
+	       Camping, Cobble Pathways, Gardens, Wide Stars
+	 
+ v12 2020/11/24 (Page 51)
+	 [Rem] Sports stuff now split to AuzSportsObjects 
+	 [Add] Town clock towers 
+	 
+ v11 2020/10/27 (Page 43)
+     [Add] Cobble stone paths, sloped steps, and gardens
+	 [Add] NRL rugby field and AFL football field
+	 [Add] Stands and seating for sports fields
+	 [Add] Transferred horse tracks and grandstands
+	 [Fix] Missing foundations for some objects on slopes
+	 
+ v10 2020/09/27 (Page 43)
+     [Add] In Camping: tents with camp fires now have people watching them
+	 
+ v09 2020/09/20 (Page 42)
+     [Rem] Mowed lawns from baseball, cricket, and playground lawns 
+	 [Add] Parklands with gardens, houes with gardens
+	 [Add] News and re-surfaced paths and roads, now also snow-aware
+	 [Cng] More multi-select menus
+	 
+ v08 2020/09/09 (Page 38)
+     [Add] Moved over all Camping objects from AuzObjectsAddOns
+	 [Add] Multi-select menus for many objects
+	 
+ v07 2020/05/04 (Page 26)
+     [Add] In Camping: more tents 
+	 
+ v06 2020/03/22 (Page 19)
+     [Add] In Other Buildings: Service Stations
+	 
+ v05 2020/01/03 (Page 19)
+     [Add] New categorization for Houses, Shops, Other Buildings, Camping,
+	       Parks and Playgrounds, Recreation.Leisure 
+     [Rem] Removed RVs from streets so they can be used in pre-car games
+	 
+ v04 2018/12/27 (Page 15)
+     [Fix] Errors in slope-aware tiles and foundation tiles on snow
+	 [Add] Snow-aware roofs
+	 
+ v03 2018/08/26 (Page 11)
+     [Add] Electrica power poles and towners, warning flags for overhead wires
+	 
+ v02 2018/05/06 (Page 8)
+     [Add] Depot Extensions and overlapping tiles
+     
+ v01 2018/05/03(Page 7)
+	 Separation of AuzRoadAndTownObjects, with AuzTownObjects in its own set
+	
+Changes prior to v04 were not accurately tracked and will be updated 
+in the future as time permits. 
+		
+		
+   

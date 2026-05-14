@@ -9,7 +9,7 @@ describe('buildZurichTransport', () => {
     const transport = buildZurichTransport(world);
 
     expect(transport.roads.size).toBeGreaterThan(1200);
-    expect(transport.rails.size).toBeGreaterThan(180);
+    expect(transport.rails.size).toBeGreaterThan(650);
     expect(transport.bridges.size).toBeGreaterThanOrEqual(18);
     expect(transport.railCrossings.size).toBeGreaterThanOrEqual(1);
 

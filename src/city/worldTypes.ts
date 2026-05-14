@@ -75,7 +75,7 @@ export type ZurichBuilding = {
 
 export type ZurichDetail = {
   coord: Coord;
-  category: 'tree' | 'park' | 'civic' | 'industry' | 'decor';
+  category: 'tree' | 'park' | 'civic' | 'industry' | 'decor' | 'station' | 'dock' | 'quai' | 'field' | 'yard';
   assetCategory: string;
 };
 

@@ -34,6 +34,22 @@ describe('buildZurichPlacement', () => {
     expect(new Set(placement.buildings.map((building) => building.sheet)).size).toBeGreaterThanOrEqual(8);
   });
 
+  it('places OpenTTD diorama setpiece details before the city filler', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const placement = buildZurichPlacement(world, transport);
+    const detailCounts = new Map<string, number>();
+
+    for (const detail of placement.details) {
+      detailCounts.set(detail.category, (detailCounts.get(detail.category) ?? 0) + 1);
+    }
+
+    expect(detailCounts.get('station') ?? 0).toBeGreaterThanOrEqual(24);
+    expect(detailCounts.get('dock') ?? 0).toBeGreaterThanOrEqual(18);
+    expect(detailCounts.get('industry') ?? 0).toBeGreaterThanOrEqual(35);
+    expect(detailCounts.get('field') ?? 0).toBeGreaterThanOrEqual(48);
+  });
+
   it('keeps buildings off water, roads, and rails', () => {
     const world = buildZurichWorld({ seed: 1848 });
     const transport = buildZurichTransport(world);

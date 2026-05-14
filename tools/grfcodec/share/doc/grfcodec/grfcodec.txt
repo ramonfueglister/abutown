@@ -1,0 +1,148 @@
+
+                            GRFCodec Documentation
+
+   GRFCODEC: A suite of programs to decode and encode Transport Tycoon
+   Deluxe's GRF files. Copyright (C) 2000-2006 by [1]Josef Drexler.
+
+   These programs are distributed according to the terms of the GNU
+   General Public License, Version 2. For more information read the file
+   "COPYING".
+
+GRFCODEC
+
+     * Copy it into your TTD directory
+     * to decode a GRF file:
+
+     grfcodec -d <grf-file>
+       This will put a pcx file in a subdirectory called "sprites". It
+       will also make a .NFO file that is needed to reconstruct the GRF
+       file.
+     * to encode a GRF file:
+
+     grfcodec -e <grf-file>
+       It will look in the sprites directory for both the PCX and the NFO
+       file and make a GRF file out of this.
+
+  Options
+
+   When decoding:
+
+        -w <width>
+                To set the width of the PCX file
+
+        -h <height>
+                To set the maximum height of a PCX file. With this
+                option, each GRF will be split into several PCX files.
+
+                Note that both width and height should be large enough to
+                accomodate the largest sprite in your GRF file, or you
+                will get strange results.
+
+        -b <boxsize>
+                GRFCodec organizes the sprites in boxes in the PCX file.
+                Use this option to choose the minimum size of these
+                boxes.
+
+        -p <palfile>
+                Choose a differenct colour palette for the PCX file, for
+                example when decoding TT Original or TT+World Builder
+                graphics. See -p ? for a list of possible values.
+
+        -x
+        -xx
+                Disable part or all of the Info version 7 format, reverting
+                to the Info version 6 format.
+
+        -X
+                Print the sprite numbers in the PCX (but NOT the NFO) in hex
+
+          Examples:
+
+     grfcodec -d trg1.grf
+     grfcodec -d -w 800 -h 600 trg1.grf
+     grfcodec -d -p 6 mars.grf
+
+   When encoding:
+
+        -u
+                To disable redundancy compression. This speeds up the
+                encoding process, but it also greatly increases the size
+                of the resulting .GRF file, and may reduce performance in
+                TTD because it can only cache fewer sprites.
+
+        -c
+                Enable sprite-shrinking optimizations. Note that these are
+                not necessarily safe. In particular, sprites that will share
+                their bounding box (as for some station sprites) must not
+                have their upper-right hand corner moved, and the sprite
+                defining the bounding box must not be shrunk smaller than any
+                that will share with it.
+                Sprites with bit 6 of their compression byte set will never
+                be shrunk.
+
+        -s      Silences the progress output indicating which real sprite
+                currently is being worked on.
+
+   When doing either:
+
+        -M <mapping>
+                Map the colour palette from one type to another, for example
+                to convert DOS GRF files to the Windows version or vice
+                versa. See -m ? for a list of possible values.
+        -m <mapping>
+                As above, but do not map the colors of sprites that appear to
+                be character glyphs. Such sprites use only the first three
+                entries in the palette, regardless of what colors they may
+                actually represent.
+
+          Examples:
+
+     grfcodec -e trg1.grf
+     grfcodec -u -e trg1.grf
+     grfcodec -m 1 trg1.grf
+
+  What you can edit
+
+   You can change all the sprites in the PCX file. Note that the colour 0
+   (black) is the transparent colour. Any changes to the white background
+   around the sprites will be ignored.
+
+   It is possible to change the size of a sprite, but it is non-trivial.
+   You have to edit the .NFO file -- even though it says "do not edit".
+   For every sprite there's a line in the following format:
+
+     <pcx filename> <x> <y> <type> <y-size> <x-size> <x-ofs> <y-ofs>
+
+   In case you change anything, there are two things you must must MUST
+   make sure, which is that:
+     * The sprites remain in the correct order
+       Do not delete lines or rearrange them, in particular do not delete
+       or modify the strange block with a "*" as filename. These are
+       special data that aren't sprites but go in the GRF file
+       nonetheless.
+
+   The sizes are given in regular decimal notation. You need to change
+   these. Of course, you also have to make room for them in the PCX file.
+   Therefore, the best way to enlarge a sprite is to:
+    1. Decode the GRF file
+    2. Edit the NFO file, change the size
+    3. Encode the GRF file, even though you haven't edited anything in
+       the PCX file
+    4. Decode it again
+    5. Edit the PCX file
+    6. Encode it again
+
+   Steps 3 and 4 are there to ensure proper spacing in the PCX file.
+
+   ______________________________________________________________________
+
+   Copyright © 1999-2003 by Josef Drexler.
+
+
+
+    Last changed on May 17 2003 15:37 EDT by [2]Josef Drexler
+
+References
+
+   1. http://www.ttdpatch.net/email.php?GRFCodec%2CDocs
+   2. http://www.ttdpatch.net/email.php?TTDPatch%2CGRFCodec

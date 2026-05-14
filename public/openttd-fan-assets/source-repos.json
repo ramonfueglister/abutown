@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Chuffing Stations",
+    "path": "/openttd-fan-assets/sources/chuffing_stations",
+    "url": "https://github.com/andybiotic/chuffing_stations",
+    "commit": "a6f0054cc12017f0216780f8c95f9e6928515ba9",
+    "relatedUniqueId": "4e445905",
+    "license": "GPL v2"
+  },
+  {
+    "name": "Velo - DROP Fork",
+    "path": "/openttd-fan-assets/sources/velo",
+    "url": "https://github.com/EratoNysiad/velo",
+    "commit": "d59a11887eb8fdaf8491369b4408753a1466fefd",
+    "relatedUniqueId": "4a5655f1",
+    "license": "GPL v3"
+  }
+]
