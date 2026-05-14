@@ -15,8 +15,10 @@ import {
   zoomCameraAt,
 } from './cameraController';
 import { cleanupSpritePixels } from './render/spriteCleanup';
+import { drawPassForType, type SceneDrawableType } from './render/drawOrder';
 import {
   candidateVehicleSprites,
+  ROAD_VEHICLE_LANE_OFFSET_PIXELS,
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
   vehicleFrameRect,
@@ -297,6 +299,7 @@ function drawScene(offset: Coord): void {
     ...buildings.map((building) => ({ type: 'building' as const, coord: building.coord, building })),
     ...cars.map((car) => ({ type: 'car' as const, coord: carPosition(car), car })),
   ].sort((a, b) =>
+    drawPassForType(a.type) - drawPassForType(b.type) ||
     iso(a.coord).y - iso(b.coord).y ||
     drawPriority(a.type) - drawPriority(b.type) ||
     a.coord.x - b.coord.x
@@ -425,7 +428,7 @@ function drawCar(car: Car): void {
   const point = iso(pos);
   const currentPoint = iso(current);
   const nextPoint = iso(next);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, 5.5);
+  const lane = screenRightLaneOffset(currentPoint, nextPoint, ROAD_VEHICLE_LANE_OFFSET_PIXELS);
   const frame = vehicleFrameForGridDelta({ x: next.x - current.x, y: next.y - current.y });
   const rect = vehicleFrameRect(car.sprite, frame);
   if (rect.x >= image.width || rect.y >= image.height) return;
@@ -1006,7 +1009,7 @@ function depthSort(a: { coord: Coord }, b: { coord: Coord }): number {
   return iso(a.coord).y - iso(b.coord).y || a.coord.x - b.coord.x;
 }
 
-function drawPriority(type: 'rail' | 'road' | 'railStation' | 'tree' | 'building' | 'car'): number {
+function drawPriority(type: SceneDrawableType): number {
   if (type === 'rail') return 0;
   if (type === 'road') return 1;
   if (type === 'railStation') return 2;

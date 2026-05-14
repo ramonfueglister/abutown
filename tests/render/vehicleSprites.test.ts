@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   candidateVehicleSprites,
+  ROAD_VEHICLE_LANE_OFFSET_PIXELS,
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
 } from '../../src/render/vehicleSprites';
@@ -25,5 +26,10 @@ describe('vehicle sprites', () => {
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: 10, y: 0 }, 5)).toEqual({ x: 0, y: 5 });
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: 0, y: 10 }, 5)).toEqual({ x: -5, y: 0 });
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: -10, y: 0 }, 5)).toEqual({ x: 0, y: -5 });
+  });
+
+  it('keeps the right-lane offset inside the OpenGFX road surface', () => {
+    expect(ROAD_VEHICLE_LANE_OFFSET_PIXELS).toBeGreaterThanOrEqual(2.5);
+    expect(ROAD_VEHICLE_LANE_OFFSET_PIXELS).toBeLessThanOrEqual(3.5);
   });
 });

@@ -17,6 +17,7 @@ export type VehicleFrameRect = {
 
 const VEHICLE_BLOCK_WIDTH = 176;
 const VEHICLE_ROW_HEIGHT = 24;
+export const ROAD_VEHICLE_LANE_OFFSET_PIXELS = 3.25;
 
 const DIRECTION_RECTS: readonly Omit<VehicleFrameRect, 'y'>[] = [
   { x: 0, width: 9, height: 24 },
