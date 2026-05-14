@@ -29,8 +29,9 @@ export function buildTrafficRequestsForVehicles(input: BuildTrafficRequestsInput
 
   return input.vehicles.flatMap((vehicle) => {
     if (vehicle.path.length < 3) return [];
-    const base = positiveModulo(Math.floor(vehicle.offset), vehicle.path.length);
-    const fraction = vehicle.offset - Math.floor(vehicle.offset);
+    const currentOffset = normalizeOffset(vehicle.offset, vehicle.path.length);
+    const base = positiveModulo(Math.floor(currentOffset), vehicle.path.length);
+    const fraction = currentOffset - Math.floor(currentOffset);
 
     for (let step = 1; step <= Math.ceil(lookaheadTiles) + 1; step += 1) {
       const pathIndex = (base + step) % vehicle.path.length;
@@ -47,14 +48,17 @@ export function buildTrafficRequestsForVehicles(input: BuildTrafficRequestsInput
       const exitEdge = directionForRoadStep(next, coord);
       if (!approachEdge || !exitEdge) return [];
 
-      const enterTick = input.tick + Math.max(1, Math.ceil(distanceToIntersection * ticksPerTile));
+      const enterTick = input.tick + Math.max(
+        1,
+        Math.ceil((distanceToIntersection / Math.max(vehicle.speed, 0.1)) * ticksPerTile),
+      );
       const exitTick = enterTick + Math.max(2, Math.ceil((1 / Math.max(0.1, vehicle.speed)) * ticksPerTile));
       return [{
         vehicleId: vehicle.vehicleId,
         intersectionId: intersection.intersectionId,
         distanceToIntersection: Number(distanceToIntersection.toFixed(3)),
         stopOffset: normalizeOffset(pathIndex - stopDistanceTiles, vehicle.path.length),
-        currentOffset: vehicle.offset,
+        currentOffset,
         enterTick,
         exitTick,
         approachEdge,

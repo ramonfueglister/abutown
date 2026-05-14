@@ -56,4 +56,78 @@ describe('vehicle traffic requests', () => {
 
     expect(requests).toEqual([]);
   });
+
+  it('normalizes unbounded offsets when the next intersection crosses the route seam', () => {
+    const requests = buildTrafficRequestsForVehicles({
+      tick: 50,
+      intersections: new Map([
+        ['0:0', { intersectionId: 'intersection:0:0', coord: { x: 0, y: 0 }, connectedDirections: ['south', 'east', 'west'] }],
+      ]),
+      vehicles: [
+        {
+          vehicleId: 'vehicle:2',
+          path: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }],
+          offset: 7.6,
+          speed: 1,
+        },
+      ],
+    });
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        vehicleId: 'vehicle:2',
+        intersectionId: 'intersection:0:0',
+        currentOffset: 3.6,
+        distanceToIntersection: 0.4,
+        stopOffset: 3.58,
+        approachEdge: 'south',
+        exitEdge: 'east',
+      }),
+    ]);
+  });
+
+  it('makes faster vehicles request earlier entry ticks at the same distance', () => {
+    const requests = buildTrafficRequestsForVehicles({
+      tick: 100,
+      intersections: new Map([
+        ['1:0', { intersectionId: 'intersection:1:0', coord: { x: 1, y: 0 }, connectedDirections: ['west', 'south', 'east'] }],
+      ]),
+      vehicles: [
+        {
+          vehicleId: 'vehicle:3',
+          path: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
+          offset: 0.25,
+          speed: 2,
+        },
+        {
+          vehicleId: 'vehicle:4',
+          path: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
+          offset: 0.25,
+          speed: 0.5,
+        },
+      ],
+    });
+
+    expect(requests.map((request) => request.enterTick)).toEqual([103, 112]);
+    expect(requests[0].enterTick).toBeLessThan(requests[1].enterTick);
+  });
+
+  it('does not request intersections when route steps are not adjacent cardinal tiles', () => {
+    const requests = buildTrafficRequestsForVehicles({
+      tick: 30,
+      intersections: new Map([
+        ['2:0', { intersectionId: 'intersection:2:0', coord: { x: 2, y: 0 }, connectedDirections: ['west', 'south', 'east'] }],
+      ]),
+      vehicles: [
+        {
+          vehicleId: 'vehicle:5',
+          path: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }],
+          offset: 0.25,
+          speed: 1,
+        },
+      ],
+    });
+
+    expect(requests).toEqual([]);
+  });
 });
