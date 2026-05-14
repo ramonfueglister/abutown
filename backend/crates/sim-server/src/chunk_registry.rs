@@ -9,7 +9,7 @@ use sim_core::{
 };
 
 #[derive(Debug)]
-pub(crate) struct LoadedChunk {
+struct LoadedChunk {
     chunk: Chunk,
     activity: ChunkActivity,
 }
@@ -33,7 +33,11 @@ impl ChunkRegistry {
     }
 
     pub(crate) fn insert_chunk(&mut self, chunk: Chunk, activity: ChunkActivity) {
-        debug_assert_eq!(chunk.chunk_size(), self.chunk_size);
+        assert_eq!(
+            chunk.chunk_size(),
+            self.chunk_size,
+            "loaded chunk size must match registry chunk size"
+        );
         self.chunks
             .insert(chunk.coord(), LoadedChunk { chunk, activity });
     }
