@@ -26,6 +26,13 @@ describe('vehicle sprites', () => {
     expect(vehicleFrameForGridDelta({ x: 0, y: -1 })).toBe(1);
   });
 
+  it('selects diagonal OpenGFX frames for smoothed curve tangents', () => {
+    expect(vehicleFrameForGridDelta({ x: 1, y: -1 })).toBe(2);
+    expect(vehicleFrameForGridDelta({ x: 1, y: 1 })).toBe(4);
+    expect(vehicleFrameForGridDelta({ x: -1, y: 1 })).toBe(6);
+    expect(vehicleFrameForGridDelta({ x: -1, y: -1 })).toBe(0);
+  });
+
   it('places vehicles on the right lane relative to their screen-space travel direction', () => {
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: 10, y: 0 }, 5)).toEqual({ x: 0, y: 5 });
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: 0, y: 10 }, 5)).toEqual({ x: -5, y: 0 });

@@ -60,10 +60,16 @@ export function vehicleFrameRect(sprite: VehicleSprite, frame: number): VehicleF
 }
 
 export function vehicleFrameForGridDelta(delta: ScreenPoint): number {
-  if (delta.x > 0 && delta.y === 0) return 3;
-  if (delta.x === 0 && delta.y > 0) return 5;
-  if (delta.x < 0 && delta.y === 0) return 7;
-  if (delta.x === 0 && delta.y < 0) return 1;
+  const x = Math.sign(delta.x);
+  const y = Math.sign(delta.y);
+  if (x > 0 && y < 0) return 2;
+  if (x > 0 && y === 0) return 3;
+  if (x > 0 && y > 0) return 4;
+  if (x === 0 && y > 0) return 5;
+  if (x < 0 && y > 0) return 6;
+  if (x < 0 && y === 0) return 7;
+  if (x < 0 && y < 0) return 0;
+  if (x === 0 && y < 0) return 1;
   return vehicleFrameForScreenDelta(delta);
 }
 

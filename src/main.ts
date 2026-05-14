@@ -17,6 +17,7 @@ import {
 } from './cameraController';
 import { cleanupSpritePixels } from './render/spriteCleanup';
 import { drawPassForType, type SceneDrawableType } from './render/drawOrder';
+import { vehicleRenderPose, vehicleSpeedFactor } from './render/vehicleMotion';
 import {
   candidateVehicleSprites,
   hasVisiblePixelsInEveryVehicleFrame,
@@ -180,6 +181,7 @@ const railPaths = buildRailPaths();
 const railReserved = buildRailReserved(railPaths);
 const railCrossings = buildRailCrossings();
 const roads = buildRoadNetwork();
+const vehicleCautionTiles = buildVehicleCautionTiles();
 const railYardPaths: Coord[][] = [];
 const rails = buildRailNetwork(railPaths);
 const railStations = buildRailStations();
@@ -261,11 +263,22 @@ function attachCamera(): void {
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - previousTime) / 1000);
   previousTime = now;
-  for (const car of cars) car.offset = (car.offset + car.speed * dt) % car.path.length;
+  advanceCars(dt);
   if (!camera.dragging) constrainCamera(false);
   dampCamera(camera, dt, 18);
   render();
   requestAnimationFrame(frame);
+}
+
+function advanceCars(dt: number): void {
+  for (const car of cars) {
+    const speedFactor = vehicleSpeedFactor({
+      path: car.path,
+      offset: car.offset,
+      cautionTileKeys: vehicleCautionTiles,
+    });
+    car.offset = (car.offset + car.speed * speedFactor * dt) % car.path.length;
+  }
 }
 
 function render(): void {
@@ -422,15 +435,10 @@ function drawTree(coord: Coord): void {
 function drawCar(car: Car): void {
   const image = images.get(vehicleAssetPath(car.sprite.sheet));
   if (!image) return;
-  const base = Math.floor(car.offset);
-  const current = car.path[base];
-  const next = car.path[(base + 1) % car.path.length];
-  const pos = carPosition(car);
-  const point = iso(pos);
-  const currentPoint = iso(current);
-  const nextPoint = iso(next);
-  const lane = screenVehicleRightLaneOffset(currentPoint, nextPoint);
-  const frame = vehicleFrameForGridDelta({ x: next.x - current.x, y: next.y - current.y });
+  const pose = vehicleRenderPose(car);
+  const point = iso(pose.position);
+  const lane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, iso(pose.headingDelta));
+  const frame = vehicleFrameForGridDelta(pose.headingDelta);
   const rect = vehicleFrameRect(car.sprite, frame);
   if (rect.x >= image.width || rect.y >= image.height) return;
   const sourceWidth = Math.min(rect.width, image.width - rect.x);
@@ -553,6 +561,14 @@ function buildRoadNetwork(): Map<string, RoadTile> {
     roads.set(tileKey, { coord, kind, mask });
   }
   return roads;
+}
+
+function buildVehicleCautionTiles(): Set<string> {
+  const result = new Set<string>();
+  for (const road of roads.values()) {
+    if (roadDegree(road.mask) >= 3) result.add(key(road.coord));
+  }
+  return result;
 }
 
 function removeStraightParallelRoads(points: Map<string, RoadKind>, protectedPoints: ReadonlySet<string>): void {
@@ -835,13 +851,7 @@ function vehicleAssetPath(sheet: VehicleSheetName): string {
 }
 
 function carPosition(car: Car): Coord {
-  const base = Math.floor(car.offset);
-  const next = (base + 1) % car.path.length;
-  const t = car.offset - base;
-  return {
-    x: lerp(car.path[base].x, car.path[next].x, t),
-    y: lerp(car.path[base].y, car.path[next].y, t),
-  };
+  return vehicleRenderPose(car).position;
 }
 
 function route(points: Coord[]): Coord[] {
@@ -939,6 +949,10 @@ function roadMask(points: Map<string, RoadKind>, coord: Coord): number {
     (points.has(key({ x: coord.x, y: coord.y + 1 })) ? SOUTH : 0) |
     (points.has(key({ x: coord.x - 1, y: coord.y })) ? WEST : 0)
   );
+}
+
+function roadDegree(mask: number): number {
+  return [NORTH, EAST, SOUTH, WEST].filter((direction) => (mask & direction) !== 0).length;
 }
 
 function isStraightEastWest(mask: number): boolean {
@@ -1166,10 +1180,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
 async function loadCleanImage(path: string): Promise<HTMLCanvasElement> {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
@@ -1233,6 +1243,6 @@ window.render_game_to_text = () =>
   });
 
 window.advanceTime = (ms: number) => {
-  for (const car of cars) car.offset = (car.offset + car.speed * (ms / 1000)) % car.path.length;
+  advanceCars(ms / 1000);
   render();
 };

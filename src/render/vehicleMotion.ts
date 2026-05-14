@@ -1,0 +1,206 @@
+export type VehicleMotionCoord = { x: number; y: number };
+
+export type VehicleRenderPose = {
+  position: VehicleMotionCoord;
+  headingDelta: VehicleMotionCoord;
+};
+
+export const CURVE_EASING_WINDOW = 0.34;
+export const TURN_SPEED_FACTOR = 0.56;
+export const TURN_SPEED_LOOKAHEAD = 0.58;
+export const TURN_SPEED_RECOVERY = 0.62;
+export const JUNCTION_SPEED_FACTOR = 0.78;
+export const JUNCTION_SPEED_LOOKAHEAD = 0.62;
+export const JUNCTION_SPEED_RECOVERY = 0.42;
+
+type VehicleRenderPoseInput = {
+  path: readonly VehicleMotionCoord[];
+  offset: number;
+};
+
+type VehicleSpeedFactorInput = VehicleRenderPoseInput & {
+  cautionTileKeys?: ReadonlySet<string>;
+};
+
+export function vehicleRenderPose(input: VehicleRenderPoseInput): VehicleRenderPose {
+  const path = input.path;
+  if (path.length === 0) return { position: { x: 0, y: 0 }, headingDelta: { x: 0, y: 0 } };
+  if (path.length === 1) return { position: copyCoord(path[0]), headingDelta: { x: 0, y: 0 } };
+
+  const base = positiveModulo(Math.floor(input.offset), path.length);
+  const t = input.offset - Math.floor(input.offset);
+  const current = path[base];
+  const next = path[(base + 1) % path.length];
+  const linear = {
+    x: lerp(current.x, next.x, t),
+    y: lerp(current.y, next.y, t),
+  };
+  const segmentDelta = delta(current, next);
+
+  const eased = curvePoseNearSegmentBoundary(path, base, t);
+  if (eased) return eased;
+
+  return {
+    position: linear,
+    headingDelta: segmentDelta,
+  };
+}
+
+export function vehicleSpeedFactor(input: VehicleSpeedFactorInput): number {
+  const path = input.path;
+  if (path.length <= 1) return 1;
+
+  let factor = 1;
+  for (let index = 0; index < path.length; index += 1) {
+    if (isRightAngleTurnAt(path, index)) {
+      factor = Math.min(factor, speedFactorAroundIndex(
+        input.offset,
+        index,
+        path.length,
+        TURN_SPEED_LOOKAHEAD,
+        TURN_SPEED_RECOVERY,
+        TURN_SPEED_FACTOR,
+      ));
+    }
+    if (input.cautionTileKeys?.has(key(path[index]))) {
+      factor = Math.min(factor, speedFactorAroundIndex(
+        input.offset,
+        index,
+        path.length,
+        JUNCTION_SPEED_LOOKAHEAD,
+        JUNCTION_SPEED_RECOVERY,
+        JUNCTION_SPEED_FACTOR,
+      ));
+    }
+  }
+  return Number(factor.toFixed(3));
+}
+
+function curvePoseNearSegmentBoundary(
+  path: readonly VehicleMotionCoord[],
+  base: number,
+  t: number,
+): VehicleRenderPose | undefined {
+  if (t > 1 - CURVE_EASING_WINDOW) {
+    const cornerIndex = (base + 1) % path.length;
+    const pose = poseAroundCorner(path, cornerIndex, 0.5 + ((t - (1 - CURVE_EASING_WINDOW)) / CURVE_EASING_WINDOW) * 0.5);
+    if (pose) return pose;
+  }
+  if (t < CURVE_EASING_WINDOW) {
+    const cornerIndex = base;
+    const pose = poseAroundCorner(path, cornerIndex, (t / CURVE_EASING_WINDOW) * 0.5);
+    if (pose) return pose;
+  }
+  return undefined;
+}
+
+function poseAroundCorner(
+  path: readonly VehicleMotionCoord[],
+  cornerIndex: number,
+  curveT: number,
+): VehicleRenderPose | undefined {
+  const previous = path[positiveModulo(cornerIndex - 1, path.length)];
+  const corner = path[cornerIndex];
+  const next = path[(cornerIndex + 1) % path.length];
+  const incoming = delta(previous, corner);
+  const outgoing = delta(corner, next);
+  if (!isRightAngleTurn(incoming, outgoing)) return undefined;
+
+  const start = {
+    x: corner.x - incoming.x * CURVE_EASING_WINDOW,
+    y: corner.y - incoming.y * CURVE_EASING_WINDOW,
+  };
+  const end = {
+    x: corner.x + outgoing.x * CURVE_EASING_WINDOW,
+    y: corner.y + outgoing.y * CURVE_EASING_WINDOW,
+  };
+  const oneMinusT = 1 - curveT;
+  const position = {
+    x: oneMinusT * oneMinusT * start.x + 2 * oneMinusT * curveT * corner.x + curveT * curveT * end.x,
+    y: oneMinusT * oneMinusT * start.y + 2 * oneMinusT * curveT * corner.y + curveT * curveT * end.y,
+  };
+  const headingDelta = {
+    x: 2 * oneMinusT * (corner.x - start.x) + 2 * curveT * (end.x - corner.x),
+    y: 2 * oneMinusT * (corner.y - start.y) + 2 * curveT * (end.y - corner.y),
+  };
+
+  return { position, headingDelta };
+}
+
+function isRightAngleTurn(a: VehicleMotionCoord, b: VehicleMotionCoord): boolean {
+  return manhattanLength(a) === 1 && manhattanLength(b) === 1 && dot(a, b) === 0;
+}
+
+function isRightAngleTurnAt(path: readonly VehicleMotionCoord[], cornerIndex: number): boolean {
+  const previous = path[positiveModulo(cornerIndex - 1, path.length)];
+  const corner = path[cornerIndex];
+  const next = path[(cornerIndex + 1) % path.length];
+  return isRightAngleTurn(delta(previous, corner), delta(corner, next));
+}
+
+function speedFactorAroundIndex(
+  offset: number,
+  targetIndex: number,
+  pathLength: number,
+  lookahead: number,
+  recovery: number,
+  minFactor: number,
+): number {
+  const ahead = forwardDistance(offset, targetIndex, pathLength);
+  if (ahead <= lookahead) return interpolateSpeedFactor(ahead / lookahead, minFactor);
+  const behind = forwardDistance(targetIndex, offset, pathLength);
+  if (behind <= recovery) return interpolateSpeedFactor(behind / recovery, minFactor);
+  return 1;
+}
+
+function interpolateSpeedFactor(progress: number, minFactor: number): number {
+  const eased = smoothstep(clamp01(progress));
+  return minFactor + (1 - minFactor) * eased;
+}
+
+function forwardDistance(from: number, to: number, pathLength: number): number {
+  return positiveModuloFloat(to - from, pathLength);
+}
+
+function smoothstep(value: number): number {
+  return value * value * (3 - 2 * value);
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function delta(from: VehicleMotionCoord, to: VehicleMotionCoord): VehicleMotionCoord {
+  return {
+    x: Math.sign(to.x - from.x),
+    y: Math.sign(to.y - from.y),
+  };
+}
+
+function copyCoord(coord: VehicleMotionCoord): VehicleMotionCoord {
+  return { x: coord.x, y: coord.y };
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function positiveModuloFloat(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function dot(a: VehicleMotionCoord, b: VehicleMotionCoord): number {
+  return a.x * b.x + a.y * b.y;
+}
+
+function manhattanLength(coord: VehicleMotionCoord): number {
+  return Math.abs(coord.x) + Math.abs(coord.y);
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function key(coord: VehicleMotionCoord): string {
+  return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
+}
