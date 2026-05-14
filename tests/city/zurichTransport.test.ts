@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildZurichWorld } from '../../src/city/zurichWorld';
 import { buildZurichTransport } from '../../src/city/zurichTransport';
+import { countAdjacentParallelRoadRuns } from '../../src/city/roadParallelCleanup';
 
 describe('buildZurichTransport', () => {
   it('creates roads, rail, bridges, and intentional crossings without accidental overlap', () => {
@@ -57,6 +58,23 @@ describe('buildZurichTransport', () => {
       const terrain = world.terrain.get(roadKey)?.kind;
       if (terrain === 'water') expect(road.kind).toBe('bridge');
     }
+  });
+
+  it('keeps non-bridge district streets out of the raw riverbank corridor', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const nonBridgeRiverbankRoads = [...transport.roads.entries()].filter(([roadKey, road]) =>
+      road.kind !== 'bridge' && world.terrain.get(roadKey)?.kind === 'riverbank'
+    );
+
+    expect(nonBridgeRiverbankRoads).toEqual([]);
+  });
+
+  it('keeps district roads from reading as a rigid parallel grid', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+
+    expect(countAdjacentParallelRoadRuns(transport.roads)).toBeLessThanOrEqual(2);
   });
 });
 

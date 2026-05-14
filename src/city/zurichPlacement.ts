@@ -31,7 +31,7 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
   for (const tile of world.terrain.values()) {
     if (tile.kind === 'reserve') reserveTiles.add(key(tile.coord));
     const tileKey = key(tile.coord);
-    if (tile.kind === 'forest' && hash(`forest:${tileKey}`) % 3 !== 0 && !blocked.has(tileKey)) {
+    if (tile.kind === 'forest' && isForestTreeTile(tile.coord) && !blocked.has(tileKey)) {
       trees.push(tile.coord);
       blocked.add(tileKey);
     }
@@ -49,6 +49,7 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
       if (blocked.has(key(coord))) continue;
       if (zone.kind === 'reserve' && hash(`reserve-building:${key(coord)}`) % 9 !== 0) continue;
       if (hash(`building-density:${zone.id}:${key(coord)}`) % 100 > Math.floor(zone.density * 100)) continue;
+      if (zone.kind === 'residential' && distance(coord, zone.center) > zone.radius * 0.72 && hash(`residential-edge:${zone.id}:${key(coord)}`) % 100 < 55) continue;
       const sheets = sheetPools[zone.kind];
       const sheet = sheets[hash(`sheet:${zone.id}:${key(coord)}`) % sheets.length];
       buildings.push({ coord, sheet, frame: hash(`frame:${sheet}:${key(coord)}`) % frameCount(sheet), zoneId: zone.id });
@@ -99,6 +100,7 @@ function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, bloc
       const terrain = world.terrain.get(tileKey)?.kind;
       if (!inside(coord, world.width, world.height) || blocked.has(tileKey) || seen.has(tileKey)) continue;
       if (terrain === 'water' || terrain === 'riverbank' || terrain === 'forest') continue;
+      if (zone.kind !== 'old-town' && zone.kind !== 'waterfront' && distanceToWater(world, coord, 2) <= 2) continue;
       if (distance(coord, zone.center) <= zone.radius) {
         candidates.push(coord);
         seen.add(tileKey);
@@ -107,6 +109,27 @@ function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, bloc
   }
   candidates.sort((a, b) => distance(a, zone.center) - distance(b, zone.center) || a.y - b.y || a.x - b.x);
   return candidates;
+}
+
+function isForestTreeTile(coord: Coord): boolean {
+  const tileKey = key(coord);
+  const local = hash(`forest-local:${tileKey}`) % 100;
+  const pocketA = hash(`forest-pocket-a:${Math.floor(coord.x / 8)}:${Math.floor(coord.y / 8)}`) % 100;
+  const pocketB = hash(`forest-pocket-b:${Math.floor((coord.x + 5) / 13)}:${Math.floor((coord.y + 3) / 13)}`) % 100;
+  if (pocketA < 16) return local < 20;
+  if (pocketB > 70) return local < 92;
+  return local < 62;
+}
+
+function distanceToWater(world: ZurichWorld, coord: Coord, maxDistance: number): number {
+  for (let radius = 1; radius <= maxDistance; radius += 1) {
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      const dx = radius - Math.abs(dy);
+      if (world.terrain.get(key({ x: coord.x + dx, y: coord.y + dy }))?.kind === 'water') return radius;
+      if (dx !== 0 && world.terrain.get(key({ x: coord.x - dx, y: coord.y + dy }))?.kind === 'water') return radius;
+    }
+  }
+  return maxDistance + 1;
 }
 
 function frameCount(sheet: ZurichBuildingSheet): number {

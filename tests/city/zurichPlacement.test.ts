@@ -3,7 +3,7 @@ import { buildZurichWorld } from '../../src/city/zurichWorld';
 import { buildZurichTransport } from '../../src/city/zurichTransport';
 import { buildZurichPlacement } from '../../src/city/zurichPlacement';
 import { validateZurichCity } from '../../src/city/zurichValidation';
-import { key, parseKey } from '../../src/city/worldTypes';
+import { distance, key, parseKey, type Coord } from '../../src/city/worldTypes';
 
 const finishedRowColumns = {
   houses: 4,
@@ -66,6 +66,35 @@ describe('buildZurichPlacement', () => {
     for (const building of placement.buildings) {
       expect(building.frame).toBeGreaterThanOrEqual(0);
       expect(building.frame).toBeLessThan(finishedRowColumns[building.sheet]);
+    }
+  });
+
+  it('keeps the river corridor open and concentrates residential buildings toward district centers', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const placement = buildZurichPlacement(world, transport);
+    const waterTiles = [...world.terrain.values()].filter((tile) => tile.kind === 'water').map((tile) => tile.coord);
+    const nearWaterBuildings = placement.buildings.filter((building) => manhattanDistanceToNearest(building.coord, waterTiles, 2) <= 2);
+
+    expect(nearWaterBuildings.length).toBeLessThanOrEqual(45);
+
+    for (const zone of world.zones.filter((candidate) => candidate.kind === 'residential')) {
+      const buildings = placement.buildings.filter((building) => building.zoneId === zone.id);
+      const farBuildings = buildings.filter((building) => distance(building.coord, zone.center) > zone.radius * 0.72);
+      expect(farBuildings.length / buildings.length).toBeLessThan(0.33);
+    }
+  });
+
+  it('creates forest patches with dense pockets and irregular sparse edges', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const placement = buildZurichPlacement(world, transport);
+    const treeTiles = new Set(placement.trees.map(key));
+
+    for (const zone of world.zones.filter((candidate) => candidate.kind === 'forest')) {
+      const windows = forestWindowCounts(world, treeTiles, zone.center, zone.radius);
+      expect(windows.filter((count) => count >= 38).length).toBeGreaterThanOrEqual(20);
+      expect(windows.filter((count) => count <= 20).length).toBeGreaterThanOrEqual(4);
     }
   });
 });
@@ -139,3 +168,38 @@ describe('validateZurichCity', () => {
     expect(validation.stats.treeBuildingOverlap).toBe(1);
   });
 });
+
+function manhattanDistanceToNearest(coord: Coord, candidates: Coord[], maxDistance: number): number {
+  let best = maxDistance + 1;
+  for (const candidate of candidates) {
+    const distance = Math.abs(coord.x - candidate.x) + Math.abs(coord.y - candidate.y);
+    if (distance < best) best = distance;
+    if (best <= 1) return best;
+  }
+  return best;
+}
+
+function forestWindowCounts(
+  world: ReturnType<typeof buildZurichWorld>,
+  treeTiles: ReadonlySet<string>,
+  center: Coord,
+  radius: number,
+): number[] {
+  const counts: number[] = [];
+  for (let y = center.y - radius; y <= center.y + radius - 7; y += 4) {
+    for (let x = center.x - radius; x <= center.x + radius - 7; x += 4) {
+      let treeCount = 0;
+      let forestTiles = 0;
+      for (let yy = y; yy < y + 8; yy += 1) {
+        for (let xx = x; xx < x + 8; xx += 1) {
+          const coord = { x: xx, y: yy };
+          if (distance(coord, center) > radius || world.terrain.get(key(coord))?.kind !== 'forest') continue;
+          forestTiles += 1;
+          if (treeTiles.has(key(coord))) treeCount += 1;
+        }
+      }
+      if (forestTiles >= 40) counts.push(treeCount);
+    }
+  }
+  return counts;
+}

@@ -1,4 +1,5 @@
 import { inside, key, parseKey, type Coord, type ZurichRailTile, type ZurichRoadKind, type ZurichRoadTile, type ZurichWorld } from './worldTypes';
+import { removeAdjacentParallelRoadRuns } from './roadParallelCleanup';
 
 const NORTH = 1;
 const EAST = 2;
@@ -29,6 +30,7 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
     const terrain = world.terrain.get(tileKey)?.kind;
     const isBridge = allowBridge && (terrain === 'water' || terrain === 'riverbank');
     if (terrain === 'water' && !isBridge) return;
+    if (terrain === 'riverbank' && !isBridge) return;
     const kind: ZurichRoadKind = isBridge ? 'bridge' : 'street';
     if (roadKinds.get(tileKey) === 'bridge' && kind === 'street') return;
     roadKinds.set(tileKey, kind);
@@ -40,6 +42,12 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
     if (zone.kind === 'forest' || zone.kind === 'river') continue;
     addDistrictStreetPattern(world, addRoad, zone.center, zone.radius, zone.density);
   }
+
+  removeAdjacentParallelRoadRuns(roadKinds, new Set([
+    ...arterialPaths.flat().map(key),
+    ...bridgeKeys,
+    ...railCrossings,
+  ]));
 
   const roads = new Map<string, ZurichRoadTile>();
   for (const [tileKey, kind] of roadKinds) {
