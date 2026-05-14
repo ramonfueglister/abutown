@@ -29,9 +29,10 @@ export function buildTrafficRequestsForVehicles(input: BuildTrafficRequestsInput
 
   return input.vehicles.flatMap((vehicle) => {
     if (vehicle.path.length < 3) return [];
-    const currentOffset = normalizeOffset(vehicle.offset, vehicle.path.length);
-    const base = positiveModulo(Math.floor(currentOffset), vehicle.path.length);
-    const fraction = currentOffset - Math.floor(currentOffset);
+    const routeOffset = positiveModuloFloat(vehicle.offset, vehicle.path.length);
+    const currentOffset = normalizeOffset(routeOffset, vehicle.path.length);
+    const base = positiveModulo(Math.floor(routeOffset), vehicle.path.length);
+    const fraction = routeOffset - Math.floor(routeOffset);
 
     for (let step = 1; step <= Math.ceil(lookaheadTiles) + 1; step += 1) {
       const pathIndex = (base + step) % vehicle.path.length;
@@ -78,7 +79,8 @@ function stableVehiclePriority(vehicleId: VehicleId): number {
 }
 
 function normalizeOffset(offset: number, pathLength: number): number {
-  return Number(positiveModuloFloat(offset, pathLength).toFixed(3));
+  const rounded = Number(positiveModuloFloat(offset, pathLength).toFixed(3));
+  return Number(positiveModuloFloat(rounded, pathLength).toFixed(3));
 }
 
 function positiveModulo(value: number, divisor: number): number {
