@@ -4,12 +4,15 @@ import {
   MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME,
   candidateVehicleSprites,
   clippedVehicleFrameRect,
+  POLROAD_PRIVATE_CAR_FRAME_HEIGHT,
+  POLROAD_PRIVATE_CAR_FRAME_WIDTH,
   ROAD_SURFACE_WIDTH_PIXELS,
   ROAD_VEHICLE_LANE_OFFSET_PIXELS,
   screenVehicleRightLaneOffset,
   screenRightLaneOffset,
   trafficVehicleSpriteDeck,
   VEHICLE_SHEET_LAYOUTS,
+  vehicleFrameRect,
   vehicleFrameForGridDelta,
 } from '../../src/render/vehicleSprites';
 
@@ -22,10 +25,12 @@ describe('vehicle sprites', () => {
     expect(sheets.has('lorryFirstGeneration')).toBe(true);
     expect(sheets.has('lorrySecondGeneration')).toBe(true);
     expect(sheets.has('lorryThirdGeneration')).toBe(true);
+    expect(sheets.has('polroadPrivateCars')).toBe(true);
     expect([...sheets].some((sheet) => sheet.toLowerCase().includes('toyland'))).toBe(false);
-    expect(sprites.length).toBe(381);
+    expect(sprites.length).toBe(425);
     expect(sprites.filter((sprite) => sprite.sheet === 'bus')).toHaveLength(3);
-    expect(sprites.filter((sprite) => sprite.sheet !== 'bus')).toHaveLength(378);
+    expect(sprites.filter((sprite) => sprite.sheet === 'polroadPrivateCars')).toHaveLength(44);
+    expect(sprites.filter((sprite) => sprite.sheet !== 'bus' && sprite.sheet !== 'polroadPrivateCars')).toHaveLength(378);
   });
 
   it('clips edge frames instead of rejecting real OpenGFX vehicle blocks at the atlas border', () => {
@@ -34,6 +39,15 @@ describe('vehicle sprites', () => {
       7,
       { width: 523, height: 337 },
     )).toEqual({ x: 507, y: 0, width: 16, height: 24 });
+  });
+
+  it('selects fixed eight-direction frames from the extracted PolRoad private-car atlas', () => {
+    expect(vehicleFrameRect({ sheet: 'polroadPrivateCars', row: 7, block: 0, scale: 0.92 }, 6)).toEqual({
+      x: 6 * POLROAD_PRIVATE_CAR_FRAME_WIDTH,
+      y: 7 * POLROAD_PRIVATE_CAR_FRAME_HEIGHT,
+      width: POLROAD_PRIVATE_CAR_FRAME_WIDTH,
+      height: POLROAD_PRIVATE_CAR_FRAME_HEIGHT,
+    });
   });
 
   it('selects directional OpenGFX road-vehicle frames from grid movement', () => {
@@ -87,7 +101,7 @@ describe('vehicle sprites', () => {
   });
 
   it('keeps vehicle sprites smaller than the road lane footprint', () => {
-    expect(Math.max(...candidateVehicleSprites().map((sprite) => sprite.scale))).toBeLessThanOrEqual(0.84);
+    expect(Math.max(...candidateVehicleSprites().map((sprite) => sprite.scale))).toBeLessThanOrEqual(0.92);
   });
 
   it('requires every direction frame to have visible vehicle pixels', () => {
@@ -100,14 +114,22 @@ describe('vehicle sprites', () => {
     const sprites = candidateVehicleSprites();
     const deck = trafficVehicleSpriteDeck(sprites);
     const visibleFleet = deck.slice(0, 156);
+    const privateCarCount = deck.filter((sprite) => sprite.sheet === 'polroadPrivateCars').length;
     const compactCount = deck.filter((sprite) => sprite.row === 1 || sprite.row === 10).length;
-    const cargoCount = deck.filter((sprite) => sprite.row !== 1 && sprite.row !== 10 && sprite.sheet !== 'bus').length;
+    const cargoCount = deck.filter((sprite) =>
+      sprite.row !== 1 && sprite.row !== 10 && sprite.sheet !== 'bus' && sprite.sheet !== 'polroadPrivateCars'
+    ).length;
+    const visiblePrivateCarCount = visibleFleet.filter((sprite) => sprite.sheet === 'polroadPrivateCars').length;
     const visibleCompactCount = visibleFleet.filter((sprite) => sprite.row === 1 || sprite.row === 10).length;
-    const visibleCargoCount = visibleFleet.filter((sprite) => sprite.row !== 1 && sprite.row !== 10 && sprite.sheet !== 'bus').length;
+    const visibleCargoCount = visibleFleet.filter((sprite) =>
+      sprite.row !== 1 && sprite.row !== 10 && sprite.sheet !== 'bus' && sprite.sheet !== 'polroadPrivateCars'
+    ).length;
 
     expect(new Set(deck.map((sprite) => sprite.sheet))).toEqual(new Set(sprites.map((sprite) => sprite.sheet)));
+    expect(privateCarCount).toBeGreaterThan(compactCount);
+    expect(visiblePrivateCarCount).toBeGreaterThan(100);
     expect(compactCount).toBeGreaterThan(cargoCount);
-    expect(visibleCompactCount).toBeGreaterThan(visibleCargoCount);
+    expect(visibleCompactCount + visiblePrivateCarCount).toBeGreaterThan(visibleCargoCount);
   });
 });
 

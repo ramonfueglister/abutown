@@ -2,6 +2,7 @@ export type ScreenPoint = { x: number; y: number };
 
 export const VEHICLE_SHEET_LAYOUTS = [
   { sheet: 'bus', rows: 3, blocks: 1, scale: 0.82 },
+  { sheet: 'polroadPrivateCars', rows: 44, blocks: 1, scale: 0.92 },
   { sheet: 'lorryFirstGeneration', rows: 14, blocks: 3, scale: 0.78 },
   { sheet: 'lorryFirstGenerationArctic', rows: 14, blocks: 3, scale: 0.78 },
   { sheet: 'lorryFirstGenerationTropical', rows: 14, blocks: 3, scale: 0.78 },
@@ -36,6 +37,8 @@ type ImageBounds = {
 
 const VEHICLE_BLOCK_WIDTH = 176;
 const VEHICLE_ROW_HEIGHT = 24;
+export const POLROAD_PRIVATE_CAR_FRAME_WIDTH = 42;
+export const POLROAD_PRIVATE_CAR_FRAME_HEIGHT = 28;
 export const ROAD_SURFACE_WIDTH_PIXELS = 18;
 export const ROAD_VEHICLE_LANE_OFFSET_PIXELS = ROAD_SURFACE_WIDTH_PIXELS / 4;
 export const SCREEN_DOWN_LEFT_VEHICLE_LANE_INSET_PIXELS = 0.75;
@@ -79,6 +82,7 @@ export function trafficVehicleSpriteDeck(sprites: readonly VehicleSprite[]): Veh
 }
 
 export function vehicleTrafficWeight(sprite: VehicleSprite): number {
+  if (sprite.sheet === 'polroadPrivateCars') return 80;
   if (sprite.sheet === 'bus') return 3;
   if (sprite.row === 10) return 18;
   if (sprite.row === 1) return 10;
@@ -86,6 +90,16 @@ export function vehicleTrafficWeight(sprite: VehicleSprite): number {
 }
 
 export function vehicleFrameRect(sprite: VehicleSprite, frame: number): VehicleFrameRect {
+  if (sprite.sheet === 'polroadPrivateCars') {
+    const normalizedFrame = ((frame % 8) + 8) % 8;
+    return {
+      x: normalizedFrame * POLROAD_PRIVATE_CAR_FRAME_WIDTH,
+      y: sprite.row * POLROAD_PRIVATE_CAR_FRAME_HEIGHT,
+      width: POLROAD_PRIVATE_CAR_FRAME_WIDTH,
+      height: POLROAD_PRIVATE_CAR_FRAME_HEIGHT,
+    };
+  }
+
   const rect = DIRECTION_RECTS[((frame % DIRECTION_RECTS.length) + DIRECTION_RECTS.length) % DIRECTION_RECTS.length];
   return {
     x: sprite.block * VEHICLE_BLOCK_WIDTH + rect.x,

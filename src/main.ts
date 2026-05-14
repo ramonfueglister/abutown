@@ -188,6 +188,7 @@ const assetPaths = {
 
 const vehicleAssetPaths: Record<VehicleSheetName, string> = {
   bus: '/opengfx2/road_buses_32bpp.png',
+  polroadPrivateCars: '/polroad/polroad_private_cars.png',
   lorryFirstGeneration: '/opengfx2/road_lorries_firstgeneration_32bpp.png',
   lorryFirstGenerationArctic: '/opengfx2/road_lorries_firstgeneration_arctic_32bpp.png',
   lorryFirstGenerationTropical: '/opengfx2/road_lorries_firstgeneration_tropical_32bpp.png',
@@ -1312,6 +1313,8 @@ window.render_game_to_text = () =>
       vehicleSprites: vehicleSprites.length,
       trafficVehicleSprites: trafficVehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
+      vehicleSpriteSheetCounts: countVehicleSpritesBySheet(vehicleSprites),
+      trafficVehicleSpriteSheetCounts: countVehicleSpritesBySheet(trafficVehicleSprites),
       railStations: railStations.length,
       railYardTracks: railYardPaths.length,
       vehicleDiagnostics: vehicleDiagnostics(),
@@ -1334,6 +1337,14 @@ window.render_game_to_text = () =>
       },
     },
   });
+
+function countVehicleSpritesBySheet(sprites: readonly VehicleSprite[]): Record<VehicleSheetName, number> {
+  const counts = Object.fromEntries(
+    Object.keys(vehicleAssetPaths).map((sheet) => [sheet, 0]),
+  ) as Record<VehicleSheetName, number>;
+  for (const sprite of sprites) counts[sprite.sheet] += 1;
+  return counts;
+}
 
 window.advanceTime = (ms: number) => {
   advanceCars(ms / 1000);
