@@ -79,3 +79,57 @@ async fn websocket_sends_hello_and_tile_pulse() {
 
     server.abort();
 }
+
+#[tokio::test]
+async fn websocket_clients_receive_the_same_broadcast_tick() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, build_app()).await.unwrap();
+    });
+
+    let url = format!("ws://{addr}/ws");
+    let (mut first_stream, _) = connect_async(url.clone()).await.unwrap();
+    let (mut second_stream, _) = connect_async(url).await.unwrap();
+
+    let first_hello = read_server_message(&mut first_stream).await;
+    let second_hello = read_server_message(&mut second_stream).await;
+    assert!(matches!(first_hello, ServerMessageDto::Hello(_)));
+    assert!(matches!(second_hello, ServerMessageDto::Hello(_)));
+
+    let first_pulse = read_server_message(&mut first_stream).await;
+    let second_pulse = read_server_message(&mut second_stream).await;
+
+    let ServerMessageDto::TilePulse(first_delta) = first_pulse else {
+        panic!("first client should receive a tile pulse");
+    };
+    let ServerMessageDto::TilePulse(second_delta) = second_pulse else {
+        panic!("second client should receive a tile pulse");
+    };
+
+    assert_eq!(second_delta.tick, first_delta.tick);
+    assert_eq!(second_delta.version, first_delta.version);
+    assert_eq!(second_delta.local_index, first_delta.local_index);
+
+    server.abort();
+}
+
+async fn read_server_message<S>(stream: &mut S) -> ServerMessageDto
+where
+    S: futures_util::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
+{
+    let text = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+        .into_text()
+        .unwrap()
+        .to_string();
+    serde_json::from_str(&text).unwrap()
+}

@@ -32,7 +32,7 @@ npm run dev
 
 Open the Vite URL. The city should render normally and show a `RUST LIVE` badge. Chunk `4:4` is outlined from the server snapshot, and a server-driven pulse appears from `/ws` roughly once per second.
 
-Current `/ws` ticking is per connection for this visible dev slice; the production simulation should move ticking to a single scheduler and broadcast source.
+Current `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
 
 Design rules:
 

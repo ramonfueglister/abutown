@@ -12,25 +12,52 @@ use axum::{
     routing::get,
 };
 use sim_core::ids::ChunkCoord;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use tower_http::cors::CorsLayer;
 
 use crate::runtime::SimulationRuntime;
 
+const DELTA_BROADCAST_CAPACITY: usize = 64;
+const SIMULATION_TICK_INTERVAL: Duration = Duration::from_secs(1);
+
 #[derive(Clone)]
 pub struct AppState {
     runtime: Arc<Mutex<SimulationRuntime>>,
+    deltas: broadcast::Sender<ServerMessageDto>,
 }
 
 impl AppState {
     pub fn new(runtime: SimulationRuntime) -> Self {
+        let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         Self {
             runtime: Arc::new(Mutex::new(runtime)),
+            deltas,
         }
     }
 
     pub(crate) fn runtime(&self) -> Arc<Mutex<SimulationRuntime>> {
         Arc::clone(&self.runtime)
+    }
+
+    fn subscribe_deltas(&self) -> broadcast::Receiver<ServerMessageDto> {
+        self.deltas.subscribe()
+    }
+
+    fn spawn_delta_loop(&self, tick_interval: Duration) {
+        let runtime = self.runtime();
+        let deltas = self.deltas.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tick_interval);
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let pulse = {
+                    let mut runtime = runtime.lock().await;
+                    runtime.next_pulse()
+                };
+                let _ = deltas.send(pulse);
+            }
+        });
     }
 }
 
@@ -40,6 +67,7 @@ pub fn build_app() -> Router {
 
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
     let state = AppState::new(runtime);
+    state.spawn_delta_loop(SIMULATION_TICK_INTERVAL);
 
     Router::new()
         .route("/health", get(health))
@@ -78,8 +106,6 @@ async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl 
     ws.on_upgrade(move |socket| stream_world_deltas(socket, state))
 }
 
-// Temporary visible-slice stream: each connection drives its own pulses. Production
-// must move ticking to one scheduler/broadcast source so client count cannot advance time.
 async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     let hello = {
         let runtime = state.runtime();
@@ -90,17 +116,15 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
         return;
     }
 
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
-    interval.tick().await;
+    let mut deltas = state.subscribe_deltas();
     loop {
-        interval.tick().await;
-        let pulse = {
-            let runtime = state.runtime();
-            let mut runtime = runtime.lock().await;
-            runtime.next_pulse()
+        let message = match deltas.recv().await {
+            Ok(message) => message,
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => return,
         };
 
-        if send_server_message(&mut socket, pulse).await.is_err() {
+        if send_server_message(&mut socket, message).await.is_err() {
             return;
         }
     }
