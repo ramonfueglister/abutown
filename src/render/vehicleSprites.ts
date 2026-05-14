@@ -17,7 +17,9 @@ export type VehicleFrameRect = {
 
 const VEHICLE_BLOCK_WIDTH = 176;
 const VEHICLE_ROW_HEIGHT = 24;
-export const ROAD_VEHICLE_LANE_OFFSET_PIXELS = 3.25;
+export const ROAD_SURFACE_WIDTH_PIXELS = 18;
+export const ROAD_VEHICLE_LANE_OFFSET_PIXELS = ROAD_SURFACE_WIDTH_PIXELS / 4;
+export const MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME = 10;
 
 const DIRECTION_RECTS: readonly Omit<VehicleFrameRect, 'y'>[] = [
   { x: 0, width: 9, height: 24 },
@@ -34,12 +36,12 @@ export function candidateVehicleSprites(): VehicleSprite[] {
   const sprites: VehicleSprite[] = [];
 
   for (let row = 0; row < 3; row += 1) {
-    sprites.push({ sheet: 'bus', row, block: 0, scale: 1.08 });
+    sprites.push({ sheet: 'bus', row, block: 0, scale: 0.82 });
   }
 
   for (let row = 0; row < 14; row += 1) {
     for (let block = 0; block < 3; block += 1) {
-      sprites.push({ sheet: 'lorry', row, block, scale: 1.02 });
+      sprites.push({ sheet: 'lorry', row, block, scale: 0.78 });
     }
   }
 
@@ -78,6 +80,13 @@ export function screenRightLaneOffset(from: ScreenPoint, to: ScreenPoint, pixels
     x: normalizeZero((-dy / length) * pixels),
     y: normalizeZero((dx / length) * pixels),
   };
+}
+
+export function hasVisiblePixelsInEveryVehicleFrame(frameVisiblePixels: readonly number[]): boolean {
+  return (
+    frameVisiblePixels.length === DIRECTION_RECTS.length &&
+    frameVisiblePixels.every((count) => count >= MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME)
+  );
 }
 
 function normalizeZero(value: number): number {

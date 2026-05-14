@@ -7,6 +7,7 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
+import { makeNonDespawningVehicleLoop } from './city/vehiclePaths';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -18,6 +19,7 @@ import { cleanupSpritePixels } from './render/spriteCleanup';
 import { drawPassForType, type SceneDrawableType } from './render/drawOrder';
 import {
   candidateVehicleSprites,
+  hasVisiblePixelsInEveryVehicleFrame,
   ROAD_VEHICLE_LANE_OFFSET_PIXELS,
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
@@ -783,7 +785,10 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
     roadRoute([{ x: 47, y: 42 }, { x: 60, y: 48 }, { x: 65, y: 64 }, { x: 52, y: maxY }]),
     roadRoute([{ x: 12, y: maxY }, { x: 28, y: 68 }, { x: 46, y: 66 }, { x: 68, y: 68 }, { x: maxX, y: 70 }]),
   ];
-  const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]);
+  const corridors = baseCorridors.flatMap((path) => [
+    makeNonDespawningVehicleLoop(path),
+    makeNonDespawningVehicleLoop([...path].reverse()),
+  ]);
   return Array.from({ length: 156 }, (_, index) => {
     const path = corridors[index % corridors.length];
     return {
@@ -808,15 +813,21 @@ function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
   const context = probe.getContext('2d', { willReadFrequently: true });
   if (!context) return false;
   context.drawImage(image, 0, 0);
+  const frameVisiblePixels: number[] = [];
   for (let frame = 0; frame < 8; frame += 1) {
     const rect = vehicleFrameRect(sprite, frame);
-    if (rect.x + rect.width > image.width || rect.y + rect.height > image.height) continue;
-    const data = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] !== 0) return true;
+    if (rect.x + rect.width > image.width || rect.y + rect.height > image.height) {
+      frameVisiblePixels.push(0);
+      continue;
     }
+    const data = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
+    let visiblePixels = 0;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] !== 0) visiblePixels += 1;
+    }
+    frameVisiblePixels.push(visiblePixels);
   }
-  return false;
+  return hasVisiblePixelsInEveryVehicleFrame(frameVisiblePixels);
 }
 
 function vehicleAssetPath(sheet: VehicleSheetName): string {

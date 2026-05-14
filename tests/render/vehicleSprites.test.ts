@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hasVisiblePixelsInEveryVehicleFrame,
+  MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME,
   candidateVehicleSprites,
+  ROAD_SURFACE_WIDTH_PIXELS,
   ROAD_VEHICLE_LANE_OFFSET_PIXELS,
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
@@ -29,7 +32,19 @@ describe('vehicle sprites', () => {
   });
 
   it('keeps the right-lane offset inside the OpenGFX road surface', () => {
-    expect(ROAD_VEHICLE_LANE_OFFSET_PIXELS).toBeGreaterThanOrEqual(2.5);
-    expect(ROAD_VEHICLE_LANE_OFFSET_PIXELS).toBeLessThanOrEqual(3.5);
+    expect(ROAD_SURFACE_WIDTH_PIXELS).toBe(18);
+    expect(ROAD_VEHICLE_LANE_OFFSET_PIXELS).toBe(ROAD_SURFACE_WIDTH_PIXELS / 4);
+    expect(ROAD_VEHICLE_LANE_OFFSET_PIXELS).toBeGreaterThan(4);
+    expect(ROAD_VEHICLE_LANE_OFFSET_PIXELS).toBeLessThan(5);
+  });
+
+  it('keeps vehicle sprites smaller than the road lane footprint', () => {
+    expect(Math.max(...candidateVehicleSprites().map((sprite) => sprite.scale))).toBeLessThanOrEqual(0.84);
+  });
+
+  it('requires every direction frame to have visible vehicle pixels', () => {
+    expect(hasVisiblePixelsInEveryVehicleFrame(Array(8).fill(MIN_VISIBLE_PIXELS_PER_VEHICLE_FRAME))).toBe(true);
+    expect(hasVisiblePixelsInEveryVehicleFrame([18, 12, 0, 14, 19, 20, 22, 11])).toBe(false);
+    expect(hasVisiblePixelsInEveryVehicleFrame([18, 12, 14])).toBe(false);
   });
 });
