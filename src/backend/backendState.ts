@@ -151,6 +151,27 @@ export function applyServerMessage(
     };
   }
 
+  if (state.loadedChunk === undefined) {
+    return {
+      ...state,
+      warning: 'Ignored websocket tile pulse without loaded chunk',
+    };
+  }
+
+  if (message.coord.x !== state.loadedChunk.coord.x || message.coord.y !== state.loadedChunk.coord.y) {
+    return {
+      ...state,
+      warning: `Ignored websocket message for chunk ${message.coord.x}:${message.coord.y}`,
+    };
+  }
+
+  if (message.local_index < 0 || message.local_index >= state.loadedChunk.tileCount) {
+    return {
+      ...state,
+      warning: `Ignored websocket tile ${message.local_index} outside chunk ${state.loadedChunk.coord.x}:${state.loadedChunk.coord.y}`,
+    };
+  }
+
   const pulse: BackendPulse = {
     coord: message.coord,
     localIndex: message.local_index,

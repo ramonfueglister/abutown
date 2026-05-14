@@ -1,4 +1,5 @@
 export const CLIENT_PROTOCOL_VERSION = 1;
+const U16_MAX = 65535;
 
 export type ChunkCoordDto = {
   x: number;
@@ -71,16 +72,16 @@ export function isHealthResponse(value: unknown): value is HealthResponse {
     typeof value.service === 'string' &&
     typeof value.world_id === 'string' &&
     typeof value.ok === 'boolean' &&
-    typeof value.protocol_version === 'number'
+    isU16(value.protocol_version)
   );
 }
 
 export function isWorldSummaryDto(value: unknown): value is WorldSummaryDto {
   return (
     isRecord(value) &&
-    typeof value.protocol_version === 'number' &&
+    isU16(value.protocol_version) &&
     typeof value.world_id === 'string' &&
-    typeof value.chunk_size === 'number' &&
+    isU16(value.chunk_size) &&
     Array.isArray(value.loaded_chunks) &&
     value.loaded_chunks.every(isChunkCoord)
   );
@@ -89,12 +90,12 @@ export function isWorldSummaryDto(value: unknown): value is WorldSummaryDto {
 export function isChunkSnapshotDto(value: unknown): value is ChunkSnapshotDto {
   return (
     isRecord(value) &&
-    typeof value.protocol_version === 'number' &&
+    isU16(value.protocol_version) &&
     typeof value.world_id === 'string' &&
     isChunkCoord(value.coord) &&
     isChunkState(value.chunk_state) &&
-    typeof value.chunk_version === 'number' &&
-    typeof value.tile_count === 'number' &&
+    isNonNegativeSafeInteger(value.chunk_version) &&
+    isU16(value.tile_count) &&
     Array.isArray(value.dirty_tiles) &&
     value.dirty_tiles.every(isTileMutation)
   );
@@ -111,28 +112,28 @@ export function parseServerMessage(value: unknown): ServerMessage | undefined {
 function isHello(value: Record<string, unknown>): value is ServerHelloMessage {
   return (
     value.type === 'hello' &&
-    typeof value.protocol_version === 'number' &&
+    isU16(value.protocol_version) &&
     typeof value.world_id === 'string' &&
-    typeof value.chunk_size === 'number'
+    isU16(value.chunk_size)
   );
 }
 
 function isTilePulse(value: Record<string, unknown>): value is TilePulseMessage {
   return (
     value.type === 'tile_pulse' &&
-    typeof value.protocol_version === 'number' &&
+    isU16(value.protocol_version) &&
     typeof value.world_id === 'string' &&
-    typeof value.tick === 'number' &&
-    typeof value.version === 'number' &&
+    isNonNegativeSafeInteger(value.tick) &&
+    isNonNegativeSafeInteger(value.version) &&
     isChunkCoord(value.coord) &&
-    typeof value.local_index === 'number'
+    isU16(value.local_index)
   );
 }
 
 function isServerError(value: Record<string, unknown>): value is ServerErrorMessage {
   return (
     value.type === 'error' &&
-    typeof value.protocol_version === 'number' &&
+    isU16(value.protocol_version) &&
     (value.world_id === undefined || value.world_id === null || typeof value.world_id === 'string') &&
     typeof value.code === 'string' &&
     typeof value.message === 'string'
@@ -140,7 +141,7 @@ function isServerError(value: Record<string, unknown>): value is ServerErrorMess
 }
 
 function isChunkCoord(value: unknown): value is ChunkCoordDto {
-  return isRecord(value) && typeof value.x === 'number' && typeof value.y === 'number';
+  return isRecord(value) && isSafeInteger(value.x) && isSafeInteger(value.y);
 }
 
 function isChunkState(value: unknown): value is ChunkStateDto {
@@ -154,12 +155,24 @@ function isTileKind(value: unknown): value is TileKindDto {
 function isTileMutation(value: unknown): value is TileMutationDto {
   return (
     isRecord(value) &&
-    typeof value.local_index === 'number' &&
+    isU16(value.local_index) &&
     isTileKind(value.kind) &&
-    typeof value.version === 'number'
+    isNonNegativeSafeInteger(value.version)
   );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return isSafeInteger(value) && value >= 0;
+}
+
+function isU16(value: unknown): value is number {
+  return isNonNegativeSafeInteger(value) && value <= U16_MAX;
 }

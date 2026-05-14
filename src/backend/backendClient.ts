@@ -64,6 +64,7 @@ export function startBackendBridge(options: BackendBridgeOptions): BackendBridge
   }
 
   function scheduleReconnect(): void {
+    if (reconnectTimer !== undefined) return;
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = undefined;
       if (!stopped) void loadAndConnect();
@@ -71,10 +72,13 @@ export function startBackendBridge(options: BackendBridgeOptions): BackendBridge
   }
 
   function connectWebSocket(): void {
-    socket?.close();
-    socket = new WebSocketCtor(toWebSocketUrl(baseUrl, '/ws'));
+    const previousSocket = socket;
+    const nextSocket = new WebSocketCtor(toWebSocketUrl(baseUrl, '/ws'));
+    socket = nextSocket;
+    previousSocket?.close();
 
-    socket.addEventListener('message', (event) => {
+    nextSocket.addEventListener('message', (event) => {
+      if (nextSocket !== socket) return;
       try {
         const parsed = parseServerMessage(JSON.parse(String(event.data)));
         if (!parsed) {
@@ -87,15 +91,16 @@ export function startBackendBridge(options: BackendBridgeOptions): BackendBridge
       }
     });
 
-    socket.addEventListener('close', () => {
-      if (stopped) return;
+    nextSocket.addEventListener('close', () => {
+      if (stopped || nextSocket !== socket) return;
       publish(markBackendDisconnected(state, 'Backend websocket disconnected'));
       scheduleReconnect();
     });
 
-    socket.addEventListener('error', () => {
-      if (stopped) return;
+    nextSocket.addEventListener('error', () => {
+      if (stopped || nextSocket !== socket) return;
       publish(markBackendDisconnected(state, 'Backend websocket error'));
+      scheduleReconnect();
     });
   }
 
