@@ -1,0 +1,5 @@
+Original prompt: OpenTTD-like isometric persistent webgame graphics demo with realistic city, OpenGFX2 assets, no visible UI.
+
+
+2026-05-14T08:04:30.446Z - Visual QA: replaced hand-drawn road strokes with OpenGFX2 road sprites, moved central river to a small edge creek, reduced road-grid density, increased building scale, and kept verification on port 5175 only.
+2026-05-14T14:11:40.000Z - Camera UX: replaced map wrapping with a bounded fixed-map camera, added damped pan/zoom targets, added outskirts/edge-exit/mist rendering, and restored Vite preview support for Playwright smoke tests.
