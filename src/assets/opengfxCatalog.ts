@@ -1,6 +1,8 @@
 import { opengfxAssets, type OpenGfxAsset, type OpenGfxAssetCategory } from './opengfxCatalog.generated';
 
-export function assetsByCategory(): Map<OpenGfxAssetCategory | string, OpenGfxAsset[]> {
+const cachedAssetsByCategory = buildAssetsByCategory();
+
+function buildAssetsByCategory(): Map<OpenGfxAssetCategory | string, OpenGfxAsset[]> {
   const result = new Map<OpenGfxAssetCategory | string, OpenGfxAsset[]>();
   for (const asset of opengfxAssets) {
     const assets = result.get(asset.category) ?? [];
@@ -10,8 +12,12 @@ export function assetsByCategory(): Map<OpenGfxAssetCategory | string, OpenGfxAs
   return result;
 }
 
+export function assetsByCategory(): Map<OpenGfxAssetCategory | string, OpenGfxAsset[]> {
+  return cachedAssetsByCategory;
+}
+
 export function getAssetsForCategory(category: OpenGfxAssetCategory | string): OpenGfxAsset[] {
-  return assetsByCategory().get(category) ?? [];
+  return cachedAssetsByCategory.get(category) ?? [];
 }
 
 export function firstAssetPath(category: OpenGfxAssetCategory | string, fallback: string): string {

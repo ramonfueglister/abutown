@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { opengfxAssets } from '../../src/assets/opengfxCatalog.generated';
-import { assetsByCategory, getAssetsForCategory } from '../../src/assets/opengfxCatalog';
+import { OPEN_GFX_SOURCE_REVISION, opengfxAssets } from '../../src/assets/opengfxCatalog.generated';
+import { assetsByCategory, firstAssetPath, getAssetsForCategory } from '../../src/assets/opengfxCatalog';
 
 describe('OpenGFX catalog', () => {
   it('contains broad generated OpenGFX coverage', () => {
-    expect(opengfxAssets.length).toBeGreaterThan(40);
-    expect(new Set(opengfxAssets.map((asset) => asset.category)).size).toBeGreaterThanOrEqual(8);
+    expect(opengfxAssets.length).toBeGreaterThanOrEqual(600);
+    expect(new Set(opengfxAssets.map((asset) => asset.category)).size).toBeGreaterThanOrEqual(10);
+    expect(OPEN_GFX_SOURCE_REVISION).toMatch(/^[0-9a-f]{40}$/u);
   });
 
   it('exposes semantic categories for city composition', () => {
@@ -15,12 +16,23 @@ describe('OpenGFX catalog', () => {
     expect(getAssetsForCategory('rail').length).toBeGreaterThan(0);
     expect(getAssetsForCategory('building').length).toBeGreaterThan(0);
     expect(getAssetsForCategory('tree').length).toBeGreaterThan(0);
+    expect(getAssetsForCategory('vehicle').length).toBeGreaterThan(0);
+    expect(getAssetsForCategory('station').length).toBeGreaterThan(0);
+    expect(getAssetsForCategory('bridge').length).toBeGreaterThan(0);
     expect(getAssetsForCategory('industry').length).toBeGreaterThan(0);
     expect(getAssetsForCategory('decor').length).toBeGreaterThan(0);
+  });
+
+  it('categorizes top-level vehicle assets as vehicles', () => {
+    const vehicleAssets = opengfxAssets.filter((asset) => asset.sourcePath.startsWith('graphics/vehicles/'));
+
+    expect(vehicleAssets.length).toBeGreaterThan(0);
+    expect(vehicleAssets.every((asset) => asset.category === 'vehicle')).toBe(true);
   });
 
   it('returns an empty list for unknown categories instead of throwing', () => {
     expect(assetsByCategory().get('missing-category')).toBeUndefined();
     expect(getAssetsForCategory('missing-category')).toEqual([]);
+    expect(firstAssetPath('missing-category', '/fallback.png')).toBe('/fallback.png');
   });
 });
