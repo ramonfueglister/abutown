@@ -66,7 +66,7 @@ export type TrafficRuleSnapshot = {
   diagnostics: TrafficRuleDiagnostics;
 };
 
-export const EMPTY_TRAFFIC_DIAGNOSTICS: TrafficRuleDiagnostics = {
+export const EMPTY_TRAFFIC_DIAGNOSTICS = {
   reservedIntersections: 0,
   yieldingVehicles: 0,
   stoppedForTrafficRules: 0,
@@ -75,7 +75,7 @@ export const EMPTY_TRAFFIC_DIAGNOSTICS: TrafficRuleDiagnostics = {
   expiredReservations: 0,
   trafficRuleDecisionCount: 0,
   unclassifiedTrafficRequests: 0,
-};
+} as const satisfies Readonly<TrafficRuleDiagnostics>;
 
 export function createInitialTrafficRuleSnapshot(): TrafficRuleSnapshot {
   return {
