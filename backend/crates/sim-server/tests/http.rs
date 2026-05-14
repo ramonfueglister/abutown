@@ -40,8 +40,11 @@ async fn health_and_world_summary_are_available() {
         .unwrap()
         .to_bytes();
     let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["protocol_version"], 1);
     assert_eq!(json["world_id"], "abutown-main");
     assert_eq!(json["chunk_size"], 32);
+    assert_eq!(json["loaded_chunks"][0]["x"], 4);
+    assert_eq!(json["loaded_chunks"][0]["y"], 4);
 }
 
 #[tokio::test]
@@ -51,7 +54,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/chunks/0/0")
+                .uri("/chunks/4/4")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -63,8 +66,8 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let json: Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(json["world_id"], "abutown-main");
-    assert_eq!(json["coord"]["x"], 0);
-    assert_eq!(json["coord"]["y"], 0);
+    assert_eq!(json["coord"]["x"], 4);
+    assert_eq!(json["coord"]["y"], 4);
     assert_eq!(json["tile_count"], 1024);
     assert_eq!(json["chunk_state"], "active");
 
@@ -81,7 +84,7 @@ async fn unloaded_chunk_returns_not_found() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/chunks/1/0")
+                .uri("/chunks/0/0")
                 .body(Body::empty())
                 .unwrap(),
         )

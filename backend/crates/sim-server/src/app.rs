@@ -1,51 +1,70 @@
-pub mod app {
-    use abutown_protocol::{
-        ChunkCoordDto, HealthResponse, PROTOCOL_VERSION, WorldId, WorldSummaryDto,
-    };
-    use axum::{Json, Router, extract::Path, http::StatusCode, routing::get};
-    use sim_core::{
-        chunk::Chunk, ids::ChunkCoord, persistence::build_chunk_snapshot, scheduler::ChunkActivity,
-        tile::TileKind,
-    };
+use std::sync::Arc;
 
-    pub fn build_app() -> Router {
-        Router::new()
-            .route("/health", get(health))
-            .route("/world", get(world))
-            .route("/chunks/{x}/{y}", get(chunk))
-    }
+use abutown_protocol::{ChunkSnapshotDto, HealthResponse, WorldSummaryDto};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    routing::get,
+};
+use sim_core::ids::ChunkCoord;
+use tokio::sync::Mutex;
+use tower_http::cors::CorsLayer;
 
-    async fn health() -> Json<HealthResponse> {
-        Json(HealthResponse {
-            service: "abutown-sim".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            ok: true,
-            protocol_version: PROTOCOL_VERSION,
-        })
-    }
+use crate::runtime::SimulationRuntime;
 
-    async fn world() -> Json<WorldSummaryDto> {
-        Json(WorldSummaryDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            chunk_size: 32,
-            loaded_chunks: vec![ChunkCoordDto { x: 0, y: 0 }],
-        })
-    }
+#[derive(Clone)]
+pub struct AppState {
+    runtime: Arc<Mutex<SimulationRuntime>>,
+}
 
-    async fn chunk(
-        Path((x, y)): Path<(i32, i32)>,
-    ) -> Result<Json<abutown_protocol::ChunkSnapshotDto>, StatusCode> {
-        if x != 0 || y != 0 {
-            return Err(StatusCode::NOT_FOUND);
+impl AppState {
+    pub fn new(runtime: SimulationRuntime) -> Self {
+        Self {
+            runtime: Arc::new(Mutex::new(runtime)),
         }
-
-        let mut chunk = Chunk::new(ChunkCoord { x, y }, 32);
-        chunk
-            .set_tile_kind(0, TileKind::Road)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
-
-        Ok(Json(snapshot))
     }
+
+    pub(crate) fn runtime(&self) -> Arc<Mutex<SimulationRuntime>> {
+        Arc::clone(&self.runtime)
+    }
+}
+
+pub fn build_app() -> Router {
+    build_app_with_runtime(SimulationRuntime::new())
+}
+
+pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
+    let state = AppState::new(runtime);
+
+    Router::new()
+        .route("/health", get(health))
+        .route("/world", get(world))
+        .route("/chunks/{x}/{y}", get(chunk))
+        .with_state(state)
+        .layer(CorsLayer::permissive())
+}
+
+async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    let runtime = state.runtime();
+    let runtime = runtime.lock().await;
+    Json(runtime.health())
+}
+
+async fn world(State(state): State<AppState>) -> Json<WorldSummaryDto> {
+    let runtime = state.runtime();
+    let runtime = runtime.lock().await;
+    Json(runtime.world_summary())
+}
+
+async fn chunk(
+    State(state): State<AppState>,
+    Path((x, y)): Path<(i32, i32)>,
+) -> Result<Json<ChunkSnapshotDto>, StatusCode> {
+    let runtime = state.runtime();
+    let runtime = runtime.lock().await;
+    runtime
+        .chunk_snapshot(ChunkCoord { x, y })
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
