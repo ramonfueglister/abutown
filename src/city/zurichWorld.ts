@@ -8,7 +8,7 @@ const WIDTH = 256;
 const HEIGHT = 256;
 const CHUNK_SIZE = 32;
 
-const zones: ZurichZone[] = [
+const layoutZones: ZurichZone[] = [
   { id: 'zone:limmat-river', kind: 'river', name: 'Limmat River', center: { x: 128, y: 128 }, radius: 36, density: 0 },
   { id: 'zone:old-town-west', kind: 'old-town', name: 'Old Town West', center: { x: 112, y: 112 }, radius: 22, density: 0.95 },
   { id: 'zone:old-town-east', kind: 'old-town', name: 'Old Town East', center: { x: 139, y: 112 }, radius: 20, density: 0.92 },
@@ -30,6 +30,7 @@ const zones: ZurichZone[] = [
 export function buildZurichWorld(options: ZurichWorldOptions): ZurichWorld {
   const river = buildRiver();
   const riverKeys = new Set(river.map(key));
+  const zones = cloneZones(layoutZones);
   const riverZone = zones.find((zone) => zone.kind === 'river');
   const terrain = new Map<string, ZurichTerrainTile>();
 
@@ -37,7 +38,7 @@ export function buildZurichWorld(options: ZurichWorldOptions): ZurichWorld {
     const riverX = riverCenterX(y);
     for (let x = 0; x < WIDTH; x += 1) {
       const coord = { x, y };
-      const zone = riverKeys.has(key(coord)) ? riverZone : nearestZone(coord);
+      const zone = riverKeys.has(key(coord)) ? riverZone : nearestZone(coord, zones);
       const riverDistance = Math.abs(x - riverX);
       const kind = terrainKind(coord, riverDistance, riverKeys, zone);
       terrain.set(key(coord), { coord, kind, elevation: 0, zoneId: zone?.id });
@@ -46,6 +47,7 @@ export function buildZurichWorld(options: ZurichWorldOptions): ZurichWorld {
 
   return {
     id: 'zurich-river-city-v1',
+    // The seed identifies this world for now; the fixed Zurich layout stays seed-independent until placement tasks use it.
     seed: options.seed,
     width: WIDTH,
     height: HEIGHT,
@@ -54,6 +56,10 @@ export function buildZurichWorld(options: ZurichWorldOptions): ZurichWorld {
     terrain,
     river,
   };
+}
+
+function cloneZones(source: ZurichZone[]): ZurichZone[] {
+  return source.map((zone) => ({ ...zone, center: { ...zone.center } }));
 }
 
 function buildRiver(): Coord[] {
@@ -79,7 +85,7 @@ function terrainKind(coord: Coord, riverDistance: number, riverKeys: ReadonlySet
   return 'grass';
 }
 
-function nearestZone(coord: Coord): ZurichZone | undefined {
+function nearestZone(coord: Coord, zones: ZurichZone[]): ZurichZone | undefined {
   return zones.filter((zone) => zone.kind !== 'river').reduce<ZurichZone | undefined>((best, zone) => {
     if (!best) return zone;
     return distance(coord, zone.center) / zone.radius < distance(coord, best.center) / best.radius ? zone : best;

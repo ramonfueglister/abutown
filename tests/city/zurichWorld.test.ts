@@ -36,4 +36,18 @@ describe('buildZurichWorld', () => {
     expect(terrainValues.filter((tile) => tile.kind === 'forest').length).toBeGreaterThan(4500);
     expect(terrainValues.filter((tile) => tile.kind === 'reserve').length).toBeGreaterThan(2500);
   });
+
+  it('does not share mutable zone state between builds', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const originalZoneCount = world.zones.length;
+    const originalCenter = { ...world.zones[0].center };
+
+    world.zones[0].center.x = 999;
+    world.zones.pop();
+
+    const next = buildZurichWorld({ seed: 1848 });
+
+    expect(next.zones).toHaveLength(originalZoneCount);
+    expect(next.zones[0].center).toEqual(originalCenter);
+  });
 });
