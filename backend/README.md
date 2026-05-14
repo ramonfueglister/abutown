@@ -8,6 +8,11 @@ Common commands:
 cargo test --manifest-path backend/Cargo.toml --workspace
 cargo fmt --manifest-path backend/Cargo.toml --all
 cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
+```
+
+Available after the server crate is added:
+
+```bash
 cargo run --manifest-path backend/Cargo.toml -p sim-server
 ```
 
