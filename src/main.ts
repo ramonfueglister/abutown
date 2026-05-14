@@ -123,6 +123,7 @@ const CAMERA_EDGE_MARGIN = 8;
 const CAMERA_EDGE_SOFTNESS = 4;
 const CAMERA_MIN_SCALE = 0.48;
 const CAMERA_MAX_SCALE = 3.2;
+const MAX_SIMULATION_STEP_SECONDS = 0.05;
 const OUTSKIRTS_TILES = 12;
 const EDGE_EXIT_TILES = 7;
 const NORTH = 1;
@@ -307,7 +308,7 @@ function attachCamera(): void {
 }
 
 function frame(now: number): void {
-  const dt = Math.min(0.05, (now - previousTime) / 1000);
+  const dt = Math.min(MAX_SIMULATION_STEP_SECONDS, (now - previousTime) / 1000);
   previousTime = now;
   advanceCars(dt);
   if (!camera.dragging) constrainCamera(false);
@@ -1286,6 +1287,7 @@ function vehicleDiagnostics(): Record<string, number> {
     expiredReservations: trafficRuleSnapshot.diagnostics.expiredReservations,
     trafficRuleDecisionCount: trafficRuleSnapshot.diagnostics.trafficRuleDecisionCount,
     unclassifiedTrafficRequests: trafficRuleSnapshot.diagnostics.unclassifiedTrafficRequests,
+    trafficTick,
   };
 }
 
@@ -1399,6 +1401,11 @@ function countVehicleSpritesBySheet(sprites: readonly VehicleSprite[]): Record<V
 }
 
 window.advanceTime = (ms: number) => {
-  advanceCars(ms / 1000);
+  let remainingSeconds = Number.isFinite(ms) ? Math.max(0, ms / 1000) : 0;
+  while (remainingSeconds > 0) {
+    const step = Math.min(MAX_SIMULATION_STEP_SECONDS, remainingSeconds);
+    advanceCars(step);
+    remainingSeconds = Math.max(0, remainingSeconds - step);
+  }
   render();
 };
