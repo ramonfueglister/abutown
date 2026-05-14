@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use abutown_protocol::{ChunkSnapshotDto, WorldId};
 use sim_core::{
-    chunk::Chunk, ids::ChunkCoord, persistence::build_chunk_snapshot, scheduler::ChunkActivity,
+    chunk::Chunk,
+    ids::ChunkCoord,
+    persistence::{build_chunk_snapshot, InMemoryChunkSnapshotStore},
+    scheduler::ChunkActivity,
 };
 
 #[derive(Debug)]
@@ -62,6 +65,28 @@ impl ChunkRegistry {
         self.chunks
             .get(&coord)
             .map(|loaded| loaded.chunk.tile_count())
+    }
+
+    pub(crate) fn write_snapshots(
+        &mut self,
+        world_id: &WorldId,
+        store: &mut InMemoryChunkSnapshotStore,
+    ) -> usize {
+        let coords = self.loaded_coords();
+        let mut written = 0;
+
+        for coord in coords {
+            let Some(loaded) = self.chunks.get_mut(&coord) else {
+                continue;
+            };
+
+            let snapshot = build_chunk_snapshot(&world_id.0, &loaded.chunk, loaded.activity);
+            store.write_snapshot(snapshot);
+            loaded.chunk.clear_dirty();
+            written += 1;
+        }
+
+        written
     }
 }
 
@@ -139,5 +164,45 @@ mod tests {
 
         assert_eq!(registry.tile_count(ChunkCoord { x: 4, y: 5 }), Some(1024));
         assert_eq!(registry.tile_count(ChunkCoord { x: 9, y: 9 }), None);
+    }
+
+    #[test]
+    fn registry_writes_snapshots_and_clears_dirty_tiles() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 5, y: 4 }, 7, TileKind::Water),
+            ChunkActivity::Warm,
+        );
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 3, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        let world_id = WorldId("abutown-main".to_string());
+        let mut store = InMemoryChunkSnapshotStore::default();
+
+        assert_eq!(registry.write_snapshots(&world_id, &mut store), 2);
+        assert_eq!(store.snapshot_count(), 2);
+        assert_eq!(
+            store.snapshot_coords(),
+            vec![ChunkCoord { x: 4, y: 4 }, ChunkCoord { x: 5, y: 4 }]
+        );
+        assert_eq!(
+            store
+                .read_snapshot(ChunkCoord { x: 4, y: 4 })
+                .expect("visible snapshot exists")
+                .dirty_tiles
+                .len(),
+            1
+        );
+
+        assert_eq!(registry.write_snapshots(&world_id, &mut store), 2);
+        assert!(
+            store
+                .read_snapshot(ChunkCoord { x: 4, y: 4 })
+                .expect("visible snapshot still exists")
+                .dirty_tiles
+                .is_empty()
+        );
     }
 }
