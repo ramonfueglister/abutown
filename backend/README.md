@@ -16,6 +16,24 @@ Available after the server crate is added:
 cargo run --manifest-path backend/Cargo.toml -p sim-server
 ```
 
+## Visible Backend Slice
+
+Run the Rust authority server:
+
+```bash
+cargo run --manifest-path backend/Cargo.toml -p sim-server
+```
+
+In a second terminal, run the Vite client:
+
+```bash
+npm run dev
+```
+
+Open the Vite URL. The city should render normally and show a `RUST LIVE` badge. Chunk `4:4` is outlined from the server snapshot, and server-driven pulses appear from `/ws` roughly once per second. The runtime currently loads three visible chunks (`4:4`, `5:4`, and `4:5`) and rotates broadcast pulses across them.
+
+Current `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
+
 Design rules:
 
 - Rust owns hot simulation state.

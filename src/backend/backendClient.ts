@@ -1,0 +1,159 @@
+import {
+  applyChunkSnapshot,
+  applyHealth,
+  applyServerMessage,
+  applyWorldSummary,
+  createInitialBackendOverlayState,
+  markBackendConnecting,
+  markBackendDisconnected,
+  type BackendOverlayState,
+} from './backendState';
+import {
+  isChunkSnapshotDto,
+  isHealthResponse,
+  isWorldSummaryDto,
+  parseServerMessage,
+  type ChunkSnapshotDto,
+  type HealthResponse,
+  type WorldSummaryDto,
+} from './protocol';
+
+export type BackendBridgeOptions = {
+  baseUrl?: string;
+  onState: (state: BackendOverlayState) => void;
+  now?: () => number;
+  WebSocketCtor?: typeof WebSocket;
+};
+
+export type BackendBridge = {
+  stop: () => void;
+};
+
+const DEFAULT_BASE_URL = 'http://127.0.0.1:8080';
+const RECONNECT_DELAY_MS = 2500;
+
+export function startBackendBridge(options: BackendBridgeOptions): BackendBridge {
+  const baseUrl = normalizeBaseUrl(options.baseUrl ?? import.meta.env.VITE_SIM_SERVER_URL ?? DEFAULT_BASE_URL);
+  const now = options.now ?? (() => performance.now());
+  const WebSocketCtor = options.WebSocketCtor ?? WebSocket;
+  let stopped = false;
+  let socket: WebSocket | undefined;
+  let reconnectTimer: number | undefined;
+  let state = markBackendConnecting(createInitialBackendOverlayState());
+
+  const publish = (next: BackendOverlayState): void => {
+    state = next;
+    options.onState(state);
+  };
+
+  publish(state);
+
+  void loadAndConnect();
+
+  async function loadAndConnect(): Promise<void> {
+    try {
+      const next = await loadSnapshot(baseUrl, state);
+      if (stopped) return;
+      publish(next);
+      if (isConnectableState(next)) connectWebSocket();
+    } catch (error: unknown) {
+      if (stopped) return;
+      publish(markBackendDisconnected(state, error instanceof Error ? error.message : 'Backend snapshot failed'));
+      scheduleReconnect();
+    }
+  }
+
+  function scheduleReconnect(): void {
+    if (reconnectTimer !== undefined) return;
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = undefined;
+      if (!stopped) void loadAndConnect();
+    }, RECONNECT_DELAY_MS);
+  }
+
+  function connectWebSocket(): void {
+    const previousSocket = socket;
+    const nextSocket = new WebSocketCtor(toWebSocketUrl(baseUrl, '/ws'));
+    socket = nextSocket;
+    previousSocket?.close();
+
+    nextSocket.addEventListener('message', (event) => {
+      if (nextSocket !== socket) return;
+      try {
+        const parsed = parseServerMessage(JSON.parse(String(event.data)));
+        if (!parsed) {
+          publish({ ...state, warning: 'Ignored unknown websocket message' });
+          return;
+        }
+        publish(applyServerMessage(state, parsed, now()));
+      } catch {
+        publish({ ...state, warning: 'Ignored malformed websocket message' });
+      }
+    });
+
+    nextSocket.addEventListener('close', () => {
+      if (stopped || nextSocket !== socket) return;
+      publish(markBackendDisconnected(state, 'Backend websocket disconnected'));
+      scheduleReconnect();
+    });
+
+    nextSocket.addEventListener('error', () => {
+      if (stopped || nextSocket !== socket) return;
+      publish(markBackendDisconnected(state, 'Backend websocket error'));
+      scheduleReconnect();
+    });
+  }
+
+  return {
+    stop: () => {
+      stopped = true;
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
+      socket?.close();
+    },
+  };
+}
+
+async function loadSnapshot(baseUrl: string, state: BackendOverlayState): Promise<BackendOverlayState> {
+  const health = await fetchJson<HealthResponse>(`${baseUrl}/health`, isHealthResponse, 'Invalid health response');
+  let next = applyHealth(state, health);
+  if (!isConnectableState(next)) return next;
+
+  const world = await fetchJson<WorldSummaryDto>(`${baseUrl}/world`, isWorldSummaryDto, 'Invalid world response');
+  next = applyWorldSummary(next, world);
+  if (!isConnectableState(next)) return next;
+
+  const firstChunk = world.loaded_chunks[0];
+  if (!firstChunk) return next;
+
+  const snapshot = await fetchJson<ChunkSnapshotDto>(
+    `${baseUrl}/chunks/${firstChunk.x}/${firstChunk.y}`,
+    isChunkSnapshotDto,
+    'Invalid chunk snapshot response',
+  );
+  return applyChunkSnapshot(next, snapshot);
+}
+
+async function fetchJson<T>(url: string, guard: (value: unknown) => value is T, invalidMessage: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  const value: unknown = await response.json();
+  if (!guard(value)) throw new Error(invalidMessage);
+  return value;
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
+function toWebSocketUrl(baseUrl: string, path: string): string {
+  const url = new URL(path, `${baseUrl}/`);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
+}
+
+function isConnectableState(state: BackendOverlayState): boolean {
+  return state.status !== 'disconnected' && state.status !== 'incompatible';
+}
