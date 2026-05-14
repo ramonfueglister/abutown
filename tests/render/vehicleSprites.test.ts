@@ -32,19 +32,27 @@ describe('vehicle sprites', () => {
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: -10, y: 0 }, 5)).toEqual({ x: 0, y: -5 });
   });
 
-  it('pulls isometric screen-vertical travel slightly inward while preserving the right lane', () => {
-    const downwardLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: 0, y: 10 });
-    const upwardRightLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: 32, y: -16 });
-    const upwardLeftLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: -32, y: -16 });
+  it('keeps all four isometric travel directions on their right lane', () => {
+    const eastLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: 32, y: 16 });
+    const southLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: -32, y: 16 });
+    const westLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: -32, y: -16 });
+    const northLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: 32, y: -16 });
 
-    expect(vectorLength(downwardLane)).toBeLessThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS);
-    expect(vectorLength(downwardLane)).toBeGreaterThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS - 1);
-    expect(vectorLength(upwardRightLane)).toBeCloseTo(vectorLength(downwardLane), 3);
-    expect(vectorLength(upwardLeftLane)).toBeCloseTo(vectorLength(downwardLane), 3);
-    expect(upwardRightLane.x).toBeGreaterThan(0);
-    expect(upwardRightLane.y).toBeGreaterThan(0);
-    expect(upwardLeftLane.x).toBeGreaterThan(0);
-    expect(upwardLeftLane.y).toBeLessThan(0);
+    expect(vectorLength(eastLane)).toBeCloseTo(ROAD_VEHICLE_LANE_OFFSET_PIXELS, 3);
+    expect(vectorLength(southLane)).toBeLessThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS);
+    expect(vectorLength(southLane)).toBeGreaterThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS - 1);
+    expect(vectorLength(westLane)).toBeCloseTo(ROAD_VEHICLE_LANE_OFFSET_PIXELS, 3);
+    expect(vectorLength(northLane)).toBeCloseTo(ROAD_VEHICLE_LANE_OFFSET_PIXELS, 3);
+
+    expect(eastLane).toMatchObject({ x: expect.any(Number), y: expect.any(Number) });
+    expect(eastLane.x).toBeLessThan(0);
+    expect(eastLane.y).toBeGreaterThan(0);
+    expect(southLane.x).toBeLessThan(0);
+    expect(southLane.y).toBeLessThan(0);
+    expect(westLane.x).toBeGreaterThan(0);
+    expect(westLane.y).toBeLessThan(0);
+    expect(northLane.x).toBeGreaterThan(0);
+    expect(northLane.y).toBeGreaterThan(0);
   });
 
   it('keeps the right-lane offset inside the OpenGFX road surface', () => {
