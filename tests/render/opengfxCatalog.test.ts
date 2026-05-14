@@ -15,6 +15,8 @@ describe('OpenGFX catalog', () => {
     expect(getAssetsForCategory('rail').length).toBeGreaterThan(0);
     expect(getAssetsForCategory('building').length).toBeGreaterThan(0);
     expect(getAssetsForCategory('tree').length).toBeGreaterThan(0);
+    expect(getAssetsForCategory('industry').length).toBeGreaterThan(0);
+    expect(getAssetsForCategory('decor').length).toBeGreaterThan(0);
   });
 
   it('returns an empty list for unknown categories instead of throwing', () => {

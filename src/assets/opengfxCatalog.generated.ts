@@ -292,42 +292,42 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/effects__64__industries_bubblegenerator_bubbles_32bpp.png",
     "sourcePath": "graphics/effects/64/industries_bubblegenerator_bubbles_32bpp.png",
     "fileName": "industries_bubblegenerator_bubbles_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "effects__64__industries_copperoremine_smoke_32bpp",
     "path": "/opengfx2/all/effects__64__industries_copperoremine_smoke_32bpp.png",
     "sourcePath": "graphics/effects/64/industries_copperoremine_smoke_32bpp.png",
     "fileName": "industries_copperoremine_smoke_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "effects__64__industries_powerstation_smoke_32bpp",
     "path": "/opengfx2/all/effects__64__industries_powerstation_smoke_32bpp.png",
     "sourcePath": "graphics/effects/64/industries_powerstation_smoke_32bpp.png",
     "fileName": "industries_powerstation_smoke_32bpp.png",
-    "category": "station"
+    "category": "industry"
   },
   {
     "key": "effects__64__industries_powerstation_sparks",
     "path": "/opengfx2/all/effects__64__industries_powerstation_sparks.png",
     "sourcePath": "graphics/effects/64/industries_powerstation_sparks.png",
     "fileName": "industries_powerstation_sparks.png",
-    "category": "station"
+    "category": "industry"
   },
   {
     "key": "effects__64__industries_powerstation_sparks_32bpp",
     "path": "/opengfx2/all/effects__64__industries_powerstation_sparks_32bpp.png",
     "sourcePath": "graphics/effects/64/industries_powerstation_sparks_32bpp.png",
     "fileName": "industries_powerstation_sparks_32bpp.png",
-    "category": "station"
+    "category": "industry"
   },
   {
     "key": "effects__64__industries_sugarmine_sugar_32bpp",
     "path": "/opengfx2/all/effects__64__industries_sugarmine_sugar_32bpp.png",
     "sourcePath": "graphics/effects/64/industries_sugarmine_sugar_32bpp.png",
     "fileName": "industries_sugarmine_sugar_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "effects__64__vehicle_breakdownsmoke_32bpp",
@@ -397,84 +397,84 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/industries__arctic__64__bank_base_shape.png",
     "sourcePath": "graphics/industries/arctic/64/bank_base_shape.png",
     "fileName": "bank_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__bank_overlayshading",
     "path": "/opengfx2/all/industries__arctic__64__bank_overlayshading.png",
     "sourcePath": "graphics/industries/arctic/64/bank_overlayshading.png",
     "fileName": "bank_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__bank_shape",
     "path": "/opengfx2/all/industries__arctic__64__bank_shape.png",
     "sourcePath": "graphics/industries/arctic/64/bank_shape.png",
     "fileName": "bank_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__bank_tilemask",
     "path": "/opengfx2/all/industries__arctic__64__bank_tilemask.png",
     "sourcePath": "graphics/industries/arctic/64/bank_tilemask.png",
     "fileName": "bank_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__farm_base_shape",
     "path": "/opengfx2/all/industries__arctic__64__farm_base_shape.png",
     "sourcePath": "graphics/industries/arctic/64/farm_base_shape.png",
     "fileName": "farm_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__farm_overlaynormal",
     "path": "/opengfx2/all/industries__arctic__64__farm_overlaynormal.png",
     "sourcePath": "graphics/industries/arctic/64/farm_overlaynormal.png",
     "fileName": "farm_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__farm_shape",
     "path": "/opengfx2/all/industries__arctic__64__farm_shape.png",
     "sourcePath": "graphics/industries/arctic/64/farm_shape.png",
     "fileName": "farm_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__farm_tilemask",
     "path": "/opengfx2/all/industries__arctic__64__farm_tilemask.png",
     "sourcePath": "graphics/industries/arctic/64/farm_tilemask.png",
     "fileName": "farm_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__foodprocessingplant_base_shape",
     "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_base_shape.png",
     "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_base_shape.png",
     "fileName": "foodprocessingplant_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__foodprocessingplant_overlaynormal",
     "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_overlaynormal.png",
     "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_overlaynormal.png",
     "fileName": "foodprocessingplant_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__foodprocessingplant_overlayshading",
     "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_overlayshading.png",
     "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_overlayshading.png",
     "fileName": "foodprocessingplant_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__foodprocessingplant_shape",
     "path": "/opengfx2/all/industries__arctic__64__foodprocessingplant_shape.png",
     "sourcePath": "graphics/industries/arctic/64/foodprocessingplant_shape.png",
     "fileName": "foodprocessingplant_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__forest_32bpp",
@@ -488,539 +488,539 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/industries__arctic__64__goldmine_base_overlayalpha.png",
     "sourcePath": "graphics/industries/arctic/64/goldmine_base_overlayalpha.png",
     "fileName": "goldmine_base_overlayalpha.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldmine_base_overlayalpha_source",
     "path": "/opengfx2/all/industries__arctic__64__goldmine_base_overlayalpha_source.png",
     "sourcePath": "graphics/industries/arctic/64/goldmine_base_overlayalpha_source.png",
     "fileName": "goldmine_base_overlayalpha_source.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldmine_base_shape",
     "path": "/opengfx2/all/industries__arctic__64__goldmine_base_shape.png",
     "sourcePath": "graphics/industries/arctic/64/goldmine_base_shape.png",
     "fileName": "goldmine_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldmine_overlaynormal",
     "path": "/opengfx2/all/industries__arctic__64__goldmine_overlaynormal.png",
     "sourcePath": "graphics/industries/arctic/64/goldmine_overlaynormal.png",
     "fileName": "goldmine_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldmine_shape",
     "path": "/opengfx2/all/industries__arctic__64__goldmine_shape.png",
     "sourcePath": "graphics/industries/arctic/64/goldmine_shape.png",
     "fileName": "goldmine_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldmine_tilemask",
     "path": "/opengfx2/all/industries__arctic__64__goldmine_tilemask.png",
     "sourcePath": "graphics/industries/arctic/64/goldmine_tilemask.png",
     "fileName": "goldmine_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldminewinch_animask",
     "path": "/opengfx2/all/industries__arctic__64__goldminewinch_animask.png",
     "sourcePath": "graphics/industries/arctic/64/goldminewinch_animask.png",
     "fileName": "goldminewinch_animask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldminewinch_overlaynormal",
     "path": "/opengfx2/all/industries__arctic__64__goldminewinch_overlaynormal.png",
     "sourcePath": "graphics/industries/arctic/64/goldminewinch_overlaynormal.png",
     "fileName": "goldminewinch_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__goldminewinch_shape",
     "path": "/opengfx2/all/industries__arctic__64__goldminewinch_shape.png",
     "sourcePath": "graphics/industries/arctic/64/goldminewinch_shape.png",
     "fileName": "goldminewinch_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__oilwells_base_shape",
     "path": "/opengfx2/all/industries__arctic__64__oilwells_base_shape.png",
     "sourcePath": "graphics/industries/arctic/64/oilwells_base_shape.png",
     "fileName": "oilwells_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__papermill_base_shape",
     "path": "/opengfx2/all/industries__arctic__64__papermill_base_shape.png",
     "sourcePath": "graphics/industries/arctic/64/papermill_base_shape.png",
     "fileName": "papermill_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__papermill_overlaynormal",
     "path": "/opengfx2/all/industries__arctic__64__papermill_overlaynormal.png",
     "sourcePath": "graphics/industries/arctic/64/papermill_overlaynormal.png",
     "fileName": "papermill_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__papermill_overlayshading",
     "path": "/opengfx2/all/industries__arctic__64__papermill_overlayshading.png",
     "sourcePath": "graphics/industries/arctic/64/papermill_overlayshading.png",
     "fileName": "papermill_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__papermill_shape",
     "path": "/opengfx2/all/industries__arctic__64__papermill_shape.png",
     "sourcePath": "graphics/industries/arctic/64/papermill_shape.png",
     "fileName": "papermill_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__printingworks_base_shape",
     "path": "/opengfx2/all/industries__arctic__64__printingworks_base_shape.png",
     "sourcePath": "graphics/industries/arctic/64/printingworks_base_shape.png",
     "fileName": "printingworks_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__printingworks_shape",
     "path": "/opengfx2/all/industries__arctic__64__printingworks_shape.png",
     "sourcePath": "graphics/industries/arctic/64/printingworks_shape.png",
     "fileName": "printingworks_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__arctic__64__printingworks_tilemask",
     "path": "/opengfx2/all/industries__arctic__64__printingworks_tilemask.png",
     "sourcePath": "graphics/industries/arctic/64/printingworks_tilemask.png",
     "fileName": "printingworks_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__resources__64__steel_32bpp",
     "path": "/opengfx2/all/industries__resources__64__steel_32bpp.png",
     "sourcePath": "graphics/industries/resources/64/steel_32bpp.png",
     "fileName": "steel_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__256__bank_base_shape",
     "path": "/opengfx2/all/industries__temperate__256__bank_base_shape.png",
     "sourcePath": "graphics/industries/temperate/256/bank_base_shape.png",
     "fileName": "bank_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__256__bank_shape",
     "path": "/opengfx2/all/industries__temperate__256__bank_shape.png",
     "sourcePath": "graphics/industries/temperate/256/bank_shape.png",
     "fileName": "bank_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__256__factory_base_shape",
     "path": "/opengfx2/all/industries__temperate__256__factory_base_shape.png",
     "sourcePath": "graphics/industries/temperate/256/factory_base_shape.png",
     "fileName": "factory_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__256__factory_shape",
     "path": "/opengfx2/all/industries__temperate__256__factory_shape.png",
     "sourcePath": "graphics/industries/temperate/256/factory_shape.png",
     "fileName": "factory_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__bank_base_shape",
     "path": "/opengfx2/all/industries__temperate__64__bank_base_shape.png",
     "sourcePath": "graphics/industries/temperate/64/bank_base_shape.png",
     "fileName": "bank_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__bank_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__bank_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/bank_overlayshading.png",
     "fileName": "bank_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__bank_shape",
     "path": "/opengfx2/all/industries__temperate__64__bank_shape.png",
     "sourcePath": "graphics/industries/temperate/64/bank_shape.png",
     "fileName": "bank_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__bank_tilemask",
     "path": "/opengfx2/all/industries__temperate__64__bank_tilemask.png",
     "sourcePath": "graphics/industries/temperate/64/bank_tilemask.png",
     "fileName": "bank_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__coalmine_base_shape",
     "path": "/opengfx2/all/industries__temperate__64__coalmine_base_shape.png",
     "sourcePath": "graphics/industries/temperate/64/coalmine_base_shape.png",
     "fileName": "coalmine_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__coalmine_base_tilemask",
     "path": "/opengfx2/all/industries__temperate__64__coalmine_base_tilemask.png",
     "sourcePath": "graphics/industries/temperate/64/coalmine_base_tilemask.png",
     "fileName": "coalmine_base_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__coalmine_idmap",
     "path": "/opengfx2/all/industries__temperate__64__coalmine_idmap.png",
     "sourcePath": "graphics/industries/temperate/64/coalmine_idmap.png",
     "fileName": "coalmine_idmap.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__coalmine_overlaynormal",
     "path": "/opengfx2/all/industries__temperate__64__coalmine_overlaynormal.png",
     "sourcePath": "graphics/industries/temperate/64/coalmine_overlaynormal.png",
     "fileName": "coalmine_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__coalmine_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__coalmine_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/coalmine_overlayshading.png",
     "fileName": "coalmine_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__coalmine_shape",
     "path": "/opengfx2/all/industries__temperate__64__coalmine_shape.png",
     "sourcePath": "graphics/industries/temperate/64/coalmine_shape.png",
     "fileName": "coalmine_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__factory_base_shape",
     "path": "/opengfx2/all/industries__temperate__64__factory_base_shape.png",
     "sourcePath": "graphics/industries/temperate/64/factory_base_shape.png",
     "fileName": "factory_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__factory_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__factory_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/factory_overlayshading.png",
     "fileName": "factory_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__factory_shape",
     "path": "/opengfx2/all/industries__temperate__64__factory_shape.png",
     "sourcePath": "graphics/industries/temperate/64/factory_shape.png",
     "fileName": "factory_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__factory_tilemask",
     "path": "/opengfx2/all/industries__temperate__64__factory_tilemask.png",
     "sourcePath": "graphics/industries/temperate/64/factory_tilemask.png",
     "fileName": "factory_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__farm_base_shape",
     "path": "/opengfx2/all/industries__temperate__64__farm_base_shape.png",
     "sourcePath": "graphics/industries/temperate/64/farm_base_shape.png",
     "fileName": "farm_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__farm_overlaynormal",
     "path": "/opengfx2/all/industries__temperate__64__farm_overlaynormal.png",
     "sourcePath": "graphics/industries/temperate/64/farm_overlaynormal.png",
     "fileName": "farm_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__farm_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__farm_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/farm_overlayshading.png",
     "fileName": "farm_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__farm_shape",
     "path": "/opengfx2/all/industries__temperate__64__farm_shape.png",
     "sourcePath": "graphics/industries/temperate/64/farm_shape.png",
     "fileName": "farm_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__farm_tilemask",
     "path": "/opengfx2/all/industries__temperate__64__farm_tilemask.png",
     "sourcePath": "graphics/industries/temperate/64/farm_tilemask.png",
     "fileName": "farm_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__ironoremine_base_overlayalpha",
     "path": "/opengfx2/all/industries__temperate__64__ironoremine_base_overlayalpha.png",
     "sourcePath": "graphics/industries/temperate/64/ironoremine_base_overlayalpha.png",
     "fileName": "ironoremine_base_overlayalpha.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__ironoremine_base_shape",
     "path": "/opengfx2/all/industries__temperate__64__ironoremine_base_shape.png",
     "sourcePath": "graphics/industries/temperate/64/ironoremine_base_shape.png",
     "fileName": "ironoremine_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__ironoremine_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__ironoremine_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/ironoremine_overlayshading.png",
     "fileName": "ironoremine_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__ironoremine_shape",
     "path": "/opengfx2/all/industries__temperate__64__ironoremine_shape.png",
     "sourcePath": "graphics/industries/temperate/64/ironoremine_shape.png",
     "fileName": "ironoremine_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__ironoremine_tilemask",
     "path": "/opengfx2/all/industries__temperate__64__ironoremine_tilemask.png",
     "sourcePath": "graphics/industries/temperate/64/ironoremine_tilemask.png",
     "fileName": "ironoremine_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oil_refinery_overlaynormal",
     "path": "/opengfx2/all/industries__temperate__64__oil_refinery_overlaynormal.png",
     "sourcePath": "graphics/industries/temperate/64/oil_refinery_overlaynormal.png",
     "fileName": "oil_refinery_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oil_refinery_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__oil_refinery_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/oil_refinery_overlayshading.png",
     "fileName": "oil_refinery_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oil_refinery_shape",
     "path": "/opengfx2/all/industries__temperate__64__oil_refinery_shape.png",
     "sourcePath": "graphics/industries/temperate/64/oil_refinery_shape.png",
     "fileName": "oil_refinery_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oilrig_overlaynormal",
     "path": "/opengfx2/all/industries__temperate__64__oilrig_overlaynormal.png",
     "sourcePath": "graphics/industries/temperate/64/oilrig_overlaynormal.png",
     "fileName": "oilrig_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oilrig_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__oilrig_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/oilrig_overlayshading.png",
     "fileName": "oilrig_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oilrig_shape",
     "path": "/opengfx2/all/industries__temperate__64__oilrig_shape.png",
     "sourcePath": "graphics/industries/temperate/64/oilrig_shape.png",
     "fileName": "oilrig_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oilrig_tilemask",
     "path": "/opengfx2/all/industries__temperate__64__oilrig_tilemask.png",
     "sourcePath": "graphics/industries/temperate/64/oilrig_tilemask.png",
     "fileName": "oilrig_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oilwells_base_shape",
     "path": "/opengfx2/all/industries__temperate__64__oilwells_base_shape.png",
     "sourcePath": "graphics/industries/temperate/64/oilwells_base_shape.png",
     "fileName": "oilwells_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oilwells_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__oilwells_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/oilwells_overlayshading.png",
     "fileName": "oilwells_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__oilwells_shape",
     "path": "/opengfx2/all/industries__temperate__64__oilwells_shape.png",
     "sourcePath": "graphics/industries/temperate/64/oilwells_shape.png",
     "fileName": "oilwells_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__powerstation_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__powerstation_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/powerstation_overlayshading.png",
     "fileName": "powerstation_overlayshading.png",
-    "category": "station"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__powerstation_shape",
     "path": "/opengfx2/all/industries__temperate__64__powerstation_shape.png",
     "sourcePath": "graphics/industries/temperate/64/powerstation_shape.png",
     "fileName": "powerstation_shape.png",
-    "category": "station"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__sawmill_overlaynormal",
     "path": "/opengfx2/all/industries__temperate__64__sawmill_overlaynormal.png",
     "sourcePath": "graphics/industries/temperate/64/sawmill_overlaynormal.png",
     "fileName": "sawmill_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__sawmill_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__sawmill_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/sawmill_overlayshading.png",
     "fileName": "sawmill_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__sawmill_shape",
     "path": "/opengfx2/all/industries__temperate__64__sawmill_shape.png",
     "sourcePath": "graphics/industries/temperate/64/sawmill_shape.png",
     "fileName": "sawmill_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__steelmill_base_shape",
     "path": "/opengfx2/all/industries__temperate__64__steelmill_base_shape.png",
     "sourcePath": "graphics/industries/temperate/64/steelmill_base_shape.png",
     "fileName": "steelmill_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__steelmill_overlaynormal",
     "path": "/opengfx2/all/industries__temperate__64__steelmill_overlaynormal.png",
     "sourcePath": "graphics/industries/temperate/64/steelmill_overlaynormal.png",
     "fileName": "steelmill_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__steelmill_overlayshading",
     "path": "/opengfx2/all/industries__temperate__64__steelmill_overlayshading.png",
     "sourcePath": "graphics/industries/temperate/64/steelmill_overlayshading.png",
     "fileName": "steelmill_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__steelmill_shape",
     "path": "/opengfx2/all/industries__temperate__64__steelmill_shape.png",
     "sourcePath": "graphics/industries/temperate/64/steelmill_shape.png",
     "fileName": "steelmill_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__temperate__64__steelmill_tilemask",
     "path": "/opengfx2/all/industries__temperate__64__steelmill_tilemask.png",
     "sourcePath": "graphics/industries/temperate/64/steelmill_tilemask.png",
     "fileName": "steelmill_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__battery_farm_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__battery_farm_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/battery_farm_32bpp.png",
     "fileName": "battery_farm_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__bubble_generator_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__bubble_generator_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/bubble_generator_32bpp.png",
     "fileName": "bubble_generator_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__bubble_generator_palmask",
     "path": "/opengfx2/all/industries__toyland__64__bubble_generator_palmask.png",
     "sourcePath": "graphics/industries/toyland/64/bubble_generator_palmask.png",
     "fileName": "bubble_generator_palmask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__bubble_generator_plunger_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__bubble_generator_plunger_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/bubble_generator_plunger_32bpp.png",
     "fileName": "bubble_generator_plunger_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__bubble_generator_plunger_palmask",
     "path": "/opengfx2/all/industries__toyland__64__bubble_generator_plunger_palmask.png",
     "sourcePath": "graphics/industries/toyland/64/bubble_generator_plunger_palmask.png",
     "fileName": "bubble_generator_plunger_palmask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__bubble_generator_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__bubble_generator_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/bubble_generator_tilemask.png",
     "fileName": "bubble_generator_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__cola_wells_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__cola_wells_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/cola_wells_32bpp.png",
     "fileName": "cola_wells_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__cola_wells_palmask",
     "path": "/opengfx2/all/industries__toyland__64__cola_wells_palmask.png",
     "sourcePath": "graphics/industries/toyland/64/cola_wells_palmask.png",
     "fileName": "cola_wells_palmask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__fizzy_drink_factory_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__fizzy_drink_factory_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/fizzy_drink_factory_32bpp.png",
     "fileName": "fizzy_drink_factory_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__fizzy_drink_factory_palmask",
     "path": "/opengfx2/all/industries__toyland__64__fizzy_drink_factory_palmask.png",
     "sourcePath": "graphics/industries/toyland/64/fizzy_drink_factory_palmask.png",
     "fileName": "fizzy_drink_factory_palmask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__fizzy_drink_factory_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__fizzy_drink_factory_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/fizzy_drink_factory_tilemask.png",
     "fileName": "fizzy_drink_factory_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__forest_32bpp",
@@ -1034,273 +1034,273 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/industries__toyland__64__plastic_fountain_aboveground_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/plastic_fountain_aboveground_32bpp.png",
     "fileName": "plastic_fountain_aboveground_32bpp.png",
-    "category": "terrain"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__plastic_fountain_ground_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__plastic_fountain_ground_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/plastic_fountain_ground_32bpp.png",
     "fileName": "plastic_fountain_ground_32bpp.png",
-    "category": "terrain"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__sugar_mine_stand_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stand_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/sugar_mine_stand_32bpp.png",
     "fileName": "sugar_mine_stand_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__sugar_mine_stand_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stand_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/sugar_mine_stand_tilemask.png",
     "fileName": "sugar_mine_stand_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__sugar_mine_stockpile_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stockpile_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/sugar_mine_stockpile_32bpp.png",
     "fileName": "sugar_mine_stockpile_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__sugar_mine_stockpile_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__sugar_mine_stockpile_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/sugar_mine_stockpile_tilemask.png",
     "fileName": "sugar_mine_stockpile_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__sugarmine_pile_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__sugarmine_pile_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/sugarmine_pile_32bpp.png",
     "fileName": "sugarmine_pile_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__sugarmine_sieve_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__sugarmine_sieve_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/sugarmine_sieve_32bpp.png",
     "fileName": "sugarmine_sieve_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__sweet_factory_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__sweet_factory_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/sweet_factory_32bpp.png",
     "fileName": "sweet_factory_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toffee_quarry_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__toffee_quarry_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/toffee_quarry_32bpp.png",
     "fileName": "toffee_quarry_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toffee_quarry_cutter_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__toffee_quarry_cutter_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/toffee_quarry_cutter_32bpp.png",
     "fileName": "toffee_quarry_cutter_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toffee_quarry_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__toffee_quarry_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/toffee_quarry_tilemask.png",
     "fileName": "toffee_quarry_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_factory_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__toy_factory_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/toy_factory_32bpp.png",
     "fileName": "toy_factory_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_factory_constr_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__toy_factory_constr_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/toy_factory_constr_32bpp.png",
     "fileName": "toy_factory_constr_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_factory_constr_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__toy_factory_constr_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/toy_factory_constr_tilemask.png",
     "fileName": "toy_factory_constr_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_factory_stomper_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__toy_factory_stomper_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/toy_factory_stomper_32bpp.png",
     "fileName": "toy_factory_stomper_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_factory_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__toy_factory_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/toy_factory_tilemask.png",
     "fileName": "toy_factory_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_shop_32bpp",
     "path": "/opengfx2/all/industries__toyland__64__toy_shop_32bpp.png",
     "sourcePath": "graphics/industries/toyland/64/toy_shop_32bpp.png",
     "fileName": "toy_shop_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_shop_base_shape",
     "path": "/opengfx2/all/industries__toyland__64__toy_shop_base_shape.png",
     "sourcePath": "graphics/industries/toyland/64/toy_shop_base_shape.png",
     "fileName": "toy_shop_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__toyland__64__toy_shop_tilemask",
     "path": "/opengfx2/all/industries__toyland__64__toy_shop_tilemask.png",
     "sourcePath": "graphics/industries/toyland/64/toy_shop_tilemask.png",
     "fileName": "toy_shop_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__copperoremine_idmap",
     "path": "/opengfx2/all/industries__tropical__64__copperoremine_idmap.png",
     "sourcePath": "graphics/industries/tropical/64/copperoremine_idmap.png",
     "fileName": "copperoremine_idmap.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__copperoremine_overlaynormal",
     "path": "/opengfx2/all/industries__tropical__64__copperoremine_overlaynormal.png",
     "sourcePath": "graphics/industries/tropical/64/copperoremine_overlaynormal.png",
     "fileName": "copperoremine_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__copperoremine_overlayshading",
     "path": "/opengfx2/all/industries__tropical__64__copperoremine_overlayshading.png",
     "sourcePath": "graphics/industries/tropical/64/copperoremine_overlayshading.png",
     "fileName": "copperoremine_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__copperoremine_shape",
     "path": "/opengfx2/all/industries__tropical__64__copperoremine_shape.png",
     "sourcePath": "graphics/industries/tropical/64/copperoremine_shape.png",
     "fileName": "copperoremine_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__diamondmine_base_overlayalpha",
     "path": "/opengfx2/all/industries__tropical__64__diamondmine_base_overlayalpha.png",
     "sourcePath": "graphics/industries/tropical/64/diamondmine_base_overlayalpha.png",
     "fileName": "diamondmine_base_overlayalpha.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__diamondmine_base_shape",
     "path": "/opengfx2/all/industries__tropical__64__diamondmine_base_shape.png",
     "sourcePath": "graphics/industries/tropical/64/diamondmine_base_shape.png",
     "fileName": "diamondmine_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__diamondmine_overlaynormal",
     "path": "/opengfx2/all/industries__tropical__64__diamondmine_overlaynormal.png",
     "sourcePath": "graphics/industries/tropical/64/diamondmine_overlaynormal.png",
     "fileName": "diamondmine_overlaynormal.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__diamondmine_shape",
     "path": "/opengfx2/all/industries__tropical__64__diamondmine_shape.png",
     "sourcePath": "graphics/industries/tropical/64/diamondmine_shape.png",
     "fileName": "diamondmine_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__diamondmine_tilemask",
     "path": "/opengfx2/all/industries__tropical__64__diamondmine_tilemask.png",
     "sourcePath": "graphics/industries/tropical/64/diamondmine_tilemask.png",
     "fileName": "diamondmine_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__lumbermill_base_shape",
     "path": "/opengfx2/all/industries__tropical__64__lumbermill_base_shape.png",
     "sourcePath": "graphics/industries/tropical/64/lumbermill_base_shape.png",
     "fileName": "lumbermill_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__lumbermill_overlayshading",
     "path": "/opengfx2/all/industries__tropical__64__lumbermill_overlayshading.png",
     "sourcePath": "graphics/industries/tropical/64/lumbermill_overlayshading.png",
     "fileName": "lumbermill_overlayshading.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__lumbermill_shape",
     "path": "/opengfx2/all/industries__tropical__64__lumbermill_shape.png",
     "sourcePath": "graphics/industries/tropical/64/lumbermill_shape.png",
     "fileName": "lumbermill_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__lumbermill_tilemask",
     "path": "/opengfx2/all/industries__tropical__64__lumbermill_tilemask.png",
     "sourcePath": "graphics/industries/tropical/64/lumbermill_tilemask.png",
     "fileName": "lumbermill_tilemask.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__oilwells_base_shape",
     "path": "/opengfx2/all/industries__tropical__64__oilwells_base_shape.png",
     "sourcePath": "graphics/industries/tropical/64/oilwells_base_shape.png",
     "fileName": "oilwells_base_shape.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__plantations_32bpp",
     "path": "/opengfx2/all/industries__tropical__64__plantations_32bpp.png",
     "sourcePath": "graphics/industries/tropical/64/plantations_32bpp.png",
     "fileName": "plantations_32bpp.png",
-    "category": "unknown"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__waterprocessingplant_overlayshading",
     "path": "/opengfx2/all/industries__tropical__64__waterprocessingplant_overlayshading.png",
     "sourcePath": "graphics/industries/tropical/64/waterprocessingplant_overlayshading.png",
     "fileName": "waterprocessingplant_overlayshading.png",
-    "category": "water"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__waterprocessingplant_shape",
     "path": "/opengfx2/all/industries__tropical__64__waterprocessingplant_shape.png",
     "sourcePath": "graphics/industries/tropical/64/waterprocessingplant_shape.png",
     "fileName": "waterprocessingplant_shape.png",
-    "category": "water"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__watertower_overlayshading",
     "path": "/opengfx2/all/industries__tropical__64__watertower_overlayshading.png",
     "sourcePath": "graphics/industries/tropical/64/watertower_overlayshading.png",
     "fileName": "watertower_overlayshading.png",
-    "category": "water"
+    "category": "industry"
   },
   {
     "key": "industries__tropical__64__watertower_shape",
     "path": "/opengfx2/all/industries__tropical__64__watertower_shape.png",
     "sourcePath": "graphics/industries/tropical/64/watertower_shape.png",
     "fileName": "watertower_shape.png",
-    "category": "water"
+    "category": "industry"
   },
   {
     "key": "infrastructure__256__canal_overlayalpha",
@@ -1608,14 +1608,14 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/infrastructure__64__rail_fences_32bpp.png",
     "sourcePath": "graphics/infrastructure/64/rail_fences_32bpp.png",
     "fileName": "rail_fences_32bpp.png",
-    "category": "rail"
+    "category": "decor"
   },
   {
     "key": "infrastructure__64__rail_fences_toyland_32bpp",
     "path": "/opengfx2/all/infrastructure__64__rail_fences_toyland_32bpp.png",
     "sourcePath": "graphics/infrastructure/64/rail_fences_toyland_32bpp.png",
     "fileName": "rail_fences_toyland_32bpp.png",
-    "category": "rail"
+    "category": "decor"
   },
   {
     "key": "infrastructure__64__rail_levelcrossing_overlayalpha",
@@ -2707,14 +2707,14 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/terrain__64__farm_fences_32bpp.png",
     "sourcePath": "graphics/terrain/64/farm_fences_32bpp.png",
     "fileName": "farm_fences_32bpp.png",
-    "category": "terrain"
+    "category": "decor"
   },
   {
     "key": "terrain__64__farm_fences_snow_32bpp",
     "path": "/opengfx2/all/terrain__64__farm_fences_snow_32bpp.png",
     "sourcePath": "graphics/terrain/64/farm_fences_snow_32bpp.png",
     "fileName": "farm_fences_snow_32bpp.png",
-    "category": "terrain"
+    "category": "decor"
   },
   {
     "key": "terrain__64__farm_groundtiles_32bpp",
@@ -2854,7 +2854,7 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/terrain__64__temperate_forest_groundtile_32bpp.png",
     "sourcePath": "graphics/terrain/64/temperate_forest_groundtile_32bpp.png",
     "fileName": "temperate_forest_groundtile_32bpp.png",
-    "category": "terrain"
+    "category": "tree"
   },
   {
     "key": "terrain__64__temperate_groundtiles_32bpp",
@@ -3449,21 +3449,21 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/towns__streetfurniture__64__town_lamp_32bpp.png",
     "sourcePath": "graphics/towns/streetfurniture/64/town_lamp_32bpp.png",
     "fileName": "town_lamp_32bpp.png",
-    "category": "road"
+    "category": "tree"
   },
   {
     "key": "towns__streetfurniture__64__town_lamp_toyland_32bpp",
     "path": "/opengfx2/all/towns__streetfurniture__64__town_lamp_toyland_32bpp.png",
     "sourcePath": "graphics/towns/streetfurniture/64/town_lamp_toyland_32bpp.png",
     "fileName": "town_lamp_toyland_32bpp.png",
-    "category": "road"
+    "category": "tree"
   },
   {
     "key": "towns__streetfurniture__64__town_tree_32bpp",
     "path": "/opengfx2/all/towns__streetfurniture__64__town_tree_32bpp.png",
     "sourcePath": "graphics/towns/streetfurniture/64/town_tree_32bpp.png",
     "fileName": "town_tree_32bpp.png",
-    "category": "road"
+    "category": "tree"
   },
   {
     "key": "towns__temperate__256__2x1_hotel_shape",
@@ -3988,14 +3988,14 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/towns__temperate__64__statues_overlaynormal.png",
     "sourcePath": "graphics/towns/temperate/64/statues_overlaynormal.png",
     "fileName": "statues_overlaynormal.png",
-    "category": "building"
+    "category": "decor"
   },
   {
     "key": "towns__temperate__64__statues_shape",
     "path": "/opengfx2/all/towns__temperate__64__statues_shape.png",
     "sourcePath": "graphics/towns/temperate/64/statues_shape.png",
     "fileName": "statues_shape.png",
-    "category": "building"
+    "category": "decor"
   },
   {
     "key": "towns__temperate__64__tallofficeblock_base_shape",
@@ -4107,7 +4107,7 @@ export const opengfxAssets: OpenGfxAsset[] = [
     "path": "/opengfx2/all/towns__toyland__64__company_statue_32bpp.png",
     "sourcePath": "graphics/towns/toyland/64/company_statue_32bpp.png",
     "fileName": "company_statue_32bpp.png",
-    "category": "building"
+    "category": "decor"
   },
   {
     "key": "towns__toyland__64__hqs_overlaynormal",

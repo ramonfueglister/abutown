@@ -84,6 +84,16 @@ console.log(`Imported ${assets.length} OpenGFX assets into ${publicRoot}`);
 
 function categorize(rel) {
   const value = rel.toLowerCase();
+  if (value.includes('tree') || value.includes('forest')) return 'tree';
+  if (value.includes('industries') || value.includes('industry') || value.includes('industrial')) return 'industry';
+  if (
+    value.includes('object') ||
+    value.includes('streetfurniture') ||
+    value.includes('furniture') ||
+    value.includes('fence') ||
+    value.includes('lamp') ||
+    value.includes('statue')
+  ) return 'decor';
   if (value.includes('terrain') || value.includes('ground') || value.includes('landscape')) return 'terrain';
   if (value.includes('water') || value.includes('river') || value.includes('canal')) return 'water';
   if (value.includes('bridge')) return 'bridge';
@@ -91,9 +101,6 @@ function categorize(rel) {
   if (value.includes('rail') || value.includes('train') || value.includes('track')) return 'rail';
   if (value.includes('station')) return 'station';
   if (value.includes('town') || value.includes('house') || value.includes('office') || value.includes('church')) return 'building';
-  if (value.includes('tree') || value.includes('forest')) return 'tree';
   if (value.includes('vehicle') || value.includes('bus') || value.includes('lorry') || value.includes('truck')) return 'vehicle';
-  if (value.includes('industry') || value.includes('industrial')) return 'industry';
-  if (value.includes('object') || value.includes('furniture') || value.includes('fence')) return 'decor';
   return 'unknown';
 }
