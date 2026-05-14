@@ -1,18 +1,13 @@
 use abutown_protocol::TileKindDto;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum TileKind {
+    #[default]
     Grass,
     Water,
     Road,
     BuildingFootprint,
-}
-
-impl Default for TileKind {
-    fn default() -> Self {
-        Self::Grass
-    }
 }
 
 impl From<TileKind> for TileKindDto {
