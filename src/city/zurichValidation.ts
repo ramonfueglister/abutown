@@ -7,6 +7,7 @@ export function validateZurichCity(world: ZurichWorld, transport: ZurichTranspor
   let roadRailOverlap = 0;
   let invalidBuildings = 0;
   let bridgeErrors = 0;
+  let treeBuildingOverlap = 0;
 
   for (const roadKey of transport.roads.keys()) {
     if (transport.rails.has(roadKey) && !transport.railCrossings.has(roadKey)) roadRailOverlap += 1;
@@ -25,9 +26,15 @@ export function validateZurichCity(world: ZurichWorld, transport: ZurichTranspor
     }
   }
 
+  const buildingTiles = new Set(placement.buildings.map((building) => key(building.coord)));
+  for (const tree of placement.trees) {
+    if (buildingTiles.has(key(tree))) treeBuildingOverlap += 1;
+  }
+
   if (roadRailOverlap > 0) errors.push(`roadRailOverlap:${roadRailOverlap}`);
   if (bridgeErrors > 0) errors.push(`bridgeErrors:${bridgeErrors}`);
   if (invalidBuildings > 0) errors.push(`invalidBuildings:${invalidBuildings}`);
+  if (treeBuildingOverlap > 0) errors.push(`treeBuildingOverlap:${treeBuildingOverlap}`);
 
   return {
     valid: errors.length === 0,
@@ -44,6 +51,7 @@ export function validateZurichCity(world: ZurichWorld, transport: ZurichTranspor
       roadRailOverlap,
       bridgeErrors,
       invalidBuildings,
+      treeBuildingOverlap,
     },
   };
 }

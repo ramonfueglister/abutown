@@ -19,13 +19,23 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.height).toBe(256);
   expect(state.city.bridges).toBeGreaterThanOrEqual(3);
   expect(state.city.railCrossings).toBeGreaterThanOrEqual(1);
+  expect(state.city.railStations).toBe(5);
   expect(state.city.trees).toBeGreaterThan(3000);
   expect(state.city.reserveTiles).toBeGreaterThan(2500);
   expect(state.city.validationErrors).toBe(0);
   expect(state.city.invalidBuildings).toBe(0);
+  expect(state.city.treeBuildingOverlap).toBe(0);
   expect(state.city.roadRailOverlap).toBe(0);
+  expect(state.city.railStationsOnRoad).toBe(0);
+  expect(state.city.railStationsOnBuildings).toBe(0);
+  expect(state.city.railStationsOnRails).toBe(0);
+  expect(state.city.railStationsOnTrees).toBe(0);
   expect(state.city.diagnostics).toBeUndefined();
   expect(state.city.legacyDiagnostics).toEqual(expect.any(Object));
+  expect(state.city.legacyDiagnostics.railStationsOnRoad).toBe(0);
+  expect(state.city.legacyDiagnostics.railStationsOnBuildings).toBe(0);
+  expect(state.city.legacyDiagnostics.railStationsOnRails).toBe(0);
+  expect(state.city.legacyDiagnostics.railStationsOnTrees).toBe(0);
   expect(state.city.camera.mode).toBe('bounded-fixed-map');
   expect(state.city.camera.target).toEqual(expect.objectContaining({
     x: expect.any(Number),

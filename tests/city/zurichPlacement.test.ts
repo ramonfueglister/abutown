@@ -33,6 +33,17 @@ describe('buildZurichPlacement', () => {
       expect(transport.rails.has(tileKey)).toBe(false);
     }
   });
+
+  it('keeps trees and buildings on separate tiles', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const placement = buildZurichPlacement(world, transport);
+    const treeTiles = new Set(placement.trees.map(key));
+
+    const overlaps = placement.buildings.filter((building) => treeTiles.has(key(building.coord)));
+
+    expect(overlaps).toEqual([]);
+  });
 });
 
 describe('validateZurichCity', () => {
@@ -88,5 +99,19 @@ describe('validateZurichCity', () => {
     expect(validation.valid).toBe(false);
     expect(validation.errors).toContain('invalidBuildings:2');
     expect(validation.stats.invalidBuildings).toBe(2);
+  });
+
+  it('reports tree and building tile overlap', () => {
+    const world = buildZurichWorld({ seed: 1848 });
+    const transport = buildZurichTransport(world);
+    const placement = buildZurichPlacement(world, transport);
+
+    placement.trees.push(placement.buildings[0].coord);
+
+    const validation = validateZurichCity(world, transport, placement);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toContain('treeBuildingOverlap:1');
+    expect(validation.stats.treeBuildingOverlap).toBe(1);
   });
 });

@@ -30,8 +30,15 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
 
   for (const tile of world.terrain.values()) {
     if (tile.kind === 'reserve') reserveTiles.add(key(tile.coord));
-    if (tile.kind === 'forest' && hash(`forest:${key(tile.coord)}`) % 3 !== 0 && !blocked.has(key(tile.coord))) trees.push(tile.coord);
-    if (tile.kind === 'park' && hash(`park-tree:${key(tile.coord)}`) % 4 === 0 && !blocked.has(key(tile.coord))) trees.push(tile.coord);
+    const tileKey = key(tile.coord);
+    if (tile.kind === 'forest' && hash(`forest:${tileKey}`) % 3 !== 0 && !blocked.has(tileKey)) {
+      trees.push(tile.coord);
+      blocked.add(tileKey);
+    }
+    if (tile.kind === 'park' && hash(`park-tree:${tileKey}`) % 4 === 0 && !blocked.has(tileKey)) {
+      trees.push(tile.coord);
+      blocked.add(tileKey);
+    }
   }
 
   for (const zone of world.zones) {

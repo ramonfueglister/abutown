@@ -673,13 +673,38 @@ function buildRailNetwork(paths: Coord[][]): Map<string, RailTile> {
 }
 
 function buildRailStations(): RailStation[] {
-  return [
-    { coord: { x: 116, y: 153 }, frame: 0 },
-    { coord: { x: 117, y: 153 }, frame: 0 },
-    { coord: { x: 118, y: 153 }, frame: 0 },
-    { coord: { x: 119, y: 153 }, frame: 0 },
-    { coord: { x: 120, y: 153 }, frame: 0 },
+  const railCenter = zurichWorld.zones.find((zone) => zone.kind === 'rail-center')?.center ?? { x: 118, y: 154 };
+  const occupied = new Set<string>([
+    ...roads.keys(),
+    ...rails.keys(),
+    ...zurichPlacement.buildings.map((building) => key(building.coord)),
+    ...zurichPlacement.trees.map(key),
+  ]);
+  const candidates: Coord[] = [];
+  const seen = new Set<string>();
+  const offsets = [
+    { x: 0, y: -1 },
+    { x: 0, y: 1 },
+    { x: -1, y: 0 },
+    { x: 1, y: 0 },
+    { x: -1, y: -1 },
+    { x: 1, y: -1 },
+    { x: -1, y: 1 },
+    { x: 1, y: 1 },
   ];
+
+  for (const rail of rails.values()) {
+    for (const offset of offsets) {
+      const coord = { x: rail.coord.x + offset.x, y: rail.coord.y + offset.y };
+      const tileKey = key(coord);
+      if (seen.has(tileKey) || occupied.has(tileKey) || !inside(coord) || !isBuildable(coord)) continue;
+      candidates.push(coord);
+      seen.add(tileKey);
+    }
+  }
+
+  candidates.sort((a, b) => distance(a, railCenter) - distance(b, railCenter) || a.y - b.y || a.x - b.x);
+  return candidates.slice(0, 5).map((coord) => ({ coord, frame: 0 }));
 }
 
 function addDistrictStreets(points: Map<string, RoadKind>, center: Coord, radius: number, dense: boolean): void {
@@ -1162,8 +1187,19 @@ function cityDiagnostics(): Record<string, number> {
     if (sheet && Math.floor(building.frame / sheet.cols) > 0) buildingFramesOutsideFinishedRow += 1;
   }
 
+  const buildingTiles = new Set(buildings.map((building) => key(building.coord)));
+  const treeTiles = new Set(trees.map(key));
   let railStationsOnRoad = 0;
-  for (const station of railStations) if (roads.has(key(station.coord))) railStationsOnRoad += 1;
+  let railStationsOnBuildings = 0;
+  let railStationsOnRails = 0;
+  let railStationsOnTrees = 0;
+  for (const station of railStations) {
+    const stationKey = key(station.coord);
+    if (roads.has(stationKey)) railStationsOnRoad += 1;
+    if (buildingTiles.has(stationKey)) railStationsOnBuildings += 1;
+    if (rails.has(stationKey)) railStationsOnRails += 1;
+    if (treeTiles.has(stationKey)) railStationsOnTrees += 1;
+  }
 
   let parallelRoadPairs = 0;
   for (const road of roads.values()) {
@@ -1189,6 +1225,9 @@ function cityDiagnostics(): Record<string, number> {
     buildingsTouchingRail,
     buildingFramesOutsideFinishedRow,
     railStationsOnRoad,
+    railStationsOnBuildings,
+    railStationsOnRails,
+    railStationsOnTrees,
     adjacentParallelRoadRuns: countAdjacentParallelRoadRuns(roads),
     invalidRoadDeadEnds: countInvalidRoadDeadEnds(roads, { width: WIDTH, height: HEIGHT }),
     parallelRoadPairs,
@@ -1257,8 +1296,9 @@ declare global {
   }
 }
 
-window.render_game_to_text = () =>
-  JSON.stringify({
+window.render_game_to_text = () => {
+  const legacyDiagnostics = cityDiagnostics();
+  return JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
       worldId: zurichWorld.id,
@@ -1279,7 +1319,12 @@ window.render_game_to_text = () =>
       roadRailOverlap: zurichValidation.stats.roadRailOverlap,
       railCrossings: zurichValidation.stats.railCrossings,
       invalidBuildings: zurichValidation.stats.invalidBuildings,
-      legacyDiagnostics: cityDiagnostics(),
+      treeBuildingOverlap: zurichValidation.stats.treeBuildingOverlap,
+      railStationsOnRoad: legacyDiagnostics.railStationsOnRoad,
+      railStationsOnBuildings: legacyDiagnostics.railStationsOnBuildings,
+      railStationsOnRails: legacyDiagnostics.railStationsOnRails,
+      railStationsOnTrees: legacyDiagnostics.railStationsOnTrees,
+      legacyDiagnostics,
       camera: {
         mode: 'bounded-fixed-map',
         current: { x: camera.x, y: camera.y, scale: camera.scale },
@@ -1298,6 +1343,7 @@ window.render_game_to_text = () =>
       },
     },
   });
+};
 
 window.advanceTime = (ms: number) => {
   for (const car of cars) car.offset = (car.offset + car.speed * (ms / 1000)) % car.path.length;
