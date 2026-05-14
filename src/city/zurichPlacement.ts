@@ -1,0 +1,121 @@
+import { distance, inside, key, type Coord, type ZurichBuilding, type ZurichBuildingSheet, type ZurichDetail, type ZurichWorld, type ZurichZone } from './worldTypes';
+import type { ZurichTransport } from './zurichTransport';
+
+export type ZurichPlacement = {
+  buildings: ZurichBuilding[];
+  trees: Coord[];
+  details: ZurichDetail[];
+  reserveTiles: Set<string>;
+};
+
+const sheetPools: Record<ZurichZone['kind'], ZurichBuildingSheet[]> = {
+  river: ['townhouses'],
+  'old-town': ['oldhouses', 'townhouses', 'shops', 'church'],
+  'rail-center': ['shops', 'flats', 'office', 'modern', 'tower'],
+  residential: ['houses', 'cottages', 'oldhouses', 'townhouses'],
+  forest: ['cottages'],
+  park: ['church', 'oldhouses'],
+  industry: ['shops', 'office', 'flats'],
+  reserve: ['cottages', 'houses'],
+  civic: ['church', 'office', 'shops'],
+  waterfront: ['townhouses', 'shops', 'flats'],
+};
+
+export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransport): ZurichPlacement {
+  const blocked = new Set<string>([...transport.roads.keys(), ...transport.rails.keys()]);
+  const buildings: ZurichBuilding[] = [];
+  const trees: Coord[] = [];
+  const details: ZurichDetail[] = [];
+  const reserveTiles = new Set<string>();
+
+  for (const tile of world.terrain.values()) {
+    if (tile.kind === 'reserve') reserveTiles.add(key(tile.coord));
+    if (tile.kind === 'forest' && hash(`forest:${key(tile.coord)}`) % 3 !== 0 && !blocked.has(key(tile.coord))) trees.push(tile.coord);
+    if (tile.kind === 'park' && hash(`park-tree:${key(tile.coord)}`) % 4 === 0 && !blocked.has(key(tile.coord))) trees.push(tile.coord);
+  }
+
+  for (const zone of world.zones) {
+    if (zone.kind === 'forest' || zone.kind === 'river') continue;
+    const candidates = frontageCandidates(world, transport, blocked, zone);
+    for (const coord of candidates) {
+      if (buildings.length >= 4200) break;
+      if (blocked.has(key(coord))) continue;
+      if (zone.kind === 'reserve' && hash(`reserve-building:${key(coord)}`) % 9 !== 0) continue;
+      if (hash(`building-density:${zone.id}:${key(coord)}`) % 100 > Math.floor(zone.density * 100)) continue;
+      const sheets = sheetPools[zone.kind];
+      const sheet = sheets[hash(`sheet:${zone.id}:${key(coord)}`) % sheets.length];
+      buildings.push({ coord, sheet, frame: hash(`frame:${sheet}:${key(coord)}`) % frameCount(sheet), zoneId: zone.id });
+      blocked.add(key(coord));
+    }
+  }
+
+  for (const zone of world.zones) {
+    if (zone.kind === 'civic' || zone.kind === 'park' || zone.kind === 'industry') {
+      for (let index = 0; index < 60; index += 1) {
+        const coord = {
+          x: zone.center.x + ((hash(`detail-x:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
+          y: zone.center.y + ((hash(`detail-y:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
+        };
+        const tileKey = key(coord);
+        if (!inside(coord, world.width, world.height) || blocked.has(tileKey)) continue;
+        details.push({
+          coord,
+          category: zone.kind === 'industry' ? 'industry' : zone.kind === 'civic' ? 'civic' : 'park',
+          assetCategory: zone.kind === 'industry' ? 'industry' : 'decor',
+        });
+      }
+    }
+  }
+
+  return { buildings, trees, details, reserveTiles };
+}
+
+function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, blocked: ReadonlySet<string>, zone: ZurichZone): Coord[] {
+  const candidates: Coord[] = [];
+  const seen = new Set<string>();
+  const offsets = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 },
+    { x: 2, y: 0 },
+    { x: -2, y: 0 },
+    { x: 0, y: 2 },
+    { x: 0, y: -2 },
+  ];
+
+  for (const road of transport.roads.values()) {
+    if (road.kind !== 'street') continue;
+    for (const offset of offsets) {
+      const coord = { x: road.coord.x + offset.x, y: road.coord.y + offset.y };
+      const tileKey = key(coord);
+      const terrain = world.terrain.get(tileKey)?.kind;
+      if (!inside(coord, world.width, world.height) || blocked.has(tileKey) || seen.has(tileKey)) continue;
+      if (terrain === 'water' || terrain === 'riverbank' || terrain === 'forest') continue;
+      if (distance(coord, zone.center) <= zone.radius) {
+        candidates.push(coord);
+        seen.add(tileKey);
+      }
+    }
+  }
+  candidates.sort((a, b) => distance(a, zone.center) - distance(b, zone.center) || a.y - b.y || a.x - b.x);
+  return candidates;
+}
+
+function frameCount(sheet: ZurichBuildingSheet): number {
+  if (sheet === 'church') return 3;
+  if (sheet === 'cottages') return 3;
+  if (sheet === 'townhouses') return 6;
+  if (sheet === 'modern') return 8;
+  if (sheet === 'tower') return 12;
+  return 12;
+}
+
+function hash(value: string): number {
+  let result = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index);
+    result = Math.imul(result, 16777619);
+  }
+  return result >>> 0;
+}
