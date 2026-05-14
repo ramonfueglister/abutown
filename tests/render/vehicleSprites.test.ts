@@ -5,6 +5,7 @@ import {
   candidateVehicleSprites,
   ROAD_SURFACE_WIDTH_PIXELS,
   ROAD_VEHICLE_LANE_OFFSET_PIXELS,
+  screenVehicleRightLaneOffset,
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
 } from '../../src/render/vehicleSprites';
@@ -29,6 +30,15 @@ describe('vehicle sprites', () => {
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: 10, y: 0 }, 5)).toEqual({ x: 0, y: 5 });
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: 0, y: 10 }, 5)).toEqual({ x: -5, y: 0 });
     expect(screenRightLaneOffset({ x: 0, y: 0 }, { x: -10, y: 0 }, 5)).toEqual({ x: 0, y: -5 });
+  });
+
+  it('pulls top-to-bottom vehicles slightly inward from the road border', () => {
+    const downwardLane = screenVehicleRightLaneOffset({ x: 0, y: 0 }, { x: 0, y: 10 });
+    const upwardLane = screenVehicleRightLaneOffset({ x: 0, y: 10 }, { x: 0, y: 0 });
+
+    expect(Math.abs(downwardLane.x)).toBeLessThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS);
+    expect(Math.abs(downwardLane.x)).toBeGreaterThan(ROAD_VEHICLE_LANE_OFFSET_PIXELS - 1);
+    expect(upwardLane.x).toBe(ROAD_VEHICLE_LANE_OFFSET_PIXELS);
   });
 
   it('keeps the right-lane offset inside the OpenGFX road surface', () => {

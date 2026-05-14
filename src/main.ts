@@ -20,8 +20,7 @@ import { drawPassForType, type SceneDrawableType } from './render/drawOrder';
 import {
   candidateVehicleSprites,
   hasVisiblePixelsInEveryVehicleFrame,
-  ROAD_VEHICLE_LANE_OFFSET_PIXELS,
-  screenRightLaneOffset,
+  screenVehicleRightLaneOffset,
   vehicleFrameForGridDelta,
   vehicleFrameRect,
   type VehicleSheetName,
@@ -430,7 +429,7 @@ function drawCar(car: Car): void {
   const point = iso(pos);
   const currentPoint = iso(current);
   const nextPoint = iso(next);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, ROAD_VEHICLE_LANE_OFFSET_PIXELS);
+  const lane = screenVehicleRightLaneOffset(currentPoint, nextPoint);
   const frame = vehicleFrameForGridDelta({ x: next.x - current.x, y: next.y - current.y });
   const rect = vehicleFrameRect(car.sprite, frame);
   if (rect.x >= image.width || rect.y >= image.height) return;
