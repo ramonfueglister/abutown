@@ -6,7 +6,7 @@ describe('OpenGFX catalog', () => {
   it('contains broad generated OpenGFX coverage', () => {
     expect(opengfxAssets.length).toBeGreaterThanOrEqual(600);
     expect(new Set(opengfxAssets.map((asset) => asset.category)).size).toBeGreaterThanOrEqual(10);
-    expect(OPEN_GFX_SOURCE_REVISION).toMatch(/^[0-9a-f]{40}$/u);
+    expect(OPEN_GFX_SOURCE_REVISION).toBe('e922d2303d695e88965a70ea3158215f8c0be15b');
   });
 
   it('exposes semantic categories for city composition', () => {
@@ -34,5 +34,16 @@ describe('OpenGFX catalog', () => {
     expect(assetsByCategory().get('missing-category')).toBeUndefined();
     expect(getAssetsForCategory('missing-category')).toEqual([]);
     expect(firstAssetPath('missing-category', '/fallback.png')).toBe('/fallback.png');
+  });
+
+  it('does not expose mutable category cache internals', () => {
+    const terrainBefore = getAssetsForCategory('terrain').length;
+    const vehiclesBefore = getAssetsForCategory('vehicle').length;
+
+    assetsByCategory().delete('terrain');
+    getAssetsForCategory('vehicle').length = 0;
+
+    expect(getAssetsForCategory('terrain').length).toBe(terrainBefore);
+    expect(getAssetsForCategory('vehicle').length).toBe(vehiclesBefore);
   });
 });

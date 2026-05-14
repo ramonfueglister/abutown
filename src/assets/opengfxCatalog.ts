@@ -13,11 +13,15 @@ function buildAssetsByCategory(): Map<OpenGfxAssetCategory | string, OpenGfxAsse
 }
 
 export function assetsByCategory(): Map<OpenGfxAssetCategory | string, OpenGfxAsset[]> {
-  return cachedAssetsByCategory;
+  const result = new Map<OpenGfxAssetCategory | string, OpenGfxAsset[]>();
+  for (const [category, assets] of cachedAssetsByCategory) {
+    result.set(category, [...assets]);
+  }
+  return result;
 }
 
 export function getAssetsForCategory(category: OpenGfxAssetCategory | string): OpenGfxAsset[] {
-  return cachedAssetsByCategory.get(category) ?? [];
+  return [...(cachedAssetsByCategory.get(category) ?? [])];
 }
 
 export function firstAssetPath(category: OpenGfxAssetCategory | string, fallback: string): string {
