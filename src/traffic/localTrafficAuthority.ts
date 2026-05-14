@@ -5,6 +5,7 @@ import {
   type TrafficRuleDiagnostics,
   type TrafficRuleSnapshot,
   type TrafficVehicleRequest,
+  type VehicleId,
   trafficReservationId,
 } from './trafficTypes';
 
@@ -16,28 +17,31 @@ export type StepLocalTrafficAuthorityInput = {
 
 export type StepLocalTrafficAuthorityResult = {
   snapshot: TrafficRuleSnapshot;
-  decisions: Map<string, TrafficDecision>;
+  decisions: Map<VehicleId, TrafficDecision>;
   diagnostics: TrafficRuleDiagnostics;
 };
 
 const NEAR_STOP_BOUNDARY_TILES = 0.16;
 const NEAR_INTERSECTION_TILES = 0.48;
+const MAX_CONSERVATIVE_STOP_ADVANCE_TILES = 1;
 const YIELD_SPEED_FACTOR = 0.28;
 
 export function stepLocalTrafficAuthority(input: StepLocalTrafficAuthorityInput): StepLocalTrafficAuthorityResult {
   const diagnostics: TrafficRuleDiagnostics = { ...EMPTY_TRAFFIC_DIAGNOSTICS };
-  const activeReservations = input.snapshot.reservations.filter((reservation) => {
-    const active = reservation.exitTick > input.tick;
-    if (!active) diagnostics.expiredReservations += 1;
-    return active;
+  const activeReservations = input.snapshot.reservations.flatMap((reservation) => {
+    if (reservation.exitTick <= input.tick) {
+      diagnostics.expiredReservations += 1;
+      return [];
+    }
+    return [{ ...reservation }];
   });
-  const nextReservations: TrafficReservation[] = [...activeReservations];
-  const decisions = new Map<string, TrafficDecision>();
+  const nextReservations: TrafficReservation[] = activeReservations;
+  const decisions = new Map<VehicleId, TrafficDecision>();
 
   for (const request of sortedTrafficRequests(input.requests)) {
     diagnostics.trafficRuleDecisionCount += 1;
 
-    const existing = nextReservations.find((reservation) => reservation.vehicleId === request.vehicleId);
+    const existing = nextReservations.find((reservation) => reservationMatchesRequest(reservation, request));
     if (existing) {
       decisions.set(request.vehicleId, goDecision(request, existing.reservationId));
       continue;
@@ -65,6 +69,7 @@ export function stepLocalTrafficAuthority(input: StepLocalTrafficAuthorityInput)
           vehicleId: request.vehicleId,
           kind: 'yield',
           speedFactor: YIELD_SPEED_FACTOR,
+          maxAdvance: roundTileDistance(stopAdvance),
           intersectionId: request.intersectionId,
         });
       }
@@ -80,12 +85,14 @@ export function stepLocalTrafficAuthority(input: StepLocalTrafficAuthorityInput)
     nextReservations.map((reservation) => reservation.intersectionId),
   ).size;
 
+  const snapshotDiagnostics = { ...diagnostics };
+
   return {
     snapshot: {
       tick: input.tick,
       version: input.snapshot.version + 1,
       reservations: nextReservations,
-      diagnostics,
+      diagnostics: snapshotDiagnostics,
     },
     decisions,
     diagnostics,
@@ -124,6 +131,14 @@ function goDecision(request: TrafficVehicleRequest, reservationId: TrafficReserv
   };
 }
 
+function reservationMatchesRequest(reservation: TrafficReservation, request: TrafficVehicleRequest): boolean {
+  return (
+    reservation.vehicleId === request.vehicleId &&
+    reservation.intersectionId === request.intersectionId &&
+    windowsOverlap(reservation.enterTick, reservation.exitTick, request.enterTick, request.exitTick)
+  );
+}
+
 function reservationsConflict(reservation: TrafficReservation, request: TrafficVehicleRequest): boolean {
   return (
     reservation.intersectionId === request.intersectionId &&
@@ -138,7 +153,10 @@ function windowsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: numb
 
 function distanceToStopBoundary(currentOffset: number, stopOffset: number): number {
   if (stopOffset < currentOffset) return 0;
-  return stopOffset - currentOffset;
+
+  const rawAdvance = stopOffset - currentOffset;
+  if (rawAdvance > MAX_CONSERVATIVE_STOP_ADVANCE_TILES) return 0;
+  return rawAdvance;
 }
 
 function roundTileDistance(distance: number): number {

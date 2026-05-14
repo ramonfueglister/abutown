@@ -179,6 +179,56 @@ describe('local traffic authority', () => {
     expect(result.diagnostics.intersectionConflictsPrevented).toBe(0);
   });
 
+  it('does not reuse a same-vehicle reservation for a different intersection', () => {
+    const reservation: TrafficReservation = {
+      reservationId: trafficReservationId('intersection:4:4', 'vehicle:1', 20),
+      intersectionId: 'intersection:4:4',
+      vehicleId: 'vehicle:1',
+      enterTick: 20,
+      exitTick: 26,
+      approachEdge: 'west',
+      exitEdge: 'east',
+      conflictMask: 1,
+      priority: 1,
+    };
+
+    const result = stepLocalTrafficAuthority({
+      snapshot: snapshotWithReservations([reservation]),
+      tick: 12,
+      requests: [
+        request({
+          vehicleId: 'vehicle:1',
+          intersectionId: 'intersection:5:5',
+          enterTick: 20,
+          exitTick: 26,
+        }),
+      ],
+    });
+
+    expect(result.snapshot.reservations).toHaveLength(2);
+    expect(result.snapshot.reservations[1]).toEqual(expect.objectContaining({
+      intersectionId: 'intersection:5:5',
+      vehicleId: 'vehicle:1',
+    }));
+    expect(result.decisions.get('vehicle:1')?.reservationId).not.toBe(reservation.reservationId);
+  });
+
+  it('caps yielding cars at their stop boundary', () => {
+    const result = stepLocalTrafficAuthority({
+      snapshot: createInitialTrafficRuleSnapshot(),
+      tick: 10,
+      requests: [
+        request({ vehicleId: 'vehicle:1', priority: 1, currentOffset: 2.1 }),
+        request({ vehicleId: 'vehicle:2', priority: 2, currentOffset: 1.9, stopOffset: 2.58 }),
+      ],
+    });
+
+    const blocked = result.decisions.get('vehicle:2');
+    expect(blocked?.kind).toBe('yield');
+    expect(blocked?.speedFactor).toBeGreaterThan(0);
+    expect(blocked?.maxAdvance).toBeCloseTo(0.68, 3);
+  });
+
   it('stops a blocked car before it crosses its stop boundary', () => {
     const result = stepLocalTrafficAuthority({
       snapshot: createInitialTrafficRuleSnapshot(),
@@ -204,6 +254,21 @@ describe('local traffic authority', () => {
       requests: [
         request({ vehicleId: 'vehicle:1', currentOffset: 3.1, stopOffset: 3.58, priority: 1 }),
         request({ vehicleId: 'vehicle:2', currentOffset: 3.99, stopOffset: 3.58, priority: 2 }),
+      ],
+    });
+
+    const blocked = result.decisions.get('vehicle:2');
+    expect(blocked?.kind).toBe('stop');
+    expect(blocked?.maxAdvance).toBe(0);
+  });
+
+  it('does not produce a large advance when current and stop offsets straddle the route seam', () => {
+    const result = stepLocalTrafficAuthority({
+      snapshot: createInitialTrafficRuleSnapshot(),
+      tick: 10,
+      requests: [
+        request({ vehicleId: 'vehicle:1', currentOffset: 3.1, stopOffset: 3.58, priority: 1 }),
+        request({ vehicleId: 'vehicle:2', currentOffset: 0.05, stopOffset: 3.58, priority: 2 }),
       ],
     });
 
