@@ -29,6 +29,7 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
     if (railPoints.has(tileKey) && !railCrossings.has(tileKey)) return;
     const terrain = world.terrain.get(tileKey)?.kind;
     const isIntentionalBridge = INTENTIONAL_BRIDGE_KEYS.has(tileKey) && (terrain === 'water' || terrain === 'riverbank');
+    if (terrain === 'water' && !isIntentionalBridge) return;
     const kind: ZurichRoadKind = isIntentionalBridge ? 'bridge' : 'street';
     roadKinds.set(tileKey, kind);
     if (kind === 'bridge') bridgeKeys.add(tileKey);
@@ -52,9 +53,32 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
     rails.set(tileKey, { coord, mask: maskForRail(railPoints, coord) });
   }
 
-  const roadBackedArterialPaths = arterialPaths.map((path) => path.filter((coord) => roadKinds.has(key(coord))));
+  const roadBackedArterialPaths = splitRoadBackedPaths(arterialPaths, roadKinds);
 
   return { roads, rails, bridges: bridgeKeys, railCrossings, arterialPaths: roadBackedArterialPaths, railPaths };
+}
+
+function splitRoadBackedPaths(paths: Coord[][], roadKinds: ReadonlyMap<string, ZurichRoadKind>): Coord[][] {
+  const roadBackedPaths: Coord[][] = [];
+  for (const path of paths) {
+    let currentPath: Coord[] = [];
+    for (const coord of path) {
+      if (!roadKinds.has(key(coord))) {
+        if (currentPath.length > 0) roadBackedPaths.push(currentPath);
+        currentPath = [];
+        continue;
+      }
+
+      const previous = currentPath[currentPath.length - 1];
+      if (previous && Math.abs(coord.x - previous.x) + Math.abs(coord.y - previous.y) !== 1) {
+        roadBackedPaths.push(currentPath);
+        currentPath = [];
+      }
+      currentPath.push(coord);
+    }
+    if (currentPath.length > 0) roadBackedPaths.push(currentPath);
+  }
+  return roadBackedPaths;
 }
 
 function buildArterialPaths(world: ZurichWorld): Coord[][] {

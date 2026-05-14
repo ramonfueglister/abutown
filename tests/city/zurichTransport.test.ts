@@ -28,6 +28,13 @@ describe('buildZurichTransport', () => {
     for (const coord of transport.arterialPaths.flat()) {
       expect(transport.roads.has(`${coord.x}:${coord.y}`)).toBe(true);
     }
+    for (const path of transport.arterialPaths) {
+      for (let index = 1; index < path.length; index += 1) {
+        const previous = path[index - 1];
+        const current = path[index];
+        expect(Math.abs(current.x - previous.x) + Math.abs(current.y - previous.y)).toBe(1);
+      }
+    }
 
     let accidentalOverlap = 0;
     for (const roadKey of transport.roads.keys()) {
@@ -44,6 +51,11 @@ describe('buildZurichTransport', () => {
     for (const [bridgeKey] of bridgeRoads) {
       const terrain = world.terrain.get(bridgeKey)?.kind;
       expect(['water', 'riverbank']).toContain(terrain);
+    }
+
+    for (const [roadKey, road] of transport.roads) {
+      const terrain = world.terrain.get(roadKey)?.kind;
+      if (terrain === 'water') expect(road.kind).toBe('bridge');
     }
   });
 });
