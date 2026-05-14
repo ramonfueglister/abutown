@@ -89,6 +89,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     }
 
     let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.tick().await;
     loop {
         interval.tick().await;
         let pulse = {
