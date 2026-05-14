@@ -43,3 +43,50 @@ async fn health_and_world_summary_are_available() {
     assert_eq!(json["world_id"], "abutown-main");
     assert_eq!(json["chunk_size"], 32);
 }
+
+#[tokio::test]
+async fn chunk_snapshot_is_available_for_loaded_chunk() {
+    let app = build_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/chunks/0/0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["world_id"], "abutown-main");
+    assert_eq!(json["coord"]["x"], 0);
+    assert_eq!(json["coord"]["y"], 0);
+    assert_eq!(json["tile_count"], 1024);
+    assert_eq!(json["chunk_state"], "active");
+
+    let dirty_tiles = json["dirty_tiles"].as_array().unwrap();
+    assert_eq!(dirty_tiles.len(), 1);
+    assert_eq!(dirty_tiles[0]["local_index"], 0);
+    assert_eq!(dirty_tiles[0]["kind"], "road");
+}
+
+#[tokio::test]
+async fn unloaded_chunk_returns_not_found() {
+    let app = build_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/chunks/1/0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
