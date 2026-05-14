@@ -36,4 +36,11 @@ describe('traffic intersections', () => {
     expect(directionForRoadStep({ x: 2, y: 3 }, { x: 2, y: 2 })).toBe('south');
     expect(directionForRoadStep({ x: 1, y: 2 }, { x: 2, y: 2 })).toBe('west');
   });
+
+  it('rejects route steps that are not exactly one cardinal tile', () => {
+    expect(directionForRoadStep({ x: 0, y: 0 }, { x: 2, y: 0 })).toBeUndefined();
+    expect(directionForRoadStep({ x: 0, y: 0 }, { x: 0, y: 2 })).toBeUndefined();
+    expect(directionForRoadStep({ x: 0, y: 0 }, { x: 1, y: 1 })).toBeUndefined();
+    expect(directionForRoadStep({ x: 0, y: 0 }, { x: 0, y: 0 })).toBeUndefined();
+  });
 });

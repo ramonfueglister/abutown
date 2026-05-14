@@ -27,8 +27,8 @@ export function buildTrafficIntersections(roads: Iterable<TrafficRoadTile>): Tra
 }
 
 export function directionForRoadStep(from: TrafficCoord, to: TrafficCoord): TrafficDirection | undefined {
-  const dx = Math.sign(to.x - from.x);
-  const dy = Math.sign(to.y - from.y);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
   if (dx === 0 && dy === 1) return 'north';
   if (dx === -1 && dy === 0) return 'east';
   if (dx === 0 && dy === -1) return 'south';
