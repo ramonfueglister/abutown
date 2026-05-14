@@ -7,7 +7,7 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
-import { buildVehicleRoadLoops, hasTeleportingVehicleSegment } from './city/vehiclePaths';
+import { buildVehicleRoadLoops, hasIllegalVehicleUTurn, hasTeleportingVehicleSegment } from './city/vehiclePaths';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -1209,12 +1209,14 @@ function vehicleDiagnostics(): Record<string, number> {
   let pathTilesOffRoad = 0;
   let pathTilesOnRails = 0;
   let teleportingVehiclePaths = 0;
+  let illegalVehicleUTurnPaths = 0;
   let samePathGapViolations = 0;
   let minSamePathGap = Number.POSITIVE_INFINITY;
   const leaderOffsets = carLeaderOffsets(cars);
 
   for (const car of cars) {
     if (hasTeleportingVehicleSegment(car.path)) teleportingVehiclePaths += 1;
+    if (hasIllegalVehicleUTurn(car.path, { roadKeys: roads, railKeys: rails })) illegalVehicleUTurnPaths += 1;
     const leaderOffset = leaderOffsets.get(car);
     if (leaderOffset !== undefined) {
       const gap = loopDistance(car.offset, leaderOffset, car.path.length);
@@ -1232,6 +1234,7 @@ function vehicleDiagnostics(): Record<string, number> {
     pathTilesOffRoad,
     pathTilesOnRails,
     teleportingVehiclePaths,
+    illegalVehicleUTurnPaths,
     samePathGapViolations,
     minSamePathGap: Number((Number.isFinite(minSamePathGap) ? minSamePathGap : 0).toFixed(3)),
   };
