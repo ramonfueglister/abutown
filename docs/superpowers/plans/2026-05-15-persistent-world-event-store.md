@@ -39,13 +39,13 @@ Relevant current behavior:
 ## File Structure
 
 - Modify `backend/Cargo.toml`
-  - Add `async-trait` and `sqlx` workspace dependencies.
+  - Add `async-trait` workspace dependency.
 - Modify `backend/crates/sim-core/Cargo.toml`
   - Add `async-trait` and test-only `tokio`.
 - Modify `backend/crates/sim-core/src/events.rs`
-  - Add `WorldEventStore`, `WorldEventStoreError`, event metadata helpers, and failing test store.
+  - Add `WorldEventStore`, `WorldEventStoreError`, event metadata helpers, and failing test store while preserving in-memory diagnostics helpers.
 - Modify `backend/crates/sim-server/Cargo.toml`
-  - Add `async-trait` and `sqlx`.
+  - Add `async-trait` and `sqlx` after the adapter is introduced.
 - Create `backend/crates/sim-server/migrations/202605150001_world_events.sql`
   - Add `world_events` table and indexes.
 - Create `backend/crates/sim-server/src/postgres_events.rs`
@@ -81,11 +81,10 @@ Relevant current behavior:
 
 - [ ] **Step 1: Add dependency entries**
 
-Add these workspace dependencies in `backend/Cargo.toml` under `[workspace.dependencies]`:
+Add this workspace dependency in `backend/Cargo.toml` under `[workspace.dependencies]`:
 
 ```toml
 async-trait = "0.1"
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "json", "time"] }
 ```
 
 Add these dependencies in `backend/crates/sim-core/Cargo.toml`:
@@ -127,8 +126,12 @@ mod tests {
     async fn event_store_appends_events_in_order() {
         let mut store = InMemoryWorldEventStore::default();
 
-        store.append(tile_event("event:1", 1)).await.unwrap();
-        store.append(tile_event("event:2", 2)).await.unwrap();
+        WorldEventStore::append(&mut store, tile_event("event:1", 1))
+            .await
+            .unwrap();
+        WorldEventStore::append(&mut store, tile_event("event:2", 2))
+            .await
+            .unwrap();
 
         assert_eq!(store.event_count(), 2);
         assert_eq!(store.events()[0], tile_event("event:1", 1));
@@ -139,7 +142,9 @@ mod tests {
     async fn failing_event_store_returns_typed_error_without_appending() {
         let mut store = FailingWorldEventStore::new("database offline");
 
-        let error = store.append(tile_event("event:1", 1)).await.unwrap_err();
+        let error = WorldEventStore::append(&mut store, tile_event("event:1", 1))
+            .await
+            .unwrap_err();
 
         assert_eq!(error.code(), "event_store_unavailable");
         assert!(error.to_string().contains("database offline"));
@@ -168,7 +173,7 @@ Run:
 cargo test --manifest-path backend/Cargo.toml -p sim-core events
 ```
 
-Expected: FAIL because `WorldEventStore`, `WorldEventStoreError`, `FailingWorldEventStore`, and `WorldEventMetadata` do not exist, and `InMemoryWorldEventStore::append` is not async.
+Expected: FAIL because `WorldEventStore`, `WorldEventStoreError`, `FailingWorldEventStore`, and `WorldEventMetadata` do not exist.
 
 - [ ] **Step 4: Implement event-store contract**
 
@@ -226,10 +231,6 @@ impl WorldEventStoreError {
 #[async_trait]
 pub trait WorldEventStore: std::fmt::Debug + Send {
     async fn append(&mut self, event: WorldEventDto) -> Result<(), WorldEventStoreError>;
-
-    fn event_count(&self) -> usize;
-
-    fn events(&self) -> &[WorldEventDto];
 }
 
 #[derive(Debug, Default)]
@@ -240,15 +241,21 @@ pub struct InMemoryWorldEventStore {
 #[async_trait]
 impl WorldEventStore for InMemoryWorldEventStore {
     async fn append(&mut self, event: WorldEventDto) -> Result<(), WorldEventStoreError> {
-        self.events.push(event);
+        InMemoryWorldEventStore::append(self, event);
         Ok(())
     }
+}
 
-    fn event_count(&self) -> usize {
+impl InMemoryWorldEventStore {
+    pub fn append(&mut self, event: WorldEventDto) {
+        self.events.push(event);
+    }
+
+    pub fn event_count(&self) -> usize {
         self.events.len()
     }
 
-    fn events(&self) -> &[WorldEventDto] {
+    pub fn events(&self) -> &[WorldEventDto] {
         &self.events
     }
 }
@@ -271,13 +278,11 @@ impl WorldEventStore for FailingWorldEventStore {
     async fn append(&mut self, _event: WorldEventDto) -> Result<(), WorldEventStoreError> {
         Err(WorldEventStoreError::unavailable(self.message.clone()))
     }
+}
 
-    fn event_count(&self) -> usize {
+impl FailingWorldEventStore {
+    pub fn event_count(&self) -> usize {
         0
-    }
-
-    fn events(&self) -> &[WorldEventDto] {
-        &[]
     }
 }
 ```
@@ -290,6 +295,7 @@ Run:
 
 ```bash
 cargo test --manifest-path backend/Cargo.toml -p sim-core events
+cargo check --locked --manifest-path backend/Cargo.toml --workspace
 ```
 
 Expected: PASS.
@@ -297,7 +303,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/Cargo.toml backend/crates/sim-core/Cargo.toml backend/crates/sim-core/src/events.rs
+git add backend/Cargo.toml backend/Cargo.lock backend/crates/sim-core/Cargo.toml backend/crates/sim-core/src/events.rs
 git commit -m "feat: add world event store contract"
 ```
 
@@ -828,6 +834,12 @@ async-trait.workspace = true
 sqlx.workspace = true
 ```
 
+Add this workspace dependency in `backend/Cargo.toml` under `[workspace.dependencies]`:
+
+```toml
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "json", "time"] }
+```
+
 - [ ] **Step 2: Create migration SQL**
 
 Create `backend/crates/sim-server/migrations/202605150001_world_events.sql`:
@@ -998,18 +1010,10 @@ impl WorldEventStore for PostgresWorldEventStore {
 
         Ok(())
     }
-
-    fn event_count(&self) -> usize {
-        0
-    }
-
-    fn events(&self) -> &[WorldEventDto] {
-        &[]
-    }
 }
 ```
 
-Then append the test from Step 3 below the implementation. `event_count()` and `events()` intentionally return empty diagnostic values for the DB adapter because normal runtime diagnostics should query the DB in a later admin slice; do not use them for persistent-store correctness.
+Then append the test from Step 3 below the implementation. Do not add count/list helpers to the DB adapter in this slice; durable read APIs belong in a later replay or admin-query slice.
 
 - [ ] **Step 6: Export module**
 

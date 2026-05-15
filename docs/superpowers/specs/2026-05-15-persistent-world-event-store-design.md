@@ -54,11 +54,9 @@ If the event store append fails, the command must not change hot state, must not
 `sim-core` should expose a small event-store contract shaped around the current DTOs:
 
 - append one `WorldEventDto`,
-- return append failures as typed errors,
-- list events for tests and diagnostics,
-- report event count.
+- return append failures as typed errors.
 
-The existing `InMemoryWorldEventStore` remains the default test/local store. The contract should make a persistent adapter possible without forcing the runtime to know about SQL, Supabase, or transport-specific errors.
+The existing `InMemoryWorldEventStore` remains the default test/local store and may keep synchronous `event_count()` and `events()` helpers for tests and diagnostics. Those helpers should not be required by the trait because a persistent SQL-backed store cannot return a borrowed event slice without caching the full log in memory. Durable read/query APIs belong in a later replay or admin-query slice.
 
 ## Durable Record Shape
 
