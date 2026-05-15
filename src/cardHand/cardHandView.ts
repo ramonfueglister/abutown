@@ -11,19 +11,6 @@ import {
 
 const LOCAL_USER_ID = '00000000-0000-0000-0000-000000000001';
 
-const FALLBACK_DEFINITIONS: CardDefinition[] = [
-  { id: 'strike', name: 'Strike', type: 'attack', mana_cost: 1, description: 'Deal damage.', rarity: 'starter' },
-  { id: 'defend', name: 'Defend', type: 'skill', mana_cost: 1, description: 'Gain block.', rarity: 'starter' },
-  { id: 'bash', name: 'Bash', type: 'attack', mana_cost: 2, description: 'A heavier starter attack.', rarity: 'starter' },
-  { id: 'guard', name: 'Guard', type: 'skill', mana_cost: 1, description: 'Prepare a stable defense.', rarity: 'common' },
-  { id: 'focus', name: 'Focus', type: 'power', mana_cost: 1, description: 'Keep this card as reusable content.', rarity: 'common' },
-];
-
-const FALLBACK_HAND: HandCard[] = FALLBACK_DEFINITIONS.map((card, index) => ({
-  instance_id: index + 1,
-  card_id: card.id,
-}));
-
 export type CardHandViewOptions = {
   baseUrl?: string;
   token?: string;
@@ -55,7 +42,7 @@ export function mountCardHandView(options: CardHandViewOptions = {}): void {
     .catch((error) => {
       state = {
         status: 'error',
-        cards: mergeHandCards(FALLBACK_HAND, FALLBACK_DEFINITIONS),
+        cards: [],
         error: error instanceof Error ? error.message : String(error),
       };
       renderCardHand(handEl, statusEl, state);
@@ -86,7 +73,7 @@ async function loadPersistedHand(options: CardHandViewOptions): Promise<VisibleH
 }
 
 function renderCardHand(handEl: HTMLElement, statusEl: HTMLElement, state: CardHandState): void {
-  statusEl.textContent = state.status === 'ready' ? 'Hand synced' : state.status === 'error' ? 'Local hand preview' : 'Loading hand';
+  statusEl.textContent = state.status === 'ready' ? 'Hand synced' : state.status === 'error' ? `Hand error: ${state.error ?? 'backend unavailable'}` : 'Loading hand';
   statusEl.dataset.status = state.status;
   statusEl.title = state.error ?? '';
   handEl.replaceChildren(...state.cards.map(renderCard));
