@@ -12,6 +12,7 @@ use sim_core::{
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ChunkMutationError {
     ChunkNotLoaded { coord: ChunkCoord },
+    NoStateChange { coord: ChunkCoord, local_index: u16 },
     TileOutOfBounds { index: u16, tile_count: u16 },
 }
 
@@ -84,6 +85,18 @@ impl ChunkRegistry {
             .chunks
             .get_mut(&coord)
             .ok_or(ChunkMutationError::ChunkNotLoaded { coord })?;
+        let existing_kind =
+            loaded
+                .chunk
+                .kind_at(local_index)
+                .ok_or(ChunkMutationError::TileOutOfBounds {
+                    index: local_index,
+                    tile_count: loaded.chunk.tile_count(),
+                })?;
+
+        if existing_kind == kind {
+            return Err(ChunkMutationError::NoStateChange { coord, local_index });
+        }
 
         loaded
             .chunk
@@ -247,6 +260,23 @@ mod tests {
                 index: 2000,
                 tile_count: 1024
             })
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_no_op_tile_mutation() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        assert!(matches!(
+            registry.set_tile_kind(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            Err(ChunkMutationError::NoStateChange {
+                coord,
+                local_index: 0
+            }) if coord == ChunkCoord { x: 4, y: 4 }
         ));
     }
 
