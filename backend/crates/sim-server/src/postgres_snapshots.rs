@@ -183,7 +183,7 @@ mod tests {
             chunk_state: ChunkStateDto::Active,
             chunk_version: 7,
             tile_count: 1024,
-            dirty_tiles: vec![TileMutationDto {
+            tiles: vec![TileMutationDto {
                 local_index: 3,
                 kind: TileKindDto::Road,
                 version: 7,

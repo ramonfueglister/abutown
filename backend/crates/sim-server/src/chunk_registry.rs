@@ -30,6 +30,8 @@ pub(crate) struct SetTileKindPlan {
 struct LoadedChunk {
     chunk: Chunk,
     activity: ChunkActivity,
+    last_persisted_version: u64,
+    last_snapshot_at: std::time::Instant,
 }
 
 #[derive(Debug)]
@@ -56,8 +58,37 @@ impl ChunkRegistry {
             self.chunk_size,
             "loaded chunk size must match registry chunk size"
         );
-        self.chunks
-            .insert(chunk.coord(), LoadedChunk { chunk, activity });
+        self.chunks.insert(
+            chunk.coord(),
+            LoadedChunk {
+                chunk,
+                activity,
+                last_persisted_version: 0,
+                last_snapshot_at: std::time::Instant::now(),
+            },
+        );
+    }
+
+    pub(crate) fn insert_hydrated(
+        &mut self,
+        chunk: Chunk,
+        last_persisted_version: u64,
+        activity: ChunkActivity,
+    ) {
+        assert_eq!(
+            chunk.chunk_size(),
+            self.chunk_size,
+            "loaded chunk size must match registry chunk size"
+        );
+        self.chunks.insert(
+            chunk.coord(),
+            LoadedChunk {
+                chunk,
+                activity,
+                last_persisted_version,
+                last_snapshot_at: std::time::Instant::now(),
+            },
+        );
     }
 
     pub(crate) fn loaded_coords(&self) -> Vec<ChunkCoord> {
@@ -176,15 +207,30 @@ impl ChunkRegistry {
     }
 
     pub(crate) fn collect_snapshots(&self, world_id: &WorldId) -> Vec<ChunkSnapshotDto> {
-        self.loaded_coords()
+        let ceiling = std::time::Duration::from_secs(30);
+        let now = std::time::Instant::now();
+        let mut coords: Vec<ChunkCoord> = self
+            .chunks
+            .iter()
+            .filter(|(_, loaded)| {
+                loaded.chunk.version() > loaded.last_persisted_version
+                    || now.duration_since(loaded.last_snapshot_at) >= ceiling
+            })
+            .map(|(coord, _)| *coord)
+            .collect();
+        coords.sort_by_key(|coord| (coord.y, coord.x));
+        coords
             .into_iter()
             .filter_map(|coord| self.chunk_snapshot(world_id, coord))
             .collect()
     }
 
     pub(crate) fn mark_snapshots_persisted(&mut self, coords: &[ChunkCoord]) {
+        let now = std::time::Instant::now();
         for coord in coords {
             if let Some(loaded) = self.chunks.get_mut(coord) {
+                loaded.last_persisted_version = loaded.chunk.version();
+                loaded.last_snapshot_at = now;
                 loaded.chunk.clear_dirty();
             }
         }
@@ -241,12 +287,9 @@ mod tests {
             abutown_protocol::ChunkStateDto::Active
         );
         assert_eq!(snapshot.tile_count, 1024);
-        assert_eq!(snapshot.dirty_tiles.len(), 1);
-        assert_eq!(snapshot.dirty_tiles[0].local_index, 17);
-        assert_eq!(
-            snapshot.dirty_tiles[0].kind,
-            abutown_protocol::TileKindDto::Road
-        );
+        assert_eq!(snapshot.tiles.len(), 1);
+        assert_eq!(snapshot.tiles[0].local_index, 17);
+        assert_eq!(snapshot.tiles[0].kind, abutown_protocol::TileKindDto::Road);
         assert!(
             registry
                 .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
@@ -285,12 +328,9 @@ mod tests {
                 ChunkCoord { x: 4, y: 4 },
             )
             .expect("chunk snapshot exists");
-        assert_eq!(snapshot.dirty_tiles.len(), 2);
-        assert_eq!(snapshot.dirty_tiles[1].local_index, 11);
-        assert_eq!(
-            snapshot.dirty_tiles[1].kind,
-            abutown_protocol::TileKindDto::Water
-        );
+        assert_eq!(snapshot.tiles.len(), 2);
+        assert_eq!(snapshot.tiles[1].local_index, 11);
+        assert_eq!(snapshot.tiles[1].kind, abutown_protocol::TileKindDto::Water);
     }
 
     #[test]
@@ -316,7 +356,7 @@ mod tests {
                 ChunkCoord { x: 4, y: 4 },
             )
             .expect("chunk snapshot exists");
-        assert!(!snapshot.dirty_tiles.iter().any(|tile| {
+        assert!(!snapshot.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
         }));
     }
@@ -343,7 +383,7 @@ mod tests {
                 ChunkCoord { x: 4, y: 4 },
             )
             .expect("chunk snapshot exists");
-        assert!(snapshot.dirty_tiles.iter().any(|tile| {
+        assert!(snapshot.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
         }));
     }
@@ -393,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_writes_snapshots_and_clears_dirty_tiles() {
+    fn registry_writes_snapshots_and_clears_dirty_state() {
         let mut registry = ChunkRegistry::new(32);
         registry.insert_chunk(
             chunk_with_seed(ChunkCoord { x: 5, y: 4 }, 7, TileKind::Water),
@@ -417,23 +457,42 @@ mod tests {
             store
                 .read_snapshot(ChunkCoord { x: 4, y: 4 })
                 .expect("visible snapshot exists")
-                .dirty_tiles
+                .tiles
                 .len(),
             1
         );
 
-        assert_eq!(registry.write_snapshots(&world_id, &mut store), 2);
-        assert!(
+        // After persisting, a fresh write with no new events and within the
+        // 30s ceiling must skip both chunks.
+        assert_eq!(registry.write_snapshots(&world_id, &mut store), 0);
+        // Previously-stored snapshot rows remain intact.
+        assert_eq!(
             store
                 .read_snapshot(ChunkCoord { x: 4, y: 4 })
                 .expect("visible snapshot still exists")
-                .dirty_tiles
-                .is_empty()
+                .tiles
+                .len(),
+            1
+        );
+
+        // A new event on one chunk re-arms only that chunk for the next
+        // collect.
+        registry
+            .set_tile_kind(ChunkCoord { x: 4, y: 4 }, 9, TileKind::Water)
+            .expect("loaded tile can mutate");
+        assert_eq!(registry.write_snapshots(&world_id, &mut store), 1);
+        assert_eq!(
+            store
+                .read_snapshot(ChunkCoord { x: 4, y: 4 })
+                .expect("visible snapshot has the new tile")
+                .tiles
+                .len(),
+            2
         );
     }
 
     #[test]
-    fn registry_collects_snapshots_without_clearing_dirty_tiles() {
+    fn registry_collects_snapshots_without_clearing_dirty_state() {
         let mut registry = ChunkRegistry::new(32);
         registry.insert_chunk(
             chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 3, TileKind::Road),
@@ -447,15 +506,96 @@ mod tests {
 
         let snapshots = registry.collect_snapshots(&world_id);
         assert_eq!(snapshots.len(), 2);
-        assert_eq!(snapshots[0].dirty_tiles.len(), 1);
+        assert_eq!(snapshots[0].tiles.len(), 1);
 
+        // collect_snapshots is non-destructive; a second call with no
+        // persistence in between must still yield both chunks.
         let collected_again = registry.collect_snapshots(&world_id);
-        assert_eq!(collected_again[0].dirty_tiles.len(), 1);
+        assert_eq!(collected_again.len(), 2);
+        assert_eq!(collected_again[0].tiles.len(), 1);
 
         registry.mark_snapshots_persisted(&[ChunkCoord { x: 4, y: 4 }]);
 
+        // Only the unmarked chunk should remain in the next collect — the
+        // marked chunk has no new events and is within the 30s ceiling.
         let after_partial_mark = registry.collect_snapshots(&world_id);
-        assert!(after_partial_mark[0].dirty_tiles.is_empty());
-        assert_eq!(after_partial_mark[1].dirty_tiles.len(), 1);
+        assert_eq!(after_partial_mark.len(), 1);
+        assert_eq!(after_partial_mark[0].coord.x, 5);
+        assert_eq!(after_partial_mark[0].coord.y, 4);
+        assert_eq!(after_partial_mark[0].tiles.len(), 1);
+    }
+
+    #[test]
+    fn collect_snapshots_skips_chunks_with_no_new_events_within_snapshot_ceiling() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        let world_id = WorldId("abutown-main".to_string());
+
+        let first = registry.collect_snapshots(&world_id);
+        assert_eq!(first.len(), 1, "first call must include the dirty chunk");
+        let coords: Vec<ChunkCoord> = first
+            .iter()
+            .map(|s| ChunkCoord {
+                x: s.coord.x,
+                y: s.coord.y,
+            })
+            .collect();
+        registry.mark_snapshots_persisted(&coords);
+
+        let second = registry.collect_snapshots(&world_id);
+        assert!(
+            second.is_empty(),
+            "second call without new events and within 30s must produce no snapshots"
+        );
+    }
+
+    #[test]
+    fn collect_snapshots_emits_again_after_new_event() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        let world_id = WorldId("abutown-main".to_string());
+        let coords: Vec<ChunkCoord> = registry
+            .collect_snapshots(&world_id)
+            .iter()
+            .map(|s| ChunkCoord {
+                x: s.coord.x,
+                y: s.coord.y,
+            })
+            .collect();
+        registry.mark_snapshots_persisted(&coords);
+
+        registry
+            .set_tile_kind(ChunkCoord { x: 4, y: 4 }, 5, TileKind::Water)
+            .unwrap();
+
+        let next = registry.collect_snapshots(&world_id);
+        assert_eq!(
+            next.len(),
+            1,
+            "new event must produce a new snapshot candidate"
+        );
+    }
+
+    #[test]
+    fn insert_hydrated_skips_redundant_snapshot_when_version_matches() {
+        let mut registry = ChunkRegistry::new(32);
+        let chunk = chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road);
+        let restored_version = chunk.version();
+        registry.insert_hydrated(chunk, restored_version, ChunkActivity::Active);
+
+        let world_id = WorldId("abutown-main".to_string());
+        let snapshots = registry.collect_snapshots(&world_id);
+        assert!(
+            snapshots.is_empty(),
+            "hydrated chunk with version == last_persisted_version must not generate a redundant snapshot"
+        );
     }
 }

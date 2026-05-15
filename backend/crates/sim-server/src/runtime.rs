@@ -5,14 +5,28 @@ use abutown_protocol::{
     WorldSummaryDto,
 };
 use sim_core::{
-    chunk::Chunk,
-    events::{InMemoryWorldEventStore, WorldEventStore},
+    chunk::{Chunk, ChunkError, EventApplyError, SnapshotDecodeError},
+    events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
     persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore},
     scheduler::ChunkActivity,
     tile::TileKind,
 };
+
+#[derive(Debug, thiserror::Error)]
+pub enum HydrationError {
+    #[error("snapshot store error: {0}")]
+    Snapshot(ChunkSnapshotStoreError),
+    #[error("event store error: {0}")]
+    Events(WorldEventStoreError),
+    #[error("snapshot decode error: {0}")]
+    Decode(SnapshotDecodeError),
+    #[error("event apply error: {0}")]
+    Apply(EventApplyError),
+    #[error("chunk error during seed: {0}")]
+    Chunk(ChunkError),
+}
 
 use crate::{
     chunk_registry::{ChunkMutationError, ChunkRegistry},
@@ -103,6 +117,96 @@ impl SimulationRuntime {
         }
     }
 
+    pub async fn hydrate_from_stores(
+        event_store: Box<dyn WorldEventStore + Send>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+    ) -> Result<Self, HydrationError> {
+        let world_id = Self::default_world_id();
+        let mut registry = ChunkRegistry::new(CHUNK_SIZE);
+
+        for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
+            let snap = snapshot_store
+                .read_snapshot(coord)
+                .await
+                .map_err(HydrationError::Snapshot)?;
+
+            let (mut chunk, mut chunk_version, activity) = match snap {
+                Some(snapshot) => {
+                    let version = snapshot.chunk_version;
+                    let activity = ChunkActivity::from(snapshot.chunk_state);
+                    let chunk = Chunk::from_snapshot(&snapshot).map_err(HydrationError::Decode)?;
+                    (chunk, version, activity)
+                }
+                None => {
+                    let mut chunk = Chunk::new(coord, CHUNK_SIZE);
+                    let seed_index = (offset as u16) * 17;
+                    let seed_kind = match offset {
+                        0 => TileKind::Road,
+                        1 => TileKind::Water,
+                        _ => TileKind::BuildingFootprint,
+                    };
+                    chunk
+                        .set_tile_kind(seed_index, seed_kind)
+                        .map_err(HydrationError::Chunk)?;
+                    let activity = if offset == 0 {
+                        ChunkActivity::Active
+                    } else {
+                        ChunkActivity::Warm
+                    };
+                    let v = chunk.version();
+                    (chunk, v, activity)
+                }
+            };
+
+            let events = event_store
+                .read_chunk_events_since(
+                    &world_id.0,
+                    ChunkCoordDto {
+                        x: coord.x,
+                        y: coord.y,
+                    },
+                    chunk_version,
+                )
+                .await
+                .map_err(HydrationError::Events)?;
+
+            for event in &events {
+                let next_version = chunk_version + 1;
+                chunk
+                    .apply_event(event, next_version)
+                    .map_err(HydrationError::Apply)?;
+                chunk_version = next_version;
+            }
+
+            registry.insert_hydrated(chunk, chunk_version, activity);
+        }
+
+        let global_tick = event_store
+            .max_tick(&world_id.0)
+            .await
+            .map_err(HydrationError::Events)?
+            .unwrap_or(0);
+        let global_version = event_store
+            .max_version(&world_id.0)
+            .await
+            .map_err(HydrationError::Events)?
+            .unwrap_or(0);
+        // event_count is bootstrapped from version because today they advance 1:1;
+        // revisit if version bumps ever decouple from event appends.
+        let event_count = global_version as usize;
+
+        Ok(Self {
+            world_id,
+            registry,
+            mobility: MobilityWorld::default(),
+            snapshot_store,
+            event_store,
+            event_count,
+            tick: global_tick,
+            version: global_version,
+        })
+    }
+
     pub fn health(&self) -> HealthResponse {
         HealthResponse {
             service: "abutown-sim".to_string(),
@@ -179,13 +283,23 @@ impl SimulationRuntime {
         self.event_count
     }
 
-    pub(crate) async fn apply_client_command(
+    pub async fn apply_client_command(
         &mut self,
         command: ClientCommandDto,
     ) -> Result<AppliedCommand, CommandRejection> {
         match command {
             ClientCommandDto::SetTileKind(command) => self.apply_set_tile_kind(command).await,
         }
+    }
+
+    fn build_accepted(&self, command_id: String, event: WorldEventDto) -> AppliedCommand {
+        let response = CommandAcceptedDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: self.world_id.clone(),
+            command_id,
+            event: event.clone(),
+        };
+        AppliedCommand { response, event }
     }
 
     async fn apply_set_tile_kind(
@@ -211,6 +325,25 @@ impl SimulationRuntime {
                 code: "wrong_world",
                 message: format!("command targets a different world than {}", self.world_id.0),
             });
+        }
+
+        match self
+            .event_store
+            .find_event_by_command(&self.world_id.0, &command.command_id)
+            .await
+        {
+            Ok(Some(existing_event)) => {
+                return Ok(self.build_accepted(command.command_id.clone(), existing_event));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(CommandRejection {
+                    world_id: Some(command.world_id),
+                    command_id: Some(command.command_id),
+                    code: error.code(),
+                    message: error.to_string(),
+                });
+            }
         }
 
         let coord = ChunkCoord {
@@ -257,29 +390,44 @@ impl SimulationRuntime {
             local_index: command.local_index,
             kind: command.kind,
         });
-        self.event_store
-            .append(event.clone())
-            .await
-            .map_err(|error| CommandRejection {
-                world_id: Some(self.world_id.clone()),
-                command_id: Some(command.command_id.clone()),
-                code: error.code(),
-                message: error.to_string(),
-            })?;
+        match self.event_store.append(event.clone()).await {
+            Ok(()) => {}
+            Err(error) if error.code() == "duplicate_command_id" => {
+                let winner = self
+                    .event_store
+                    .find_event_by_command(&self.world_id.0, &command.command_id)
+                    .await
+                    .map_err(|error| CommandRejection {
+                        world_id: Some(self.world_id.clone()),
+                        command_id: Some(command.command_id.clone()),
+                        code: error.code(),
+                        message: error.to_string(),
+                    })?
+                    .ok_or_else(|| CommandRejection {
+                        world_id: Some(self.world_id.clone()),
+                        command_id: Some(command.command_id.clone()),
+                        code: "event_store_inconsistent",
+                        message: "duplicate command_id reported but lookup returned none"
+                            .to_string(),
+                    })?;
+                return Ok(self.build_accepted(command.command_id.clone(), winner));
+            }
+            Err(error) => {
+                return Err(CommandRejection {
+                    world_id: Some(self.world_id.clone()),
+                    command_id: Some(command.command_id.clone()),
+                    code: error.code(),
+                    message: error.to_string(),
+                });
+            }
+        }
 
         self.event_count += 1;
         self.registry
             .apply_set_tile_kind(plan)
             .expect("planned mutation should apply after event append");
 
-        let response = CommandAcceptedDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: self.world_id.clone(),
-            command_id: command.command_id,
-            event: event.clone(),
-        };
-
-        Ok(AppliedCommand { response, event })
+        Ok(self.build_accepted(command.command_id, event))
     }
 
     pub fn hello(&self) -> ServerMessageDto {
@@ -322,8 +470,9 @@ impl Default for SimulationRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abutown_protocol::{ChunkStateDto, TileKindDto};
     use async_trait::async_trait;
-    use sim_core::persistence::ChunkSnapshotStoreError;
+    use sim_core::persistence::{ChunkSnapshotStoreError, build_chunk_snapshot};
 
     #[derive(Debug)]
     struct FailingChunkSnapshotStore;
@@ -422,7 +571,7 @@ mod tests {
             .unwrap()
             .expect("visible snapshot stored");
         assert_eq!(visible.coord, ChunkCoordDto { x: 4, y: 4 });
-        assert_eq!(visible.dirty_tiles.len(), 1);
+        assert_eq!(visible.tiles.len(), 1);
 
         let east = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 5, y: 4 })
@@ -430,22 +579,55 @@ mod tests {
             .unwrap()
             .expect("east snapshot stored");
         assert_eq!(east.coord, ChunkCoordDto { x: 5, y: 4 });
-        assert_eq!(east.dirty_tiles.len(), 1);
+        assert_eq!(east.tiles.len(), 1);
 
-        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 3);
-        assert!(
+        // After the first persist with no further events and well within the
+        // 30s snapshot ceiling, the registry must skip every chunk.
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 0);
+
+        // Previously-stored rows remain intact in the snapshot store.
+        assert_eq!(
             runtime
                 .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
                 .await
                 .unwrap()
                 .expect("visible snapshot remains stored")
-                .dirty_tiles
-                .is_empty()
+                .tiles
+                .len(),
+            1
+        );
+
+        // A new event on one chunk re-arms only that chunk for the next
+        // persist.
+        runtime
+            .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
+                abutown_protocol::SetTileKindCommandDto {
+                    protocol_version: abutown_protocol::PROTOCOL_VERSION,
+                    world_id: abutown_protocol::WorldId("abutown-main".to_string()),
+                    command_id: "command:persist-test:1".to_string(),
+                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    local_index: 11,
+                    kind: abutown_protocol::TileKindDto::Water,
+                },
+            ))
+            .await
+            .expect("command should apply");
+
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 1);
+        assert_eq!(
+            runtime
+                .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+                .await
+                .unwrap()
+                .expect("visible snapshot reflects new event")
+                .tiles
+                .len(),
+            2
         );
     }
 
     #[tokio::test]
-    async fn runtime_keeps_dirty_tiles_when_snapshot_store_fails() {
+    async fn runtime_keeps_dirty_state_when_snapshot_store_fails() {
         let mut runtime = SimulationRuntime::new_with_stores(
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(FailingChunkSnapshotStore),
@@ -461,8 +643,8 @@ mod tests {
             runtime
                 .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
                 .expect("visible chunk remains loaded")
-                .dirty_tiles,
-            before.dirty_tiles
+                .tiles,
+            before.tiles
         );
     }
 
@@ -495,7 +677,7 @@ mod tests {
         let snapshot = runtime
             .chunk_snapshot(sim_core::ids::ChunkCoord { x: 4, y: 4 })
             .expect("mutated chunk snapshot exists");
-        assert!(snapshot.dirty_tiles.iter().any(|tile| {
+        assert!(snapshot.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
         }));
     }
@@ -567,6 +749,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hydrate_from_stores_restores_chunk_from_snapshot_and_replays_tail_events() {
+        // Seed: a chunk with tile 0 = Road at version 1, snapshotted.
+        let mut authoring_chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        authoring_chunk.set_tile_kind(0, TileKind::Road).unwrap();
+        let snapshot =
+            build_chunk_snapshot("abutown-main", &authoring_chunk, ChunkActivity::Active);
+
+        let mut snapshot_store = InMemoryChunkSnapshotStore::default();
+        ChunkSnapshotStore::write_snapshot(&mut snapshot_store, snapshot)
+            .await
+            .unwrap();
+
+        // Tail event after the snapshot: tile 7 = Water at chunk_version 2.
+        let tail_event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:tail".to_string(),
+            command_id: "command:tail".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 2,
+            version: 2,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 7,
+            kind: TileKindDto::Water,
+        });
+        let mut event_store = InMemoryWorldEventStore::default();
+        WorldEventStore::append(&mut event_store, tail_event)
+            .await
+            .unwrap();
+
+        let runtime =
+            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
+                .await
+                .unwrap();
+
+        let restored = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
+        assert_eq!(restored.chunk_version, 2);
+        let kinds: std::collections::HashMap<u16, TileKindDto> = restored
+            .tiles
+            .iter()
+            .map(|t| (t.local_index, t.kind))
+            .collect();
+        assert_eq!(kinds.get(&0), Some(&TileKindDto::Road));
+        assert_eq!(kinds.get(&7), Some(&TileKindDto::Water));
+        assert_eq!(restored.chunk_state, ChunkStateDto::Active);
+    }
+
+    #[tokio::test]
+    async fn hydrate_from_stores_falls_back_to_seed_when_no_snapshot() {
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+        )
+        .await
+        .unwrap();
+
+        let snap = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
+        assert_eq!(
+            snap.chunk_version, 1,
+            "seeded chunk has one tile mutation by default"
+        );
+    }
+
+    #[tokio::test]
     async fn runtime_rejects_store_failure_without_mutating_chunk() {
         let mut runtime = SimulationRuntime::new_with_event_store(Box::new(
             sim_core::events::FailingWorldEventStore::new("database offline"),
@@ -598,5 +843,138 @@ mod tests {
                 .expect("chunk still exists"),
             before
         );
+    }
+
+    #[tokio::test]
+    async fn duplicate_command_id_is_idempotent_and_writes_only_one_event() {
+        use abutown_protocol::{
+            ChunkCoordDto, ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto,
+            WorldId,
+        };
+
+        let mut runtime = SimulationRuntime::new();
+        let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            command_id: "command:dup".to_string(),
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 12,
+            kind: TileKindDto::Water,
+        });
+
+        let first = runtime.apply_client_command(command.clone()).await.unwrap();
+        let second = runtime.apply_client_command(command).await.unwrap();
+
+        assert_eq!(
+            first.response, second.response,
+            "duplicate command must return identical response"
+        );
+        assert_eq!(
+            first.event, second.event,
+            "duplicate command must return identical event"
+        );
+        assert_eq!(runtime.event_count(), 1, "only one event must be appended");
+    }
+
+    #[derive(Debug)]
+    struct RaceyEventStore {
+        planted_winner: WorldEventDto,
+        appended: bool,
+    }
+
+    impl RaceyEventStore {
+        fn new(planted_winner: WorldEventDto) -> Self {
+            Self {
+                planted_winner,
+                appended: false,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WorldEventStore for RaceyEventStore {
+        async fn append(
+            &mut self,
+            _event: WorldEventDto,
+        ) -> Result<(), sim_core::events::WorldEventStoreError> {
+            self.appended = true;
+            Err(sim_core::events::WorldEventStoreError::duplicate_command(
+                "command:race",
+            ))
+        }
+        async fn find_event_by_command(
+            &self,
+            _world_id: &str,
+            command_id: &str,
+        ) -> Result<Option<WorldEventDto>, sim_core::events::WorldEventStoreError> {
+            // Pre-flight call (before append) returns None so we fall through to the append path.
+            // Refetch call (after append, in the race handler) returns the planted winner.
+            if self.appended && command_id == "command:race" {
+                Ok(Some(self.planted_winner.clone()))
+            } else {
+                Ok(None)
+            }
+        }
+        async fn read_chunk_events_since(
+            &self,
+            _world_id: &str,
+            _coord: abutown_protocol::ChunkCoordDto,
+            _after_chunk_version: u64,
+        ) -> Result<Vec<WorldEventDto>, sim_core::events::WorldEventStoreError> {
+            Ok(Vec::new())
+        }
+        async fn max_tick(
+            &self,
+            _world_id: &str,
+        ) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
+            Ok(None)
+        }
+        async fn max_version(
+            &self,
+            _world_id: &str,
+        ) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn race_handler_returns_winner_when_append_reports_duplicate() {
+        use abutown_protocol::{
+            ChunkCoordDto, ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto,
+            TileKindSetEventDto, WorldEventDto, WorldId,
+        };
+        use sim_core::persistence::InMemoryChunkSnapshotStore;
+
+        let winner = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:winner".to_string(),
+            command_id: "command:race".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 7,
+            version: 7,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 0,
+            kind: TileKindDto::Water,
+        });
+        let mut runtime = SimulationRuntime::new_with_stores(
+            Box::new(RaceyEventStore::new(winner.clone())),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+        );
+
+        let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            command_id: "command:race".to_string(),
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 13,
+            kind: TileKindDto::Road,
+        });
+
+        let result = runtime.apply_client_command(command).await.unwrap();
+        assert_eq!(
+            result.event, winner,
+            "race handler must return the planted winner event"
+        );
+        assert_eq!(result.response.event, winner);
     }
 }
