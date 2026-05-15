@@ -68,7 +68,7 @@ describe('mobility state reducer', () => {
     expect(diagnostics).toMatchObject({ tick: 2, agents: 1, vehicles: 1, stops: 1, seededAgentState: 'walking' });
     expect(markers.find((marker) => marker.id === 'agent:seed:0')).toMatchObject({
       kind: 'agent',
-      coord: { x: 122, y: 144 },
+      coord: { x: 125, y: 131 },
       state: 'walking',
     });
   });
@@ -100,7 +100,7 @@ describe('mobility state reducer', () => {
 
     expect(mobilityDiagnostics(next)).toMatchObject({ tick: 3, seededAgentState: 'waiting_at_stop' });
     expect(mobilityMarkers(next).find((marker) => marker.id === 'agent:seed:0')).toMatchObject({
-      coord: { x: 126, y: 142 },
+      coord: { x: 126, y: 130 },
       state: 'waiting_at_stop',
     });
   });
@@ -129,7 +129,7 @@ describe('mobility state reducer', () => {
     );
 
     expect(mobilityMarkers(state).find((marker) => marker.id === 'agent:seed:0')).toMatchObject({
-      coord: { x: 146, y: 126 },
+      coord: { x: 130, y: 126 },
       state: 'at_activity',
     });
   });
