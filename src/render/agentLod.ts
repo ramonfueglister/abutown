@@ -1,5 +1,5 @@
 import { projectIso } from '../projection';
-import type { Agent, AgentPopulation, City, Coord, RoadEdge } from '../types';
+import type { City, Coord, GeneratedPopulation, PopulationEntity, RoadEdge } from '../types';
 
 export type AgentRenderQuality = 'ultra-low' | 'standard' | 'high';
 export type AgentLod = 'density' | 'pixel' | 'citizen';
@@ -38,26 +38,26 @@ export type AgentRenderPlan = {
 };
 
 type VisibleAgent = {
-  agent: Agent;
+  entity: PopulationEntity;
   roadEdgeId: string;
   isoX: number;
   isoY: number;
 };
 
-export function buildAgentRenderPlan(city: City, population: AgentPopulation, viewport: AgentViewport): AgentRenderPlan {
+export function buildAgentRenderPlan(city: City, population: GeneratedPopulation, viewport: AgentViewport): AgentRenderPlan {
   const roadsById = new Map(city.roadEdges.map((roadEdge) => [roadEdge.id, roadEdge]));
   const budget = renderBudget(viewport);
   const visibleAgents: VisibleAgent[] = [];
 
-  for (const agent of population.agents) {
-    const roadEdge = roadsById.get(agent.roadEdgeId);
+  for (const entity of population.entities) {
+    const roadEdge = roadsById.get(entity.roadEdgeId);
     if (!roadEdge) continue;
-    const point = withLaneOffset(pointOnRoad(roadEdge, agent.progress), agent.laneOffset);
+    const point = withLaneOffset(pointOnRoad(roadEdge, entity.progress), entity.laneOffset);
     const iso = projectIso(point);
     const screenX = viewport.stageX + iso.x * viewport.stageScale;
     const screenY = viewport.stageY + iso.y * viewport.stageScale;
     if (isScreenVisible(screenX, screenY, viewport, 48)) {
-      visibleAgents.push({ agent, roadEdgeId: roadEdge.id, isoX: iso.x, isoY: iso.y });
+      visibleAgents.push({ entity, roadEdgeId: roadEdge.id, isoX: iso.x, isoY: iso.y });
     }
   }
 
@@ -65,11 +65,11 @@ export function buildAgentRenderPlan(city: City, population: AgentPopulation, vi
   return {
     samples,
     stats: {
-      simulatedAgents: population.agents.length,
+      simulatedAgents: population.entities.length,
       visibleAgents: visibleAgents.length,
       renderedSamples: samples.length,
       aggregatedAgents: Math.max(0, visibleAgents.length - samples.length),
-      culledAgents: population.agents.length - visibleAgents.length,
+      culledAgents: population.entities.length - visibleAgents.length,
       budget,
     },
   };
@@ -86,12 +86,12 @@ function sampleVisibleAgents(visibleAgents: VisibleAgent[], budget: number, stag
     const end = Math.floor(((index + 1) * visibleAgents.length) / sampleCount);
     const visible = visibleAgents[start];
     samples.push({
-      agentId: lod === 'density' ? `density:${visible.roadEdgeId}:${start}` : visible.agent.id,
+      agentId: lod === 'density' ? `density:${visible.roadEdgeId}:${start}` : visible.entity.id,
       roadEdgeId: visible.roadEdgeId,
       x: visible.isoX,
       y: visible.isoY - lodYOffset(lod),
       lod,
-      colorIndex: visible.agent.colorIndex,
+      colorIndex: visible.entity.colorIndex,
       density: Math.max(1, end - start),
     });
   }

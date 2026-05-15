@@ -1,27 +1,27 @@
-import type { Agent, AgentKind, AgentPopulation, AgentRole, City, RoadEdge } from '../types';
+import type { City, GeneratedPopulation, PopulationEntity, PopulationEntityKind, PopulationEntityRole, RoadEdge } from '../types';
 
-type GenerateAgentsOptions = {
+type GeneratePopulationOptions = {
   count: number;
   seed: number;
 };
 
-export function generateAgents(city: City, options: GenerateAgentsOptions): AgentPopulation {
+export function generatePopulation(city: City, options: GeneratePopulationOptions): GeneratedPopulation {
   if (options.count === 0) return emptyPopulation();
 
   const random = seededRandom(options.seed);
   const eligibleRoads = city.roadEdges.filter((edge) => edge.points.length > 1 && edge.modes.includes('pedestrian'));
   if (eligibleRoads.length === 0) {
-    throw new Error('Cannot generate agents without eligible pedestrian road edges');
+    throw new Error('Cannot generate population without eligible pedestrian road edges');
   }
 
   const weightedRoads = weightRoads(eligibleRoads);
-  const agents: Agent[] = [];
+  const entities: PopulationEntity[] = [];
   for (let index = 0; index < options.count; index += 1) {
     const roadEdge = pickWeightedRoad(weightedRoads, random());
     const kind = chooseKind(roadEdge, random());
     const role = chooseRole(kind, random());
-    agents.push({
-      id: `agent:${options.seed}:${index}`,
+    entities.push({
+      id: `population:${options.seed}:${index}`,
       kind,
       role,
       roadEdgeId: roadEdge.id,
@@ -32,29 +32,29 @@ export function generateAgents(city: City, options: GenerateAgentsOptions): Agen
     });
   }
 
-  const segmentBuckets = new Map<string, Agent[]>();
-  for (const agent of agents) {
-    const bucket = segmentBuckets.get(agent.roadEdgeId) ?? [];
-    bucket.push(agent);
-    segmentBuckets.set(agent.roadEdgeId, bucket);
+  const segmentBuckets = new Map<string, PopulationEntity[]>();
+  for (const entity of entities) {
+    const bucket = segmentBuckets.get(entity.roadEdgeId) ?? [];
+    bucket.push(entity);
+    segmentBuckets.set(entity.roadEdgeId, bucket);
   }
 
   return {
-    agents,
+    entities,
     segmentBuckets,
     stats: {
-      totalAgents: agents.length,
-      pedestrians: agents.filter((agent) => agent.kind === 'pedestrian').length,
-      vehicles: agents.filter((agent) => agent.kind === 'vehicle').length,
+      totalEntities: entities.length,
+      people: entities.filter((entity) => entity.kind === 'person').length,
+      vehicles: entities.filter((entity) => entity.kind === 'vehicle').length,
     },
   };
 }
 
-function emptyPopulation(): AgentPopulation {
+function emptyPopulation(): GeneratedPopulation {
   return {
-    agents: [],
+    entities: [],
     segmentBuckets: new Map(),
-    stats: { totalAgents: 0, pedestrians: 0, vehicles: 0 },
+    stats: { totalEntities: 0, people: 0, vehicles: 0 },
   };
 }
 
@@ -80,16 +80,16 @@ function pickWeightedRoad(weightedRoads: Array<{ roadEdge: RoadEdge; cumulativeW
   return weightedRoads.find((entry) => entry.cumulativeWeight >= target)?.roadEdge ?? weightedRoads[0].roadEdge;
 }
 
-function chooseKind(roadEdge: RoadEdge, randomValue: number): AgentKind {
-  return roadEdge.modes.includes('car') && randomValue < 0.18 ? 'vehicle' : 'pedestrian';
+function chooseKind(roadEdge: RoadEdge, randomValue: number): PopulationEntityKind {
+  return roadEdge.modes.includes('car') && randomValue < 0.18 ? 'vehicle' : 'person';
 }
 
-function chooseRole(kind: AgentKind, randomValue: number): AgentRole {
+function chooseRole(kind: PopulationEntityKind, randomValue: number): PopulationEntityRole {
   if (kind === 'vehicle') return randomValue < 0.72 ? 'worker' : 'service';
   if (randomValue < 0.52) return 'resident';
   return randomValue < 0.82 ? 'worker' : 'visitor';
 }
 
-function speedFor(kind: AgentKind, role: AgentRole, randomValue: number): number {
+function speedFor(kind: PopulationEntityKind, role: PopulationEntityRole, randomValue: number): number {
   return Number((kind === 'vehicle' ? 2.4 + randomValue * (role === 'service' ? 1.8 : 1.2) : 0.55 + randomValue * 0.65).toFixed(3));
 }
