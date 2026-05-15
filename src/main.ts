@@ -56,6 +56,7 @@ import {
   pedestrianAgentId,
   type LocalPedestrianAgent,
 } from './render/pedestrianAgents';
+import { buildPedestrianAgentInspector, type PedestrianAgentInspector } from './render/pedestrianAgentInspector';
 import { buildPedestrianLoop, pedestrianWalkingSpeed } from './render/pedestrianMotion';
 import {
   buildNorthboundTrainPath,
@@ -339,6 +340,7 @@ function render(): void {
 
   drawScene({ x: 0, y: 0 });
   ctx.restore();
+  drawAgentInspectorPanel(buildPedestrianAgentInspector(selectedPedestrianAgent()));
 }
 
 function drawScene(offset: Coord): void {
@@ -622,6 +624,57 @@ function drawPedestrian(pedestrian: Pedestrian, selected: boolean): void {
   ctx.fillRect(-Math.max(2, width * 0.18), -Math.max(1, height * 0.08), Math.max(4, width * 0.36), Math.max(2, height * 0.1));
   ctx.drawImage(image, visible.x, visible.y, visible.width, visible.height, -width / 2, -height, width, height);
   ctx.restore();
+}
+
+function drawAgentInspectorPanel(inspector: PedestrianAgentInspector | null): void {
+  if (!inspector) return;
+  const ratio = window.devicePixelRatio || 1;
+  const x = 12;
+  const y = 12;
+  const width = 232;
+  const padding = 10;
+  const rowHeight = 17;
+  const titleHeight = 20;
+  const height = padding * 2 + titleHeight + inspector.rows.length * rowHeight;
+
+  ctx.save();
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.fillStyle = 'rgba(7, 10, 9, 0.82)';
+  ctx.strokeStyle = 'rgba(247, 215, 106, 0.8)';
+  ctx.lineWidth = 1;
+  roundedRect(x, y, width, height, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.font = '600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.fillStyle = '#f7d76a';
+  ctx.textBaseline = 'top';
+  ctx.fillText(inspector.title, x + padding, y + padding);
+
+  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+  inspector.rows.forEach((row, index) => {
+    const rowY = y + padding + titleHeight + index * rowHeight;
+    ctx.fillStyle = 'rgba(231, 236, 224, 0.72)';
+    ctx.fillText(row.label, x + padding, rowY);
+    ctx.fillStyle = '#f7f7e8';
+    ctx.fillText(row.value, x + 70, rowY);
+  });
+  ctx.restore();
+}
+
+function roundedRect(x: number, y: number, width: number, height: number, radius: number): void {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }
 
 function drawEdgeConnections(visibleGrid: GridRect): void {
@@ -1091,6 +1144,11 @@ function pedestrianPosition(pedestrian: Pedestrian): Coord {
 
 function localPedestrianAgents(): LocalPedestrianAgent[] {
   return buildPedestrianAgents(pedestrians);
+}
+
+function selectedPedestrianAgent(): LocalPedestrianAgent | null {
+  if (!selectedAgentId) return null;
+  return localPedestrianAgents().find((agent) => agent.id === selectedAgentId) ?? null;
 }
 
 function selectPedestrianAgentAtScreenPoint(point: Coord): void {
@@ -1586,7 +1644,8 @@ window.render_game_to_text = () => {
   const detailCounts = detailCountsByCategory();
   const agents = localPedestrianAgents();
   const serializedAgents = agents.map(serializeLocalAgent);
-  const selectedAgent = serializedAgents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const selectedSerializedAgent = selectedAgent ? serializeLocalAgent(selectedAgent) : null;
   return JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
@@ -1629,9 +1688,10 @@ window.render_game_to_text = () => {
       localAgents: {
         count: agents.length,
         selectedId: selectedAgentId,
-        selected: selectedAgent,
+        selected: selectedSerializedAgent,
         agents: serializedAgents,
       },
+      agentInspector: buildPedestrianAgentInspector(selectedAgent),
       railStations: railStations.length,
       railYardTracks: Math.max(0, railPaths.length - 2),
       details: detailCounts,

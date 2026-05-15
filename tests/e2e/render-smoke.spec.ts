@@ -80,6 +80,14 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     id: clickableAgent.id,
     state: 'walking',
   }));
+  expect(selectedState.city.agentInspector).toEqual(expect.objectContaining({
+    title: clickableAgent.id,
+    rows: expect.arrayContaining([
+      expect.objectContaining({ label: 'State', value: 'walking' }),
+      expect.objectContaining({ label: 'Tile', value: expect.any(String) }),
+      expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
+    ]),
+  }));
   expect(state.city.railStationsOnRoad).toBe(0);
   expect(state.city.railStationsOnBuildings).toBe(0);
   expect(state.city.railStationsOnRails).toBe(0);
