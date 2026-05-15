@@ -1,0 +1,25 @@
+{
+  "name": "abutown",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "preview": "vite preview --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "assets:pak128": "node scripts/import-pak128-assets.mjs",
+    "assets:yellow-crossing-hk": "node scripts/import-pak128-assets.mjs --yellow-crossing-hk",
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.1.0",
+    "vite": "^8.0.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.7.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}

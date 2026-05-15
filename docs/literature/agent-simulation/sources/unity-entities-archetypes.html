@@ -1,0 +1,200 @@
+<!DOCTYPE html><!--[if IE]><![endif]--><html><head>
+    <!-- OneTrust Cookies Consent Notice start -->
+<script type="text/javascript" src="" charset="UTF-8" data-domain-script="6e91be4c-3145-4ea2-aa64-89d716064836"></script>
+<script type="text/javascript">
+  function OptanonWrapper() { }
+</script>
+<!-- OneTrust Cookies Consent Notice end -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],   j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=   'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);  })(window,document,'script','dataLayer','GTM-5V25JL6');</script>
+    <script type="text/javascript">thisPackageMetaData = { name: "com.unity.entities", version: "1.0.11", displayTitle:"Entities 1.0.11", lang: "en" };</script>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
+  
+    <title>Archetypes concepts | Entities | 1.0.11 </title>
+    <meta name="viewport" content="width=device-width">
+    <meta name="title" content="Archetypes concepts | Entities | 1.0.11 ">
+    <meta name="generator" content="docfx 2.58.9.0">
+    
+    <link rel="shortcut icon" href="../favicon.ico">
+    <link rel="stylesheet" href="../styles/docfx.vendor.css">
+    <link rel="stylesheet" href="../styles/docfx.css">
+    <link rel="stylesheet" href="../styles/main.css">
+    <link rel="stylesheet" href="../styles/version-switcher.css">
+    <link rel="stylesheet" href="../styles/language-switcher.css">
+    <meta property="docfx:navrel" content="../toc.html">
+    <meta property="docfx:tocrel" content="toc.html">
+    <meta property="unity:packageTitle" content="Entities | 1.0.11">
+    <meta property="docfx:rel" content="../">
+    <meta property="docfx:newtab" content="true">
+    <meta property="unity:image-zoom-threshold" content="1200">
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-PVTCJQL');</script>
+<script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?69a368c3131f2309a321e386accc19c5";
+  var s = document.getElementsByTagName("script")[0]; 
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
+<script>
+    (function(win, export_obj) {
+        win['TeaAnalyticsObject'] = export_obj;
+        if (!win[export_obj]) {
+            function _collect() {
+                _collect.q.push(arguments);
+            }
+            _collect.q = _collect.q || [];
+            win[export_obj] = _collect;
+        }
+        win[export_obj].l = +new Date();
+    })(window, 'collectEvent');
+    </script>
+    <script async src="https://lf3-data.volccdn.com/obj/data-static/log-sdk/collect/collect-autotrack-rangers.js"></script>
+    <script>
+        window.collectEvent('init', { app_id:20003301,
+            channel_domain: 'https://gator.volces.com',
+            autotrack: true,
+            log: true,
+            enable_stay_duration: true,
+            disable_sdk_monitor:true,
+            cross_subdomain: true,
+        });
+        window.collectEvent('start')
+    </script></head>
+  <body data-spy="scroll" data-target="#affix" class="">
+	<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5V25JL6" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    <div id="wrapper">
+      <header>
+        
+        <nav id="autocollapse" class="navbar navbar-inverse ng-scope" role="navigation">
+          <div class="container">
+            <div class="navbar-header">
+              <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#navbar">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+              </button>
+              
+              <a class="navbar-brand" href="../index.html">
+                <img id="logo" class="svg" src="../logo.svg" alt="">
+              </a>
+            </div>
+            <div class="collapse navbar-collapse" id="navbar">
+              <form class="navbar-form navbar-right" role="search" id="search">
+                <div class="form-group">
+                  <input type="text" class="form-control" id="search-query" placeholder="Search" autocomplete="off">
+                </div>
+        
+        		<div class="back-to-unity-group">
+        			<a class="back-to-unity" href="http://docs.unity.cn/">docs.unity.cn</a>
+        		</div>
+        
+              </form>
+            </div>
+          </div>
+        </nav>
+        
+        <div class="subnav navbar navbar-default">
+          <div class="container hide-when-search" id="breadcrumb">
+          </div>
+        </div>
+      </header>
+      <div class="container body-content">
+        
+        <div id="search-results">
+          <div class="search-list"></div>
+          <div class="sr-items"></div>
+          <ul id="pagination"></ul>
+        </div>
+      </div>
+      <div role="main" class="container body-content hide-when-search">
+        
+        <div class="sidenav hide-when-search">
+          <a class="btn toc-toggle collapse" data-toggle="collapse" href="#sidetoggle" aria-expanded="false" aria-controls="sidetoggle">Show / Hide Table of Contents</a>
+          <div class="sidetoggle collapse" id="sidetoggle">
+            <div id="sidetoc"></div>
+          </div>
+        </div>
+        <div class="article row grid-right">
+          <div class="col-md-10" id="main_content">
+          <div id="breadcrumb_placeholder"></div>
+            <article class="content wrap" id="_content" data-uid="concepts-archetypes">
+<h1 id="archetypes-concepts">Archetypes concepts</h1>
+
+<p>An <strong>archetype</strong> is a unique identifier for all the <a href="concepts-entities.html">entities</a> in a <a href="concepts-worlds.html">world</a> that have the same unique combination of <a href="concepts-components.html">component</a> types. For example, all the entities in a world that have component types A and B share an archetype. All the entities that have component types A, B, and C share a different archetype, and all the entities that have component types A and Z share yet another archetype.</p>
+<p>When you add or remove component types from an entity, the world's <a class="xref" href="../api/Unity.Entities.EntityManager.html"><code>EntityManager</code></a> moves the entity to the appropriate archetype. For example, if an entity has component types A, B, and C and you remove its B component, the <code>EntityManager</code> moves the entity to the archetype that has component types A and C. If no such archetyps exists, the <code>EntityManager</code> creates it. </p>
+<div class="IMPORTANT"><h5>Important</h5><p>Moving entities frequently is resource-intensive and reduces the performance of your application. For more information, see the documentation on  <a href="concepts-structural-changes.html">Structural change concepts</a>.</p>
+</div>
+<p>The archetype-based organization of entities means that it's efficient to query entities by their component types. For example, if you want to find all entities that have component types A and B, you can find all the archetypes with those component types, which is more performant than scanning through all individual entities. The set of existing archetypes in a world tends to stabilize early in the lifetime of a program, so you can cache queries to get faster performance.</p>
+<p>An archetype is only destroyed when its world is destroyed.</p>
+<h2 id="archetype-chunks">Archetype chunks</h2>
+<p>All entities and components with the same archetype are stored in uniform blocks of memory called <strong>chunks</strong>. Each chunk consists of 16KiB and the number of entities that they can store depends on the number and size of the components in the chunk's archetype. The <a class="xref" href="../api/Unity.Entities.EntityManager.html"><code>EntityManager</code></a> creates and destroys chunks as needed.</p>
+<p>A chunk contains an array for each component type, plus an additional array to store the entity IDs. For example, in an archetype with component types A and B, the chunks each have three arrays: one array for the A component values, one array for the B component values, and one array for the entity IDs.</p>
+<p>The arrays of a chunk are tightly packed: the first entity of the chunk is stored at index 0 of these arrays, the second entity of the chunk is stored at index 1, and subsequent entities are stored in the consecutive indexes. When a new entity is added to the chunk, it's stored in the first available index. When an entity is removed from the chunk (either because it's being destroyed or being moved to another archetype), the last entity of the chunk is moved to fill the gap.</p>
+<p>When an entity is added to an archetype, the <code>EntityManager</code> creates a new chunk if the archetype's existing chunks are all full. When the last entity is removed from a chunk, the <code>EntityManager</code> destroys the chunk.</p>
+<h2 id="archetypes-in-the-editor">Archetypes in the Editor</h2>
+<p>The <a href="editor-archetypes-window.html">Archetypes window</a> lists the archetypes of all the worlds in your project and it shows the amount of allocated and unused memory of each archetype.</p>
+<p>In the Editor, the following icon represents an Archetype: <img src="images/editor-archetype-icon.png" alt=""> . </p>
+<h2 id="additional-resources">Additional resources</h2>
+<ul>
+<li><a href="concepts-entities.html">Entities concepts</a></li>
+<li><a href="concepts-structural-changes.html">Structural changes concepts</a></li>
+<li><a href="editor-archetypes-window.html">Archetypes window</a></li>
+</ul>
+</article>
+          </div>
+          
+          <div class="hidden-sm col-md-2" role="complementary">
+            <div class="sideaffix">
+              <div class="contribution">
+                <ul class="nav">
+                </ul>
+              </div>
+              <nav class="bs-docs-sidebar hidden-print hidden-xs hidden-sm affix" id="affix">
+              <!-- <p><a class="back-to-top" href="#top">Back to top</a><p> -->
+              </nav>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <footer>
+        <div class="grad-bottom"></div>
+        <div class="footer">
+          <div class="container">
+            <span class="pull-right">
+              <a href="#top">Back to top</a>
+            </span>
+            
+            
+            <span>Copyright © 2023 Unity Technologies — <a href="https://docs.unity.cn/Manual/TermsOfUse.html">Terms of use</a><br>
+            Generated by <strong>DocFX</strong></span> on Wednesday, June 21, 2023
+          </div>
+        </div>
+      </footer>
+    </div>
+    
+    <script type="text/javascript" src="../styles/docfx.vendor.js"></script>
+    <script type="text/javascript" src="../styles/docfx.js"></script>
+    <script type="text/javascript" src="../styles/main.js"></script>
+    <script type="text/javascript" src="../styles/version-switcher.js"></script>
+    <script type="text/javascript" src="../styles/language-switcher.js"></script>
+    <script type="text/javascript" src="../styles/metadata-collector.js"></script>
+    <script type="text/javascript" src="../styles/PMDT.js"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true });
+    </script>  
+
+</body></html>

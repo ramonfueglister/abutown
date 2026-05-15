@@ -1,0 +1,34 @@
+[package]
+name = "sim-server"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+name = "sim_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sim-server"
+path = "src/main.rs"
+
+[dependencies]
+abutown-protocol = { path = "../protocol" }
+sim-core = { path = "../sim-core" }
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+http-body-util.workspace = true
+tokio-tungstenite.workspace = true
+tower.workspace = true
