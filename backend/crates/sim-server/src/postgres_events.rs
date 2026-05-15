@@ -74,7 +74,9 @@ impl WorldEventStore for PostgresWorldEventStore {
             .map_err(|_| WorldEventStoreError::unavailable("event version exceeds i64"))?;
 
         let (chunk_x, chunk_y, chunk_version) = match &event {
-            WorldEventDto::TileKindSet(payload) => (payload.coord.x, payload.coord.y, payload.version),
+            WorldEventDto::TileKindSet(payload) => {
+                (payload.coord.x, payload.coord.y, payload.version)
+            }
         };
         let chunk_version_i64 = i64::try_from(chunk_version)
             .map_err(|_| WorldEventStoreError::unavailable("chunk_version exceeds i64"))?;
@@ -113,7 +115,9 @@ impl WorldEventStore for PostgresWorldEventStore {
         .rows_affected();
 
         if rows_affected == 0 {
-            return Err(WorldEventStoreError::duplicate_command(&record.metadata.command_id));
+            return Err(WorldEventStoreError::duplicate_command(
+                &record.metadata.command_id,
+            ));
         }
 
         Ok(())
@@ -183,23 +187,21 @@ impl WorldEventStore for PostgresWorldEventStore {
             .collect()
     }
     async fn max_tick(&self, world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
-        let row: Option<(Option<i64>,)> = sqlx::query_as(
-            "SELECT MAX(tick) FROM world_events WHERE world_id = $1",
-        )
-        .bind(world_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+        let row: Option<(Option<i64>,)> =
+            sqlx::query_as("SELECT MAX(tick) FROM world_events WHERE world_id = $1")
+                .bind(world_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
         Ok(row.and_then(|(opt,)| opt).map(|v| v as u64))
     }
     async fn max_version(&self, world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
-        let row: Option<(Option<i64>,)> = sqlx::query_as(
-            "SELECT MAX(version) FROM world_events WHERE world_id = $1",
-        )
-        .bind(world_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+        let row: Option<(Option<i64>,)> =
+            sqlx::query_as("SELECT MAX(version) FROM world_events WHERE world_id = $1")
+                .bind(world_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
         Ok(row.and_then(|(opt,)| opt).map(|v| v as u64))
     }
 }

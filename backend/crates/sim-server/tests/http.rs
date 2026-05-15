@@ -510,12 +510,10 @@ async fn postgres_world_state_survives_runtime_restart() {
         )
         .await
         .expect("connect postgres snapshot store");
-        let mut runtime = SimulationRuntime::hydrate_from_stores(
-            Box::new(event_store),
-            Box::new(snapshot_store),
-        )
-        .await
-        .expect("hydrate first runtime");
+        let mut runtime =
+            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
+                .await
+                .expect("hydrate first runtime");
 
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
@@ -551,12 +549,10 @@ async fn postgres_world_state_survives_runtime_restart() {
         )
         .await
         .expect("connect postgres snapshot store (restart)");
-        let runtime = SimulationRuntime::hydrate_from_stores(
-            Box::new(event_store),
-            Box::new(snapshot_store),
-        )
-        .await
-        .expect("hydrate restarted runtime");
+        let runtime =
+            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
+                .await
+                .expect("hydrate restarted runtime");
 
         let restored = runtime
             .chunk_snapshot(ChunkCoord { x: 4, y: 4 })

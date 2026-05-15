@@ -539,7 +539,10 @@ mod tests {
         assert_eq!(first.len(), 1, "first call must include the dirty chunk");
         let coords: Vec<ChunkCoord> = first
             .iter()
-            .map(|s| ChunkCoord { x: s.coord.x, y: s.coord.y })
+            .map(|s| ChunkCoord {
+                x: s.coord.x,
+                y: s.coord.y,
+            })
             .collect();
         registry.mark_snapshots_persisted(&coords);
 
@@ -562,7 +565,10 @@ mod tests {
         let coords: Vec<ChunkCoord> = registry
             .collect_snapshots(&world_id)
             .iter()
-            .map(|s| ChunkCoord { x: s.coord.x, y: s.coord.y })
+            .map(|s| ChunkCoord {
+                x: s.coord.x,
+                y: s.coord.y,
+            })
             .collect();
         registry.mark_snapshots_persisted(&coords);
 
@@ -571,7 +577,11 @@ mod tests {
             .unwrap();
 
         let next = registry.collect_snapshots(&world_id);
-        assert_eq!(next.len(), 1, "new event must produce a new snapshot candidate");
+        assert_eq!(
+            next.len(),
+            1,
+            "new event must produce a new snapshot candidate"
+        );
     }
 
     #[test]

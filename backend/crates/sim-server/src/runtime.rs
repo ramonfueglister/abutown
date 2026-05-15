@@ -161,7 +161,10 @@ impl SimulationRuntime {
             let events = event_store
                 .read_chunk_events_since(
                     &world_id.0,
-                    ChunkCoordDto { x: coord.x, y: coord.y },
+                    ChunkCoordDto {
+                        x: coord.x,
+                        y: coord.y,
+                    },
                     chunk_version,
                 )
                 .await
@@ -775,17 +778,18 @@ mod tests {
             .await
             .unwrap();
 
-        let runtime = SimulationRuntime::hydrate_from_stores(
-            Box::new(event_store),
-            Box::new(snapshot_store),
-        )
-        .await
-        .unwrap();
+        let runtime =
+            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
+                .await
+                .unwrap();
 
         let restored = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
         assert_eq!(restored.chunk_version, 2);
-        let kinds: std::collections::HashMap<u16, TileKindDto> =
-            restored.tiles.iter().map(|t| (t.local_index, t.kind)).collect();
+        let kinds: std::collections::HashMap<u16, TileKindDto> = restored
+            .tiles
+            .iter()
+            .map(|t| (t.local_index, t.kind))
+            .collect();
         assert_eq!(kinds.get(&0), Some(&TileKindDto::Road));
         assert_eq!(kinds.get(&7), Some(&TileKindDto::Water));
         assert_eq!(restored.chunk_state, ChunkStateDto::Active);
@@ -861,8 +865,14 @@ mod tests {
         let first = runtime.apply_client_command(command.clone()).await.unwrap();
         let second = runtime.apply_client_command(command).await.unwrap();
 
-        assert_eq!(first.response, second.response, "duplicate command must return identical response");
-        assert_eq!(first.event, second.event, "duplicate command must return identical event");
+        assert_eq!(
+            first.response, second.response,
+            "duplicate command must return identical response"
+        );
+        assert_eq!(
+            first.event, second.event,
+            "duplicate command must return identical event"
+        );
         assert_eq!(runtime.event_count(), 1, "only one event must be appended");
     }
 
@@ -874,15 +884,23 @@ mod tests {
 
     impl RaceyEventStore {
         fn new(planted_winner: WorldEventDto) -> Self {
-            Self { planted_winner, appended: false }
+            Self {
+                planted_winner,
+                appended: false,
+            }
         }
     }
 
     #[async_trait::async_trait]
     impl WorldEventStore for RaceyEventStore {
-        async fn append(&mut self, _event: WorldEventDto) -> Result<(), sim_core::events::WorldEventStoreError> {
+        async fn append(
+            &mut self,
+            _event: WorldEventDto,
+        ) -> Result<(), sim_core::events::WorldEventStoreError> {
             self.appended = true;
-            Err(sim_core::events::WorldEventStoreError::duplicate_command("command:race"))
+            Err(sim_core::events::WorldEventStoreError::duplicate_command(
+                "command:race",
+            ))
         }
         async fn find_event_by_command(
             &self,
@@ -905,10 +923,16 @@ mod tests {
         ) -> Result<Vec<WorldEventDto>, sim_core::events::WorldEventStoreError> {
             Ok(Vec::new())
         }
-        async fn max_tick(&self, _world_id: &str) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
+        async fn max_tick(
+            &self,
+            _world_id: &str,
+        ) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
             Ok(None)
         }
-        async fn max_version(&self, _world_id: &str) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
+        async fn max_version(
+            &self,
+            _world_id: &str,
+        ) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
             Ok(None)
         }
     }
@@ -947,7 +971,10 @@ mod tests {
         });
 
         let result = runtime.apply_client_command(command).await.unwrap();
-        assert_eq!(result.event, winner, "race handler must return the planted winner event");
+        assert_eq!(
+            result.event, winner,
+            "race handler must return the planted winner event"
+        );
         assert_eq!(result.response.event, winner);
     }
 }
