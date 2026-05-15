@@ -48,7 +48,7 @@ export type MobilityOverlayState = {
 const DEMO_LINKS = new Map<string, { from: MobilityCoord; to: MobilityCoord }>([
   ['link:home-to-old-town-stop', { from: { x: 118, y: 146 }, to: { x: 126, y: 142 } }],
   ['link:old-town-to-station', { from: { x: 126, y: 142 }, to: { x: 150, y: 124 } }],
-  ['link:station-to-work', { from: { x: 150, y: 124 }, to: { x: 158, y: 118 } }],
+  ['link:station-to-work', { from: { x: 150, y: 124 }, to: { x: 146, y: 126 } }],
 ]);
 
 const DEMO_STOPS = new Map<string, MobilityCoord>([
@@ -56,7 +56,7 @@ const DEMO_STOPS = new Map<string, MobilityCoord>([
   ['stop:station', { x: 150, y: 124 }],
 ]);
 
-const DEMO_ACTIVITIES = new Map<string, MobilityCoord>([['activity:work', { x: 158, y: 118 }]]);
+const DEMO_ACTIVITIES = new Map<string, MobilityCoord>([['activity:work', { x: 146, y: 126 }]]);
 
 export function createMobilityOverlayState(): MobilityOverlayState {
   return {

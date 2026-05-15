@@ -47,7 +47,7 @@ describe('mobility overlay', () => {
     expect(items.find((item) => item.id === 'agent:seed:0')).toMatchObject({
       x: 244,
       y: 288,
-      radius: 4,
+      radius: 10,
       color: '#f7d76a',
     });
   });
