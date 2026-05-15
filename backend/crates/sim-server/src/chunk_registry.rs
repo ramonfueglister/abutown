@@ -2,11 +2,18 @@ use std::collections::HashMap;
 
 use abutown_protocol::{ChunkSnapshotDto, WorldId};
 use sim_core::{
-    chunk::Chunk,
+    chunk::{Chunk, ChunkError},
     ids::ChunkCoord,
-    persistence::{InMemoryChunkSnapshotStore, build_chunk_snapshot},
+    persistence::{build_chunk_snapshot, InMemoryChunkSnapshotStore},
     scheduler::ChunkActivity,
+    tile::TileKind,
 };
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ChunkMutationError {
+    ChunkNotLoaded { coord: ChunkCoord },
+    TileOutOfBounds { index: u16, tile_count: u16 },
+}
 
 #[derive(Debug)]
 struct LoadedChunk {
@@ -67,6 +74,32 @@ impl ChunkRegistry {
             .map(|loaded| loaded.chunk.tile_count())
     }
 
+    pub(crate) fn set_tile_kind(
+        &mut self,
+        coord: ChunkCoord,
+        local_index: u16,
+        kind: TileKind,
+    ) -> Result<u64, ChunkMutationError> {
+        let loaded = self
+            .chunks
+            .get_mut(&coord)
+            .ok_or(ChunkMutationError::ChunkNotLoaded { coord })?;
+
+        loaded
+            .chunk
+            .set_tile_kind(local_index, kind)
+            .map_err(|error| match error {
+                ChunkError::IndexOutOfBounds { index, tile_count } => {
+                    ChunkMutationError::TileOutOfBounds { index, tile_count }
+                }
+                ChunkError::InvalidChunkSize { .. } => {
+                    unreachable!("loaded chunks are already valid")
+                }
+            })?;
+
+        Ok(loaded.chunk.version())
+    }
+
     pub(crate) fn write_snapshots(
         &mut self,
         world_id: &WorldId,
@@ -93,7 +126,6 @@ impl ChunkRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim_core::tile::TileKind;
 
     fn chunk_with_seed(coord: ChunkCoord, local_index: u16, kind: TileKind) -> Chunk {
         let mut chunk = Chunk::new(coord, 32);
@@ -147,11 +179,9 @@ mod tests {
             snapshot.dirty_tiles[0].kind,
             abutown_protocol::TileKindDto::Road
         );
-        assert!(
-            registry
-                .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
-                .is_none()
-        );
+        assert!(registry
+            .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
+            .is_none());
     }
 
     #[test]
@@ -164,6 +194,60 @@ mod tests {
 
         assert_eq!(registry.tile_count(ChunkCoord { x: 4, y: 5 }), Some(1024));
         assert_eq!(registry.tile_count(ChunkCoord { x: 9, y: 9 }), None);
+    }
+
+    #[test]
+    fn registry_sets_tile_kind_on_loaded_chunk() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        let version = registry
+            .set_tile_kind(ChunkCoord { x: 4, y: 4 }, 11, TileKind::Water)
+            .expect("loaded tile can mutate");
+
+        assert_eq!(version, 2);
+        let snapshot = registry
+            .chunk_snapshot(
+                &WorldId("abutown-main".to_string()),
+                ChunkCoord { x: 4, y: 4 },
+            )
+            .expect("chunk snapshot exists");
+        assert_eq!(snapshot.dirty_tiles.len(), 2);
+        assert_eq!(snapshot.dirty_tiles[1].local_index, 11);
+        assert_eq!(
+            snapshot.dirty_tiles[1].kind,
+            abutown_protocol::TileKindDto::Water
+        );
+    }
+
+    #[test]
+    fn registry_rejects_missing_chunk_mutation() {
+        let mut registry = ChunkRegistry::new(32);
+
+        assert!(matches!(
+            registry.set_tile_kind(ChunkCoord { x: 9, y: 9 }, 0, TileKind::Road),
+            Err(ChunkMutationError::ChunkNotLoaded { coord }) if coord == ChunkCoord { x: 9, y: 9 }
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_out_of_bounds_tile_mutation() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        assert!(matches!(
+            registry.set_tile_kind(ChunkCoord { x: 4, y: 4 }, 2000, TileKind::Water),
+            Err(ChunkMutationError::TileOutOfBounds {
+                index: 2000,
+                tile_count: 1024
+            })
+        ));
     }
 
     #[test]
@@ -197,12 +281,10 @@ mod tests {
         );
 
         assert_eq!(registry.write_snapshots(&world_id, &mut store), 2);
-        assert!(
-            store
-                .read_snapshot(ChunkCoord { x: 4, y: 4 })
-                .expect("visible snapshot still exists")
-                .dirty_tiles
-                .is_empty()
-        );
+        assert!(store
+            .read_snapshot(ChunkCoord { x: 4, y: 4 })
+            .expect("visible snapshot still exists")
+            .dirty_tiles
+            .is_empty());
     }
 }

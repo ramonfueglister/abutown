@@ -21,6 +21,17 @@ impl From<TileKind> for TileKindDto {
     }
 }
 
+impl From<TileKindDto> for TileKind {
+    fn from(value: TileKindDto) -> Self {
+        match value {
+            TileKindDto::Grass => Self::Grass,
+            TileKindDto::Water => Self::Water,
+            TileKindDto::Road => Self::Road,
+            TileKindDto::BuildingFootprint => Self::BuildingFootprint,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TileFlags {
     pub blocks_movement: bool,
@@ -32,4 +43,20 @@ pub struct TileRecord {
     pub kind: TileKind,
     pub flags: TileFlags,
     pub version: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tile_kind_converts_from_protocol_kind() {
+        assert_eq!(TileKind::from(TileKindDto::Grass), TileKind::Grass);
+        assert_eq!(TileKind::from(TileKindDto::Water), TileKind::Water);
+        assert_eq!(TileKind::from(TileKindDto::Road), TileKind::Road);
+        assert_eq!(
+            TileKind::from(TileKindDto::BuildingFootprint),
+            TileKind::BuildingFootprint
+        );
+    }
 }
