@@ -28,6 +28,10 @@ export function riverbankSourceFromMask(mask: number): RiverbankSource {
   return cell(27, 3);
 }
 
+export function riverSurfaceSourceFromMask(mask: number): RiverbankSource {
+  return riverbankSourceFromMask(mask);
+}
+
 function cell(row: number, col: number): RiverbankSource {
   return { x: col * CELL_SIZE, y: row * CELL_SIZE, width: CELL_SIZE, height: CELL_SIZE };
 }

@@ -48,7 +48,7 @@ import {
   RIVERBANK_NORTH,
   RIVERBANK_SOUTH,
   RIVERBANK_WEST,
-  riverbankSourceFromMask,
+  riverSurfaceSourceFromMask,
 } from './render/riverbankFrames';
 import { compareDrawableOrder } from './render/drawOrder';
 import {
@@ -411,9 +411,8 @@ function drawTerrainOverlay(coord: Coord): void {
 function drawTerrainEmbankment(coord: Coord): void {
   if (!isWaterSurface(coord)) return;
   const mask = waterSurfaceMask(coord);
-  if (mask === (RIVERBANK_NORTH | RIVERBANK_EAST | RIVERBANK_SOUTH | RIVERBANK_WEST)) return;
   const asset = activeAssetPack.require('terrain.riverbank');
-  drawAssetFrame({ ...asset, source: riverbankSourceFromMask(mask) }, coord);
+  drawAssetFrame({ ...asset, source: riverSurfaceSourceFromMask(mask) }, coord);
 }
 
 function drawOutskirtsTerrain(visibleGrid: GridRect): void {
