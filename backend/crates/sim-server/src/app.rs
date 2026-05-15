@@ -25,6 +25,7 @@ use crate::{
     },
     config::ServerConfig,
     postgres_events::PostgresWorldEventStore,
+    postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
 };
 
@@ -117,11 +118,16 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
     let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
+    let snapshot_store = PostgresChunkSnapshotStore::connect(
+        &config.database_url,
+        SimulationRuntime::default_world_id(),
+    )
+    .await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
     Ok(build_app_with_runtime_and_card_hands(
-        SimulationRuntime::new_with_event_store(Box::new(event_store)),
+        SimulationRuntime::new_with_stores(Box::new(event_store), Box::new(snapshot_store)),
         card_hands,
         auth,
     ))
@@ -325,6 +331,8 @@ mod tests {
         let runtime = runtime.lock().await;
         let snapshot = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .await
+            .unwrap()
             .expect("visible snapshot stored");
         assert_eq!(snapshot.coord.x, 4);
         assert_eq!(snapshot.coord.y, 4);

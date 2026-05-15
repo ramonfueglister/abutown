@@ -500,7 +500,7 @@ git commit -m "feat: add postgres chunk snapshot store"
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/README.md`
 
-- [ ] **Step 1: Add runtime constructor**
+- [x] **Step 1: Add runtime constructor**
 
 Add:
 
@@ -513,13 +513,15 @@ pub fn new_with_stores(
 
 Keep `new_with_event_store()` for tests by delegating to `new_with_stores(event_store, Box::new(InMemoryChunkSnapshotStore::default()))`.
 
-- [ ] **Step 2: Wire config**
+- [x] **Step 2: Wire config**
 
 In `build_app_from_config`, create these from required config:
 
 ```rust
 let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
-let snapshot_store = PostgresChunkSnapshotStore::connect(&config.database_url).await?;
+let snapshot_store =
+    PostgresChunkSnapshotStore::connect(&config.database_url, SimulationRuntime::default_world_id())
+        .await?;
 let card_hands = CardHandStore::postgres(&config.database_url).await?;
 ```
 
@@ -529,7 +531,7 @@ Then:
 SimulationRuntime::new_with_stores(Box::new(event_store), Box::new(snapshot_store))
 ```
 
-- [ ] **Step 3: Document key usage**
+- [x] **Step 3: Document key usage**
 
 Update `backend/README.md`:
 
@@ -538,7 +540,7 @@ Update `backend/README.md`:
 - `SUPABASE_ANON_KEY`: frontend login/client key, not used by Rust persistence.
 - `SUPABASE_SERVICE_ROLE_KEY`: intentionally not used by Rust in this slice.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
