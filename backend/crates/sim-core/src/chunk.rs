@@ -30,6 +30,18 @@ pub enum SnapshotDecodeError {
     Chunk(ChunkError),
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum EventApplyError {
+    #[error("event coord ({event_x},{event_y}) does not match chunk coord ({chunk_x},{chunk_y})")]
+    WrongChunkCoord { event_x: i32, event_y: i32, chunk_x: i32, chunk_y: i32 },
+    #[error("event chunk_version {event_version} is older than current chunk version {chunk_version}")]
+    StaleEvent { event_version: u64, chunk_version: u64 },
+    #[error("event chunk_version {event_version} skips past current chunk version {chunk_version}")]
+    GapEvent { event_version: u64, chunk_version: u64 },
+    #[error("tile index {index} is outside chunk tile count {tile_count}")]
+    IndexOutOfBounds { index: u16, tile_count: u16 },
+}
+
 #[derive(Debug, Clone)]
 pub struct Chunk {
     coord: ChunkCoord,
@@ -123,6 +135,65 @@ impl Chunk {
         }
         chunk.version = snapshot.chunk_version;
         Ok(chunk)
+    }
+
+    pub fn apply_event(
+        &mut self,
+        event: &abutown_protocol::WorldEventDto,
+        event_chunk_version: u64,
+    ) -> Result<(), EventApplyError> {
+        use abutown_protocol::WorldEventDto;
+
+        // Coord check first — applies to all variants and runs even on idempotent re-delivery.
+        match event {
+            WorldEventDto::TileKindSet(payload) => {
+                if payload.coord.x != self.coord.x || payload.coord.y != self.coord.y {
+                    return Err(EventApplyError::WrongChunkCoord {
+                        event_x: payload.coord.x,
+                        event_y: payload.coord.y,
+                        chunk_x: self.coord.x,
+                        chunk_y: self.coord.y,
+                    });
+                }
+            }
+        }
+
+        // Version checks.
+        if event_chunk_version == self.version {
+            return Ok(());
+        }
+        if event_chunk_version < self.version {
+            return Err(EventApplyError::StaleEvent {
+                event_version: event_chunk_version,
+                chunk_version: self.version,
+            });
+        }
+        if event_chunk_version != self.version + 1 {
+            return Err(EventApplyError::GapEvent {
+                event_version: event_chunk_version,
+                chunk_version: self.version,
+            });
+        }
+
+        // Apply mutation.
+        match event {
+            WorldEventDto::TileKindSet(payload) => {
+                let tile_count = self.tile_count();
+                let slot = self.tiles.get_mut(usize::from(payload.local_index)).ok_or(
+                    EventApplyError::IndexOutOfBounds {
+                        index: payload.local_index,
+                        tile_count,
+                    },
+                )?;
+                self.version = event_chunk_version;
+                slot.kind = payload.kind.into();
+                slot.version = self.version;
+                slot.flags.modified = true;
+                self.dirty.insert(payload.local_index);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn set_tile_kind(&mut self, index: u16, kind: TileKind) -> Result<(), ChunkError> {
@@ -236,6 +307,150 @@ mod tests {
 
         let err = Chunk::from_snapshot(&snapshot).unwrap_err();
         assert!(matches!(err, SnapshotDecodeError::NonSquareTileCount { tile_count: 1000 }));
+    }
+
+    #[test]
+    fn chunk_apply_event_advances_version_and_mutates_tile() {
+        use abutown_protocol::{ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto, WorldId};
+
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:1".to_string(),
+            command_id: "command:1".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 1,
+            version: 1,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 7,
+            kind: TileKindDto::Road,
+        });
+
+        chunk.apply_event(&event, 1).unwrap();
+
+        assert_eq!(chunk.version(), 1);
+        assert_eq!(chunk.kind_at(7), Some(TileKind::Road));
+    }
+
+    #[test]
+    fn chunk_apply_event_rejects_event_for_wrong_coord() {
+        use abutown_protocol::{ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto, WorldId};
+
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:1".to_string(),
+            command_id: "command:1".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 1,
+            version: 1,
+            coord: ChunkCoordDto { x: 9, y: 9 },
+            local_index: 7,
+            kind: TileKindDto::Road,
+        });
+
+        let err = chunk.apply_event(&event, 1).unwrap_err();
+        assert!(matches!(err, EventApplyError::WrongChunkCoord { .. }));
+    }
+
+    #[test]
+    fn chunk_apply_event_idempotent_for_same_chunk_version() {
+        use abutown_protocol::{ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto, WorldId};
+
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:1".to_string(),
+            command_id: "command:1".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 1,
+            version: 1,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 7,
+            kind: TileKindDto::Road,
+        });
+
+        chunk.apply_event(&event, 1).unwrap();
+        chunk.apply_event(&event, 1).unwrap();
+
+        assert_eq!(chunk.version(), 1, "re-applying the same chunk_version must not bump version");
+        assert_eq!(chunk.kind_at(7), Some(TileKind::Road));
+    }
+
+    #[test]
+    fn chunk_apply_event_rejects_stale_chunk_version() {
+        use abutown_protocol::{ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto, WorldId};
+
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        let mk_event = |chunk_version: u64| WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: format!("event:{chunk_version}"),
+            command_id: format!("command:{chunk_version}"),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: chunk_version,
+            version: chunk_version,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 0,
+            kind: TileKindDto::Road,
+        });
+
+        chunk.apply_event(&mk_event(1), 1).unwrap();
+        chunk.apply_event(&mk_event(2), 2).unwrap();
+
+        let err = chunk.apply_event(&mk_event(1), 1).unwrap_err();
+        // chunk is now at version 2; replaying at version 1 is stale.
+        assert!(
+            matches!(err, EventApplyError::StaleEvent { event_version: 1, chunk_version: 2 }),
+            "expected StaleEvent {{ event: 1, chunk: 2 }}, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn chunk_apply_event_rejects_gap_in_chunk_version() {
+        use abutown_protocol::{ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto, WorldId};
+
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:5".to_string(),
+            command_id: "command:5".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 5,
+            version: 5,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 3,
+            kind: TileKindDto::Water,
+        });
+
+        let err = chunk.apply_event(&event, 5).unwrap_err();
+        assert!(
+            matches!(err, EventApplyError::GapEvent { event_version: 5, chunk_version: 0 }),
+            "expected GapEvent {{ event: 5, chunk: 0 }}, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn chunk_apply_event_rejects_index_out_of_bounds() {
+        use abutown_protocol::{ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto, WorldId};
+
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:oob".to_string(),
+            command_id: "command:oob".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 1,
+            version: 1,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 9999,
+            kind: TileKindDto::Road,
+        });
+
+        let err = chunk.apply_event(&event, 1).unwrap_err();
+        assert!(
+            matches!(err, EventApplyError::IndexOutOfBounds { index: 9999, tile_count: 1024 }),
+            "expected IndexOutOfBounds {{ index: 9999, tile_count: 1024 }}, got {err:?}"
+        );
     }
 
     #[test]
