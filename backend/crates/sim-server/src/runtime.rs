@@ -9,7 +9,7 @@ use sim_core::{
     events::{InMemoryWorldEventStore, WorldEventStore},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
-    persistence::InMemoryChunkSnapshotStore,
+    persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore},
     scheduler::ChunkActivity,
     tile::TileKind,
 };
@@ -32,7 +32,7 @@ pub struct SimulationRuntime {
     world_id: WorldId,
     registry: ChunkRegistry,
     mobility: MobilityWorld,
-    snapshot_store: InMemoryChunkSnapshotStore,
+    snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
     event_store: Box<dyn WorldEventStore + Send>,
     event_count: usize,
     tick: u64,
@@ -52,6 +52,24 @@ impl std::fmt::Debug for SimulationRuntime {
 
 impl SimulationRuntime {
     pub fn new() -> Self {
+        Self::new_with_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+        )
+    }
+
+    pub fn default_world_id() -> WorldId {
+        WorldId(WORLD_ID.to_string())
+    }
+
+    pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send>) -> Self {
+        Self::new_with_stores(event_store, Box::new(InMemoryChunkSnapshotStore::default()))
+    }
+
+    pub fn new_with_stores(
+        event_store: Box<dyn WorldEventStore + Send>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+    ) -> Self {
         let mut registry = ChunkRegistry::new(CHUNK_SIZE);
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let mut chunk = Chunk::new(coord, CHUNK_SIZE);
@@ -74,21 +92,15 @@ impl SimulationRuntime {
         }
 
         Self {
-            world_id: WorldId(WORLD_ID.to_string()),
+            world_id: Self::default_world_id(),
             registry,
             mobility: MobilityWorld::default(),
-            snapshot_store: InMemoryChunkSnapshotStore::default(),
-            event_store: Box::new(InMemoryWorldEventStore::default()),
+            snapshot_store,
+            event_store,
             event_count: 0,
             tick: 0,
             version: 0,
         }
-    }
-
-    pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send>) -> Self {
-        let mut runtime = Self::new();
-        runtime.event_store = event_store;
-        runtime
     }
 
     pub fn health(&self) -> HealthResponse {
@@ -138,13 +150,29 @@ impl SimulationRuntime {
         ]
     }
 
-    pub fn persist_chunk_snapshots(&mut self) -> usize {
-        self.registry
-            .write_snapshots(&self.world_id, &mut self.snapshot_store)
+    pub async fn persist_chunk_snapshots(&mut self) -> Result<usize, ChunkSnapshotStoreError> {
+        let snapshots = self.registry.collect_snapshots(&self.world_id);
+        let persisted_coords: Vec<ChunkCoord> = snapshots
+            .iter()
+            .map(|snapshot| ChunkCoord {
+                x: snapshot.coord.x,
+                y: snapshot.coord.y,
+            })
+            .collect();
+
+        for snapshot in snapshots {
+            self.snapshot_store.write_snapshot(snapshot).await?;
+        }
+
+        self.registry.mark_snapshots_persisted(&persisted_coords);
+        Ok(persisted_coords.len())
     }
 
-    pub fn stored_chunk_snapshot(&self, coord: ChunkCoord) -> Option<&ChunkSnapshotDto> {
-        self.snapshot_store.read_snapshot(coord)
+    pub async fn stored_chunk_snapshot(
+        &self,
+        coord: ChunkCoord,
+    ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
+        self.snapshot_store.read_snapshot(coord).await
     }
 
     pub fn event_count(&self) -> usize {
@@ -294,6 +322,28 @@ impl Default for SimulationRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use sim_core::persistence::ChunkSnapshotStoreError;
+
+    #[derive(Debug)]
+    struct FailingChunkSnapshotStore;
+
+    #[async_trait]
+    impl ChunkSnapshotStore for FailingChunkSnapshotStore {
+        async fn write_snapshot(
+            &mut self,
+            _snapshot: ChunkSnapshotDto,
+        ) -> Result<(), ChunkSnapshotStoreError> {
+            Err(ChunkSnapshotStoreError::unavailable("database offline"))
+        }
+
+        async fn read_snapshot(
+            &self,
+            _coord: ChunkCoord,
+        ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
+            Ok(None)
+        }
+    }
 
     fn tile_pulse(message: ServerMessageDto) -> TilePulseDeltaDto {
         let ServerMessageDto::TilePulse(delta) = message else {
@@ -360,31 +410,59 @@ mod tests {
         assert_eq!(fourth.coord, ChunkCoordDto { x: 4, y: 4 });
     }
 
-    #[test]
-    fn runtime_persists_loaded_chunk_snapshots_and_clears_dirty_state() {
+    #[tokio::test]
+    async fn runtime_persists_loaded_chunk_snapshots_and_clears_dirty_state() {
         let mut runtime = SimulationRuntime::new();
 
-        assert_eq!(runtime.persist_chunk_snapshots(), 3);
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 3);
 
         let visible = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .await
+            .unwrap()
             .expect("visible snapshot stored");
         assert_eq!(visible.coord, ChunkCoordDto { x: 4, y: 4 });
         assert_eq!(visible.dirty_tiles.len(), 1);
 
         let east = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 5, y: 4 })
+            .await
+            .unwrap()
             .expect("east snapshot stored");
         assert_eq!(east.coord, ChunkCoordDto { x: 5, y: 4 });
         assert_eq!(east.dirty_tiles.len(), 1);
 
-        assert_eq!(runtime.persist_chunk_snapshots(), 3);
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 3);
         assert!(
             runtime
                 .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+                .await
+                .unwrap()
                 .expect("visible snapshot remains stored")
                 .dirty_tiles
                 .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_keeps_dirty_tiles_when_snapshot_store_fails() {
+        let mut runtime = SimulationRuntime::new_with_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(FailingChunkSnapshotStore),
+        );
+        let before = runtime
+            .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .expect("visible chunk loaded");
+
+        let error = runtime.persist_chunk_snapshots().await.unwrap_err();
+
+        assert_eq!(error.to_string(), "database offline");
+        assert_eq!(
+            runtime
+                .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+                .expect("visible chunk remains loaded")
+                .dirty_tiles,
+            before.dirty_tiles
         );
     }
 

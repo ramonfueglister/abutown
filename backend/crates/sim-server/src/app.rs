@@ -23,7 +23,9 @@ use crate::{
         AuthVerifier, CardHandError, CardHandResponse, CardHandStore, SaveCardHandRequest,
         card_definitions,
     },
+    config::ServerConfig,
     postgres_events::PostgresWorldEventStore,
+    postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
 };
 
@@ -96,7 +98,9 @@ impl AppState {
             interval.tick().await;
             loop {
                 interval.tick().await;
-                let _ = persist_snapshots_once(&state).await;
+                if let Err(error) = persist_snapshots_once(&state).await {
+                    tracing::warn!(%error, "failed to persist chunk snapshots");
+                }
             }
         });
     }
@@ -107,21 +111,26 @@ pub fn build_app() -> Router {
 }
 
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
-    if let Ok(database_url) = std::env::var("ABUTOWN_DATABASE_URL") {
-        let event_store = PostgresWorldEventStore::connect(&database_url).await?;
-        let card_hands = CardHandStore::postgres(&database_url).await?;
-        let auth = match std::env::var("SUPABASE_URL") {
-            Ok(url) => AuthVerifier::supabase(&url).await,
-            Err(_) => AuthVerifier::local_bearer_uuid(),
-        };
-        return Ok(build_app_with_runtime_and_card_hands(
-            SimulationRuntime::new_with_event_store(Box::new(event_store)),
-            card_hands,
-            auth,
-        ));
-    }
+    let _ = dotenvy::dotenv();
+    let config = ServerConfig::from_env()?;
+    build_app_from_config(&config).await
+}
 
-    Ok(build_app())
+pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
+    let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
+    let snapshot_store = PostgresChunkSnapshotStore::connect(
+        &config.database_url,
+        SimulationRuntime::default_world_id(),
+    )
+    .await?;
+    let card_hands = CardHandStore::postgres(&config.database_url).await?;
+    let auth = AuthVerifier::supabase(&config.supabase_url).await;
+
+    Ok(build_app_with_runtime_and_card_hands(
+        SimulationRuntime::new_with_stores(Box::new(event_store), Box::new(snapshot_store)),
+        card_hands,
+        auth,
+    ))
 }
 
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
@@ -289,10 +298,12 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     }
 }
 
-async fn persist_snapshots_once(state: &AppState) -> usize {
+async fn persist_snapshots_once(
+    state: &AppState,
+) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
     let runtime = state.runtime();
     let mut runtime = runtime.lock().await;
-    runtime.persist_chunk_snapshots()
+    runtime.persist_chunk_snapshots().await
 }
 
 async fn send_server_message(
@@ -314,12 +325,14 @@ mod tests {
     async fn persist_snapshots_once_writes_runtime_snapshots() {
         let state = AppState::new(SimulationRuntime::new());
 
-        assert_eq!(persist_snapshots_once(&state).await, 3);
+        assert_eq!(persist_snapshots_once(&state).await.unwrap(), 3);
 
         let runtime = state.runtime();
         let runtime = runtime.lock().await;
         let snapshot = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .await
+            .unwrap()
             .expect("visible snapshot stored");
         assert_eq!(snapshot.coord.x, 4);
         assert_eq!(snapshot.coord.y, 4);

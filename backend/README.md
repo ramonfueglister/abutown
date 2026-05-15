@@ -16,6 +16,17 @@ Run the authority server:
 cargo run --manifest-path backend/Cargo.toml -p sim-server
 ```
 
+The server entrypoint loads the repository-root `.env` and requires:
+
+- `DATABASE_URL`: SQLx Postgres/Supabase connection string for `world_events`, `chunk_snapshots`, and `user_card_hands`.
+- `SUPABASE_URL`: Supabase project URL used for JWT/JWKS authentication.
+
+Other root `.env` keys currently have narrower ownership:
+
+- `SUPABASE_ANON_KEY`: frontend login/client key; Rust persistence does not use it.
+- `SUPABASE_SERVICE_ROLE_KEY`: intentionally unused by this Rust slice.
+- `SUPABASE_JWKS_X` and `SUPABASE_JWKS_Y`: local key material present in the env file; Rust auth currently fetches JWKS from `SUPABASE_URL`.
+
 ## Runtime Surface
 
 The server exposes the current backend runtime directly:
@@ -48,9 +59,9 @@ Current boundaries:
 - Commands are unauthenticated local-development inputs.
 - Commands only target loaded chunks.
 - Accepted mutations are appended through the runtime event-store boundary before hot-state application and websocket broadcast.
-- Local development defaults to an in-memory event store.
-- Set `ABUTOWN_DATABASE_URL` to a Postgres/Supabase connection string to use the persistent `world_events` store.
-- Command idempotency, permissions, chunk loading, recovery replay, and durable chunk snapshots remain later slices.
+- The server entrypoint uses `DATABASE_URL` for persistent `world_events`.
+- Direct test/local app builders use explicit in-memory stores.
+- Command idempotency, permissions, chunk loading, and recovery replay remain later slices.
 
 Targeted commands:
 
@@ -97,7 +108,7 @@ Frontend agent mode:
 
 ## Snapshot Loop
 
-The server also runs an in-memory snapshot loop every five seconds. It writes snapshots for all loaded chunks into the current process snapshot store and clears chunk dirty flags after each successful pass. This is the first persistence boundary; Supabase/Postgres adapters remain a later slice.
+The server runs a snapshot loop every five seconds. The configured server entrypoint writes snapshots for all loaded chunks to the Postgres `chunk_snapshots` table and clears chunk dirty flags only after successful writes. Direct test/local app builders use explicit in-memory snapshot stores.
 
 Design rules:
 
