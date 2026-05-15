@@ -22,6 +22,9 @@ describe('vehicle sprites', () => {
     expect(paths.every((path) => path.startsWith('/simutrans-assets/pak128/'))).toBe(true);
     expect(paths.every((path) => path.endsWith('.png'))).toBe(true);
     expect(paths.every((path) => !removedAssetPathPattern.test(path))).toBe(true);
+    const roles = new Set(sprites.map((sprite) => sprite.role));
+    expect(roles.has('vehicle.bus')).toBe(true);
+    expect(roles.has('vehicle.truck')).toBe(true);
   });
 
   it('assigns available vehicle sprites in a stable pseudo-random order', () => {
