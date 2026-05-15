@@ -10,7 +10,7 @@ use axum::{
         Path, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -18,7 +18,14 @@ use sim_core::ids::ChunkCoord;
 use tokio::sync::{Mutex, broadcast};
 use tower_http::cors::CorsLayer;
 
-use crate::{postgres_events::PostgresWorldEventStore, runtime::SimulationRuntime};
+use crate::{
+    card_hand::{
+        AuthVerifier, CardHandError, CardHandResponse, CardHandStore, SaveCardHandRequest,
+        card_definitions,
+    },
+    postgres_events::PostgresWorldEventStore,
+    runtime::SimulationRuntime,
+};
 
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_secs(1);
@@ -28,14 +35,30 @@ const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
 pub struct AppState {
     runtime: Arc<Mutex<SimulationRuntime>>,
     deltas: broadcast::Sender<ServerMessageDto>,
+    card_hands: CardHandStore,
+    auth: AuthVerifier,
 }
 
 impl AppState {
     pub fn new(runtime: SimulationRuntime) -> Self {
+        Self::new_with_card_hands(
+            runtime,
+            CardHandStore::memory(),
+            AuthVerifier::local_bearer_uuid(),
+        )
+    }
+
+    pub fn new_with_card_hands(
+        runtime: SimulationRuntime,
+        card_hands: CardHandStore,
+        auth: AuthVerifier,
+    ) -> Self {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         Self {
             runtime: Arc::new(Mutex::new(runtime)),
             deltas,
+            card_hands,
+            auth,
         }
     }
 
@@ -86,8 +109,15 @@ pub fn build_app() -> Router {
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
     if let Ok(database_url) = std::env::var("ABUTOWN_DATABASE_URL") {
         let event_store = PostgresWorldEventStore::connect(&database_url).await?;
-        return Ok(build_app_with_runtime(
+        let card_hands = CardHandStore::postgres(&database_url).await?;
+        let auth = match std::env::var("SUPABASE_URL") {
+            Ok(url) => AuthVerifier::supabase(&url).await,
+            Err(_) => AuthVerifier::local_bearer_uuid(),
+        };
+        return Ok(build_app_with_runtime_and_card_hands(
             SimulationRuntime::new_with_event_store(Box::new(event_store)),
+            card_hands,
+            auth,
         ));
     }
 
@@ -95,12 +125,26 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 }
 
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
-    let state = AppState::new(runtime);
+    build_app_with_runtime_and_card_hands(
+        runtime,
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    )
+}
+
+pub fn build_app_with_runtime_and_card_hands(
+    runtime: SimulationRuntime,
+    card_hands: CardHandStore,
+    auth: AuthVerifier,
+) -> Router {
+    let state = AppState::new_with_card_hands(runtime, card_hands, auth);
     state.spawn_delta_loop(SIMULATION_TICK_INTERVAL);
     state.spawn_snapshot_loop(SNAPSHOT_INTERVAL);
 
     Router::new()
         .route("/health", get(health))
+        .route("/cards", get(cards))
+        .route("/card-hand", get(card_hand).put(save_card_hand))
         .route("/world", get(world))
         .route("/chunks/{x}/{y}", get(chunk))
         .route("/commands", post(command))
@@ -126,6 +170,57 @@ async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
     let runtime = state.runtime();
     let runtime = runtime.lock().await;
     Json(runtime.mobility_snapshot())
+}
+
+async fn cards() -> Json<Vec<crate::card_hand::CardDefinition>> {
+    Json(card_definitions())
+}
+
+async fn card_hand(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user_id = match state.auth.authenticate(&headers).await {
+        Ok(user_id) => user_id,
+        Err(error) => return card_hand_error(error),
+    };
+    match state.card_hands.get_or_create(user_id).await {
+        Ok(cards) => Json(CardHandResponse {
+            user_id: user_id.to_string(),
+            cards,
+        })
+        .into_response(),
+        Err(error) => card_hand_error(error),
+    }
+}
+
+async fn save_card_hand(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SaveCardHandRequest>,
+) -> Response {
+    let user_id = match state.auth.authenticate(&headers).await {
+        Ok(user_id) => user_id,
+        Err(error) => return card_hand_error(error),
+    };
+    match state.card_hands.save(user_id, request.cards.clone()).await {
+        Ok(()) => Json(CardHandResponse {
+            user_id: user_id.to_string(),
+            cards: request.cards,
+        })
+        .into_response(),
+        Err(error) => card_hand_error(error),
+    }
+}
+
+fn card_hand_error(error: CardHandError) -> Response {
+    let status = match error {
+        CardHandError::MissingAuth | CardHandError::InvalidAuth => StatusCode::UNAUTHORIZED,
+        CardHandError::UnknownCard(_) => StatusCode::UNPROCESSABLE_ENTITY,
+        CardHandError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (
+        status,
+        Json(serde_json::json!({ "error": error.to_string() })),
+    )
+        .into_response()
 }
 
 async fn chunk(
