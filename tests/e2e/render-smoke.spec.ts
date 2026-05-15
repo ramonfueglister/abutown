@@ -21,7 +21,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     id: 'simutrans-pak128',
     tile: { width: 128, height: 64 },
   });
-  expect(state.city.legacyAssetPaths).toEqual([]);
+  expect(state.city.nonPak128AssetPaths).toEqual([]);
   expect(state.city.width).toBe(256);
   expect(state.city.height).toBe(256);
   expect(state.city.roadTiles).toBeGreaterThan(1800);
@@ -92,12 +92,11 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.railStationsOnBuildings).toBe(0);
   expect(state.city.railStationsOnRails).toBe(0);
   expect(state.city.railStationsOnTrees).toBe(0);
-  expect(state.city.diagnostics).toBeUndefined();
-  expect(state.city.legacyDiagnostics).toEqual(expect.any(Object));
-  expect(state.city.legacyDiagnostics.railStationsOnRoad).toBe(0);
-  expect(state.city.legacyDiagnostics.railStationsOnBuildings).toBe(0);
-  expect(state.city.legacyDiagnostics.railStationsOnRails).toBe(0);
-  expect(state.city.legacyDiagnostics.railStationsOnTrees).toBe(0);
+  expect(state.city.diagnostics).toEqual(expect.any(Object));
+  expect(state.city.diagnostics.railStationsOnRoad).toBe(0);
+  expect(state.city.diagnostics.railStationsOnBuildings).toBe(0);
+  expect(state.city.diagnostics.railStationsOnRails).toBe(0);
+  expect(state.city.diagnostics.railStationsOnTrees).toBe(0);
   expect(state.city.camera.mode).toBe('bounded-fixed-map');
   expect(state.city.camera.target).toEqual(expect.objectContaining({
     x: expect.any(Number),
