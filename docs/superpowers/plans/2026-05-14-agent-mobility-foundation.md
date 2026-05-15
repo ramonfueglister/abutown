@@ -4,6 +4,8 @@
 
 **Goal:** Build the first authoritative backend slice where an agent can walk to a stop, board a vehicle, ride as a passenger, alight, and continue walking.
 
+**Status 2026-05-15:** Backend foundation implemented and verified with `cargo test --manifest-path backend/Cargo.toml --workspace`. The current branch exposes `/mobility` and streams `mobility_delta` messages over `/ws`; frontend rendering of mobility is still outside this plan's completed backend scope.
+
 **Architecture:** Keep agent intent/mobility separate from traffic. `sim-core` owns deterministic mobility data and systems; `sim-server` exposes snapshots and deltas. Vehicles are independent simulated objects, and agents refer to vehicles through an explicit `InVehicle` location instead of being moved separately while riding.
 
 **Tech Stack:** Rust 2024, `bevy_ecs` for materialized hot entities, pure Rust structs for dense deterministic mobility state, Axum HTTP/WebSocket DTOs through `abutown-protocol`, TDD with targeted Cargo package tests.

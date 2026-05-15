@@ -4,6 +4,8 @@
 
 **Goal:** Build the first visible browser-to-Rust runtime slice: the existing Zurich canvas scene shows a Rust-owned live chunk overlay and server-driven pulse.
 
+**Status 2026-05-15:** Backend protocol, runtime, HTTP routes, and WebSocket stream are implemented and tested. The frontend bridge files referenced by this original plan (`src/backend/*`, `src/render/backendOverlay.ts`, and related tests) are not present in this branch, so the visible browser overlay portion remains pending.
+
 **Architecture:** Extend the Rust protocol with JSON WebSocket messages, give `sim-server` a small in-memory authoritative runtime, and expose `/ws` for low-frequency tile pulse deltas. Add a frontend backend bridge that fetches snapshot state, consumes WebSocket messages, and passes a render-friendly overlay state to a focused canvas overlay renderer.
 
 **Tech Stack:** Rust 2024, Axum WebSocket, Tokio, `serde` JSON DTOs, Vite, TypeScript, Vitest, Playwright for final visual smoke.

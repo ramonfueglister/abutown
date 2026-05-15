@@ -4,6 +4,8 @@
 
 **Goal:** Add the first durable-world boundary: the Rust runtime periodically writes authoritative chunk snapshots into an in-memory snapshot store and clears dirty chunk state after each successful snapshot pass.
 
+**Status 2026-05-15:** Implemented in `sim-core` and `sim-server`; verified with `cargo test --manifest-path backend/Cargo.toml --workspace`. The checkbox list below is the original execution plan and has not been used as the source of truth for current implementation status.
+
 **Architecture:** Keep hot simulation state in `SimulationRuntime` and `ChunkRegistry`; add a snapshot persistence pass that copies loaded chunk snapshots into `sim_core::persistence::InMemoryChunkSnapshotStore`. The server starts a separate snapshot loop next to the existing broadcast tick loop, so persistence remains outside websocket client handling and does not advance simulation time.
 
 **Tech Stack:** Rust, Tokio, Axum app state, `sim-core::persistence::InMemoryChunkSnapshotStore`, existing `ChunkSnapshotDto` protocol.
