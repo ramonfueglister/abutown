@@ -50,14 +50,12 @@ Add one focused renderer:
 
 ## Data Flow
 
-1. Browser boots the existing local city.
-2. If the URL has `?mobility=1`, `?mobilityBackend=<url>`, or `localStorage["abutown:mobility"]` is `1`, `connectMobilityBackend` fetches `/mobility` from the configured origin.
-3. Snapshot initializes a `MobilityOverlayState`.
-4. The WebSocket receives mixed server messages.
-5. `mobility_delta` messages replace changed agents and vehicles in the read model.
-6. Rendering maps known demo link/stop IDs to stable Zurich-grid diagnostic coordinates and draws compact markers.
+1. Browser boots the existing local city at `/`.
+2. The game projects rendered pedestrians into local agent records by default.
+3. The render loop exposes local pedestrian-agent diagnostics through `render_game_to_text`.
+4. Clicking a pedestrian selects the corresponding local agent and updates the inspector.
 
-If mobility is not enabled, the local city still renders without network requests. If mobility is enabled and the backend is unavailable, the mobility state reports `disconnected`, draws nothing, and schedules reconnect.
+The local pedestrian-agent layer does not require a URL flag, localStorage flag, or backend network request.
 
 ## Error Handling
 
@@ -82,9 +80,9 @@ If mobility is not enabled, the local city still renders without network request
 
 ## Success Criteria
 
-- With only Vite running, the city renders unchanged, makes no mobility network request by default, and reports mobility as disconnected.
-- With `sim-server` running on `127.0.0.1:8080` and mobility enabled through `?mobility=1`, `?mobilityBackend=http://127.0.0.1:8080`, or `localStorage["abutown:mobility"]="1"`, the browser loads the mobility snapshot and receives deltas.
-- `window.render_game_to_text()` includes mobility connection, tick, agent count, vehicle count, stop count, and current seeded agent state.
+- With only Vite running, the city renders local pedestrian agents by default and reports mobility as `local-pedestrians`.
+- The browser loads from `http://127.0.0.1:5175/` without query parameters.
+- `window.render_game_to_text()` includes mobility status, local pedestrian-agent count, selected agent id, and current selected-agent inspector state.
 - Tests and build pass in the mobility worktree.
 
 ## Self-Review
