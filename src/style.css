@@ -62,6 +62,52 @@ body {
   font-size: 12px;
 }
 
+.card-auth-shell {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 28px);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.card-auth-user {
+  overflow: hidden;
+  max-width: min(220px, 45vw);
+  color: #e9f0dd;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-shadow: 0 2px 8px rgb(0 0 0 / 64%);
+  white-space: nowrap;
+}
+
+.card-auth-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgb(205 216 192 / 36%);
+  border-radius: 6px;
+  background: rgb(8 13 10 / 82%);
+  color: #f2f5e8;
+  cursor: pointer;
+  font: 800 12px/1 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 34%);
+}
+
+.card-auth-button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.card-auth-button:not(:disabled):hover {
+  border-color: rgb(224 186 92 / 62%);
+  color: #ffe2a3;
+}
+
 .card-hand-shell {
   position: fixed;
   left: 50%;

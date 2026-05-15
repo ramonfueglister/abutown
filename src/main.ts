@@ -51,7 +51,7 @@ import {
   RIVERBANK_NORTH,
   RIVERBANK_SOUTH,
   RIVERBANK_WEST,
-  riverbankSourceFromMask,
+  riverSurfaceSourceFromMask,
 } from './render/riverbankFrames';
 import { compareDrawableOrder } from './render/drawOrder';
 import {
@@ -426,8 +426,7 @@ function drawScene(offset: Coord): void {
   }
   visibleTerrainTiles.sort((a, b) => iso(a).y - iso(b).y || a.x - b.x);
   for (const coord of visibleTerrainTiles) drawTerrainBase(coord);
-  for (const coord of visibleTerrainTiles) drawTerrainOverlay(coord);
-  for (const coord of visibleTerrainTiles) drawTerrainEmbankment(coord);
+  for (const coord of visibleTerrainTiles) drawRiverSurface(coord);
   drawEdgeConnections(visibleGrid);
 
   const visibleStaticDrawables = staticDrawables.filter((item) => isCoordVisible(item.coord, visibleGrid));
@@ -471,17 +470,11 @@ function drawTerrainBase(coord: Coord): void {
   drawAssetRole('terrain.grass', coord);
 }
 
-function drawTerrainOverlay(coord: Coord): void {
-  const kind = terrain.get(key(coord)) ?? 'grass';
-  if (kind === 'water' || kind === 'riverbank') drawAssetRole('terrain.water', coord);
-}
-
-function drawTerrainEmbankment(coord: Coord): void {
+function drawRiverSurface(coord: Coord): void {
   if (!isWaterSurface(coord)) return;
   const mask = waterSurfaceMask(coord);
-  if (mask === (RIVERBANK_NORTH | RIVERBANK_EAST | RIVERBANK_SOUTH | RIVERBANK_WEST)) return;
   const asset = activeAssetPack.require('terrain.riverbank');
-  drawAssetFrame({ ...asset, source: riverbankSourceFromMask(mask) }, coord);
+  drawAssetFrame({ ...asset, source: riverSurfaceSourceFromMask(mask) }, coord);
 }
 
 function drawOutskirtsTerrain(visibleGrid: GridRect): void {

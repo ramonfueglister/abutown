@@ -14,6 +14,7 @@
     "test:e2e": "npm run build && playwright test"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
     "@vitejs/plugin-basic-ssl": "^2.1.0",
     "vite": "^8.0.12"
   },

@@ -1,3 +1,4 @@
+import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import {
   createCardHandState,
   isCardDefinitionList,
@@ -10,15 +11,21 @@ import {
 } from './cardHandState';
 import { resolveBackendBaseUrl } from '../backend/backendGate';
 
-const LOCAL_USER_ID = '00000000-0000-0000-0000-000000000001';
-
 export type CardHandViewOptions = {
   baseUrl?: string;
-  token?: string;
   fetchImpl?: typeof fetch;
+  supabaseClient?: SupabaseClient;
 };
 
 export function mountCardHandView(options: CardHandViewOptions = {}): void {
+  const authRoot = document.createElement('div');
+  authRoot.className = 'card-auth-shell';
+  authRoot.innerHTML = `
+    <span class="card-auth-user" data-card-auth-user></span>
+    <button class="card-auth-button" type="button" data-card-auth-button>Login</button>
+  `;
+  document.body.appendChild(authRoot);
+
   const root = document.createElement('section');
   root.className = 'card-hand-shell';
   root.setAttribute('aria-label', 'Card hand');
@@ -30,32 +37,68 @@ export function mountCardHandView(options: CardHandViewOptions = {}): void {
 
   const handEl = root.querySelector<HTMLElement>('[data-card-hand]');
   const statusEl = root.querySelector<HTMLElement>('[data-card-hand-status]');
-  if (!handEl || !statusEl) return;
+  const authButton = authRoot.querySelector<HTMLButtonElement>('[data-card-auth-button]');
+  const authUser = authRoot.querySelector<HTMLElement>('[data-card-auth-user]');
+  if (!handEl || !statusEl || !authButton || !authUser) return;
+  const hand = handEl;
+  const status = statusEl;
+  const button = authButton;
+  const user = authUser;
 
   let state = createCardHandState();
-  renderCardHand(handEl, statusEl, state);
+  let activeSession: Session | null = null;
+  const supabase = options.supabaseClient ?? createConfiguredSupabaseClient();
+  renderCardHand(hand, status, state);
 
-  void loadPersistedHand(options)
-    .then((cards) => {
+  if (!supabase) {
+    button.disabled = true;
+    button.textContent = 'Login unavailable';
+    state = { status: 'error', cards: [], error: 'Supabase env missing' };
+    renderCardHand(hand, status, state);
+    return;
+  }
+
+  button.addEventListener('click', () => {
+    void handleAuthClick(supabase, activeSession);
+  });
+
+  void supabase.auth.getSession().then(({ data }) => {
+    void applySession(data.session);
+  });
+  supabase.auth.onAuthStateChange((_event, session) => {
+    void applySession(session);
+  });
+
+  async function applySession(session: Session | null): Promise<void> {
+    activeSession = session;
+    renderAuth(button, user, session);
+    if (!session?.access_token) {
+      state = { status: 'signed_out', cards: [], error: null };
+      renderCardHand(hand, status, state);
+      return;
+    }
+
+    state = createCardHandState();
+    renderCardHand(hand, status, state);
+    try {
+      const cards = await loadPersistedHand(session.access_token, options);
       state = { status: 'ready', cards, error: null };
-      renderCardHand(handEl, statusEl, state);
-    })
-    .catch((error) => {
+    } catch (error) {
       state = {
         status: 'error',
         cards: [],
         error: error instanceof Error ? error.message : String(error),
       };
-      renderCardHand(handEl, statusEl, state);
-    });
+    }
+    renderCardHand(hand, status, state);
+  }
 }
 
-async function loadPersistedHand(options: CardHandViewOptions): Promise<VisibleHandCard[]> {
+async function loadPersistedHand(token: string, options: CardHandViewOptions): Promise<VisibleHandCard[]> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   if (!fetchImpl) throw new Error('Fetch unavailable');
 
   const baseUrl = options.baseUrl ?? cardHandBaseUrl();
-  const token = options.token ?? localCardHandToken();
   const headers = { authorization: `Bearer ${token}` };
   const [definitionsResponse, handResponse] = await Promise.all([
     fetchImpl(new URL('/cards', baseUrl), { headers }),
@@ -74,10 +117,17 @@ async function loadPersistedHand(options: CardHandViewOptions): Promise<VisibleH
 }
 
 function renderCardHand(handEl: HTMLElement, statusEl: HTMLElement, state: CardHandState): void {
-  statusEl.textContent = state.status === 'ready' ? 'Hand synced' : state.status === 'error' ? `Hand error: ${state.error ?? 'backend unavailable'}` : 'Loading hand';
+  statusEl.textContent = statusText(state);
   statusEl.dataset.status = state.status;
   statusEl.title = state.error ?? '';
   handEl.replaceChildren(...state.cards.map(renderCard));
+}
+
+function statusText(state: CardHandState): string {
+  if (state.status === 'ready') return 'Hand synced';
+  if (state.status === 'signed_out') return 'Login required';
+  if (state.status === 'error') return `Hand error: ${state.error ?? 'backend unavailable'}`;
+  return 'Loading hand';
 }
 
 function renderCard(card: VisibleHandCard): HTMLElement {
@@ -106,11 +156,41 @@ export function resolveCardHandBaseUrl(envUrl?: unknown): string {
   return resolveBackendBaseUrl(envUrl);
 }
 
-function localCardHandToken(): string {
-  const stored = globalThis.localStorage?.getItem('abutown.card_hand_user_id');
-  if (stored) return stored;
-  globalThis.localStorage?.setItem('abutown.card_hand_user_id', LOCAL_USER_ID);
-  return LOCAL_USER_ID;
+function createConfiguredSupabaseClient(): SupabaseClient | null {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (typeof url !== 'string' || url.length === 0) return null;
+  if (typeof anonKey !== 'string' || anonKey.length === 0) return null;
+  return createClient(url, anonKey);
+}
+
+async function handleAuthClick(supabase: SupabaseClient, session: Session | null): Promise<void> {
+  if (session) {
+    await supabase.auth.signOut();
+    return;
+  }
+
+  const email = globalThis.prompt('Email for login link');
+  if (!email) return;
+  await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: globalThis.location.href,
+    },
+  });
+}
+
+function renderAuth(button: HTMLButtonElement, userEl: HTMLElement, session: Session | null): void {
+  if (session) {
+    button.disabled = false;
+    button.textContent = 'Logout';
+    userEl.textContent = session.user.email ?? 'Logged in';
+    return;
+  }
+
+  button.disabled = false;
+  button.textContent = 'Login';
+  userEl.textContent = '';
 }
 
 function escapeHtml(value: unknown): string {

@@ -22,7 +22,7 @@ export type VisibleHandCard = CardDefinition & {
 };
 
 export type CardHandState = {
-  status: 'loading' | 'ready' | 'error';
+  status: 'signed_out' | 'loading' | 'ready' | 'error';
   cards: VisibleHandCard[];
   error: string | null;
 };

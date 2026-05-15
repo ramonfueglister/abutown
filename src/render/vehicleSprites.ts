@@ -1,31 +1,13 @@
-import { pak128AssetPack } from '../assets/pak128Catalog';
-import type { AssetRole } from '../assets/assetPack';
+import { PAK128_ROAD_VEHICLES } from './pak128RoadVehicleManifest';
 
 export type ScreenPoint = { x: number; y: number };
-export type VehicleSheetName =
-  | 'bus'
-  | 'truck'
-  | 'delivery-van'
-  | 'cooling-truck'
-  | 'tanker'
-  | 'concrete-mixer'
-  | 'bulk-truck'
-  | 'car-transporter';
+export type VehicleSheetName = string;
 export type SimutransVehicleDirection = 'W' | 'NW' | 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW';
 
 export type VehicleSprite = {
   sheet: VehicleSheetName;
-  role: Extract<
-    AssetRole,
-    | 'vehicle.bus'
-    | 'vehicle.truck'
-    | 'vehicle.delivery.van'
-    | 'vehicle.cooling.truck'
-    | 'vehicle.tanker'
-    | 'vehicle.concrete.mixer'
-    | 'vehicle.bulk.truck'
-    | 'vehicle.car.transporter'
-  >;
+  name: string;
+  datPath: string;
   path: string;
   row: number;
   scale: number;
@@ -51,22 +33,15 @@ const DIRECTION_COLUMNS: Record<SimutransVehicleDirection, number> = {
   SW: 7,
 };
 
-const ROAD_VEHICLE_ROLES: { sheet: VehicleSheetName; role: VehicleSprite['role'] }[] = [
-  { sheet: 'bus', role: 'vehicle.bus' },
-  { sheet: 'truck', role: 'vehicle.truck' },
-  { sheet: 'delivery-van', role: 'vehicle.delivery.van' },
-  { sheet: 'cooling-truck', role: 'vehicle.cooling.truck' },
-  { sheet: 'tanker', role: 'vehicle.tanker' },
-  { sheet: 'concrete-mixer', role: 'vehicle.concrete.mixer' },
-  { sheet: 'bulk-truck', role: 'vehicle.bulk.truck' },
-  { sheet: 'car-transporter', role: 'vehicle.car.transporter' },
-];
-
 export function candidateVehicleSprites(): VehicleSprite[] {
-  return ROAD_VEHICLE_ROLES.map(({ sheet, role }) => {
-    const asset = pak128AssetPack.require(role);
-    return { sheet, role, path: asset.path, row: asset.source.y / TILE_SIZE, scale: asset.scale };
-  });
+  return PAK128_ROAD_VEHICLES.map((vehicle) => ({
+    sheet: vehicle.id,
+    name: vehicle.name,
+    datPath: vehicle.datPath,
+    path: vehicle.path,
+    row: vehicle.row,
+    scale: vehicle.scale,
+  }));
 }
 
 export function vehicleFrameRect(sprite: VehicleSprite, direction: SimutransVehicleDirection): VehicleFrameRect {
