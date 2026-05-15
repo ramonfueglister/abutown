@@ -70,10 +70,72 @@ pub struct ChunkSnapshotDto {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientCommandDto {
+    SetTileKind(SetTileKindCommandDto),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetTileKindCommandDto {
+    pub protocol_version: u16,
+    pub world_id: WorldId,
+    pub command_id: String,
+    pub coord: ChunkCoordDto,
+    pub local_index: u16,
+    pub kind: TileKindDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CommandResponseDto {
+    Accepted(CommandAcceptedDto),
+    Rejected(CommandRejectedDto),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommandAcceptedDto {
+    pub protocol_version: u16,
+    pub world_id: WorldId,
+    pub command_id: String,
+    pub event: WorldEventDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommandRejectedDto {
+    pub protocol_version: u16,
+    pub world_id: Option<WorldId>,
+    pub command_id: Option<String>,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorldEventDto {
+    TileKindSet(TileKindSetEventDto),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TileKindSetEventDto {
+    pub protocol_version: u16,
+    pub event_id: String,
+    pub command_id: String,
+    pub world_id: WorldId,
+    pub tick: u64,
+    pub version: u64,
+    pub coord: ChunkCoordDto,
+    pub local_index: u16,
+    pub kind: TileKindDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
     MobilityDelta(MobilityDeltaDto),
+    WorldEvent {
+        event: WorldEventDto,
+    },
     Error(ServerErrorDto),
 }
 
@@ -229,6 +291,95 @@ mod tests {
             json,
             r#"{"type":"tile_pulse","protocol_version":1,"world_id":"abutown-main","tick":7,"version":11,"coord":{"x":0,"y":0},"local_index":231}"#
         );
+    }
+
+    #[test]
+    fn client_set_tile_kind_command_serializes_with_type_tag() {
+        let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            command_id: "command:test:1".to_string(),
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 11,
+            kind: TileKindDto::Water,
+        });
+
+        let json = serde_json::to_string(&command).expect("command serializes");
+
+        assert_eq!(
+            json,
+            r#"{"type":"set_tile_kind","protocol_version":1,"world_id":"abutown-main","command_id":"command:test:1","coord":{"x":4,"y":4},"local_index":11,"kind":"water"}"#
+        );
+    }
+
+    #[test]
+    fn accepted_command_response_serializes_event() {
+        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:1".to_string(),
+            command_id: "command:test:1".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 0,
+            version: 1,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 11,
+            kind: TileKindDto::Water,
+        });
+        let response = CommandResponseDto::Accepted(CommandAcceptedDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            command_id: "command:test:1".to_string(),
+            event,
+        });
+
+        let json = serde_json::to_value(&response).expect("accepted response serializes");
+
+        assert_eq!(json["status"], "accepted");
+        assert_eq!(json["event"]["type"], "tile_kind_set");
+        assert_eq!(json["event"]["event_id"], "event:1");
+        assert_eq!(json["event"]["kind"], "water");
+    }
+
+    #[test]
+    fn rejected_command_response_serializes_reason() {
+        let response = CommandResponseDto::Rejected(CommandRejectedDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: Some(WorldId("abutown-main".to_string())),
+            command_id: Some("command:test:2".to_string()),
+            code: "chunk_not_loaded".to_string(),
+            message: "chunk 9:9 is not loaded".to_string(),
+        });
+
+        let json = serde_json::to_value(&response).expect("rejected response serializes");
+
+        assert_eq!(json["status"], "rejected");
+        assert_eq!(json["world_id"], "abutown-main");
+        assert_eq!(json["command_id"], "command:test:2");
+        assert_eq!(json["code"], "chunk_not_loaded");
+    }
+
+    #[test]
+    fn websocket_world_event_serializes_with_outer_type_tag() {
+        let message = ServerMessageDto::WorldEvent {
+            event: WorldEventDto::TileKindSet(TileKindSetEventDto {
+                protocol_version: PROTOCOL_VERSION,
+                event_id: "event:2".to_string(),
+                command_id: "command:test:3".to_string(),
+                world_id: WorldId("abutown-main".to_string()),
+                tick: 4,
+                version: 8,
+                coord: ChunkCoordDto { x: 5, y: 4 },
+                local_index: 23,
+                kind: TileKindDto::Road,
+            }),
+        };
+
+        let json = serde_json::to_value(&message).expect("world event message serializes");
+
+        assert_eq!(json["type"], "world_event");
+        assert_eq!(json["event"]["type"], "tile_kind_set");
+        assert_eq!(json["event"]["version"], 8);
+        assert_eq!(json["event"]["coord"]["x"], 5);
     }
 
     #[test]
