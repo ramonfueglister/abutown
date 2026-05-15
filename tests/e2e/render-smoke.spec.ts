@@ -43,11 +43,27 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadRailOverlap).toBe(0);
   expect(state.city.railCrossings).toBeGreaterThanOrEqual(1);
   expect(state.city.railStations).toBe(0);
+  expect(state.city.backend).toEqual(expect.objectContaining({
+    required: true,
+    baseUrl: 'http://127.0.0.1:8080',
+    status: expect.objectContaining({
+      service: 'abutown-sim',
+      world_id: 'abutown-main',
+      ok: true,
+      protocol_version: 1,
+    }),
+  }));
   expect(state.city.mobility).toEqual(expect.objectContaining({
-    status: 'local-mobility',
-    agents: state.city.pedestrians,
-    vehicles: state.city.cars,
-    stops: 0,
+    source: 'backend',
+    status: 'connected',
+    tick: expect.any(Number),
+    agents: expect.any(Number),
+    vehicles: expect.any(Number),
+    stops: expect.any(Number),
+    invalidMessages: 0,
+    lastError: null,
+    localAgents: state.city.pedestrians,
+    localVehicles: state.city.cars,
   }));
   expect(state.city.localAgents.count).toBe(state.city.pedestrians);
   expect(state.city.localAgents.selectedId).toBeNull();

@@ -19,6 +19,49 @@ body {
   cursor: grabbing;
 }
 
+.backend-required-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 40;
+  width: min(520px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid rgb(224 186 92 / 44%);
+  border-radius: 8px;
+  background: rgb(8 13 10 / 92%);
+  color: #e9f0dd;
+  font: 500 14px/1.4 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 18px 42px rgb(0 0 0 / 48%);
+}
+
+.backend-required-panel h1 {
+  margin: 0 0 8px;
+  color: #ffe2a3;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.backend-required-panel p {
+  margin: 0 0 12px;
+}
+
+.backend-required-panel pre {
+  overflow: auto;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid rgb(205 216 192 / 18%);
+  background: rgb(5 7 5 / 72%);
+  color: #f7f1dd;
+  font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.backend-required-panel small {
+  display: block;
+  color: #b8c4ad;
+  font-size: 12px;
+}
+
 .card-hand-shell {
   position: fixed;
   left: 50%;

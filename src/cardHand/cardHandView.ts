@@ -8,9 +8,9 @@ import {
   type HandCard,
   type VisibleHandCard,
 } from './cardHandState';
+import { resolveBackendBaseUrl } from '../backend/backendGate';
 
 const LOCAL_USER_ID = '00000000-0000-0000-0000-000000000001';
-const DEFAULT_CARD_HAND_BACKEND_URL = 'http://127.0.0.1:8080';
 
 export type CardHandViewOptions = {
   baseUrl?: string;
@@ -103,7 +103,7 @@ function cardHandBaseUrl(): string {
 }
 
 export function resolveCardHandBaseUrl(envUrl?: unknown): string {
-  return typeof envUrl === 'string' && envUrl.length > 0 ? envUrl : DEFAULT_CARD_HAND_BACKEND_URL;
+  return resolveBackendBaseUrl(envUrl);
 }
 
 function localCardHandToken(): string {

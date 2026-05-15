@@ -1,5 +1,8 @@
 import './style.css';
 import { pak128AssetPack } from './assets/pak128Catalog';
+import { backendErrorMessage, requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
+import { connectMobilityBackend, requireMobilitySnapshot, type MobilityBackendBridge } from './backend/mobilityClient';
+import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
 import { mountCardHandView } from './cardHand/cardHandView';
 import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
@@ -180,6 +183,7 @@ const WEST = 8;
 const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
 
+const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
 const zurichWorld = buildZurichWorld({ seed: 1848 });
 const zurichTransport = buildZurichTransport(zurichWorld);
 const zurichPlacement = buildZurichPlacement(zurichWorld, zurichTransport);
@@ -248,9 +252,30 @@ let pedestrianCorridorCount = 0;
 let selectedAgentId: string | null = null;
 let selectedVehicleId: string | null = null;
 let previousTime = performance.now();
+let backendStatus: BackendHealthDto | null = null;
+let mobilityState: MobilityOverlayState = createMobilityOverlayState();
+let mobilityBackendBridge: MobilityBackendBridge | null = null;
 
-mountCardHandView();
-void boot();
+void startRuntime();
+
+async function startRuntime(): Promise<void> {
+  try {
+    backendStatus = await requireBackend({ baseUrl: backendBaseUrl });
+    mobilityState = await requireMobilitySnapshot({ baseUrl: backendBaseUrl });
+    mountCardHandView({ baseUrl: backendBaseUrl });
+    await boot();
+    mobilityBackendBridge = connectMobilityBackend({
+      baseUrl: backendBaseUrl,
+      initialState: mobilityState,
+      onState: (state) => {
+        mobilityState = state;
+      },
+    });
+    window.addEventListener('beforeunload', () => mobilityBackendBridge?.stop(), { once: true });
+  } catch (error) {
+    renderBackendRequired(error);
+  }
+}
 
 async function boot(): Promise<void> {
   const imageEntries = [
@@ -267,6 +292,40 @@ async function boot(): Promise<void> {
   attachCamera();
   canvas.dataset.ready = 'true';
   requestAnimationFrame(frame);
+}
+
+function renderBackendRequired(error: unknown): void {
+  const message = backendErrorMessage(error);
+  canvas.dataset.ready = 'false';
+  canvas.dataset.backendRequired = 'true';
+  ctx.save();
+  ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+  ctx.fillStyle = '#050705';
+  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+  ctx.restore();
+
+  document.querySelector<HTMLElement>('[data-backend-required]')?.remove();
+  const panel = document.createElement('section');
+  panel.className = 'backend-required-panel';
+  panel.dataset.backendRequired = 'true';
+  panel.innerHTML = `
+    <h1>Backend required</h1>
+    <p>Start Abutown backend at ${escapeHtml(backendBaseUrl)} and reload.</p>
+    <pre>cargo run --manifest-path backend/Cargo.toml -p sim-server</pre>
+    <small>${escapeHtml(message)}</small>
+  `;
+  document.body.appendChild(panel);
+  console.error(`Abutown backend required: ${message}`);
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char] ?? char);
 }
 
 function resize(): void {
@@ -1688,6 +1747,7 @@ declare global {
 window.render_game_to_text = () => {
   const diagnostics = cityDiagnostics();
   const detailCounts = detailCountsByCategory();
+  const backendMobility = mobilityDiagnostics(mobilityState);
   const agents = localPedestrianAgents();
   const serializedAgents = agents.map(serializeLocalAgent);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
@@ -1729,11 +1789,22 @@ window.render_game_to_text = () => {
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
       vehicleSprites: vehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
+      backend: {
+        required: true,
+        baseUrl: backendBaseUrl,
+        status: backendStatus,
+      },
       mobility: {
-        status: 'local-mobility',
-        agents: agents.length,
-        vehicles: localVehicles.length,
-        stops: 0,
+        source: 'backend',
+        status: backendMobility.status,
+        tick: backendMobility.tick,
+        agents: backendMobility.agents,
+        vehicles: backendMobility.vehicles,
+        stops: backendMobility.stops,
+        invalidMessages: backendMobility.invalidMessages,
+        lastError: backendMobility.lastError,
+        localAgents: agents.length,
+        localVehicles: localVehicles.length,
       },
       localAgents: {
         count: agents.length,
