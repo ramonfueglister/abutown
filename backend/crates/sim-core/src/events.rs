@@ -49,8 +49,6 @@ impl WorldEventStoreError {
 #[async_trait]
 pub trait WorldEventStore: std::fmt::Debug + Send {
     async fn append(&mut self, event: WorldEventDto) -> Result<(), WorldEventStoreError>;
-    fn event_count(&self) -> usize;
-    fn events(&self) -> &[WorldEventDto];
 }
 
 #[derive(Debug, Default)]
@@ -58,19 +56,25 @@ pub struct InMemoryWorldEventStore {
     events: Vec<WorldEventDto>,
 }
 
-#[async_trait]
-impl WorldEventStore for InMemoryWorldEventStore {
-    async fn append(&mut self, event: WorldEventDto) -> Result<(), WorldEventStoreError> {
+impl InMemoryWorldEventStore {
+    pub fn append(&mut self, event: WorldEventDto) {
         self.events.push(event);
-        Ok(())
     }
 
-    fn event_count(&self) -> usize {
+    pub fn event_count(&self) -> usize {
         self.events.len()
     }
 
-    fn events(&self) -> &[WorldEventDto] {
+    pub fn events(&self) -> &[WorldEventDto] {
         &self.events
+    }
+}
+
+#[async_trait]
+impl WorldEventStore for InMemoryWorldEventStore {
+    async fn append(&mut self, event: WorldEventDto) -> Result<(), WorldEventStoreError> {
+        InMemoryWorldEventStore::append(self, event);
+        Ok(())
     }
 }
 
@@ -85,20 +89,16 @@ impl FailingWorldEventStore {
             message: message.into(),
         }
     }
+
+    pub fn event_count(&self) -> usize {
+        0
+    }
 }
 
 #[async_trait]
 impl WorldEventStore for FailingWorldEventStore {
     async fn append(&mut self, _event: WorldEventDto) -> Result<(), WorldEventStoreError> {
         Err(WorldEventStoreError::unavailable(self.message.clone()))
-    }
-
-    fn event_count(&self) -> usize {
-        0
-    }
-
-    fn events(&self) -> &[WorldEventDto] {
-        &[]
     }
 }
 
@@ -127,8 +127,12 @@ mod tests {
     async fn event_store_appends_events_in_order() {
         let mut store = InMemoryWorldEventStore::default();
 
-        store.append(tile_event("event:1", 1)).await.unwrap();
-        store.append(tile_event("event:2", 2)).await.unwrap();
+        WorldEventStore::append(&mut store, tile_event("event:1", 1))
+            .await
+            .unwrap();
+        WorldEventStore::append(&mut store, tile_event("event:2", 2))
+            .await
+            .unwrap();
 
         assert_eq!(store.event_count(), 2);
         assert_eq!(store.events()[0], tile_event("event:1", 1));
@@ -139,7 +143,9 @@ mod tests {
     async fn failing_event_store_returns_typed_error_without_appending() {
         let mut store = FailingWorldEventStore::new("database offline");
 
-        let error = store.append(tile_event("event:1", 1)).await.unwrap_err();
+        let error = WorldEventStore::append(&mut store, tile_event("event:1", 1))
+            .await
+            .unwrap_err();
 
         assert_eq!(error.code(), "event_store_unavailable");
         assert!(error.to_string().contains("database offline"));
