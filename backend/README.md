@@ -58,6 +58,10 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server mobility_snapshot_is
 cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobility_deltas_after_hello
 ```
 
+## Snapshot Loop
+
+The server also runs an in-memory snapshot loop every five seconds. It writes snapshots for all loaded chunks into the current process snapshot store and clears chunk dirty flags after each successful pass. This is the first persistence boundary; Supabase/Postgres adapters remain a later slice.
+
 Design rules:
 
 - Rust owns hot simulation state.
