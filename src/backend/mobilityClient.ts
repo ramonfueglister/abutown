@@ -1,4 +1,5 @@
-import { isMobilitySnapshotDto, parseServerMessage } from './mobilityProtocol';
+import { resolveBackendBaseUrl } from './backendGate';
+import { isMobilitySnapshotDto, parseServerMessage, type MobilitySnapshotDto } from './mobilityProtocol';
 import {
   applyMobilitySnapshot,
   applyServerMessage,
@@ -20,24 +21,44 @@ export type MobilityBackendBridgeOptions = {
   fetchImpl?: typeof fetch;
   WebSocketImpl?: typeof WebSocket;
   onState?: (state: MobilityOverlayState) => void;
+  initialState?: MobilityOverlayState;
   now?: () => number;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
 };
 
-const DEFAULT_BASE_URL = 'http://127.0.0.1:5175';
+export type MobilitySnapshotOptions = {
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+};
+
 const DEFAULT_RECONNECT_DELAY_MS = 2500;
 
+export function resolveMobilityBackendBaseUrl(envUrl?: unknown): string {
+  return resolveBackendBaseUrl(envUrl);
+}
+
+export async function requireMobilitySnapshot(options: MobilitySnapshotOptions = {}): Promise<MobilityOverlayState> {
+  const baseUrl = options.baseUrl ?? resolveMobilityBackendBaseUrl();
+  const fetchImpl = resolveFetch(options);
+  if (!fetchImpl) throw new Error('Mobility fetch transport unavailable');
+
+  const now = options.now ?? Date.now;
+  const payload = await requestMobilitySnapshot(baseUrl, fetchImpl);
+  return applyMobilitySnapshot(markMobilityConnecting(createMobilityOverlayState(), now()), payload, now());
+}
+
 export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {}): MobilityBackendBridge {
-  const baseUrl = options.baseUrl ?? globalThis.location?.origin ?? DEFAULT_BASE_URL;
+  const baseUrl = options.baseUrl ?? resolveMobilityBackendBaseUrl();
   const reconnectDelayMs = Math.max(500, options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS);
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch?.bind(globalThis);
+  const fetchImpl = resolveFetch(options);
   const WebSocketImpl = options.WebSocketImpl ?? globalThis.WebSocket;
   const now = options.now ?? Date.now;
   const setTimeoutImpl = options.setTimeoutImpl ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutImpl = options.clearTimeoutImpl ?? globalThis.clearTimeout.bind(globalThis);
 
-  let currentState = markMobilityConnecting(createMobilityOverlayState(), now());
+  let currentState = options.initialState ?? markMobilityConnecting(createMobilityOverlayState(), now());
   let stopped = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,10 +91,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
     }
 
     try {
-      const response = await fetchImpl(new URL('/mobility', baseUrl).toString());
-      if (!response.ok) throw new Error(`Mobility snapshot HTTP ${response.status}`);
-      const payload: unknown = await response.json();
-      if (!isMobilitySnapshotDto(payload)) throw new Error('Invalid mobility snapshot payload');
+      const payload = await requestMobilitySnapshot(baseUrl, fetchImpl);
       if (stopped) return;
       currentState = applyMobilitySnapshot(currentState, payload, now());
       notify();
@@ -142,6 +160,23 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
   function notify(): void {
     options.onState?.(currentState);
   }
+}
+
+async function requestMobilitySnapshot(baseUrl: string, fetchImpl: typeof fetch): Promise<MobilitySnapshotDto> {
+  const response = await fetchImpl(new URL('/mobility', baseUrl).toString());
+  if (!response.ok) throw new Error(`Mobility snapshot HTTP ${response.status}`);
+
+  const payload: unknown = await response.json();
+  if (!isMobilitySnapshotDto(payload)) throw new Error('Invalid mobility snapshot payload');
+  return payload;
+}
+
+function resolveFetch(options: { fetchImpl?: typeof fetch }): typeof fetch | undefined {
+  return hasOption(options, 'fetchImpl') ? options.fetchImpl : globalThis.fetch?.bind(globalThis);
+}
+
+function hasOption<T extends object, K extends PropertyKey>(value: T, key: K): value is T & Record<K, unknown> {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function websocketUrl(baseUrl: string, path: string): string {
