@@ -432,9 +432,11 @@ mod tests {
         assert_eq!(east.coord, ChunkCoordDto { x: 5, y: 4 });
         assert_eq!(east.tiles.len(), 1);
 
-        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 3);
-        // Full-state snapshots still carry every non-default tile after
-        // clear_dirty() so a single row can rebuild the chunk on recovery.
+        // After the first persist with no further events and well within the
+        // 30s snapshot ceiling, the registry must skip every chunk.
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 0);
+
+        // Previously-stored rows remain intact in the snapshot store.
         assert_eq!(
             runtime
                 .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
@@ -444,6 +446,34 @@ mod tests {
                 .tiles
                 .len(),
             1
+        );
+
+        // A new event on one chunk re-arms only that chunk for the next
+        // persist.
+        runtime
+            .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
+                abutown_protocol::SetTileKindCommandDto {
+                    protocol_version: abutown_protocol::PROTOCOL_VERSION,
+                    world_id: abutown_protocol::WorldId("abutown-main".to_string()),
+                    command_id: "command:persist-test:1".to_string(),
+                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    local_index: 11,
+                    kind: abutown_protocol::TileKindDto::Water,
+                },
+            ))
+            .await
+            .expect("command should apply");
+
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 1);
+        assert_eq!(
+            runtime
+                .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+                .await
+                .unwrap()
+                .expect("visible snapshot reflects new event")
+                .tiles
+                .len(),
+            2
         );
     }
 
