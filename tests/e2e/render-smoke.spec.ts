@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+type ScreenEntity = { id: string; screen: { x: number; y: number } };
+
 test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   await page.setViewportSize({ width: 409, height: 519 });
   const consoleErrors: string[] = [];
@@ -98,13 +100,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
       expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
     ]),
   }));
-  const clickableVehicle = selectedState.city.localVehicles.vehicles.find(
-    (vehicle: { screen: { x: number; y: number } }) =>
-      vehicle.screen.x > 16 &&
-      vehicle.screen.x < 393 &&
-      vehicle.screen.y > 16 &&
-      vehicle.screen.y < 503,
-  );
+  const clickableVehicle = isolatedVisibleEntity(selectedState.city.localVehicles.vehicles, { width: 409, height: 519 });
   expect(clickableVehicle).toBeTruthy();
   await page.mouse.click(clickableVehicle.screen.x, clickableVehicle.screen.y);
   const vehicleSelectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
@@ -153,3 +149,28 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(nearBlackRatio).toBeLessThan(0.05);
   expect(consoleErrors).toEqual([]);
 });
+
+function isolatedVisibleEntity<T extends ScreenEntity>(
+  entities: T[],
+  viewport: { width: number; height: number },
+): T | undefined {
+  return entities
+    .filter((entity) => (
+      entity.screen.x > 16 &&
+      entity.screen.x < viewport.width - 16 &&
+      entity.screen.y > 16 &&
+      entity.screen.y < viewport.height - 16
+    ))
+    .map((entity) => ({ entity, nearestNeighbor: nearestNeighborDistance(entity, entities) }))
+    .sort((a, b) => b.nearestNeighbor - a.nearestNeighbor)
+    .find(({ nearestNeighbor }) => nearestNeighbor > 32)?.entity;
+}
+
+function nearestNeighborDistance(entity: ScreenEntity, entities: ScreenEntity[]): number {
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const other of entities) {
+    if (other.id === entity.id) continue;
+    nearest = Math.min(nearest, Math.hypot(entity.screen.x - other.screen.x, entity.screen.y - other.screen.y));
+  }
+  return nearest;
+}
