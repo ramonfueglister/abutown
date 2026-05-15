@@ -2170,6 +2170,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "dotenvy",
  "futures-util",
  "http-body-util",
  "jsonwebtoken",

@@ -32,14 +32,14 @@ SUPABASE_SERVICE_ROLE_KEY
 SUPABASE_URL
 ```
 
-Important mismatch: current backend code reads `ABUTOWN_DATABASE_URL`, while the root `.env` provides `DATABASE_URL`. The next backend slice must fix config before adding more persistence.
+Important mismatch: current backend code reads an old backend-specific database variable, while the root `.env` provides `DATABASE_URL`. The next backend slice must make `DATABASE_URL` the required production database key before adding more persistence. Missing `DATABASE_URL` or missing `SUPABASE_URL` is a startup error.
 
 ## Scope
 
 This plan includes:
 
 - root `.env` loading for the server binary,
-- config fallback from `ABUTOWN_DATABASE_URL` to `DATABASE_URL`,
+- strict config from required `DATABASE_URL` and `SUPABASE_URL`,
 - documentation of which Supabase keys the backend actually uses,
 - async chunk snapshot store trait,
 - in-memory implementation preserving existing tests,
@@ -66,7 +66,7 @@ This plan does not include:
   - Add `dotenvy.workspace = true`.
 - Create `backend/crates/sim-server/src/config.rs`
   - Own `ServerConfig::from_env()`.
-  - Resolve `database_url` from `ABUTOWN_DATABASE_URL` or `DATABASE_URL`.
+  - Resolve required `database_url` from `DATABASE_URL`.
   - Resolve `supabase_url` from `SUPABASE_URL`.
 - Modify `backend/crates/sim-server/src/main.rs`
   - Load root `.env` via `dotenvy::dotenv().ok()`.
@@ -129,23 +129,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_prefers_abutown_database_url_over_database_url() {
+    fn config_reads_required_supabase_database_values() {
         let config = ServerConfig::from_pairs([
-            ("DATABASE_URL", "postgres://fallback"),
-            ("ABUTOWN_DATABASE_URL", "postgres://primary"),
+            ("DATABASE_URL", "postgres://primary"),
             ("SUPABASE_URL", "https://project.supabase.co"),
-        ]);
+        ])
+        .unwrap();
 
-        assert_eq!(config.database_url.as_deref(), Some("postgres://primary"));
-        assert_eq!(config.supabase_url.as_deref(), Some("https://project.supabase.co"));
+        assert_eq!(config.database_url, "postgres://primary");
+        assert_eq!(config.supabase_url, "https://project.supabase.co");
     }
 
     #[test]
-    fn config_accepts_root_dotenv_database_url_name() {
-        let config = ServerConfig::from_pairs([("DATABASE_URL", "postgres://root-env")]);
+    fn config_rejects_missing_database_url() {
+        let error = ServerConfig::from_pairs([("SUPABASE_URL", "https://project.supabase.co")])
+            .unwrap_err();
 
-        assert_eq!(config.database_url.as_deref(), Some("postgres://root-env"));
-        assert_eq!(config.supabase_url, None);
+        assert_eq!(error, ServerConfigError::MissingDatabaseUrl);
+    }
+
+    #[test]
+    fn config_rejects_missing_supabase_url() {
+        let error = ServerConfig::from_pairs([("DATABASE_URL", "postgres://primary")]).unwrap_err();
+
+        assert_eq!(error, ServerConfigError::MissingSupabaseUrl);
     }
 }
 ```
@@ -157,39 +164,45 @@ Add above the tests:
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
-    pub database_url: Option<String>,
-    pub supabase_url: Option<String>,
+    pub database_url: String,
+    pub supabase_url: String,
 }
 
 impl ServerConfig {
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self, ServerConfigError> {
         Self::from_pairs(std::env::vars())
     }
 
-    pub fn from_pairs<I, K, V>(pairs: I) -> Self
+    pub fn from_pairs<I, K, V>(pairs: I) -> Result<Self, ServerConfigError>
     where
         I: IntoIterator<Item = (K, V)>,
         K: AsRef<str>,
         V: Into<String>,
     {
         let mut database_url = None;
-        let mut abutown_database_url = None;
         let mut supabase_url = None;
 
         for (key, value) in pairs {
             match key.as_ref() {
                 "DATABASE_URL" => database_url = Some(value.into()),
-                "ABUTOWN_DATABASE_URL" => abutown_database_url = Some(value.into()),
                 "SUPABASE_URL" => supabase_url = Some(value.into()),
                 _ => {}
             }
         }
 
-        Self {
-            database_url: abutown_database_url.or(database_url),
-            supabase_url,
-        }
+        Ok(Self {
+            database_url: database_url.ok_or(ServerConfigError::MissingDatabaseUrl)?,
+            supabase_url: supabase_url.ok_or(ServerConfigError::MissingSupabaseUrl)?,
+        })
     }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum ServerConfigError {
+    #[error("DATABASE_URL is required")]
+    MissingDatabaseUrl,
+    #[error("SUPABASE_URL is required")]
+    MissingSupabaseUrl,
 }
 ```
 
@@ -205,7 +218,7 @@ In `backend/crates/sim-server/src/main.rs`, load root `.env` before config:
 
 ```rust
 let _ = dotenvy::dotenv();
-let config = sim_server::config::ServerConfig::from_env();
+let config = sim_server::config::ServerConfig::from_env().context("load server config")?;
 ```
 
 Change app construction to:
@@ -224,25 +237,21 @@ Replace `build_app_from_env()` internals with:
 
 ```rust
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
-    Ok(build_app_from_config(&ServerConfig::from_env()).await?)
+    let _ = dotenvy::dotenv();
+    let config = ServerConfig::from_env()?;
+    build_app_from_config(&config).await
 }
 
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
-    if let Some(database_url) = &config.database_url {
-        let event_store = PostgresWorldEventStore::connect(database_url).await?;
-        let card_hands = CardHandStore::postgres(database_url).await?;
-        let auth = match &config.supabase_url {
-            Some(url) => AuthVerifier::supabase(url).await,
-            None => AuthVerifier::local_bearer_uuid(),
-        };
-        return Ok(build_app_with_runtime_and_card_hands(
-            SimulationRuntime::new_with_event_store(Box::new(event_store)),
-            card_hands,
-            auth,
-        ));
-    }
+    let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
+    let card_hands = CardHandStore::postgres(&config.database_url).await?;
+    let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
-    Ok(build_app())
+    Ok(build_app_with_runtime_and_card_hands(
+        SimulationRuntime::new_with_event_store(Box::new(event_store)),
+        card_hands,
+        auth,
+    ))
 }
 ```
 
@@ -506,12 +515,12 @@ Keep `new_with_event_store()` for tests by delegating to `new_with_stores(event_
 
 - [ ] **Step 2: Wire config**
 
-In `build_app_from_config`, when `database_url` exists, create:
+In `build_app_from_config`, create these from required config:
 
 ```rust
-let event_store = PostgresWorldEventStore::connect(database_url).await?;
-let snapshot_store = PostgresChunkSnapshotStore::connect(database_url).await?;
-let card_hands = CardHandStore::postgres(database_url).await?;
+let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
+let snapshot_store = PostgresChunkSnapshotStore::connect(&config.database_url).await?;
+let card_hands = CardHandStore::postgres(&config.database_url).await?;
 ```
 
 Then:
@@ -524,8 +533,7 @@ SimulationRuntime::new_with_stores(Box::new(event_store), Box::new(snapshot_stor
 
 Update `backend/README.md`:
 
-- `DATABASE_URL`: primary root `.env` key for SQLx Postgres/Supabase.
-- `ABUTOWN_DATABASE_URL`: supported override for backend-only local runs.
+- `DATABASE_URL`: required root `.env` key for SQLx Postgres/Supabase.
 - `SUPABASE_URL`: used for JWT/JWKS auth.
 - `SUPABASE_ANON_KEY`: frontend login/client key, not used by Rust persistence.
 - `SUPABASE_SERVICE_ROLE_KEY`: intentionally not used by Rust in this slice.
@@ -564,5 +572,5 @@ That recovery slice should not be bundled here because it changes startup truth 
 
 - Spec coverage: This plan advances the architecture requirement for Supabase/Postgres durable chunk snapshots and keeps event history already implemented.
 - Duplicate check: It does not redo `world_events` or `card_hand`; it only normalizes config and adds `chunk_snapshots`.
-- Config check: It accounts for the actual root `.env` key `DATABASE_URL`, while preserving `ABUTOWN_DATABASE_URL`.
+- Config check: It accounts for the actual root `.env` key `DATABASE_URL` and deliberately fails startup when required production config is missing.
 - Secret safety: No `.env` values are stored, printed, committed, or copied into docs.

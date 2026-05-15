@@ -23,6 +23,7 @@ use crate::{
         AuthVerifier, CardHandError, CardHandResponse, CardHandStore, SaveCardHandRequest,
         card_definitions,
     },
+    config::ServerConfig,
     postgres_events::PostgresWorldEventStore,
     runtime::SimulationRuntime,
 };
@@ -107,21 +108,21 @@ pub fn build_app() -> Router {
 }
 
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
-    if let Ok(database_url) = std::env::var("ABUTOWN_DATABASE_URL") {
-        let event_store = PostgresWorldEventStore::connect(&database_url).await?;
-        let card_hands = CardHandStore::postgres(&database_url).await?;
-        let auth = match std::env::var("SUPABASE_URL") {
-            Ok(url) => AuthVerifier::supabase(&url).await,
-            Err(_) => AuthVerifier::local_bearer_uuid(),
-        };
-        return Ok(build_app_with_runtime_and_card_hands(
-            SimulationRuntime::new_with_event_store(Box::new(event_store)),
-            card_hands,
-            auth,
-        ));
-    }
+    let _ = dotenvy::dotenv();
+    let config = ServerConfig::from_env()?;
+    build_app_from_config(&config).await
+}
 
-    Ok(build_app())
+pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
+    let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
+    let card_hands = CardHandStore::postgres(&config.database_url).await?;
+    let auth = AuthVerifier::supabase(&config.supabase_url).await;
+
+    Ok(build_app_with_runtime_and_card_hands(
+        SimulationRuntime::new_with_event_store(Box::new(event_store)),
+        card_hands,
+        auth,
+    ))
 }
 
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {

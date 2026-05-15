@@ -19,6 +19,7 @@ sim-core = { path = "../sim-core" }
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+dotenvy.workspace = true
 jsonwebtoken.workspace = true
 reqwest.workspace = true
 serde.workspace = true
