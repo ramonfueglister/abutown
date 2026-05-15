@@ -6,6 +6,8 @@ use crate::ids::{ChunkCoord, StableEntityId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaterializedKind {
+    Agent,
+    Vehicle,
     Player,
     Item,
     Machine,
@@ -77,5 +79,24 @@ mod tests {
 
         assert_eq!(runtime.lookup(&stable_id), Some(entity));
         assert_eq!(runtime.materialized_count(), 1);
+    }
+
+    #[test]
+    fn agents_and_vehicles_can_be_materialized_as_hot_entities() {
+        let mut runtime = MaterializedRuntime::default();
+
+        let agent = runtime.spawn_materialized(
+            StableEntityId("agent:seed:0".to_string()),
+            ChunkCoord { x: 4, y: 4 },
+            MaterializedKind::Agent,
+        );
+        let vehicle = runtime.spawn_materialized(
+            StableEntityId("vehicle:shuttle:0".to_string()),
+            ChunkCoord { x: 4, y: 4 },
+            MaterializedKind::Vehicle,
+        );
+
+        assert_ne!(agent, vehicle);
+        assert_eq!(runtime.materialized_count(), 2);
     }
 }
