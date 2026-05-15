@@ -49,7 +49,7 @@ export function candidateSimutransPedestrianSprites(): SimutransPedestrianSprite
       sheet: 'pedestrians-1' as const,
       row,
       kind: 'pedestrian' as const,
-      scale: 1.05,
+      scale: 0.96,
     })),
   ];
 }

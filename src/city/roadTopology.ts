@@ -17,6 +17,30 @@ export function countInvalidRoadDeadEnds(roads: ReadonlyMap<string, unknown>, di
     .length;
 }
 
+export function countRoadNetworkComponents(roads: ReadonlyMap<string, unknown>): number {
+  const remaining = new Set(roads.keys());
+  let components = 0;
+
+  for (const start of roads.keys()) {
+    if (!remaining.has(start)) continue;
+    components += 1;
+    const queue = [parseKey(start)];
+    remaining.delete(start);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const neighbor of cardinal(current)) {
+        const neighborKey = key(neighbor);
+        if (!remaining.has(neighborKey)) continue;
+        remaining.delete(neighborKey);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  return components;
+}
+
 export function pruneInvalidRoadDeadEnds(roads: Map<string, unknown>, dimensions: RoadDimensions): void {
   for (let pass = 0; pass < roads.size; pass += 1) {
     const removable = [...roads.keys()]
@@ -26,6 +50,15 @@ export function pruneInvalidRoadDeadEnds(roads: Map<string, unknown>, dimensions
     if (removable.length === 0) return;
     for (const tileKey of removable) roads.delete(tileKey);
   }
+}
+
+function cardinal(coord: Coord): Coord[] {
+  return [
+    { x: coord.x, y: coord.y - 1 },
+    { x: coord.x + 1, y: coord.y },
+    { x: coord.x, y: coord.y + 1 },
+    { x: coord.x - 1, y: coord.y },
+  ];
 }
 
 function isInvalidDeadEnd(roads: ReadonlyMap<string, unknown>, dimensions: RoadDimensions, coord: Coord): boolean {

@@ -41,17 +41,16 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
     }
   }
 
-  addDioramaDetails(world, details, blocked);
-
   for (const zone of world.zones) {
     if (zone.kind === 'forest' || zone.kind === 'river') continue;
     const candidates = frontageCandidates(world, transport, blocked, zone);
     for (const coord of candidates) {
       if (buildings.length >= 4200) break;
       if (blocked.has(key(coord))) continue;
-      if (zone.kind === 'reserve' && hash(`reserve-building:${key(coord)}`) % 9 !== 0) continue;
-      if (hash(`building-density:${zone.id}:${key(coord)}`) % 100 > Math.floor(zone.density * 100)) continue;
-      if (zone.kind === 'residential' && distance(coord, zone.center) > zone.radius * 0.72 && hash(`residential-edge:${zone.id}:${key(coord)}`) % 100 < 55) continue;
+      if (zone.kind === 'reserve') {
+        if (hash(`reserve-building:${key(coord)}`) % 5 !== 0) continue;
+      } else if (hash(`building-density:${zone.id}:${key(coord)}`) % 100 > Math.floor(effectiveBuildingDensity(zone) * 100)) continue;
+      if (zone.kind === 'residential' && distance(coord, zone.center) > zone.radius * 0.72 && hash(`residential-edge:${zone.id}:${key(coord)}`) % 100 < 35) continue;
       const sheets = sheetPools[zone.kind];
       const sheet = sheets[hash(`sheet:${zone.id}:${key(coord)}`) % sheets.length];
       buildings.push({ coord, sheet, frame: hash(`frame:${sheet}:${key(coord)}`) % frameCount(sheet), zoneId: zone.id });
@@ -59,20 +58,24 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
     }
   }
 
+  addDioramaDetails(world, transport, details, blocked);
+
   for (const zone of world.zones) {
     if (zone.kind === 'civic' || zone.kind === 'park' || zone.kind === 'industry') {
-      for (let index = 0; index < 80; index += 1) {
-        const coord = {
-          x: zone.center.x + ((hash(`detail-x:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
-          y: zone.center.y + ((hash(`detail-y:${zone.id}:${index}`) % (zone.radius * 2)) - zone.radius),
-        };
-        const tileKey = key(coord);
-        if (!inside(coord, world.width, world.height) || blocked.has(tileKey)) continue;
-        details.push({
+      const detailTarget = zone.kind === 'industry' ? 105 : zone.kind === 'civic' ? 72 : 48;
+      let placed = 0;
+      for (const coord of detailFrontageCandidates(world, transport, blocked, zone)) {
+        if (placed >= detailTarget) break;
+        pushDetail(
+          world,
+          details,
+          blocked,
           coord,
-          category: zone.kind === 'industry' ? 'industry' : zone.kind === 'civic' ? 'civic' : 'park',
-          assetCategory: zone.kind === 'industry' ? 'industry' : 'decor',
-        });
+          zone.kind === 'industry' ? 'industry' : zone.kind === 'civic' ? 'civic' : 'park',
+          zone.kind === 'industry' ? 'industry' : 'decor',
+          false,
+        );
+        placed += 1;
       }
     }
   }
@@ -80,61 +83,37 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
   return { buildings, trees, details, reserveTiles };
 }
 
-function addDioramaDetails(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
-  addStationSetpiece(world, details, blocked);
-  addQuaySetpiece(world, details, blocked);
-  addIndustrySetpiece(world, details, blocked);
+function addDioramaDetails(world: ZurichWorld, transport: ZurichTransport, details: ZurichDetail[], blocked: Set<string>): void {
+  addIndustrySetpiece(world, transport, details, blocked);
   addFieldSetpiece(world, details, blocked);
 }
 
-function addStationSetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
-  const station = world.zones.find((zone) => zone.kind === 'rail-center')?.center ?? { x: 118, y: 154 };
-  for (const y of [station.y - 8, station.y - 5, station.y - 2, station.y + 2]) {
-    for (let x = station.x - 24; x <= station.x + 24; x += 8) {
-      pushDetail(world, details, blocked, { x, y }, 'station', 'station-roof', true);
-    }
-  }
-  for (const coord of [
-    { x: station.x - 34, y: station.y + 11 },
-    { x: station.x - 28, y: station.y + 11 },
-    { x: station.x + 34, y: station.y + 9 },
-    { x: station.x + 40, y: station.y + 9 },
-  ]) {
-    pushDetail(world, details, blocked, coord, 'yard', 'rail-depot', true);
-  }
-  for (let x = station.x - 24; x <= station.x + 24; x += 8) {
-    pushDetail(world, details, blocked, { x, y: station.y - 12 }, 'station', 'road-stop', false);
+function addIndustrySetpiece(world: ZurichWorld, transport: ZurichTransport, details: ZurichDetail[], blocked: Set<string>): void {
+  const industry = world.zones.find((zone) => zone.kind === 'industry');
+  if (!industry) return;
+
+  let placed = 0;
+  for (const coord of detailFrontageCandidates(world, transport, blocked, industry)) {
+    if (placed >= 90) break;
+    const asset = placed % 2 === 0 ? 'factory' : 'road-depot';
+    pushDetail(world, details, blocked, coord, 'industry', asset, false);
+    placed += 1;
   }
 }
 
-function addQuaySetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
-  for (const mooring of [
-    { y: 116, side: -1, assets: ['quay', 'dock'] },
-    { y: 144, side: 1, assets: ['ship', 'quay'] },
-    { y: 166, side: -1, assets: ['dock', 'ship'] },
-  ] as const) {
-    const centerX = riverCenterAt(world, mooring.y);
-    const bankX = centerX + mooring.side * 3;
-    mooring.assets.forEach((asset, index) => {
-      pushDetail(world, details, blocked, { x: bankX, y: mooring.y + index }, 'dock', asset, true);
-    });
-  }
-}
-
-function addIndustrySetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
-  const industry = world.zones.find((zone) => zone.kind === 'industry')?.center ?? { x: 175, y: 184 };
-  for (let y = industry.y - 18; y <= industry.y + 18; y += 6) {
-    for (let x = industry.x - 22; x <= industry.x + 22; x += 8) {
-      const asset = (x + y) % 3 === 0 ? 'factory' : (x + y) % 3 === 1 ? 'road-depot' : 'rail-depot';
-      pushDetail(world, details, blocked, { x, y }, 'industry', asset, false);
-    }
-  }
+function effectiveBuildingDensity(zone: ZurichZone): number {
+  if (zone.kind === 'old-town') return 0.99;
+  if (zone.kind === 'residential') return Math.min(0.99, zone.density + 0.38);
+  if (zone.kind === 'industry' || zone.kind === 'civic') return Math.min(0.98, zone.density + 0.38);
+  if (zone.kind === 'park') return Math.min(0.75, zone.density + 0.36);
+  if (zone.kind === 'rail-center') return 1;
+  return zone.density;
 }
 
 function addFieldSetpiece(world: ZurichWorld, details: ZurichDetail[], blocked: Set<string>): void {
   for (const zone of world.zones.filter((candidate) => candidate.kind === 'reserve')) {
-    for (let y = zone.center.y - zone.radius + 2; y <= zone.center.y + zone.radius - 2; y += 4) {
-      for (let x = zone.center.x - zone.radius + 2; x <= zone.center.x + zone.radius - 2; x += 4) {
+    for (let y = zone.center.y - zone.radius + 2; y <= zone.center.y + zone.radius - 2; y += 3) {
+      for (let x = zone.center.x - zone.radius + 2; x <= zone.center.x + zone.radius - 2; x += 3) {
         const coord = { x, y };
         if (distance(coord, zone.center) > zone.radius || hash(`field:${zone.id}:${key(coord)}`) % 100 > 58) continue;
         pushDetail(world, details, blocked, coord, 'field', 'farm-field', false);
@@ -155,30 +134,19 @@ function pushDetail(
   const tileKey = key(coord);
   const terrain = world.terrain.get(tileKey)?.kind;
   if (!inside(coord, world.width, world.height) || !terrain) return;
+  if (terrain === 'water' || terrain === 'riverbank') return;
   if (!allowBlocked && blocked.has(tileKey)) return;
-  if (!allowBlocked && (terrain === 'water' || terrain === 'riverbank' || terrain === 'forest')) return;
+  if (!allowBlocked && terrain === 'forest') return;
   details.push({ coord, category, assetCategory });
   if (!allowBlocked) blocked.add(tileKey);
-}
-
-function riverCenterAt(world: ZurichWorld, y: number): number {
-  const riverTiles = world.river.filter((coord) => coord.y === y);
-  if (riverTiles.length === 0) return 128;
-  return Math.round(riverTiles.reduce((sum, coord) => sum + coord.x, 0) / riverTiles.length);
 }
 
 function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, blocked: ReadonlySet<string>, zone: ZurichZone): Coord[] {
   const candidates: Coord[] = [];
   const seen = new Set<string>();
   const offsets = [
-    { x: 1, y: 0 },
     { x: -1, y: 0 },
-    { x: 0, y: 1 },
     { x: 0, y: -1 },
-    { x: 2, y: 0 },
-    { x: -2, y: 0 },
-    { x: 0, y: 2 },
-    { x: 0, y: -2 },
   ];
 
   for (const road of transport.roads.values()) {
@@ -198,6 +166,11 @@ function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, bloc
   }
   candidates.sort((a, b) => distance(a, zone.center) - distance(b, zone.center) || a.y - b.y || a.x - b.x);
   return candidates;
+}
+
+function detailFrontageCandidates(world: ZurichWorld, transport: ZurichTransport, blocked: ReadonlySet<string>, zone: ZurichZone): Coord[] {
+  return frontageCandidates(world, transport, blocked, zone)
+    .sort((a, b) => hash(`detail-order:${zone.id}:${key(a)}`) - hash(`detail-order:${zone.id}:${key(b)}`));
 }
 
 function isForestTreeTile(coord: Coord): boolean {

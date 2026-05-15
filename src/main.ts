@@ -21,6 +21,7 @@ import {
   zoomCameraAt,
 } from './cameraController';
 import { cleanupSpritePixels } from './render/spriteCleanup';
+import { shouldRenderDetail } from './render/detailRenderPolicy';
 import {
   candidateVehicleSprites,
   screenRightLaneOffset,
@@ -38,6 +39,14 @@ import {
   type SimutransDirection,
   type SimutransPedestrianSprite,
 } from './render/simutransPedestrianSprites';
+import { compareDrawableOrder } from './render/drawOrder';
+import { buildPedestrianLoop, pedestrianWalkingSpeed } from './render/pedestrianMotion';
+import {
+  buildNorthboundTrainPath,
+  trainFadeAlpha,
+  trainPosition as movingTrainPosition,
+  trainWrappedOffset,
+} from './render/trainMotion';
 
 type Coord = { x: number; y: number };
 type Terrain = 'grass' | 'water' | 'riverbank' | 'park';
@@ -80,6 +89,14 @@ type Pedestrian = {
   sprite: SimutransPedestrianSprite;
 };
 
+type Train = {
+  path: Coord[];
+  offset: number;
+  speed: number;
+  fadeTiles: number;
+  carSpacing: number;
+};
+
 type GridRect = {
   minX: number;
   maxX: number;
@@ -97,7 +114,8 @@ type StaticDrawable =
 
 type CarDrawable = { type: 'car'; coord: Coord; car: Car };
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: Pedestrian };
-type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
+type TrainDrawable = { type: 'train'; coord: Coord; train: Train };
+type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
 
 type BuildingSheetName =
   | 'houses'
@@ -143,6 +161,8 @@ const EAST = 2;
 const SOUTH = 4;
 const WEST = 8;
 const ROAD_SPRITE_STEP = 65;
+const TRAIN_FADE_TILES = 12;
+const TRAIN_SPEED = 8.5;
 
 const zurichWorld = buildZurichWorld({ seed: 1848 });
 const zurichTransport = buildZurichTransport(zurichWorld);
@@ -228,6 +248,8 @@ const assetPaths = {
   tree: '/opengfx2/town_tree_32bpp.png',
   bus: '/opengfx2/road_buses_32bpp.png',
   lorry: '/opengfx2/road_lorries_firstgeneration_32bpp.png',
+  trainEngine: '/opengfx2/all/vehicles__64__rail_engines_temperate_32bpp.png',
+  trainWagon: '/opengfx2/all/vehicles__64__rail_wagons_32bpp.png',
 };
 
 const images = new Map<string, HTMLCanvasElement>();
@@ -256,6 +278,7 @@ let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: SimutransPedestrianSprite[] = [];
 let cars: Car[] = [];
 let pedestrians: Pedestrian[] = [];
+let trains: Train[] = buildTrains();
 let pedestrianCorridorCount = 0;
 let previousTime = performance.now();
 
@@ -336,6 +359,7 @@ function frame(now: number): void {
   previousTime = now;
   for (const car of cars) car.offset = (car.offset + car.speed * dt) % car.path.length;
   for (const pedestrian of pedestrians) pedestrian.offset = (pedestrian.offset + pedestrian.speed * dt) % pedestrian.path.length;
+  for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * dt, train.path);
   if (!camera.dragging) constrainCamera(false);
   dampCamera(camera, dt, 18);
   render();
@@ -376,14 +400,19 @@ function drawScene(offset: Coord): void {
     .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrianPosition(pedestrian), pedestrian }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort(compareDrawables);
+  const trainDrawables = trains
+    .map((train) => ({ type: 'train' as const, coord: trainPosition(train), train }))
+    .filter((item) => isCoordVisible(item.coord, visibleGrid))
+    .sort(compareDrawables);
 
-  for (const item of mergeSortedDrawables(visibleStaticDrawables, [...carDrawables, ...pedestrianDrawables].sort(compareDrawables))) {
+  for (const item of mergeSortedDrawables(visibleStaticDrawables, [...trainDrawables, ...carDrawables, ...pedestrianDrawables].sort(compareDrawables))) {
     if (item.type === 'rail') drawRail(item.rail);
     if (item.type === 'road') drawRoad(item.road);
     if (item.type === 'railStation') drawRailStation(item.station);
     if (item.type === 'detail') drawDetail(item.detail);
     if (item.type === 'tree') drawTree(item.coord);
     if (item.type === 'building') drawBuilding(item.building);
+    if (item.type === 'train') drawTrain(item.train);
     if (item.type === 'car') drawCar(item.car);
     if (item.type === 'pedestrian') drawPedestrian(item.pedestrian);
   }
@@ -468,6 +497,7 @@ function drawRailStation(station: RailStation): void {
 }
 
 function drawDetail(detail: ZurichDetail): void {
+  if (!shouldRenderDetail(detail)) return;
   if (detail.category === 'field') {
     drawGroundDetail(assetPaths.field, detail.coord, 19, 9);
     return;
@@ -589,6 +619,48 @@ function drawCar(car: Car): void {
   ctx.translate(point.x + lane.x, point.y + lane.y + 7);
   ctx.drawImage(image, rect.x, rect.y, sourceWidth, sourceHeight, -width / 2, -height, width, height);
   ctx.restore();
+}
+
+function drawTrain(train: Train): void {
+  const engineImage = images.get(assetPaths.trainEngine);
+  const wagonImage = images.get(assetPaths.trainWagon);
+  if (!engineImage || !wagonImage) return;
+
+  const segments = [
+    { image: engineImage, source: { x: 153, y: 5, width: 20, height: 15 }, offset: train.offset, scale: 4.0 },
+    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing, scale: 3.85 },
+    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing * 2, scale: 3.85 },
+    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing * 3, scale: 3.85 },
+    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing * 4, scale: 3.85 },
+  ].sort((a, b) => iso(movingTrainPosition(train.path, a.offset)).y - iso(movingTrainPosition(train.path, b.offset)).y);
+
+  for (const segment of segments) {
+    const pos = movingTrainPosition(train.path, segment.offset);
+    const alpha = trainFadeAlpha(pos, { height: HEIGHT, fadeTiles: train.fadeTiles });
+    if (alpha <= 0) continue;
+    const point = iso(pos);
+    const width = segment.source.width * segment.scale;
+    const height = segment.source.height * segment.scale;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(point.x, point.y + 8);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+    ctx.beginPath();
+    ctx.ellipse(0, -4, width * 0.42, 5.5, -Math.PI / 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.drawImage(
+      segment.image,
+      segment.source.x,
+      segment.source.y,
+      segment.source.width,
+      segment.source.height,
+      -width / 2,
+      -height,
+      width,
+      height,
+    );
+    ctx.restore();
+  }
 }
 
 function drawPedestrian(pedestrian: Pedestrian): void {
@@ -822,39 +894,7 @@ function buildRailNetwork(paths: Coord[][]): Map<string, RailTile> {
 }
 
 function buildRailStations(): RailStation[] {
-  const railCenter = zurichWorld.zones.find((zone) => zone.kind === 'rail-center')?.center ?? { x: 118, y: 154 };
-  const occupied = new Set<string>([
-    ...roads.keys(),
-    ...rails.keys(),
-    ...zurichPlacement.buildings.map((building) => key(building.coord)),
-    ...zurichPlacement.trees.map(key),
-  ]);
-  const candidates: Coord[] = [];
-  const seen = new Set<string>();
-  const offsets = [
-    { x: 0, y: -1 },
-    { x: 0, y: 1 },
-    { x: -1, y: 0 },
-    { x: 1, y: 0 },
-    { x: -1, y: -1 },
-    { x: 1, y: -1 },
-    { x: -1, y: 1 },
-    { x: 1, y: 1 },
-  ];
-
-  for (const rail of rails.values()) {
-    for (const offset of offsets) {
-      const coord = { x: rail.coord.x + offset.x, y: rail.coord.y + offset.y };
-      const tileKey = key(coord);
-      if (seen.has(tileKey) || occupied.has(tileKey) || !inside(coord) || !isBuildable(coord)) continue;
-      candidates.push(coord);
-      seen.add(tileKey);
-    }
-  }
-
-  candidates.sort((a, b) => distance(a, railCenter) - distance(b, railCenter) || a.y - b.y || a.x - b.x);
-  const stationFrames = [3, 8, 13, 1, 2];
-  return candidates.slice(0, 14).map((coord, index) => ({ coord, frame: stationFrames[index % stationFrames.length] }));
+  return [];
 }
 
 function addDistrictStreets(points: Map<string, RoadKind>, center: Coord, radius: number, dense: boolean): void {
@@ -1016,7 +1056,7 @@ function buildPedestrians(sprites: SimutransPedestrianSprite[]): Pedestrian[] {
     ...urbanArterials,
   ];
   if (baseCorridors.length === 0) return [];
-  const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]);
+  const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]).map(buildPedestrianLoop);
   pedestrianCorridorCount = corridors.length;
   const totalPathTiles = baseCorridors.reduce((sum, path) => sum + path.length, 0);
   const pedestrianCount = Math.min(420, Math.max(220, Math.floor(totalPathTiles / 3)));
@@ -1026,11 +1066,23 @@ function buildPedestrians(sprites: SimutransPedestrianSprite[]): Pedestrian[] {
     return {
       path,
       offset: (index * 11 + Math.floor(index / corridors.length) * 5) % path.length,
-      speed: 0.34 + (index % 9) * 0.035,
+      speed: pedestrianWalkingSpeed(index),
       laneOffset: ((index % 5) - 2) * 0.45,
       sprite,
     };
   });
+}
+
+function buildTrains(): Train[] {
+  const path = buildNorthboundTrainPath(railPaths[0] ?? [], { fadeTiles: TRAIN_FADE_TILES });
+  if (path.length === 0) return [];
+  return [{
+    path,
+    offset: 0,
+    speed: TRAIN_SPEED,
+    fadeTiles: TRAIN_FADE_TILES,
+    carSpacing: 1.45,
+  }];
 }
 
 function urbanPedestrianSegments(path: Coord[]): Coord[][] {
@@ -1104,6 +1156,10 @@ function pedestrianPosition(pedestrian: Pedestrian): Coord {
     x: lerp(pedestrian.path[base].x, pedestrian.path[next].x, t),
     y: lerp(pedestrian.path[base].y, pedestrian.path[next].y, t),
   };
+}
+
+function trainPosition(train: Train): Coord {
+  return movingTrainPosition(train.path, train.offset);
 }
 
 function route(points: Coord[]): Coord[] {
@@ -1314,12 +1370,13 @@ function depthSort(a: { coord: Coord }, b: { coord: Coord }): number {
 }
 
 function compareDrawables(a: Drawable, b: Drawable): number {
-  return iso(a.coord).y - iso(b.coord).y ||
-    drawPriority(a.type) - drawPriority(b.type) ||
-    a.coord.x - b.coord.x;
+  return compareDrawableOrder(
+    { type: a.type, isoY: iso(a.coord).y, x: a.coord.x },
+    { type: b.type, isoY: iso(b.coord).y, x: b.coord.x },
+  );
 }
 
-function mergeSortedDrawables(staticItems: StaticDrawable[], dynamicItems: Array<CarDrawable | PedestrianDrawable>): Drawable[] {
+function mergeSortedDrawables(staticItems: StaticDrawable[], dynamicItems: Array<TrainDrawable | CarDrawable | PedestrianDrawable>): Drawable[] {
   const result: Drawable[] = [];
   let staticIndex = 0;
   let dynamicIndex = 0;
@@ -1338,17 +1395,6 @@ function mergeSortedDrawables(staticItems: StaticDrawable[], dynamicItems: Array
     }
   }
   return result;
-}
-
-function drawPriority(type: 'rail' | 'road' | 'railStation' | 'detail' | 'tree' | 'building' | 'car' | 'pedestrian'): number {
-  if (type === 'rail') return 0;
-  if (type === 'road') return 1;
-  if (type === 'railStation') return 2;
-  if (type === 'car') return 3;
-  if (type === 'pedestrian') return 4;
-  if (type === 'detail') return 5;
-  if (type === 'tree') return 6;
-  return 7;
 }
 
 function cardinal(coord: Coord): Coord[] {
@@ -1567,6 +1613,16 @@ window.render_game_to_text = () => {
       buildings: buildings.length,
       trees: trees.length,
       cars: cars.length,
+      trains: trains.length,
+      train: trains[0]
+        ? {
+            position: trainPosition(trains[0]),
+            alpha: trainFadeAlpha(trainPosition(trains[0]), { height: HEIGHT, fadeTiles: trains[0].fadeTiles }),
+            speed: trains[0].speed,
+            fadeTiles: trains[0].fadeTiles,
+            direction: 'northbound',
+          }
+        : null,
       pedestrians: pedestrians.length,
       pedestrianCorridors: pedestrianCorridorCount,
       pedestrianSprites: pedestrianSprites.length,
@@ -1618,5 +1674,6 @@ function detailCountsByCategory(): Record<string, number> {
 window.advanceTime = (ms: number) => {
   for (const car of cars) car.offset = (car.offset + car.speed * (ms / 1000)) % car.path.length;
   for (const pedestrian of pedestrians) pedestrian.offset = (pedestrian.offset + pedestrian.speed * (ms / 1000)) % pedestrian.path.length;
+  for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * (ms / 1000), train.path);
   render();
 };

@@ -29,13 +29,13 @@ describe('Simutrans pak128 pedestrian sprites', () => {
   it('uses display scales large enough for cropped pak128 figures to remain visible', () => {
     const sprites = candidateSimutransPedestrianSprites();
 
-    expect(Math.min(...sprites.filter((sprite) => sprite.kind === 'pedestrian').map((sprite) => sprite.scale))).toBeGreaterThanOrEqual(1);
-    expect(Math.max(...sprites.map((sprite) => sprite.scale))).toBeLessThanOrEqual(1.1);
+    expect(Math.min(...sprites.filter((sprite) => sprite.kind === 'pedestrian').map((sprite) => sprite.scale))).toBeGreaterThanOrEqual(0.92);
+    expect(Math.max(...sprites.map((sprite) => sprite.scale))).toBeLessThanOrEqual(0.98);
   });
 
   it('keeps pak128 agents small when the camera zooms in', () => {
-    expect(simutransPedestrianDisplayScale(1.05, 0.56)).toBeGreaterThan(1.05);
-    expect(simutransPedestrianDisplayScale(1.05, 2)).toBeLessThan(0.6);
+    expect(simutransPedestrianDisplayScale(0.96, 0.56)).toBeGreaterThan(0.96);
+    expect(simutransPedestrianDisplayScale(0.96, 2)).toBeLessThan(0.55);
   });
 
   it('selects Simutrans direction keys from grid movement', () => {

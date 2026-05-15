@@ -4,6 +4,10 @@ import { buildZurichTransport } from '../../src/city/zurichTransport';
 import { buildZurichPlacement } from '../../src/city/zurichPlacement';
 import { validateZurichCity } from '../../src/city/zurichValidation';
 import { distance, key, parseKey, type Coord } from '../../src/city/worldTypes';
+import {
+  countBuildingsWithoutDirectStreetAdjacency,
+  hasVisibleStreetFrontage,
+} from '../../src/city/buildingFrontage';
 
 const finishedRowColumns = {
   houses: 4,
@@ -20,42 +24,76 @@ const finishedRowColumns = {
 
 describe('buildZurichPlacement', () => {
   it('places varied buildings, forests, and reserves without hard-rule conflicts', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { world, transport, placement } = placementFixture();
     const validation = validateZurichCity(world, transport, placement);
 
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(placement.buildings.length).toBeGreaterThan(1800);
+    expect(placement.buildings.length).toBeGreaterThan(2250);
     expect(placement.trees.length).toBeGreaterThan(2600);
     expect(placement.trees.length).toBeLessThan(6500);
-    expect(placement.details.length).toBeGreaterThan(120);
+    expect(placement.details.length).toBeGreaterThanOrEqual(260);
     expect(placement.reserveTiles.size).toBeGreaterThan(2500);
     expect(new Set(placement.buildings.map((building) => building.sheet)).size).toBeGreaterThanOrEqual(8);
+    expect(countBuildingsWithoutDirectStreetAdjacency(placement.buildings, transport.roads)).toBe(0);
+    expect(placement.buildings.filter((building) => !hasVisibleStreetFrontage(building.coord, transport.roads))).toEqual([]);
   });
 
-  it('places OpenTTD diorama setpiece details before the city filler', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+  it('places OpenTTD diorama setpiece details before the city filler without rail roofs', () => {
+    const { placement } = placementFixture();
     const detailCounts = new Map<string, number>();
 
     for (const detail of placement.details) {
       detailCounts.set(detail.category, (detailCounts.get(detail.category) ?? 0) + 1);
     }
 
-    expect(detailCounts.get('station') ?? 0).toBeGreaterThanOrEqual(24);
-    expect(detailCounts.get('dock') ?? 0).toBeGreaterThanOrEqual(6);
-    expect(detailCounts.get('dock') ?? 0).toBeLessThanOrEqual(10);
-    expect(detailCounts.get('industry') ?? 0).toBeGreaterThanOrEqual(35);
+    expect(detailCounts.get('station') ?? 0).toBe(0);
+    expect(detailCounts.get('dock') ?? 0).toBe(0);
+    expect(detailCounts.get('industry') ?? 0).toBeGreaterThanOrEqual(16);
     expect(detailCounts.get('field') ?? 0).toBeGreaterThanOrEqual(48);
+    expect(placement.details.filter((detail) =>
+      detail.assetCategory === 'station-roof' ||
+      detail.assetCategory === 'rail-depot' ||
+      detail.assetCategory === 'road-stop'
+    )).toEqual([]);
+  });
+
+  it('keeps the water clear of non-bridge details', () => {
+    const { world, placement } = placementFixture();
+    const waterDetails = placement.details.filter((detail) =>
+      ['water', 'riverbank'].includes(world.terrain.get(key(detail.coord))?.kind ?? '')
+    );
+
+    expect(waterDetails).toEqual([]);
+  });
+
+  it('keeps non-field detail assets on visible street frontage', () => {
+    const { transport, placement } = placementFixture();
+    const floatingDetails = placement.details.filter((detail) =>
+      detail.category !== 'field' && !hasVisibleStreetFrontage(detail.coord, transport.roads)
+    );
+
+    expect(floatingDetails).toEqual([]);
+  });
+
+  it('does not build empty street-only neighborhoods in expansion reserves', () => {
+    const { world, transport, placement } = placementFixture();
+    const hollowReserves = world.zones
+      .filter((zone) => zone.kind === 'reserve')
+      .map((zone) => {
+        const roadTiles = [...transport.roads.values()].filter((road) =>
+          world.terrain.get(key(road.coord))?.zoneId === zone.id
+        ).length;
+        const buildings = placement.buildings.filter((building) => building.zoneId === zone.id).length;
+        return { zoneId: zone.id, roadTiles, buildings };
+      })
+      .filter(({ roadTiles, buildings }) => roadTiles > 72 && buildings < 12);
+
+    expect(hollowReserves).toEqual([]);
   });
 
   it('keeps buildings off water, roads, and rails', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { world, transport, placement } = placementFixture();
 
     for (const building of placement.buildings) {
       const tileKey = key(building.coord);
@@ -66,9 +104,7 @@ describe('buildZurichPlacement', () => {
   });
 
   it('keeps trees and buildings on separate tiles', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { placement } = placementFixture();
     const treeTiles = new Set(placement.trees.map(key));
 
     const overlaps = placement.buildings.filter((building) => treeTiles.has(key(building.coord)));
@@ -77,9 +113,7 @@ describe('buildZurichPlacement', () => {
   });
 
   it('uses only finished first-row building frames to avoid mask and empty sprite tiles', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { placement } = placementFixture();
 
     for (const building of placement.buildings) {
       expect(building.frame).toBeGreaterThanOrEqual(0);
@@ -88,9 +122,7 @@ describe('buildZurichPlacement', () => {
   });
 
   it('keeps the river corridor open and concentrates residential buildings toward district centers', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { world, transport, placement } = placementFixture();
     const waterTiles = [...world.terrain.values()].filter((tile) => tile.kind === 'water').map((tile) => tile.coord);
     const nearWaterBuildings = placement.buildings.filter((building) => manhattanDistanceToNearest(building.coord, waterTiles, 2) <= 2);
 
@@ -104,9 +136,7 @@ describe('buildZurichPlacement', () => {
   });
 
   it('creates forest patches with dense pockets and irregular sparse edges', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { world, placement } = placementFixture();
     const treeTiles = new Set(placement.trees.map(key));
 
     for (const zone of world.zones.filter((candidate) => candidate.kind === 'forest')) {
@@ -117,11 +147,31 @@ describe('buildZurichPlacement', () => {
   });
 });
 
-describe('validateZurichCity', () => {
-  it('reports road and rail overlap outside rail crossings', () => {
+function placementFixture(): {
+  world: ReturnType<typeof buildZurichWorld>;
+  transport: ReturnType<typeof buildZurichTransport>;
+  placement: ReturnType<typeof buildZurichPlacement>;
+} {
+  if (!cachedPlacementFixture) {
     const world = buildZurichWorld({ seed: 1848 });
     const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    cachedPlacementFixture = { world, transport, placement: buildZurichPlacement(world, transport) };
+  }
+  return cachedPlacementFixture;
+}
+
+let cachedPlacementFixture:
+  | {
+      world: ReturnType<typeof buildZurichWorld>;
+      transport: ReturnType<typeof buildZurichTransport>;
+      placement: ReturnType<typeof buildZurichPlacement>;
+    }
+  | undefined;
+
+describe('validateZurichCity', () => {
+  it('reports road and rail overlap outside rail crossings', () => {
+    const { world, placement } = placementFixture();
+    const transport = mutableTransportFixture();
     const overlapKey = [...transport.roads.keys()].find((roadKey) => !transport.railCrossings.has(roadKey));
     expect(overlapKey).toBeDefined();
 
@@ -137,9 +187,8 @@ describe('validateZurichCity', () => {
   });
 
   it('reports bridges that are not on water or riverbank terrain', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { world, placement } = placementFixture();
+    const transport = mutableTransportFixture();
     const grassKey = [...world.terrain.entries()].find(([, tile]) => tile.kind === 'grass')?.[0];
     expect(grassKey).toBeDefined();
 
@@ -153,9 +202,9 @@ describe('validateZurichCity', () => {
   });
 
   it('reports invalid buildings on missing terrain and outside world bounds', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { transport } = placementFixture();
+    const world = mutableWorldFixture();
+    const placement = mutablePlacementFixture();
     const missingTerrainKey = [...world.terrain.entries()].find(([, tile]) => tile.kind === 'grass')?.[0];
     expect(missingTerrainKey).toBeDefined();
 
@@ -173,9 +222,8 @@ describe('validateZurichCity', () => {
   });
 
   it('reports tree and building tile overlap', () => {
-    const world = buildZurichWorld({ seed: 1848 });
-    const transport = buildZurichTransport(world);
-    const placement = buildZurichPlacement(world, transport);
+    const { world, transport } = placementFixture();
+    const placement = mutablePlacementFixture();
 
     placement.trees.push(placement.buildings[0].coord);
 
@@ -186,6 +234,38 @@ describe('validateZurichCity', () => {
     expect(validation.stats.treeBuildingOverlap).toBe(1);
   });
 });
+
+function mutableWorldFixture(): ReturnType<typeof buildZurichWorld> {
+  const world = placementFixture().world;
+  return {
+    ...world,
+    zones: world.zones.map((zone) => ({ ...zone, center: { ...zone.center } })),
+    terrain: new Map([...world.terrain].map(([tileKey, tile]) => [tileKey, { ...tile, coord: { ...tile.coord } }])),
+    river: world.river.map((coord) => ({ ...coord })),
+  };
+}
+
+function mutableTransportFixture(): ReturnType<typeof buildZurichTransport> {
+  const transport = placementFixture().transport;
+  return {
+    roads: new Map([...transport.roads].map(([tileKey, road]) => [tileKey, { ...road, coord: { ...road.coord } }])),
+    rails: new Map([...transport.rails].map(([tileKey, rail]) => [tileKey, { ...rail, coord: { ...rail.coord } }])),
+    bridges: new Set(transport.bridges),
+    railCrossings: new Set(transport.railCrossings),
+    arterialPaths: transport.arterialPaths.map((path) => path.map((coord) => ({ ...coord }))),
+    railPaths: transport.railPaths.map((path) => path.map((coord) => ({ ...coord }))),
+  };
+}
+
+function mutablePlacementFixture(): ReturnType<typeof buildZurichPlacement> {
+  const placement = placementFixture().placement;
+  return {
+    buildings: placement.buildings.map((building) => ({ ...building, coord: { ...building.coord } })),
+    trees: placement.trees.map((coord) => ({ ...coord })),
+    details: placement.details.map((detail) => ({ ...detail, coord: { ...detail.coord } })),
+    reserveTiles: new Set(placement.reserveTiles),
+  };
+}
 
 function manhattanDistanceToNearest(coord: Coord, candidates: Coord[], maxDistance: number): number {
   let best = maxDistance + 1;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from '../../src/city/roadTopology';
+import { countInvalidRoadDeadEnds, countRoadNetworkComponents, pruneInvalidRoadDeadEnds } from '../../src/city/roadTopology';
 
 function key(x: number, y: number): string {
   return `${x}:${y}`;
@@ -33,5 +33,14 @@ describe('road topology', () => {
     ]);
 
     expect(countInvalidRoadDeadEnds(roads, { width: 5, height: 5 })).toBe(2);
+  });
+
+  it('counts disconnected road islands', () => {
+    const roads = makeRoads([
+      [0, 3], [1, 3], [2, 3],
+      [5, 5], [5, 6],
+    ]);
+
+    expect(countRoadNetworkComponents(roads)).toBe(2);
   });
 });
