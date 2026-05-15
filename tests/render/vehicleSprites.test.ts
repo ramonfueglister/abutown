@@ -9,25 +9,31 @@ import {
 describe('vehicle sprites', () => {
   const legacyPathPattern = new RegExp(`/${['open', 'gfx'].join('')}|/${['open', 'ttd'].join('')}`, 'i');
 
-  it('uses pak128 road vehicle sheets from the active asset pack', () => {
+  it('uses the full pak128 road vehicle manifest', () => {
     const sprites = candidateVehicleSprites();
     const sheets = new Set(sprites.map((sprite) => sprite.sheet));
     const paths = sprites.map((sprite) => sprite.path);
 
-    expect(sheets).toEqual(new Set(['bus', 'truck', 'delivery-van', 'cooling-truck', 'tanker', 'concrete-mixer', 'bulk-truck', 'car-transporter']));
+    expect(sprites.length).toBeGreaterThan(80);
+    expect(sheets.size).toBe(sprites.length);
+    expect(sheets).toContain('rvg_type_s_van');
+    expect(sheets).toContain('man_lions_city');
+    expect(sheets).toContain('goods_truck_0');
     expect(paths.every((path) => path.startsWith('/simutrans-assets/pak128/'))).toBe(true);
+    expect(paths.every((path) => path.endsWith('.png'))).toBe(true);
     expect(paths.every((path) => !legacyPathPattern.test(path))).toBe(true);
   });
 
   it('assigns available vehicle sprites in a stable pseudo-random order', () => {
     const sprites = candidateVehicleSprites();
-    const assignments = Array.from({ length: 48 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet);
+    const assignments = Array.from({ length: sprites.length * 6 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet);
 
     expect(new Set(assignments)).toEqual(new Set(sprites.map((sprite) => sprite.sheet)));
-    expect(assignments).toContain('delivery-van');
-    expect(assignments.slice(0, 8)).not.toEqual(sprites.map((sprite) => sprite.sheet));
+    expect(assignments).toContain('rvg_type_s_van');
+    expect(new Set(assignments).size).toBeGreaterThan(24);
+    expect(assignments.slice(0, 8)).not.toEqual(sprites.slice(0, 8).map((sprite) => sprite.sheet));
     expect(assignments).toEqual(
-      Array.from({ length: 48 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet),
+      Array.from({ length: sprites.length * 6 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet),
     );
   });
 
