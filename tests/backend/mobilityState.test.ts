@@ -5,7 +5,6 @@ import {
   applyServerMessage,
   createMobilityOverlayState,
   mobilityDiagnostics,
-  mobilityMarkers,
 } from '../../src/backend/mobilityState';
 import type { MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
 
@@ -54,23 +53,17 @@ describe('mobility state reducer', () => {
       vehicles: 0,
       stops: 0,
       invalidMessages: 0,
-      seededAgentState: null,
       lastError: null,
     });
   });
 
-  it('stores snapshot records and projects seeded walking agent markers', () => {
+  it('stores snapshot records without projecting demo map markers', () => {
     const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
     const diagnostics = mobilityDiagnostics(state);
-    const markers = mobilityMarkers(state);
 
     expect(state.status).toBe('connected');
-    expect(diagnostics).toMatchObject({ tick: 2, agents: 1, vehicles: 1, stops: 1, seededAgentState: 'walking' });
-    expect(markers.find((marker) => marker.id === 'agent:seed:0')).toMatchObject({
-      kind: 'agent',
-      coord: { x: 125, y: 131 },
-      state: 'walking',
-    });
+    expect(diagnostics).toMatchObject({ tick: 2, agents: 1, vehicles: 1, stops: 1 });
+    expect(diagnostics).not.toHaveProperty('seededAgentState');
   });
 
   it('applies mobility deltas by replacing changed agents and vehicles', () => {
@@ -98,11 +91,7 @@ describe('mobility state reducer', () => {
       200
     );
 
-    expect(mobilityDiagnostics(next)).toMatchObject({ tick: 3, seededAgentState: 'waiting_at_stop' });
-    expect(mobilityMarkers(next).find((marker) => marker.id === 'agent:seed:0')).toMatchObject({
-      coord: { x: 126, y: 130 },
-      state: 'waiting_at_stop',
-    });
+    expect(mobilityDiagnostics(next)).toMatchObject({ tick: 3, agents: 1, vehicles: 1 });
   });
 
   it('counts invalid messages without dropping known records', () => {
@@ -112,25 +101,4 @@ describe('mobility state reducer', () => {
     expect(mobilityDiagnostics(next)).toMatchObject({ agents: 1, invalidMessages: 1 });
   });
 
-  it('keeps the completed demo agent inside the initial camera area', () => {
-    const state = applyMobilitySnapshot(
-      createMobilityOverlayState(),
-      {
-        ...snapshot,
-        agents: [
-          {
-            id: 'agent:seed:0',
-            state: { type: 'at_activity', activity_id: 'activity:work' },
-            plan_cursor: 3,
-          },
-        ],
-      },
-      100
-    );
-
-    expect(mobilityMarkers(state).find((marker) => marker.id === 'agent:seed:0')).toMatchObject({
-      coord: { x: 130, y: 126 },
-      state: 'at_activity',
-    });
-  });
 });

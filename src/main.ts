@@ -15,8 +15,6 @@ import { buildZurichTransport } from './city/zurichTransport';
 import { validateZurichCity } from './city/zurichValidation';
 import { buildZurichWorld } from './city/zurichWorld';
 import type { ZurichBuilding, ZurichDetail } from './city/worldTypes';
-import { connectMobilityBackend, type MobilityBackendBridge } from './backend/mobilityClient';
-import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -52,6 +50,12 @@ import {
   riverbankSourceFromMask,
 } from './render/riverbankFrames';
 import { compareDrawableOrder } from './render/drawOrder';
+import {
+  buildPedestrianAgents,
+  findNearestPedestrianAgent,
+  pedestrianAgentId,
+  type LocalPedestrianAgent,
+} from './render/pedestrianAgents';
 import { buildPedestrianLoop, pedestrianWalkingSpeed } from './render/pedestrianMotion';
 import {
   buildNorthboundTrainPath,
@@ -59,7 +63,6 @@ import {
   trainPosition as movingTrainPosition,
   trainWrappedOffset,
 } from './render/trainMotion';
-import { drawMobilityOverlay } from './render/mobilityOverlay';
 
 type Coord = { x: number; y: number };
 type Terrain = 'grass' | 'water' | 'riverbank' | 'park';
@@ -126,7 +129,7 @@ type StaticDrawable =
   | { type: 'building'; coord: Coord; building: Building };
 
 type CarDrawable = { type: 'car'; coord: Coord; car: Car };
-type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: Pedestrian };
+type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: Pedestrian; agentId: string };
 type TrainDrawable = { type: 'train'; coord: Coord; train: Train };
 type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
 
@@ -233,8 +236,7 @@ let cars: Car[] = [];
 let pedestrians: Pedestrian[] = [];
 let trains: Train[] = buildTrains();
 let pedestrianCorridorCount = 0;
-let mobilityState: MobilityOverlayState = createMobilityOverlayState();
-let mobilityBridge: MobilityBackendBridge | null = null;
+let selectedAgentId: string | null = null;
 let previousTime = performance.now();
 
 void boot();
@@ -249,16 +251,6 @@ async function boot(): Promise<void> {
   pedestrianSprites = candidateSimutransPedestrianSprites();
   cars = buildCars(vehicleSprites);
   pedestrians = buildPedestrians(pedestrianSprites);
-  const mobilityBackend = configuredMobilityBackend();
-  if (mobilityBackend.enabled) {
-    mobilityBridge = connectMobilityBackend({
-      baseUrl: mobilityBackend.baseUrl,
-      onState: (nextState) => {
-        mobilityState = nextState;
-      },
-    });
-    window.addEventListener('beforeunload', () => mobilityBridge?.stop(), { once: true });
-  }
   resize();
   window.addEventListener('resize', resize);
   attachCamera();
@@ -287,8 +279,10 @@ function resize(): void {
 }
 
 function attachCamera(): void {
+  let pointerDown: Coord | null = null;
   canvas.addEventListener('pointerdown', (event) => {
     camera.dragging = true;
+    pointerDown = { x: event.clientX, y: event.clientY };
     camera.lastX = event.clientX;
     camera.lastY = event.clientY;
     canvas.setPointerCapture(event.pointerId);
@@ -300,12 +294,16 @@ function attachCamera(): void {
     camera.lastX = event.clientX;
     camera.lastY = event.clientY;
   });
-  canvas.addEventListener('pointerup', () => {
+  canvas.addEventListener('pointerup', (event) => {
+    const clickDistance = pointerDown ? Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) : Infinity;
     camera.dragging = false;
+    if (clickDistance < 4) selectPedestrianAgentAtScreenPoint({ x: event.clientX, y: event.clientY });
+    pointerDown = null;
     constrainCamera(false);
   });
   canvas.addEventListener('pointercancel', () => {
     camera.dragging = false;
+    pointerDown = null;
     constrainCamera(false);
   });
   canvas.addEventListener('wheel', (event) => {
@@ -366,7 +364,7 @@ function drawScene(offset: Coord): void {
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort(compareDrawables);
   const pedestrianDrawables = pedestrians
-    .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrianPosition(pedestrian), pedestrian }))
+    .map((pedestrian, index) => ({ type: 'pedestrian' as const, coord: pedestrianPosition(pedestrian), pedestrian, agentId: pedestrianAgentId(index) }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort(compareDrawables);
   const trainDrawables = trains
@@ -383,14 +381,10 @@ function drawScene(offset: Coord): void {
     if (item.type === 'building') drawBuilding(item.building);
     if (item.type === 'train') drawTrain(item.train);
     if (item.type === 'car') drawCar(item.car);
-    if (item.type === 'pedestrian') drawPedestrian(item.pedestrian);
+    if (item.type === 'pedestrian') drawPedestrian(item.pedestrian, item.agentId === selectedAgentId);
   }
 
   drawPerimeterMist();
-  drawMobilityOverlay(ctx, mobilityState, {
-    project: iso,
-    isVisible: (coord) => isCoordVisible(coord, visibleGrid),
-  });
   ctx.restore();
 }
 
@@ -597,7 +591,7 @@ function detailRole(detail: ZurichDetail): Extract<AssetRole, 'detail.park' | 'd
   return 'detail.industry';
 }
 
-function drawPedestrian(pedestrian: Pedestrian): void {
+function drawPedestrian(pedestrian: Pedestrian, selected: boolean): void {
   const image = images.get(SIMUTRANS_PEDESTRIAN_ASSET_PATHS[pedestrian.sprite.sheet]);
   if (!image) return;
   const base = Math.floor(pedestrian.offset);
@@ -616,6 +610,14 @@ function drawPedestrian(pedestrian: Pedestrian): void {
   const height = visible.height * scale;
   ctx.save();
   ctx.translate(point.x + lane.x, point.y + lane.y + 5);
+  if (selected) {
+    ctx.globalAlpha = 0.92;
+    ctx.strokeStyle = '#f7d76a';
+    ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
+    ctx.beginPath();
+    ctx.ellipse(0, -Math.max(3, height * 0.28), Math.max(6, width * 0.55), Math.max(8, height * 0.48), 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
   ctx.fillRect(-Math.max(2, width * 0.18), -Math.max(1, height * 0.08), Math.max(4, width * 0.36), Math.max(2, height * 0.1));
   ctx.drawImage(image, visible.x, visible.y, visible.width, visible.height, -width / 2, -height, width, height);
@@ -1084,6 +1086,23 @@ function pedestrianPosition(pedestrian: Pedestrian): Coord {
   return {
     x: lerp(pedestrian.path[base].x, pedestrian.path[next].x, t),
     y: lerp(pedestrian.path[base].y, pedestrian.path[next].y, t),
+  };
+}
+
+function localPedestrianAgents(): LocalPedestrianAgent[] {
+  return buildPedestrianAgents(pedestrians);
+}
+
+function selectPedestrianAgentAtScreenPoint(point: Coord): void {
+  const worldPoint = screenToWorld(point);
+  const hit = findNearestPedestrianAgent(localPedestrianAgents(), worldPoint, iso, Math.max(8, 20 / camera.scale));
+  selectedAgentId = hit?.id ?? null;
+}
+
+function screenToWorld(point: Coord): Coord {
+  return {
+    x: (point.x - camera.x) / camera.scale,
+    y: (point.y - camera.y) / camera.scale,
   };
 }
 
@@ -1565,6 +1584,9 @@ declare global {
 window.render_game_to_text = () => {
   const legacyDiagnostics = cityDiagnostics();
   const detailCounts = detailCountsByCategory();
+  const agents = localPedestrianAgents();
+  const serializedAgents = agents.map(serializeLocalAgent);
+  const selectedAgent = serializedAgents.find((agent) => agent.id === selectedAgentId) ?? null;
   return JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
@@ -1598,7 +1620,18 @@ window.render_game_to_text = () => {
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
       vehicleSprites: vehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
-      mobility: mobilityDiagnostics(mobilityState),
+      mobility: {
+        status: 'local-pedestrians',
+        agents: agents.length,
+        vehicles: 0,
+        stops: 0,
+      },
+      localAgents: {
+        count: agents.length,
+        selectedId: selectedAgentId,
+        selected: selectedAgent,
+        agents: serializedAgents,
+      },
       railStations: railStations.length,
       railYardTracks: Math.max(0, railPaths.length - 2),
       details: detailCounts,
@@ -1641,6 +1674,17 @@ function detailCountsByCategory(): Record<string, number> {
   return result;
 }
 
+function serializeLocalAgent(agent: LocalPedestrianAgent): LocalPedestrianAgent & { screen: Coord } {
+  const projected = iso(agent.coord);
+  return {
+    ...agent,
+    screen: {
+      x: camera.x + projected.x * camera.scale,
+      y: camera.y + projected.y * camera.scale,
+    },
+  };
+}
+
 function legacyAssetPaths(): string[] {
   return [...images.keys()].filter((path) => !path.startsWith('/simutrans-assets/pak128/')).sort();
 }
@@ -1651,18 +1695,3 @@ window.advanceTime = (ms: number) => {
   for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * (ms / 1000), train.path);
   render();
 };
-
-const DEFAULT_MOBILITY_BACKEND = 'http://127.0.0.1:8080';
-
-function configuredMobilityBackend(): { enabled: boolean; baseUrl?: string } {
-  const params = new URLSearchParams(window.location.search);
-  const explicitBaseUrl = params.get('mobilityBackend');
-  if (explicitBaseUrl) return { enabled: true, baseUrl: explicitBaseUrl };
-  if (params.get('mobility') === '1') return { enabled: true, baseUrl: DEFAULT_MOBILITY_BACKEND };
-  try {
-    if (window.localStorage.getItem('abutown:mobility') === '1') return { enabled: true, baseUrl: DEFAULT_MOBILITY_BACKEND };
-  } catch {
-    return { enabled: false };
-  }
-  return { enabled: false };
-}

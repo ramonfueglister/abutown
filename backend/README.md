@@ -83,14 +83,13 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server mobility_snapshot_is
 cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobility_deltas_after_hello
 ```
 
-Frontend mobility bridge:
+Frontend agent mode:
 
-- Run `cargo run --manifest-path backend/Cargo.toml -p sim-server`.
-- Run `npm run dev`.
-- Open the Vite URL with `?mobility=1` to use the Vite same-origin proxy, or
-  `?mobilityBackend=http://127.0.0.1:8080` to connect directly.
-- Without either flag, the browser keeps the local city-only view and makes no
-  mobility backend request.
+- The Vite client no longer renders the seeded backend demo mobility marker.
+- Existing Simutrans pedestrians are the local frontend agents and can be
+  selected directly on the canvas.
+- Backend mobility endpoints remain available for later authoritative
+  simulation slices, but the current browser agent mode is pedestrian-driven.
 
 ## Snapshot Loop
 
