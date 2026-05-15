@@ -133,7 +133,7 @@ async fn command(State(state): State<AppState>, Json(command): Json<ClientComman
     let result = {
         let runtime = state.runtime();
         let mut runtime = runtime.lock().await;
-        runtime.apply_client_command(command)
+        runtime.apply_client_command(command).await
     };
 
     match result {

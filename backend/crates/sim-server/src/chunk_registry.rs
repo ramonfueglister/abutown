@@ -83,6 +83,7 @@ impl ChunkRegistry {
             .map(|loaded| loaded.chunk.tile_count())
     }
 
+    #[cfg(test)]
     pub(crate) fn set_tile_kind(
         &mut self,
         coord: ChunkCoord,
@@ -128,10 +129,10 @@ impl ChunkRegistry {
         &mut self,
         plan: SetTileKindPlan,
     ) -> Result<u64, ChunkMutationError> {
-        let loaded =
-            self.chunks
-                .get_mut(&plan.coord)
-                .ok_or(ChunkMutationError::ChunkNotLoaded { coord: plan.coord })?;
+        let loaded = self
+            .chunks
+            .get_mut(&plan.coord)
+            .ok_or(ChunkMutationError::ChunkNotLoaded { coord: plan.coord })?;
 
         loaded
             .chunk

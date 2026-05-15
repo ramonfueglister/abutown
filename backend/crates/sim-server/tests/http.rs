@@ -7,7 +7,10 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
-use sim_server::app::build_app;
+use sim_server::{
+    app::{build_app, build_app_with_runtime},
+    runtime::SimulationRuntime,
+};
 
 #[tokio::test]
 async fn health_and_world_summary_are_available() {
@@ -275,4 +278,75 @@ async fn command_rejects_tile_out_of_bounds() {
     assert_eq!(json["status"], "rejected");
     assert_eq!(json["code"], "tile_out_of_bounds");
     assert_eq!(json["command_id"], "command:http:3");
+}
+
+#[tokio::test]
+async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
+    let app = build_app_with_runtime(SimulationRuntime::new_with_event_store(Box::new(
+        sim_core::events::FailingWorldEventStore::new("database offline"),
+    )));
+
+    let before_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/chunks/4/4")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let before_body = before_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let before: Value = serde_json::from_slice(&before_body).unwrap();
+
+    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+        protocol_version: PROTOCOL_VERSION,
+        world_id: WorldId("abutown-main".to_string()),
+        command_id: "command:http:store-failure".to_string(),
+        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+        local_index: 11,
+        kind: TileKindDto::Water,
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "rejected");
+    assert_eq!(json["code"], "event_store_unavailable");
+
+    let after_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/chunks/4/4")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let after_body = after_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let after: Value = serde_json::from_slice(&after_body).unwrap();
+    assert_eq!(after, before);
 }
