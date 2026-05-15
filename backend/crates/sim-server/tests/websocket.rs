@@ -1,9 +1,16 @@
 use std::time::Duration;
 
-use abutown_protocol::{ServerMessageDto, TilePulseDeltaDto};
+use abutown_protocol::{
+    ClientCommandDto, PROTOCOL_VERSION, ServerMessageDto, SetTileKindCommandDto, TileKindDto,
+    TilePulseDeltaDto, WorldEventDto, WorldId,
+};
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use futures_util::StreamExt;
+use http_body_util::BodyExt;
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
+use tower::ServiceExt;
 
 use sim_server::app::build_app;
 
@@ -142,6 +149,62 @@ async fn websocket_sends_mobility_deltas_after_hello() {
     assert_eq!(mobility_delta.world_id.0, "abutown-main");
     assert_eq!(mobility_delta.tick, 1);
     assert!(!mobility_delta.changed_agents.is_empty());
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn websocket_broadcasts_accepted_command_event() {
+    let app = build_app();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_app = app.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, server_app).await.unwrap();
+    });
+
+    let url = format!("ws://{addr}/ws");
+    let (mut stream, _) = connect_async(url).await.unwrap();
+
+    let hello = read_server_message(&mut stream).await;
+    assert!(matches!(hello, ServerMessageDto::Hello(_)));
+
+    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+        protocol_version: PROTOCOL_VERSION,
+        world_id: WorldId("abutown-main".to_string()),
+        command_id: "command:ws:1".to_string(),
+        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+        local_index: 12,
+        kind: TileKindDto::BuildingFootprint,
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = response.into_body().collect().await.unwrap();
+
+    loop {
+        let message = read_server_message(&mut stream).await;
+        if let ServerMessageDto::WorldEvent {
+            event: WorldEventDto::TileKindSet(event),
+        } = message
+        {
+            assert_eq!(event.command_id, "command:ws:1");
+            assert_eq!(event.coord, abutown_protocol::ChunkCoordDto { x: 4, y: 4 });
+            assert_eq!(event.local_index, 12);
+            assert_eq!(event.kind, TileKindDto::BuildingFootprint);
+            break;
+        }
+    }
 
     server.abort();
 }
