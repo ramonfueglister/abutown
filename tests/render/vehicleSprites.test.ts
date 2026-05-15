@@ -2,23 +2,39 @@ import { describe, expect, it } from 'vitest';
 import {
   candidateVehicleSprites,
   screenRightLaneOffset,
+  vehicleSpriteForTrafficIndex,
   vehicleFrameForGridDelta,
 } from '../../src/render/vehicleSprites';
 
 describe('vehicle sprites', () => {
-  it('uses every available road vehicle sheet candidate instead of a single bus frame', () => {
+  const legacyPathPattern = new RegExp(`/${['open', 'gfx'].join('')}|/${['open', 'ttd'].join('')}`, 'i');
+
+  it('uses pak128 road vehicle sheets from the active asset pack', () => {
     const sprites = candidateVehicleSprites();
     const sheets = new Set(sprites.map((sprite) => sprite.sheet));
+    const paths = sprites.map((sprite) => sprite.path);
 
-    expect(sheets).toEqual(new Set(['bus', 'lorry']));
-    expect(sprites.length).toBeGreaterThan(20);
+    expect(sheets).toEqual(new Set(['bus', 'truck']));
+    expect(paths.every((path) => path.startsWith('/simutrans-assets/pak128/'))).toBe(true);
+    expect(paths.every((path) => !legacyPathPattern.test(path))).toBe(true);
   });
 
-  it('selects directional OpenGFX road-vehicle frames from grid movement', () => {
-    expect(vehicleFrameForGridDelta({ x: 1, y: 0 })).toBe(3);
-    expect(vehicleFrameForGridDelta({ x: 0, y: 1 })).toBe(5);
-    expect(vehicleFrameForGridDelta({ x: -1, y: 0 })).toBe(7);
-    expect(vehicleFrameForGridDelta({ x: 0, y: -1 })).toBe(1);
+  it('assigns available vehicle sprites in a stable pseudo-random order', () => {
+    const sprites = candidateVehicleSprites();
+    const assignments = Array.from({ length: 12 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet);
+
+    expect(new Set(assignments)).toEqual(new Set(['bus', 'truck']));
+    expect(assignments.slice(0, 4)).not.toEqual(['bus', 'truck', 'bus', 'truck']);
+    expect(assignments).toEqual(
+      Array.from({ length: 12 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet),
+    );
+  });
+
+  it('selects pak128 road-vehicle frames using the same grid compass as road DAT masks', () => {
+    expect(vehicleFrameForGridDelta({ x: 1, y: 0 })).toBe('E');
+    expect(vehicleFrameForGridDelta({ x: 0, y: 1 })).toBe('S');
+    expect(vehicleFrameForGridDelta({ x: -1, y: 0 })).toBe('W');
+    expect(vehicleFrameForGridDelta({ x: 0, y: -1 })).toBe('N');
   });
 
   it('places vehicles on the right lane relative to their screen-space travel direction', () => {

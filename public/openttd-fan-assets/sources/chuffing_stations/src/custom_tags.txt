@@ -1,3 +1,0 @@
-TITLE               :Chuffing Stations
-VERSION             :v2.0
-WEBSITE             :https://github.com/andybiotic/chuffing_stations

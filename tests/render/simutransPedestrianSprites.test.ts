@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   candidateSimutransPedestrianSprites,
+  SIMUTRANS_PEDESTRIAN_ASSET_PATHS,
   simutransPedestrianDisplayScale,
   simutransPedestrianFrameForGridDelta,
   simutransPedestrianFrameRect,
 } from '../../src/render/simutransPedestrianSprites';
+import { pak128AssetPack } from '../../src/assets/pak128Catalog';
 
 describe('Simutrans pak128 pedestrian sprites', () => {
+  const stalePedestrianRoot = ['pak128', 'pedestrians'].join('-');
+
   it('exposes only single-person pak128 pedestrian variants', () => {
     const sprites = candidateSimutransPedestrianSprites();
     const kinds = new Set(sprites.map((sprite) => sprite.kind));
@@ -15,6 +19,12 @@ describe('Simutrans pak128 pedestrian sprites', () => {
     expect(sprites.length).toBeGreaterThanOrEqual(5);
     expect([...kinds]).toEqual(['pedestrian']);
     expect(sheets).toEqual(new Set(['pedestrians-1']));
+  });
+
+  it('loads pedestrian sheets from the active pak128 asset tree', () => {
+    expect(SIMUTRANS_PEDESTRIAN_ASSET_PATHS['pedestrians-1']).toBe(pak128AssetPack.require('agent.pedestrian').path);
+    expect(Object.values(SIMUTRANS_PEDESTRIAN_ASSET_PATHS).every((path) => path.startsWith('/simutrans-assets/pak128/'))).toBe(true);
+    expect(Object.values(SIMUTRANS_PEDESTRIAN_ASSET_PATHS).every((path) => !path.includes(stalePedestrianRoot))).toBe(true);
   });
 
   it('maps pak128 DAT image coordinates to 128px source cells', () => {

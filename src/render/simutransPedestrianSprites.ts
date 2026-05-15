@@ -1,3 +1,5 @@
+import { pak128AssetPack } from '../assets/pak128Catalog';
+
 export type SimutransPedestrianSheetName = 'pedestrians-1' | 'pedestrians-2' | 'pedestrians-3';
 export type SimutransPedestrianKind = 'pedestrian' | 'walker';
 export type SimutransDirection = 'S' | 'N' | 'E' | 'W' | 'SE' | 'NW' | 'NE' | 'SW';
@@ -38,9 +40,9 @@ const DIRECTION_COLUMNS: Record<SimutransDirection, number> = {
 };
 
 export const SIMUTRANS_PEDESTRIAN_ASSET_PATHS: Record<SimutransPedestrianSheetName, string> = {
-  'pedestrians-1': '/simutrans-assets/pak128-pedestrians/raw/privat-pedestrians-128.png',
-  'pedestrians-2': '/simutrans-assets/pak128-pedestrians/raw/privat-pedestrians_2-128.png',
-  'pedestrians-3': '/simutrans-assets/pak128-pedestrians/raw/privat-pedestrians_3-128.png',
+  'pedestrians-1': pak128AssetPack.require('agent.pedestrian').path,
+  'pedestrians-2': '/simutrans-assets/pak128/base/pedestrians/privat-pedestrians_2-128.png',
+  'pedestrians-3': '/simutrans-assets/pak128/base/pedestrians/privat-pedestrians_3-128.png',
 };
 
 export function candidateSimutransPedestrianSprites(): SimutransPedestrianSprite[] {
