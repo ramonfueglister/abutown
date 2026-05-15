@@ -111,102 +111,6 @@ pub struct MobilityWorld {
 }
 
 impl MobilityWorld {
-    pub fn seeded_demo() -> Self {
-        let route_id = RouteId("route:old-town-loop".to_string());
-        let pickup_stop_id = StopId("stop:old-town".to_string());
-        let dropoff_stop_id = StopId("stop:station".to_string());
-        let walk_to_pickup = LinkId("link:home-to-old-town-stop".to_string());
-        let vehicle_link = LinkId("link:old-town-to-station".to_string());
-        let walk_to_activity = LinkId("link:station-to-work".to_string());
-        let agent_id = AgentId("agent:seed:0".to_string());
-        let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
-
-        let mut routes = HashMap::new();
-        routes.insert(
-            route_id.clone(),
-            RouteRecord {
-                id: route_id.clone(),
-                links: vec![vehicle_link],
-            },
-        );
-
-        let mut stops = HashMap::new();
-        stops.insert(
-            pickup_stop_id.clone(),
-            StopRecord {
-                id: pickup_stop_id.clone(),
-                route_id: route_id.clone(),
-                link_index: 0,
-                progress: 0.0,
-                waiting_agents: VecDeque::new(),
-            },
-        );
-        stops.insert(
-            dropoff_stop_id.clone(),
-            StopRecord {
-                id: dropoff_stop_id.clone(),
-                route_id: route_id.clone(),
-                link_index: 0,
-                progress: 1.0,
-                waiting_agents: VecDeque::new(),
-            },
-        );
-
-        let mut agents = HashMap::new();
-        agents.insert(
-            agent_id.clone(),
-            AgentRecord {
-                id: agent_id,
-                state: AgentMobilityState::Walking {
-                    link_id: walk_to_pickup.clone(),
-                    progress: 0.0,
-                },
-                plan: vec![
-                    PlanStage::WalkToStop {
-                        link_id: walk_to_pickup,
-                        stop_id: pickup_stop_id,
-                    },
-                    PlanStage::RideToStop {
-                        route_id: route_id.clone(),
-                        stop_id: dropoff_stop_id,
-                    },
-                    PlanStage::WalkToActivity {
-                        link_id: walk_to_activity,
-                        activity_id: "activity:work".to_string(),
-                    },
-                    PlanStage::Activity {
-                        activity_id: "activity:work".to_string(),
-                    },
-                ],
-                plan_cursor: 0,
-                walk_speed_per_tick: 0.5,
-            },
-        );
-
-        let mut vehicles = HashMap::new();
-        vehicles.insert(
-            vehicle_id.clone(),
-            VehicleRecord {
-                id: vehicle_id,
-                route_id,
-                link_index: 0,
-                progress: 0.0,
-                speed_per_tick: 0.5,
-                capacity: 4,
-                occupants: Vec::new(),
-                dwell_ticks_remaining: 2,
-            },
-        );
-
-        Self {
-            tick: 0,
-            agents,
-            vehicles,
-            stops,
-            routes,
-        }
-    }
-
     pub fn tick(&self) -> u64 {
         self.tick
     }
@@ -624,17 +528,17 @@ mod tests {
     use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
     #[test]
-    fn seeded_world_starts_with_agent_walking_to_pickup_stop() {
-        let world = MobilityWorld::seeded_demo();
+    fn sample_world_starts_with_agent_walking_to_pickup_stop() {
+        let world = sample_world();
         let agent = world
-            .agent(&AgentId("agent:seed:0".to_string()))
-            .expect("seed agent exists");
+            .agent(&AgentId("agent:pedestrian:0".to_string()))
+            .expect("sample agent exists");
         let vehicle = world
             .vehicle(&VehicleId("vehicle:shuttle:0".to_string()))
-            .expect("seed vehicle exists");
+            .expect("sample vehicle exists");
         let stop = world
             .stop(&StopId("stop:old-town".to_string()))
-            .expect("seed stop exists");
+            .expect("sample stop exists");
 
         assert_eq!(agent.plan_cursor, 0);
         assert_eq!(
@@ -651,8 +555,8 @@ mod tests {
 
     #[test]
     fn walking_agent_reaches_pickup_stop_and_waits() {
-        let mut world = MobilityWorld::seeded_demo();
-        let agent_id = AgentId("agent:seed:0".to_string());
+        let mut world = sample_world();
+        let agent_id = AgentId("agent:pedestrian:0".to_string());
 
         let first_delta = world.tick_mobility();
         let agent = world.agent(&agent_id).expect("agent exists");
@@ -687,7 +591,7 @@ mod tests {
 
     #[test]
     fn vehicle_respects_initial_dwell_then_moves_on_route() {
-        let mut world = MobilityWorld::seeded_demo();
+        let mut world = sample_world();
         let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
 
         let first_delta = world.tick_mobility();
@@ -711,8 +615,8 @@ mod tests {
 
     #[test]
     fn agent_boards_rides_alights_and_walks_to_activity() {
-        let mut world = MobilityWorld::seeded_demo();
-        let agent_id = AgentId("agent:seed:0".to_string());
+        let mut world = sample_world();
+        let agent_id = AgentId("agent:pedestrian:0".to_string());
         let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
 
         world.tick_mobility();
@@ -765,5 +669,101 @@ mod tests {
             }
         );
         assert_eq!(arrived.plan_cursor, 3);
+    }
+
+    fn sample_world() -> MobilityWorld {
+        let route_id = RouteId("route:old-town-loop".to_string());
+        let pickup_stop_id = StopId("stop:old-town".to_string());
+        let dropoff_stop_id = StopId("stop:station".to_string());
+        let walk_to_pickup = LinkId("link:home-to-old-town-stop".to_string());
+        let vehicle_link = LinkId("link:old-town-to-station".to_string());
+        let walk_to_activity = LinkId("link:station-to-work".to_string());
+        let agent_id = AgentId("agent:pedestrian:0".to_string());
+        let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
+
+        let mut routes = HashMap::new();
+        routes.insert(
+            route_id.clone(),
+            RouteRecord {
+                id: route_id.clone(),
+                links: vec![vehicle_link],
+            },
+        );
+
+        let mut stops = HashMap::new();
+        stops.insert(
+            pickup_stop_id.clone(),
+            StopRecord {
+                id: pickup_stop_id.clone(),
+                route_id: route_id.clone(),
+                link_index: 0,
+                progress: 0.0,
+                waiting_agents: VecDeque::new(),
+            },
+        );
+        stops.insert(
+            dropoff_stop_id.clone(),
+            StopRecord {
+                id: dropoff_stop_id.clone(),
+                route_id: route_id.clone(),
+                link_index: 0,
+                progress: 1.0,
+                waiting_agents: VecDeque::new(),
+            },
+        );
+
+        let mut agents = HashMap::new();
+        agents.insert(
+            agent_id.clone(),
+            AgentRecord {
+                id: agent_id,
+                state: AgentMobilityState::Walking {
+                    link_id: walk_to_pickup.clone(),
+                    progress: 0.0,
+                },
+                plan: vec![
+                    PlanStage::WalkToStop {
+                        link_id: walk_to_pickup,
+                        stop_id: pickup_stop_id,
+                    },
+                    PlanStage::RideToStop {
+                        route_id: route_id.clone(),
+                        stop_id: dropoff_stop_id,
+                    },
+                    PlanStage::WalkToActivity {
+                        link_id: walk_to_activity,
+                        activity_id: "activity:work".to_string(),
+                    },
+                    PlanStage::Activity {
+                        activity_id: "activity:work".to_string(),
+                    },
+                ],
+                plan_cursor: 0,
+                walk_speed_per_tick: 0.5,
+            },
+        );
+
+        let mut vehicles = HashMap::new();
+        vehicles.insert(
+            vehicle_id.clone(),
+            VehicleRecord {
+                id: vehicle_id,
+                route_id,
+                link_index: 0,
+                progress: 0.0,
+                speed_per_tick: 0.5,
+                capacity: 4,
+                occupants: Vec::new(),
+                dwell_ticks_remaining: 2,
+            },
+        );
+
+        MobilityWorld {
+            tick: 0,
+            agents,
+            vehicles,
+            stops,
+            routes,
+        }
     }
 }

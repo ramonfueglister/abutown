@@ -148,7 +148,8 @@ async fn websocket_sends_mobility_deltas_after_hello() {
 
     assert_eq!(mobility_delta.world_id.0, "abutown-main");
     assert_eq!(mobility_delta.tick, 1);
-    assert!(!mobility_delta.changed_agents.is_empty());
+    assert!(mobility_delta.changed_agents.is_empty());
+    assert!(mobility_delta.changed_vehicles.is_empty());
 
     server.abort();
 }

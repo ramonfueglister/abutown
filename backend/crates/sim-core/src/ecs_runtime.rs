@@ -86,7 +86,7 @@ mod tests {
         let mut runtime = MaterializedRuntime::default();
 
         let agent = runtime.spawn_materialized(
-            StableEntityId("agent:seed:0".to_string()),
+            StableEntityId("agent:pedestrian:0".to_string()),
             ChunkCoord { x: 4, y: 4 },
             MaterializedKind::Agent,
         );

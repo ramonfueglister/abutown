@@ -148,15 +148,9 @@ async fn mobility_snapshot_is_available() {
     assert_eq!(json["protocol_version"], 1);
     assert_eq!(json["world_id"], "abutown-main");
     assert_eq!(json["tick"], 0);
-    assert_eq!(json["agents"][0]["id"], "agent:seed:0");
-    assert_eq!(json["agents"][0]["state"]["type"], "walking");
-    assert_eq!(
-        json["agents"][0]["state"]["link_id"],
-        "link:home-to-old-town-stop"
-    );
-    assert_eq!(json["vehicles"][0]["id"], "vehicle:shuttle:0");
-    assert_eq!(json["vehicles"][0]["capacity"], 4);
-    assert_eq!(json["stops"].as_array().unwrap().len(), 2);
+    assert_eq!(json["agents"].as_array().unwrap().len(), 0);
+    assert_eq!(json["vehicles"].as_array().unwrap().len(), 0);
+    assert_eq!(json["stops"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]

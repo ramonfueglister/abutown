@@ -12,7 +12,7 @@ const snapshot: MobilitySnapshotDto = {
   tick: 3,
   agents: [
     {
-      id: 'agent:seed:0',
+      id: 'agent:pedestrian:0',
       state: {
         type: 'walking',
         link_id: 'link:home-to-old-town-stop',
@@ -38,7 +38,7 @@ const snapshot: MobilitySnapshotDto = {
       route_id: 'route:old-town-loop',
       link_index: 0,
       progress: 0,
-      waiting_agents: ['agent:seed:0'],
+      waiting_agents: ['agent:pedestrian:0'],
     },
   ],
 };
