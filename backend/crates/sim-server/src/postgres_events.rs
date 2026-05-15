@@ -87,6 +87,36 @@ impl WorldEventStore for PostgresWorldEventStore {
 
         Ok(())
     }
+
+    async fn find_event_by_command(
+        &self,
+        _world_id: &str,
+        _command_id: &str,
+    ) -> Result<Option<WorldEventDto>, WorldEventStoreError> {
+        Err(WorldEventStoreError::unavailable(
+            "PostgresWorldEventStore::find_event_by_command not implemented yet",
+        ))
+    }
+    async fn read_chunk_events_since(
+        &self,
+        _world_id: &str,
+        _coord: abutown_protocol::ChunkCoordDto,
+        _after_chunk_version: u64,
+    ) -> Result<Vec<WorldEventDto>, WorldEventStoreError> {
+        Err(WorldEventStoreError::unavailable(
+            "PostgresWorldEventStore::read_chunk_events_since not implemented yet",
+        ))
+    }
+    async fn max_tick(&self, _world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
+        Err(WorldEventStoreError::unavailable(
+            "PostgresWorldEventStore::max_tick not implemented yet",
+        ))
+    }
+    async fn max_version(&self, _world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
+        Err(WorldEventStoreError::unavailable(
+            "PostgresWorldEventStore::max_version not implemented yet",
+        ))
+    }
 }
 
 #[cfg(test)]

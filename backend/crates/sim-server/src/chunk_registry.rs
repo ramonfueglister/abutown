@@ -243,10 +243,7 @@ mod tests {
         assert_eq!(snapshot.tile_count, 1024);
         assert_eq!(snapshot.tiles.len(), 1);
         assert_eq!(snapshot.tiles[0].local_index, 17);
-        assert_eq!(
-            snapshot.tiles[0].kind,
-            abutown_protocol::TileKindDto::Road
-        );
+        assert_eq!(snapshot.tiles[0].kind, abutown_protocol::TileKindDto::Road);
         assert!(
             registry
                 .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
@@ -287,10 +284,7 @@ mod tests {
             .expect("chunk snapshot exists");
         assert_eq!(snapshot.tiles.len(), 2);
         assert_eq!(snapshot.tiles[1].local_index, 11);
-        assert_eq!(
-            snapshot.tiles[1].kind,
-            abutown_protocol::TileKindDto::Water
-        );
+        assert_eq!(snapshot.tiles[1].kind, abutown_protocol::TileKindDto::Water);
     }
 
     #[test]

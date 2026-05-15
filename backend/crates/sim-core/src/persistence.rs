@@ -144,12 +144,18 @@ mod tests {
         chunk.set_tile_kind(0, TileKind::Road).unwrap();
         chunk.set_tile_kind(17, TileKind::Water).unwrap();
         chunk.clear_dirty();
-        chunk.set_tile_kind(42, TileKind::BuildingFootprint).unwrap();
+        chunk
+            .set_tile_kind(42, TileKind::BuildingFootprint)
+            .unwrap();
 
         let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
 
         let indices: Vec<u16> = snapshot.tiles.iter().map(|t| t.local_index).collect();
-        assert_eq!(indices, vec![0, 17, 42], "snapshot must include all non-default tiles, not only currently-dirty ones");
+        assert_eq!(
+            indices,
+            vec![0, 17, 42],
+            "snapshot must include all non-default tiles, not only currently-dirty ones"
+        );
         assert_eq!(snapshot.chunk_version, 3);
     }
 
