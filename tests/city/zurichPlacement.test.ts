@@ -39,7 +39,7 @@ describe('buildZurichPlacement', () => {
     expect(placement.buildings.filter((building) => !hasVisibleStreetFrontage(building.coord, transport.roads))).toEqual([]);
   });
 
-  it('places OpenTTD diorama setpiece details before the city filler without rail roofs', () => {
+  it('places transport setpiece details before the city filler without rail roofs', () => {
     const { placement } = placementFixture();
     const detailCounts = new Map<string, number>();
 
