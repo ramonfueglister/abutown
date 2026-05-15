@@ -1,4 +1,6 @@
 import './style.css';
+import { pak128AssetPack } from './assets/pak128Catalog';
+import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
   buildingStreetFrontageOffset,
   countBuildingsWithoutDirectStreetAdjacency,
@@ -27,7 +29,7 @@ import {
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
   vehicleFrameRect,
-  type VehicleSheetName,
+  type SimutransVehicleDirection,
   type VehicleSprite,
 } from './render/vehicleSprites';
 import {
@@ -129,14 +131,6 @@ type BuildingSheetName =
   | 'tower'
   | 'church';
 
-type BuildingSheet = {
-  name: BuildingSheetName;
-  file: string;
-  cols: number;
-  rows: number;
-  scale: number;
-};
-
 type DistrictSeed = {
   id: string;
   center: Coord;
@@ -146,13 +140,13 @@ type DistrictSeed = {
   sheets: BuildingSheetName[];
 };
 
-const TILE_W = 64;
-const TILE_H = 32;
-const SPRITE_H = 42;
+const activeAssetPack = pak128AssetPack;
+const TILE_W = activeAssetPack.tile.width;
+const TILE_H = activeAssetPack.tile.height;
 const CAMERA_EDGE_MARGIN = 8;
 const CAMERA_EDGE_SOFTNESS = 4;
-const CAMERA_MIN_SCALE = 0.48;
-const CAMERA_MAX_SCALE = 3.2;
+const CAMERA_MIN_SCALE = 0.24;
+const CAMERA_MAX_SCALE = 2.1;
 const VIEWPORT_GRID_PADDING = 9;
 const OUTSKIRTS_TILES = 12;
 const EDGE_EXIT_TILES = 7;
@@ -160,7 +154,6 @@ const NORTH = 1;
 const EAST = 2;
 const SOUTH = 4;
 const WEST = 8;
-const ROAD_SPRITE_STEP = 65;
 const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
 
@@ -172,20 +165,6 @@ const zurichValidation = validateZurichCity(zurichWorld, zurichTransport, zurich
 const WIDTH = zurichWorld.width;
 const HEIGHT = zurichWorld.height;
 
-const roadFrameByMask = new Map<number, number>([
-  [EAST | WEST, 0],
-  [NORTH | SOUTH, 1],
-  [NORTH | EAST | SOUTH | WEST, 2],
-  [NORTH | EAST | WEST, 3],
-  [NORTH | SOUTH | WEST, 4],
-  [EAST | SOUTH | WEST, 5],
-  [NORTH | EAST | SOUTH, 6],
-  [SOUTH | WEST, 7],
-  [NORTH | WEST, 8],
-  [NORTH | EAST, 9],
-  [EAST | SOUTH, 10],
-]);
-
 const canvasElement = document.querySelector<HTMLCanvasElement>('#game');
 if (!canvasElement) throw new Error('Missing game canvas');
 const canvas: HTMLCanvasElement = canvasElement;
@@ -195,21 +174,10 @@ if (!canvasContext) throw new Error('Missing canvas context');
 const ctx: CanvasRenderingContext2D = canvasContext;
 ctx.imageSmoothingEnabled = false;
 
-const camera = createCameraState({ x: 0, y: 0, scale: 0.56 });
+const camera = createCameraState({ x: 0, y: 0, scale: 0.34 });
 let cameraInitialized = false;
 
-const buildingSheets: BuildingSheet[] = [
-  { name: 'houses', file: 'houses_shape.png', cols: 4, rows: 3, scale: 0.84 },
-  { name: 'oldhouses', file: 'oldhouses_shape.png', cols: 4, rows: 3, scale: 0.84 },
-  { name: 'cottages', file: 'cottages_shape.png', cols: 1, rows: 3, scale: 0.82 },
-  { name: 'townhouses', file: 'townhouses_shape.png', cols: 2, rows: 3, scale: 0.86 },
-  { name: 'shops', file: 'shopsandoffices_shape.png', cols: 6, rows: 3, scale: 0.82 },
-  { name: 'flats', file: 'flats_shape.png', cols: 3, rows: 3, scale: 0.92 },
-  { name: 'office', file: 'officeblocks_shape.png', cols: 4, rows: 3, scale: 0.92 },
-  { name: 'modern', file: 'modernoffice_shape.png', cols: 2, rows: 4, scale: 0.84 },
-  { name: 'tower', file: 'tallofficeblock_shape.png', cols: 4, rows: 3, scale: 0.86 },
-  { name: 'church', file: 'churches_shape.png', cols: 1, rows: 3, scale: 0.84 },
-];
+const BUILDING_FRAME_VARIANTS = 4;
 
 const districtSeeds: DistrictSeed[] = [
   { id: 'old-town', center: { x: 32, y: 30 }, radius: 14, gridRadius: 7, core: true, sheets: ['oldhouses', 'townhouses', 'houses', 'shops'] },
@@ -225,32 +193,6 @@ const districtSeeds: DistrictSeed[] = [
   { id: 'south-east', center: { x: 76, y: 63 }, radius: 11, gridRadius: 6, core: false, sheets: ['houses', 'townhouses', 'shops'] },
   { id: 'north-east', center: { x: 78, y: 23 }, radius: 11, gridRadius: 6, core: false, sheets: ['houses', 'townhouses', 'shops'] },
 ];
-
-const sheetByName = new Map(buildingSheets.map((sheet) => [sheet.name, sheet]));
-const assetPaths = {
-  grass: '/opengfx2/temperate_groundtiles_32bpp.png',
-  water: '/opengfx2/universal_watertiles_32bpp.png',
-  riverbank: '/opengfx2/universal_rivertiles_32bpp.png',
-  bridge: '/opengfx2/general_bridgetiles_32bpp.png',
-  road: '/opengfx2/road_town_overlayalpha.png',
-  rail: '/opengfx2/rail_overlayalpha.png',
-  railStation: '/opengfx2/railstations_shape.png',
-  station64: '/opengfx2/all/stations__general__64__railstations_shape.png',
-  railDepot: '/opengfx2/all/stations__general__64__raildepots_shape.png',
-  roadDepot: '/opengfx2/all/stations__general__64__roaddepots_shape.png',
-  roadStop: '/opengfx2/all/stations__general__64__roadstops_shape.png',
-  dock: '/opengfx2/all/stations__general__64__docksandlocks_shape.png',
-  ship: '/opengfx2/all/vehicles__64__water_32bpp.png',
-  factory: '/opengfx2/all/industries__temperate__64__factory_shape.png',
-  farm: '/opengfx2/all/industries__temperate__64__farm_shape.png',
-  field: '/opengfx2/all/terrain__64__farm_groundtiles_32bpp.png',
-  parkDetail: '/opengfx2/all/terrain__64__temperate_park_32bpp.png',
-  tree: '/opengfx2/town_tree_32bpp.png',
-  bus: '/opengfx2/road_buses_32bpp.png',
-  lorry: '/opengfx2/road_lorries_firstgeneration_32bpp.png',
-  trainEngine: '/opengfx2/all/vehicles__64__rail_engines_temperate_32bpp.png',
-  trainWagon: '/opengfx2/all/vehicles__64__rail_wagons_32bpp.png',
-};
 
 const images = new Map<string, HTMLCanvasElement>();
 const simutransSourceBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
@@ -286,9 +228,8 @@ void boot();
 
 async function boot(): Promise<void> {
   const imageEntries = [
-    ...Object.values(assetPaths).map((path) => [path, path] as const),
+    ...activeAssetPack.all().map((asset) => [asset.path, asset.path] as const),
     ...Object.values(SIMUTRANS_PEDESTRIAN_ASSET_PATHS).map((path) => [path, path] as const),
-    ...buildingSheets.map((sheet) => [`/opengfx2/${sheet.file}`, `/opengfx2/${sheet.file}`] as const),
   ];
   await Promise.all(imageEntries.map(async ([key, path]) => images.set(key, await loadCleanImage(path))));
   vehicleSprites = usableVehicleSprites();
@@ -421,18 +362,19 @@ function drawScene(offset: Coord): void {
   ctx.restore();
 }
 
+type AssetDrawOptions = {
+  offsetX?: number;
+  offsetY?: number;
+  scale?: number;
+  alpha?: number;
+};
+
 function drawTerrain(coord: Coord): void {
-  const kind = terrain.get(key(coord)) ?? 'grass';
-  const point = iso(coord);
-  const image = images.get(kind === 'water' ? assetPaths.water : kind === 'riverbank' ? assetPaths.riverbank : assetPaths.grass);
-  if (!image) return;
-  const sx = kind === 'water' ? 0 : kind === 'riverbank' ? 0 : 0;
-  ctx.drawImage(image, sx, 0, 64, SPRITE_H, point.x - TILE_W / 2, point.y - 12, TILE_W, SPRITE_H);
+  drawAssetRole(terrainRole(terrain.get(key(coord)) ?? 'grass'), coord);
 }
 
 function drawOutskirtsTerrain(visibleGrid: GridRect): void {
-  const image = images.get(assetPaths.grass);
-  if (!image) return;
+  const grass = activeAssetPack.require('terrain.grass');
 
   for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(HEIGHT - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
     for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(WIDTH - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
@@ -441,12 +383,11 @@ function drawOutskirtsTerrain(visibleGrid: GridRect): void {
       const edgeDistance = distanceOutsidePlayableMap(coord);
       if (edgeDistance > OUTSKIRTS_TILES) continue;
 
-      const point = iso(coord);
       const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
       ctx.save();
-      ctx.globalAlpha = 0.05 + fade * 0.22;
-      ctx.drawImage(image, 0, 0, 64, SPRITE_H, point.x - TILE_W / 2, point.y - 12, TILE_W, SPRITE_H);
+      drawAssetFrame(grass, coord, { alpha: 0.05 + fade * 0.22 });
       if (hash(`outskirts-shadow:${x}:${y}`) % 11 === 0) {
+        const point = iso(coord);
         ctx.fillStyle = `rgba(5, 7, 5, ${0.035 + (1 - fade) * 0.055})`;
         drawIsoTile(point);
       }
@@ -456,148 +397,39 @@ function drawOutskirtsTerrain(visibleGrid: GridRect): void {
 }
 
 function drawRoad(road: RoadTile): void {
-  const point = iso(road.coord);
-  const roadImage = images.get(assetPaths.road);
-  ctx.save();
-  if (road.kind === 'bridge') {
-    const bridge = images.get(assetPaths.bridge);
-    if (bridge) {
-      const bridgeFrameW = spriteSheetCellSize(bridge.width, 19);
-      const bridgeFrame = road.mask & (NORTH | SOUTH) ? 1 : 0;
-      ctx.drawImage(bridge, bridgeFrame * bridgeFrameW, 0, bridgeFrameW, bridge.height, point.x - 32, point.y - 14, 64, 48);
-    }
-  }
-
-  if (roadImage) {
-    const frame = roadSpriteFrame(road.mask);
-    ctx.drawImage(roadImage, frame * ROAD_SPRITE_STEP, 0, 64, SPRITE_H, point.x - 32, point.y - 12, 64, SPRITE_H);
-  }
-  ctx.restore();
+  drawAssetRole(roadRole(road), road.coord);
 }
 
-function drawRail(rail: RailTile): void {
-  const point = iso(rail.coord);
-  const railImage = images.get(assetPaths.rail);
-  if (!railImage) return;
-  const frame = roadSpriteFrame(rail.mask);
-  ctx.drawImage(railImage, frame * ROAD_SPRITE_STEP, 0, 64, SPRITE_H, point.x - 32, point.y - 12, 64, SPRITE_H);
+function drawRail(_rail: RailTile): void {
+  drawAssetRole('rail.straight', _rail.coord);
 }
 
 function drawRailStation(station: RailStation): void {
-  const image = images.get(assetPaths.railStation);
-  if (!image) return;
-  const cols = 5;
-  const rows = 4;
-  const col = station.frame % cols;
-  const row = Math.floor(station.frame / cols) % rows;
-  const cellW = spriteSheetCellSize(image.width, cols);
-  const cellH = spriteSheetCellSize(image.height, rows);
-  const point = iso(station.coord);
-  ctx.drawImage(image, col * cellW, row * cellH, cellW, cellH, point.x - 33, point.y - 32, 66, 66);
+  drawAssetRole('rail.station', station.coord, { scale: 0.94 + (station.frame % 2) * 0.04 });
 }
 
 function drawDetail(detail: ZurichDetail): void {
   if (!shouldRenderDetail(detail)) return;
-  if (detail.category === 'field') {
-    drawGroundDetail(assetPaths.field, detail.coord, 19, 9);
-    return;
-  }
-  if (detail.category === 'park' || detail.category === 'civic' || detail.category === 'decor') {
-    drawGroundDetail(assetPaths.parkDetail, detail.coord, 2, 1);
-    return;
-  }
-  if (detail.assetCategory === 'station-roof') {
-    drawGridSprite(assetPaths.station64, detail.coord, 5, 4, [0, 5, 10, 15][hash(`station:${key(detail.coord)}`) % 4], 0.98, -22);
-    return;
-  }
-  if (detail.assetCategory === 'road-stop') {
-    drawGridSprite(assetPaths.roadStop, detail.coord, 10, 4, hash(`road-stop:${key(detail.coord)}`) % 20, 0.92, -28);
-    return;
-  }
-  if (detail.assetCategory === 'rail-depot') {
-    drawGridSprite(assetPaths.railDepot, detail.coord, 1, 4, hash(`rail-depot:${key(detail.coord)}`) % 4, 0.96, -42);
-    return;
-  }
-  if (detail.assetCategory === 'road-depot') {
-    drawGridSprite(assetPaths.roadDepot, detail.coord, 1, 4, hash(`road-depot:${key(detail.coord)}`) % 4, 0.92, -42);
-    return;
-  }
-  if (detail.assetCategory === 'ship') {
-    drawGridSprite(assetPaths.ship, detail.coord, 8, 4, 1 + (hash(`ship:${key(detail.coord)}`) % 22), 0.72, -36);
-    return;
-  }
-  if (detail.assetCategory === 'dock' || detail.assetCategory === 'quay') {
-    drawGridSprite(assetPaths.dock, detail.coord, 8, 4, hash(`dock:${key(detail.coord)}`) % 28, 0.98, -30);
-    return;
-  }
-  if (detail.assetCategory === 'factory') {
-    drawGridSprite(assetPaths.factory, detail.coord, 2, 3, hash(`factory:${key(detail.coord)}`) % 2, 0.9, -76);
-    return;
-  }
-  drawGridSprite(assetPaths.farm, detail.coord, 5, 1, hash(`farm:${key(detail.coord)}`) % 5, 0.86, -38);
-}
-
-function drawGroundDetail(path: string, coord: Coord, cols: number, rows: number): void {
-  const image = images.get(path);
-  if (!image) return;
-  const frame = hash(`ground-detail:${path}:${key(coord)}`) % (cols * rows);
-  const cellW = spriteSheetCellSize(image.width, cols);
-  const cellH = spriteSheetCellSize(image.height, rows);
-  const col = frame % cols;
-  const row = Math.floor(frame / cols) % rows;
-  const point = iso(coord);
-  ctx.drawImage(image, col * cellW, row * cellH, Math.min(64, cellW), Math.min(SPRITE_H, cellH), point.x - 32, point.y - 12, 64, SPRITE_H);
-}
-
-function drawGridSprite(path: string, coord: Coord, cols: number, rows: number, frame: number, scale: number, yOffset: number): void {
-  const image = images.get(path);
-  if (!image) return;
-  const col = frame % cols;
-  const row = Math.floor(frame / cols) % rows;
-  const cellW = spriteSheetCellSize(image.width, cols);
-  const cellH = spriteSheetCellSize(image.height, rows);
-  const point = iso(coord);
-  const w = cellW * scale;
-  const h = cellH * scale;
-  ctx.drawImage(image, col * cellW, row * cellH, cellW, cellH, point.x - w / 2, point.y + yOffset, w, h);
+  const detailJitter = (hash(`detail:${key(detail.coord)}`) % 5) / 100;
+  drawAssetRole(detailRole(detail), detail.coord, { scale: 0.88 + detailJitter });
 }
 
 function drawBuilding(building: Building): void {
-  const sheet = sheetByName.get(building.sheet);
-  const image = sheet ? images.get(`/opengfx2/${sheet.file}`) : undefined;
-  if (!sheet || !image) return;
-  const col = building.frame % sheet.cols;
-  const row = Math.floor(building.frame / sheet.cols) % sheet.rows;
-  const cellW = spriteSheetCellSize(image.width, sheet.cols);
-  const cellH = spriteSheetCellSize(image.height, sheet.rows);
-  const point = iso(building.coord);
   const offset = buildingStreetFrontageOffset(building.coord, roads);
-  const w = cellW * sheet.scale;
-  const h = cellH * sheet.scale;
-  ctx.drawImage(image, col * cellW, row * cellH, cellW, cellH, point.x - w / 2 + offset.x, point.y + 4 - h + offset.y, w, h);
+  const scale = 0.88 + (building.frame % BUILDING_FRAME_VARIANTS) * 0.035;
+  drawAssetRole(buildingRole(building), building.coord, { offsetX: offset.x, offsetY: offset.y + 4, scale });
 }
 
 function drawTree(coord: Coord): void {
-  const image = images.get(assetPaths.tree);
-  if (!image) return;
-  const point = iso(coord);
   const isForest = zurichWorld.terrain.get(key(coord))?.kind === 'forest';
-  const forestFrames = [
-    { sx: 0, sy: 0, w: 16, h: 43 },
-    { sx: 16, sy: 0, w: 17, h: 43 },
-    { sx: 33, sy: 0, w: 28, h: 43 },
-  ];
-  const frame = isForest ? forestFrames[hash(`tree-frame:${key(coord)}`) % forestFrames.length] : forestFrames[0];
   const jitterX = (hash(`tree-x:${key(coord)}`) % 13) - 6;
   const jitterY = (hash(`tree-y:${key(coord)}`) % 9) - 4;
-  const scale = (isForest ? 0.98 : 0.82) + (hash(`tree-scale:${key(coord)}`) % 23) / 100;
-  const w = frame.w * scale;
-  const h = frame.h * scale;
-  ctx.drawImage(image, frame.sx, frame.sy, frame.w, frame.h, point.x - w / 2 + jitterX, point.y - h + 7 + jitterY, w, h);
+  const scale = (isForest ? 0.82 : 0.68) + (hash(`tree-scale:${key(coord)}`) % 18) / 100;
+  drawAssetRole('vegetation.tree', coord, { offsetX: jitterX, offsetY: jitterY + 8, scale });
 }
 
 function drawCar(car: Car): void {
-  const image = images.get(vehicleAssetPath(car.sprite.sheet));
+  const image = images.get(car.sprite.path);
   if (!image) return;
   const base = Math.floor(car.offset);
   const current = car.path[base];
@@ -622,16 +454,15 @@ function drawCar(car: Car): void {
 }
 
 function drawTrain(train: Train): void {
-  const engineImage = images.get(assetPaths.trainEngine);
-  const wagonImage = images.get(assetPaths.trainWagon);
-  if (!engineImage || !wagonImage) return;
+  const engine = activeAssetPack.require('vehicle.train.engine');
+  const wagon = activeAssetPack.require('vehicle.train.wagon');
 
   const segments = [
-    { image: engineImage, source: { x: 153, y: 5, width: 20, height: 15 }, offset: train.offset, scale: 4.0 },
-    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing, scale: 3.85 },
-    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing * 2, scale: 3.85 },
-    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing * 3, scale: 3.85 },
-    { image: wagonImage, source: { x: 153, y: 4, width: 20, height: 16 }, offset: train.offset - train.carSpacing * 4, scale: 3.85 },
+    { asset: engine, offset: train.offset, scale: 1.2 },
+    { asset: wagon, offset: train.offset - train.carSpacing, scale: 1.12 },
+    { asset: wagon, offset: train.offset - train.carSpacing * 2, scale: 1.12 },
+    { asset: wagon, offset: train.offset - train.carSpacing * 3, scale: 1.12 },
+    { asset: wagon, offset: train.offset - train.carSpacing * 4, scale: 1.12 },
   ].sort((a, b) => iso(movingTrainPosition(train.path, a.offset)).y - iso(movingTrainPosition(train.path, b.offset)).y);
 
   for (const segment of segments) {
@@ -639,8 +470,7 @@ function drawTrain(train: Train): void {
     const alpha = trainFadeAlpha(pos, { height: HEIGHT, fadeTiles: train.fadeTiles });
     if (alpha <= 0) continue;
     const point = iso(pos);
-    const width = segment.source.width * segment.scale;
-    const height = segment.source.height * segment.scale;
+    const width = segment.asset.source.width * segment.asset.scale * segment.scale;
     ctx.save();
     ctx.globalAlpha *= alpha;
     ctx.translate(point.x, point.y + 8);
@@ -648,19 +478,74 @@ function drawTrain(train: Train): void {
     ctx.beginPath();
     ctx.ellipse(0, -4, width * 0.42, 5.5, -Math.PI / 7, 0, Math.PI * 2);
     ctx.fill();
-    ctx.drawImage(
-      segment.image,
-      segment.source.x,
-      segment.source.y,
-      segment.source.width,
-      segment.source.height,
-      -width / 2,
-      -height,
-      width,
-      height,
-    );
     ctx.restore();
+    drawAssetAt(segment.asset, { x: point.x, y: point.y + 8 }, { scale: segment.scale, alpha });
   }
+}
+
+function drawAssetRole(role: AssetRole, coord: Coord, options: AssetDrawOptions = {}): void {
+  drawAssetFrame(activeAssetPack.require(role), coord, options);
+}
+
+function drawAssetFrame(asset: AssetFrame, coord: Coord, options: AssetDrawOptions = {}): void {
+  drawAssetAt(asset, iso(coord), options);
+}
+
+function drawAssetAt(asset: AssetFrame, point: Coord, options: AssetDrawOptions = {}): void {
+  const image = images.get(asset.path);
+  if (!image) return;
+  const sourceWidth = Math.min(asset.source.width, image.width - asset.source.x);
+  const sourceHeight = Math.min(asset.source.height, image.height - asset.source.y);
+  if (sourceWidth <= 0 || sourceHeight <= 0) return;
+
+  const scale = asset.scale * (options.scale ?? 1);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  ctx.save();
+  ctx.globalAlpha *= options.alpha ?? 1;
+  ctx.drawImage(
+    image,
+    asset.source.x,
+    asset.source.y,
+    sourceWidth,
+    sourceHeight,
+    point.x - asset.anchor.x * scale + (options.offsetX ?? 0),
+    point.y - asset.anchor.y * scale + (options.offsetY ?? 0),
+    width,
+    height,
+  );
+  ctx.restore();
+}
+
+function terrainRole(kind: Terrain): Extract<AssetRole, 'terrain.grass' | 'terrain.water' | 'terrain.riverbank'> {
+  if (kind === 'water') return 'terrain.water';
+  if (kind === 'riverbank') return 'terrain.riverbank';
+  return 'terrain.grass';
+}
+
+function roadRole(road: RoadTile): Extract<AssetRole, 'road.straight' | 'road.curve' | 'road.intersection' | 'road.bridge'> {
+  if (road.kind === 'bridge') return 'road.bridge';
+  const normalized = road.mask & (NORTH | EAST | SOUTH | WEST);
+  const degree = [NORTH, EAST, SOUTH, WEST].filter((direction) => (normalized & direction) !== 0).length;
+  if (degree >= 3) return 'road.intersection';
+  if (degree <= 1 || isStraightEastWest(normalized) || isStraightNorthSouth(normalized)) return 'road.straight';
+  return 'road.curve';
+}
+
+function buildingRole(building: Building): Extract<AssetRole, 'building.residential.low' | 'building.commercial.mid' | 'building.civic' | 'building.industrial'> {
+  if (building.sheet === 'church') return 'building.civic';
+  if (building.district === 'mill-yard' && hash(`industrial:${key(building.coord)}`) % 3 === 0) return 'building.industrial';
+  if (building.sheet === 'houses' || building.sheet === 'oldhouses' || building.sheet === 'cottages' || building.sheet === 'townhouses') {
+    return 'building.residential.low';
+  }
+  return 'building.commercial.mid';
+}
+
+function detailRole(detail: ZurichDetail): Extract<AssetRole, 'detail.park' | 'detail.industry' | 'detail.dock' | 'detail.quay'> {
+  if (detail.assetCategory === 'dock') return 'detail.dock';
+  if (detail.assetCategory === 'quay' || detail.assetCategory === 'ship') return 'detail.quay';
+  if (detail.category === 'field' || detail.category === 'park' || detail.category === 'civic' || detail.category === 'decor') return 'detail.park';
+  return 'detail.industry';
 }
 
 function drawPedestrian(pedestrian: Pedestrian): void {
@@ -952,9 +837,7 @@ function buildBuildings(): Building[] {
     if (touchesRail(coord)) return false;
     if (!district.core && hash(key(coord)) % 12 === 0) return false;
     const sheet = district.sheets[hash(`${district.id}:${key(coord)}`) % district.sheets.length];
-    const meta = sheetByName.get(sheet);
-    if (!meta) return false;
-    const frameCount = meta.cols * usableRows(meta);
+    const frameCount = BUILDING_FRAME_VARIANTS;
     result.push({ coord, sheet, frame: hash(`${key(coord)}:${sheet}`) % frameCount, district: district.id });
     occupied.add(key(coord));
     return true;
@@ -1115,7 +998,7 @@ function usableVehicleSprites(): VehicleSprite[] {
 }
 
 function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
-  const image = images.get(vehicleAssetPath(sprite.sheet));
+  const image = images.get(sprite.path);
   if (!image) return false;
   const probe = document.createElement('canvas');
   probe.width = image.width;
@@ -1123,8 +1006,9 @@ function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
   const context = probe.getContext('2d', { willReadFrequently: true });
   if (!context) return false;
   context.drawImage(image, 0, 0);
-  for (let frame = 0; frame < 8; frame += 1) {
-    const rect = vehicleFrameRect(sprite, frame);
+  const directions: SimutransVehicleDirection[] = ['W', 'NW', 'N', 'NE', 'E', 'SE', 'S', 'SW'];
+  for (const direction of directions) {
+    const rect = vehicleFrameRect(sprite, direction);
     if (rect.x + rect.width > image.width || rect.y + rect.height > image.height) continue;
     const data = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
     for (let i = 3; i < data.length; i += 4) {
@@ -1132,10 +1016,6 @@ function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
     }
   }
   return false;
-}
-
-function vehicleAssetPath(sheet: VehicleSheetName): string {
-  return sheet === 'bus' ? assetPaths.bus : assetPaths.lorry;
 }
 
 function carPosition(car: Car): Coord {
@@ -1241,13 +1121,6 @@ function linePath(from: Coord, to: Coord): Coord[] {
 function isBuildable(coord: Coord): boolean {
   const kind = terrain.get(key(coord));
   return kind === 'grass' || kind === 'park';
-}
-
-function roadSpriteFrame(mask: number): number {
-  const normalized = mask & (NORTH | EAST | SOUTH | WEST);
-  if (normalized === NORTH || normalized === SOUTH) return 1;
-  if (normalized === EAST || normalized === WEST) return 0;
-  return roadFrameByMask.get(normalized) ?? 2;
 }
 
 function roadMask(points: Map<string, RoadKind>, coord: Coord): number {
@@ -1439,13 +1312,11 @@ function cityDiagnostics(): Record<string, number> {
   for (const building of buildings) {
     const tileKey = key(building.coord);
     const terrainKind = terrain.get(tileKey);
-    const sheet = sheetByName.get(building.sheet);
     if (roads.has(tileKey) || rails.has(tileKey) || !(terrainKind === 'grass' || terrainKind === 'park')) invalidBuildings += 1;
     if (!streetFrontages.has(tileKey)) buildingsOutsideStreetFrontageSet += 1;
     if (!hasDirectStreetAdjacency(building.coord, roads)) buildingsWithoutAnyStreetAdjacency += 1;
     if (!hasVisibleStreetFrontage(building.coord, roads)) buildingsWithoutStreetFrontage += 1;
     if (touchesRail(building.coord)) buildingsTouchingRail += 1;
-    if (sheet && Math.floor(building.frame / sheet.cols) > 0) buildingFramesOutsideFinishedRow += 1;
   }
 
   const buildingTiles = new Set(buildings.map((building) => key(building.coord)));
@@ -1511,16 +1382,6 @@ function hash(value: string): number {
     result = Math.imul(result, 16777619);
   }
   return result >>> 0;
-}
-
-function usableRows(sheet: BuildingSheet): number {
-  return Math.min(1, sheet.rows);
-}
-
-function spriteSheetCellSize(totalPixels: number, frameCount: number): number {
-  if (totalPixels % frameCount === 0) return totalPixels / frameCount;
-  if ((totalPixels - 1) % frameCount === 0) return (totalPixels - 1) / frameCount;
-  return Math.floor(totalPixels / frameCount);
 }
 
 function visibleSourceBounds(
@@ -1605,6 +1466,11 @@ window.render_game_to_text = () => {
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
       worldId: zurichWorld.id,
+      assetPack: {
+        id: activeAssetPack.id,
+        tile: activeAssetPack.tile,
+      },
+      legacyAssetPaths: legacyAssetPaths(),
       width: WIDTH,
       height: HEIGHT,
       roadTiles: roads.size,
@@ -1669,6 +1535,14 @@ function detailCountsByCategory(): Record<string, number> {
     result[detail.category] = (result[detail.category] ?? 0) + 1;
   }
   return result;
+}
+
+function legacyAssetPaths(): string[] {
+  return [...images.keys()].filter((path) =>
+    /\/opengfx2?\//i.test(path) ||
+    /\/openttd-fan-assets\//i.test(path) ||
+    /\/simutrans-assets\/pak128-pedestrians\//i.test(path)
+  ).sort();
 }
 
 window.advanceTime = (ms: number) => {

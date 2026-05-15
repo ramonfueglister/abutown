@@ -16,6 +16,11 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.cars).toBeGreaterThan(0);
   expect(state.city.trains).toBe(1);
   expect(state.city.worldId).toBe('zurich-river-city-v1');
+  expect(state.city.assetPack).toEqual({
+    id: 'simutrans-pak128',
+    tile: { width: 128, height: 64 },
+  });
+  expect(state.city.legacyAssetPaths).toEqual([]);
   expect(state.city.width).toBe(256);
   expect(state.city.height).toBe(256);
   expect(state.city.roadTiles).toBeGreaterThan(1800);
