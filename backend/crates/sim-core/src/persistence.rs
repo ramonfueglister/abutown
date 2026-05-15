@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use abutown_protocol::{ChunkSnapshotDto, PROTOCOL_VERSION, TileMutationDto, WorldId};
+use async_trait::async_trait;
 
 use crate::chunk::Chunk;
 use crate::ids::ChunkCoord;
@@ -34,9 +35,54 @@ pub fn build_chunk_snapshot(
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct ChunkSnapshotStoreError {
+    message: String,
+}
+
+impl ChunkSnapshotStoreError {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+#[async_trait]
+pub trait ChunkSnapshotStore: std::fmt::Debug + Send {
+    async fn write_snapshot(
+        &mut self,
+        snapshot: ChunkSnapshotDto,
+    ) -> Result<(), ChunkSnapshotStoreError>;
+
+    async fn read_snapshot(
+        &self,
+        coord: ChunkCoord,
+    ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError>;
+}
+
+#[derive(Debug, Default)]
 pub struct InMemoryChunkSnapshotStore {
     snapshots: HashMap<ChunkCoord, ChunkSnapshotDto>,
+}
+
+#[async_trait]
+impl ChunkSnapshotStore for InMemoryChunkSnapshotStore {
+    async fn write_snapshot(
+        &mut self,
+        snapshot: ChunkSnapshotDto,
+    ) -> Result<(), ChunkSnapshotStoreError> {
+        InMemoryChunkSnapshotStore::write_snapshot(self, snapshot);
+        Ok(())
+    }
+
+    async fn read_snapshot(
+        &self,
+        coord: ChunkCoord,
+    ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
+        Ok(InMemoryChunkSnapshotStore::read_snapshot(self, coord).cloned())
+    }
 }
 
 impl InMemoryChunkSnapshotStore {
@@ -118,5 +164,23 @@ mod tests {
             store.snapshot_coords(),
             vec![ChunkCoord { x: 4, y: 4 }, ChunkCoord { x: 5, y: 4 }]
         );
+    }
+
+    #[tokio::test]
+    async fn chunk_snapshot_store_writes_and_reads_snapshot() {
+        let mut store = InMemoryChunkSnapshotStore::default();
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        chunk.set_tile_kind(0, TileKind::Road).expect("tile exists");
+        let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
+
+        ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone())
+            .await
+            .unwrap();
+
+        let stored = ChunkSnapshotStore::read_snapshot(&store, ChunkCoord { x: 4, y: 4 })
+            .await
+            .unwrap()
+            .expect("snapshot exists");
+        assert_eq!(stored, snapshot);
     }
 }
