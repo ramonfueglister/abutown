@@ -5,6 +5,8 @@ use sim_core::events::{WorldEventMetadata, WorldEventStore, WorldEventStoreError
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
 const WORLD_EVENTS_MIGRATION: &str = include_str!("../migrations/202605150001_world_events.sql");
+const CHUNK_RECOVERY_MIGRATION: &str =
+    include_str!("../migrations/202605160001_chunk_recovery.sql");
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SqlWorldEventRecord {
@@ -47,6 +49,17 @@ impl PostgresWorldEventStore {
                 .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
         }
 
+        for statement in CHUNK_RECOVERY_MIGRATION
+            .split(';')
+            .map(str::trim)
+            .filter(|statement| !statement.is_empty())
+        {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+        }
+
         Ok(Self { pool })
     }
 }
@@ -60,7 +73,13 @@ impl WorldEventStore for PostgresWorldEventStore {
         let version = i64::try_from(record.metadata.version)
             .map_err(|_| WorldEventStoreError::unavailable("event version exceeds i64"))?;
 
-        sqlx::query(
+        let (chunk_x, chunk_y, chunk_version) = match &event {
+            WorldEventDto::TileKindSet(payload) => (payload.coord.x, payload.coord.y, payload.version),
+        };
+        let chunk_version_i64 = i64::try_from(chunk_version)
+            .map_err(|_| WorldEventStoreError::unavailable("chunk_version exceeds i64"))?;
+
+        let rows_affected = sqlx::query(
             r#"
             INSERT INTO world_events (
                 event_id,
@@ -69,9 +88,13 @@ impl WorldEventStore for PostgresWorldEventStore {
                 event_type,
                 tick,
                 version,
+                chunk_x,
+                chunk_y,
+                chunk_version,
                 payload
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (world_id, command_id) DO NOTHING
             "#,
         )
         .bind(&record.metadata.event_id)
@@ -80,42 +103,104 @@ impl WorldEventStore for PostgresWorldEventStore {
         .bind(record.metadata.event_type)
         .bind(tick)
         .bind(version)
+        .bind(chunk_x)
+        .bind(chunk_y)
+        .bind(chunk_version_i64)
         .bind(record.payload)
         .execute(&self.pool)
         .await
-        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            return Err(WorldEventStoreError::duplicate_command(&record.metadata.command_id));
+        }
 
         Ok(())
     }
 
     async fn find_event_by_command(
         &self,
-        _world_id: &str,
-        _command_id: &str,
+        world_id: &str,
+        command_id: &str,
     ) -> Result<Option<WorldEventDto>, WorldEventStoreError> {
-        Err(WorldEventStoreError::unavailable(
-            "PostgresWorldEventStore::find_event_by_command not implemented yet",
-        ))
+        let row: Option<(Value,)> = sqlx::query_as(
+            r#"
+            SELECT payload
+              FROM world_events
+             WHERE world_id = $1 AND command_id = $2
+             LIMIT 1
+            "#,
+        )
+        .bind(world_id)
+        .bind(command_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+
+        match row {
+            None => Ok(None),
+            Some((payload,)) => {
+                let event: WorldEventDto = serde_json::from_value(payload)
+                    .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+                Ok(Some(event))
+            }
+        }
     }
     async fn read_chunk_events_since(
         &self,
-        _world_id: &str,
-        _coord: abutown_protocol::ChunkCoordDto,
-        _after_chunk_version: u64,
+        world_id: &str,
+        coord: abutown_protocol::ChunkCoordDto,
+        after_chunk_version: u64,
     ) -> Result<Vec<WorldEventDto>, WorldEventStoreError> {
-        Err(WorldEventStoreError::unavailable(
-            "PostgresWorldEventStore::read_chunk_events_since not implemented yet",
-        ))
+        let after = i64::try_from(after_chunk_version)
+            .map_err(|_| WorldEventStoreError::unavailable("after_chunk_version exceeds i64"))?;
+
+        let rows: Vec<(Value,)> = sqlx::query_as(
+            r#"
+            SELECT payload
+              FROM world_events
+             WHERE world_id = $1
+               AND chunk_x = $2
+               AND chunk_y = $3
+               AND chunk_version > $4
+             ORDER BY chunk_version ASC
+            "#,
+        )
+        .bind(world_id)
+        .bind(coord.x)
+        .bind(coord.y)
+        .bind(after)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+
+        rows.into_iter()
+            .map(|(payload,)| {
+                serde_json::from_value::<WorldEventDto>(payload)
+                    .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))
+            })
+            .collect()
     }
-    async fn max_tick(&self, _world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
-        Err(WorldEventStoreError::unavailable(
-            "PostgresWorldEventStore::max_tick not implemented yet",
-        ))
+    async fn max_tick(&self, world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
+        let row: Option<(Option<i64>,)> = sqlx::query_as(
+            "SELECT MAX(tick) FROM world_events WHERE world_id = $1",
+        )
+        .bind(world_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+        Ok(row.and_then(|(opt,)| opt).map(|v| v as u64))
     }
-    async fn max_version(&self, _world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
-        Err(WorldEventStoreError::unavailable(
-            "PostgresWorldEventStore::max_version not implemented yet",
-        ))
+    async fn max_version(&self, world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
+        let row: Option<(Option<i64>,)> = sqlx::query_as(
+            "SELECT MAX(version) FROM world_events WHERE world_id = $1",
+        )
+        .bind(world_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
+        Ok(row.and_then(|(opt,)| opt).map(|v| v as u64))
     }
 }
 
