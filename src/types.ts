@@ -45,13 +45,13 @@ export type City = {
   buildings: Building[];
 };
 
-export type AgentKind = 'pedestrian' | 'vehicle';
-export type AgentRole = 'resident' | 'worker' | 'visitor' | 'service';
+export type PopulationEntityKind = 'person' | 'vehicle';
+export type PopulationEntityRole = 'resident' | 'worker' | 'visitor' | 'service';
 
-export type Agent = {
+export type PopulationEntity = {
   id: string;
-  kind: AgentKind;
-  role: AgentRole;
+  kind: PopulationEntityKind;
+  role: PopulationEntityRole;
   roadEdgeId: string;
   progress: number;
   laneOffset: number;
@@ -59,12 +59,12 @@ export type Agent = {
   colorIndex: number;
 };
 
-export type AgentPopulation = {
-  agents: Agent[];
-  segmentBuckets: Map<string, Agent[]>;
+export type GeneratedPopulation = {
+  entities: PopulationEntity[];
+  segmentBuckets: Map<string, PopulationEntity[]>;
   stats: {
-    totalAgents: number;
-    pedestrians: number;
+    totalEntities: number;
+    people: number;
     vehicles: number;
   };
 };

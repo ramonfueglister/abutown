@@ -4,7 +4,7 @@
 
 **Goal:** Replace the OpenTTD/OpenGFX visual stack with a pak128-only Simutrans renderer and remove the old OpenTTD asset files, import scripts, catalogs, and runtime references.
 
-**Architecture:** Keep the Zurich world model, placement, topology, and movement systems. Replace every renderer asset path with semantic pak128 catalog lookup, use native pak128 frame metadata, and make missing roles fail tests and startup instead of silently drawing an old asset. Delete the legacy OpenTTD/OpenGFX asset pipeline once the pak128 catalog covers the visible runtime categories.
+**Architecture:** Keep the Zurich world model, placement, topology, and movement systems. Replace every renderer asset path with semantic pak128 catalog lookup, use native pak128 frame metadata, and make missing roles fail tests and startup instead of silently drawing an old asset. Delete the retired OpenTTD/OpenGFX asset pipeline once the pak128 catalog covers the visible runtime categories.
 
 **Tech Stack:** Vite, TypeScript, Canvas 2D, Vitest, Playwright, Node.js pak128 import script, Simutrans pak128 PNG/DAT assets, Artistic License 2.0 attribution.
 
@@ -27,7 +27,7 @@
 - Create `/Users/ramonfuglister/Desktop/Coding/abutown/scripts/import-pak128-assets.mjs`: sparse-imports curated pak128 PNG/DAT/license files pinned to revision `acdf2f0793a6beee5ea34ea85d308fbbeccf50c5`.
 - Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/assetPack.test.ts`: strict lookup coverage.
 - Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/pak128Catalog.test.ts`: role coverage, metadata, and DAT-backed source-frame coverage.
-- Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noLegacyAssets.test.ts`: guard against legacy asset paths in runtime files.
+- Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noRetiredAssets.test.ts`: guard against retired asset paths in runtime files.
 - Modify `/Users/ramonfuglister/Desktop/Coding/abutown/src/main.ts`: load and draw only pak128 catalog assets.
 - Modify `/Users/ramonfuglister/Desktop/Coding/abutown/src/render/simutransPedestrianSprites.ts`: use pak128 catalog paths.
 - Modify `/Users/ramonfuglister/Desktop/Coding/abutown/src/render/vehicleSprites.ts`: replace OpenGFX vehicle sheets with pak128 vehicle direction metadata.
@@ -257,7 +257,7 @@ describe('pak128 catalog', () => {
     }
   });
 
-  it('does not contain legacy asset paths', () => {
+  it('does not contain retired asset paths', () => {
     for (const asset of pak128AssetPack.all()) {
       expect(asset.path).not.toMatch(/opengfx|openttd/i);
       expect(asset.provenance.sourcePath).not.toMatch(/opengfx|openttd/i);
@@ -417,7 +417,7 @@ expect(state.city.assetPack).toEqual({
   id: 'simutrans-pak128',
   tile: { width: 128, height: 64 },
 });
-expect(state.city.legacyAssetPaths).toEqual([]);
+expect(state.city.nonPak128AssetPaths).toEqual([]);
 ```
 
 - [ ] **Step 2: Run smoke test to verify it fails**
@@ -428,7 +428,7 @@ Run:
 npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 ```
 
-Expected: FAIL because `assetPack` and `legacyAssetPaths` are not reported yet.
+Expected: FAIL because `assetPack` and `nonPak128AssetPaths` are not reported yet.
 
 - [ ] **Step 3: Replace runtime asset loading**
 
@@ -465,7 +465,7 @@ assetPack: {
   id: activeAssetPack.id,
   tile: activeAssetPack.tile,
 },
-legacyAssetPaths: [...images.keys()].filter((path) => /opengfx|openttd/i.test(path)),
+nonPak128AssetPaths: [...images.keys()].filter((path) => !path.startsWith('/simutrans-assets/pak128/')),
 ```
 
 - [ ] **Step 6: Run focused tests**
@@ -477,7 +477,7 @@ npm test -- tests/render/simutransPedestrianSprites.test.ts tests/render/vehicle
 npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 ```
 
-Expected: PASS and `legacyAssetPaths` is `[]`.
+Expected: PASS and `nonPak128AssetPaths` is `[]`.
 
 - [ ] **Step 7: Commit**
 
@@ -488,7 +488,7 @@ git add src/main.ts src/render/simutransPedestrianSprites.ts src/render/vehicleS
 git commit -m "feat: cut renderer over to pak128 assets"
 ```
 
-### Task 4: Remove Legacy OpenTTD/OpenGFX Assets
+### Task 4: Remove Retired OpenTTD/OpenGFX Assets
 
 **Files:**
 - Delete: `/Users/ramonfuglister/Desktop/Coding/abutown/src/assets/opengfxCatalog.ts`
@@ -498,11 +498,11 @@ git commit -m "feat: cut renderer over to pak128 assets"
 - Delete: `/Users/ramonfuglister/Desktop/Coding/abutown/scripts/decode-openttd-fan-grfs.mjs`
 - Delete: `/Users/ramonfuglister/Desktop/Coding/abutown/public/opengfx2`
 - Delete: `/Users/ramonfuglister/Desktop/Coding/abutown/public/openttd-fan-assets`
-- Test: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noLegacyAssets.test.ts`
+- Test: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noRetiredAssets.test.ts`
 
-- [ ] **Step 1: Add legacy guard test**
+- [ ] **Step 1: Add retired-asset guard test**
 
-Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noLegacyAssets.test.ts`:
+Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noRetiredAssets.test.ts`:
 
 ```ts
 import { existsSync, readFileSync } from 'node:fs';
@@ -518,7 +518,7 @@ const runtimeFiles = [
   'src/render/spriteCleanup.ts',
 ];
 
-describe('legacy OpenTTD/OpenGFX asset removal', () => {
+describe('retired OpenTTD/OpenGFX asset removal', () => {
   it('removes old asset directories and import scripts', () => {
     for (const path of [
       'public/opengfx2',
@@ -532,7 +532,7 @@ describe('legacy OpenTTD/OpenGFX asset removal', () => {
     }
   });
 
-  it('keeps runtime files free of legacy asset references', () => {
+  it('keeps runtime files free of retired asset references', () => {
     for (const file of runtimeFiles) {
       const contents = readFileSync(join(root, file), 'utf8');
       expect(contents, file).not.toMatch(/opengfx|openttd-fan-assets|assets:opengfx/i);
@@ -546,12 +546,12 @@ describe('legacy OpenTTD/OpenGFX asset removal', () => {
 Run:
 
 ```bash
-npm test -- tests/render/noLegacyAssets.test.ts
+npm test -- tests/render/noRetiredAssets.test.ts
 ```
 
-Expected: FAIL while legacy files/directories still exist.
+Expected: FAIL while retired files/directories still exist.
 
-- [ ] **Step 3: Delete legacy files**
+- [ ] **Step 3: Delete retired files**
 
 Run:
 
@@ -565,7 +565,7 @@ git rm scripts/import-opengfx-assets.mjs scripts/decode-openttd-fan-grfs.mjs src
 Run:
 
 ```bash
-npm test -- tests/render/noLegacyAssets.test.ts
+npm test -- tests/render/noRetiredAssets.test.ts
 ```
 
 Expected: PASS.
@@ -575,8 +575,8 @@ Expected: PASS.
 Run:
 
 ```bash
-git add -A public/opengfx2 public/openttd-fan-assets scripts/import-opengfx-assets.mjs scripts/decode-openttd-fan-grfs.mjs src/assets/opengfxCatalog.ts src/assets/opengfxCatalog.generated.ts tests/render/opengfxCatalog.test.ts tests/render/noLegacyAssets.test.ts package.json
-git commit -m "chore: remove legacy OpenTTD asset pipeline"
+git add -A public/opengfx2 public/openttd-fan-assets scripts/import-opengfx-assets.mjs scripts/decode-openttd-fan-grfs.mjs src/assets/opengfxCatalog.ts src/assets/opengfxCatalog.generated.ts tests/render/opengfxCatalog.test.ts tests/render/noRetiredAssets.test.ts package.json
+git commit -m "chore: remove retired OpenTTD asset pipeline"
 ```
 
 ### Task 5: Full Verification
@@ -628,4 +628,4 @@ Skip this commit if Task 2 already produced the final README content.
 - This plan intentionally rejects mixed OpenTTD/OpenGFX and pak128 runtime rendering.
 - The catalog must cover every runtime role before the renderer cutover can pass.
 - The old OpenTTD/OpenGFX asset directories, scripts, generated catalogs, and tests are deleted after the renderer no longer uses them.
-- Verification includes a guard test plus an `rg` check so legacy asset references cannot drift back in unnoticed.
+- Verification includes a guard test plus an `rg` check so retired asset references cannot drift back in unnoticed.

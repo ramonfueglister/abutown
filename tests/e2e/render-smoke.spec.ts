@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+type ScreenEntity = { id: string; screen: { x: number; y: number } };
+
 test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   await page.setViewportSize({ width: 409, height: 519 });
   const consoleErrors: string[] = [];
@@ -21,7 +23,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     id: 'simutrans-pak128',
     tile: { width: 128, height: 64 },
   });
-  expect(state.city.legacyAssetPaths).toEqual([]);
+  expect(state.city.nonPak128AssetPaths).toEqual([]);
   expect(state.city.width).toBe(256);
   expect(state.city.height).toBe(256);
   expect(state.city.roadTiles).toBeGreaterThan(1800);
@@ -42,9 +44,9 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.railCrossings).toBeGreaterThanOrEqual(1);
   expect(state.city.railStations).toBe(0);
   expect(state.city.mobility).toEqual(expect.objectContaining({
-    status: 'local-pedestrians',
+    status: 'local-mobility',
     agents: state.city.pedestrians,
-    vehicles: 0,
+    vehicles: state.city.cars,
     stops: 0,
   }));
   expect(state.city.localAgents.count).toBe(state.city.pedestrians);
@@ -54,6 +56,16 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     id: 'agent:pedestrian:0',
     kind: 'pedestrian',
     state: 'walking',
+    coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+    screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+  }));
+  expect(state.city.localVehicles.count).toBe(state.city.cars);
+  expect(state.city.localVehicles.selectedId).toBeNull();
+  expect(state.city.localVehicles.vehicles.length).toBe(state.city.cars);
+  expect(state.city.localVehicles.vehicles[0]).toEqual(expect.objectContaining({
+    id: 'vehicle:road:0',
+    kind: 'road-vehicle',
+    state: 'driving',
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
   }));
@@ -88,16 +100,29 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
       expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
     ]),
   }));
+  const clickableVehicle = isolatedVisibleEntity(selectedState.city.localVehicles.vehicles, { width: 409, height: 519 });
+  expect(clickableVehicle).toBeTruthy();
+  await page.mouse.click(clickableVehicle.screen.x, clickableVehicle.screen.y);
+  const vehicleSelectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
+  expect(vehicleSelectedState.city.localVehicles.selectedId).toBe(clickableVehicle.id);
+  expect(vehicleSelectedState.city.localAgents.selectedId).toBeNull();
+  expect(vehicleSelectedState.city.vehicleInspector).toEqual(expect.objectContaining({
+    title: clickableVehicle.id,
+    rows: expect.arrayContaining([
+      expect.objectContaining({ label: 'State', value: 'driving' }),
+      expect.objectContaining({ label: 'Tile', value: expect.any(String) }),
+      expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
+    ]),
+  }));
   expect(state.city.railStationsOnRoad).toBe(0);
   expect(state.city.railStationsOnBuildings).toBe(0);
   expect(state.city.railStationsOnRails).toBe(0);
   expect(state.city.railStationsOnTrees).toBe(0);
-  expect(state.city.diagnostics).toBeUndefined();
-  expect(state.city.legacyDiagnostics).toEqual(expect.any(Object));
-  expect(state.city.legacyDiagnostics.railStationsOnRoad).toBe(0);
-  expect(state.city.legacyDiagnostics.railStationsOnBuildings).toBe(0);
-  expect(state.city.legacyDiagnostics.railStationsOnRails).toBe(0);
-  expect(state.city.legacyDiagnostics.railStationsOnTrees).toBe(0);
+  expect(state.city.diagnostics).toEqual(expect.any(Object));
+  expect(state.city.diagnostics.railStationsOnRoad).toBe(0);
+  expect(state.city.diagnostics.railStationsOnBuildings).toBe(0);
+  expect(state.city.diagnostics.railStationsOnRails).toBe(0);
+  expect(state.city.diagnostics.railStationsOnTrees).toBe(0);
   expect(state.city.camera.mode).toBe('bounded-fixed-map');
   expect(state.city.camera.target).toEqual(expect.objectContaining({
     x: expect.any(Number),
@@ -124,3 +149,28 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(nearBlackRatio).toBeLessThan(0.05);
   expect(consoleErrors).toEqual([]);
 });
+
+function isolatedVisibleEntity<T extends ScreenEntity>(
+  entities: T[],
+  viewport: { width: number; height: number },
+): T | undefined {
+  return entities
+    .filter((entity) => (
+      entity.screen.x > 16 &&
+      entity.screen.x < viewport.width - 16 &&
+      entity.screen.y > 16 &&
+      entity.screen.y < viewport.height - 16
+    ))
+    .map((entity) => ({ entity, nearestNeighbor: nearestNeighborDistance(entity, entities) }))
+    .sort((a, b) => b.nearestNeighbor - a.nearestNeighbor)
+    .find(({ nearestNeighbor }) => nearestNeighbor > 32)?.entity;
+}
+
+function nearestNeighborDistance(entity: ScreenEntity, entities: ScreenEntity[]): number {
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const other of entities) {
+    if (other.id === entity.id) continue;
+    nearest = Math.min(nearest, Math.hypot(entity.screen.x - other.screen.x, entity.screen.y - other.screen.y));
+  }
+  return nearest;
+}
