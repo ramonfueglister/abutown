@@ -422,7 +422,7 @@ mod tests {
             .unwrap()
             .expect("visible snapshot stored");
         assert_eq!(visible.coord, ChunkCoordDto { x: 4, y: 4 });
-        assert_eq!(visible.dirty_tiles.len(), 1);
+        assert_eq!(visible.tiles.len(), 1);
 
         let east = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 5, y: 4 })
@@ -430,22 +430,25 @@ mod tests {
             .unwrap()
             .expect("east snapshot stored");
         assert_eq!(east.coord, ChunkCoordDto { x: 5, y: 4 });
-        assert_eq!(east.dirty_tiles.len(), 1);
+        assert_eq!(east.tiles.len(), 1);
 
         assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 3);
-        assert!(
+        // Full-state snapshots still carry every non-default tile after
+        // clear_dirty() so a single row can rebuild the chunk on recovery.
+        assert_eq!(
             runtime
                 .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
                 .await
                 .unwrap()
                 .expect("visible snapshot remains stored")
-                .dirty_tiles
-                .is_empty()
+                .tiles
+                .len(),
+            1
         );
     }
 
     #[tokio::test]
-    async fn runtime_keeps_dirty_tiles_when_snapshot_store_fails() {
+    async fn runtime_keeps_dirty_state_when_snapshot_store_fails() {
         let mut runtime = SimulationRuntime::new_with_stores(
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(FailingChunkSnapshotStore),
@@ -461,8 +464,8 @@ mod tests {
             runtime
                 .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
                 .expect("visible chunk remains loaded")
-                .dirty_tiles,
-            before.dirty_tiles
+                .tiles,
+            before.tiles
         );
     }
 
@@ -495,7 +498,7 @@ mod tests {
         let snapshot = runtime
             .chunk_snapshot(sim_core::ids::ChunkCoord { x: 4, y: 4 })
             .expect("mutated chunk snapshot exists");
-        assert!(snapshot.dirty_tiles.iter().any(|tile| {
+        assert!(snapshot.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
         }));
     }

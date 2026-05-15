@@ -201,10 +201,10 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     assert_eq!(json["tile_count"], 1024);
     assert_eq!(json["chunk_state"], "active");
 
-    let dirty_tiles = json["dirty_tiles"].as_array().unwrap();
-    assert_eq!(dirty_tiles.len(), 1);
-    assert_eq!(dirty_tiles[0]["local_index"], 0);
-    assert_eq!(dirty_tiles[0]["kind"], "road");
+    let tiles = json["tiles"].as_array().unwrap();
+    assert_eq!(tiles.len(), 1);
+    assert_eq!(tiles[0]["local_index"], 0);
+    assert_eq!(tiles[0]["kind"], "road");
 }
 
 #[tokio::test]
@@ -327,7 +327,7 @@ async fn command_sets_tile_kind_and_returns_event() {
         .to_bytes();
     let snapshot: Value = serde_json::from_slice(&body).unwrap();
     assert!(
-        snapshot["dirty_tiles"]
+        snapshot["tiles"]
             .as_array()
             .unwrap()
             .iter()

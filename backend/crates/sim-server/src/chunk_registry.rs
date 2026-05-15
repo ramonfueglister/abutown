@@ -241,10 +241,10 @@ mod tests {
             abutown_protocol::ChunkStateDto::Active
         );
         assert_eq!(snapshot.tile_count, 1024);
-        assert_eq!(snapshot.dirty_tiles.len(), 1);
-        assert_eq!(snapshot.dirty_tiles[0].local_index, 17);
+        assert_eq!(snapshot.tiles.len(), 1);
+        assert_eq!(snapshot.tiles[0].local_index, 17);
         assert_eq!(
-            snapshot.dirty_tiles[0].kind,
+            snapshot.tiles[0].kind,
             abutown_protocol::TileKindDto::Road
         );
         assert!(
@@ -285,10 +285,10 @@ mod tests {
                 ChunkCoord { x: 4, y: 4 },
             )
             .expect("chunk snapshot exists");
-        assert_eq!(snapshot.dirty_tiles.len(), 2);
-        assert_eq!(snapshot.dirty_tiles[1].local_index, 11);
+        assert_eq!(snapshot.tiles.len(), 2);
+        assert_eq!(snapshot.tiles[1].local_index, 11);
         assert_eq!(
-            snapshot.dirty_tiles[1].kind,
+            snapshot.tiles[1].kind,
             abutown_protocol::TileKindDto::Water
         );
     }
@@ -316,7 +316,7 @@ mod tests {
                 ChunkCoord { x: 4, y: 4 },
             )
             .expect("chunk snapshot exists");
-        assert!(!snapshot.dirty_tiles.iter().any(|tile| {
+        assert!(!snapshot.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
         }));
     }
@@ -343,7 +343,7 @@ mod tests {
                 ChunkCoord { x: 4, y: 4 },
             )
             .expect("chunk snapshot exists");
-        assert!(snapshot.dirty_tiles.iter().any(|tile| {
+        assert!(snapshot.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
         }));
     }
@@ -393,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_writes_snapshots_and_clears_dirty_tiles() {
+    fn registry_writes_snapshots_and_clears_dirty_state() {
         let mut registry = ChunkRegistry::new(32);
         registry.insert_chunk(
             chunk_with_seed(ChunkCoord { x: 5, y: 4 }, 7, TileKind::Water),
@@ -417,23 +417,26 @@ mod tests {
             store
                 .read_snapshot(ChunkCoord { x: 4, y: 4 })
                 .expect("visible snapshot exists")
-                .dirty_tiles
+                .tiles
                 .len(),
             1
         );
 
         assert_eq!(registry.write_snapshots(&world_id, &mut store), 2);
-        assert!(
+        // Full-state snapshots still carry all non-default tiles even after
+        // clear_dirty(); only the dirty bookkeeping was cleared.
+        assert_eq!(
             store
                 .read_snapshot(ChunkCoord { x: 4, y: 4 })
                 .expect("visible snapshot still exists")
-                .dirty_tiles
-                .is_empty()
+                .tiles
+                .len(),
+            1
         );
     }
 
     #[test]
-    fn registry_collects_snapshots_without_clearing_dirty_tiles() {
+    fn registry_collects_snapshots_without_clearing_dirty_state() {
         let mut registry = ChunkRegistry::new(32);
         registry.insert_chunk(
             chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 3, TileKind::Road),
@@ -447,15 +450,17 @@ mod tests {
 
         let snapshots = registry.collect_snapshots(&world_id);
         assert_eq!(snapshots.len(), 2);
-        assert_eq!(snapshots[0].dirty_tiles.len(), 1);
+        assert_eq!(snapshots[0].tiles.len(), 1);
 
         let collected_again = registry.collect_snapshots(&world_id);
-        assert_eq!(collected_again[0].dirty_tiles.len(), 1);
+        assert_eq!(collected_again[0].tiles.len(), 1);
 
         registry.mark_snapshots_persisted(&[ChunkCoord { x: 4, y: 4 }]);
 
+        // After clear_dirty(), full-state snapshots still include every
+        // non-default tile so a single row can rebuild the chunk.
         let after_partial_mark = registry.collect_snapshots(&world_id);
-        assert!(after_partial_mark[0].dirty_tiles.is_empty());
-        assert_eq!(after_partial_mark[1].dirty_tiles.len(), 1);
+        assert_eq!(after_partial_mark[0].tiles.len(), 1);
+        assert_eq!(after_partial_mark[1].tiles.len(), 1);
     }
 }

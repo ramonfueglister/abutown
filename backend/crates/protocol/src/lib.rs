@@ -65,7 +65,7 @@ pub struct ChunkSnapshotDto {
     pub chunk_state: ChunkStateDto,
     pub chunk_version: u64,
     pub tile_count: u16,
-    pub dirty_tiles: Vec<TileMutationDto>,
+    pub tiles: Vec<TileMutationDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

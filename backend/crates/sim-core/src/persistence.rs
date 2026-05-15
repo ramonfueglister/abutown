@@ -6,23 +6,24 @@ use async_trait::async_trait;
 use crate::chunk::Chunk;
 use crate::ids::ChunkCoord;
 use crate::scheduler::ChunkActivity;
+use crate::tile::TileKind;
 
 pub fn build_chunk_snapshot(
     world_id: impl Into<String>,
     chunk: &Chunk,
     activity: ChunkActivity,
 ) -> ChunkSnapshotDto {
-    let dirty_tiles = chunk
-        .dirty_indices()
-        .into_iter()
-        .filter_map(|index| {
-            chunk.tile_at(index).map(|tile| TileMutationDto {
+    let mut tiles: Vec<TileMutationDto> = Vec::new();
+    for index in 0..chunk.tile_count() {
+        let tile = chunk.tile_at(index).expect("index within tile_count");
+        if tile.kind != TileKind::default() {
+            tiles.push(TileMutationDto {
                 local_index: index,
                 kind: tile.kind.into(),
                 version: tile.version,
-            })
-        })
-        .collect();
+            });
+        }
+    }
 
     ChunkSnapshotDto {
         protocol_version: PROTOCOL_VERSION,
@@ -31,7 +32,7 @@ pub fn build_chunk_snapshot(
         chunk_state: activity.into(),
         chunk_version: chunk.version(),
         tile_count: chunk.tile_count(),
-        dirty_tiles,
+        tiles,
     }
 }
 
@@ -120,7 +121,7 @@ mod tests {
     use crate::tile::TileKind;
 
     #[test]
-    fn snapshot_contains_only_dirty_tiles_then_clears_dirty_state() {
+    fn snapshot_contains_initial_tiles_then_clears_dirty_state() {
         let mut chunk = Chunk::new(ChunkCoord { x: 1, y: 2 }, 32);
         chunk
             .set_tile_kind(3, TileKind::Water)
@@ -129,12 +130,27 @@ mod tests {
 
         let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
 
-        assert_eq!(snapshot.dirty_tiles.len(), 2);
-        assert_eq!(snapshot.dirty_tiles[0].local_index, 3);
-        assert_eq!(snapshot.dirty_tiles[1].local_index, 9);
+        assert_eq!(snapshot.tiles.len(), 2);
+        assert_eq!(snapshot.tiles[0].local_index, 3);
+        assert_eq!(snapshot.tiles[1].local_index, 9);
 
         chunk.clear_dirty();
         assert!(chunk.dirty_indices().is_empty());
+    }
+
+    #[test]
+    fn build_chunk_snapshot_emits_all_non_default_tiles_after_clear_dirty() {
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        chunk.set_tile_kind(0, TileKind::Road).unwrap();
+        chunk.set_tile_kind(17, TileKind::Water).unwrap();
+        chunk.clear_dirty();
+        chunk.set_tile_kind(42, TileKind::BuildingFootprint).unwrap();
+
+        let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
+
+        let indices: Vec<u16> = snapshot.tiles.iter().map(|t| t.local_index).collect();
+        assert_eq!(indices, vec![0, 17, 42], "snapshot must include all non-default tiles, not only currently-dirty ones");
+        assert_eq!(snapshot.chunk_version, 3);
     }
 
     #[test]
