@@ -42,10 +42,20 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.railCrossings).toBeGreaterThanOrEqual(1);
   expect(state.city.railStations).toBe(0);
   expect(state.city.mobility).toEqual(expect.objectContaining({
-    status: 'disconnected',
-    agents: 0,
+    status: 'local-pedestrians',
+    agents: state.city.pedestrians,
     vehicles: 0,
     stops: 0,
+  }));
+  expect(state.city.localAgents.count).toBe(state.city.pedestrians);
+  expect(state.city.localAgents.selectedId).toBeNull();
+  expect(state.city.localAgents.agents.length).toBe(state.city.pedestrians);
+  expect(state.city.localAgents.agents[0]).toEqual(expect.objectContaining({
+    id: 'agent:pedestrian:0',
+    kind: 'pedestrian',
+    state: 'walking',
+    coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+    screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
   }));
   expect(state.city.train.position.y).toBeGreaterThan(state.city.height - 1);
   expect(state.city.train.alpha).toBeGreaterThanOrEqual(0);
@@ -55,6 +65,21 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(movedState.city.train.position.y).toBeLessThan(state.city.train.position.y);
   expect(movedState.city.train.alpha).toBeGreaterThan(0);
   expect(movedState.city.train.alpha).toBeGreaterThan(state.city.train.alpha);
+  const clickableAgent = movedState.city.localAgents.agents.find(
+    (agent: { screen: { x: number; y: number } }) =>
+      agent.screen.x > 16 &&
+      agent.screen.x < 393 &&
+      agent.screen.y > 16 &&
+      agent.screen.y < 503,
+  );
+  expect(clickableAgent).toBeTruthy();
+  await page.mouse.click(clickableAgent.screen.x, clickableAgent.screen.y);
+  const selectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
+  expect(selectedState.city.localAgents.selectedId).toBe(clickableAgent.id);
+  expect(selectedState.city.localAgents.selected).toEqual(expect.objectContaining({
+    id: clickableAgent.id,
+    state: 'walking',
+  }));
   expect(state.city.railStationsOnRoad).toBe(0);
   expect(state.city.railStationsOnBuildings).toBe(0);
   expect(state.city.railStationsOnRails).toBe(0);
