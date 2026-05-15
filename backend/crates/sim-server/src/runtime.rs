@@ -37,7 +37,6 @@ pub struct SimulationRuntime {
     event_count: usize,
     tick: u64,
     version: u64,
-    next_event_id: u64,
 }
 
 impl std::fmt::Debug for SimulationRuntime {
@@ -47,7 +46,6 @@ impl std::fmt::Debug for SimulationRuntime {
             .field("registry", &self.registry)
             .field("tick", &self.tick)
             .field("version", &self.version)
-            .field("next_event_id", &self.next_event_id)
             .finish_non_exhaustive()
     }
 }
@@ -84,7 +82,6 @@ impl SimulationRuntime {
             event_count: 0,
             tick: 0,
             version: 0,
-            next_event_id: 1,
         }
     }
 
@@ -220,7 +217,7 @@ impl SimulationRuntime {
                 },
             })?;
 
-        let event_id = format!("event:{}", self.next_event_id);
+        let event_id = format!("event:{}", uuid::Uuid::now_v7());
         let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
             protocol_version: PROTOCOL_VERSION,
             event_id,
@@ -242,7 +239,6 @@ impl SimulationRuntime {
                 message: error.to_string(),
             })?;
 
-        self.next_event_id += 1;
         self.event_count += 1;
         self.registry
             .apply_set_tile_kind(plan)
@@ -411,7 +407,7 @@ mod tests {
             .expect("command should apply");
 
         let abutown_protocol::WorldEventDto::TileKindSet(event) = &applied.event;
-        assert_eq!(event.event_id, "event:1");
+        assert!(event.event_id.starts_with("event:"));
         assert_eq!(event.command_id, "command:test:1");
         assert_eq!(event.version, 2);
         assert_eq!(event.local_index, 11);

@@ -136,7 +136,7 @@ mod integration_tests {
         let mut store = PostgresWorldEventStore::connect(&database_url)
             .await
             .expect("connect postgres event store");
-        let event = tile_event(&format!("event:test:{}", uuid::Uuid::now_v7()), 1);
+        let event = tile_event(&format!("event:{}", uuid::Uuid::now_v7()), 1);
 
         store.append(event).await.expect("append event");
     }
