@@ -16,6 +16,14 @@ pub(crate) enum ChunkMutationError {
     TileOutOfBounds { index: u16, tile_count: u16 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SetTileKindPlan {
+    pub(crate) coord: ChunkCoord,
+    pub(crate) local_index: u16,
+    pub(crate) kind: TileKind,
+    pub(crate) version: u64,
+}
+
 #[derive(Debug)]
 struct LoadedChunk {
     chunk: Chunk,
@@ -81,9 +89,19 @@ impl ChunkRegistry {
         local_index: u16,
         kind: TileKind,
     ) -> Result<u64, ChunkMutationError> {
+        let plan = self.plan_set_tile_kind(coord, local_index, kind)?;
+        self.apply_set_tile_kind(plan)
+    }
+
+    pub(crate) fn plan_set_tile_kind(
+        &self,
+        coord: ChunkCoord,
+        local_index: u16,
+        kind: TileKind,
+    ) -> Result<SetTileKindPlan, ChunkMutationError> {
         let loaded = self
             .chunks
-            .get_mut(&coord)
+            .get(&coord)
             .ok_or(ChunkMutationError::ChunkNotLoaded { coord })?;
         let existing_kind =
             loaded
@@ -98,9 +116,26 @@ impl ChunkRegistry {
             return Err(ChunkMutationError::NoStateChange { coord, local_index });
         }
 
+        Ok(SetTileKindPlan {
+            coord,
+            local_index,
+            kind,
+            version: loaded.chunk.version() + 1,
+        })
+    }
+
+    pub(crate) fn apply_set_tile_kind(
+        &mut self,
+        plan: SetTileKindPlan,
+    ) -> Result<u64, ChunkMutationError> {
+        let loaded =
+            self.chunks
+                .get_mut(&plan.coord)
+                .ok_or(ChunkMutationError::ChunkNotLoaded { coord: plan.coord })?;
+
         loaded
             .chunk
-            .set_tile_kind(local_index, kind)
+            .set_tile_kind(plan.local_index, plan.kind)
             .map_err(|error| match error {
                 ChunkError::IndexOutOfBounds { index, tile_count } => {
                     ChunkMutationError::TileOutOfBounds { index, tile_count }
@@ -110,6 +145,7 @@ impl ChunkRegistry {
                 }
             })?;
 
+        debug_assert_eq!(loaded.chunk.version(), plan.version);
         Ok(loaded.chunk.version())
     }
 
@@ -236,6 +272,61 @@ mod tests {
             snapshot.dirty_tiles[1].kind,
             abutown_protocol::TileKindDto::Water
         );
+    }
+
+    #[test]
+    fn registry_plans_tile_kind_mutation_without_changing_chunk() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        let plan = registry
+            .plan_set_tile_kind(ChunkCoord { x: 4, y: 4 }, 11, TileKind::Water)
+            .expect("loaded tile can be planned");
+
+        assert_eq!(plan.coord, ChunkCoord { x: 4, y: 4 });
+        assert_eq!(plan.local_index, 11);
+        assert_eq!(plan.kind, TileKind::Water);
+        assert_eq!(plan.version, 2);
+
+        let snapshot = registry
+            .chunk_snapshot(
+                &WorldId("abutown-main".to_string()),
+                ChunkCoord { x: 4, y: 4 },
+            )
+            .expect("chunk snapshot exists");
+        assert!(!snapshot.dirty_tiles.iter().any(|tile| {
+            tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
+        }));
+    }
+
+    #[test]
+    fn registry_applies_planned_tile_kind_mutation() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 0, TileKind::Road),
+            ChunkActivity::Active,
+        );
+
+        let plan = registry
+            .plan_set_tile_kind(ChunkCoord { x: 4, y: 4 }, 11, TileKind::Water)
+            .expect("loaded tile can be planned");
+
+        registry
+            .apply_set_tile_kind(plan)
+            .expect("planned mutation applies");
+
+        let snapshot = registry
+            .chunk_snapshot(
+                &WorldId("abutown-main".to_string()),
+                ChunkCoord { x: 4, y: 4 },
+            )
+            .expect("chunk snapshot exists");
+        assert!(snapshot.dirty_tiles.iter().any(|tile| {
+            tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
+        }));
     }
 
     #[test]
