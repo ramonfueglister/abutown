@@ -4,7 +4,7 @@ use abutown_protocol::{ChunkSnapshotDto, WorldId};
 use sim_core::{
     chunk::{Chunk, ChunkError},
     ids::ChunkCoord,
-    persistence::{build_chunk_snapshot, InMemoryChunkSnapshotStore},
+    persistence::{InMemoryChunkSnapshotStore, build_chunk_snapshot},
     scheduler::ChunkActivity,
     tile::TileKind,
 };
@@ -192,9 +192,11 @@ mod tests {
             snapshot.dirty_tiles[0].kind,
             abutown_protocol::TileKindDto::Road
         );
-        assert!(registry
-            .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
-            .is_none());
+        assert!(
+            registry
+                .chunk_snapshot(&world_id, ChunkCoord { x: 0, y: 0 })
+                .is_none()
+        );
     }
 
     #[test]
@@ -311,10 +313,12 @@ mod tests {
         );
 
         assert_eq!(registry.write_snapshots(&world_id, &mut store), 2);
-        assert!(store
-            .read_snapshot(ChunkCoord { x: 4, y: 4 })
-            .expect("visible snapshot still exists")
-            .dirty_tiles
-            .is_empty());
+        assert!(
+            store
+                .read_snapshot(ChunkCoord { x: 4, y: 4 })
+                .expect("visible snapshot still exists")
+                .dirty_tiles
+                .is_empty()
+        );
     }
 }

@@ -133,9 +133,7 @@ pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
     MobilityDelta(MobilityDeltaDto),
-    WorldEvent {
-        event: WorldEventDto,
-    },
+    WorldEvent { event: WorldEventDto },
     Error(ServerErrorDto),
 }
 
