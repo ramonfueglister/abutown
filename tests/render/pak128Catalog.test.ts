@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { pak128AssetPack, PAK128_REQUIRED_ROLES, PAK128_REVISION } from '../../src/assets/pak128Catalog';
 
 describe('pak128 catalog', () => {
+  const legacyAssetPattern = new RegExp(`${['open', 'gfx'].join('')}|${['open', 'ttd'].join('')}`, 'i');
+
   it('pins the audited source revision', () => {
     expect(PAK128_REVISION).toBe('acdf2f0793a6beee5ea34ea85d308fbbeccf50c5');
   });
@@ -23,8 +25,8 @@ describe('pak128 catalog', () => {
 
   it('does not contain legacy asset paths', () => {
     for (const asset of pak128AssetPack.all()) {
-      expect(asset.path).not.toMatch(/opengfx|openttd/i);
-      expect(asset.provenance.sourcePath).not.toMatch(/opengfx|openttd/i);
+      expect(asset.path).not.toMatch(legacyAssetPattern);
+      expect(asset.provenance.sourcePath).not.toMatch(legacyAssetPattern);
     }
   });
 

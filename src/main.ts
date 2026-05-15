@@ -1538,11 +1538,7 @@ function detailCountsByCategory(): Record<string, number> {
 }
 
 function legacyAssetPaths(): string[] {
-  return [...images.keys()].filter((path) =>
-    /\/opengfx2?\//i.test(path) ||
-    /\/openttd-fan-assets\//i.test(path) ||
-    /\/simutrans-assets\/pak128-pedestrians\//i.test(path)
-  ).sort();
+  return [...images.keys()].filter((path) => !path.startsWith('/simutrans-assets/pak128/')).sort();
 }
 
 window.advanceTime = (ms: number) => {

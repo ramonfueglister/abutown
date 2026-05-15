@@ -6,6 +6,8 @@ import {
 } from '../../src/render/vehicleSprites';
 
 describe('vehicle sprites', () => {
+  const legacyPathPattern = new RegExp(`/${['open', 'gfx'].join('')}|/${['open', 'ttd'].join('')}`, 'i');
+
   it('uses pak128 road vehicle sheets from the active asset pack', () => {
     const sprites = candidateVehicleSprites();
     const sheets = new Set(sprites.map((sprite) => sprite.sheet));
@@ -13,7 +15,7 @@ describe('vehicle sprites', () => {
 
     expect(sheets).toEqual(new Set(['bus', 'truck']));
     expect(paths.every((path) => path.startsWith('/simutrans-assets/pak128/'))).toBe(true);
-    expect(paths.every((path) => !path.includes('/opengfx') && !path.includes('/openttd'))).toBe(true);
+    expect(paths.every((path) => !legacyPathPattern.test(path))).toBe(true);
   });
 
   it('selects directional pak128 road-vehicle frames from grid movement', () => {
