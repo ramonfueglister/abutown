@@ -57,6 +57,7 @@ export function buildZurichTransport(world: ZurichWorld): ZurichTransport {
   pruneInvalidRoadDeadEnds(roadKinds, { width: world.width, height: world.height });
   const postPruneConnectorPaths = buildPostPruneConnectorPaths(world);
   for (const path of postPruneConnectorPaths) for (const coord of path) addRoad(coord, true);
+  removeStreetsTouchingOpenWater(world, roadKinds);
   pruneInvalidRoadDeadEnds(roadKinds, { width: world.width, height: world.height });
   removeDisconnectedRoadComponents(roadKinds);
   for (const bridgeKey of [...bridgeKeys]) {
@@ -202,6 +203,21 @@ function removeDisconnectedRoadComponents(roads: Map<string, ZurichRoadKind>): v
   for (const tileKey of roads.keys()) {
     if (!connectedKeys.has(tileKey)) roads.delete(tileKey);
   }
+}
+
+function removeStreetsTouchingOpenWater(world: ZurichWorld, roads: Map<string, ZurichRoadKind>): void {
+  const removable: string[] = [];
+  for (const [tileKey, kind] of roads) {
+    if (kind !== 'street') continue;
+    const coord = parseKey(tileKey);
+    const touchesOpenWater = cardinal(coord).some((neighbor) => {
+      const neighborKey = key(neighbor);
+      const terrain = world.terrain.get(neighborKey)?.kind;
+      return (terrain === 'water' || terrain === 'riverbank') && roads.get(neighborKey) !== 'bridge';
+    });
+    if (touchesOpenWater) removable.push(tileKey);
+  }
+  for (const tileKey of removable) roads.delete(tileKey);
 }
 
 function blockOffsets(halfSize: number, spacing: number): number[] {

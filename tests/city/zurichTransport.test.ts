@@ -99,6 +99,19 @@ describe('buildZurichTransport', () => {
     expect(nonBridgeRiverbankRoads).toEqual([]);
   });
 
+  it('keeps street roads away from water edges except at bridge approaches', () => {
+    const { world, transport } = transportFixture();
+    const streetsTouchingOpenWater = [...transport.roads.entries()].filter(([, road]) => {
+      if (road.kind !== 'street') return false;
+      return cardinalKeys(road.coord).some((neighbor) =>
+        ['water', 'riverbank'].includes(world.terrain.get(neighbor)?.kind ?? '') &&
+        transport.roads.get(neighbor)?.kind !== 'bridge'
+      );
+    });
+
+    expect(streetsTouchingOpenWater).toEqual([]);
+  });
+
   it('keeps district roads from reading as a rigid parallel grid', () => {
     const { transport } = transportFixture();
 

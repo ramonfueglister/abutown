@@ -20,7 +20,7 @@ describe('sprite cleanup', () => {
       80, 70, 60, 255,
     ]);
 
-    cleanupSpritePixels({ data, width: 1, height: 2, path: '/simutrans-assets/pak128/infrastructure/roads/cityroad_030.png' });
+    cleanupSpritePixels({ data, width: 1, height: 2, path: '/simutrans-assets/pak128/infrastructure/roads/road_090.png' });
 
     expect([...data]).toEqual([220, 10, 10, 255, 80, 70, 60, 255]);
   });

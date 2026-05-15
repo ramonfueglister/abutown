@@ -52,17 +52,22 @@ export function vehicleFrameRect(sprite: VehicleSprite, direction: SimutransVehi
   };
 }
 
+export function vehicleSpriteForTrafficIndex(sprites: readonly VehicleSprite[], index: number): VehicleSprite {
+  if (sprites.length === 0) throw new Error('Cannot select a vehicle sprite from an empty sprite list');
+  return sprites[hashTrafficIndex(index) % sprites.length];
+}
+
 export function vehicleFrameForGridDelta(delta: ScreenPoint): SimutransVehicleDirection {
   const dx = Math.sign(delta.x);
   const dy = Math.sign(delta.y);
-  if (dx > 0 && dy > 0) return 'S';
-  if (dx < 0 && dy < 0) return 'N';
-  if (dx > 0 && dy < 0) return 'E';
-  if (dx < 0 && dy > 0) return 'W';
-  if (dx > 0) return 'SE';
-  if (dy > 0) return 'SW';
-  if (dx < 0) return 'NW';
-  if (dy < 0) return 'NE';
+  if (dx > 0 && dy > 0) return 'SE';
+  if (dx < 0 && dy < 0) return 'NW';
+  if (dx > 0 && dy < 0) return 'NE';
+  if (dx < 0 && dy > 0) return 'SW';
+  if (dx > 0) return 'E';
+  if (dy > 0) return 'S';
+  if (dx < 0) return 'W';
+  if (dy < 0) return 'N';
   return 'S';
 }
 
@@ -85,4 +90,14 @@ export function screenRightLaneOffset(from: ScreenPoint, to: ScreenPoint, pixels
 
 function normalizeZero(value: number): number {
   return Math.abs(value) < 0.000001 ? 0 : Number(value.toFixed(3));
+}
+
+function hashTrafficIndex(index: number): number {
+  let value = (index + 1) >>> 0;
+  value ^= value >>> 16;
+  value = Math.imul(value, 0x7feb352d);
+  value ^= value >>> 15;
+  value = Math.imul(value, 0x846ca68b);
+  value ^= value >>> 16;
+  return value >>> 0;
 }

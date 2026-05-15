@@ -31,6 +31,7 @@ import {
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
   vehicleFrameRect,
+  vehicleSpriteForTrafficIndex,
   type SimutransVehicleDirection,
   type VehicleSprite,
 } from './render/vehicleSprites';
@@ -43,6 +44,13 @@ import {
   type SimutransDirection,
   type SimutransPedestrianSprite,
 } from './render/simutransPedestrianSprites';
+import {
+  RIVERBANK_EAST,
+  RIVERBANK_NORTH,
+  RIVERBANK_SOUTH,
+  RIVERBANK_WEST,
+  riverbankSourceFromMask,
+} from './render/riverbankFrames';
 import { compareDrawableOrder } from './render/drawOrder';
 import { buildPedestrianLoop, pedestrianWalkingSpeed } from './render/pedestrianMotion';
 import {
@@ -342,9 +350,14 @@ function drawScene(offset: Coord): void {
   const visibleGrid = visibleGridRect();
 
   drawOutskirtsTerrain(visibleGrid);
+  const visibleTerrainTiles: Coord[] = [];
   for (let y = Math.max(0, visibleGrid.minY); y <= Math.min(HEIGHT - 1, visibleGrid.maxY); y += 1) {
-    for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(WIDTH - 1, visibleGrid.maxX); x += 1) drawTerrain({ x, y });
+    for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(WIDTH - 1, visibleGrid.maxX); x += 1) visibleTerrainTiles.push({ x, y });
   }
+  visibleTerrainTiles.sort((a, b) => iso(a).y - iso(b).y || a.x - b.x);
+  for (const coord of visibleTerrainTiles) drawTerrainBase(coord);
+  for (const coord of visibleTerrainTiles) drawTerrainOverlay(coord);
+  for (const coord of visibleTerrainTiles) drawTerrainEmbankment(coord);
   drawEdgeConnections(visibleGrid);
 
   const visibleStaticDrawables = staticDrawables.filter((item) => isCoordVisible(item.coord, visibleGrid));
@@ -388,8 +401,21 @@ type AssetDrawOptions = {
   alpha?: number;
 };
 
-function drawTerrain(coord: Coord): void {
-  drawAssetRole(terrainRole(terrain.get(key(coord)) ?? 'grass'), coord);
+function drawTerrainBase(coord: Coord): void {
+  drawAssetRole('terrain.grass', coord);
+}
+
+function drawTerrainOverlay(coord: Coord): void {
+  const kind = terrain.get(key(coord)) ?? 'grass';
+  if (kind === 'water' || kind === 'riverbank') drawAssetRole('terrain.water', coord);
+}
+
+function drawTerrainEmbankment(coord: Coord): void {
+  if (!isWaterSurface(coord)) return;
+  const mask = waterSurfaceMask(coord);
+  if (mask === (RIVERBANK_NORTH | RIVERBANK_EAST | RIVERBANK_SOUTH | RIVERBANK_WEST)) return;
+  const asset = activeAssetPack.require('terrain.riverbank');
+  drawAssetFrame({ ...asset, source: riverbankSourceFromMask(mask) }, coord);
 }
 
 function drawOutskirtsTerrain(visibleGrid: GridRect): void {
@@ -404,7 +430,7 @@ function drawOutskirtsTerrain(visibleGrid: GridRect): void {
 
       const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
       ctx.save();
-      drawAssetFrame(grass, coord, { alpha: 0.05 + fade * 0.22 });
+      drawAssetFrame(grass, coord, { alpha: 0.05 + fade * 0.2 });
       if (hash(`outskirts-shadow:${x}:${y}`) % 11 === 0) {
         const point = iso(coord);
         ctx.fillStyle = `rgba(5, 7, 5, ${0.035 + (1 - fade) * 0.055})`;
@@ -416,7 +442,11 @@ function drawOutskirtsTerrain(visibleGrid: GridRect): void {
 }
 
 function drawRoad(road: RoadTile): void {
-  drawAssetRole(roadRole(road), road.coord);
+  if (road.kind === 'bridge') {
+    for (const frame of bridgeRoadAssetFrames(road)) drawAssetFrame(frame, road.coord);
+    return;
+  }
+  drawAssetFrame(streetRoadAssetFrame(road), road.coord);
 }
 
 function drawRail(_rail: RailTile): void {
@@ -435,8 +465,8 @@ function drawDetail(detail: ZurichDetail): void {
 
 function drawBuilding(building: Building): void {
   const offset = buildingStreetFrontageOffset(building.coord, roads);
-  const scale = 0.88 + (building.frame % BUILDING_FRAME_VARIANTS) * 0.035;
-  drawAssetRole(buildingRole(building), building.coord, { offsetX: offset.x, offsetY: offset.y + 4, scale });
+  const scale = 0.42 + (building.frame % BUILDING_FRAME_VARIANTS) * 0.014;
+  drawAssetRole(buildingRole(building), building.coord, { offsetX: offset.x * 0.08, offsetY: offset.y * 0.08 + 6, scale });
 }
 
 function drawTree(coord: Coord): void {
@@ -943,7 +973,7 @@ function buildCars(sprites: VehicleSprite[]): Car[] {
       path,
       offset: (index * 7 + Math.floor(index / corridors.length) * 3) % path.length,
       speed: 1.15 + (index % 9) * 0.13,
-      sprite: sprites[index % sprites.length],
+      sprite: vehicleSpriteForTrafficIndex(sprites, index),
     };
   });
 }
@@ -1227,6 +1257,20 @@ function isInsidePlayableMap(coord: Coord): boolean {
   return coord.x >= 0 && coord.y >= 0 && coord.x < WIDTH && coord.y < HEIGHT;
 }
 
+function waterSurfaceMask(coord: Coord): number {
+  return (
+    (isWaterSurface({ x: coord.x, y: coord.y - 1 }) ? RIVERBANK_NORTH : 0) |
+    (isWaterSurface({ x: coord.x + 1, y: coord.y }) ? RIVERBANK_EAST : 0) |
+    (isWaterSurface({ x: coord.x, y: coord.y + 1 }) ? RIVERBANK_SOUTH : 0) |
+    (isWaterSurface({ x: coord.x - 1, y: coord.y }) ? RIVERBANK_WEST : 0)
+  );
+}
+
+function isWaterSurface(coord: Coord): boolean {
+  const kind = terrain.get(key(coord));
+  return kind === 'water' || kind === 'riverbank';
+}
+
 function distanceOutsidePlayableMap(coord: Coord): number {
   return Math.max(0, -coord.x, coord.x - (WIDTH - 1), -coord.y, coord.y - (HEIGHT - 1));
 }
@@ -1239,6 +1283,46 @@ function drawIsoTile(point: Coord): void {
   ctx.lineTo(point.x - TILE_W / 2, point.y);
   ctx.closePath();
   ctx.fill();
+}
+
+function streetRoadAssetFrame(road: RoadTile): AssetFrame {
+  const asset = activeAssetPack.require(roadRole(road));
+  return { ...asset, source: roadSourceFromMask(road.mask) };
+}
+
+function bridgeRoadAssetFrames(road: RoadTile): AssetFrame[] {
+  const asset = activeAssetPack.require('road.bridge');
+  const eastWest = isStraightEastWest(road.mask) || (!isStraightNorthSouth(road.mask) && (road.mask & (EAST | WEST)) !== 0);
+  const row = 1;
+  const backCol = eastWest ? 4 : 0;
+  return [
+    { ...asset, source: pak128Cell(row, backCol), anchor: { x: 64, y: 96 }, baseline: 96 },
+    { ...asset, source: pak128Cell(row, backCol + 1), anchor: { x: 64, y: 96 }, baseline: 96 },
+  ];
+}
+
+function roadSourceFromMask(mask: number): AssetFrame['source'] {
+  const normalized = mask & (NORTH | EAST | SOUTH | WEST);
+  if (normalized === 0) return pak128Cell(1, 0);
+  if (normalized === NORTH) return pak128Cell(1, 1);
+  if (normalized === SOUTH) return pak128Cell(1, 2);
+  if (normalized === EAST) return pak128Cell(1, 3);
+  if (normalized === WEST) return pak128Cell(1, 4);
+  if (normalized === (NORTH | SOUTH)) return pak128Cell(1, 5);
+  if (normalized === (EAST | WEST)) return pak128Cell(1, 6);
+  if (normalized === (NORTH | SOUTH | EAST)) return pak128Cell(1, 7);
+  if (normalized === (NORTH | SOUTH | WEST)) return pak128Cell(2, 0);
+  if (normalized === (NORTH | EAST | WEST)) return pak128Cell(2, 1);
+  if (normalized === (SOUTH | EAST | WEST)) return pak128Cell(2, 2);
+  if (normalized === (NORTH | SOUTH | EAST | WEST)) return pak128Cell(2, 3);
+  if (normalized === (NORTH | EAST)) return pak128Cell(2, 4);
+  if (normalized === (SOUTH | EAST)) return pak128Cell(2, 5);
+  if (normalized === (NORTH | WEST)) return pak128Cell(2, 6);
+  return pak128Cell(2, 7);
+}
+
+function pak128Cell(row: number, col: number, height = 128): AssetFrame['source'] {
+  return { x: col * 128, y: row * 128, width: 128, height };
 }
 
 function drawFadingEdgeTile(step: number, draw: () => void): void {

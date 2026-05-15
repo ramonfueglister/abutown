@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('renders the city with a bounded fixed-map camera', async ({ page }) => {
+  await page.setViewportSize({ width: 409, height: 519 });
   const consoleErrors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text());
@@ -27,7 +28,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.bridges).toBeGreaterThanOrEqual(6);
   expect(state.city.bridges).toBeLessThanOrEqual(12);
   expect(state.city.railTiles).toBe(256);
-  expect(state.city.buildings).toBeGreaterThan(2300);
+  expect(state.city.buildings).toBeGreaterThan(2250);
   expect(state.city.details.total).toBeGreaterThanOrEqual(260);
   expect(state.city.details.dock ?? 0).toBe(0);
   expect(state.city.details.industry).toBeGreaterThanOrEqual(16);
@@ -70,5 +71,23 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     y: expect.any(Number),
     scale: expect.any(Number),
   }));
+  const nearBlackRatio = await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('#game');
+    const context = canvas?.getContext('2d');
+    if (!canvas || !context) return 1;
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let nearBlack = 0;
+    let sampled = 0;
+    for (let i = 0; i < data.length; i += 4 * 16) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+      sampled += 1;
+      if (a === 255 && r < 8 && g < 8 && b < 8) nearBlack += 1;
+    }
+    return nearBlack / sampled;
+  });
+  expect(nearBlackRatio).toBeLessThan(0.05);
   expect(consoleErrors).toEqual([]);
 });

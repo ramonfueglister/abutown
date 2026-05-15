@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   candidateVehicleSprites,
   screenRightLaneOffset,
+  vehicleSpriteForTrafficIndex,
   vehicleFrameForGridDelta,
 } from '../../src/render/vehicleSprites';
 
@@ -18,11 +19,22 @@ describe('vehicle sprites', () => {
     expect(paths.every((path) => !legacyPathPattern.test(path))).toBe(true);
   });
 
-  it('selects directional pak128 road-vehicle frames from grid movement', () => {
-    expect(vehicleFrameForGridDelta({ x: 1, y: 0 })).toBe('SE');
-    expect(vehicleFrameForGridDelta({ x: 0, y: 1 })).toBe('SW');
-    expect(vehicleFrameForGridDelta({ x: -1, y: 0 })).toBe('NW');
-    expect(vehicleFrameForGridDelta({ x: 0, y: -1 })).toBe('NE');
+  it('assigns available vehicle sprites in a stable pseudo-random order', () => {
+    const sprites = candidateVehicleSprites();
+    const assignments = Array.from({ length: 12 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet);
+
+    expect(new Set(assignments)).toEqual(new Set(['bus', 'truck']));
+    expect(assignments.slice(0, 4)).not.toEqual(['bus', 'truck', 'bus', 'truck']);
+    expect(assignments).toEqual(
+      Array.from({ length: 12 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet),
+    );
+  });
+
+  it('selects pak128 road-vehicle frames using the same grid compass as road DAT masks', () => {
+    expect(vehicleFrameForGridDelta({ x: 1, y: 0 })).toBe('E');
+    expect(vehicleFrameForGridDelta({ x: 0, y: 1 })).toBe('S');
+    expect(vehicleFrameForGridDelta({ x: -1, y: 0 })).toBe('W');
+    expect(vehicleFrameForGridDelta({ x: 0, y: -1 })).toBe('N');
   });
 
   it('places vehicles on the right lane relative to their screen-space travel direction', () => {

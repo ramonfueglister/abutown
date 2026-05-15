@@ -31,6 +31,10 @@ describe('pak128 catalog', () => {
   });
 
   it('uses DAT-backed frame coordinates for known directional assets', () => {
+    expect(pak128AssetPack.require('terrain.grass').source).toEqual({ x: 512, y: 0, width: 128, height: 64 });
+    expect(pak128AssetPack.require('terrain.water').source).toEqual({ x: 0, y: 128, width: 128, height: 128 });
+    expect(pak128AssetPack.require('road.straight').path).toBe('/simutrans-assets/pak128/infrastructure/roads/road_090.png');
+    expect(pak128AssetPack.require('building.residential.low').source).toEqual({ x: 0, y: 128, width: 128, height: 256 });
     expect(pak128AssetPack.require('agent.pedestrian').source).toEqual({ x: 0, y: 128, width: 128, height: 128 });
     expect(pak128AssetPack.require('vehicle.bus').source.y).toBe(128);
   });
