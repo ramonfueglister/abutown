@@ -28,6 +28,8 @@ export const PAK128_REQUIRED_ROLES = [
 ] as const satisfies readonly AssetRole[];
 
 const ROOT = '/simutrans-assets/pak128';
+const YELLOW_CROSSING_ROAD = `${ROOT}/infrastructure/roads/yellow_crossing_hk_road_090.png`;
+const YELLOW_CROSSING_ROAD_DAT = 'infrastructure/roads/yellow_crossing_hk_road_090.dat';
 
 const provenance = (sourcePath: string, datPath: string) => ({
   sourcePath,
@@ -71,33 +73,33 @@ const pak128Assets: AssetFrame[] = [
   },
   {
     role: 'road.straight',
-    path: `${ROOT}/infrastructure/roads/road_090.png`,
+    path: YELLOW_CROSSING_ROAD,
     source: cell(1, 5),
     anchor: { x: 64, y: 96 },
     baseline: 96,
     scale: 1,
     cleanup: 'pak128',
-    provenance: provenance('infrastructure/roads/road_090.png', 'infrastructure/roads/road_090.dat'),
+    provenance: provenance('infrastructure/roads/yellow_crossing_hk_road_090.png', YELLOW_CROSSING_ROAD_DAT),
   },
   {
     role: 'road.curve',
-    path: `${ROOT}/infrastructure/roads/road_090.png`,
+    path: YELLOW_CROSSING_ROAD,
     source: cell(2, 4),
     anchor: { x: 64, y: 96 },
     baseline: 96,
     scale: 1,
     cleanup: 'pak128',
-    provenance: provenance('infrastructure/roads/road_090.png', 'infrastructure/roads/road_090.dat'),
+    provenance: provenance('infrastructure/roads/yellow_crossing_hk_road_090.png', YELLOW_CROSSING_ROAD_DAT),
   },
   {
     role: 'road.intersection',
-    path: `${ROOT}/infrastructure/roads/road_090.png`,
+    path: YELLOW_CROSSING_ROAD,
     source: cell(2, 3),
     anchor: { x: 64, y: 96 },
     baseline: 96,
     scale: 1,
     cleanup: 'pak128',
-    provenance: provenance('infrastructure/roads/road_090.png', 'infrastructure/roads/road_090.dat'),
+    provenance: provenance('infrastructure/roads/yellow_crossing_hk_road_090.png', YELLOW_CROSSING_ROAD_DAT),
   },
   {
     role: 'road.bridge',
