@@ -31,7 +31,7 @@ const forbiddenPattern = new RegExp([
 ].map(escapeRegExp).join('|'), 'iu');
 const textExtensions = new Set(['.css', '.dat', '.html', '.js', '.json', '.md', '.mjs', '.ts', '.txt']);
 
-describe('legacy raster asset removal', () => {
+describe('retired raster asset removal', () => {
   it('removes old asset directories, import scripts, catalogs, and stray tests', () => {
     for (const pathParts of removedPaths) {
       const relativePath = pathParts.join('/');
