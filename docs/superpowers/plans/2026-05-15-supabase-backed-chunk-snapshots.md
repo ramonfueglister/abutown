@@ -105,7 +105,7 @@ This plan does not include:
 - Modify: `backend/crates/sim-server/src/main.rs`
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Add dependencies**
+- [x] **Step 1: Add dependencies**
 
 Add to `backend/Cargo.toml` under `[workspace.dependencies]`:
 
@@ -119,7 +119,7 @@ Add to `backend/crates/sim-server/Cargo.toml` under `[dependencies]`:
 dotenvy.workspace = true
 ```
 
-- [ ] **Step 2: Add config tests**
+- [x] **Step 2: Add config tests**
 
 Create `backend/crates/sim-server/src/config.rs` with tests first:
 
@@ -157,7 +157,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Implement config**
+- [x] **Step 3: Implement config**
 
 Add above the tests:
 
@@ -206,7 +206,7 @@ pub enum ServerConfigError {
 }
 ```
 
-- [ ] **Step 4: Wire config**
+- [x] **Step 4: Wire config**
 
 In `backend/crates/sim-server/src/lib.rs` add:
 
@@ -255,7 +255,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
 }
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -280,7 +280,7 @@ git commit -m "feat: load backend supabase config from env"
 **Files:**
 - Modify: `backend/crates/sim-core/src/persistence.rs`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Add tests covering async in-memory write/read and typed failure shape:
 
@@ -302,7 +302,7 @@ async fn chunk_snapshot_store_writes_and_reads_snapshot() {
 }
 ```
 
-- [ ] **Step 2: Implement trait**
+- [x] **Step 2: Implement trait**
 
 Add:
 
@@ -330,7 +330,7 @@ pub trait ChunkSnapshotStore: std::fmt::Debug + Send {
 
 Implement it for `InMemoryChunkSnapshotStore`, cloning snapshots on reads.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 Run:
 
@@ -354,7 +354,7 @@ git commit -m "feat: add chunk snapshot store contract"
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Add tests**
+- [x] **Step 1: Add tests**
 
 Add a registry test proving snapshot collection does not clear dirty flags until explicitly marked persisted.
 
@@ -364,7 +364,7 @@ Expected behavior:
 - A second collection before clearing still contains dirty tiles.
 - `mark_snapshots_persisted(&coords)` clears dirty tiles only for successful coords.
 
-- [ ] **Step 2: Implement registry split**
+- [x] **Step 2: Implement registry split**
 
 Add methods shaped like:
 
@@ -375,7 +375,7 @@ pub(crate) fn mark_snapshots_persisted(&mut self, coords: &[ChunkCoord]);
 
 Do not hold a mutable chunk borrow across an async `.await`.
 
-- [ ] **Step 3: Update runtime snapshot persistence**
+- [x] **Step 3: Update runtime snapshot persistence**
 
 Change runtime snapshot persistence to:
 
@@ -396,11 +396,11 @@ pub async fn persist_chunk_snapshots(&mut self) -> Result<usize, ChunkSnapshotSt
 }
 ```
 
-- [ ] **Step 4: Update app helper**
+- [x] **Step 4: Update app helper**
 
 Change `persist_snapshots_once()` to return `Result<usize, ChunkSnapshotStoreError>` and log snapshot-loop failures instead of panicking or clearing dirty state.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 

@@ -9,7 +9,7 @@ use sim_core::{
     events::{InMemoryWorldEventStore, WorldEventStore},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
-    persistence::InMemoryChunkSnapshotStore,
+    persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore},
     scheduler::ChunkActivity,
     tile::TileKind,
 };
@@ -138,9 +138,22 @@ impl SimulationRuntime {
         ]
     }
 
-    pub fn persist_chunk_snapshots(&mut self) -> usize {
-        self.registry
-            .write_snapshots(&self.world_id, &mut self.snapshot_store)
+    pub async fn persist_chunk_snapshots(&mut self) -> Result<usize, ChunkSnapshotStoreError> {
+        let snapshots = self.registry.collect_snapshots(&self.world_id);
+        let persisted_coords: Vec<ChunkCoord> = snapshots
+            .iter()
+            .map(|snapshot| ChunkCoord {
+                x: snapshot.coord.x,
+                y: snapshot.coord.y,
+            })
+            .collect();
+
+        for snapshot in snapshots {
+            ChunkSnapshotStore::write_snapshot(&mut self.snapshot_store, snapshot).await?;
+        }
+
+        self.registry.mark_snapshots_persisted(&persisted_coords);
+        Ok(persisted_coords.len())
     }
 
     pub fn stored_chunk_snapshot(&self, coord: ChunkCoord) -> Option<&ChunkSnapshotDto> {
@@ -360,11 +373,11 @@ mod tests {
         assert_eq!(fourth.coord, ChunkCoordDto { x: 4, y: 4 });
     }
 
-    #[test]
-    fn runtime_persists_loaded_chunk_snapshots_and_clears_dirty_state() {
+    #[tokio::test]
+    async fn runtime_persists_loaded_chunk_snapshots_and_clears_dirty_state() {
         let mut runtime = SimulationRuntime::new();
 
-        assert_eq!(runtime.persist_chunk_snapshots(), 3);
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 3);
 
         let visible = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
@@ -378,7 +391,7 @@ mod tests {
         assert_eq!(east.coord, ChunkCoordDto { x: 5, y: 4 });
         assert_eq!(east.dirty_tiles.len(), 1);
 
-        assert_eq!(runtime.persist_chunk_snapshots(), 3);
+        assert_eq!(runtime.persist_chunk_snapshots().await.unwrap(), 3);
         assert!(
             runtime
                 .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })

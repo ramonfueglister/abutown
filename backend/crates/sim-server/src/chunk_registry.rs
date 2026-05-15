@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
 use abutown_protocol::{ChunkSnapshotDto, WorldId};
+#[cfg(test)]
+use sim_core::persistence::InMemoryChunkSnapshotStore;
 use sim_core::{
     chunk::{Chunk, ChunkError},
     ids::ChunkCoord,
-    persistence::{InMemoryChunkSnapshotStore, build_chunk_snapshot},
+    persistence::build_chunk_snapshot,
     scheduler::ChunkActivity,
     tile::TileKind,
 };
@@ -150,26 +152,42 @@ impl ChunkRegistry {
         Ok(loaded.chunk.version())
     }
 
+    #[cfg(test)]
     pub(crate) fn write_snapshots(
         &mut self,
         world_id: &WorldId,
         store: &mut InMemoryChunkSnapshotStore,
     ) -> usize {
-        let coords = self.loaded_coords();
-        let mut written = 0;
-
-        for coord in coords {
-            let Some(loaded) = self.chunks.get_mut(&coord) else {
-                continue;
-            };
-
-            let snapshot = build_chunk_snapshot(&world_id.0, &loaded.chunk, loaded.activity);
+        let snapshots = self.collect_snapshots(world_id);
+        let coords: Vec<ChunkCoord> = snapshots
+            .iter()
+            .map(|snapshot| ChunkCoord {
+                x: snapshot.coord.x,
+                y: snapshot.coord.y,
+            })
+            .collect();
+        let written = snapshots.len();
+        for snapshot in snapshots {
             store.write_snapshot(snapshot);
-            loaded.chunk.clear_dirty();
-            written += 1;
         }
 
+        self.mark_snapshots_persisted(&coords);
         written
+    }
+
+    pub(crate) fn collect_snapshots(&self, world_id: &WorldId) -> Vec<ChunkSnapshotDto> {
+        self.loaded_coords()
+            .into_iter()
+            .filter_map(|coord| self.chunk_snapshot(world_id, coord))
+            .collect()
+    }
+
+    pub(crate) fn mark_snapshots_persisted(&mut self, coords: &[ChunkCoord]) {
+        for coord in coords {
+            if let Some(loaded) = self.chunks.get_mut(coord) {
+                loaded.chunk.clear_dirty();
+            }
+        }
     }
 }
 
@@ -412,5 +430,32 @@ mod tests {
                 .dirty_tiles
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn registry_collects_snapshots_without_clearing_dirty_tiles() {
+        let mut registry = ChunkRegistry::new(32);
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 4, y: 4 }, 3, TileKind::Road),
+            ChunkActivity::Active,
+        );
+        registry.insert_chunk(
+            chunk_with_seed(ChunkCoord { x: 5, y: 4 }, 7, TileKind::Water),
+            ChunkActivity::Warm,
+        );
+        let world_id = WorldId("abutown-main".to_string());
+
+        let snapshots = registry.collect_snapshots(&world_id);
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].dirty_tiles.len(), 1);
+
+        let collected_again = registry.collect_snapshots(&world_id);
+        assert_eq!(collected_again[0].dirty_tiles.len(), 1);
+
+        registry.mark_snapshots_persisted(&[ChunkCoord { x: 4, y: 4 }]);
+
+        let after_partial_mark = registry.collect_snapshots(&world_id);
+        assert!(after_partial_mark[0].dirty_tiles.is_empty());
+        assert_eq!(after_partial_mark[1].dirty_tiles.len(), 1);
     }
 }

@@ -97,7 +97,9 @@ impl AppState {
             interval.tick().await;
             loop {
                 interval.tick().await;
-                let _ = persist_snapshots_once(&state).await;
+                if let Err(error) = persist_snapshots_once(&state).await {
+                    tracing::warn!(%error, "failed to persist chunk snapshots");
+                }
             }
         });
     }
@@ -290,10 +292,12 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     }
 }
 
-async fn persist_snapshots_once(state: &AppState) -> usize {
+async fn persist_snapshots_once(
+    state: &AppState,
+) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
     let runtime = state.runtime();
     let mut runtime = runtime.lock().await;
-    runtime.persist_chunk_snapshots()
+    runtime.persist_chunk_snapshots().await
 }
 
 async fn send_server_message(
@@ -315,7 +319,7 @@ mod tests {
     async fn persist_snapshots_once_writes_runtime_snapshots() {
         let state = AppState::new(SimulationRuntime::new());
 
-        assert_eq!(persist_snapshots_once(&state).await, 3);
+        assert_eq!(persist_snapshots_once(&state).await.unwrap(), 3);
 
         let runtime = state.runtime();
         let runtime = runtime.lock().await;
