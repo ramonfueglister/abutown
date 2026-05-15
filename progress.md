@@ -9,3 +9,4 @@ Original prompt: OpenTTD-like isometric persistent webgame graphics demo with re
 2026-05-14T22:17:00.000Z - Train task: add one visible northbound OpenGFX train on the single vertical rail corridor; it should fade in from the south edge, travel upward, and fade out at the north edge.
 2026-05-14T23:31:00.000Z - Train QA fix: moved the single rail corridor to visible x=150, enlarged and tightened the OpenGFX train consist, verified screenshots at mid-map, and kept only the 5174 dev server running.
 2026-05-15T13:40:48.000Z - Backend cleanup: verified the Rust backend workspace, corrected backend README scope, and removed stale tracked duplicate ` 2.ts` test files.
+2026-05-15T15:56:00.000Z - Mobility client bridge: added opt-in frontend mobility protocol/state/client modules, diagnostic canvas overlay markers, Vite dev proxy support, and offline-safe smoke coverage.

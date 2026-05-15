@@ -83,6 +83,15 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server mobility_snapshot_is
 cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobility_deltas_after_hello
 ```
 
+Frontend mobility bridge:
+
+- Run `cargo run --manifest-path backend/Cargo.toml -p sim-server`.
+- Run `npm run dev`.
+- Open the Vite URL with `?mobility=1` to use the Vite same-origin proxy, or
+  `?mobilityBackend=http://127.0.0.1:8080` to connect directly.
+- Without either flag, the browser keeps the local city-only view and makes no
+  mobility backend request.
+
 ## Snapshot Loop
 
 The server also runs an in-memory snapshot loop every five seconds. It writes snapshots for all loaded chunks into the current process snapshot store and clears chunk dirty flags after each successful pass. This is the first persistence boundary; Supabase/Postgres adapters remain a later slice.
