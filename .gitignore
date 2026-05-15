@@ -5,6 +5,7 @@ playwright-report/
 test-results/
 artifacts/
 .DS_Store
+.env
 .superpowers
 .superpowers/
 .worktrees
