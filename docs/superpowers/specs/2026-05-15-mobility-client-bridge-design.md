@@ -24,7 +24,7 @@ The current Vite client has no `src/backend` bridge and still renders cars, pede
 
 Implement a focused TypeScript mobility bridge.
 
-The bridge fetches `/mobility`, subscribes to `/ws`, reduces `mobility_delta` messages into a local read model, and leaves the existing local animation untouched. Rendering stays diagnostic: a small server-agent marker, waiting stop markers, and a connection summary in `render_game_to_text`.
+When enabled, the bridge fetches `/mobility`, subscribes to `/ws`, reduces `mobility_delta` messages into a local read model, and leaves the existing local animation untouched. Rendering stays diagnostic: a small server-agent marker, waiting stop markers, and a connection summary in `render_game_to_text`.
 
 This is preferable to replacing local pedestrians because the backend currently seeds only one demo agent and one shuttle. A full replacement would make the city feel empty and would force premature routing/pathfinding work.
 
@@ -51,13 +51,13 @@ Add one focused renderer:
 ## Data Flow
 
 1. Browser boots the existing local city.
-2. `connectMobilityBackend` fetches `http://127.0.0.1:8080/mobility`.
+2. If the URL has `?mobility=1`, `?mobilityBackend=<url>`, or `localStorage["abutown:mobility"]` is `1`, `connectMobilityBackend` fetches `/mobility` from the configured origin.
 3. Snapshot initializes a `MobilityOverlayState`.
 4. The WebSocket receives mixed server messages.
 5. `mobility_delta` messages replace changed agents and vehicles in the read model.
 6. Rendering maps known demo link/stop IDs to stable Zurich-grid diagnostic coordinates and draws compact markers.
 
-If the backend is unavailable, the local city still renders. The mobility state reports `disconnected`, draws nothing, and schedules reconnect.
+If mobility is not enabled, the local city still renders without network requests. If mobility is enabled and the backend is unavailable, the mobility state reports `disconnected`, draws nothing, and schedules reconnect.
 
 ## Error Handling
 
@@ -82,8 +82,8 @@ If the backend is unavailable, the local city still renders. The mobility state 
 
 ## Success Criteria
 
-- With only Vite running, the city renders unchanged and reports mobility as disconnected.
-- With `sim-server` running on `127.0.0.1:8080`, the browser loads the mobility snapshot and receives deltas.
+- With only Vite running, the city renders unchanged, makes no mobility network request by default, and reports mobility as disconnected.
+- With `sim-server` running on `127.0.0.1:8080` and mobility enabled through `?mobility=1`, `?mobilityBackend=http://127.0.0.1:8080`, or `localStorage["abutown:mobility"]="1"`, the browser loads the mobility snapshot and receives deltas.
 - `window.render_game_to_text()` includes mobility connection, tick, agent count, vehicle count, stop count, and current seeded agent state.
 - Tests and build pass in the mobility worktree.
 
