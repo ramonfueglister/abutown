@@ -82,7 +82,7 @@ Steps:
 
 1. For each `coord` in `SEEDED_CHUNKS`:
    - `snapshot_store.read_snapshot(coord)` →
-     - if `Some(snap)`: `chunk = Chunk::from_snapshot(&snap.payload)`, `chunk_version = snap.chunk_version`.
+     - if `Some(snap)`: `chunk = Chunk::from_snapshot(&snap)`, `chunk_version = snap.chunk_version`.
      - if `None`: `chunk = seed_default_chunk(coord)`, `chunk_version = 0`.
    - `event_store.read_chunk_events_since(world_id, coord, chunk_version)` → events ordered by `chunk_version` ASC.
    - For each event: `chunk.apply_event(event)`; `chunk_version = event.chunk_version`.
@@ -95,9 +95,15 @@ Steps:
 
 **Failure policy:** Any error during hydration (store read failure, snapshot deserialization failure, event apply rejection) is fatal — the server refuses to start. Silent fallback to fresh seed would lose data without an operator signal.
 
+### Snapshot format change: delta → full state
+
+`build_chunk_snapshot` today only encodes `dirty_tiles` (the tiles modified since the last `clear_dirty()`). Because `mark_snapshots_persisted` clears dirty after each write and the table stores only the latest row per `(world_id, chunk_x, chunk_y)`, recovery cannot rebuild full state from one snapshot row.
+
+Fix as part of this slice: change `build_chunk_snapshot` to emit **all non-default tiles** of the chunk (sparse representation — empty default tiles omitted, modified tiles included regardless of dirty status). The wire DTO `ChunkSnapshotDto.dirty_tiles` is renamed to `tiles` and means "the authoritative non-default tile set". Sparse encoding keeps payloads small for mostly-empty chunks while making snapshots self-sufficient for recovery.
+
 ### New methods required
 
-- `Chunk::from_snapshot(payload: &ChunkSnapshotPayload) -> Result<Chunk, SnapshotDecodeError>` — inverse of the existing `build_chunk_snapshot`.
+- `Chunk::from_snapshot(payload: &ChunkSnapshotDto) -> Result<Chunk, SnapshotDecodeError>` — inverse of the (updated) `build_chunk_snapshot`. Restores `chunk_version` and every tile listed in `tiles`; unlisted tiles stay at default.
 - `Chunk::apply_event(event: &WorldEventDto) -> Result<(), EventApplyError>` — applies the event's mutation to the chunk and bumps the chunk's internal version. Pure; same input always produces same output.
 - `WorldEventStore::read_chunk_events_since(world_id, coord, after_chunk_version) -> Vec<WorldEventDto>` — replay query, ordered by `chunk_version`.
 - `WorldEventStore::max_tick(world_id) -> Option<u64>` and `max_version(world_id) -> Option<u64>` — for restoring global counters.
