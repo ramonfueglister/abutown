@@ -7,7 +7,7 @@ import {
 } from '../../src/render/vehicleSprites';
 
 describe('vehicle sprites', () => {
-  const legacyPathPattern = new RegExp(`/${['open', 'gfx'].join('')}|/${['open', 'ttd'].join('')}`, 'i');
+  const removedAssetPathPattern = new RegExp(`/${['open', 'gfx'].join('')}|/${['open', 'ttd'].join('')}`, 'i');
 
   it('uses the full pak128 road vehicle manifest', () => {
     const sprites = candidateVehicleSprites();
@@ -21,7 +21,10 @@ describe('vehicle sprites', () => {
     expect(sheets).toContain('goods_truck_0');
     expect(paths.every((path) => path.startsWith('/simutrans-assets/pak128/'))).toBe(true);
     expect(paths.every((path) => path.endsWith('.png'))).toBe(true);
-    expect(paths.every((path) => !legacyPathPattern.test(path))).toBe(true);
+    expect(paths.every((path) => !removedAssetPathPattern.test(path))).toBe(true);
+    const roles = new Set(sprites.map((sprite) => sprite.role));
+    expect(roles.has('vehicle.bus')).toBe(true);
+    expect(roles.has('vehicle.truck')).toBe(true);
   });
 
   it('assigns available vehicle sprites in a stable pseudo-random order', () => {

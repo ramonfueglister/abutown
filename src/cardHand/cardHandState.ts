@@ -38,7 +38,8 @@ export function createCardHandState(): CardHandState {
 export function mergeHandCards(handCards: HandCard[], definitions: CardDefinition[]): VisibleHandCard[] {
   const defs = new Map(definitions.map((definition) => [definition.id, definition]));
   return handCards.map((card) => {
-    const definition = defs.get(card.card_id) ?? fallbackDefinition(card.card_id);
+    const definition = defs.get(card.card_id);
+    if (!definition) throw new Error(`Missing card definition: ${card.card_id}`);
     return {
       ...definition,
       instance_id: card.instance_id,
@@ -57,17 +58,6 @@ export function isCardHandResponse(value: unknown): value is CardHandResponse {
     Array.isArray(value.cards) &&
     value.cards.every(isHandCard)
   );
-}
-
-function fallbackDefinition(id: string): CardDefinition {
-  return {
-    id,
-    name: id,
-    type: 'skill',
-    mana_cost: 0,
-    description: '',
-    rarity: 'common',
-  };
 }
 
 function isCardDefinition(value: unknown): value is CardDefinition {

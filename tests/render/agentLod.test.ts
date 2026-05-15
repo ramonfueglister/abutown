@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { generateAgents } from '../../src/agents/generateAgents';
+import { generatePopulation } from '../../src/agents/generateAgents';
 import { generateCity } from '../../src/city/generateCity';
 import { buildAgentRenderPlan } from '../../src/render/agentLod';
 
 describe('buildAgentRenderPlan', () => {
   it('culls, budgets, and aggregates a large simulated population', () => {
     const city = generateCity();
-    const population = generateAgents(city, { count: 10_000, seed: 9231 });
+    const population = generatePopulation(city, { count: 10_000, seed: 9231 });
     const plan = buildAgentRenderPlan(city, population, {
       stageX: 420,
       stageY: -160,
@@ -24,7 +24,7 @@ describe('buildAgentRenderPlan', () => {
 
   it('drops to density LOD at far zoom', () => {
     const city = generateCity();
-    const population = generateAgents(city, { count: 10_000, seed: 9231 });
+    const population = generatePopulation(city, { count: 10_000, seed: 9231 });
     const plan = buildAgentRenderPlan(city, population, {
       stageX: 420,
       stageY: -160,

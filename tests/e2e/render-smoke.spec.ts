@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+type ScreenEntity = { id: string; screen: { x: number; y: number } };
+
 test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   await page.setViewportSize({ width: 409, height: 519 });
   const consoleErrors: string[] = [];
@@ -41,11 +43,27 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadRailOverlap).toBe(0);
   expect(state.city.railCrossings).toBeGreaterThanOrEqual(1);
   expect(state.city.railStations).toBe(0);
+  expect(state.city.backend).toEqual(expect.objectContaining({
+    required: true,
+    baseUrl: 'http://127.0.0.1:8080',
+    status: expect.objectContaining({
+      service: 'abutown-sim',
+      world_id: 'abutown-main',
+      ok: true,
+      protocol_version: 1,
+    }),
+  }));
   expect(state.city.mobility).toEqual(expect.objectContaining({
-    status: 'local-pedestrians',
-    agents: state.city.pedestrians,
-    vehicles: 0,
-    stops: 0,
+    source: 'backend',
+    status: 'connected',
+    tick: expect.any(Number),
+    agents: expect.any(Number),
+    vehicles: expect.any(Number),
+    stops: expect.any(Number),
+    invalidMessages: 0,
+    lastError: null,
+    localAgents: state.city.pedestrians,
+    localVehicles: state.city.cars,
   }));
   expect(state.city.localAgents.count).toBe(state.city.pedestrians);
   expect(state.city.localAgents.selectedId).toBeNull();
@@ -54,6 +72,16 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     id: 'agent:pedestrian:0',
     kind: 'pedestrian',
     state: 'walking',
+    coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+    screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+  }));
+  expect(state.city.localVehicles.count).toBe(state.city.cars);
+  expect(state.city.localVehicles.selectedId).toBeNull();
+  expect(state.city.localVehicles.vehicles.length).toBe(state.city.cars);
+  expect(state.city.localVehicles.vehicles[0]).toEqual(expect.objectContaining({
+    id: 'vehicle:road:0',
+    kind: 'road-vehicle',
+    state: 'driving',
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
   }));
@@ -84,6 +112,20 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     title: clickableAgent.id,
     rows: expect.arrayContaining([
       expect.objectContaining({ label: 'State', value: 'walking' }),
+      expect.objectContaining({ label: 'Tile', value: expect.any(String) }),
+      expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
+    ]),
+  }));
+  const clickableVehicle = isolatedVisibleEntity(selectedState.city.localVehicles.vehicles, { width: 409, height: 519 });
+  expect(clickableVehicle).toBeTruthy();
+  await page.mouse.click(clickableVehicle.screen.x, clickableVehicle.screen.y);
+  const vehicleSelectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
+  expect(vehicleSelectedState.city.localVehicles.selectedId).toBe(clickableVehicle.id);
+  expect(vehicleSelectedState.city.localAgents.selectedId).toBeNull();
+  expect(vehicleSelectedState.city.vehicleInspector).toEqual(expect.objectContaining({
+    title: clickableVehicle.id,
+    rows: expect.arrayContaining([
+      expect.objectContaining({ label: 'State', value: 'driving' }),
       expect.objectContaining({ label: 'Tile', value: expect.any(String) }),
       expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
     ]),
@@ -123,3 +165,28 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(nearBlackRatio).toBeLessThan(0.05);
   expect(consoleErrors).toEqual([]);
 });
+
+function isolatedVisibleEntity<T extends ScreenEntity>(
+  entities: T[],
+  viewport: { width: number; height: number },
+): T | undefined {
+  return entities
+    .filter((entity) => (
+      entity.screen.x > 16 &&
+      entity.screen.x < viewport.width - 16 &&
+      entity.screen.y > 16 &&
+      entity.screen.y < viewport.height - 16
+    ))
+    .map((entity) => ({ entity, nearestNeighbor: nearestNeighborDistance(entity, entities) }))
+    .sort((a, b) => b.nearestNeighbor - a.nearestNeighbor)
+    .find(({ nearestNeighbor }) => nearestNeighbor > 32)?.entity;
+}
+
+function nearestNeighborDistance(entity: ScreenEntity, entities: ScreenEntity[]): number {
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const other of entities) {
+    if (other.id === entity.id) continue;
+    nearest = Math.min(nearest, Math.hypot(entity.screen.x - other.screen.x, entity.screen.y - other.screen.y));
+  }
+  return nearest;
+}

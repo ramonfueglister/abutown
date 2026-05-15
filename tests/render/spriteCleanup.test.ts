@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { cleanupSpritePixels } from '../../src/render/spriteCleanup';
 
 describe('sprite cleanup', () => {
-  it('removes transparent source colors without path-specific legacy cleanup', () => {
+  it('removes transparent source colors without path-specific cleanup', () => {
     const data = new Uint8ClampedArray([
       220, 10, 10, 255, 20, 20, 230, 255,
       80, 70, 60, 255, 255, 255, 255, 255,

@@ -9,6 +9,7 @@ import {
   type HandCard,
   type VisibleHandCard,
 } from './cardHandState';
+import { resolveBackendBaseUrl } from '../backend/backendGate';
 
 export type CardHandViewOptions = {
   baseUrl?: string;
@@ -148,8 +149,11 @@ function renderCard(card: VisibleHandCard): HTMLElement {
 }
 
 function cardHandBaseUrl(): string {
-  const envUrl = import.meta.env.VITE_ABUTOWN_BACKEND_URL;
-  return typeof envUrl === 'string' && envUrl.length > 0 ? envUrl : globalThis.location.origin;
+  return resolveCardHandBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
+}
+
+export function resolveCardHandBaseUrl(envUrl?: unknown): string {
+  return resolveBackendBaseUrl(envUrl);
 }
 
 function createConfiguredSupabaseClient(): SupabaseClient | null {

@@ -1,13 +1,26 @@
 import { PAK128_ROAD_VEHICLES } from './pak128RoadVehicleManifest';
+import type { AssetRole } from '../assets/assetPack';
 
 export type ScreenPoint = { x: number; y: number };
 export type VehicleSheetName = string;
 export type SimutransVehicleDirection = 'W' | 'NW' | 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW';
+export type VehicleSpriteRole = Extract<
+  AssetRole,
+  | 'vehicle.bus'
+  | 'vehicle.truck'
+  | 'vehicle.delivery.van'
+  | 'vehicle.cooling.truck'
+  | 'vehicle.tanker'
+  | 'vehicle.concrete.mixer'
+  | 'vehicle.bulk.truck'
+  | 'vehicle.car.transporter'
+>;
 
 export type VehicleSprite = {
   sheet: VehicleSheetName;
   name: string;
   datPath: string;
+  role: VehicleSpriteRole;
   path: string;
   row: number;
   scale: number;
@@ -38,6 +51,7 @@ export function candidateVehicleSprites(): VehicleSprite[] {
     sheet: vehicle.id,
     name: vehicle.name,
     datPath: vehicle.datPath,
+    role: vehicleRoleForManifestEntry(vehicle),
     path: vehicle.path,
     row: vehicle.row,
     scale: vehicle.scale,
@@ -87,6 +101,20 @@ export function screenRightLaneOffset(from: ScreenPoint, to: ScreenPoint, pixels
     x: normalizeZero((-dy / length) * pixels),
     y: normalizeZero((dx / length) * pixels),
   };
+}
+
+function vehicleRoleForManifestEntry(vehicle: { id: string; name: string; datPath: string }): VehicleSpriteRole {
+  const value = `${vehicle.id} ${vehicle.name} ${vehicle.datPath}`.toLowerCase();
+  if (value.includes('road-psg+mail') || /bus|coach|interliner|shuttle|ikarus|citaro|cruiser/u.test(value)) {
+    return 'vehicle.bus';
+  }
+  if (/car[_-]?trans|transporter/u.test(value)) return 'vehicle.car.transporter';
+  if (/cool|refriger/u.test(value)) return 'vehicle.cooling.truck';
+  if (/concrete|cement|mixer/u.test(value)) return 'vehicle.concrete.mixer';
+  if (/bulk|grain/u.test(value)) return 'vehicle.bulk.truck';
+  if (/fluid|oil|milk|cistern|tanker/u.test(value)) return 'vehicle.tanker';
+  if (/mail|post|sprinter|van|goods/u.test(value)) return 'vehicle.delivery.van';
+  return 'vehicle.truck';
 }
 
 function normalizeZero(value: number): number {

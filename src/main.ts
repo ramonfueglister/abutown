@@ -1,5 +1,8 @@
 import './style.css';
 import { pak128AssetPack } from './assets/pak128Catalog';
+import { backendErrorMessage, requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
+import { connectMobilityBackend, requireMobilitySnapshot, type MobilityBackendBridge } from './backend/mobilityClient';
+import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
 import { mountCardHandView } from './cardHand/cardHandView';
 import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
@@ -58,6 +61,13 @@ import {
   type LocalPedestrianAgent,
 } from './render/pedestrianAgents';
 import { buildPedestrianAgentInspector, type PedestrianAgentInspector } from './render/pedestrianAgentInspector';
+import {
+  buildLocalRoadVehicles,
+  findNearestLocalRoadVehicle,
+  localRoadVehicleId,
+  type LocalRoadVehicle,
+} from './render/localRoadVehicles';
+import { buildRoadVehicleInspector, type RoadVehicleInspector } from './render/roadVehicleInspector';
 import { buildPedestrianLoop, pedestrianWalkingSpeed } from './render/pedestrianMotion';
 import {
   buildNorthboundTrainPath,
@@ -130,7 +140,7 @@ type StaticDrawable =
   | { type: 'tree'; coord: Coord }
   | { type: 'building'; coord: Coord; building: Building };
 
-type CarDrawable = { type: 'car'; coord: Coord; car: Car };
+type CarDrawable = { type: 'car'; coord: Coord; car: Car; vehicleId: string };
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: Pedestrian; agentId: string };
 type TrainDrawable = { type: 'train'; coord: Coord; train: Train };
 type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
@@ -173,6 +183,7 @@ const WEST = 8;
 const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
 
+const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
 const zurichWorld = buildZurichWorld({ seed: 1848 });
 const zurichTransport = buildZurichTransport(zurichWorld);
 const zurichPlacement = buildZurichPlacement(zurichWorld, zurichTransport);
@@ -239,10 +250,32 @@ let pedestrians: Pedestrian[] = [];
 let trains: Train[] = buildTrains();
 let pedestrianCorridorCount = 0;
 let selectedAgentId: string | null = null;
+let selectedVehicleId: string | null = null;
 let previousTime = performance.now();
+let backendStatus: BackendHealthDto | null = null;
+let mobilityState: MobilityOverlayState = createMobilityOverlayState();
+let mobilityBackendBridge: MobilityBackendBridge | null = null;
 
-mountCardHandView();
-void boot();
+void startRuntime();
+
+async function startRuntime(): Promise<void> {
+  try {
+    backendStatus = await requireBackend({ baseUrl: backendBaseUrl });
+    mobilityState = await requireMobilitySnapshot({ baseUrl: backendBaseUrl });
+    mountCardHandView({ baseUrl: backendBaseUrl });
+    await boot();
+    mobilityBackendBridge = connectMobilityBackend({
+      baseUrl: backendBaseUrl,
+      initialState: mobilityState,
+      onState: (state) => {
+        mobilityState = state;
+      },
+    });
+    window.addEventListener('beforeunload', () => mobilityBackendBridge?.stop(), { once: true });
+  } catch (error) {
+    renderBackendRequired(error);
+  }
+}
 
 async function boot(): Promise<void> {
   const imageEntries = [
@@ -259,6 +292,40 @@ async function boot(): Promise<void> {
   attachCamera();
   canvas.dataset.ready = 'true';
   requestAnimationFrame(frame);
+}
+
+function renderBackendRequired(error: unknown): void {
+  const message = backendErrorMessage(error);
+  canvas.dataset.ready = 'false';
+  canvas.dataset.backendRequired = 'true';
+  ctx.save();
+  ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+  ctx.fillStyle = '#050705';
+  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+  ctx.restore();
+
+  document.querySelector<HTMLElement>('[data-backend-required]')?.remove();
+  const panel = document.createElement('section');
+  panel.className = 'backend-required-panel';
+  panel.dataset.backendRequired = 'true';
+  panel.innerHTML = `
+    <h1>Backend required</h1>
+    <p>Start Abutown backend at ${escapeHtml(backendBaseUrl)} and reload.</p>
+    <pre>cargo run --manifest-path backend/Cargo.toml -p sim-server</pre>
+    <small>${escapeHtml(message)}</small>
+  `;
+  document.body.appendChild(panel);
+  console.error(`Abutown backend required: ${message}`);
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char] ?? char);
 }
 
 function resize(): void {
@@ -300,7 +367,7 @@ function attachCamera(): void {
   canvas.addEventListener('pointerup', (event) => {
     const clickDistance = pointerDown ? Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) : Infinity;
     camera.dragging = false;
-    if (clickDistance < 4) selectPedestrianAgentAtScreenPoint({ x: event.clientX, y: event.clientY });
+    if (clickDistance < 4) selectMobilityEntityAtScreenPoint({ x: event.clientX, y: event.clientY });
     pointerDown = null;
     constrainCamera(false);
   });
@@ -343,6 +410,7 @@ function render(): void {
   drawScene({ x: 0, y: 0 });
   ctx.restore();
   drawAgentInspectorPanel(buildPedestrianAgentInspector(selectedPedestrianAgent()));
+  drawRoadVehicleInspectorPanel(buildRoadVehicleInspector(selectedRoadVehicle()));
 }
 
 function drawScene(offset: Coord): void {
@@ -363,7 +431,7 @@ function drawScene(offset: Coord): void {
 
   const visibleStaticDrawables = staticDrawables.filter((item) => isCoordVisible(item.coord, visibleGrid));
   const carDrawables = cars
-    .map((car) => ({ type: 'car' as const, coord: carPosition(car), car }))
+    .map((car, index) => ({ type: 'car' as const, coord: carPosition(car), car, vehicleId: localRoadVehicleId(index) }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort(compareDrawables);
   const pedestrianDrawables = pedestrians
@@ -383,7 +451,7 @@ function drawScene(offset: Coord): void {
     if (item.type === 'tree') drawTree(item.coord);
     if (item.type === 'building') drawBuilding(item.building);
     if (item.type === 'train') drawTrain(item.train);
-    if (item.type === 'car') drawCar(item.car);
+    if (item.type === 'car') drawCar(item.car, item.vehicleId === selectedVehicleId);
     if (item.type === 'pedestrian') drawPedestrian(item.pedestrian, item.agentId === selectedAgentId);
   }
 
@@ -468,7 +536,7 @@ function drawTree(coord: Coord): void {
   drawAssetRole('vegetation.tree', coord, { offsetX: jitterX, offsetY: jitterY + 8, scale });
 }
 
-function drawCar(car: Car): void {
+function drawCar(car: Car, selected: boolean): void {
   const image = images.get(car.sprite.path);
   if (!image) return;
   const base = Math.floor(car.offset);
@@ -489,6 +557,14 @@ function drawCar(car: Car): void {
   const height = sourceHeight * scale;
   ctx.save();
   ctx.translate(point.x + lane.x, point.y + lane.y + 7);
+  if (selected) {
+    ctx.globalAlpha = 0.94;
+    ctx.strokeStyle = '#75d7ff';
+    ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
+    ctx.beginPath();
+    ctx.ellipse(0, -Math.max(4, height * 0.32), Math.max(9, width * 0.52), Math.max(7, height * 0.28), 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.drawImage(image, rect.x, rect.y, sourceWidth, sourceHeight, -width / 2, -height, width, height);
   ctx.restore();
 }
@@ -623,9 +699,20 @@ function drawPedestrian(pedestrian: Pedestrian, selected: boolean): void {
 
 function drawAgentInspectorPanel(inspector: PedestrianAgentInspector | null): void {
   if (!inspector) return;
+  drawInspectorPanel(inspector, { x: 12, y: 12, accent: '#f7d76a', stroke: 'rgba(247, 215, 106, 0.8)' });
+}
+
+function drawRoadVehicleInspectorPanel(inspector: RoadVehicleInspector | null): void {
+  if (!inspector) return;
+  drawInspectorPanel(inspector, { x: 12, y: 128, accent: '#75d7ff', stroke: 'rgba(117, 215, 255, 0.8)' });
+}
+
+function drawInspectorPanel(
+  inspector: { title: string; rows: { label: string; value: string }[] },
+  options: { x: number; y: number; accent: string; stroke: string },
+): void {
   const ratio = window.devicePixelRatio || 1;
-  const x = 12;
-  const y = 12;
+  const { x, y } = options;
   const width = 232;
   const padding = 10;
   const rowHeight = 17;
@@ -635,14 +722,14 @@ function drawAgentInspectorPanel(inspector: PedestrianAgentInspector | null): vo
   ctx.save();
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.fillStyle = 'rgba(7, 10, 9, 0.82)';
-  ctx.strokeStyle = 'rgba(247, 215, 106, 0.8)';
+  ctx.strokeStyle = options.stroke;
   ctx.lineWidth = 1;
   roundedRect(x, y, width, height, 6);
   ctx.fill();
   ctx.stroke();
 
   ctx.font = '600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-  ctx.fillStyle = '#f7d76a';
+  ctx.fillStyle = options.accent;
   ctx.textBaseline = 'top';
   ctx.fillText(inspector.title, x + padding, y + padding);
 
@@ -1141,15 +1228,31 @@ function localPedestrianAgents(): LocalPedestrianAgent[] {
   return buildPedestrianAgents(pedestrians);
 }
 
+function localRoadVehicles(): LocalRoadVehicle[] {
+  return buildLocalRoadVehicles(cars);
+}
+
 function selectedPedestrianAgent(): LocalPedestrianAgent | null {
   if (!selectedAgentId) return null;
   return localPedestrianAgents().find((agent) => agent.id === selectedAgentId) ?? null;
 }
 
-function selectPedestrianAgentAtScreenPoint(point: Coord): void {
+function selectedRoadVehicle(): LocalRoadVehicle | null {
+  if (!selectedVehicleId) return null;
+  return localRoadVehicles().find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+}
+
+function selectMobilityEntityAtScreenPoint(point: Coord): void {
   const worldPoint = screenToWorld(point);
-  const hit = findNearestPedestrianAgent(localPedestrianAgents(), worldPoint, iso, Math.max(8, 20 / camera.scale));
-  selectedAgentId = hit?.id ?? null;
+  const vehicleHit = findNearestLocalRoadVehicle(localRoadVehicles(), worldPoint, iso, Math.max(10, 24 / camera.scale));
+  if (vehicleHit) {
+    selectedVehicleId = vehicleHit.id;
+    selectedAgentId = null;
+    return;
+  }
+  const agentHit = findNearestPedestrianAgent(localPedestrianAgents(), worldPoint, iso, Math.max(8, 20 / camera.scale));
+  selectedAgentId = agentHit?.id ?? null;
+  selectedVehicleId = null;
 }
 
 function screenToWorld(point: Coord): Coord {
@@ -1637,10 +1740,15 @@ declare global {
 window.render_game_to_text = () => {
   const diagnostics = cityDiagnostics();
   const detailCounts = detailCountsByCategory();
+  const backendMobility = mobilityDiagnostics(mobilityState);
   const agents = localPedestrianAgents();
   const serializedAgents = agents.map(serializeLocalAgent);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
   const selectedSerializedAgent = selectedAgent ? serializeLocalAgent(selectedAgent) : null;
+  const localVehicles = localRoadVehicles();
+  const serializedVehicles = localVehicles.map(serializeLocalVehicle);
+  const selectedVehicle = localVehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  const selectedSerializedVehicle = selectedVehicle ? serializeLocalVehicle(selectedVehicle) : null;
   return JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
@@ -1674,11 +1782,22 @@ window.render_game_to_text = () => {
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
       vehicleSprites: vehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
+      backend: {
+        required: true,
+        baseUrl: backendBaseUrl,
+        status: backendStatus,
+      },
       mobility: {
-        status: 'local-pedestrians',
-        agents: agents.length,
-        vehicles: 0,
-        stops: 0,
+        source: 'backend',
+        status: backendMobility.status,
+        tick: backendMobility.tick,
+        agents: backendMobility.agents,
+        vehicles: backendMobility.vehicles,
+        stops: backendMobility.stops,
+        invalidMessages: backendMobility.invalidMessages,
+        lastError: backendMobility.lastError,
+        localAgents: agents.length,
+        localVehicles: localVehicles.length,
       },
       localAgents: {
         count: agents.length,
@@ -1686,7 +1805,14 @@ window.render_game_to_text = () => {
         selected: selectedSerializedAgent,
         agents: serializedAgents,
       },
+      localVehicles: {
+        count: localVehicles.length,
+        selectedId: selectedVehicleId,
+        selected: selectedSerializedVehicle,
+        vehicles: serializedVehicles,
+      },
       agentInspector: buildPedestrianAgentInspector(selectedAgent),
+      vehicleInspector: buildRoadVehicleInspector(selectedVehicle),
       railStations: railStations.length,
       railYardTracks: Math.max(0, railPaths.length - 2),
       details: detailCounts,
@@ -1733,6 +1859,17 @@ function serializeLocalAgent(agent: LocalPedestrianAgent): LocalPedestrianAgent 
   const projected = iso(agent.coord);
   return {
     ...agent,
+    screen: {
+      x: camera.x + projected.x * camera.scale,
+      y: camera.y + projected.y * camera.scale,
+    },
+  };
+}
+
+function serializeLocalVehicle(vehicle: LocalRoadVehicle): LocalRoadVehicle & { screen: Coord } {
+  const projected = iso(vehicle.coord);
+  return {
+    ...vehicle,
     screen: {
       x: camera.x + projected.x * camera.scale,
       y: camera.y + projected.y * camera.scale,
