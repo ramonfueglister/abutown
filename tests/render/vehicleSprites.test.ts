@@ -14,19 +14,20 @@ describe('vehicle sprites', () => {
     const sheets = new Set(sprites.map((sprite) => sprite.sheet));
     const paths = sprites.map((sprite) => sprite.path);
 
-    expect(sheets).toEqual(new Set(['bus', 'truck']));
+    expect(sheets).toEqual(new Set(['bus', 'truck', 'delivery-van', 'cooling-truck', 'tanker', 'concrete-mixer', 'bulk-truck', 'car-transporter']));
     expect(paths.every((path) => path.startsWith('/simutrans-assets/pak128/'))).toBe(true);
     expect(paths.every((path) => !legacyPathPattern.test(path))).toBe(true);
   });
 
   it('assigns available vehicle sprites in a stable pseudo-random order', () => {
     const sprites = candidateVehicleSprites();
-    const assignments = Array.from({ length: 12 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet);
+    const assignments = Array.from({ length: 48 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet);
 
-    expect(new Set(assignments)).toEqual(new Set(['bus', 'truck']));
-    expect(assignments.slice(0, 4)).not.toEqual(['bus', 'truck', 'bus', 'truck']);
+    expect(new Set(assignments)).toEqual(new Set(sprites.map((sprite) => sprite.sheet)));
+    expect(assignments).toContain('delivery-van');
+    expect(assignments.slice(0, 8)).not.toEqual(sprites.map((sprite) => sprite.sheet));
     expect(assignments).toEqual(
-      Array.from({ length: 12 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet),
+      Array.from({ length: 48 }, (_, index) => vehicleSpriteForTrafficIndex(sprites, index).sheet),
     );
   });
 

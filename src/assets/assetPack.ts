@@ -19,6 +19,12 @@ export type AssetRole =
   | 'detail.quay'
   | 'vehicle.bus'
   | 'vehicle.truck'
+  | 'vehicle.delivery.van'
+  | 'vehicle.cooling.truck'
+  | 'vehicle.tanker'
+  | 'vehicle.concrete.mixer'
+  | 'vehicle.bulk.truck'
+  | 'vehicle.car.transporter'
   | 'vehicle.train.engine'
   | 'vehicle.train.wagon'
   | 'agent.pedestrian';

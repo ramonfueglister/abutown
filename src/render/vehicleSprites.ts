@@ -2,12 +2,30 @@ import { pak128AssetPack } from '../assets/pak128Catalog';
 import type { AssetRole } from '../assets/assetPack';
 
 export type ScreenPoint = { x: number; y: number };
-export type VehicleSheetName = 'bus' | 'truck';
+export type VehicleSheetName =
+  | 'bus'
+  | 'truck'
+  | 'delivery-van'
+  | 'cooling-truck'
+  | 'tanker'
+  | 'concrete-mixer'
+  | 'bulk-truck'
+  | 'car-transporter';
 export type SimutransVehicleDirection = 'W' | 'NW' | 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW';
 
 export type VehicleSprite = {
   sheet: VehicleSheetName;
-  role: Extract<AssetRole, 'vehicle.bus' | 'vehicle.truck'>;
+  role: Extract<
+    AssetRole,
+    | 'vehicle.bus'
+    | 'vehicle.truck'
+    | 'vehicle.delivery.van'
+    | 'vehicle.cooling.truck'
+    | 'vehicle.tanker'
+    | 'vehicle.concrete.mixer'
+    | 'vehicle.bulk.truck'
+    | 'vehicle.car.transporter'
+  >;
   path: string;
   row: number;
   scale: number;
@@ -33,14 +51,22 @@ const DIRECTION_COLUMNS: Record<SimutransVehicleDirection, number> = {
   SW: 7,
 };
 
-export function candidateVehicleSprites(): VehicleSprite[] {
-  const bus = pak128AssetPack.require('vehicle.bus');
-  const truck = pak128AssetPack.require('vehicle.truck');
+const ROAD_VEHICLE_ROLES: { sheet: VehicleSheetName; role: VehicleSprite['role'] }[] = [
+  { sheet: 'bus', role: 'vehicle.bus' },
+  { sheet: 'truck', role: 'vehicle.truck' },
+  { sheet: 'delivery-van', role: 'vehicle.delivery.van' },
+  { sheet: 'cooling-truck', role: 'vehicle.cooling.truck' },
+  { sheet: 'tanker', role: 'vehicle.tanker' },
+  { sheet: 'concrete-mixer', role: 'vehicle.concrete.mixer' },
+  { sheet: 'bulk-truck', role: 'vehicle.bulk.truck' },
+  { sheet: 'car-transporter', role: 'vehicle.car.transporter' },
+];
 
-  return [
-    { sheet: 'bus', role: 'vehicle.bus', path: bus.path, row: bus.source.y / TILE_SIZE, scale: bus.scale },
-    { sheet: 'truck', role: 'vehicle.truck', path: truck.path, row: truck.source.y / TILE_SIZE, scale: truck.scale },
-  ];
+export function candidateVehicleSprites(): VehicleSprite[] {
+  return ROAD_VEHICLE_ROLES.map(({ sheet, role }) => {
+    const asset = pak128AssetPack.require(role);
+    return { sheet, role, path: asset.path, row: asset.source.y / TILE_SIZE, scale: asset.scale };
+  });
 }
 
 export function vehicleFrameRect(sprite: VehicleSprite, direction: SimutransVehicleDirection): VehicleFrameRect {

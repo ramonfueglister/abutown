@@ -25,11 +25,11 @@ export type MobilityBackendBridgeOptions = {
   clearTimeoutImpl?: typeof clearTimeout;
 };
 
-const FALLBACK_BASE_URL = 'http://127.0.0.1:5175';
+const DEFAULT_BASE_URL = 'http://127.0.0.1:5175';
 const DEFAULT_RECONNECT_DELAY_MS = 2500;
 
 export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {}): MobilityBackendBridge {
-  const baseUrl = options.baseUrl ?? globalThis.location?.origin ?? FALLBACK_BASE_URL;
+  const baseUrl = options.baseUrl ?? globalThis.location?.origin ?? DEFAULT_BASE_URL;
   const reconnectDelayMs = Math.max(500, options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS);
   const fetchImpl = options.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const WebSocketImpl = options.WebSocketImpl ?? globalThis.WebSocket;
