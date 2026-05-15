@@ -5,14 +5,28 @@ use abutown_protocol::{
     WorldSummaryDto,
 };
 use sim_core::{
-    chunk::Chunk,
-    events::{InMemoryWorldEventStore, WorldEventStore},
+    chunk::{Chunk, ChunkError, EventApplyError, SnapshotDecodeError},
+    events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
     persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore},
     scheduler::ChunkActivity,
     tile::TileKind,
 };
+
+#[derive(Debug, thiserror::Error)]
+pub enum HydrationError {
+    #[error("snapshot store error: {0}")]
+    Snapshot(ChunkSnapshotStoreError),
+    #[error("event store error: {0}")]
+    Events(WorldEventStoreError),
+    #[error("snapshot decode error: {0}")]
+    Decode(SnapshotDecodeError),
+    #[error("event apply error: {0}")]
+    Apply(EventApplyError),
+    #[error("chunk error during seed: {0}")]
+    Chunk(ChunkError),
+}
 
 use crate::{
     chunk_registry::{ChunkMutationError, ChunkRegistry},
@@ -101,6 +115,93 @@ impl SimulationRuntime {
             tick: 0,
             version: 0,
         }
+    }
+
+    pub async fn hydrate_from_stores(
+        event_store: Box<dyn WorldEventStore + Send>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+    ) -> Result<Self, HydrationError> {
+        let world_id = Self::default_world_id();
+        let mut registry = ChunkRegistry::new(CHUNK_SIZE);
+
+        for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
+            let snap = snapshot_store
+                .read_snapshot(coord)
+                .await
+                .map_err(HydrationError::Snapshot)?;
+
+            let (mut chunk, mut chunk_version, activity) = match snap {
+                Some(snapshot) => {
+                    let version = snapshot.chunk_version;
+                    let activity = ChunkActivity::from(snapshot.chunk_state);
+                    let chunk = Chunk::from_snapshot(&snapshot).map_err(HydrationError::Decode)?;
+                    (chunk, version, activity)
+                }
+                None => {
+                    let mut chunk = Chunk::new(coord, CHUNK_SIZE);
+                    let seed_index = (offset as u16) * 17;
+                    let seed_kind = match offset {
+                        0 => TileKind::Road,
+                        1 => TileKind::Water,
+                        _ => TileKind::BuildingFootprint,
+                    };
+                    chunk
+                        .set_tile_kind(seed_index, seed_kind)
+                        .map_err(HydrationError::Chunk)?;
+                    let activity = if offset == 0 {
+                        ChunkActivity::Active
+                    } else {
+                        ChunkActivity::Warm
+                    };
+                    let v = chunk.version();
+                    (chunk, v, activity)
+                }
+            };
+
+            let events = event_store
+                .read_chunk_events_since(
+                    &world_id.0,
+                    ChunkCoordDto { x: coord.x, y: coord.y },
+                    chunk_version,
+                )
+                .await
+                .map_err(HydrationError::Events)?;
+
+            for event in &events {
+                let next_version = chunk_version + 1;
+                chunk
+                    .apply_event(event, next_version)
+                    .map_err(HydrationError::Apply)?;
+                chunk_version = next_version;
+            }
+
+            registry.insert_hydrated(chunk, chunk_version, activity);
+        }
+
+        let global_tick = event_store
+            .max_tick(&world_id.0)
+            .await
+            .map_err(HydrationError::Events)?
+            .unwrap_or(0);
+        let global_version = event_store
+            .max_version(&world_id.0)
+            .await
+            .map_err(HydrationError::Events)?
+            .unwrap_or(0);
+        // event_count is bootstrapped from version because today they advance 1:1;
+        // revisit if version bumps ever decouple from event appends.
+        let event_count = global_version as usize;
+
+        Ok(Self {
+            world_id,
+            registry,
+            mobility: MobilityWorld::default(),
+            snapshot_store,
+            event_store,
+            event_count,
+            tick: global_tick,
+            version: global_version,
+        })
     }
 
     pub fn health(&self) -> HealthResponse {
@@ -322,8 +423,9 @@ impl Default for SimulationRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abutown_protocol::{ChunkStateDto, TileKindDto};
     use async_trait::async_trait;
-    use sim_core::persistence::ChunkSnapshotStoreError;
+    use sim_core::persistence::{ChunkSnapshotStoreError, build_chunk_snapshot};
 
     #[derive(Debug)]
     struct FailingChunkSnapshotStore;
@@ -597,6 +699,68 @@ mod tests {
 
         assert_eq!(rejection.code, "no_state_change");
         assert_eq!(runtime.event_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn hydrate_from_stores_restores_chunk_from_snapshot_and_replays_tail_events() {
+        // Seed: a chunk with tile 0 = Road at version 1, snapshotted.
+        let mut authoring_chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        authoring_chunk.set_tile_kind(0, TileKind::Road).unwrap();
+        let snapshot =
+            build_chunk_snapshot("abutown-main", &authoring_chunk, ChunkActivity::Active);
+
+        let mut snapshot_store = InMemoryChunkSnapshotStore::default();
+        ChunkSnapshotStore::write_snapshot(&mut snapshot_store, snapshot)
+            .await
+            .unwrap();
+
+        // Tail event after the snapshot: tile 7 = Water at chunk_version 2.
+        let tail_event = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:tail".to_string(),
+            command_id: "command:tail".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 2,
+            version: 2,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 7,
+            kind: TileKindDto::Water,
+        });
+        let mut event_store = InMemoryWorldEventStore::default();
+        WorldEventStore::append(&mut event_store, tail_event)
+            .await
+            .unwrap();
+
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+        )
+        .await
+        .unwrap();
+
+        let restored = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
+        assert_eq!(restored.chunk_version, 2);
+        let kinds: std::collections::HashMap<u16, TileKindDto> =
+            restored.tiles.iter().map(|t| (t.local_index, t.kind)).collect();
+        assert_eq!(kinds.get(&0), Some(&TileKindDto::Road));
+        assert_eq!(kinds.get(&7), Some(&TileKindDto::Water));
+        assert_eq!(restored.chunk_state, ChunkStateDto::Active);
+    }
+
+    #[tokio::test]
+    async fn hydrate_from_stores_falls_back_to_seed_when_no_snapshot() {
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+        )
+        .await
+        .unwrap();
+
+        let snap = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
+        assert_eq!(
+            snap.chunk_version, 1,
+            "seeded chunk has one tile mutation by default"
+        );
     }
 
     #[tokio::test]

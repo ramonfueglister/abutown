@@ -69,7 +69,6 @@ impl ChunkRegistry {
         );
     }
 
-    #[allow(dead_code)]
     pub(crate) fn insert_hydrated(
         &mut self,
         chunk: Chunk,
