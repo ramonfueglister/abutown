@@ -1,13 +1,13 @@
 use abutown_protocol::{CommandRejectedDto, PROTOCOL_VERSION, WorldId};
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AppliedCommand {
+pub struct AppliedCommand {
     pub response: abutown_protocol::CommandAcceptedDto,
     pub event: abutown_protocol::WorldEventDto,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CommandRejection {
+pub struct CommandRejection {
     pub world_id: Option<WorldId>,
     pub command_id: Option<String>,
     pub code: &'static str,

@@ -280,7 +280,7 @@ impl SimulationRuntime {
         self.event_count
     }
 
-    pub(crate) async fn apply_client_command(
+    pub async fn apply_client_command(
         &mut self,
         command: ClientCommandDto,
     ) -> Result<AppliedCommand, CommandRejection> {

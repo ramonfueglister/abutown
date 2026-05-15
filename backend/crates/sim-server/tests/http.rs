@@ -469,3 +469,182 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
     let after: Value = serde_json::from_slice(&after_body).unwrap();
     assert_eq!(after, before);
 }
+
+// ---------------------------------------------------------------------------
+// Opt-in postgres integration tests. Skipped silently when
+// `ABUTOWN_TEST_DATABASE_URL` is unset so they don't break local CI.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn postgres_world_state_survives_runtime_restart() {
+    use abutown_protocol::{ChunkCoordDto, ClientCommandDto, SetTileKindCommandDto};
+    use sim_core::ids::ChunkCoord;
+    use sim_server::postgres_events::PostgresWorldEventStore;
+    use sim_server::postgres_snapshots::PostgresChunkSnapshotStore;
+
+    let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
+        eprintln!(
+            "skipping postgres_world_state_survives_runtime_restart; \
+             ABUTOWN_TEST_DATABASE_URL not set"
+        );
+        return;
+    };
+
+    // Use a unique command_id so re-runs don't collide with leftover rows from
+    // earlier test runs (dedup would otherwise short-circuit our mutation).
+    let command_id = format!("command:recover-test:{}", uuid::Uuid::now_v7());
+    // Pick a unique tile index per run so re-runs against the same DB don't
+    // hit `no_state_change` because a previous run already set this tile.
+    // Skip index 0 (seeded as Road in chunk (4,4)) by adding 1 and constraining
+    // to the valid range below the chunk tile count (1024).
+    let local_index: u16 = (((uuid::Uuid::now_v7().as_u128() % 1023) as u16) + 1).min(1023);
+
+    // ---- First runtime: hydrate, apply a command, persist snapshot, drop.
+    {
+        let event_store = PostgresWorldEventStore::connect(&database_url)
+            .await
+            .expect("connect postgres event store");
+        let snapshot_store = PostgresChunkSnapshotStore::connect(
+            &database_url,
+            SimulationRuntime::default_world_id(),
+        )
+        .await
+        .expect("connect postgres snapshot store");
+        let mut runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+        )
+        .await
+        .expect("hydrate first runtime");
+
+        let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            command_id: command_id.clone(),
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index,
+            kind: TileKindDto::Water,
+        });
+        match runtime.apply_client_command(command).await {
+            Ok(_) => {}
+            Err(rejection) if rejection.code == "no_state_change" => {
+                // Tile is already in the target state from a prior run; the
+                // restart-recovery assertion below still holds.
+            }
+            Err(other) => panic!("unexpected rejection: {other:?}"),
+        }
+        runtime
+            .persist_chunk_snapshots()
+            .await
+            .expect("persist chunk snapshots");
+        // runtime drops here, severing the in-memory state from the DB.
+    }
+
+    // ---- Second runtime: hydrate fresh from the same database.
+    {
+        let event_store = PostgresWorldEventStore::connect(&database_url)
+            .await
+            .expect("connect postgres event store (restart)");
+        let snapshot_store = PostgresChunkSnapshotStore::connect(
+            &database_url,
+            SimulationRuntime::default_world_id(),
+        )
+        .await
+        .expect("connect postgres snapshot store (restart)");
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+        )
+        .await
+        .expect("hydrate restarted runtime");
+
+        let restored = runtime
+            .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .expect("chunk (4,4) loaded after restart");
+        assert!(
+            restored
+                .tiles
+                .iter()
+                .any(|t| t.local_index == local_index && t.kind == TileKindDto::Water),
+            "post-restart snapshot must contain tile {local_index}=Water set before restart; \
+             got tiles: {:?}",
+            restored.tiles
+        );
+    }
+}
+
+#[tokio::test]
+async fn postgres_duplicate_command_returns_same_response() {
+    use sim_server::app::build_app_from_config;
+    use sim_server::config::ServerConfig;
+
+    let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
+        eprintln!(
+            "skipping postgres_duplicate_command_returns_same_response; \
+             ABUTOWN_TEST_DATABASE_URL not set"
+        );
+        return;
+    };
+
+    let config = ServerConfig {
+        database_url,
+        supabase_url: "http://dummy.local".to_string(),
+    };
+    let app = build_app_from_config(&config)
+        .await
+        .expect("build app from postgres config");
+
+    let unique_command_id = format!("command:dup-test:{}", uuid::Uuid::now_v7());
+    // Pick a unique tile index per run so the first POST is unlikely to hit
+    // `no_state_change` from prior pollution. Indices 0..=1023 are valid.
+    let local_index: u16 = ((uuid::Uuid::now_v7().as_u128() % 1024) as u16).max(1);
+    let body = format!(
+        r#"{{"type":"set_tile_kind","protocol_version":1,"world_id":"abutown-main","command_id":"{unique_command_id}","coord":{{"x":4,"y":4}},"local_index":{local_index},"kind":"water"}}"#
+    );
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let first_status = first.status();
+    let first_body = first.into_body().collect().await.unwrap().to_bytes();
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let second_status = second.status();
+    let second_body = second.into_body().collect().await.unwrap().to_bytes();
+
+    assert_eq!(
+        first_status,
+        StatusCode::OK,
+        "first command must succeed (body: {})",
+        String::from_utf8_lossy(&first_body)
+    );
+    assert_eq!(
+        second_status,
+        StatusCode::OK,
+        "duplicate command must also succeed idempotently (body: {})",
+        String::from_utf8_lossy(&second_body)
+    );
+    assert_eq!(
+        first_body, second_body,
+        "duplicate command must return an identical response body"
+    );
+}
