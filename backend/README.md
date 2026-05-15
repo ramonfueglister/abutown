@@ -10,29 +10,54 @@ cargo fmt --manifest-path backend/Cargo.toml --all
 cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
 ```
 
-Available after the server crate is added:
+Run the authority server:
 
 ```bash
 cargo run --manifest-path backend/Cargo.toml -p sim-server
 ```
 
-## Visible Backend Slice
+## Runtime Surface
 
-Run the Rust authority server:
+The server exposes the current backend runtime directly:
+
+- `GET /health` returns service and protocol health.
+- `GET /world` returns the loaded chunk summary.
+- `GET /chunks/{x}/{y}` returns snapshots for loaded chunks.
+- `GET /mobility` returns the seeded mobility snapshot.
+- `POST /commands` accepts validated local-development commands.
+- `GET /ws` streams a hello message, tile pulses, and mobility deltas.
 
 ```bash
 cargo run --manifest-path backend/Cargo.toml -p sim-server
 ```
 
-In a second terminal, run the Vite client:
+The runtime currently loads three chunks (`4:4`, `5:4`, and `4:5`) and rotates tile pulses across them. `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
+
+The old frontend bridge described in the visible-slice plan is not present in this branch. The current Vite client still renders the local canvas world without consuming these backend endpoints.
+
+## Command Event Boundary
+
+The first mutation ingress is `POST /commands`. It accepts versioned JSON client commands, validates them inside the Rust runtime, applies accepted changes to loaded hot state, appends an in-memory world event, and broadcasts that event to `/ws` subscribers.
+
+Implemented command:
+
+- `set_tile_kind`: changes one tile in one already-loaded chunk.
+
+Current boundaries:
+
+- Commands are unauthenticated local-development inputs.
+- Commands only target loaded chunks.
+- Accepted mutations are stored in an in-memory append-only event store.
+- Supabase/Postgres, command idempotency, permissions, chunk loading, and recovery remain later slices.
+
+Targeted commands:
 
 ```bash
-npm run dev
+cargo test --manifest-path backend/Cargo.toml -p abutown-protocol command_
+cargo test --manifest-path backend/Cargo.toml -p sim-core events
+cargo test --manifest-path backend/Cargo.toml -p sim-server command_
+cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_broadcasts_accepted_command_event
 ```
-
-Open the Vite URL. The city should render normally and show a `RUST LIVE` badge. Chunk `4:4` is outlined from the server snapshot, and server-driven pulses appear from `/ws` roughly once per second. The runtime currently loads three visible chunks (`4:4`, `5:4`, and `4:5`) and rotates broadcast pulses across them.
-
-Current `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
 
 ## Agent Mobility Foundation
 
