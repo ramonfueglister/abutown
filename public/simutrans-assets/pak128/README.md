@@ -5,20 +5,6 @@ Revision: `acdf2f0793a6beee5ea34ea85d308fbbeccf50c5`
 
 This directory contains the pak128 source PNG and DAT files used by Abutown's runtime renderer.
 
-## Yellow Crossing HK road overlay
-
-Surface road roles use `infrastructure/roads/yellow_crossing_hk_surface_road.png`, generated from reachable Yellow Crossing Addon of Hong Kong source material and credited TKU road source.
-
-Required local source files:
-
-- `infrastructure/roads/yellow-crossing-hk/source/Source1.jpg`
-- `infrastructure/roads/yellow-crossing-hk/source/Source2.gif`
-- `infrastructure/roads/yellow-crossing-hk/source/tku_road.zip`
-
-The importer only uses the approved Yellow Crossing HK source files.
-
-Run `npm run assets:yellow-crossing-hk` after adding the source files. The script repacks the archived Yellow Crossing/TKU source cells into the existing runtime mask layout used by `roadSourceFromMask()` and writes `infrastructure/roads/yellow-crossing-hk/source/manifest.json` with the approved source list.
-
 Imported files:
 
 - `LICENSE.txt`
@@ -41,8 +27,8 @@ Imported files:
 - `infrastructure/rail_tracks/rail_120_tracks.png`
 - `infrastructure/road_bridges/road_040_bridge.dat`
 - `infrastructure/road_bridges/road_040_bridge.png`
-- `infrastructure/roads/yellow_crossing_hk_surface_road.dat`
-- `infrastructure/roads/yellow_crossing_hk_surface_road.png` (generated only when Yellow Crossing source files are available)
+- `infrastructure/roads/road_090.dat`
+- `infrastructure/roads/road_090.png`
 - `infrastructure/water_all/bulk_dock.dat`
 - `infrastructure/water_all/bulk_dock.png`
 - `infrastructure/water_all/crate_goods_dock.dat`

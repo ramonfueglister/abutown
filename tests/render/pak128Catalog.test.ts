@@ -1,21 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 import { pak128AssetPack, PAK128_REQUIRED_ROLES, PAK128_REVISION } from '../../src/assets/pak128Catalog';
 
 describe('pak128 catalog', () => {
   const retiredAssetPattern = new RegExp(`${['open', 'gfx'].join('')}|${['open', 'ttd'].join('')}`, 'i');
   const root = process.cwd();
-  const yellowCrossingRoadPath = '/simutrans-assets/pak128/infrastructure/roads/yellow_crossing_hk_surface_road.png';
-  const yellowCrossingRoadProvenance = {
-    sourcePath: 'infrastructure/roads/yellow_crossing_hk_surface_road.png',
-    datPath: 'infrastructure/roads/yellow_crossing_hk_surface_road.dat',
+  const pak128RoadPath = '/simutrans-assets/pak128/infrastructure/roads/road_090.png';
+  const pak128RoadProvenance = {
+    sourcePath: 'infrastructure/roads/road_090.png',
+    datPath: 'infrastructure/roads/road_090.dat',
   };
-  const yellowSourceDir = join(root, 'public', 'simutrans-assets', 'pak128', 'infrastructure', 'roads', 'yellow-crossing-hk', 'source');
-  const yellowRuntimePng = join(root, 'public', 'simutrans-assets', 'pak128', 'infrastructure', 'roads', 'yellow_crossing_hk_surface_road.png');
-  const yellowRuntimeDat = join(root, 'public', 'simutrans-assets', 'pak128', 'infrastructure', 'roads', 'yellow_crossing_hk_surface_road.dat');
+  const yellowIntakeDir = join(root, 'asset-intake', 'yellow-crossing-hk');
+  const publicRoadDir = join(root, 'public', 'simutrans-assets', 'pak128', 'infrastructure', 'roads');
+  const pak128RoadPng = join(publicRoadDir, 'road_090.png');
+  const pak128RoadDat = join(publicRoadDir, 'road_090.dat');
 
   it('pins the audited source revision', () => {
     expect(PAK128_REVISION).toBe('acdf2f0793a6beee5ea34ea85d308fbbeccf50c5');
@@ -51,50 +50,32 @@ describe('pak128 catalog', () => {
     expect(pak128AssetPack.require('vehicle.bus').source.y).toBe(128);
   });
 
-  it('uses the Yellow Crossing runtime sheet for surface road roles only', () => {
+  it('uses real pak128 road sheet for surface road roles until a complete original Yellow Crossing sheet exists', () => {
+    expect(pak128RoadPng).toSatisfy(existsSync);
+    expect(pak128RoadDat).toSatisfy(existsSync);
+
     for (const role of ['road.straight', 'road.curve', 'road.intersection'] as const) {
       const asset = pak128AssetPack.require(role);
 
-      expect(asset.path).toBe(yellowCrossingRoadPath);
-      expect(asset.provenance).toEqual(expect.objectContaining(yellowCrossingRoadProvenance));
+      expect(asset.path).toBe(pak128RoadPath);
+      expect(asset.provenance).toEqual(expect.objectContaining(pak128RoadProvenance));
     }
 
     expect(pak128AssetPack.require('road.bridge').path).toBe('/simutrans-assets/pak128/infrastructure/road_bridges/road_040_bridge.png');
   });
 
-  it('fails clearly when Yellow Crossing source files are missing', () => {
-    const emptyRoot = mkdtempSync(join(tmpdir(), 'yellow-crossing-missing-'));
-    expect(() => execFileSync(process.execPath, [join(root, 'scripts', 'import-pak128-assets.mjs'), '--yellow-crossing-hk'], {
-      cwd: emptyRoot,
-      stdio: 'pipe',
-    })).toThrow(/Missing Yellow Crossing HK source files/u);
-  });
-
-  it('has generated Yellow Crossing runtime and source provenance', () => {
-    for (const file of ['Source1.jpg', 'Source2.gif', 'tku_road.zip']) {
-      expect(join(yellowSourceDir, file), `Missing Yellow Crossing source file ${file}`).toSatisfy(existsSync);
+  it('keeps partial Yellow Crossing material out of the runtime pack', () => {
+    for (const file of ['Source1.jpg', 'Source2.gif', 'Demo.png', 'tku_road.zip']) {
+      expect(join(yellowIntakeDir, file), `Missing Yellow Crossing intake file ${file}`).toSatisfy(existsSync);
     }
-    expect(yellowRuntimePng).toSatisfy(existsSync);
-    expect(yellowRuntimeDat).toSatisfy(existsSync);
-    expect(join(yellowSourceDir, 'manifest.json')).toSatisfy(existsSync);
 
-    const png = readFileSync(yellowRuntimePng);
-    expect(statSync(yellowRuntimePng).size).toBeGreaterThan(0);
-    expect(png.readUInt32BE(16)).toBe(1024);
-    expect(png.readUInt32BE(20)).toBe(384);
+    for (const asset of pak128AssetPack.all()) {
+      expect(asset.path).not.toContain('yellow_crossing_hk_surface_road');
+      expect(asset.provenance.sourcePath).not.toContain('yellow_crossing_hk_surface_road');
+    }
 
-    const dat = readFileSync(yellowRuntimeDat, 'utf8');
-    expect(dat).toContain('Yellow Crossing Addon of Hong Kong');
-    expect(dat).toContain('Source1.jpg');
-    expect(dat).toContain('Source2.gif');
-    expect(dat).toContain('runtime_png=yellow_crossing_hk_surface_road.png');
-
-    const manifest = JSON.parse(readFileSync(join(yellowSourceDir, 'manifest.json'), 'utf8'));
-    expect(manifest).toEqual(expect.objectContaining({
-      userApprovedReuse: true,
-      runtimePng: 'yellow_crossing_hk_surface_road.png',
-    }));
-    expect(manifest.sourceFiles).toEqual(expect.arrayContaining(['Source1.jpg', 'Source2.gif']));
-    expect(manifest.blockedSource).toBe('base Pak128 surface road sheet');
+    expect(existsSync(join(publicRoadDir, 'yellow_crossing_hk_surface_road.png'))).toBe(false);
+    expect(existsSync(join(publicRoadDir, 'yellow_crossing_hk_surface_road.dat'))).toBe(false);
+    expect(existsSync(join(publicRoadDir, 'yellow-crossing-hk'))).toBe(false);
   });
 });

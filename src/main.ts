@@ -1,5 +1,6 @@
 import './style.css';
 import { pak128AssetPack } from './assets/pak128Catalog';
+import { mountCardHandView } from './cardHand/cardHandView';
 import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
   buildingStreetFrontageOffset,
@@ -240,6 +241,7 @@ let pedestrianCorridorCount = 0;
 let selectedAgentId: string | null = null;
 let previousTime = performance.now();
 
+mountCardHandView();
 void boot();
 
 async function boot(): Promise<void> {
