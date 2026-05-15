@@ -10,6 +10,7 @@ import {
 } from './cardHandState';
 
 const LOCAL_USER_ID = '00000000-0000-0000-0000-000000000001';
+const DEFAULT_CARD_HAND_BACKEND_URL = 'http://127.0.0.1:8080';
 
 export type CardHandViewOptions = {
   baseUrl?: string;
@@ -98,8 +99,11 @@ function renderCard(card: VisibleHandCard): HTMLElement {
 }
 
 function cardHandBaseUrl(): string {
-  const envUrl = import.meta.env.VITE_ABUTOWN_BACKEND_URL;
-  return typeof envUrl === 'string' && envUrl.length > 0 ? envUrl : globalThis.location.origin;
+  return resolveCardHandBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
+}
+
+export function resolveCardHandBaseUrl(envUrl?: unknown): string {
+  return typeof envUrl === 'string' && envUrl.length > 0 ? envUrl : DEFAULT_CARD_HAND_BACKEND_URL;
 }
 
 function localCardHandToken(): string {
