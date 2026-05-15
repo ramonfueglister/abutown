@@ -130,7 +130,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Implement browser bridge**
 
-Create `src/backend/mobilityClient.ts` with `connectMobilityBackend(options)`. The bridge should fetch `/mobility`, validate it, open `/ws`, apply `mobility_delta` messages, ignore non-mobility messages, mark disconnected on fetch/WebSocket failure, and reconnect with a bounded delay unless stopped. Main runtime integration should only start this bridge when `?mobility=1`, `?mobilityBackend=<url>`, or `localStorage["abutown:mobility"]` is `1`, so the default offline path makes no backend network request.
+Create `src/backend/mobilityClient.ts` with `connectMobilityBackend(options)`. The bridge should fetch `/mobility`, validate it, open `/ws`, apply `mobility_delta` messages, ignore non-mobility messages, mark disconnected on fetch/WebSocket failure, and reconnect with a bounded delay unless stopped. The current game path keeps mobility in the default local-pedestrian layer, so runtime startup must not require URL or localStorage flags for pedestrian agents.
 
 - [ ] **Step 2: Type-check bridge through full build**
 

@@ -2,14 +2,13 @@
 
 ## Goal
 
-Run the existing backend mobility bridge on the Pak128 renderer so `http://127.0.0.1:5175/?mobility=1` shows the Pak128 world and the live demo mobility markers from the simulation backend.
+Run mobility directly in the Pak128 game at `http://127.0.0.1:5175/` so the rendered pedestrians are available as local agents without a URL flag.
 
 ## Scope
 
 In scope:
-- Reuse the existing mobility protocol, state reducer, backend client, and canvas overlay behavior from the merged mobility work.
 - Keep Pak128 as the active renderer and asset pack.
-- Keep mobility opt-in through `?mobility=1`, `?mobilityBackend=...`, or `localStorage["abutown:mobility"]="1"`.
+- Keep local pedestrian agents enabled by default in the game.
 - Preserve current uncommitted Pak128 visual tuning changes.
 - Verify with unit tests, build, E2E smoke test, and a browser screenshot on the live `5175` server.
 
@@ -20,31 +19,27 @@ Out of scope:
 
 ## Architecture
 
-The frontend owns a small mobility bridge layer:
-- `src/backend/mobilityProtocol.ts` validates snapshot and delta DTOs.
-- `src/backend/mobilityState.ts` stores current server records and maps demo route ids to Pak128 world coordinates.
-- `src/backend/mobilityClient.ts` fetches `/mobility`, subscribes to `/ws`, applies deltas, and reconnects after socket loss.
-- `src/render/mobilityOverlay.ts` converts reducer markers into canvas draw items and draws the visible overlay.
+The frontend owns a small local-agent layer:
+- `src/render/pedestrianAgents.ts` projects rendered pedestrians into stable local agent records.
+- `src/render/pedestrianAgentInspector.ts` formats selected-agent details.
+- `src/main.ts` owns selection, hit testing, canvas feedback, and diagnostics.
 
-`src/main.ts` remains the composition root. It detects whether mobility is enabled, starts the client bridge, exposes mobility diagnostics through `render_game_to_text`, and draws the overlay after the Pak128 scene so the agent marker remains visible.
+`src/main.ts` remains the composition root. It exposes local pedestrian-agent diagnostics through `render_game_to_text` and draws the selected-agent feedback after the Pak128 scene.
 
 ## Data Flow
 
-On boot, the Pak128 client loads assets and builds the world. If mobility is enabled, it connects to the backend, applies the initial `/mobility` snapshot, then applies `mobility_delta` messages from `/ws`. The render loop uses the latest immutable `mobilityState` and does not block on network activity.
-
-The demo coordinate mapping is intentionally local and explicit. It maps backend demo ids to known visible Pak128 grid coordinates so the current seeded agent remains visible after the short backend demo has completed.
+On boot, the Pak128 client loads assets, builds the world, creates pedestrians, and projects them into local agent records. The render loop updates pedestrian positions and keeps the selected-agent inspector in sync with the current projected agent state.
 
 ## Error Handling
 
-Invalid websocket messages increment `invalidMessages` without dropping the last valid state. Failed snapshot or websocket connections mark the bridge disconnected with a readable `lastError`. Reconnects happen in the client bridge; the renderer continues to run with the latest known state.
+No network path is required for the local pedestrian-agent layer. If the selected pedestrian disappears from the local projection, the inspector returns to the empty state and the renderer keeps running.
 
 ## Testing
 
 Tests must cover:
-- DTO parsing and malformed server messages.
-- Snapshot and delta reducer behavior.
-- Completed agent coordinate visibility in the Pak128 startup view.
-- Overlay draw item sizing and visibility filtering.
-- E2E diagnostics showing Pak128 asset pack and disconnected default mobility when the opt-in flag is absent.
+- Local pedestrian agent projection.
+- Click-hit selection.
+- Selected-agent inspector payload.
+- E2E diagnostics showing Pak128 asset pack and default local-pedestrian mobility.
 
-Browser verification must load `http://127.0.0.1:5175/?mobility=1` from the Pak128 worktree and confirm `assetPack.id === "simutrans-pak128"` plus connected mobility diagnostics.
+Browser verification must load `http://127.0.0.1:5175/` from the Pak128 worktree and confirm `assetPack.id === "simutrans-pak128"` plus `mobility.status === "local-pedestrians"`.

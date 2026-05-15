@@ -111,4 +111,4 @@ Expected: TypeScript and Vite build pass.
 
 - [ ] **Step 3: Verify browser**
 
-Load `http://127.0.0.1:5175/?mobility=1` from the Pak128 server. Confirm diagnostics show `assetPack.id` as `simutrans-pak128` and mobility status as `connected`, then take a screenshot.
+Load `http://127.0.0.1:5175/` from the Pak128 server. Confirm diagnostics show `assetPack.id` as `simutrans-pak128` and mobility status as `local-pedestrians`, then take a screenshot.
