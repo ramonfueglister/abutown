@@ -15,6 +15,8 @@ import { buildZurichTransport } from './city/zurichTransport';
 import { validateZurichCity } from './city/zurichValidation';
 import { buildZurichWorld } from './city/zurichWorld';
 import type { ZurichBuilding, ZurichDetail } from './city/worldTypes';
+import { connectMobilityBackend, type MobilityBackendBridge } from './backend/mobilityClient';
+import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -49,6 +51,7 @@ import {
   trainPosition as movingTrainPosition,
   trainWrappedOffset,
 } from './render/trainMotion';
+import { drawMobilityOverlay } from './render/mobilityOverlay';
 
 type Coord = { x: number; y: number };
 type Terrain = 'grass' | 'water' | 'riverbank' | 'park';
@@ -222,6 +225,8 @@ let cars: Car[] = [];
 let pedestrians: Pedestrian[] = [];
 let trains: Train[] = buildTrains();
 let pedestrianCorridorCount = 0;
+let mobilityState: MobilityOverlayState = createMobilityOverlayState();
+let mobilityBridge: MobilityBackendBridge | null = null;
 let previousTime = performance.now();
 
 void boot();
@@ -236,6 +241,16 @@ async function boot(): Promise<void> {
   pedestrianSprites = candidateSimutransPedestrianSprites();
   cars = buildCars(vehicleSprites);
   pedestrians = buildPedestrians(pedestrianSprites);
+  const mobilityBackend = configuredMobilityBackend();
+  if (mobilityBackend.enabled) {
+    mobilityBridge = connectMobilityBackend({
+      baseUrl: mobilityBackend.baseUrl,
+      onState: (nextState) => {
+        mobilityState = nextState;
+      },
+    });
+    window.addEventListener('beforeunload', () => mobilityBridge?.stop(), { once: true });
+  }
   resize();
   window.addEventListener('resize', resize);
   attachCamera();
@@ -359,6 +374,10 @@ function drawScene(offset: Coord): void {
   }
 
   drawPerimeterMist();
+  drawMobilityOverlay(ctx, mobilityState, {
+    project: iso,
+    isVisible: (coord) => isCoordVisible(coord, visibleGrid),
+  });
   ctx.restore();
 }
 
@@ -1495,6 +1514,7 @@ window.render_game_to_text = () => {
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
       vehicleSprites: vehicleSprites.length,
       vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
+      mobility: mobilityDiagnostics(mobilityState),
       railStations: railStations.length,
       railYardTracks: Math.max(0, railPaths.length - 2),
       details: detailCounts,
@@ -1547,3 +1567,18 @@ window.advanceTime = (ms: number) => {
   for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * (ms / 1000), train.path);
   render();
 };
+
+const DEFAULT_MOBILITY_BACKEND = 'http://127.0.0.1:8080';
+
+function configuredMobilityBackend(): { enabled: boolean; baseUrl?: string } {
+  const params = new URLSearchParams(window.location.search);
+  const explicitBaseUrl = params.get('mobilityBackend');
+  if (explicitBaseUrl) return { enabled: true, baseUrl: explicitBaseUrl };
+  if (params.get('mobility') === '1') return { enabled: true, baseUrl: DEFAULT_MOBILITY_BACKEND };
+  try {
+    if (window.localStorage.getItem('abutown:mobility') === '1') return { enabled: true, baseUrl: DEFAULT_MOBILITY_BACKEND };
+  } catch {
+    return { enabled: false };
+  }
+  return { enabled: false };
+}

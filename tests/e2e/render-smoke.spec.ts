@@ -40,6 +40,12 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadRailOverlap).toBe(0);
   expect(state.city.railCrossings).toBeGreaterThanOrEqual(1);
   expect(state.city.railStations).toBe(0);
+  expect(state.city.mobility).toEqual(expect.objectContaining({
+    status: 'disconnected',
+    agents: 0,
+    vehicles: 0,
+    stops: 0,
+  }));
   expect(state.city.train.position.y).toBeGreaterThan(state.city.height - 1);
   expect(state.city.train.alpha).toBeGreaterThanOrEqual(0);
   expect(state.city.train.alpha).toBeLessThan(1);
