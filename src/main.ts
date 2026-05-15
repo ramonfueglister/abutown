@@ -432,11 +432,11 @@ function drawScene(offset: Coord): void {
     if (item.type === 'pedestrian') drawPedestrian(item.pedestrian);
   }
 
+  drawPerimeterMist();
   drawMobilityOverlay(ctx, mobilityState, {
     project: iso,
     isVisible: (coord) => isCoordVisible(coord, visibleGrid),
   });
-  drawPerimeterMist();
   ctx.restore();
 }
 

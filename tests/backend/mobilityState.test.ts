@@ -111,4 +111,26 @@ describe('mobility state reducer', () => {
 
     expect(mobilityDiagnostics(next)).toMatchObject({ agents: 1, invalidMessages: 1 });
   });
+
+  it('keeps the completed demo agent inside the initial camera area', () => {
+    const state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        ...snapshot,
+        agents: [
+          {
+            id: 'agent:seed:0',
+            state: { type: 'at_activity', activity_id: 'activity:work' },
+            plan_cursor: 3,
+          },
+        ],
+      },
+      100
+    );
+
+    expect(mobilityMarkers(state).find((marker) => marker.id === 'agent:seed:0')).toMatchObject({
+      coord: { x: 146, y: 126 },
+      state: 'at_activity',
+    });
+  });
 });

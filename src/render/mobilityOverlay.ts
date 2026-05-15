@@ -25,7 +25,7 @@ export function buildMobilityOverlayDrawItems(state: MobilityOverlayState, optio
         kind: marker.kind,
         x: projected.x,
         y: projected.y,
-        radius: marker.kind === 'agent' ? 4 : marker.kind === 'vehicle' ? 5 : 3,
+        radius: marker.kind === 'agent' ? 10 : marker.kind === 'vehicle' ? 7 : 5,
         color: markerColor(marker),
         label: marker.label,
       };
@@ -38,11 +38,21 @@ export function drawMobilityOverlay(context: CanvasRenderingContext2D, state: Mo
 
   context.save();
   context.lineWidth = 1;
-  context.font = '6px sans-serif';
+  context.font = '10px sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
 
   for (const item of items) {
+    if (item.kind === 'agent') {
+      context.globalAlpha = 0.94;
+      context.lineWidth = 2;
+      context.strokeStyle = 'rgba(255, 255, 245, 0.92)';
+      context.beginPath();
+      context.arc(item.x, item.y, item.radius + 4, 0, Math.PI * 2);
+      context.stroke();
+      context.lineWidth = 1;
+    }
+
     context.globalAlpha = item.kind === 'stop' ? 0.52 : 0.88;
     context.fillStyle = item.color;
     context.strokeStyle = 'rgba(8, 10, 8, 0.72)';
