@@ -289,6 +289,16 @@ impl SimulationRuntime {
         }
     }
 
+    fn build_accepted(&self, command_id: String, event: WorldEventDto) -> AppliedCommand {
+        let response = CommandAcceptedDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: self.world_id.clone(),
+            command_id,
+            event: event.clone(),
+        };
+        AppliedCommand { response, event }
+    }
+
     async fn apply_set_tile_kind(
         &mut self,
         command: SetTileKindCommandDto,
@@ -312,6 +322,25 @@ impl SimulationRuntime {
                 code: "wrong_world",
                 message: format!("command targets a different world than {}", self.world_id.0),
             });
+        }
+
+        match self
+            .event_store
+            .find_event_by_command(&self.world_id.0, &command.command_id)
+            .await
+        {
+            Ok(Some(existing_event)) => {
+                return Ok(self.build_accepted(command.command_id.clone(), existing_event));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(CommandRejection {
+                    world_id: Some(command.world_id),
+                    command_id: Some(command.command_id),
+                    code: error.code(),
+                    message: error.to_string(),
+                });
+            }
         }
 
         let coord = ChunkCoord {
@@ -358,29 +387,44 @@ impl SimulationRuntime {
             local_index: command.local_index,
             kind: command.kind,
         });
-        self.event_store
-            .append(event.clone())
-            .await
-            .map_err(|error| CommandRejection {
-                world_id: Some(self.world_id.clone()),
-                command_id: Some(command.command_id.clone()),
-                code: error.code(),
-                message: error.to_string(),
-            })?;
+        match self.event_store.append(event.clone()).await {
+            Ok(()) => {}
+            Err(error) if error.code() == "duplicate_command_id" => {
+                let winner = self
+                    .event_store
+                    .find_event_by_command(&self.world_id.0, &command.command_id)
+                    .await
+                    .map_err(|error| CommandRejection {
+                        world_id: Some(self.world_id.clone()),
+                        command_id: Some(command.command_id.clone()),
+                        code: error.code(),
+                        message: error.to_string(),
+                    })?
+                    .ok_or_else(|| CommandRejection {
+                        world_id: Some(self.world_id.clone()),
+                        command_id: Some(command.command_id.clone()),
+                        code: "event_store_inconsistent",
+                        message: "duplicate command_id reported but lookup returned none"
+                            .to_string(),
+                    })?;
+                return Ok(self.build_accepted(command.command_id.clone(), winner));
+            }
+            Err(error) => {
+                return Err(CommandRejection {
+                    world_id: Some(self.world_id.clone()),
+                    command_id: Some(command.command_id.clone()),
+                    code: error.code(),
+                    message: error.to_string(),
+                });
+            }
+        }
 
         self.event_count += 1;
         self.registry
             .apply_set_tile_kind(plan)
             .expect("planned mutation should apply after event append");
 
-        let response = CommandAcceptedDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: self.world_id.clone(),
-            command_id: command.command_id,
-            event: event.clone(),
-        };
-
-        Ok(AppliedCommand { response, event })
+        Ok(self.build_accepted(command.command_id, event))
     }
 
     pub fn hello(&self) -> ServerMessageDto {
@@ -795,5 +839,115 @@ mod tests {
                 .expect("chunk still exists"),
             before
         );
+    }
+
+    #[tokio::test]
+    async fn duplicate_command_id_is_idempotent_and_writes_only_one_event() {
+        use abutown_protocol::{
+            ChunkCoordDto, ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto,
+            WorldId,
+        };
+
+        let mut runtime = SimulationRuntime::new();
+        let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            command_id: "command:dup".to_string(),
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 12,
+            kind: TileKindDto::Water,
+        });
+
+        let first = runtime.apply_client_command(command.clone()).await.unwrap();
+        let second = runtime.apply_client_command(command).await.unwrap();
+
+        assert_eq!(first.response, second.response, "duplicate command must return identical response");
+        assert_eq!(first.event, second.event, "duplicate command must return identical event");
+        assert_eq!(runtime.event_count(), 1, "only one event must be appended");
+    }
+
+    #[derive(Debug)]
+    struct RaceyEventStore {
+        planted_winner: WorldEventDto,
+        appended: bool,
+    }
+
+    impl RaceyEventStore {
+        fn new(planted_winner: WorldEventDto) -> Self {
+            Self { planted_winner, appended: false }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WorldEventStore for RaceyEventStore {
+        async fn append(&mut self, _event: WorldEventDto) -> Result<(), sim_core::events::WorldEventStoreError> {
+            self.appended = true;
+            Err(sim_core::events::WorldEventStoreError::duplicate_command("command:race"))
+        }
+        async fn find_event_by_command(
+            &self,
+            _world_id: &str,
+            command_id: &str,
+        ) -> Result<Option<WorldEventDto>, sim_core::events::WorldEventStoreError> {
+            // Pre-flight call (before append) returns None so we fall through to the append path.
+            // Refetch call (after append, in the race handler) returns the planted winner.
+            if self.appended && command_id == "command:race" {
+                Ok(Some(self.planted_winner.clone()))
+            } else {
+                Ok(None)
+            }
+        }
+        async fn read_chunk_events_since(
+            &self,
+            _world_id: &str,
+            _coord: abutown_protocol::ChunkCoordDto,
+            _after_chunk_version: u64,
+        ) -> Result<Vec<WorldEventDto>, sim_core::events::WorldEventStoreError> {
+            Ok(Vec::new())
+        }
+        async fn max_tick(&self, _world_id: &str) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
+            Ok(None)
+        }
+        async fn max_version(&self, _world_id: &str) -> Result<Option<u64>, sim_core::events::WorldEventStoreError> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn race_handler_returns_winner_when_append_reports_duplicate() {
+        use abutown_protocol::{
+            ChunkCoordDto, ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto,
+            TileKindSetEventDto, WorldEventDto, WorldId,
+        };
+        use sim_core::persistence::InMemoryChunkSnapshotStore;
+
+        let winner = WorldEventDto::TileKindSet(TileKindSetEventDto {
+            protocol_version: PROTOCOL_VERSION,
+            event_id: "event:winner".to_string(),
+            command_id: "command:race".to_string(),
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 7,
+            version: 7,
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 0,
+            kind: TileKindDto::Water,
+        });
+        let mut runtime = SimulationRuntime::new_with_stores(
+            Box::new(RaceyEventStore::new(winner.clone())),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+        );
+
+        let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            command_id: "command:race".to_string(),
+            coord: ChunkCoordDto { x: 4, y: 4 },
+            local_index: 13,
+            kind: TileKindDto::Road,
+        });
+
+        let result = runtime.apply_client_command(command).await.unwrap();
+        assert_eq!(result.event, winner, "race handler must return the planted winner event");
+        assert_eq!(result.response.event, winner);
     }
 }
