@@ -45,8 +45,8 @@ describe('mobility overlay', () => {
 
     expect(items.map((item) => item.kind).sort()).toEqual(['agent', 'stop', 'vehicle']);
     expect(items.find((item) => item.id === 'agent:seed:0')).toMatchObject({
-      x: 244,
-      y: 288,
+      x: 250,
+      y: 262,
       radius: 10,
       color: '#f7d76a',
     });
@@ -59,6 +59,6 @@ describe('mobility overlay', () => {
       isVisible: (coord) => coord.x > 124,
     });
 
-    expect(items.map((item) => item.id).sort()).toEqual(['stop:old-town', 'vehicle:shuttle:0']);
+    expect(items.map((item) => item.id).sort()).toEqual(['agent:seed:0', 'stop:old-town', 'vehicle:shuttle:0']);
   });
 });
