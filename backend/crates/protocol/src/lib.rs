@@ -387,7 +387,7 @@ mod tests {
             world_id: WorldId("abutown-main".to_string()),
             tick: 3,
             agents: vec![AgentMobilityDto {
-                id: EntityId("agent:seed:0".to_string()),
+                id: EntityId("agent:pedestrian:0".to_string()),
                 state: AgentMobilityStateDto::InVehicle {
                     vehicle_id: EntityId("vehicle:tram:0".to_string()),
                     seat_index: 0,
@@ -400,7 +400,7 @@ mod tests {
                 link_index: 0,
                 progress: 0.5,
                 capacity: 24,
-                occupants: vec![EntityId("agent:seed:0".to_string())],
+                occupants: vec![EntityId("agent:pedestrian:0".to_string())],
                 dwell_ticks_remaining: 0,
             }],
             stops: vec![StopMobilityDto {
@@ -417,10 +417,10 @@ mod tests {
         assert_eq!(json["protocol_version"], 1);
         assert_eq!(json["world_id"], "abutown-main");
         assert_eq!(json["tick"], 3);
-        assert_eq!(json["agents"][0]["id"], "agent:seed:0");
+        assert_eq!(json["agents"][0]["id"], "agent:pedestrian:0");
         assert_eq!(json["agents"][0]["state"]["type"], "in_vehicle");
         assert_eq!(json["agents"][0]["state"]["vehicle_id"], "vehicle:tram:0");
-        assert_eq!(json["vehicles"][0]["occupants"][0], "agent:seed:0");
+        assert_eq!(json["vehicles"][0]["occupants"][0], "agent:pedestrian:0");
         assert_eq!(json["stops"][0]["id"], "stop:old-town");
     }
 
@@ -431,7 +431,7 @@ mod tests {
             world_id: WorldId("abutown-main".to_string()),
             tick: 8,
             changed_agents: vec![AgentMobilityDto {
-                id: EntityId("agent:seed:0".to_string()),
+                id: EntityId("agent:pedestrian:0".to_string()),
                 state: AgentMobilityStateDto::WaitingAtStop {
                     stop_id: "stop:old-town".to_string(),
                 },

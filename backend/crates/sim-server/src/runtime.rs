@@ -77,7 +77,7 @@ impl SimulationRuntime {
         Self {
             world_id: WorldId(WORLD_ID.to_string()),
             registry,
-            mobility: MobilityWorld::seeded_demo(),
+            mobility: MobilityWorld::default(),
             snapshot_store: InMemoryChunkSnapshotStore::default(),
             event_store: InMemoryWorldEventStore::default(),
             tick: 0,

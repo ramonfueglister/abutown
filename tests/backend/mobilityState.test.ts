@@ -14,7 +14,7 @@ const snapshot: MobilitySnapshotDto = {
   tick: 2,
   agents: [
     {
-      id: 'agent:seed:0',
+      id: 'agent:pedestrian:0',
       state: { type: 'walking', link_id: 'link:home-to-old-town-stop', progress: 0.5 },
       plan_cursor: 0,
     },
@@ -76,7 +76,7 @@ describe('mobility state reducer', () => {
         tick: 3,
         changed_agents: [
           {
-            id: 'agent:seed:0',
+            id: 'agent:pedestrian:0',
             state: { type: 'waiting_at_stop', stop_id: 'stop:old-town' },
             plan_cursor: 1,
           },
