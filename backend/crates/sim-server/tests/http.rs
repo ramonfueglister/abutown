@@ -1,3 +1,6 @@
+use abutown_protocol::{
+    ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto, WorldId,
+};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -154,4 +157,128 @@ async fn mobility_snapshot_is_available() {
     assert_eq!(json["vehicles"][0]["id"], "vehicle:shuttle:0");
     assert_eq!(json["vehicles"][0]["capacity"], 4);
     assert_eq!(json["stops"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn command_sets_tile_kind_and_returns_event() {
+    let app = build_app();
+    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+        protocol_version: PROTOCOL_VERSION,
+        world_id: WorldId("abutown-main".to_string()),
+        command_id: "command:http:1".to_string(),
+        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+        local_index: 11,
+        kind: TileKindDto::Water,
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "accepted");
+    assert_eq!(json["event"]["type"], "tile_kind_set");
+    assert_eq!(json["event"]["command_id"], "command:http:1");
+    assert_eq!(json["event"]["local_index"], 11);
+    assert_eq!(json["event"]["kind"], "water");
+
+    let snapshot_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/chunks/4/4")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot_response.status(), StatusCode::OK);
+    let body = snapshot_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let snapshot: Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        snapshot["dirty_tiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tile| tile["local_index"] == 11 && tile["kind"] == "water")
+    );
+}
+
+#[tokio::test]
+async fn command_rejects_unloaded_chunk() {
+    let app = build_app();
+    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+        protocol_version: PROTOCOL_VERSION,
+        world_id: WorldId("abutown-main".to_string()),
+        command_id: "command:http:2".to_string(),
+        coord: abutown_protocol::ChunkCoordDto { x: 9, y: 9 },
+        local_index: 11,
+        kind: TileKindDto::Water,
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "rejected");
+    assert_eq!(json["code"], "chunk_not_loaded");
+    assert_eq!(json["command_id"], "command:http:2");
+}
+
+#[tokio::test]
+async fn command_rejects_tile_out_of_bounds() {
+    let app = build_app();
+    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+        protocol_version: PROTOCOL_VERSION,
+        world_id: WorldId("abutown-main".to_string()),
+        command_id: "command:http:3".to_string(),
+        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+        local_index: 1024,
+        kind: TileKindDto::Water,
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "rejected");
+    assert_eq!(json["code"], "tile_out_of_bounds");
+    assert_eq!(json["command_id"], "command:http:3");
 }

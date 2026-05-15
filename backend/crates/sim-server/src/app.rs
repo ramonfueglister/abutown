@@ -1,7 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use abutown_protocol::{
-    ChunkSnapshotDto, HealthResponse, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
+    ChunkSnapshotDto, ClientCommandDto, CommandResponseDto, HealthResponse, MobilitySnapshotDto,
+    ServerMessageDto, WorldSummaryDto,
 };
 use axum::{
     Json, Router,
@@ -10,8 +11,8 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
-    response::IntoResponse,
-    routing::get,
+    response::{IntoResponse, Response},
+    routing::{get, post},
 };
 use sim_core::ids::ChunkCoord;
 use tokio::sync::{Mutex, broadcast};
@@ -91,6 +92,7 @@ pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
         .route("/health", get(health))
         .route("/world", get(world))
         .route("/chunks/{x}/{y}", get(chunk))
+        .route("/commands", post(command))
         .route("/mobility", get(mobility))
         .route("/ws", get(websocket))
         .with_state(state)
@@ -127,11 +129,38 @@ async fn chunk(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+async fn command(State(state): State<AppState>, Json(command): Json<ClientCommandDto>) -> Response {
+    let result = {
+        let runtime = state.runtime();
+        let mut runtime = runtime.lock().await;
+        runtime.apply_client_command(command)
+    };
+
+    match result {
+        Ok(applied) => {
+            let _ = state.deltas.send(ServerMessageDto::WorldEvent {
+                event: applied.event.clone(),
+            });
+            (
+                StatusCode::OK,
+                Json(CommandResponseDto::Accepted(applied.response)),
+            )
+                .into_response()
+        }
+        Err(rejection) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(CommandResponseDto::Rejected(rejection.into_dto())),
+        )
+            .into_response(),
+    }
+}
+
 async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(move |socket| stream_world_deltas(socket, state))
 }
 
 async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
+    let mut deltas = state.subscribe_deltas();
     let hello = {
         let runtime = state.runtime();
         let runtime = runtime.lock().await;
@@ -141,7 +170,6 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
         return;
     }
 
-    let mut deltas = state.subscribe_deltas();
     loop {
         let message = match deltas.recv().await {
             Ok(message) => message,
