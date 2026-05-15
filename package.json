@@ -8,6 +8,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "assets:pak128": "node scripts/import-pak128-assets.mjs",
+    "assets:yellow-crossing-hk": "node scripts/import-pak128-assets.mjs --yellow-crossing-hk",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test"
   },
