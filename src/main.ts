@@ -1684,7 +1684,7 @@ declare global {
 }
 
 window.render_game_to_text = () => {
-  const legacyDiagnostics = cityDiagnostics();
+  const diagnostics = cityDiagnostics();
   const detailCounts = detailCountsByCategory();
   const agents = localPedestrianAgents();
   const serializedAgents = agents.map(serializeLocalAgent);
@@ -1702,7 +1702,7 @@ window.render_game_to_text = () => {
         id: activeAssetPack.id,
         tile: activeAssetPack.tile,
       },
-      legacyAssetPaths: legacyAssetPaths(),
+      nonPak128AssetPaths: nonPak128AssetPaths(),
       width: WIDTH,
       height: HEIGHT,
       roadTiles: roads.size,
@@ -1756,11 +1756,11 @@ window.render_game_to_text = () => {
       railCrossings: zurichValidation.stats.railCrossings,
       invalidBuildings: zurichValidation.stats.invalidBuildings,
       treeBuildingOverlap: zurichValidation.stats.treeBuildingOverlap,
-      railStationsOnRoad: legacyDiagnostics.railStationsOnRoad,
-      railStationsOnBuildings: legacyDiagnostics.railStationsOnBuildings,
-      railStationsOnRails: legacyDiagnostics.railStationsOnRails,
-      railStationsOnTrees: legacyDiagnostics.railStationsOnTrees,
-      legacyDiagnostics,
+      railStationsOnRoad: diagnostics.railStationsOnRoad,
+      railStationsOnBuildings: diagnostics.railStationsOnBuildings,
+      railStationsOnRails: diagnostics.railStationsOnRails,
+      railStationsOnTrees: diagnostics.railStationsOnTrees,
+      diagnostics,
       camera: {
         mode: 'bounded-fixed-map',
         current: { x: camera.x, y: camera.y, scale: camera.scale },
@@ -1811,7 +1811,7 @@ function serializeLocalVehicle(vehicle: LocalRoadVehicle): LocalRoadVehicle & { 
   };
 }
 
-function legacyAssetPaths(): string[] {
+function nonPak128AssetPaths(): string[] {
   return [...images.keys()].filter((path) => !path.startsWith('/simutrans-assets/pak128/')).sort();
 }
 

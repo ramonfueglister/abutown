@@ -75,7 +75,7 @@ The local pedestrian-agent layer does not require a URL flag, localStorage flag,
 
 - No full backend-driven population.
 - No city-scale routing, pathfinding, lane traffic, congestion, or parking.
-- No replacement of local OpenGFX cars, pedestrians, or train.
+- No replacement of local traffic actors, pedestrians, or train.
 - No player commands or persistence changes.
 
 ## Success Criteria

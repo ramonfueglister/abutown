@@ -6,7 +6,7 @@ use abutown_protocol::{
 };
 use sim_core::{
     chunk::Chunk,
-    events::InMemoryWorldEventStore,
+    events::{InMemoryWorldEventStore, WorldEventStore},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
     persistence::InMemoryChunkSnapshotStore,
@@ -33,10 +33,10 @@ pub struct SimulationRuntime {
     registry: ChunkRegistry,
     mobility: MobilityWorld,
     snapshot_store: InMemoryChunkSnapshotStore,
-    event_store: InMemoryWorldEventStore,
+    event_store: Box<dyn WorldEventStore + Send>,
+    event_count: usize,
     tick: u64,
     version: u64,
-    next_event_id: u64,
 }
 
 impl std::fmt::Debug for SimulationRuntime {
@@ -46,7 +46,6 @@ impl std::fmt::Debug for SimulationRuntime {
             .field("registry", &self.registry)
             .field("tick", &self.tick)
             .field("version", &self.version)
-            .field("next_event_id", &self.next_event_id)
             .finish_non_exhaustive()
     }
 }
@@ -79,11 +78,17 @@ impl SimulationRuntime {
             registry,
             mobility: MobilityWorld::default(),
             snapshot_store: InMemoryChunkSnapshotStore::default(),
-            event_store: InMemoryWorldEventStore::default(),
+            event_store: Box::new(InMemoryWorldEventStore::default()),
+            event_count: 0,
             tick: 0,
             version: 0,
-            next_event_id: 1,
         }
+    }
+
+    pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send>) -> Self {
+        let mut runtime = Self::new();
+        runtime.event_store = event_store;
+        runtime
     }
 
     pub fn health(&self) -> HealthResponse {
@@ -143,19 +148,19 @@ impl SimulationRuntime {
     }
 
     pub fn event_count(&self) -> usize {
-        self.event_store.event_count()
+        self.event_count
     }
 
-    pub(crate) fn apply_client_command(
+    pub(crate) async fn apply_client_command(
         &mut self,
         command: ClientCommandDto,
     ) -> Result<AppliedCommand, CommandRejection> {
         match command {
-            ClientCommandDto::SetTileKind(command) => self.apply_set_tile_kind(command),
+            ClientCommandDto::SetTileKind(command) => self.apply_set_tile_kind(command).await,
         }
     }
 
-    fn apply_set_tile_kind(
+    async fn apply_set_tile_kind(
         &mut self,
         command: SetTileKindCommandDto,
     ) -> Result<AppliedCommand, CommandRejection> {
@@ -185,9 +190,9 @@ impl SimulationRuntime {
             y: command.coord.y,
         };
         let kind = TileKind::from(command.kind);
-        let version = self
+        let plan = self
             .registry
-            .set_tile_kind(coord, command.local_index, kind)
+            .plan_set_tile_kind(coord, command.local_index, kind)
             .map_err(|error| match error {
                 ChunkMutationError::ChunkNotLoaded { coord } => CommandRejection {
                     world_id: Some(command.world_id.clone()),
@@ -212,20 +217,32 @@ impl SimulationRuntime {
                 },
             })?;
 
-        let event_id = format!("event:{}", self.next_event_id);
-        self.next_event_id += 1;
+        let event_id = format!("event:{}", uuid::Uuid::now_v7());
         let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
             protocol_version: PROTOCOL_VERSION,
             event_id,
             command_id: command.command_id.clone(),
             world_id: self.world_id.clone(),
             tick: self.tick,
-            version,
+            version: plan.version,
             coord: command.coord,
             local_index: command.local_index,
             kind: command.kind,
         });
-        self.event_store.append(event.clone());
+        self.event_store
+            .append(event.clone())
+            .await
+            .map_err(|error| CommandRejection {
+                world_id: Some(self.world_id.clone()),
+                command_id: Some(command.command_id.clone()),
+                code: error.code(),
+                message: error.to_string(),
+            })?;
+
+        self.event_count += 1;
+        self.registry
+            .apply_set_tile_kind(plan)
+            .expect("planned mutation should apply after event append");
 
         let response = CommandAcceptedDto {
             protocol_version: PROTOCOL_VERSION,
@@ -371,8 +388,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn runtime_applies_set_tile_kind_command_and_appends_event() {
+    #[tokio::test]
+    async fn runtime_applies_set_tile_kind_command_and_appends_event() {
         let mut runtime = SimulationRuntime::new();
 
         let applied = runtime
@@ -386,10 +403,11 @@ mod tests {
                     kind: abutown_protocol::TileKindDto::Water,
                 },
             ))
+            .await
             .expect("command should apply");
 
         let abutown_protocol::WorldEventDto::TileKindSet(event) = &applied.event;
-        assert_eq!(event.event_id, "event:1");
+        assert!(event.event_id.starts_with("event:"));
         assert_eq!(event.command_id, "command:test:1");
         assert_eq!(event.version, 2);
         assert_eq!(event.local_index, 11);
@@ -404,8 +422,8 @@ mod tests {
         }));
     }
 
-    #[test]
-    fn runtime_rejects_commands_for_other_worlds() {
+    #[tokio::test]
+    async fn runtime_rejects_commands_for_other_worlds() {
         let mut runtime = SimulationRuntime::new();
 
         let rejection = runtime
@@ -419,14 +437,15 @@ mod tests {
                     kind: abutown_protocol::TileKindDto::Water,
                 },
             ))
+            .await
             .expect_err("wrong world should reject");
 
         assert_eq!(rejection.code, "wrong_world");
         assert_eq!(runtime.event_count(), 0);
     }
 
-    #[test]
-    fn runtime_rejects_commands_for_unloaded_chunks() {
+    #[tokio::test]
+    async fn runtime_rejects_commands_for_unloaded_chunks() {
         let mut runtime = SimulationRuntime::new();
 
         let rejection = runtime
@@ -440,14 +459,15 @@ mod tests {
                     kind: abutown_protocol::TileKindDto::Water,
                 },
             ))
+            .await
             .expect_err("unloaded chunk should reject");
 
         assert_eq!(rejection.code, "chunk_not_loaded");
         assert_eq!(runtime.event_count(), 0);
     }
 
-    #[test]
-    fn runtime_rejects_no_op_tile_kind_commands_without_appending_event() {
+    #[tokio::test]
+    async fn runtime_rejects_no_op_tile_kind_commands_without_appending_event() {
         let mut runtime = SimulationRuntime::new();
 
         let rejection = runtime
@@ -461,9 +481,44 @@ mod tests {
                     kind: abutown_protocol::TileKindDto::Grass,
                 },
             ))
+            .await
             .expect_err("no-op command should reject");
 
         assert_eq!(rejection.code, "no_state_change");
         assert_eq!(runtime.event_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn runtime_rejects_store_failure_without_mutating_chunk() {
+        let mut runtime = SimulationRuntime::new_with_event_store(Box::new(
+            sim_core::events::FailingWorldEventStore::new("database offline"),
+        ));
+
+        let before = runtime
+            .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .expect("chunk exists");
+
+        let rejection = runtime
+            .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
+                abutown_protocol::SetTileKindCommandDto {
+                    protocol_version: abutown_protocol::PROTOCOL_VERSION,
+                    world_id: abutown_protocol::WorldId("abutown-main".to_string()),
+                    command_id: "command:test:store-failure".to_string(),
+                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    local_index: 11,
+                    kind: abutown_protocol::TileKindDto::Water,
+                },
+            ))
+            .await
+            .expect_err("store failure should reject");
+
+        assert_eq!(rejection.code, "event_store_unavailable");
+        assert_eq!(runtime.event_count(), 0);
+        assert_eq!(
+            runtime
+                .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+                .expect("chunk still exists"),
+            before
+        );
     }
 }

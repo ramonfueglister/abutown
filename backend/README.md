@@ -37,7 +37,7 @@ The old frontend bridge described in the visible-slice plan is not present in th
 
 ## Command Event Boundary
 
-The first mutation ingress is `POST /commands`. It accepts versioned JSON client commands, validates them inside the Rust runtime, applies accepted changes to loaded hot state, appends an in-memory world event, and broadcasts that event to `/ws` subscribers.
+The first mutation ingress is `POST /commands`. It accepts versioned JSON client commands, validates them inside the Rust runtime, appends accepted events through the configured event store, applies accepted changes to loaded hot state, and broadcasts those events to `/ws` subscribers.
 
 Implemented command:
 
@@ -47,16 +47,20 @@ Current boundaries:
 
 - Commands are unauthenticated local-development inputs.
 - Commands only target loaded chunks.
-- Accepted mutations are stored in an in-memory append-only event store.
-- Supabase/Postgres, command idempotency, permissions, chunk loading, and recovery remain later slices.
+- Accepted mutations are appended through the runtime event-store boundary before hot-state application and websocket broadcast.
+- Local development defaults to an in-memory event store.
+- Set `ABUTOWN_DATABASE_URL` to a Postgres/Supabase connection string to use the persistent `world_events` store.
+- Command idempotency, permissions, chunk loading, recovery replay, and durable chunk snapshots remain later slices.
 
 Targeted commands:
 
 ```bash
 cargo test --manifest-path backend/Cargo.toml -p abutown-protocol command_
 cargo test --manifest-path backend/Cargo.toml -p sim-core events
+cargo test --manifest-path backend/Cargo.toml -p sim-server postgres_events
 cargo test --manifest-path backend/Cargo.toml -p sim-server command_
 cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_broadcasts_accepted_command_event
+cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_does_not_broadcast_failed_command_append
 ```
 
 ## Agent Mobility Foundation

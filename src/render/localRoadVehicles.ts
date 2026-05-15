@@ -1,5 +1,4 @@
-import type { AssetRole } from '../assets/assetPack';
-import type { VehicleSheetName } from './vehicleSprites';
+import type { VehicleSheetName, VehicleSprite } from './vehicleSprites';
 
 export type LocalRoadVehicleCoord = {
   x: number;
@@ -12,7 +11,7 @@ export type LocalRoadVehicleSource = {
   speed: number;
   sprite: {
     sheet: VehicleSheetName;
-    role: Extract<AssetRole, 'vehicle.bus' | 'vehicle.truck'>;
+    role: VehicleSprite['role'];
   };
 };
 
@@ -25,7 +24,7 @@ export type LocalRoadVehicle = {
   nextCoord: LocalRoadVehicleCoord;
   speed: number;
   spriteSheet: VehicleSheetName;
-  role: Extract<AssetRole, 'vehicle.bus' | 'vehicle.truck'>;
+  role: VehicleSprite['role'];
 };
 
 export function localRoadVehicleId(index: number): string {

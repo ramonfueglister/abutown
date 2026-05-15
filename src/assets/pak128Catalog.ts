@@ -22,14 +22,20 @@ export const PAK128_REQUIRED_ROLES = [
   'detail.quay',
   'vehicle.bus',
   'vehicle.truck',
+  'vehicle.delivery.van',
+  'vehicle.cooling.truck',
+  'vehicle.tanker',
+  'vehicle.concrete.mixer',
+  'vehicle.bulk.truck',
+  'vehicle.car.transporter',
   'vehicle.train.engine',
   'vehicle.train.wagon',
   'agent.pedestrian',
 ] as const satisfies readonly AssetRole[];
 
 const ROOT = '/simutrans-assets/pak128';
-const YELLOW_CROSSING_ROAD = `${ROOT}/infrastructure/roads/yellow_crossing_hk_road_090.png`;
-const YELLOW_CROSSING_ROAD_DAT = 'infrastructure/roads/yellow_crossing_hk_road_090.dat';
+const YELLOW_CROSSING_ROAD = `${ROOT}/infrastructure/roads/yellow_crossing_hk_surface_road.png`;
+const YELLOW_CROSSING_ROAD_DAT = 'infrastructure/roads/yellow_crossing_hk_surface_road.dat';
 
 const provenance = (sourcePath: string, datPath: string) => ({
   sourcePath,
@@ -79,7 +85,7 @@ const pak128Assets: AssetFrame[] = [
     baseline: 96,
     scale: 1,
     cleanup: 'pak128',
-    provenance: provenance('infrastructure/roads/yellow_crossing_hk_road_090.png', YELLOW_CROSSING_ROAD_DAT),
+    provenance: provenance('infrastructure/roads/yellow_crossing_hk_surface_road.png', YELLOW_CROSSING_ROAD_DAT),
   },
   {
     role: 'road.curve',
@@ -89,7 +95,7 @@ const pak128Assets: AssetFrame[] = [
     baseline: 96,
     scale: 1,
     cleanup: 'pak128',
-    provenance: provenance('infrastructure/roads/yellow_crossing_hk_road_090.png', YELLOW_CROSSING_ROAD_DAT),
+    provenance: provenance('infrastructure/roads/yellow_crossing_hk_surface_road.png', YELLOW_CROSSING_ROAD_DAT),
   },
   {
     role: 'road.intersection',
@@ -99,7 +105,7 @@ const pak128Assets: AssetFrame[] = [
     baseline: 96,
     scale: 1,
     cleanup: 'pak128',
-    provenance: provenance('infrastructure/roads/yellow_crossing_hk_road_090.png', YELLOW_CROSSING_ROAD_DAT),
+    provenance: provenance('infrastructure/roads/yellow_crossing_hk_surface_road.png', YELLOW_CROSSING_ROAD_DAT),
   },
   {
     role: 'road.bridge',
@@ -242,6 +248,72 @@ const pak128Assets: AssetFrame[] = [
     cleanup: 'pak128',
     direction: 'W',
     provenance: provenance('vehicles/road-cargo/goods_truck_0.png', 'vehicles/road-cargo/goods_truck_0.dat'),
+  },
+  {
+    role: 'vehicle.delivery.van',
+    path: `${ROOT}/vehicles/road-cargo/rvg_type_s_van.png`,
+    source: cell(1, 0),
+    anchor: { x: 64, y: 88 },
+    baseline: 88,
+    scale: 0.42,
+    cleanup: 'pak128',
+    direction: 'W',
+    provenance: provenance('vehicles/road-cargo/rvg_type_s_van.png', 'vehicles/road-cargo/rvg_type_s_van.dat'),
+  },
+  {
+    role: 'vehicle.cooling.truck',
+    path: `${ROOT}/vehicles/road-cargo/cooling_truck_0.png`,
+    source: cell(1, 0),
+    anchor: { x: 64, y: 88 },
+    baseline: 88,
+    scale: 0.42,
+    cleanup: 'pak128',
+    direction: 'W',
+    provenance: provenance('vehicles/road-cargo/cooling_truck_0.png', 'vehicles/road-cargo/cooling_truck_0.dat'),
+  },
+  {
+    role: 'vehicle.tanker',
+    path: `${ROOT}/vehicles/road-cargo/fluid_truck_0.png`,
+    source: cell(1, 0),
+    anchor: { x: 64, y: 88 },
+    baseline: 88,
+    scale: 0.42,
+    cleanup: 'pak128',
+    direction: 'W',
+    provenance: provenance('vehicles/road-cargo/fluid_truck_0.png', 'vehicles/road-cargo/fluid_truck_0.dat'),
+  },
+  {
+    role: 'vehicle.concrete.mixer',
+    path: `${ROOT}/vehicles/road-cargo/concrete_truck_0.png`,
+    source: cell(1, 0),
+    anchor: { x: 64, y: 88 },
+    baseline: 88,
+    scale: 0.42,
+    cleanup: 'pak128',
+    direction: 'W',
+    provenance: provenance('vehicles/road-cargo/concrete_truck_0.png', 'vehicles/road-cargo/concrete_truck_0.dat'),
+  },
+  {
+    role: 'vehicle.bulk.truck',
+    path: `${ROOT}/vehicles/road-cargo/bulk_truck_0.png`,
+    source: cell(1, 0),
+    anchor: { x: 64, y: 88 },
+    baseline: 88,
+    scale: 0.42,
+    cleanup: 'pak128',
+    direction: 'W',
+    provenance: provenance('vehicles/road-cargo/bulk_truck_0.png', 'vehicles/road-cargo/bulk_truck_0.dat'),
+  },
+  {
+    role: 'vehicle.car.transporter',
+    path: `${ROOT}/vehicles/road-cargo/car_transporter_0.png`,
+    source: cell(1, 0),
+    anchor: { x: 64, y: 88 },
+    baseline: 88,
+    scale: 0.42,
+    cleanup: 'pak128',
+    direction: 'W',
+    provenance: provenance('vehicles/road-cargo/car_transporter_0.png', 'vehicles/road-cargo/car_transporter_0.dat'),
   },
   {
     role: 'vehicle.train.engine',

@@ -18,7 +18,7 @@ use sim_core::ids::ChunkCoord;
 use tokio::sync::{Mutex, broadcast};
 use tower_http::cors::CorsLayer;
 
-use crate::runtime::SimulationRuntime;
+use crate::{postgres_events::PostgresWorldEventStore, runtime::SimulationRuntime};
 
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_secs(1);
@@ -83,6 +83,17 @@ pub fn build_app() -> Router {
     build_app_with_runtime(SimulationRuntime::new())
 }
 
+pub async fn build_app_from_env() -> anyhow::Result<Router> {
+    if let Ok(database_url) = std::env::var("ABUTOWN_DATABASE_URL") {
+        let event_store = PostgresWorldEventStore::connect(&database_url).await?;
+        return Ok(build_app_with_runtime(
+            SimulationRuntime::new_with_event_store(Box::new(event_store)),
+        ));
+    }
+
+    Ok(build_app())
+}
+
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
     let state = AppState::new(runtime);
     state.spawn_delta_loop(SIMULATION_TICK_INTERVAL);
@@ -133,7 +144,7 @@ async fn command(State(state): State<AppState>, Json(command): Json<ClientComman
     let result = {
         let runtime = state.runtime();
         let mut runtime = runtime.lock().await;
-        runtime.apply_client_command(command)
+        runtime.apply_client_command(command).await
     };
 
     match result {

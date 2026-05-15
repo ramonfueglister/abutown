@@ -12,7 +12,10 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
 use tower::ServiceExt;
 
-use sim_server::app::build_app;
+use sim_server::{
+    app::{build_app, build_app_with_runtime},
+    runtime::SimulationRuntime,
+};
 
 #[tokio::test]
 async fn websocket_sends_hello_and_tile_pulse() {
@@ -206,6 +209,49 @@ async fn websocket_broadcasts_accepted_command_event() {
             break;
         }
     }
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn websocket_does_not_broadcast_failed_command_append() {
+    let app = build_app_with_runtime(SimulationRuntime::new_with_event_store(Box::new(
+        sim_core::events::FailingWorldEventStore::new("database offline"),
+    )));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_app = app.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, server_app).await.unwrap();
+    });
+
+    let (mut websocket, _) = connect_async(format!("ws://{addr}/ws")).await.unwrap();
+    let _hello = read_server_message(&mut websocket).await;
+
+    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
+        protocol_version: PROTOCOL_VERSION,
+        world_id: WorldId("abutown-main".to_string()),
+        command_id: "command:ws:store-failure".to_string(),
+        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+        local_index: 11,
+        kind: TileKindDto::Water,
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let no_message = tokio::time::timeout(Duration::from_millis(150), websocket.next()).await;
+    assert!(no_message.is_err());
 
     server.abort();
 }
