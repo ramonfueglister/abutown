@@ -425,7 +425,7 @@ git commit -m "feat: make snapshot persistence fallible"
 - Create: `backend/crates/sim-server/src/postgres_snapshots.rs`
 - Modify: `backend/crates/sim-server/src/lib.rs`
 
-- [ ] **Step 1: Add migration**
+- [x] **Step 1: Add migration**
 
 Create:
 
@@ -446,7 +446,7 @@ CREATE INDEX IF NOT EXISTS chunk_snapshots_world_updated_idx
     ON chunk_snapshots (world_id, updated_at DESC);
 ```
 
-- [ ] **Step 2: Add adapter tests**
+- [x] **Step 2: Add adapter tests**
 
 Unit-test serialization:
 
@@ -454,7 +454,7 @@ Unit-test serialization:
 
 Add opt-in integration test using `ABUTOWN_TEST_DATABASE_URL`.
 
-- [ ] **Step 3: Implement adapter**
+- [x] **Step 3: Implement adapter**
 
 Create `PostgresChunkSnapshotStore` with:
 
@@ -467,7 +467,7 @@ Trait behavior:
 - `write_snapshot`: upsert latest row by `(world_id, chunk_x, chunk_y)`.
 - `read_snapshot`: select payload by coord for `abutown-main` initially, matching current runtime single-world scope.
 
-- [ ] **Step 4: Export module**
+- [x] **Step 4: Export module**
 
 Add in `backend/crates/sim-server/src/lib.rs`:
 
@@ -475,7 +475,7 @@ Add in `backend/crates/sim-server/src/lib.rs`:
 pub mod postgres_snapshots;
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
