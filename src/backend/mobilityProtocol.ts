@@ -78,6 +78,19 @@ export type MobilityDeltaServerMessage = MobilityDeltaDto & {
   type: 'mobility_delta';
 };
 
+export type RoadVehicleDeltaServerMessage = {
+  type: 'road_vehicle_delta';
+  protocol_version: number;
+  world_id: string;
+  tick: number;
+  changed: Array<{
+    id: string;
+    world_coord: WorldCoordDto;
+    direction: DirectionDto;
+    sprite_key: string;
+  }>;
+};
+
 export type ServerErrorDto = {
   type: 'error';
   protocol_version: number;
@@ -90,6 +103,7 @@ export type ServerMessageDto =
   | ServerHelloDto
   | TilePulseDeltaDto
   | MobilityDeltaServerMessage
+  | RoadVehicleDeltaServerMessage
   | ServerErrorDto;
 
 export function isMobilitySnapshotDto(value: unknown): value is MobilitySnapshotDto {
@@ -128,7 +142,24 @@ export function parseServerMessage(value: unknown): ServerMessageDto | null {
   if (value.type === 'hello') return isServerHelloDto(value) ? value : null;
   if (value.type === 'tile_pulse') return isTilePulseDeltaDto(value) ? value : null;
   if (value.type === 'error') return isServerErrorDto(value) ? value : null;
+  if (value.type === 'road_vehicle_delta') {
+    return isRoadVehicleDeltaShape(value) ? (value as RoadVehicleDeltaServerMessage) : null;
+  }
   return null;
+}
+
+function isRoadVehicleDeltaShape(value: Record<string, unknown>): boolean {
+  if (!isNumber(value.protocol_version) || !isString(value.world_id) || !isNumber(value.tick)) return false;
+  if (!Array.isArray(value.changed)) return false;
+  return value.changed.every((entry) => {
+    if (!isObject(entry)) return false;
+    return (
+      isString(entry.id) &&
+      isWorldCoordDto(entry.world_coord) &&
+      isDirectionDto(entry.direction) &&
+      isString(entry.sprite_key)
+    );
+  });
 }
 
 function isAgentMobilityDto(value: unknown): value is AgentMobilityDto {

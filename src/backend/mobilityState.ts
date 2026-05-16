@@ -7,6 +7,13 @@ import {
   type StopMobilityDto,
   type VehicleMobilityDto,
 } from './mobilityProtocol';
+import {
+  applyRoadVehicleSnapshot,
+  applyRoadVehicleDelta,
+  createRoadVehicleOverlayState,
+  type RoadVehicleOverlayState,
+} from './roadVehicleState';
+import type { RoadVehicleSnapshotDto } from './roadVehicleProtocol';
 
 export type MobilityConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -16,6 +23,7 @@ export type MobilityDiagnostics = {
   agents: number;
   vehicles: number;
   stops: number;
+  roadVehicles: number;
   invalidMessages: number;
   lastError: string | null;
 };
@@ -26,6 +34,7 @@ export type MobilityOverlayState = {
   agents: Map<string, AgentMobilityDto>;
   vehicles: Map<string, VehicleMobilityDto>;
   stops: Map<string, StopMobilityDto>;
+  roadVehicles: RoadVehicleOverlayState;
   invalidMessages: number;
   lastError: string | null;
   lastUpdatedAt: number;
@@ -38,9 +47,22 @@ export function createMobilityOverlayState(): MobilityOverlayState {
     agents: new Map(),
     vehicles: new Map(),
     stops: new Map(),
+    roadVehicles: createRoadVehicleOverlayState(),
     invalidMessages: 0,
     lastError: null,
     lastUpdatedAt: 0,
+  };
+}
+
+export function applyRoadVehicleSnapshotToState(
+  state: MobilityOverlayState,
+  snapshot: RoadVehicleSnapshotDto,
+  now = Date.now(),
+): MobilityOverlayState {
+  return {
+    ...state,
+    roadVehicles: applyRoadVehicleSnapshot(state.roadVehicles, snapshot, now),
+    lastUpdatedAt: now,
   };
 }
 
@@ -97,6 +119,13 @@ export function applyServerMessage(state: MobilityOverlayState, value: unknown, 
   if (message?.type === 'mobility_delta' && isMobilityDeltaDto(message)) {
     return applyMobilityDelta(state, message, now);
   }
+  if (message?.type === 'road_vehicle_delta') {
+    return {
+      ...state,
+      roadVehicles: applyRoadVehicleDelta(state.roadVehicles, message, now),
+      lastUpdatedAt: now,
+    };
+  }
   if (message !== null) return state;
   return {
     ...state,
@@ -112,6 +141,7 @@ export function mobilityDiagnostics(state: MobilityOverlayState): MobilityDiagno
     agents: state.agents.size,
     vehicles: state.vehicles.size,
     stops: state.stops.size,
+    roadVehicles: state.roadVehicles.vehicles.size,
     invalidMessages: state.invalidMessages,
     lastError: state.lastError,
   };

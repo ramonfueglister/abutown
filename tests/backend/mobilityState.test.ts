@@ -58,6 +58,7 @@ describe('mobility state reducer', () => {
       agents: 0,
       vehicles: 0,
       stops: 0,
+      roadVehicles: 0,
       invalidMessages: 0,
       lastError: null,
     });
@@ -110,4 +111,23 @@ describe('mobility state reducer', () => {
     expect(mobilityDiagnostics(next)).toMatchObject({ agents: 1, invalidMessages: 1 });
   });
 
+  it('applies road_vehicle_delta messages into embedded road vehicle state', () => {
+    let state = createMobilityOverlayState();
+    state = applyServerMessage(state, {
+      type: 'road_vehicle_delta',
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      tick: 5,
+      changed: [
+        {
+          id: 'road_vehicle:seed:0',
+          world_coord: { x: 10, y: 20 },
+          direction: 'n',
+          sprite_key: 'vehicle:0',
+        },
+      ],
+    });
+    expect(state.roadVehicles.tick).toBe(5);
+    expect(state.roadVehicles.vehicles.get('road_vehicle:seed:0')?.world_coord.y).toBe(20);
+  });
 });
