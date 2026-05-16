@@ -1,4 +1,5 @@
-import type { MobilityOverlayState } from '../backend/mobilityState';
+import { interpolatedAgents, type MobilityOverlayState } from '../backend/mobilityState';
+import { interpolatedRoadVehicles } from '../backend/roadVehicleState';
 import type { DirectionDto } from '../backend/mobilityProtocol';
 
 export type Coord = { x: number; y: number };
@@ -63,13 +64,12 @@ function syntheticPath(start: Coord, direction: DirectionDto): Coord[] {
 export function pedestriansFromMobilityState(
   state: MobilityOverlayState,
   sprites: readonly SimutransPedestrianSpriteLike[],
+  now: number,
+  tickPeriodMs: number,
 ): BackendPedestrian[] {
   if (sprites.length === 0) return [];
+  const agents = interpolatedAgents(state, now, tickPeriodMs).sort((a, b) => a.id.localeCompare(b.id));
   const out: BackendPedestrian[] = [];
-  // Deterministic order by id so tests and the renderer see stable input each frame.
-  const agents = Array.from(state.agents.values())
-    .map((entry) => entry.current)
-    .sort((a, b) => a.id.localeCompare(b.id));
   for (const agent of agents) {
     const sprite = sprites[spriteIndexFromKey(agent.sprite_key, sprites.length)];
     out.push({
@@ -88,12 +88,14 @@ export function pedestriansFromMobilityState(
 export function carsFromMobilityState(
   state: MobilityOverlayState,
   sprites: readonly VehicleSpriteLike[],
+  now: number,
+  tickPeriodMs: number,
 ): BackendCar[] {
   if (sprites.length === 0) return [];
+  const vehicles = interpolatedRoadVehicles(state.roadVehicles, now, tickPeriodMs).sort((a, b) =>
+    a.id.localeCompare(b.id),
+  );
   const out: BackendCar[] = [];
-  const vehicles = Array.from(state.roadVehicles.vehicles.values())
-    .map((entry) => entry.current)
-    .sort((a, b) => a.id.localeCompare(b.id));
   for (const vehicle of vehicles) {
     const sprite = sprites[spriteIndexFromKey(vehicle.sprite_key, sprites.length)];
     out.push({

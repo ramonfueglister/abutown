@@ -394,8 +394,8 @@ function drawScene(offset: Coord): void {
   drawEdgeConnections(visibleGrid);
 
   const visibleStaticDrawables = staticDrawables.filter((item) => isCoordVisible(item.coord, visibleGrid));
-  const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
-  const cars: BackendCar[] = carsFromMobilityState(mobilityState, vehicleSprites);
+  const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), 100);
+  const cars: BackendCar[] = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), 100);
   const carDrawables = cars
     .map((car) => ({ type: 'car' as const, coord: car.path[0], car, vehicleId: car.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
@@ -1139,20 +1139,20 @@ function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
 
 function selectedBackendPedestrian(): BackendPedestrian | null {
   if (!selectedAgentId) return null;
-  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
+  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), 100);
   return pedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
 }
 
 function selectedBackendCar(): BackendCar | null {
   if (!selectedVehicleId) return null;
-  const cars = carsFromMobilityState(mobilityState, vehicleSprites);
+  const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), 100);
   return cars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
 }
 
 function selectMobilityEntityAtScreenPoint(point: Coord): void {
   const worldPoint = screenToWorld(point);
-  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
-  const cars = carsFromMobilityState(mobilityState, vehicleSprites);
+  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), 100);
+  const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), 100);
   const vehicleHit = findNearestProjectedEntity(cars, worldPoint, Math.max(10, 24 / camera.scale));
   if (vehicleHit) {
     selectedVehicleId = vehicleHit.id;
@@ -1665,8 +1665,8 @@ window.render_game_to_text = () => {
   const diagnostics = cityDiagnostics();
   const detailCounts = detailCountsByCategory();
   const backendMobility = mobilityDiagnostics(mobilityState);
-  const projectedPedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
-  const projectedCars = carsFromMobilityState(mobilityState, vehicleSprites);
+  const projectedPedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), 100);
+  const projectedCars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), 100);
   const selectedAgent = projectedPedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
   const selectedVehicle = projectedCars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
   const entityScreenPosition = (coord: Coord): Coord => {
