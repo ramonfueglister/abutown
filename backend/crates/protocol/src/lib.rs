@@ -183,6 +183,13 @@ pub struct WorldCoordDto {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum VehicleKindDto {
+    Car,
+    Tram,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DirectionDto {
     N,
     Ne,
@@ -234,6 +241,7 @@ pub enum AgentMobilityStateDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VehicleMobilityDto {
     pub id: EntityId,
+    pub kind: VehicleKindDto,
     pub route_id: String,
     pub link_index: usize,
     pub progress: f32,
@@ -450,6 +458,7 @@ mod tests {
             }],
             vehicles: vec![VehicleMobilityDto {
                 id: EntityId("vehicle:tram:0".to_string()),
+                kind: VehicleKindDto::Tram,
                 route_id: "route:demo".to_string(),
                 link_index: 0,
                 progress: 0.5,
@@ -586,6 +595,28 @@ mod tests {
         assert_eq!(json["tick_period_ms"], 100);
         let back: WorldSummaryDto = serde_json::from_value(json).unwrap();
         assert_eq!(back, dto);
+    }
+
+    #[test]
+    fn vehicle_mobility_dto_carries_kind() {
+        let dto = VehicleMobilityDto {
+            id: EntityId("vehicle:seed:0".to_string()),
+            kind: VehicleKindDto::Car,
+            route_id: "route:arterial:0".to_string(),
+            link_index: 0,
+            progress: 0.5,
+            capacity: 1,
+            occupants: vec![EntityId("agent:driver:0".to_string())],
+            dwell_ticks_remaining: 0,
+            world_coord: WorldCoordDto { x: 1.0, y: 2.0 },
+            direction: DirectionDto::E,
+            sprite_key: "car:0".to_string(),
+        };
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["kind"], "car");
+
+        let back: VehicleMobilityDto = serde_json::from_value(json).unwrap();
+        assert_eq!(back.kind, VehicleKindDto::Car);
     }
 
     #[test]

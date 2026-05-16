@@ -526,6 +526,7 @@ impl MobilityWorld {
             .unwrap_or_else(|| "tram:0".to_string());
         Some(abutown_protocol::VehicleMobilityDto {
             id: abutown_protocol::EntityId(vehicle.id.0.clone()),
+            kind: abutown_protocol::VehicleKindDto::Tram,
             route_id: vehicle.route_id.0.clone(),
             link_index: vehicle.link_index,
             progress: vehicle.progress,
@@ -602,8 +603,11 @@ impl From<&VehicleRecord> for VehicleMobilityDto {
     fn from(value: &VehicleRecord) -> Self {
         // Placeholder values for world_coord, direction, sprite_key — Task 3
         // replaces this `From` path with a `MobilityWorld`-aware builder.
+        // kind is hardcoded to Tram here; Task 5 will read value.kind once
+        // VehicleRecord has that field.
         Self {
             id: EntityId(value.id.0.clone()),
+            kind: abutown_protocol::VehicleKindDto::Tram,
             route_id: value.route_id.0.clone(),
             link_index: value.link_index,
             progress: value.progress,
