@@ -11,7 +11,8 @@
     "build": "tsc --noEmit && vite build",
     "assets:pak128": "node scripts/import-pak128-assets.mjs",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "npm run build && playwright test"
+    "test:e2e": "npm run build && playwright test",
+    "generate:city-network": "node --import tsx/esm scripts/generate-city-network.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@types/node": "^25.7.0",
+    "tsx": "^4.22.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"
   }
