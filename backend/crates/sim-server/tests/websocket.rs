@@ -52,6 +52,12 @@ async fn websocket_sends_hello_and_tile_pulse() {
         ServerMessageDto::MobilityDelta(_)
     ));
 
+    let road_after_mobility = read_server_message(&mut stream).await;
+    assert!(matches!(
+        road_after_mobility,
+        ServerMessageDto::RoadVehicleDelta(_)
+    ));
+
     assert!(
         tokio::time::timeout(Duration::from_millis(500), stream.next())
             .await

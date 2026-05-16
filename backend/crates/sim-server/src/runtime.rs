@@ -11,8 +11,10 @@ use sim_core::{
     mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
     persistence::{
         ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore,
-        InMemoryMobilitySnapshotStore, MobilitySnapshotStore, MobilitySnapshotStoreError,
+        InMemoryMobilitySnapshotStore, InMemoryRoadVehicleSnapshotStore, MobilitySnapshotStore,
+        MobilitySnapshotStoreError, RoadVehicleSnapshotStore, RoadVehicleSnapshotStoreError,
     },
+    road_vehicles::{self, RoadVehicleWorld, build_road_vehicle_delta_dto},
     scheduler::ChunkActivity,
     tile::TileKind,
 };
@@ -53,6 +55,8 @@ pub struct SimulationRuntime {
     mobility: MobilityWorld,
     snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
     mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
+    road_vehicle_world: RoadVehicleWorld,
+    road_vehicle_snapshot_store: Box<dyn RoadVehicleSnapshotStore + Send>,
     event_store: Box<dyn WorldEventStore + Send>,
     event_count: usize,
     tick: u64,
@@ -117,6 +121,8 @@ impl SimulationRuntime {
             mobility: MobilityWorld::default(),
             snapshot_store,
             mobility_snapshot_store: Box::new(InMemoryMobilitySnapshotStore::default()),
+            road_vehicle_world: road_vehicles::seed::initial_road_vehicles(),
+            road_vehicle_snapshot_store: Box::new(InMemoryRoadVehicleSnapshotStore::default()),
             event_store,
             event_count: 0,
             tick: 0,
@@ -131,6 +137,21 @@ impl SimulationRuntime {
     ) -> Self {
         let mut runtime = Self::new_with_stores(event_store, snapshot_store);
         runtime.mobility_snapshot_store = mobility_snapshot_store;
+        runtime
+    }
+
+    pub fn new_with_full_stores(
+        event_store: Box<dyn WorldEventStore + Send>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
+        road_vehicle_snapshot_store: Box<dyn RoadVehicleSnapshotStore + Send>,
+    ) -> Self {
+        let mut runtime = Self::new_with_all_stores(
+            event_store,
+            snapshot_store,
+            mobility_snapshot_store,
+        );
+        runtime.road_vehicle_snapshot_store = road_vehicle_snapshot_store;
         runtime
     }
 
@@ -247,6 +268,8 @@ impl SimulationRuntime {
             mobility,
             snapshot_store,
             mobility_snapshot_store,
+            road_vehicle_world: road_vehicles::seed::initial_road_vehicles(),
+            road_vehicle_snapshot_store: Box::new(InMemoryRoadVehicleSnapshotStore::default()),
             event_store,
             event_count,
             tick: global_tick,
@@ -296,10 +319,15 @@ impl SimulationRuntime {
     }
 
     pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {
-        vec![
+        let mut messages = vec![
             self.next_pulse(),
             ServerMessageDto::MobilityDelta(self.next_mobility_delta()),
-        ]
+        ];
+        let road_delta = self.road_vehicle_world.tick_road_vehicles();
+        messages.push(ServerMessageDto::RoadVehicleDelta(
+            build_road_vehicle_delta_dto(&self.world_id, &self.road_vehicle_world, &road_delta),
+        ));
+        messages
     }
 
     pub async fn persist_chunk_snapshots(&mut self) -> Result<usize, ChunkSnapshotStoreError> {
@@ -324,6 +352,22 @@ impl SimulationRuntime {
         self.mobility_snapshot_store
             .write(&self.world_id.0, self.mobility.tick(), &self.mobility)
             .await
+    }
+
+    pub async fn persist_road_vehicle_snapshot(
+        &mut self,
+    ) -> Result<(), RoadVehicleSnapshotStoreError> {
+        self.road_vehicle_snapshot_store
+            .write(
+                &self.world_id.0,
+                self.road_vehicle_world.tick(),
+                &self.road_vehicle_world,
+            )
+            .await
+    }
+
+    pub fn road_vehicle_snapshot_dto(&self) -> abutown_protocol::RoadVehicleSnapshotDto {
+        road_vehicles::build_road_vehicle_snapshot_dto(&self.world_id, &self.road_vehicle_world)
     }
 
     pub async fn stored_chunk_snapshot(
@@ -1088,6 +1132,31 @@ mod tests {
         assert_eq!(runtime.mobility_tick_for_test(), 0);
         assert_eq!(runtime.mobility_agent_count_for_test(), 20);
         assert_eq!(runtime.mobility_vehicle_count_for_test(), 4);
+    }
+
+    #[tokio::test]
+    async fn runtime_ticks_road_vehicles_and_persists_snapshot() {
+        use sim_core::persistence::InMemoryRoadVehicleSnapshotStore;
+
+        let mut runtime = SimulationRuntime::new_with_full_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryRoadVehicleSnapshotStore::default()),
+        );
+
+        let initial_tick = runtime.road_vehicle_world.tick();
+        runtime.next_server_messages();
+        assert_eq!(runtime.road_vehicle_world.tick(), initial_tick + 1);
+
+        runtime.persist_road_vehicle_snapshot().await.unwrap();
+        let stored = runtime
+            .road_vehicle_snapshot_store
+            .read(&runtime.world_id.0)
+            .await
+            .unwrap()
+            .expect("persisted snapshot");
+        assert_eq!(stored.0, runtime.road_vehicle_world.tick());
     }
 
     #[tokio::test]
