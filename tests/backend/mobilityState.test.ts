@@ -17,6 +17,9 @@ const snapshot: MobilitySnapshotDto = {
       id: 'agent:pedestrian:0',
       state: { type: 'walking', link_id: 'link:home-to-old-town-stop', progress: 0.5 },
       plan_cursor: 0,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'pedestrian:0',
     },
   ],
   vehicles: [
@@ -28,6 +31,9 @@ const snapshot: MobilitySnapshotDto = {
       capacity: 4,
       occupants: [],
       dwell_ticks_remaining: 0,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'tram:0',
     },
   ],
   stops: [
@@ -52,6 +58,7 @@ describe('mobility state reducer', () => {
       agents: 0,
       vehicles: 0,
       stops: 0,
+      roadVehicles: 0,
       invalidMessages: 0,
       lastError: null,
     });
@@ -79,6 +86,9 @@ describe('mobility state reducer', () => {
             id: 'agent:pedestrian:0',
             state: { type: 'waiting_at_stop', stop_id: 'stop:old-town' },
             plan_cursor: 1,
+            world_coord: { x: 0, y: 0 },
+            direction: 'e',
+            sprite_key: 'pedestrian:0',
           },
         ],
         changed_vehicles: [
@@ -101,4 +111,23 @@ describe('mobility state reducer', () => {
     expect(mobilityDiagnostics(next)).toMatchObject({ agents: 1, invalidMessages: 1 });
   });
 
+  it('applies road_vehicle_delta messages into embedded road vehicle state', () => {
+    let state = createMobilityOverlayState();
+    state = applyServerMessage(state, {
+      type: 'road_vehicle_delta',
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      tick: 5,
+      changed: [
+        {
+          id: 'road_vehicle:seed:0',
+          world_coord: { x: 10, y: 20 },
+          direction: 'n',
+          sprite_key: 'vehicle:0',
+        },
+      ],
+    });
+    expect(state.roadVehicles.tick).toBe(5);
+    expect(state.roadVehicles.vehicles.get('road_vehicle:seed:0')?.world_coord.y).toBe(20);
+  });
 });

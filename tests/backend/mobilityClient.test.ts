@@ -6,6 +6,7 @@ import {
 } from '../../src/backend/mobilityClient';
 import { mobilityDiagnostics } from '../../src/backend/mobilityState';
 import type { MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
+import type { RoadVehicleSnapshotDto } from '../../src/backend/roadVehicleProtocol';
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
@@ -16,6 +17,9 @@ const snapshot: MobilitySnapshotDto = {
       id: 'agent-1',
       state: { type: 'walking', link_id: 'link-1', progress: 0.25 },
       plan_cursor: 2,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'pedestrian:0',
     },
   ],
   vehicles: [
@@ -27,6 +31,9 @@ const snapshot: MobilitySnapshotDto = {
       capacity: 20,
       occupants: ['agent-1'],
       dwell_ticks_remaining: 0,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'tram:0',
     },
   ],
   stops: [
@@ -39,6 +46,19 @@ const snapshot: MobilitySnapshotDto = {
     },
   ],
 };
+
+const roadVehicleSnapshot: RoadVehicleSnapshotDto = {
+  protocol_version: 1,
+  world_id: 'abutown-main',
+  tick: 42,
+  vehicles: [],
+};
+
+function snapshotFetch(input: RequestInfo | URL): Response {
+  const url = String(input);
+  if (url.includes('/road-vehicles')) return Response.json(roadVehicleSnapshot);
+  return Response.json(snapshot);
+}
 
 describe('mobility backend client', () => {
   it('uses the live local backend by default', () => {
@@ -66,20 +86,26 @@ describe('mobility backend client', () => {
   });
 
   it('returns a connected state from the initial snapshot', async () => {
+    const requestedUrls: string[] = [];
     const state = await requireMobilitySnapshot({
       fetchImpl: async (input) => {
-        expect(String(input)).toBe('http://127.0.0.1:8080/mobility');
-        return Response.json(snapshot);
+        requestedUrls.push(String(input));
+        return snapshotFetch(input);
       },
       now: () => 123,
     });
 
+    expect(requestedUrls).toEqual([
+      'http://127.0.0.1:8080/mobility',
+      'http://127.0.0.1:8080/road-vehicles',
+    ]);
     expect(mobilityDiagnostics(state)).toEqual({
       status: 'connected',
       tick: 42,
       agents: 1,
       vehicles: 1,
       stops: 1,
+      roadVehicles: 0,
       invalidMessages: 0,
       lastError: null,
     });
@@ -87,7 +113,7 @@ describe('mobility backend client', () => {
   });
 
   it('connects websocket streaming to the same backend', async () => {
-    let requested = '';
+    const requested: string[] = [];
     const sockets: string[] = [];
     const WebSocketImpl = class {
       readyState = 1;
@@ -106,8 +132,8 @@ describe('mobility backend client', () => {
 
     const bridge = connectMobilityBackend({
       fetchImpl: async (input) => {
-        requested = String(input);
-        return Response.json(snapshot);
+        requested.push(String(input));
+        return snapshotFetch(input);
       },
       WebSocketImpl,
       now: () => 123,
@@ -116,7 +142,10 @@ describe('mobility backend client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     bridge.stop();
 
-    expect(requested).toBe('http://127.0.0.1:8080/mobility');
+    expect(requested).toEqual([
+      'http://127.0.0.1:8080/mobility',
+      'http://127.0.0.1:8080/road-vehicles',
+    ]);
     expect(sockets).toEqual(['ws://127.0.0.1:8080/ws']);
   });
 });

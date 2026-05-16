@@ -1,3 +1,7 @@
+export type DirectionDto = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw';
+
+export type WorldCoordDto = { x: number; y: number };
+
 export type AgentMobilityStateDto =
   | { type: 'at_activity'; activity_id: string }
   | { type: 'walking'; link_id: string; progress: number }
@@ -10,6 +14,9 @@ export type AgentMobilityDto = {
   id: string;
   state: AgentMobilityStateDto;
   plan_cursor: number;
+  world_coord: WorldCoordDto;
+  direction: DirectionDto;
+  sprite_key: string;
 };
 
 export type VehicleMobilityDto = {
@@ -20,6 +27,9 @@ export type VehicleMobilityDto = {
   capacity: number;
   occupants: string[];
   dwell_ticks_remaining: number;
+  world_coord: WorldCoordDto;
+  direction: DirectionDto;
+  sprite_key: string;
 };
 
 export type StopMobilityDto = {
@@ -68,6 +78,19 @@ export type MobilityDeltaServerMessage = MobilityDeltaDto & {
   type: 'mobility_delta';
 };
 
+export type RoadVehicleDeltaServerMessage = {
+  type: 'road_vehicle_delta';
+  protocol_version: number;
+  world_id: string;
+  tick: number;
+  changed: Array<{
+    id: string;
+    world_coord: WorldCoordDto;
+    direction: DirectionDto;
+    sprite_key: string;
+  }>;
+};
+
 export type ServerErrorDto = {
   type: 'error';
   protocol_version: number;
@@ -80,6 +103,7 @@ export type ServerMessageDto =
   | ServerHelloDto
   | TilePulseDeltaDto
   | MobilityDeltaServerMessage
+  | RoadVehicleDeltaServerMessage
   | ServerErrorDto;
 
 export function isMobilitySnapshotDto(value: unknown): value is MobilitySnapshotDto {
@@ -118,12 +142,36 @@ export function parseServerMessage(value: unknown): ServerMessageDto | null {
   if (value.type === 'hello') return isServerHelloDto(value) ? value : null;
   if (value.type === 'tile_pulse') return isTilePulseDeltaDto(value) ? value : null;
   if (value.type === 'error') return isServerErrorDto(value) ? value : null;
+  if (value.type === 'road_vehicle_delta') {
+    return isRoadVehicleDeltaShape(value) ? (value as RoadVehicleDeltaServerMessage) : null;
+  }
   return null;
+}
+
+function isRoadVehicleDeltaShape(value: Record<string, unknown>): boolean {
+  if (!isNumber(value.protocol_version) || !isString(value.world_id) || !isNumber(value.tick)) return false;
+  if (!Array.isArray(value.changed)) return false;
+  return value.changed.every((entry) => {
+    if (!isObject(entry)) return false;
+    return (
+      isString(entry.id) &&
+      isWorldCoordDto(entry.world_coord) &&
+      isDirectionDto(entry.direction) &&
+      isString(entry.sprite_key)
+    );
+  });
 }
 
 function isAgentMobilityDto(value: unknown): value is AgentMobilityDto {
   if (!isObject(value)) return false;
-  return isString(value.id) && isAgentMobilityStateDto(value.state) && isNonNegativeInteger(value.plan_cursor);
+  return (
+    isString(value.id) &&
+    isAgentMobilityStateDto(value.state) &&
+    isNonNegativeInteger(value.plan_cursor) &&
+    isWorldCoordDto(value.world_coord) &&
+    isDirectionDto(value.direction) &&
+    isString(value.sprite_key)
+  );
 }
 
 function isAgentMobilityStateDto(value: unknown): value is AgentMobilityStateDto {
@@ -147,7 +195,10 @@ function isVehicleMobilityDto(value: unknown): value is VehicleMobilityDto {
     isNonNegativeInteger(value.capacity) &&
     Array.isArray(value.occupants) &&
     value.occupants.every(isString) &&
-    isNonNegativeInteger(value.dwell_ticks_remaining)
+    isNonNegativeInteger(value.dwell_ticks_remaining) &&
+    isWorldCoordDto(value.world_coord) &&
+    isDirectionDto(value.direction) &&
+    isString(value.sprite_key)
   );
 }
 
@@ -191,15 +242,15 @@ function isServerErrorDto(value: Record<string, unknown>): value is ServerErrorD
   );
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isString(value: unknown): value is string {
+export function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
 
-function isNumber(value: unknown): value is number {
+export function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
@@ -209,4 +260,14 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isFiniteProgress(value: unknown): value is number {
   return isNumber(value) && value >= 0 && value <= 1;
+}
+
+const DIRECTIONS: ReadonlySet<DirectionDto> = new Set(['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']);
+
+export function isDirectionDto(value: unknown): value is DirectionDto {
+  return typeof value === 'string' && DIRECTIONS.has(value as DirectionDto);
+}
+
+export function isWorldCoordDto(value: unknown): value is WorldCoordDto {
+  return isObject(value) && isNumber(value.x) && isNumber(value.y);
 }

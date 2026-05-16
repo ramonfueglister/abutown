@@ -19,6 +19,9 @@ const snapshot: MobilitySnapshotDto = {
         progress: 0.5,
       },
       plan_cursor: 0,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'pedestrian:0',
     },
   ],
   vehicles: [
@@ -30,6 +33,9 @@ const snapshot: MobilitySnapshotDto = {
       capacity: 4,
       occupants: [],
       dwell_ticks_remaining: 1,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'tram:0',
     },
   ],
   stops: [

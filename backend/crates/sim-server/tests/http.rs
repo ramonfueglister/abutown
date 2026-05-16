@@ -276,6 +276,35 @@ async fn mobility_snapshot_is_available() {
 }
 
 #[tokio::test]
+async fn road_vehicles_endpoint_returns_seeded_snapshot() {
+    let app = build_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/road-vehicles")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["protocol_version"], 1);
+    assert_eq!(json["world_id"], "abutown-main");
+    let vehicles = json["vehicles"].as_array().expect("vehicles array");
+    assert!(
+        vehicles.len() >= 80,
+        "seed must populate at least 80 vehicles"
+    );
+    assert!(vehicles[0]["sprite_key"].is_string());
+    assert!(vehicles[0]["direction"].is_string());
+    assert!(vehicles[0]["world_coord"]["x"].is_number());
+}
+
+#[tokio::test]
 async fn command_sets_tile_kind_and_returns_event() {
     let app = build_app();
     let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
@@ -481,6 +510,7 @@ async fn postgres_world_state_survives_runtime_restart() {
     use sim_core::ids::ChunkCoord;
     use sim_server::postgres_events::PostgresWorldEventStore;
     use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
+    use sim_server::postgres_road_vehicles::PostgresRoadVehicleSnapshotStore;
     use sim_server::postgres_snapshots::PostgresChunkSnapshotStore;
 
     let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
@@ -514,10 +544,14 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store");
+        let road_vehicle_snapshot_store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres road vehicle snapshot store");
         let mut runtime = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(road_vehicle_snapshot_store),
         )
         .await
         .expect("hydrate first runtime");
@@ -559,10 +593,14 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store (restart)");
+        let road_vehicle_snapshot_store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres road vehicle snapshot store (restart)");
         let runtime = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(road_vehicle_snapshot_store),
         )
         .await
         .expect("hydrate restarted runtime");
@@ -714,6 +752,69 @@ async fn postgres_mobility_state_survives_runtime_restart() {
     assert_eq!(restored, persisted_world);
 
     let _ = sqlx::query("DELETE FROM mobility_snapshots WHERE world_id = $1")
+        .bind(&world_id)
+        .execute(store.pool_for_test())
+        .await;
+}
+
+#[tokio::test]
+async fn postgres_road_vehicle_state_survives_runtime_restart() {
+    use sim_core::events::InMemoryWorldEventStore;
+    use sim_core::persistence::{
+        InMemoryChunkSnapshotStore, InMemoryMobilitySnapshotStore, RoadVehicleSnapshotStore,
+    };
+    use sim_core::road_vehicles::seed;
+    use sim_server::postgres_road_vehicles::PostgresRoadVehicleSnapshotStore;
+    use sim_server::runtime::SimulationRuntime;
+
+    let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
+        eprintln!(
+            "skipping postgres_road_vehicle_state_survives_runtime_restart; \
+             ABUTOWN_TEST_DATABASE_URL not set"
+        );
+        return;
+    };
+
+    let world_id = format!("test:road_vehicle:{}", uuid::Uuid::now_v7());
+
+    let persisted_tick;
+    let persisted_world;
+    {
+        let road_store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+            .await
+            .expect("connect road vehicle store");
+        let mut runtime = SimulationRuntime::new_with_full_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(road_store),
+        );
+        runtime.override_world_id_for_test(&world_id);
+        runtime.set_road_vehicle_world_for_test(seed::initial_road_vehicles());
+
+        for _ in 0..3 {
+            runtime.next_server_messages();
+        }
+        let cloned = runtime.road_vehicle_world_clone_for_test();
+        persisted_tick = cloned.tick();
+        persisted_world = cloned;
+        runtime
+            .persist_road_vehicle_snapshot()
+            .await
+            .expect("persist");
+    }
+
+    let store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+        .await
+        .expect("reconnect");
+    let (tick, restored) = RoadVehicleSnapshotStore::read(&store, &world_id)
+        .await
+        .expect("read")
+        .expect("snapshot present");
+    assert_eq!(tick, persisted_tick);
+    assert_eq!(restored, persisted_world);
+
+    let _ = sqlx::query("DELETE FROM road_vehicle_snapshots WHERE world_id = $1")
         .bind(&world_id)
         .execute(store.pool_for_test())
         .await;

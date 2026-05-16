@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use abutown_protocol::{
     ChunkSnapshotDto, ClientCommandDto, CommandResponseDto, HealthResponse, MobilitySnapshotDto,
-    ServerMessageDto, WorldSummaryDto,
+    RoadVehicleSnapshotDto, ServerMessageDto, WorldSummaryDto,
 };
 use axum::{
     Json, Router,
@@ -26,6 +26,7 @@ use crate::{
     config::ServerConfig,
     postgres_events::PostgresWorldEventStore,
     postgres_mobility::PostgresMobilitySnapshotStore,
+    postgres_road_vehicles::PostgresRoadVehicleSnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
 };
@@ -126,6 +127,8 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     .await?;
     let mobility_snapshot_store =
         PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
+    let road_vehicle_snapshot_store =
+        PostgresRoadVehicleSnapshotStore::connect(&config.database_url).await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
@@ -133,6 +136,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         Box::new(event_store),
         Box::new(snapshot_store),
         Box::new(mobility_snapshot_store),
+        Box::new(road_vehicle_snapshot_store),
     )
     .await?;
 
@@ -166,6 +170,7 @@ pub fn build_app_with_runtime_and_card_hands(
         .route("/chunks/{x}/{y}", get(chunk))
         .route("/commands", post(command))
         .route("/mobility", get(mobility))
+        .route("/road-vehicles", get(road_vehicles))
         .route("/ws", get(websocket))
         .with_state(state)
         .layer(CorsLayer::permissive())
@@ -187,6 +192,12 @@ async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
     let runtime = state.runtime();
     let runtime = runtime.lock().await;
     Json(runtime.mobility_snapshot())
+}
+
+async fn road_vehicles(State(state): State<AppState>) -> Json<RoadVehicleSnapshotDto> {
+    let runtime = state.runtime();
+    let runtime = runtime.lock().await;
+    Json(runtime.road_vehicle_snapshot_dto())
 }
 
 async fn cards() -> Json<Vec<crate::card_hand::CardDefinition>> {
@@ -314,6 +325,9 @@ async fn persist_snapshots_once(
     let written = runtime.persist_chunk_snapshots().await?;
     if let Err(error) = runtime.persist_mobility_snapshot().await {
         tracing::warn!(%error, "failed to persist mobility snapshot");
+    }
+    if let Err(error) = runtime.persist_road_vehicle_snapshot().await {
+        tracing::warn!(%error, "failed to persist road vehicle snapshot");
     }
     Ok(written)
 }
