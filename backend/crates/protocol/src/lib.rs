@@ -134,7 +134,6 @@ pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
     MobilityDelta(MobilityDeltaDto),
-    RoadVehicleDelta(RoadVehicleDeltaDto),
     WorldEvent { event: WorldEventDto },
     Error(ServerErrorDto),
 }
@@ -251,30 +250,6 @@ pub struct VehicleMobilityDto {
     pub world_coord: WorldCoordDto,
     pub direction: DirectionDto,
     pub sprite_key: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RoadVehicleDto {
-    pub id: String,
-    pub world_coord: WorldCoordDto,
-    pub direction: DirectionDto,
-    pub sprite_key: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RoadVehicleSnapshotDto {
-    pub protocol_version: u16,
-    pub world_id: WorldId,
-    pub tick: u64,
-    pub vehicles: Vec<RoadVehicleDto>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RoadVehicleDeltaDto {
-    pub protocol_version: u16,
-    pub world_id: WorldId,
-    pub tick: u64,
-    pub changed: Vec<RoadVehicleDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -568,21 +543,6 @@ mod tests {
     }
 
     #[test]
-    fn road_vehicle_dto_serializes_full_shape() {
-        let dto = RoadVehicleDto {
-            id: "road_vehicle:seed:0".to_string(),
-            world_coord: WorldCoordDto { x: 5.0, y: 6.0 },
-            direction: DirectionDto::N,
-            sprite_key: "vehicle:0".to_string(),
-        };
-        let json = serde_json::to_value(&dto).unwrap();
-        assert_eq!(json["id"], "road_vehicle:seed:0");
-        assert_eq!(json["world_coord"]["y"], 6.0);
-        assert_eq!(json["direction"], "n");
-        assert_eq!(json["sprite_key"], "vehicle:0");
-    }
-
-    #[test]
     fn world_summary_dto_serializes_tick_period_ms() {
         let dto = WorldSummaryDto {
             protocol_version: PROTOCOL_VERSION,
@@ -619,22 +579,4 @@ mod tests {
         assert_eq!(back.kind, VehicleKindDto::Car);
     }
 
-    #[test]
-    fn road_vehicle_delta_serializes_with_type_tag() {
-        let delta = ServerMessageDto::RoadVehicleDelta(RoadVehicleDeltaDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 4,
-            changed: vec![RoadVehicleDto {
-                id: "road_vehicle:seed:0".to_string(),
-                world_coord: WorldCoordDto { x: 5.0, y: 6.0 },
-                direction: DirectionDto::N,
-                sprite_key: "vehicle:0".to_string(),
-            }],
-        });
-        let json = serde_json::to_value(&delta).unwrap();
-        assert_eq!(json["type"], "road_vehicle_delta");
-        assert_eq!(json["tick"], 4);
-        assert_eq!(json["changed"][0]["id"], "road_vehicle:seed:0");
-    }
 }

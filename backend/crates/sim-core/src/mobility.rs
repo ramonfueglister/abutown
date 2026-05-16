@@ -1484,11 +1484,8 @@ mod tests {
         };
         let dto = build_mobility_delta_dto(&world_id, world.tick(), &world, &delta_input);
         for agent in &dto.changed_agents {
-            match &agent.state {
-                abutown_protocol::AgentMobilityStateDto::InVehicle { .. } => {
-                    panic!("in_vehicle agent leaked into delta: {}", agent.id.0);
-                }
-                _ => {}
+            if let abutown_protocol::AgentMobilityStateDto::InVehicle { .. } = &agent.state {
+                panic!("in_vehicle agent leaked into delta: {}", agent.id.0);
             }
         }
     }

@@ -6,6 +6,5 @@ pub mod ids;
 pub mod mobility;
 pub mod mobility_geometry;
 pub mod persistence;
-pub mod road_vehicles;
 pub mod scheduler;
 pub mod tile;

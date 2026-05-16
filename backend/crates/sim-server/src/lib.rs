@@ -5,6 +5,5 @@ pub mod commands;
 pub mod config;
 pub mod postgres_events;
 pub mod postgres_mobility;
-pub mod postgres_road_vehicles;
 pub mod postgres_snapshots;
 pub mod runtime;

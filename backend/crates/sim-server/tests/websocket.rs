@@ -52,12 +52,6 @@ async fn websocket_sends_hello_and_tile_pulse() {
         ServerMessageDto::MobilityDelta(_)
     ));
 
-    let road_after_mobility = read_server_message(&mut stream).await;
-    assert!(matches!(
-        road_after_mobility,
-        ServerMessageDto::RoadVehicleDelta(_)
-    ));
-
     // Next tick arrives within one tick window.
     let next_pulse = tokio::time::timeout(
         Duration::from_millis(250),
@@ -256,7 +250,7 @@ async fn websocket_does_not_broadcast_failed_command_append() {
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
-    // Drain any background messages (tile pulses, mobility/road-vehicle deltas) for one tick
+    // Drain any background messages (tile pulses, mobility deltas) for one tick
     // and assert that none of them are a WorldEvent — that would indicate the rejected
     // command was broadcast despite the store failure.
     let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(250);
