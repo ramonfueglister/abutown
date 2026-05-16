@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn world_coord_dto_round_trips() {
         let coord = WorldCoordDto { x: 12.5, y: -3.25 };
-        let json = serde_json::to_value(&coord).unwrap();
+        let json = serde_json::to_value(coord).unwrap();
         assert_eq!(json["x"], 12.5);
         assert_eq!(json["y"], -3.25);
         let back: WorldCoordDto = serde_json::from_value(json).unwrap();
@@ -525,8 +525,8 @@ mod tests {
 
     #[test]
     fn direction_dto_serializes_as_compass_string() {
-        assert_eq!(serde_json::to_value(&DirectionDto::N).unwrap(), serde_json::json!("n"));
-        assert_eq!(serde_json::to_value(&DirectionDto::Sw).unwrap(), serde_json::json!("sw"));
+        assert_eq!(serde_json::to_value(DirectionDto::N).unwrap(), serde_json::json!("n"));
+        assert_eq!(serde_json::to_value(DirectionDto::Sw).unwrap(), serde_json::json!("sw"));
         let parsed: DirectionDto = serde_json::from_value(serde_json::json!("ne")).unwrap();
         assert_eq!(parsed, DirectionDto::Ne);
     }
