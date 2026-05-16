@@ -13,7 +13,6 @@ import {
 } from './city/buildingFrontage';
 import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
 import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
-import { buildPedestrianCorridors } from './city/pedestrianCorridors';
 import { buildZurichPlacement } from './city/zurichPlacement';
 import { buildZurichTransport } from './city/zurichTransport';
 import { validateZurichCity } from './city/zurichValidation';
@@ -33,7 +32,6 @@ import {
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
   vehicleFrameRect,
-  vehicleSpriteForTrafficIndex,
   type SimutransVehicleDirection,
   type VehicleSprite,
 } from './render/vehicleSprites';
@@ -55,20 +53,11 @@ import {
 } from './render/riverbankFrames';
 import { compareDrawableOrder } from './render/drawOrder';
 import {
-  buildPedestrianAgents,
-  findNearestPedestrianAgent,
-  pedestrianAgentId,
-  type LocalPedestrianAgent,
-} from './render/pedestrianAgents';
-import { buildPedestrianAgentInspector, type PedestrianAgentInspector } from './render/pedestrianAgentInspector';
-import {
-  buildLocalRoadVehicles,
-  findNearestLocalRoadVehicle,
-  localRoadVehicleId,
-  type LocalRoadVehicle,
-} from './render/localRoadVehicles';
-import { buildRoadVehicleInspector, type RoadVehicleInspector } from './render/roadVehicleInspector';
-import { buildPedestrianLoop, pedestrianWalkingSpeed } from './render/pedestrianMotion';
+  carsFromMobilityState,
+  pedestriansFromMobilityState,
+  type BackendCar,
+  type BackendPedestrian,
+} from './render/backendMobilityDrawables';
 import {
   buildNorthboundTrainPath,
   trainFadeAlpha,
@@ -102,21 +91,6 @@ type RailStation = {
   frame: number;
 };
 
-type Car = {
-  path: Coord[];
-  offset: number;
-  speed: number;
-  sprite: VehicleSprite;
-};
-
-type Pedestrian = {
-  path: Coord[];
-  offset: number;
-  speed: number;
-  laneOffset: number;
-  sprite: SimutransPedestrianSprite;
-};
-
 type Train = {
   path: Coord[];
   offset: number;
@@ -140,8 +114,8 @@ type StaticDrawable =
   | { type: 'tree'; coord: Coord }
   | { type: 'building'; coord: Coord; building: Building };
 
-type CarDrawable = { type: 'car'; coord: Coord; car: Car; vehicleId: string };
-type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: Pedestrian; agentId: string };
+type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: string };
+type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
 type TrainDrawable = { type: 'train'; coord: Coord; train: Train };
 type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
 
@@ -238,17 +212,10 @@ const railStations = buildRailStations();
 const buildings = zurichPlacement.buildings.map(toRuntimeBuilding);
 const trees = zurichPlacement.trees;
 const details = zurichPlacement.details;
-const pedestrianDemandTiles = new Set<string>([
-  ...buildings.map((building) => key(building.coord)),
-  ...details.map((detail) => key(detail.coord)),
-]);
 const staticDrawables = buildStaticDrawables();
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: SimutransPedestrianSprite[] = [];
-let cars: Car[] = [];
-let pedestrians: Pedestrian[] = [];
 let trains: Train[] = buildTrains();
-let pedestrianCorridorCount = 0;
 let selectedAgentId: string | null = null;
 let selectedVehicleId: string | null = null;
 let previousTime = performance.now();
@@ -285,8 +252,6 @@ async function boot(): Promise<void> {
   await Promise.all(imageEntries.map(async ([key, path]) => images.set(key, await loadCleanImage(path))));
   vehicleSprites = usableVehicleSprites();
   pedestrianSprites = candidateSimutransPedestrianSprites();
-  cars = buildCars(vehicleSprites);
-  pedestrians = buildPedestrians(pedestrianSprites);
   resize();
   window.addEventListener('resize', resize);
   attachCamera();
@@ -389,8 +354,6 @@ function attachCamera(): void {
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - previousTime) / 1000);
   previousTime = now;
-  for (const car of cars) car.offset = (car.offset + car.speed * dt) % car.path.length;
-  for (const pedestrian of pedestrians) pedestrian.offset = (pedestrian.offset + pedestrian.speed * dt) % pedestrian.path.length;
   for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * dt, train.path);
   if (!camera.dragging) constrainCamera(false);
   dampCamera(camera, dt, 18);
@@ -409,8 +372,8 @@ function render(): void {
 
   drawScene({ x: 0, y: 0 });
   ctx.restore();
-  drawAgentInspectorPanel(buildPedestrianAgentInspector(selectedPedestrianAgent()));
-  drawRoadVehicleInspectorPanel(buildRoadVehicleInspector(selectedRoadVehicle()));
+  drawAgentInspectorPanel(buildBackendPedestrianInspector(selectedBackendPedestrian()));
+  drawRoadVehicleInspectorPanel(buildBackendCarInspector(selectedBackendCar()));
 }
 
 function drawScene(offset: Coord): void {
@@ -430,12 +393,14 @@ function drawScene(offset: Coord): void {
   drawEdgeConnections(visibleGrid);
 
   const visibleStaticDrawables = staticDrawables.filter((item) => isCoordVisible(item.coord, visibleGrid));
+  const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
+  const cars: BackendCar[] = carsFromMobilityState(mobilityState, vehicleSprites);
   const carDrawables = cars
-    .map((car, index) => ({ type: 'car' as const, coord: carPosition(car), car, vehicleId: localRoadVehicleId(index) }))
+    .map((car) => ({ type: 'car' as const, coord: car.path[0], car, vehicleId: car.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort(compareDrawables);
   const pedestrianDrawables = pedestrians
-    .map((pedestrian, index) => ({ type: 'pedestrian' as const, coord: pedestrianPosition(pedestrian), pedestrian, agentId: pedestrianAgentId(index) }))
+    .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort(compareDrawables);
   const trainDrawables = trains
@@ -536,23 +501,23 @@ function drawTree(coord: Coord): void {
   drawAssetRole('vegetation.tree', coord, { offsetX: jitterX, offsetY: jitterY + 8, scale });
 }
 
-function drawCar(car: Car, selected: boolean): void {
-  const image = images.get(car.sprite.path);
+function drawCar(car: BackendCar, selected: boolean): void {
+  const sprite = car.sprite as VehicleSprite;
+  const image = images.get(sprite.path);
   if (!image) return;
-  const base = Math.floor(car.offset);
-  const current = car.path[base];
-  const next = car.path[(base + 1) % car.path.length];
-  const pos = carPosition(car);
+  const current = car.path[0];
+  const next = car.path[1] ?? current;
+  const pos = current;
   const point = iso(pos);
   const currentPoint = iso(current);
   const nextPoint = iso(next);
   const lane = screenRightLaneOffset(currentPoint, nextPoint, 5.5);
   const frame = vehicleFrameForGridDelta({ x: next.x - current.x, y: next.y - current.y });
-  const rect = vehicleFrameRect(car.sprite, frame);
+  const rect = vehicleFrameRect(sprite, frame);
   if (rect.x >= image.width || rect.y >= image.height) return;
   const sourceWidth = Math.min(rect.width, image.width - rect.x);
   const sourceHeight = Math.min(rect.height, image.height - rect.y);
-  const scale = car.sprite.scale;
+  const scale = sprite.scale;
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
   ctx.save();
@@ -664,21 +629,21 @@ function detailRole(detail: ZurichDetail): Extract<AssetRole, 'detail.park' | 'd
   return 'detail.industry';
 }
 
-function drawPedestrian(pedestrian: Pedestrian, selected: boolean): void {
-  const image = images.get(SIMUTRANS_PEDESTRIAN_ASSET_PATHS[pedestrian.sprite.sheet]);
+function drawPedestrian(pedestrian: BackendPedestrian, selected: boolean): void {
+  const sprite = pedestrian.sprite as SimutransPedestrianSprite;
+  const image = images.get(SIMUTRANS_PEDESTRIAN_ASSET_PATHS[sprite.sheet]);
   if (!image) return;
-  const base = Math.floor(pedestrian.offset);
-  const current = pedestrian.path[base];
-  const next = pedestrian.path[(base + 1) % pedestrian.path.length];
-  const pos = pedestrianPosition(pedestrian);
+  const current = pedestrian.path[0];
+  const next = pedestrian.path[1] ?? current;
+  const pos = current;
   const point = iso(pos);
   const currentPoint = iso(current);
   const nextPoint = iso(next);
   const lane = screenRightLaneOffset(currentPoint, nextPoint, 4 + pedestrian.laneOffset);
   const direction = simutransPedestrianFrameForGridDelta({ x: next.x - current.x, y: next.y - current.y });
-  const rect = simutransPedestrianFrameRect(pedestrian.sprite, direction);
-  const visible = visibleSourceBounds(image, pedestrian.sprite, direction, rect);
-  const scale = simutransPedestrianDisplayScale(pedestrian.sprite.scale, camera.scale);
+  const rect = simutransPedestrianFrameRect(sprite, direction);
+  const visible = visibleSourceBounds(image, sprite, direction, rect);
+  const scale = simutransPedestrianDisplayScale(sprite.scale, camera.scale);
   const width = visible.width * scale;
   const height = visible.height * scale;
   ctx.save();
@@ -697,12 +662,47 @@ function drawPedestrian(pedestrian: Pedestrian, selected: boolean): void {
   ctx.restore();
 }
 
-function drawAgentInspectorPanel(inspector: PedestrianAgentInspector | null): void {
+type EntityInspectorRow = { label: string; value: string };
+type EntityInspector = { title: string; rows: EntityInspectorRow[] } | null;
+
+function formatBackendCoord(coord: { x: number; y: number }): string {
+  return `${coord.x.toFixed(1)}, ${coord.y.toFixed(1)}`;
+}
+
+function buildBackendPedestrianInspector(agent: BackendPedestrian | null): EntityInspector {
+  if (!agent) return null;
+  return {
+    title: agent.id,
+    rows: [
+      { label: 'State', value: 'walking' },
+      { label: 'Tile', value: formatBackendCoord(agent.path[0]) },
+      { label: 'Next', value: formatBackendCoord(agent.path[1] ?? agent.path[0]) },
+      { label: 'Direction', value: agent.direction },
+      { label: 'Sprite', value: agent.sprite.sheet },
+    ],
+  };
+}
+
+function buildBackendCarInspector(vehicle: BackendCar | null): EntityInspector {
+  if (!vehicle) return null;
+  return {
+    title: vehicle.id,
+    rows: [
+      { label: 'State', value: 'driving' },
+      { label: 'Tile', value: formatBackendCoord(vehicle.path[0]) },
+      { label: 'Next', value: formatBackendCoord(vehicle.path[1] ?? vehicle.path[0]) },
+      { label: 'Direction', value: vehicle.direction },
+      { label: 'Sprite', value: vehicle.sprite.role },
+    ],
+  };
+}
+
+function drawAgentInspectorPanel(inspector: EntityInspector): void {
   if (!inspector) return;
   drawInspectorPanel(inspector, { x: 12, y: 12, accent: '#f7d76a', stroke: 'rgba(247, 215, 106, 0.8)' });
 }
 
-function drawRoadVehicleInspectorPanel(inspector: RoadVehicleInspector | null): void {
+function drawRoadVehicleInspectorPanel(inspector: EntityInspector): void {
   if (!inspector) return;
   drawInspectorPanel(inspector, { x: 12, y: 128, accent: '#75d7ff', stroke: 'rgba(117, 215, 255, 0.8)' });
 }
@@ -1099,49 +1099,6 @@ function buildTrees(): Coord[] {
   return result;
 }
 
-function buildCars(sprites: VehicleSprite[]): Car[] {
-  if (sprites.length === 0) return [];
-  const baseCorridors = zurichTransport.arterialPaths.filter((path) => path.length >= 2);
-  if (baseCorridors.length === 0) return [];
-  const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]);
-  return Array.from({ length: 156 }, (_, index) => {
-    const path = corridors[index % corridors.length];
-    return {
-      path,
-      offset: (index * 7 + Math.floor(index / corridors.length) * 3) % path.length,
-      speed: 1.15 + (index % 9) * 0.13,
-      sprite: vehicleSpriteForTrafficIndex(sprites, index),
-    };
-  });
-}
-
-function buildPedestrians(sprites: SimutransPedestrianSprite[]): Pedestrian[] {
-  if (sprites.length === 0) return [];
-  const roadCorridors = buildPedestrianCorridors(roads, { minLength: 5, maxCorridors: 260 });
-  const urbanRoadCorridors = roadCorridors.flatMap(urbanPedestrianSegments);
-  const urbanArterials = zurichTransport.arterialPaths.flatMap(urbanPedestrianSegments);
-  const baseCorridors = [
-    ...(urbanRoadCorridors.length > 0 ? urbanRoadCorridors : roadCorridors.slice(0, 72)),
-    ...urbanArterials,
-  ];
-  if (baseCorridors.length === 0) return [];
-  const corridors = baseCorridors.flatMap((path) => [path, [...path].reverse()]).map(buildPedestrianLoop);
-  pedestrianCorridorCount = corridors.length;
-  const totalPathTiles = baseCorridors.reduce((sum, path) => sum + path.length, 0);
-  const pedestrianCount = Math.min(420, Math.max(220, Math.floor(totalPathTiles / 3)));
-  return Array.from({ length: pedestrianCount }, (_, index) => {
-    const path = corridors[index % corridors.length];
-    const sprite = sprites[index % sprites.length];
-    return {
-      path,
-      offset: (index * 11 + Math.floor(index / corridors.length) * 5) % path.length,
-      speed: pedestrianWalkingSpeed(index),
-      laneOffset: ((index % 5) - 2) * 0.45,
-      sprite,
-    };
-  });
-}
-
 function buildTrains(): Train[] {
   const path = buildNorthboundTrainPath(railPaths[0] ?? [], { fadeTiles: TRAIN_FADE_TILES });
   if (path.length === 0) return [];
@@ -1152,31 +1109,6 @@ function buildTrains(): Train[] {
     fadeTiles: TRAIN_FADE_TILES,
     carSpacing: 1.45,
   }];
-}
-
-function urbanPedestrianSegments(path: Coord[]): Coord[][] {
-  const segments: Coord[][] = [];
-  let current: Coord[] = [];
-
-  for (const coord of path) {
-    if (hasPedestrianDemandNearby(coord)) {
-      current.push(coord);
-      continue;
-    }
-    if (current.length >= 3) segments.push(current);
-    current = [];
-  }
-  if (current.length >= 3) segments.push(current);
-  return segments;
-}
-
-function hasPedestrianDemandNearby(coord: Coord): boolean {
-  for (let y = coord.y - 4; y <= coord.y + 4; y += 1) {
-    for (let x = coord.x - 4; x <= coord.x + 4; x += 1) {
-      if (pedestrianDemandTiles.has(key({ x, y }))) return true;
-    }
-  }
-  return false;
 }
 
 function usableVehicleSprites(): VehicleSprite[] {
@@ -1204,55 +1136,46 @@ function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
   return false;
 }
 
-function carPosition(car: Car): Coord {
-  const base = Math.floor(car.offset);
-  const next = (base + 1) % car.path.length;
-  const t = car.offset - base;
-  return {
-    x: lerp(car.path[base].x, car.path[next].x, t),
-    y: lerp(car.path[base].y, car.path[next].y, t),
-  };
-}
-
-function pedestrianPosition(pedestrian: Pedestrian): Coord {
-  const base = Math.floor(pedestrian.offset);
-  const next = (base + 1) % pedestrian.path.length;
-  const t = pedestrian.offset - base;
-  return {
-    x: lerp(pedestrian.path[base].x, pedestrian.path[next].x, t),
-    y: lerp(pedestrian.path[base].y, pedestrian.path[next].y, t),
-  };
-}
-
-function localPedestrianAgents(): LocalPedestrianAgent[] {
-  return buildPedestrianAgents(pedestrians);
-}
-
-function localRoadVehicles(): LocalRoadVehicle[] {
-  return buildLocalRoadVehicles(cars);
-}
-
-function selectedPedestrianAgent(): LocalPedestrianAgent | null {
+function selectedBackendPedestrian(): BackendPedestrian | null {
   if (!selectedAgentId) return null;
-  return localPedestrianAgents().find((agent) => agent.id === selectedAgentId) ?? null;
+  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
+  return pedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
 }
 
-function selectedRoadVehicle(): LocalRoadVehicle | null {
+function selectedBackendCar(): BackendCar | null {
   if (!selectedVehicleId) return null;
-  return localRoadVehicles().find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  const cars = carsFromMobilityState(mobilityState, vehicleSprites);
+  return cars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
 }
 
 function selectMobilityEntityAtScreenPoint(point: Coord): void {
   const worldPoint = screenToWorld(point);
-  const vehicleHit = findNearestLocalRoadVehicle(localRoadVehicles(), worldPoint, iso, Math.max(10, 24 / camera.scale));
+  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
+  const cars = carsFromMobilityState(mobilityState, vehicleSprites);
+  const vehicleHit = findNearestProjectedEntity(cars, worldPoint, Math.max(10, 24 / camera.scale));
   if (vehicleHit) {
     selectedVehicleId = vehicleHit.id;
     selectedAgentId = null;
     return;
   }
-  const agentHit = findNearestPedestrianAgent(localPedestrianAgents(), worldPoint, iso, Math.max(8, 20 / camera.scale));
+  const agentHit = findNearestProjectedEntity(pedestrians, worldPoint, Math.max(8, 20 / camera.scale));
   selectedAgentId = agentHit?.id ?? null;
   selectedVehicleId = null;
+}
+
+function findNearestProjectedEntity<T extends { id: string; path: Coord[] }>(
+  entities: readonly T[],
+  worldPoint: Coord,
+  radius: number,
+): T | null {
+  let nearest: { entity: T; distance: number } | null = null;
+  for (const entity of entities) {
+    const projected = iso(entity.path[0]);
+    const distance = Math.hypot(projected.x - worldPoint.x, projected.y - worldPoint.y);
+    if (distance > radius) continue;
+    if (!nearest || distance < nearest.distance) nearest = { entity, distance };
+  }
+  return nearest?.entity ?? null;
 }
 
 function screenToWorld(point: Coord): Coord {
@@ -1741,14 +1664,10 @@ window.render_game_to_text = () => {
   const diagnostics = cityDiagnostics();
   const detailCounts = detailCountsByCategory();
   const backendMobility = mobilityDiagnostics(mobilityState);
-  const agents = localPedestrianAgents();
-  const serializedAgents = agents.map(serializeLocalAgent);
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
-  const selectedSerializedAgent = selectedAgent ? serializeLocalAgent(selectedAgent) : null;
-  const localVehicles = localRoadVehicles();
-  const serializedVehicles = localVehicles.map(serializeLocalVehicle);
-  const selectedVehicle = localVehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
-  const selectedSerializedVehicle = selectedVehicle ? serializeLocalVehicle(selectedVehicle) : null;
+  const projectedPedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites);
+  const projectedCars = carsFromMobilityState(mobilityState, vehicleSprites);
+  const selectedAgent = projectedPedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
+  const selectedVehicle = projectedCars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
   return JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
@@ -1765,7 +1684,7 @@ window.render_game_to_text = () => {
       bridges: [...roads.values()].filter((road) => road.kind === 'bridge').length,
       buildings: buildings.length,
       trees: trees.length,
-      cars: cars.length,
+      cars: projectedCars.length,
       trains: trains.length,
       train: trains[0]
         ? {
@@ -1776,8 +1695,7 @@ window.render_game_to_text = () => {
             direction: 'northbound',
           }
         : null,
-      pedestrians: pedestrians.length,
-      pedestrianCorridors: pedestrianCorridorCount,
+      pedestrians: projectedPedestrians.length,
       pedestrianSprites: pedestrianSprites.length,
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
       vehicleSprites: vehicleSprites.length,
@@ -1794,25 +1712,12 @@ window.render_game_to_text = () => {
         agents: backendMobility.agents,
         vehicles: backendMobility.vehicles,
         stops: backendMobility.stops,
+        roadVehicles: backendMobility.roadVehicles,
         invalidMessages: backendMobility.invalidMessages,
         lastError: backendMobility.lastError,
-        localAgents: agents.length,
-        localVehicles: localVehicles.length,
       },
-      localAgents: {
-        count: agents.length,
-        selectedId: selectedAgentId,
-        selected: selectedSerializedAgent,
-        agents: serializedAgents,
-      },
-      localVehicles: {
-        count: localVehicles.length,
-        selectedId: selectedVehicleId,
-        selected: selectedSerializedVehicle,
-        vehicles: serializedVehicles,
-      },
-      agentInspector: buildPedestrianAgentInspector(selectedAgent),
-      vehicleInspector: buildRoadVehicleInspector(selectedVehicle),
+      agentInspector: buildBackendPedestrianInspector(selectedAgent),
+      vehicleInspector: buildBackendCarInspector(selectedVehicle),
       railStations: railStations.length,
       railYardTracks: Math.max(0, railPaths.length - 2),
       details: detailCounts,
@@ -1855,35 +1760,11 @@ function detailCountsByCategory(): Record<string, number> {
   return result;
 }
 
-function serializeLocalAgent(agent: LocalPedestrianAgent): LocalPedestrianAgent & { screen: Coord } {
-  const projected = iso(agent.coord);
-  return {
-    ...agent,
-    screen: {
-      x: camera.x + projected.x * camera.scale,
-      y: camera.y + projected.y * camera.scale,
-    },
-  };
-}
-
-function serializeLocalVehicle(vehicle: LocalRoadVehicle): LocalRoadVehicle & { screen: Coord } {
-  const projected = iso(vehicle.coord);
-  return {
-    ...vehicle,
-    screen: {
-      x: camera.x + projected.x * camera.scale,
-      y: camera.y + projected.y * camera.scale,
-    },
-  };
-}
-
 function nonPak128AssetPaths(): string[] {
   return [...images.keys()].filter((path) => !path.startsWith('/simutrans-assets/pak128/')).sort();
 }
 
 window.advanceTime = (ms: number) => {
-  for (const car of cars) car.offset = (car.offset + car.speed * (ms / 1000)) % car.path.length;
-  for (const pedestrian of pedestrians) pedestrian.offset = (pedestrian.offset + pedestrian.speed * (ms / 1000)) % pedestrian.path.length;
   for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * (ms / 1000), train.path);
   render();
 };
