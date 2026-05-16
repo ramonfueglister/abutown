@@ -480,6 +480,7 @@ async fn postgres_world_state_survives_runtime_restart() {
     use abutown_protocol::{ChunkCoordDto, ClientCommandDto, SetTileKindCommandDto};
     use sim_core::ids::ChunkCoord;
     use sim_server::postgres_events::PostgresWorldEventStore;
+    use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
     use sim_server::postgres_snapshots::PostgresChunkSnapshotStore;
 
     let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
@@ -510,10 +511,16 @@ async fn postgres_world_state_survives_runtime_restart() {
         )
         .await
         .expect("connect postgres snapshot store");
-        let mut runtime =
-            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
-                .await
-                .expect("hydrate first runtime");
+        let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres mobility snapshot store");
+        let mut runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+            Box::new(mobility_snapshot_store),
+        )
+        .await
+        .expect("hydrate first runtime");
 
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
@@ -549,10 +556,16 @@ async fn postgres_world_state_survives_runtime_restart() {
         )
         .await
         .expect("connect postgres snapshot store (restart)");
-        let runtime =
-            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
-                .await
-                .expect("hydrate restarted runtime");
+        let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres mobility snapshot store (restart)");
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+            Box::new(mobility_snapshot_store),
+        )
+        .await
+        .expect("hydrate restarted runtime");
 
         let restored = runtime
             .chunk_snapshot(ChunkCoord { x: 4, y: 4 })

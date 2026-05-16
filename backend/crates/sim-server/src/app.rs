@@ -25,6 +25,7 @@ use crate::{
     },
     config::ServerConfig,
     postgres_events::PostgresWorldEventStore,
+    postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
 };
@@ -123,12 +124,17 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         SimulationRuntime::default_world_id(),
     )
     .await?;
+    let mobility_snapshot_store =
+        PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
-    let runtime =
-        SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
-            .await?;
+    let runtime = SimulationRuntime::hydrate_from_stores(
+        Box::new(event_store),
+        Box::new(snapshot_store),
+        Box::new(mobility_snapshot_store),
+    )
+    .await?;
 
     Ok(build_app_with_runtime_and_card_hands(
         runtime, card_hands, auth,

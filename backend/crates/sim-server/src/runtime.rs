@@ -29,6 +29,8 @@ pub enum HydrationError {
     Apply(EventApplyError),
     #[error("chunk error during seed: {0}")]
     Chunk(ChunkError),
+    #[error("mobility store error: {0}")]
+    Mobility(sim_core::persistence::MobilitySnapshotStoreError),
 }
 
 use crate::{
@@ -140,8 +142,17 @@ impl SimulationRuntime {
     pub async fn hydrate_from_stores(
         event_store: Box<dyn WorldEventStore + Send>,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
     ) -> Result<Self, HydrationError> {
         let world_id = Self::default_world_id();
+        let mobility = match mobility_snapshot_store
+            .read(&world_id.0)
+            .await
+            .map_err(HydrationError::Mobility)?
+        {
+            Some((_tick, world)) => world,
+            None => sim_core::mobility::seed::initial_world(),
+        };
         let mut registry = ChunkRegistry::new(CHUNK_SIZE);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
@@ -218,9 +229,9 @@ impl SimulationRuntime {
         Ok(Self {
             world_id,
             registry,
-            mobility: MobilityWorld::default(),
+            mobility,
             snapshot_store,
-            mobility_snapshot_store: Box::new(InMemoryMobilitySnapshotStore::default()),
+            mobility_snapshot_store,
             event_store,
             event_count,
             tick: global_tick,
@@ -491,6 +502,19 @@ impl SimulationRuntime {
 impl Default for SimulationRuntime {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+impl SimulationRuntime {
+    pub fn mobility_tick_for_test(&self) -> u64 {
+        self.mobility.tick()
+    }
+    pub fn mobility_agent_count_for_test(&self) -> usize {
+        self.mobility.snapshot().agents.len()
+    }
+    pub fn mobility_vehicle_count_for_test(&self) -> usize {
+        self.mobility.snapshot().vehicles.len()
     }
 }
 
@@ -805,10 +829,13 @@ mod tests {
             .await
             .unwrap();
 
-        let runtime =
-            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
-                .await
-                .unwrap();
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+        )
+        .await
+        .unwrap();
 
         let restored = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
         assert_eq!(restored.chunk_version, 2);
@@ -827,6 +854,7 @@ mod tests {
         let runtime = SimulationRuntime::hydrate_from_stores(
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
         )
         .await
         .unwrap();
@@ -1029,5 +1057,45 @@ mod tests {
             "race handler must return the planted winner event"
         );
         assert_eq!(result.response.event, winner);
+    }
+
+    #[tokio::test]
+    async fn hydrate_seeds_fresh_mobility_when_store_is_empty() {
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        assert_eq!(runtime.mobility_agent_count_for_test(), 20);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 4);
+    }
+
+    #[tokio::test]
+    async fn hydrate_restores_mobility_from_store_when_present() {
+        use sim_core::mobility::seed;
+
+        let mut authored = seed::initial_world();
+        // Advance one tick so the persisted state differs from a fresh seed.
+        let _ = authored.tick_mobility();
+        let persisted_tick = authored.tick();
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(&mut mobility_store, "abutown-main", persisted_tick, &authored)
+            .await
+            .unwrap();
+
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), persisted_tick);
     }
 }
