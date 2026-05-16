@@ -89,6 +89,7 @@ export function applyMobilityDelta(
   now = Date.now(),
 ): MobilityOverlayState {
   const agents = new Map(state.agents);
+  for (const id of delta.left_agents ?? []) agents.delete(id);
   for (const agent of delta.changed_agents) {
     const previous = agents.get(agent.id);
     agents.set(agent.id, {
@@ -98,6 +99,7 @@ export function applyMobilityDelta(
     });
   }
   const vehicles = new Map(state.vehicles);
+  for (const id of delta.left_vehicles ?? []) vehicles.delete(id);
   for (const vehicle of delta.changed_vehicles) {
     const previous = vehicles.get(vehicle.id);
     vehicles.set(vehicle.id, {

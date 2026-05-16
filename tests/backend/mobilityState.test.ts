@@ -8,6 +8,7 @@ import {
   mobilityDiagnostics,
 } from '../../src/backend/mobilityState';
 import type { AgentMobilityDto, MobilityDeltaDto, MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
+import type { MobilityDeltaServerMessage } from '../../src/backend/mobilityProtocol';
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
@@ -110,6 +111,55 @@ describe('mobility state reducer', () => {
     const next = applyServerMessage(state, { type: 'mobility_delta', tick: 3 }, 200);
 
     expect(mobilityDiagnostics(next)).toMatchObject({ agents: 1, invalidMessages: 1 });
+  });
+
+  it('applyMobilityDelta drops entities listed in left_agents and left_vehicles', () => {
+    const state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'w',
+        tick: 0,
+        agents: [{
+          id: 'agent:walk:1',
+          state: { type: 'walking', link_id: 'l', progress: 0 },
+          plan_cursor: 0,
+          world_coord: { x: 0, y: 0 },
+          direction: 'e',
+          sprite_key: 'p:0',
+        }],
+        vehicles: [{
+          id: 'vehicle:car:0:0',
+          kind: 'car',
+          route_id: 'r',
+          link_index: 0,
+          progress: 0,
+          capacity: 1,
+          occupants: [],
+          dwell_ticks_remaining: 0,
+          world_coord: { x: 0, y: 0 },
+          direction: 'e',
+          sprite_key: 'c:0',
+        }],
+        stops: [],
+      },
+      0,
+    );
+    expect(state.agents.size).toBe(1);
+    expect(state.vehicles.size).toBe(1);
+
+    const after = applyMobilityDelta(state, {
+      type: 'mobility_delta',
+      protocol_version: 1,
+      world_id: 'w',
+      tick: 1,
+      changed_agents: [],
+      changed_vehicles: [],
+      left_agents: ['agent:walk:1'],
+      left_vehicles: ['vehicle:car:0:0'],
+    } as MobilityDeltaServerMessage, 100);
+    expect(after.agents.size).toBe(0);
+    expect(after.vehicles.size).toBe(0);
   });
 
 });

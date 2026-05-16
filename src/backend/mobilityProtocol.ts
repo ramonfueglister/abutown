@@ -58,6 +58,8 @@ export type MobilityDeltaDto = {
   tick: number;
   changed_agents: AgentMobilityDto[];
   changed_vehicles: VehicleMobilityDto[];
+  left_agents?: string[];
+  left_vehicles?: string[];
 };
 
 export type ServerHelloDto = {
