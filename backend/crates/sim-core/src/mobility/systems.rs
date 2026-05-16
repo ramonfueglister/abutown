@@ -3,6 +3,15 @@ use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
+use crate::mobility_geometry::LinkGeometry;
+
+fn coord_at_progress(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
+    LinkGeometry { points: points.to_vec() }.world_coord_at_progress(progress)
+}
+
+fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::DirectionDto {
+    LinkGeometry { points: points.to_vec() }.direction_at_progress(progress)
+}
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum MobilitySet {
@@ -311,9 +320,84 @@ pub fn boarding_alighting_system(
     }
 }
 
-pub fn compute_world_coord_system() {}
+#[allow(clippy::type_complexity)]
+pub fn compute_world_coord_system(
+    mut agents: Query<
+        (&AgentMobilityStateComponent, &mut Position),
+        (With<AgentMarker>, Without<VehicleMarker>),
+    >,
+    mut vehicles: Query<
+        (&RoutePosition, &mut Position),
+        (With<VehicleMarker>, Without<AgentMarker>),
+    >,
+    routes: Res<Routes>,
+    stops: Res<Stops>,
+    link_polylines: Res<LinkPolylines>,
+) {
+    // Vehicles first.
+    for (rp, mut pos) in vehicles.iter_mut() {
+        let Some(route) = routes.0.get(&rp.route_id) else { continue; };
+        let Some(link_id) = route.links.get(rp.link_index) else { continue; };
+        let Some(points) = link_polylines.0.get(link_id) else { continue; };
+        let (x, y) = coord_at_progress(points, rp.progress);
+        pos.x = x;
+        pos.y = y;
+    }
 
-pub fn compute_direction_system() {}
+    // Agents.
+    for (state, mut pos) in agents.iter_mut() {
+        let coord = match &state.0 {
+            AgentMobilityState::Walking { link_id, progress } => {
+                link_polylines.0.get(link_id).map(|p| coord_at_progress(p, *progress))
+            }
+            AgentMobilityState::WaitingAtStop { stop_id }
+            | AgentMobilityState::Boarding { stop_id, .. }
+            | AgentMobilityState::Alighting { stop_id, .. } => {
+                stops.0.get(stop_id).and_then(|s| {
+                    let route = routes.0.get(&s.route_id)?;
+                    let link_id = route.links.get(s.link_index)?;
+                    let points = link_polylines.0.get(link_id)?;
+                    Some(coord_at_progress(points, s.progress))
+                })
+            }
+            // InVehicle and AtActivity: leave Position unchanged.
+            _ => None,
+        };
+        if let Some((x, y)) = coord {
+            pos.x = x;
+            pos.y = y;
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+pub fn compute_direction_system(
+    mut agents: Query<
+        (&AgentMobilityStateComponent, &mut Direction),
+        (With<AgentMarker>, Without<VehicleMarker>),
+    >,
+    mut vehicles: Query<
+        (&RoutePosition, &mut Direction),
+        (With<VehicleMarker>, Without<AgentMarker>),
+    >,
+    routes: Res<Routes>,
+    link_polylines: Res<LinkPolylines>,
+) {
+    for (rp, mut dir) in vehicles.iter_mut() {
+        let Some(route) = routes.0.get(&rp.route_id) else { continue; };
+        let Some(link_id) = route.links.get(rp.link_index) else { continue; };
+        let Some(points) = link_polylines.0.get(link_id) else { continue; };
+        dir.0 = dir_at_progress(points, rp.progress);
+    }
+    for (state, mut dir) in agents.iter_mut() {
+        if let AgentMobilityState::Walking { link_id, progress } = &state.0
+            && let Some(points) = link_polylines.0.get(link_id)
+        {
+            dir.0 = dir_at_progress(points, *progress);
+        }
+        // Other states: keep current Direction unchanged.
+    }
+}
 
 pub fn tick_increment_system(mut tick: ResMut<Tick>) {
     tick.0 += 1;
@@ -736,5 +820,113 @@ mod tests {
         let pos = world.get::<RoutePosition>(entity).unwrap();
         assert!((pos.progress - 0.5).abs() < 1e-6);
         assert!(world.resource::<DirtyVehicles>().0.contains(&entity));
+    }
+
+    #[test]
+    fn compute_world_coord_system_writes_position_for_walking_agent() {
+        use crate::ids::{AgentId, LinkId};
+        use crate::mobility::records::AgentMobilityState;
+
+        let mut world = World::new();
+        let mut polylines = LinkPolylines::default();
+        polylines.0.insert(LinkId("l:1".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
+        world.insert_resource(polylines);
+        world.insert_resource(Routes::default());
+        world.insert_resource(Stops::default());
+
+        let entity = world.spawn((
+            AgentMarker,
+            StableAgentId(AgentId("a:1".into())),
+            AgentMobilityStateComponent(AgentMobilityState::Walking {
+                link_id: LinkId("l:1".into()),
+                progress: 0.5,
+            }),
+            WalkPlan { stages: vec![], cursor: 0 },
+            WalkSpeed(0.0),
+            Position { x: 99.0, y: 99.0 },
+            Direction(abutown_protocol::DirectionDto::S),
+            SpriteKey(String::new()),
+        )).id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(compute_world_coord_system);
+        schedule.run(&mut world);
+
+        let pos = world.get::<Position>(entity).unwrap();
+        assert!((pos.x - 5.0).abs() < 1e-3, "x at midpoint of 0..10 = 5.0, got {}", pos.x);
+        assert!(pos.y.abs() < 1e-3);
+    }
+
+    #[test]
+    fn compute_direction_system_writes_direction_for_walking_agent() {
+        use crate::ids::{AgentId, LinkId};
+        use crate::mobility::records::AgentMobilityState;
+
+        let mut world = World::new();
+        let mut polylines = LinkPolylines::default();
+        polylines.0.insert(LinkId("l:1".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
+        world.insert_resource(polylines);
+        world.insert_resource(Routes::default());
+
+        let entity = world.spawn((
+            AgentMarker,
+            StableAgentId(AgentId("a:1".into())),
+            AgentMobilityStateComponent(AgentMobilityState::Walking {
+                link_id: LinkId("l:1".into()),
+                progress: 0.5,
+            }),
+            WalkPlan { stages: vec![], cursor: 0 },
+            WalkSpeed(0.0),
+            Position { x: 0.0, y: 0.0 },
+            Direction(abutown_protocol::DirectionDto::S),
+            SpriteKey(String::new()),
+        )).id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(compute_direction_system);
+        schedule.run(&mut world);
+
+        let dir = world.get::<Direction>(entity).unwrap();
+        // East-pointing polyline → DirectionDto::E
+        assert_eq!(dir.0, abutown_protocol::DirectionDto::E);
+    }
+
+    #[test]
+    fn compute_world_coord_writes_position_for_vehicle() {
+        use crate::ids::{LinkId, RouteId, VehicleId};
+        use crate::mobility::records::{RouteRecord, VehicleKind};
+
+        let mut world = World::new();
+        let mut polylines = LinkPolylines::default();
+        polylines.0.insert(LinkId("l:1".into()), vec![(0.0, 0.0), (20.0, 0.0)]);
+        world.insert_resource(polylines);
+        let mut routes = Routes::default();
+        routes.0.insert(RouteId("r:1".into()), RouteRecord {
+            id: RouteId("r:1".into()),
+            links: vec![LinkId("l:1".into())],
+        });
+        world.insert_resource(routes);
+        world.insert_resource(Stops::default());
+
+        let entity = world.spawn((
+            VehicleMarker,
+            StableVehicleId(VehicleId("v:1".into())),
+            VehicleKindComponent(VehicleKind::Tram),
+            RoutePosition { route_id: RouteId("r:1".into()), link_index: 0, progress: 0.25, speed: 0.0 },
+            Capacity(4),
+            Occupants(vec![]),
+            DwellTicksRemaining(0),
+            Position { x: 99.0, y: 99.0 },
+            Direction(abutown_protocol::DirectionDto::S),
+            SpriteKey(String::new()),
+        )).id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(compute_world_coord_system);
+        schedule.run(&mut world);
+
+        let pos = world.get::<Position>(entity).unwrap();
+        assert!((pos.x - 5.0).abs() < 1e-3, "0.25 of 0..20 = 5.0, got {}", pos.x);
+        assert!(pos.y.abs() < 1e-3);
     }
 }
