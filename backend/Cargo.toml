@@ -12,6 +12,7 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
+criterion = "0.5"
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
