@@ -376,7 +376,7 @@ function render(): void {
   drawScene({ x: 0, y: 0 });
   ctx.restore();
   drawAgentInspectorPanel(buildBackendPedestrianInspector(selectedBackendPedestrian()));
-  drawRoadVehicleInspectorPanel(buildBackendCarInspector(selectedBackendCar()));
+  drawCarInspectorPanel(buildBackendCarInspector(selectedBackendCar()));
 }
 
 function drawScene(offset: Coord): void {
@@ -705,7 +705,7 @@ function drawAgentInspectorPanel(inspector: EntityInspector): void {
   drawInspectorPanel(inspector, { x: 12, y: 12, accent: '#f7d76a', stroke: 'rgba(247, 215, 106, 0.8)' });
 }
 
-function drawRoadVehicleInspectorPanel(inspector: EntityInspector): void {
+function drawCarInspectorPanel(inspector: EntityInspector): void {
   if (!inspector) return;
   drawInspectorPanel(inspector, { x: 12, y: 128, accent: '#75d7ff', stroke: 'rgba(117, 215, 255, 0.8)' });
 }
@@ -1689,7 +1689,7 @@ window.render_game_to_text = () => {
   }));
   const mobilityVehicleEntries = projectedCars.map((vehicle) => ({
     id: vehicle.id,
-    kind: 'road-vehicle' as const,
+    kind: 'car' as const,
     state: 'driving' as const,
     coord: vehicle.path[0],
     screen: entityScreenPosition(vehicle.path[0]),
