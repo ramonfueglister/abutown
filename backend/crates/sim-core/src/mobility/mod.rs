@@ -76,6 +76,88 @@ impl Default for MobilityWorld {
     }
 }
 
+impl serde::Serialize for MobilityWorld {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        use std::collections::HashMap;
+
+        #[derive(serde::Serialize)]
+        struct WorldRepr<'a> {
+            tick: u64,
+            agents: HashMap<&'a AgentId, AgentRecord>,
+            vehicles: HashMap<&'a VehicleId, VehicleRecord>,
+            stops: &'a HashMap<StopId, StopRecord>,
+            routes: &'a HashMap<RouteId, RouteRecord>,
+            link_polylines: &'a HashMap<LinkId, Vec<(f32, f32)>>,
+        }
+
+        let agents_map: HashMap<&AgentId, AgentRecord> = self
+            .by_agent_id
+            .keys()
+            .filter_map(|id| self.agent(id).map(|rec| (id, rec)))
+            .collect();
+        let vehicles_map: HashMap<&VehicleId, VehicleRecord> = self
+            .by_vehicle_id
+            .keys()
+            .filter_map(|id| self.vehicle(id).map(|rec| (id, rec)))
+            .collect();
+
+        WorldRepr {
+            tick: self.tick(),
+            agents: agents_map,
+            vehicles: vehicles_map,
+            stops: &self.world.resource::<Stops>().0,
+            routes: &self.world.resource::<Routes>().0,
+            link_polylines: &self.world.resource::<LinkPolylines>().0,
+        }
+        .serialize(ser)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MobilityWorld {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        use std::collections::HashMap;
+
+        #[derive(serde::Deserialize)]
+        struct WorldRepr {
+            tick: u64,
+            agents: HashMap<AgentId, AgentRecord>,
+            vehicles: HashMap<VehicleId, VehicleRecord>,
+            stops: HashMap<StopId, StopRecord>,
+            routes: HashMap<RouteId, RouteRecord>,
+            link_polylines: HashMap<LinkId, Vec<(f32, f32)>>,
+        }
+
+        let repr = WorldRepr::deserialize(de)?;
+        let mut world = MobilityWorld::empty();
+        world.world.resource_mut::<Tick>().0 = repr.tick;
+        for (_, agent) in repr.agents {
+            world.spawn_agent_from_record(agent);
+        }
+        for (_, vehicle) in repr.vehicles {
+            world.spawn_vehicle_from_record(vehicle);
+        }
+        {
+            let mut stops_res = world.world.resource_mut::<Stops>();
+            for (id, stop) in repr.stops {
+                stops_res.0.insert(id, stop);
+            }
+        }
+        {
+            let mut routes_res = world.world.resource_mut::<Routes>();
+            for (id, route) in repr.routes {
+                routes_res.0.insert(id, route);
+            }
+        }
+        {
+            let mut links_res = world.world.resource_mut::<LinkPolylines>();
+            for (id, points) in repr.link_polylines {
+                links_res.0.insert(id, points);
+            }
+        }
+        Ok(world)
+    }
+}
+
 impl std::fmt::Debug for MobilityWorld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MobilityWorld")
@@ -560,7 +642,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Task 7: walk_advance_system not yet implemented"]
     fn walking_agent_reaches_pickup_stop_and_waits() {
         let mut world = sample_world();
         let agent_id = AgentId("agent:pedestrian:0".to_string());
@@ -597,7 +678,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Task 7: vehicle_advance_system not yet implemented"]
     fn vehicle_respects_initial_dwell_then_moves_on_route() {
         let mut world = sample_world();
         let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
@@ -622,7 +702,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Task 8: boarding_alighting_system not yet implemented"]
     fn agent_boards_rides_alights_and_walks_to_activity() {
         let mut world = sample_world();
         let agent_id = AgentId("agent:pedestrian:0".to_string());
@@ -681,10 +760,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Task 11: custom serde for MobilityWorld not yet implemented"]
     fn mobility_world_serde_round_trip_preserves_state() {
-        // Serde impl for MobilityWorld is pending Task 11.
-        todo!("implement MobilityWorld serde before enabling this test");
+        let world = sample_world();
+        let json = serde_json::to_value(&world).expect("serialize");
+        let back: MobilityWorld =
+            serde_json::from_value(json.clone()).expect("deserialize");
+        let rejson = serde_json::to_value(&back).expect("re-serialize");
+        assert_eq!(json, rejson, "round-trip should preserve state");
     }
 
     fn sample_world() -> MobilityWorld {
@@ -809,15 +891,74 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Task 10: requires mutable agent state mutation API not yet exposed"]
     fn world_coord_for_agent_waiting_at_stop_uses_stop_coord() {
-        let _ = seed::initial_world();
+        use crate::mobility_geometry::stop_geometry;
+
+        let mut world = MobilityWorld::empty();
+        let stop_id = StopId("stop:horizontal:pickup".to_string());
+        let route_id = RouteId("route:horizontal".to_string());
+        world.add_route(RouteRecord {
+            id: route_id.clone(),
+            links: vec![LinkId("link:horizontal:main".to_string())],
+        });
+        world.add_stop(StopRecord {
+            id: stop_id.clone(),
+            route_id: route_id.clone(),
+            link_index: 0,
+            progress: 0.0,
+            waiting_agents: VecDeque::new(),
+        });
+        let agent_id = AgentId("agent:waiter".to_string());
+        world.spawn_agent_from_record(AgentRecord {
+            id: agent_id.clone(),
+            state: AgentMobilityState::WaitingAtStop {
+                stop_id: stop_id.clone(),
+            },
+            plan: vec![PlanStage::RideToStop {
+                route_id,
+                stop_id: stop_id.clone(),
+            }],
+            plan_cursor: 0,
+            walk_speed_per_tick: 0.5,
+        });
+        let coord = world
+            .world_coord_for_agent(&agent_id)
+            .expect("agent coord resolves");
+        let expected = stop_geometry(&stop_id.0).expect("stop has geometry").coord;
+        assert!((coord.0 - expected.0).abs() < 0.01);
+        assert!((coord.1 - expected.1).abs() < 0.01);
     }
 
     #[test]
-    #[ignore = "Task 10: requires mutable vehicle state mutation API not yet exposed"]
     fn world_coord_for_transit_vehicle_interpolates_route() {
-        let _ = seed::initial_world();
+        use crate::mobility_geometry::link_geometry;
+
+        let mut world = MobilityWorld::empty();
+        let route_id = RouteId("route:horizontal".to_string());
+        let link_id = LinkId("link:horizontal:main".to_string());
+        world.add_route(RouteRecord {
+            id: route_id.clone(),
+            links: vec![link_id.clone()],
+        });
+        let vehicle_id = VehicleId("vehicle:test".to_string());
+        world.spawn_vehicle_from_record(VehicleRecord {
+            id: vehicle_id.clone(),
+            kind: VehicleKind::Tram,
+            route_id,
+            link_index: 0,
+            progress: 0.5,
+            speed_per_tick: 0.1,
+            capacity: 4,
+            occupants: Vec::new(),
+            dwell_ticks_remaining: 0,
+        });
+        let coord = world
+            .world_coord_for_vehicle(&vehicle_id)
+            .expect("vehicle coord resolves");
+        let geom = link_geometry(&link_id.0).expect("link geometry exists");
+        let expected = geom.world_coord_at_progress(0.5);
+        assert!((coord.0 - expected.0).abs() < 0.01);
+        assert!((coord.1 - expected.1).abs() < 0.01);
     }
 
     #[test]
@@ -1163,7 +1304,7 @@ mod tests {
             },
         );
 
-        let car_id = world.vehicles().iter().next().map(|v| v.id.clone()).unwrap();
+        let car_id = world.vehicles().first().map(|v| v.id.clone()).unwrap();
         let car_entity_id = abutown_protocol::EntityId(car_id.0.clone());
         let subscription: HashSet<ChunkCoord> = [ChunkCoord { x: 1, y: 0 }].into_iter().collect();
         let mut last_visible_agents: HashSet<abutown_protocol::EntityId> = HashSet::new();

@@ -29,10 +29,25 @@ pub fn install_systems(schedule: &mut Schedule) {
         )
     );
     schedule.add_systems((
+        // Ordering within Advance (each step observes the previous step's
+        // output, but is staged so that "newly waiting" agents are not
+        // immediately boarded in the same tick they arrived at the stop, and
+        // "just alighted" agents do not immediately walk further in the same
+        // tick they got off):
+        //
+        //   1. walk_advance        — push Walking agents along their link.
+        //   2. boarding_alighting  — apply Phase-3 boarding + alighting using
+        //                            the PRE-stop_arrival waiting queue. This
+        //                            means an agent that arrived at the stop
+        //                            in step 3 of this same tick won't board
+        //                            until the next tick.
+        //   3. stop_arrival        — convert progress=1.0 walkers into
+        //                            WaitingAtStop / AtActivity.
+        //   4. vehicle_advance     — decrement dwell or push progress.
         walk_advance_system.in_set(MobilitySet::Advance),
-        vehicle_advance_system.in_set(MobilitySet::Advance),
-        stop_arrival_system.in_set(MobilitySet::Advance),
-        boarding_alighting_system.in_set(MobilitySet::Advance),
+        boarding_alighting_system.in_set(MobilitySet::Advance).after(walk_advance_system),
+        stop_arrival_system.in_set(MobilitySet::Advance).after(boarding_alighting_system),
+        vehicle_advance_system.in_set(MobilitySet::Advance).after(stop_arrival_system),
         compute_world_coord_system.in_set(MobilitySet::Output),
         compute_direction_system.in_set(MobilitySet::Output),
         tick_increment_system.in_set(MobilitySet::Bookkeeping),

@@ -328,7 +328,6 @@ impl SimulationRuntime {
             .filter_map(|dto| {
                 self.mobility
                     .agent(&sim_core::ids::AgentId(dto.id.0.clone()))
-                    .cloned()
             })
             .collect();
         let changed_vehicles: Vec<sim_core::mobility::VehicleRecord> = raw_delta_dto
@@ -337,7 +336,6 @@ impl SimulationRuntime {
             .filter_map(|dto| {
                 self.mobility
                     .vehicle(&sim_core::ids::VehicleId(dto.id.0.clone()))
-                    .cloned()
             })
             .collect();
         let delta = sim_core::mobility::MobilityDelta {
