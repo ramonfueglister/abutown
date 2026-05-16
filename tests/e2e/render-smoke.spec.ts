@@ -43,6 +43,8 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadRailOverlap).toBe(0);
   expect(state.city.railCrossings).toBeGreaterThanOrEqual(1);
   expect(state.city.railStations).toBe(0);
+  expect(state.city.cars).toBeGreaterThanOrEqual(20);
+  expect(state.city.pedestrians).toBeGreaterThanOrEqual(10);
   expect(state.city.backend).toEqual(expect.objectContaining({
     required: true,
     baseUrl: 'http://127.0.0.1:8080',
@@ -62,24 +64,22 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     stops: expect.any(Number),
     invalidMessages: 0,
     lastError: null,
-    localAgents: state.city.pedestrians,
-    localVehicles: state.city.cars,
   }));
-  expect(state.city.localAgents.count).toBe(state.city.pedestrians);
-  expect(state.city.localAgents.selectedId).toBeNull();
-  expect(state.city.localAgents.agents.length).toBe(state.city.pedestrians);
-  expect(state.city.localAgents.agents[0]).toEqual(expect.objectContaining({
-    id: 'agent:pedestrian:0',
+  expect(state.city.mobilityAgents.count).toBe(state.city.pedestrians);
+  expect(state.city.mobilityAgents.selectedId).toBeNull();
+  expect(state.city.mobilityAgents.agents.length).toBe(state.city.pedestrians);
+  expect(state.city.mobilityAgents.agents[0]).toEqual(expect.objectContaining({
+    id: expect.stringMatching(/^agent:seed:/),
     kind: 'pedestrian',
     state: 'walking',
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
   }));
-  expect(state.city.localVehicles.count).toBe(state.city.cars);
-  expect(state.city.localVehicles.selectedId).toBeNull();
-  expect(state.city.localVehicles.vehicles.length).toBe(state.city.cars);
-  expect(state.city.localVehicles.vehicles[0]).toEqual(expect.objectContaining({
-    id: 'vehicle:road:0',
+  expect(state.city.mobilityVehicles.count).toBe(state.city.cars);
+  expect(state.city.mobilityVehicles.selectedId).toBeNull();
+  expect(state.city.mobilityVehicles.vehicles.length).toBe(state.city.cars);
+  expect(state.city.mobilityVehicles.vehicles[0]).toEqual(expect.objectContaining({
+    id: expect.stringMatching(/^road_vehicle:seed:/),
     kind: 'road-vehicle',
     state: 'driving',
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
@@ -93,7 +93,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(movedState.city.train.position.y).toBeLessThan(state.city.train.position.y);
   expect(movedState.city.train.alpha).toBeGreaterThan(0);
   expect(movedState.city.train.alpha).toBeGreaterThan(state.city.train.alpha);
-  const clickableAgent = movedState.city.localAgents.agents.find(
+  const clickableAgent = movedState.city.mobilityAgents.agents.find(
     (agent: { screen: { x: number; y: number } }) =>
       agent.screen.x > 16 &&
       agent.screen.x < 393 &&
@@ -103,8 +103,8 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(clickableAgent).toBeTruthy();
   await page.mouse.click(clickableAgent.screen.x, clickableAgent.screen.y);
   const selectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
-  expect(selectedState.city.localAgents.selectedId).toBe(clickableAgent.id);
-  expect(selectedState.city.localAgents.selected).toEqual(expect.objectContaining({
+  expect(selectedState.city.mobilityAgents.selectedId).toBe(clickableAgent.id);
+  expect(selectedState.city.mobilityAgents.selected).toEqual(expect.objectContaining({
     id: clickableAgent.id,
     state: 'walking',
   }));
@@ -113,21 +113,21 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     rows: expect.arrayContaining([
       expect.objectContaining({ label: 'State', value: 'walking' }),
       expect.objectContaining({ label: 'Tile', value: expect.any(String) }),
-      expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
+      expect.objectContaining({ label: 'Direction', value: expect.any(String) }),
     ]),
   }));
-  const clickableVehicle = isolatedVisibleEntity(selectedState.city.localVehicles.vehicles, { width: 409, height: 519 });
+  const clickableVehicle = isolatedVisibleEntity(selectedState.city.mobilityVehicles.vehicles, { width: 409, height: 519 });
   expect(clickableVehicle).toBeTruthy();
   await page.mouse.click(clickableVehicle.screen.x, clickableVehicle.screen.y);
   const vehicleSelectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
-  expect(vehicleSelectedState.city.localVehicles.selectedId).toBe(clickableVehicle.id);
-  expect(vehicleSelectedState.city.localAgents.selectedId).toBeNull();
+  expect(vehicleSelectedState.city.mobilityVehicles.selectedId).toBe(clickableVehicle.id);
+  expect(vehicleSelectedState.city.mobilityAgents.selectedId).toBeNull();
   expect(vehicleSelectedState.city.vehicleInspector).toEqual(expect.objectContaining({
     title: clickableVehicle.id,
     rows: expect.arrayContaining([
       expect.objectContaining({ label: 'State', value: 'driving' }),
       expect.objectContaining({ label: 'Tile', value: expect.any(String) }),
-      expect.objectContaining({ label: 'Speed', value: expect.any(String) }),
+      expect.objectContaining({ label: 'Direction', value: expect.any(String) }),
     ]),
   }));
   expect(state.city.railStationsOnRoad).toBe(0);

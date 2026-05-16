@@ -1668,6 +1668,37 @@ window.render_game_to_text = () => {
   const projectedCars = carsFromMobilityState(mobilityState, vehicleSprites);
   const selectedAgent = projectedPedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
   const selectedVehicle = projectedCars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  const entityScreenPosition = (coord: Coord): Coord => {
+    const projected = iso(coord);
+    return {
+      x: camera.x + projected.x * camera.scale,
+      y: camera.y + projected.y * camera.scale,
+    };
+  };
+  const mobilityAgentEntries = projectedPedestrians.map((agent) => ({
+    id: agent.id,
+    kind: 'pedestrian' as const,
+    state: 'walking' as const,
+    coord: agent.path[0],
+    screen: entityScreenPosition(agent.path[0]),
+    direction: agent.direction,
+    spriteSheet: agent.sprite.sheet,
+  }));
+  const mobilityVehicleEntries = projectedCars.map((vehicle) => ({
+    id: vehicle.id,
+    kind: 'road-vehicle' as const,
+    state: 'driving' as const,
+    coord: vehicle.path[0],
+    screen: entityScreenPosition(vehicle.path[0]),
+    direction: vehicle.direction,
+    spriteSheet: vehicle.sprite.sheet,
+  }));
+  const selectedMobilityAgentEntry = selectedAgent
+    ? mobilityAgentEntries.find((entry) => entry.id === selectedAgent.id) ?? null
+    : null;
+  const selectedMobilityVehicleEntry = selectedVehicle
+    ? mobilityVehicleEntries.find((entry) => entry.id === selectedVehicle.id) ?? null
+    : null;
   return JSON.stringify({
     coordinateSystem: 'grid origin north-west, x east, y south, isometric projection',
     city: {
@@ -1715,6 +1746,18 @@ window.render_game_to_text = () => {
         roadVehicles: backendMobility.roadVehicles,
         invalidMessages: backendMobility.invalidMessages,
         lastError: backendMobility.lastError,
+      },
+      mobilityAgents: {
+        count: mobilityAgentEntries.length,
+        selectedId: selectedAgentId,
+        selected: selectedMobilityAgentEntry,
+        agents: mobilityAgentEntries,
+      },
+      mobilityVehicles: {
+        count: mobilityVehicleEntries.length,
+        selectedId: selectedVehicleId,
+        selected: selectedMobilityVehicleEntry,
+        vehicles: mobilityVehicleEntries,
       },
       agentInspector: buildBackendPedestrianInspector(selectedAgent),
       vehicleInspector: buildBackendCarInspector(selectedVehicle),
