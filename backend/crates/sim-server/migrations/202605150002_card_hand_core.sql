@@ -1,5 +1,3 @@
-begin;
-
 create table if not exists cards (
   id text primary key,
   name text not null,
@@ -18,21 +16,6 @@ create policy cards_read on cards
   for select to authenticated
   using (true);
 
-insert into cards (id, name, type, mana_cost, description, rarity) values
-  ('strike', 'Strike', 'attack', 1, 'Deal damage.', 'starter'),
-  ('defend', 'Defend', 'skill', 1, 'Gain block.', 'starter'),
-  ('bash', 'Bash', 'attack', 2, 'A heavier starter attack.', 'starter'),
-  ('guard', 'Guard', 'skill', 1, 'Prepare a stable defense.', 'common'),
-  ('focus', 'Focus', 'power', 1, 'Keep this card as reusable content.', 'common')
-on conflict (id) do update set
-  name = excluded.name,
-  type = excluded.type,
-  mana_cost = excluded.mana_cost,
-  description = excluded.description,
-  rarity = excluded.rarity,
-  version = cards.version + 1,
-  updated_at = now();
-
 create table if not exists user_card_hands (
   user_id uuid primary key references auth.users(id) on delete cascade,
   cards jsonb not null,
@@ -47,5 +30,3 @@ create policy user_card_hands_owner on user_card_hands
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
-
-commit;
