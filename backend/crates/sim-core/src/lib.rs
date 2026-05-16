@@ -1,4 +1,5 @@
 pub mod chunk;
+pub mod city_network;
 pub mod ecs_runtime;
 pub mod events;
 pub mod ids;
