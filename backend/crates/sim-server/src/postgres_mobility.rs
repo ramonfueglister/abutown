@@ -6,6 +6,8 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 
 const MOBILITY_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605160002_mobility_snapshots.sql");
+const DROP_ROAD_VEHICLE_SNAPSHOTS_MIGRATION: &str =
+    include_str!("../migrations/202605160005_drop_road_vehicle_snapshots.sql");
 
 #[derive(Debug)]
 pub struct PostgresMobilitySnapshotStore {
@@ -21,6 +23,17 @@ impl PostgresMobilitySnapshotStore {
             .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
 
         for statement in MOBILITY_SNAPSHOTS_MIGRATION
+            .split(';')
+            .map(str::trim)
+            .filter(|statement| !statement.is_empty())
+        {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
+        }
+
+        for statement in DROP_ROAD_VEHICLE_SNAPSHOTS_MIGRATION
             .split(';')
             .map(str::trim)
             .filter(|statement| !statement.is_empty())
