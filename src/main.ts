@@ -228,7 +228,8 @@ void startRuntime();
 async function startRuntime(): Promise<void> {
   try {
     backendStatus = await requireBackend({ baseUrl: backendBaseUrl });
-    mobilityState = await requireMobilitySnapshot({ baseUrl: backendBaseUrl });
+    const required = await requireMobilitySnapshot({ baseUrl: backendBaseUrl });
+    mobilityState = required.state;
     mountCardHandView({ baseUrl: backendBaseUrl });
     await boot();
     mobilityBackendBridge = connectMobilityBackend({

@@ -5,8 +5,16 @@ import {
   resolveMobilityBackendBaseUrl,
 } from '../../src/backend/mobilityClient';
 import { mobilityDiagnostics } from '../../src/backend/mobilityState';
-import type { MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
+import type { MobilitySnapshotDto, WorldSummaryDto } from '../../src/backend/mobilityProtocol';
 import type { RoadVehicleSnapshotDto } from '../../src/backend/roadVehicleProtocol';
+
+const worldSummary: WorldSummaryDto = {
+  protocol_version: 1,
+  world_id: 'abutown-main',
+  chunk_size: 32,
+  loaded_chunks: [],
+  tick_period_ms: 100,
+};
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
@@ -56,6 +64,7 @@ const roadVehicleSnapshot: RoadVehicleSnapshotDto = {
 
 function snapshotFetch(input: RequestInfo | URL): Response {
   const url = String(input);
+  if (url.includes('/world')) return Response.json(worldSummary);
   if (url.includes('/road-vehicles')) return Response.json(roadVehicleSnapshot);
   return Response.json(snapshot);
 }
@@ -75,19 +84,27 @@ describe('mobility backend client', () => {
 
   it('requires HTTP success for the initial snapshot', async () => {
     await expect(requireMobilitySnapshot({
-      fetchImpl: async () => new Response('{}', { status: 503 }),
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.includes('/world')) return Response.json(worldSummary);
+        return new Response('{}', { status: 503 });
+      },
     })).rejects.toThrow('Mobility snapshot HTTP 503');
   });
 
   it('requires a valid initial snapshot payload', async () => {
     await expect(requireMobilitySnapshot({
-      fetchImpl: async () => Response.json({ world_id: 'abutown-main', tick: 1 }),
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.includes('/world')) return Response.json(worldSummary);
+        return Response.json({ world_id: 'abutown-main', tick: 1 });
+      },
     })).rejects.toThrow('Invalid mobility snapshot payload');
   });
 
   it('returns a connected state from the initial snapshot', async () => {
     const requestedUrls: string[] = [];
-    const state = await requireMobilitySnapshot({
+    const result = await requireMobilitySnapshot({
       fetchImpl: async (input) => {
         requestedUrls.push(String(input));
         return snapshotFetch(input);
@@ -96,10 +113,12 @@ describe('mobility backend client', () => {
     });
 
     expect(requestedUrls).toEqual([
+      'http://127.0.0.1:8080/world',
       'http://127.0.0.1:8080/mobility',
       'http://127.0.0.1:8080/road-vehicles',
     ]);
-    expect(mobilityDiagnostics(state)).toEqual({
+    expect(result.tickPeriodMs).toBe(100);
+    expect(mobilityDiagnostics(result.state)).toEqual({
       status: 'connected',
       tick: 42,
       agents: 1,
@@ -109,7 +128,42 @@ describe('mobility backend client', () => {
       invalidMessages: 0,
       lastError: null,
     });
-    expect(state.lastUpdatedAt).toBe(123);
+    expect(result.state.lastUpdatedAt).toBe(123);
+  });
+
+  it('requireMobilitySnapshot surfaces tickPeriodMs from /world', async () => {
+    const customWorldSummary: WorldSummaryDto = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      chunk_size: 32,
+      loaded_chunks: [],
+      tick_period_ms: 250,
+    };
+    const mobilitySnapshot: MobilitySnapshotDto = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      tick: 1,
+      agents: [],
+      vehicles: [],
+      stops: [],
+    };
+    const roadVehiclesSnapshot: RoadVehicleSnapshotDto = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      tick: 1,
+      vehicles: [],
+    };
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/world')) return Promise.resolve(new Response(JSON.stringify(customWorldSummary)));
+      if (url.includes('/road-vehicles'))
+        return Promise.resolve(new Response(JSON.stringify(roadVehiclesSnapshot)));
+      return Promise.resolve(new Response(JSON.stringify(mobilitySnapshot)));
+    }) as typeof fetch;
+
+    const result = await requireMobilitySnapshot({ baseUrl: 'http://localhost:8080', fetchImpl });
+    expect(result.tickPeriodMs).toBe(250);
+    expect(result.state.status).toBe('connected');
   });
 
   it('connects websocket streaming to the same backend', async () => {
