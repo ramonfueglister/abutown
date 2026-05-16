@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  encodeClientMessage,
   isMobilityDeltaDto,
   isMobilitySnapshotDto,
   isWorldSummaryDto,
@@ -64,6 +65,8 @@ describe('mobility protocol guards', () => {
       tick: 4,
       changed_agents: snapshot.agents,
       changed_vehicles: snapshot.vehicles,
+      left_agents: [] as string[],
+      left_vehicles: [] as string[],
     };
 
     expect(isMobilityDeltaDto(message)).toBe(true);
@@ -125,4 +128,58 @@ describe('isWorldSummaryDto', () => {
     };
     expect(isWorldSummaryDto(payload)).toBe(false);
   });
+});
+
+it('encodes chunk_subscribe message with snake_case discriminator', () => {
+  const wire = encodeClientMessage({
+    type: 'chunk_subscribe',
+    protocol_version: 1,
+    coords: [{ x: 4, y: 4 }, { x: 5, y: 4 }],
+  });
+  const json = JSON.parse(wire);
+  expect(json.type).toBe('chunk_subscribe');
+  expect(json.coords).toHaveLength(2);
+});
+
+it('encodes chunk_unsubscribe message', () => {
+  const wire = encodeClientMessage({
+    type: 'chunk_unsubscribe',
+    protocol_version: 1,
+    coords: [{ x: 4, y: 4 }],
+  });
+  expect(JSON.parse(wire).type).toBe('chunk_unsubscribe');
+});
+
+it('parses MobilityDelta with left_agents/left_vehicles', () => {
+  const result = parseServerMessage(JSON.stringify({
+    type: 'mobility_delta',
+    protocol_version: 1,
+    world_id: 'w',
+    tick: 0,
+    changed_agents: [],
+    changed_vehicles: [],
+    left_agents: ['agent:walk:1'],
+    left_vehicles: ['vehicle:car:0:0'],
+  }));
+  expect(result?.type).toBe('mobility_delta');
+  if (result?.type === 'mobility_delta') {
+    expect(result.left_agents).toEqual(['agent:walk:1']);
+    expect(result.left_vehicles).toEqual(['vehicle:car:0:0']);
+  }
+});
+
+it('parses MobilityDelta missing left_* fields for backward compat', () => {
+  const result = parseServerMessage(JSON.stringify({
+    type: 'mobility_delta',
+    protocol_version: 1,
+    world_id: 'w',
+    tick: 0,
+    changed_agents: [],
+    changed_vehicles: [],
+  }));
+  expect(result?.type).toBe('mobility_delta');
+  if (result?.type === 'mobility_delta') {
+    expect(result.left_agents).toEqual([]);
+    expect(result.left_vehicles).toEqual([]);
+  }
 });

@@ -79,6 +79,8 @@ export type TilePulseDeltaDto = {
 
 export type MobilityDeltaServerMessage = MobilityDeltaDto & {
   type: 'mobility_delta';
+  left_agents: string[];
+  left_vehicles: string[];
 };
 
 export type ServerErrorDto = {
@@ -96,6 +98,24 @@ export type ServerMessageDto =
   | ServerErrorDto;
 
 export type ChunkCoordDto = { x: number; y: number };
+
+export type ChunkSubscribeMessage = {
+  type: 'chunk_subscribe';
+  protocol_version: number;
+  coords: ChunkCoordDto[];
+};
+
+export type ChunkUnsubscribeMessage = {
+  type: 'chunk_unsubscribe';
+  protocol_version: number;
+  coords: ChunkCoordDto[];
+};
+
+export type ClientMessageDto = ChunkSubscribeMessage | ChunkUnsubscribeMessage;
+
+export function encodeClientMessage(message: ClientMessageDto): string {
+  return JSON.stringify(message);
+}
 
 export type WorldSummaryDto = {
   protocol_version: number;
@@ -149,13 +169,21 @@ export function isMobilityDeltaDto(value: unknown): value is MobilityDeltaDto | 
 }
 
 export function parseServerMessage(value: unknown): ServerMessageDto | null {
-  if (!isObject(value) || !isString(value.type)) return null;
-  if (value.type === 'mobility_delta') {
-    return isMobilityDeltaDto(value) ? { ...value, type: 'mobility_delta' } : null;
+  const parsed: unknown = isString(value) ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value;
+  if (!isObject(parsed) || !isString(parsed.type)) return null;
+  if (parsed.type === 'mobility_delta') {
+    if (!isMobilityDeltaDto(parsed)) return null;
+    const left_agents = Array.isArray(parsed.left_agents)
+      ? (parsed.left_agents as unknown[]).filter(isString)
+      : [];
+    const left_vehicles = Array.isArray(parsed.left_vehicles)
+      ? (parsed.left_vehicles as unknown[]).filter(isString)
+      : [];
+    return { ...parsed, type: 'mobility_delta', left_agents, left_vehicles };
   }
-  if (value.type === 'hello') return isServerHelloDto(value) ? value : null;
-  if (value.type === 'tile_pulse') return isTilePulseDeltaDto(value) ? value : null;
-  if (value.type === 'error') return isServerErrorDto(value) ? value : null;
+  if (parsed.type === 'hello') return isServerHelloDto(parsed) ? parsed : null;
+  if (parsed.type === 'tile_pulse') return isTilePulseDeltaDto(parsed) ? parsed : null;
+  if (parsed.type === 'error') return isServerErrorDto(parsed) ? parsed : null;
   return null;
 }
 
