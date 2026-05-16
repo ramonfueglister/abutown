@@ -677,7 +677,10 @@ mod tests {
         assert_eq!(snapshot.agents.len(), 20, "expected 20 agents");
 
         for agent in &snapshot.agents {
-            assert!(!agent.plan.is_empty(), "every agent must have at least one plan stage");
+            assert!(
+                !agent.plan.is_empty(),
+                "every agent must have at least one plan stage"
+            );
         }
         for vehicle in &snapshot.vehicles {
             assert!(vehicle.capacity > 0, "vehicle capacity must be positive");

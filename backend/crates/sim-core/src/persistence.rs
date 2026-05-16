@@ -285,7 +285,9 @@ mod tests {
     #[tokio::test]
     async fn mobility_snapshot_store_read_returns_none_for_unknown_world() {
         let store = InMemoryMobilitySnapshotStore::default();
-        let result = MobilitySnapshotStore::read(&store, "missing-world").await.unwrap();
+        let result = MobilitySnapshotStore::read(&store, "missing-world")
+            .await
+            .unwrap();
         assert!(result.is_none());
     }
 }

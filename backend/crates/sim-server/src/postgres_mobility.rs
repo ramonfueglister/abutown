@@ -76,20 +76,18 @@ impl MobilitySnapshotStore for PostgresMobilitySnapshotStore {
         &self,
         world_id: &str,
     ) -> Result<Option<(u64, MobilityWorld)>, MobilitySnapshotStoreError> {
-        let row: Option<(i64, Value)> = sqlx::query_as(
-            "SELECT tick, payload FROM mobility_snapshots WHERE world_id = $1",
-        )
-        .bind(world_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
+        let row: Option<(i64, Value)> =
+            sqlx::query_as("SELECT tick, payload FROM mobility_snapshots WHERE world_id = $1")
+                .bind(world_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
 
         match row {
             None => Ok(None),
             Some((tick, payload)) => {
-                let world: MobilityWorld = serde_json::from_value(payload).map_err(|error| {
-                    MobilitySnapshotStoreError::unavailable(error.to_string())
-                })?;
+                let world: MobilityWorld = serde_json::from_value(payload)
+                    .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
                 let tick = u64::try_from(tick)
                     .map_err(|_| MobilitySnapshotStoreError::unavailable("negative tick in row"))?;
                 Ok(Some((tick, world)))
@@ -111,12 +109,18 @@ mod tests {
             return;
         };
 
-        let mut store = PostgresMobilitySnapshotStore::connect(&database_url).await.unwrap();
+        let mut store = PostgresMobilitySnapshotStore::connect(&database_url)
+            .await
+            .unwrap();
         let world = seed::initial_world();
         let world_id = format!("test:mobility:{}", uuid::Uuid::now_v7());
 
         store.write(&world_id, 7, &world).await.unwrap();
-        let (tick, restored) = store.read(&world_id).await.unwrap().expect("snapshot exists");
+        let (tick, restored) = store
+            .read(&world_id)
+            .await
+            .unwrap()
+            .expect("snapshot exists");
 
         assert_eq!(tick, 7);
         assert_eq!(restored, world);

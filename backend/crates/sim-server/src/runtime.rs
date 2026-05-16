@@ -1099,9 +1099,14 @@ mod tests {
         let persisted_tick = authored.tick();
 
         let mut mobility_store = InMemoryMobilitySnapshotStore::default();
-        MobilitySnapshotStore::write(&mut mobility_store, "abutown-main", persisted_tick, &authored)
-            .await
-            .unwrap();
+        MobilitySnapshotStore::write(
+            &mut mobility_store,
+            "abutown-main",
+            persisted_tick,
+            &authored,
+        )
+        .await
+        .unwrap();
 
         let runtime = SimulationRuntime::hydrate_from_stores(
             Box::new(InMemoryWorldEventStore::default()),
