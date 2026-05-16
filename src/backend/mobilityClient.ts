@@ -1,5 +1,11 @@
 import { resolveBackendBaseUrl } from './backendGate';
-import { isMobilitySnapshotDto, parseServerMessage, type MobilitySnapshotDto } from './mobilityProtocol';
+import {
+  isMobilitySnapshotDto,
+  isWorldSummaryDto,
+  parseServerMessage,
+  type MobilitySnapshotDto,
+  type WorldSummaryDto,
+} from './mobilityProtocol';
 import { isRoadVehicleSnapshotDto, type RoadVehicleSnapshotDto } from './roadVehicleProtocol';
 import {
   applyMobilitySnapshot,
@@ -35,18 +41,29 @@ export type MobilitySnapshotOptions = {
   now?: () => number;
 };
 
+export type RequiredMobility = {
+  state: MobilityOverlayState;
+  tickPeriodMs: number;
+};
+
+const DEFAULT_TICK_PERIOD_MS = 100;
+
 const DEFAULT_RECONNECT_DELAY_MS = 2500;
 
 export function resolveMobilityBackendBaseUrl(envUrl?: unknown): string {
   return resolveBackendBaseUrl(envUrl);
 }
 
-export async function requireMobilitySnapshot(options: MobilitySnapshotOptions = {}): Promise<MobilityOverlayState> {
+export async function requireMobilitySnapshot(options: MobilitySnapshotOptions = {}): Promise<RequiredMobility> {
   const baseUrl = options.baseUrl ?? resolveMobilityBackendBaseUrl();
   const fetchImpl = resolveFetch(options);
   if (!fetchImpl) throw new Error('Mobility fetch transport unavailable');
 
   const now = options.now ?? Date.now;
+
+  const worldSummary = await requestWorldSummary(baseUrl, fetchImpl);
+  const tickPeriodMs = worldSummary.tick_period_ms > 0 ? worldSummary.tick_period_ms : DEFAULT_TICK_PERIOD_MS;
+
   const mobilityPayload = await requestMobilitySnapshot(baseUrl, fetchImpl);
   const roadVehiclePayload = await requestRoadVehicleSnapshot(baseUrl, fetchImpl);
 
@@ -54,7 +71,8 @@ export async function requireMobilitySnapshot(options: MobilitySnapshotOptions =
   state = markMobilityConnecting(state, now());
   state = applyMobilitySnapshot(state, mobilityPayload, now());
   state = applyRoadVehicleSnapshotToState(state, roadVehiclePayload, now());
-  return state;
+
+  return { state, tickPeriodMs };
 }
 
 export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {}): MobilityBackendBridge {
@@ -171,6 +189,14 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
   function notify(): void {
     options.onState?.(currentState);
   }
+}
+
+async function requestWorldSummary(baseUrl: string, fetchImpl: typeof fetch): Promise<WorldSummaryDto> {
+  const response = await fetchImpl(new URL('/world', baseUrl).toString());
+  if (!response.ok) throw new Error(`World summary HTTP ${response.status}`);
+  const payload: unknown = await response.json();
+  if (!isWorldSummaryDto(payload)) throw new Error('Invalid world summary payload');
+  return payload;
 }
 
 async function requestMobilitySnapshot(baseUrl: string, fetchImpl: typeof fetch): Promise<MobilitySnapshotDto> {

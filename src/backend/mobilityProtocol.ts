@@ -106,6 +106,16 @@ export type ServerMessageDto =
   | RoadVehicleDeltaServerMessage
   | ServerErrorDto;
 
+export type ChunkCoordDto = { x: number; y: number };
+
+export type WorldSummaryDto = {
+  protocol_version: number;
+  world_id: string;
+  chunk_size: number;
+  loaded_chunks: ChunkCoordDto[];
+  tick_period_ms: number;
+};
+
 export function isMobilitySnapshotDto(value: unknown): value is MobilitySnapshotDto {
   if (!isObject(value)) return false;
   return (
@@ -119,6 +129,21 @@ export function isMobilitySnapshotDto(value: unknown): value is MobilitySnapshot
     Array.isArray(value.stops) &&
     value.stops.every(isStopMobilityDto)
   );
+}
+
+export function isWorldSummaryDto(value: unknown): value is WorldSummaryDto {
+  if (!isObject(value)) return false;
+  if (
+    !isNumber(value.protocol_version) ||
+    !isString(value.world_id) ||
+    !isNumber(value.chunk_size) ||
+    !isNumber(value.tick_period_ms) ||
+    value.tick_period_ms <= 0
+  ) {
+    return false;
+  }
+  if (!Array.isArray(value.loaded_chunks)) return false;
+  return value.loaded_chunks.every((coord) => isObject(coord) && isNumber(coord.x) && isNumber(coord.y));
 }
 
 export function isMobilityDeltaDto(value: unknown): value is MobilityDeltaDto | MobilityDeltaServerMessage {

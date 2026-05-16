@@ -50,6 +50,7 @@ const SEEDED_CHUNKS: [ChunkCoord; 3] = [
     ChunkCoord { x: 4, y: 5 },
 ];
 const PULSE_STRIDE: u64 = 37;
+pub const TICK_PERIOD_MS: u32 = 100;
 
 pub struct SimulationRuntime {
     world_id: WorldId,
@@ -313,6 +314,7 @@ impl SimulationRuntime {
                 .into_iter()
                 .map(ChunkCoordDto::from)
                 .collect(),
+            tick_period_ms: TICK_PERIOD_MS,
         }
     }
 

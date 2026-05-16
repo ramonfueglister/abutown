@@ -60,6 +60,7 @@ async fn health_and_world_summary_are_available() {
     assert_eq!(json["loaded_chunks"][1]["y"], 4);
     assert_eq!(json["loaded_chunks"][2]["x"], 4);
     assert_eq!(json["loaded_chunks"][2]["y"], 5);
+    assert_eq!(json["tick_period_ms"], 100);
 }
 
 #[tokio::test]

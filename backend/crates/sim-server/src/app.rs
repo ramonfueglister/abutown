@@ -32,7 +32,7 @@ use crate::{
 };
 
 const DELTA_BROADCAST_CAPACITY: usize = 64;
-const SIMULATION_TICK_INTERVAL: Duration = Duration::from_secs(1);
+const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]

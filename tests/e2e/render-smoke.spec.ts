@@ -93,6 +93,21 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(movedState.city.train.position.y).toBeLessThan(state.city.train.position.y);
   expect(movedState.city.train.alpha).toBeGreaterThan(0);
   expect(movedState.city.train.alpha).toBeGreaterThan(state.city.train.alpha);
+  // Frame interpolation (Phase 2): two reads ~80 ms apart must show an agent that moved.
+  // With backend tick at 10 Hz (100 ms) and frontend lerp between snapshots, any agent
+  // mid-tick should report different coordinates between consecutive frames.
+  const firstSample = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
+  const sampleAgent = firstSample.city.mobilityAgents.agents[0];
+  expect(sampleAgent).toBeDefined();
+  await page.waitForTimeout(80);
+  const secondSample = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
+  const sameAgentLater = secondSample.city.mobilityAgents.agents.find(
+    (entry: { id: string }) => entry.id === sampleAgent.id,
+  );
+  expect(sameAgentLater).toBeDefined();
+  const movedX = Math.abs(sameAgentLater.coord.x - sampleAgent.coord.x);
+  const movedY = Math.abs(sameAgentLater.coord.y - sampleAgent.coord.y);
+  expect(movedX + movedY).toBeGreaterThan(0);
   const clickableAgent = movedState.city.mobilityAgents.agents.find(
     (agent: { screen: { x: number; y: number } }) =>
       agent.screen.x > 16 &&

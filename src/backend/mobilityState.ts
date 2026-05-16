@@ -17,6 +17,12 @@ import type { RoadVehicleSnapshotDto } from './roadVehicleProtocol';
 
 export type MobilityConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
+export type InterpolatedEntry<T> = {
+  prev: T;
+  current: T;
+  lastTickAt: number;
+};
+
 export type MobilityDiagnostics = {
   status: MobilityConnectionStatus;
   tick: number;
@@ -31,8 +37,8 @@ export type MobilityDiagnostics = {
 export type MobilityOverlayState = {
   status: MobilityConnectionStatus;
   tick: number;
-  agents: Map<string, AgentMobilityDto>;
-  vehicles: Map<string, VehicleMobilityDto>;
+  agents: Map<string, InterpolatedEntry<AgentMobilityDto>>;
+  vehicles: Map<string, InterpolatedEntry<VehicleMobilityDto>>;
   stops: Map<string, StopMobilityDto>;
   roadVehicles: RoadVehicleOverlayState;
   invalidMessages: number;
@@ -54,6 +60,73 @@ export function createMobilityOverlayState(): MobilityOverlayState {
   };
 }
 
+export function markMobilityConnecting(state: MobilityOverlayState, now = Date.now()): MobilityOverlayState {
+  return { ...state, status: 'connecting', lastError: null, lastUpdatedAt: now };
+}
+
+export function markMobilityDisconnected(
+  state: MobilityOverlayState,
+  error: string | null,
+  now = Date.now(),
+): MobilityOverlayState {
+  return { ...state, status: 'disconnected', lastError: error, lastUpdatedAt: now };
+}
+
+function initEntry<T>(dto: T, lastTickAt: number): InterpolatedEntry<T> {
+  return { prev: dto, current: dto, lastTickAt };
+}
+
+export function applyMobilitySnapshot(
+  state: MobilityOverlayState,
+  snapshot: MobilitySnapshotDto,
+  now = Date.now(),
+): MobilityOverlayState {
+  return {
+    ...state,
+    status: 'connected',
+    tick: snapshot.tick,
+    agents: new Map(snapshot.agents.map((agent) => [agent.id, initEntry(agent, now)])),
+    vehicles: new Map(snapshot.vehicles.map((vehicle) => [vehicle.id, initEntry(vehicle, now)])),
+    stops: new Map(snapshot.stops.map((stop) => [stop.id, stop])),
+    lastError: null,
+    lastUpdatedAt: now,
+  };
+}
+
+export function applyMobilityDelta(
+  state: MobilityOverlayState,
+  delta: MobilityDeltaDto,
+  now = Date.now(),
+): MobilityOverlayState {
+  const agents = new Map(state.agents);
+  for (const agent of delta.changed_agents) {
+    const previous = agents.get(agent.id);
+    agents.set(agent.id, {
+      prev: previous?.current ?? agent,
+      current: agent,
+      lastTickAt: now,
+    });
+  }
+  const vehicles = new Map(state.vehicles);
+  for (const vehicle of delta.changed_vehicles) {
+    const previous = vehicles.get(vehicle.id);
+    vehicles.set(vehicle.id, {
+      prev: previous?.current ?? vehicle,
+      current: vehicle,
+      lastTickAt: now,
+    });
+  }
+  return {
+    ...state,
+    status: 'connected',
+    tick: delta.tick,
+    agents,
+    vehicles,
+    lastError: null,
+    lastUpdatedAt: now,
+  };
+}
+
 export function applyRoadVehicleSnapshotToState(
   state: MobilityOverlayState,
   snapshot: RoadVehicleSnapshotDto,
@@ -66,55 +139,11 @@ export function applyRoadVehicleSnapshotToState(
   };
 }
 
-export function markMobilityConnecting(state: MobilityOverlayState, now = Date.now()): MobilityOverlayState {
-  return {
-    ...state,
-    status: 'connecting',
-    lastError: null,
-    lastUpdatedAt: now,
-  };
-}
-
-export function markMobilityDisconnected(state: MobilityOverlayState, error: string | null, now = Date.now()): MobilityOverlayState {
-  return {
-    ...state,
-    status: 'disconnected',
-    lastError: error,
-    lastUpdatedAt: now,
-  };
-}
-
-export function applyMobilitySnapshot(state: MobilityOverlayState, snapshot: MobilitySnapshotDto, now = Date.now()): MobilityOverlayState {
-  return {
-    ...state,
-    status: 'connected',
-    tick: snapshot.tick,
-    agents: new Map(snapshot.agents.map((agent) => [agent.id, agent])),
-    vehicles: new Map(snapshot.vehicles.map((vehicle) => [vehicle.id, vehicle])),
-    stops: new Map(snapshot.stops.map((stop) => [stop.id, stop])),
-    lastError: null,
-    lastUpdatedAt: now,
-  };
-}
-
-export function applyMobilityDelta(state: MobilityOverlayState, delta: MobilityDeltaDto, now = Date.now()): MobilityOverlayState {
-  const agents = new Map(state.agents);
-  const vehicles = new Map(state.vehicles);
-  for (const agent of delta.changed_agents) agents.set(agent.id, agent);
-  for (const vehicle of delta.changed_vehicles) vehicles.set(vehicle.id, vehicle);
-
-  return {
-    ...state,
-    status: 'connected',
-    tick: delta.tick,
-    agents,
-    vehicles,
-    lastError: null,
-    lastUpdatedAt: now,
-  };
-}
-
-export function applyServerMessage(state: MobilityOverlayState, value: unknown, now = Date.now()): MobilityOverlayState {
+export function applyServerMessage(
+  state: MobilityOverlayState,
+  value: unknown,
+  now = Date.now(),
+): MobilityOverlayState {
   const message = parseServerMessage(value);
   if (message?.type === 'mobility_delta' && isMobilityDeltaDto(message)) {
     return applyMobilityDelta(state, message, now);
@@ -127,11 +156,7 @@ export function applyServerMessage(state: MobilityOverlayState, value: unknown, 
     };
   }
   if (message !== null) return state;
-  return {
-    ...state,
-    invalidMessages: state.invalidMessages + 1,
-    lastUpdatedAt: now,
-  };
+  return { ...state, invalidMessages: state.invalidMessages + 1, lastUpdatedAt: now };
 }
 
 export function mobilityDiagnostics(state: MobilityOverlayState): MobilityDiagnostics {
@@ -145,4 +170,51 @@ export function mobilityDiagnostics(state: MobilityOverlayState): MobilityDiagno
     invalidMessages: state.invalidMessages,
     lastError: state.lastError,
   };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lerpCoord(
+  prev: { x: number; y: number },
+  current: { x: number; y: number },
+  t: number,
+): { x: number; y: number } {
+  return {
+    x: prev.x + (current.x - prev.x) * t,
+    y: prev.y + (current.y - prev.y) * t,
+  };
+}
+
+export function interpolatedAgents(
+  state: MobilityOverlayState,
+  now: number,
+  tickPeriodMs: number,
+): AgentMobilityDto[] {
+  const out: AgentMobilityDto[] = [];
+  for (const entry of state.agents.values()) {
+    const t = clamp((now - entry.lastTickAt) / tickPeriodMs, 0, 1);
+    out.push({
+      ...entry.current,
+      world_coord: lerpCoord(entry.prev.world_coord, entry.current.world_coord, t),
+    });
+  }
+  return out;
+}
+
+export function interpolatedVehicles(
+  state: MobilityOverlayState,
+  now: number,
+  tickPeriodMs: number,
+): VehicleMobilityDto[] {
+  const out: VehicleMobilityDto[] = [];
+  for (const entry of state.vehicles.values()) {
+    const t = clamp((now - entry.lastTickAt) / tickPeriodMs, 0, 1);
+    out.push({
+      ...entry.current,
+      world_coord: lerpCoord(entry.prev.world_coord, entry.current.world_coord, t),
+    });
+  }
+  return out;
 }
