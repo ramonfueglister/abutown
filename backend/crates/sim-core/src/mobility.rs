@@ -523,10 +523,173 @@ pub fn build_mobility_delta_dto(
     }
 }
 
+pub mod seed {
+    use std::collections::{HashMap, VecDeque};
+
+    use super::{
+        AgentMobilityState, AgentRecord, MobilityWorld, PlanStage, RouteRecord, StopRecord,
+        VehicleRecord,
+    };
+    use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
+
+    /// Build a deterministic populated mobility world for fresh server starts.
+    ///
+    /// Two routes traverse the seeded chunk neighbourhood; 4 vehicles and
+    /// 20 agents are spawned with cyclic plans. Calling this function twice
+    /// returns equal worlds.
+    pub fn initial_world() -> MobilityWorld {
+        let horizontal_route = RouteId("route:horizontal".to_string());
+        let vertical_route = RouteId("route:vertical".to_string());
+        let horizontal_link = LinkId("link:horizontal:main".to_string());
+        let vertical_link = LinkId("link:vertical:main".to_string());
+
+        let horizontal_pickup = StopId("stop:horizontal:pickup".to_string());
+        let horizontal_dropoff = StopId("stop:horizontal:dropoff".to_string());
+        let vertical_pickup = StopId("stop:vertical:pickup".to_string());
+        let vertical_dropoff = StopId("stop:vertical:dropoff".to_string());
+
+        let walk_link = LinkId("link:walk:default".to_string());
+        let work_activity = "activity:work".to_string();
+
+        let mut routes = HashMap::new();
+        routes.insert(
+            horizontal_route.clone(),
+            RouteRecord {
+                id: horizontal_route.clone(),
+                links: vec![horizontal_link.clone()],
+            },
+        );
+        routes.insert(
+            vertical_route.clone(),
+            RouteRecord {
+                id: vertical_route.clone(),
+                links: vec![vertical_link.clone()],
+            },
+        );
+
+        let mut stops = HashMap::new();
+        for (stop_id, route_id, progress) in [
+            (&horizontal_pickup, &horizontal_route, 0.0_f32),
+            (&horizontal_dropoff, &horizontal_route, 1.0_f32),
+            (&vertical_pickup, &vertical_route, 0.0_f32),
+            (&vertical_dropoff, &vertical_route, 1.0_f32),
+        ] {
+            stops.insert(
+                stop_id.clone(),
+                StopRecord {
+                    id: stop_id.clone(),
+                    route_id: route_id.clone(),
+                    link_index: 0,
+                    progress,
+                    waiting_agents: VecDeque::new(),
+                },
+            );
+        }
+
+        let mut vehicles = HashMap::new();
+        for offset in 0..4u32 {
+            let route_id = if offset % 2 == 0 {
+                horizontal_route.clone()
+            } else {
+                vertical_route.clone()
+            };
+            let vehicle_id = VehicleId(format!("vehicle:seed:{offset}"));
+            vehicles.insert(
+                vehicle_id.clone(),
+                VehicleRecord {
+                    id: vehicle_id,
+                    route_id,
+                    link_index: 0,
+                    progress: (offset as f32) * 0.25,
+                    speed_per_tick: 0.1,
+                    capacity: 4,
+                    occupants: Vec::new(),
+                    dwell_ticks_remaining: 0,
+                },
+            );
+        }
+
+        let mut agents = HashMap::new();
+        for offset in 0..20u32 {
+            let agent_id = AgentId(format!("agent:seed:{offset}"));
+            let (pickup, dropoff, route_id) = if offset % 2 == 0 {
+                (&horizontal_pickup, &horizontal_dropoff, &horizontal_route)
+            } else {
+                (&vertical_pickup, &vertical_dropoff, &vertical_route)
+            };
+
+            agents.insert(
+                agent_id.clone(),
+                AgentRecord {
+                    id: agent_id,
+                    state: AgentMobilityState::Walking {
+                        link_id: walk_link.clone(),
+                        progress: (offset as f32) * 0.05,
+                    },
+                    plan: vec![
+                        PlanStage::WalkToStop {
+                            link_id: walk_link.clone(),
+                            stop_id: pickup.clone(),
+                        },
+                        PlanStage::RideToStop {
+                            route_id: route_id.clone(),
+                            stop_id: dropoff.clone(),
+                        },
+                        PlanStage::WalkToActivity {
+                            link_id: walk_link.clone(),
+                            activity_id: work_activity.clone(),
+                        },
+                        PlanStage::Activity {
+                            activity_id: work_activity.clone(),
+                        },
+                    ],
+                    plan_cursor: 0,
+                    walk_speed_per_tick: 0.5,
+                },
+            );
+        }
+
+        MobilityWorld {
+            tick: 0,
+            agents,
+            vehicles,
+            stops,
+            routes,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
+
+    #[test]
+    fn initial_world_seeds_expected_population() {
+        let world = seed::initial_world();
+
+        assert_eq!(world.tick(), 0);
+        assert_eq!(world.routes.len(), 2, "expected 2 routes");
+
+        let snapshot = world.snapshot();
+        assert_eq!(snapshot.stops.len(), 4, "expected 4 stops");
+        assert_eq!(snapshot.vehicles.len(), 4, "expected 4 vehicles");
+        assert_eq!(snapshot.agents.len(), 20, "expected 20 agents");
+
+        for agent in &snapshot.agents {
+            assert!(!agent.plan.is_empty(), "every agent must have at least one plan stage");
+        }
+        for vehicle in &snapshot.vehicles {
+            assert!(vehicle.capacity > 0, "vehicle capacity must be positive");
+        }
+    }
+
+    #[test]
+    fn initial_world_is_deterministic() {
+        let a = seed::initial_world();
+        let b = seed::initial_world();
+        assert_eq!(a, b, "initial_world() must be deterministic across calls");
+    }
 
     #[test]
     fn sample_world_starts_with_agent_walking_to_pickup_stop() {
