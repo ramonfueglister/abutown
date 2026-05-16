@@ -11,6 +11,7 @@ mod dto;
 pub use dto::*;
 
 pub mod components;
+pub mod resources;
 pub mod seed;
 
 pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
