@@ -26,6 +26,7 @@ use crate::{
     config::ServerConfig,
     postgres_events::PostgresWorldEventStore,
     postgres_mobility::PostgresMobilitySnapshotStore,
+    postgres_road_vehicles::PostgresRoadVehicleSnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
 };
@@ -126,6 +127,8 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     .await?;
     let mobility_snapshot_store =
         PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
+    let road_vehicle_snapshot_store =
+        PostgresRoadVehicleSnapshotStore::connect(&config.database_url).await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
@@ -133,6 +136,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         Box::new(event_store),
         Box::new(snapshot_store),
         Box::new(mobility_snapshot_store),
+        Box::new(road_vehicle_snapshot_store),
     )
     .await?;
 

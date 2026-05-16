@@ -33,6 +33,8 @@ pub enum HydrationError {
     Chunk(ChunkError),
     #[error("mobility store error: {0}")]
     Mobility(sim_core::persistence::MobilitySnapshotStoreError),
+    #[error("road vehicle store error: {0}")]
+    RoadVehicle(sim_core::persistence::RoadVehicleSnapshotStoreError),
 }
 
 use crate::{
@@ -179,6 +181,7 @@ impl SimulationRuntime {
         event_store: Box<dyn WorldEventStore + Send>,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
+        road_vehicle_snapshot_store: Box<dyn RoadVehicleSnapshotStore + Send>,
     ) -> Result<Self, HydrationError> {
         let world_id = Self::default_world_id();
         let mobility = match mobility_snapshot_store
@@ -188,6 +191,14 @@ impl SimulationRuntime {
         {
             Some((_tick, world)) => world,
             None => sim_core::mobility::seed::initial_world(),
+        };
+        let road_vehicle_world = match road_vehicle_snapshot_store
+            .read(&world_id.0)
+            .await
+            .map_err(HydrationError::RoadVehicle)?
+        {
+            Some((_tick, world)) => world,
+            None => sim_core::road_vehicles::seed::initial_road_vehicles(),
         };
         let mut registry = ChunkRegistry::new(CHUNK_SIZE);
 
@@ -268,8 +279,8 @@ impl SimulationRuntime {
             mobility,
             snapshot_store,
             mobility_snapshot_store,
-            road_vehicle_world: road_vehicles::seed::initial_road_vehicles(),
-            road_vehicle_snapshot_store: Box::new(InMemoryRoadVehicleSnapshotStore::default()),
+            road_vehicle_world,
+            road_vehicle_snapshot_store,
             event_store,
             event_count,
             tick: global_tick,
@@ -893,6 +904,7 @@ mod tests {
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryRoadVehicleSnapshotStore::default()),
         )
         .await
         .unwrap();
@@ -915,6 +927,7 @@ mod tests {
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryRoadVehicleSnapshotStore::default()),
         )
         .await
         .unwrap();
@@ -1125,6 +1138,7 @@ mod tests {
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryRoadVehicleSnapshotStore::default()),
         )
         .await
         .unwrap();
@@ -1182,10 +1196,53 @@ mod tests {
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(mobility_store),
+            Box::new(InMemoryRoadVehicleSnapshotStore::default()),
         )
         .await
         .unwrap();
 
         assert_eq!(runtime.mobility_tick_for_test(), persisted_tick);
+    }
+
+    #[tokio::test]
+    async fn hydrate_restores_road_vehicles_from_store_when_present() {
+        use sim_core::persistence::{InMemoryRoadVehicleSnapshotStore, RoadVehicleSnapshotStore};
+        use sim_core::road_vehicles::seed;
+
+        let mut store = InMemoryRoadVehicleSnapshotStore::default();
+        let mut authored = seed::initial_road_vehicles();
+        authored.tick_road_vehicles();
+        let persisted_tick = authored.tick();
+        RoadVehicleSnapshotStore::write(&mut store, "abutown-main", persisted_tick, &authored)
+            .await
+            .unwrap();
+
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(store),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.road_vehicle_world.tick(), persisted_tick);
+        assert_eq!(runtime.road_vehicle_world, authored);
+    }
+
+    #[tokio::test]
+    async fn hydrate_seeds_road_vehicles_when_store_is_empty() {
+        use sim_core::persistence::InMemoryRoadVehicleSnapshotStore;
+
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryRoadVehicleSnapshotStore::default()),
+        )
+        .await
+        .unwrap();
+
+        assert!(runtime.road_vehicle_world.vehicles.len() >= 80);
     }
 }

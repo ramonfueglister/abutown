@@ -481,6 +481,7 @@ async fn postgres_world_state_survives_runtime_restart() {
     use sim_core::ids::ChunkCoord;
     use sim_server::postgres_events::PostgresWorldEventStore;
     use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
+    use sim_server::postgres_road_vehicles::PostgresRoadVehicleSnapshotStore;
     use sim_server::postgres_snapshots::PostgresChunkSnapshotStore;
 
     let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
@@ -514,10 +515,14 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store");
+        let road_vehicle_snapshot_store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres road vehicle snapshot store");
         let mut runtime = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(road_vehicle_snapshot_store),
         )
         .await
         .expect("hydrate first runtime");
@@ -559,10 +564,14 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store (restart)");
+        let road_vehicle_snapshot_store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres road vehicle snapshot store (restart)");
         let runtime = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(road_vehicle_snapshot_store),
         )
         .await
         .expect("hydrate restarted runtime");
