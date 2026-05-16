@@ -134,9 +134,24 @@ impl SimulationRuntime {
         runtime
     }
 
-    #[cfg(test)]
     pub fn set_mobility_for_test(&mut self, mobility: MobilityWorld) {
         self.mobility = mobility;
+    }
+
+    pub fn override_world_id_for_test(&mut self, world_id: &str) {
+        self.world_id = WorldId(world_id.to_string());
+    }
+
+    pub fn next_mobility_delta_for_test(&mut self) -> MobilityDeltaDto {
+        self.next_mobility_delta()
+    }
+
+    pub fn mobility_world_clone_for_test(&self) -> MobilityWorld {
+        self.mobility.clone()
+    }
+
+    pub fn mobility_tick(&self) -> u64 {
+        self.mobility.tick()
     }
 
     pub async fn hydrate_from_stores(

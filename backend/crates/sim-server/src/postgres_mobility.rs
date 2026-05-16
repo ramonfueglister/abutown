@@ -33,6 +33,10 @@ impl PostgresMobilitySnapshotStore {
 
         Ok(Self { pool })
     }
+
+    pub fn pool_for_test(&self) -> &sqlx::PgPool {
+        &self.pool
+    }
 }
 
 #[async_trait]
