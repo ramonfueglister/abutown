@@ -8,6 +8,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
+pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
+    let cs = chunk_size as f32;
+    crate::ids::ChunkCoord {
+        x: x.div_euclid(cs) as i32,
+        y: y.div_euclid(cs) as i32,
+    }
+}
+
 fn stable_index(id: &str) -> u32 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -1549,6 +1557,21 @@ mod tests {
                 panic!("in_vehicle agent leaked into delta: {}", agent.id.0);
             }
         }
+    }
+
+    #[test]
+    fn chunk_of_truncates_to_chunk_grid() {
+        use crate::ids::ChunkCoord;
+        assert_eq!(chunk_of(0.0, 0.0, 32), ChunkCoord { x: 0, y: 0 });
+        assert_eq!(chunk_of(31.9, 31.9, 32), ChunkCoord { x: 0, y: 0 });
+        assert_eq!(chunk_of(32.0, 0.0, 32), ChunkCoord { x: 1, y: 0 });
+        assert_eq!(chunk_of(150.5, 95.0, 32), ChunkCoord { x: 4, y: 2 });
+    }
+
+    #[test]
+    fn chunk_of_handles_negative_coords() {
+        use crate::ids::ChunkCoord;
+        assert_eq!(chunk_of(-0.1, -0.1, 32), ChunkCoord { x: -1, y: -1 });
     }
 
     #[test]
