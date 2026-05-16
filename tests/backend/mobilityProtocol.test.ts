@@ -28,6 +28,7 @@ const snapshot: MobilitySnapshotDto = {
   vehicles: [
     {
       id: 'vehicle:shuttle:0',
+      kind: 'tram' as const,
       route_id: 'route:old-town-loop',
       link_index: 0,
       progress: 0.25,

@@ -19,8 +19,11 @@ export type AgentMobilityDto = {
   sprite_key: string;
 };
 
+export type VehicleKindDto = 'car' | 'tram';
+
 export type VehicleMobilityDto = {
   id: string;
+  kind: VehicleKindDto;
   route_id: string;
   link_index: number;
   progress: number;
@@ -78,19 +81,6 @@ export type MobilityDeltaServerMessage = MobilityDeltaDto & {
   type: 'mobility_delta';
 };
 
-export type RoadVehicleDeltaServerMessage = {
-  type: 'road_vehicle_delta';
-  protocol_version: number;
-  world_id: string;
-  tick: number;
-  changed: Array<{
-    id: string;
-    world_coord: WorldCoordDto;
-    direction: DirectionDto;
-    sprite_key: string;
-  }>;
-};
-
 export type ServerErrorDto = {
   type: 'error';
   protocol_version: number;
@@ -103,7 +93,6 @@ export type ServerMessageDto =
   | ServerHelloDto
   | TilePulseDeltaDto
   | MobilityDeltaServerMessage
-  | RoadVehicleDeltaServerMessage
   | ServerErrorDto;
 
 export type ChunkCoordDto = { x: number; y: number };
@@ -167,24 +156,7 @@ export function parseServerMessage(value: unknown): ServerMessageDto | null {
   if (value.type === 'hello') return isServerHelloDto(value) ? value : null;
   if (value.type === 'tile_pulse') return isTilePulseDeltaDto(value) ? value : null;
   if (value.type === 'error') return isServerErrorDto(value) ? value : null;
-  if (value.type === 'road_vehicle_delta') {
-    return isRoadVehicleDeltaShape(value) ? (value as RoadVehicleDeltaServerMessage) : null;
-  }
   return null;
-}
-
-function isRoadVehicleDeltaShape(value: Record<string, unknown>): boolean {
-  if (!isNumber(value.protocol_version) || !isString(value.world_id) || !isNumber(value.tick)) return false;
-  if (!Array.isArray(value.changed)) return false;
-  return value.changed.every((entry) => {
-    if (!isObject(entry)) return false;
-    return (
-      isString(entry.id) &&
-      isWorldCoordDto(entry.world_coord) &&
-      isDirectionDto(entry.direction) &&
-      isString(entry.sprite_key)
-    );
-  });
 }
 
 function isAgentMobilityDto(value: unknown): value is AgentMobilityDto {
@@ -210,10 +182,17 @@ function isAgentMobilityStateDto(value: unknown): value is AgentMobilityStateDto
   return false;
 }
 
+const VEHICLE_KINDS: ReadonlySet<VehicleKindDto> = new Set(['car', 'tram']);
+
+function isVehicleKindDto(value: unknown): value is VehicleKindDto {
+  return typeof value === 'string' && VEHICLE_KINDS.has(value as VehicleKindDto);
+}
+
 function isVehicleMobilityDto(value: unknown): value is VehicleMobilityDto {
   if (!isObject(value)) return false;
   return (
     isString(value.id) &&
+    isVehicleKindDto(value.kind) &&
     isString(value.route_id) &&
     isNonNegativeInteger(value.link_index) &&
     isFiniteProgress(value.progress) &&
