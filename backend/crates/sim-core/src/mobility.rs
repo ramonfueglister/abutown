@@ -415,11 +415,7 @@ impl MobilityWorld {
             }
             AgentMobilityState::Walking { link_id, progress } => {
                 let geom = link_geometry(&link_id.0)?;
-                let t = progress.clamp(0.0, 1.0);
-                Some((
-                    geom.start.0 + (geom.end.0 - geom.start.0) * t,
-                    geom.start.1 + (geom.end.1 - geom.start.1) * t,
-                ))
+                Some(geom.world_coord_at_progress(*progress))
             }
             AgentMobilityState::WaitingAtStop { stop_id }
             | AgentMobilityState::Boarding { stop_id, .. }
@@ -436,15 +432,12 @@ impl MobilityWorld {
         &self,
         agent_id: &AgentId,
     ) -> Option<abutown_protocol::DirectionDto> {
-        use crate::mobility_geometry::{direction_from_delta, link_geometry};
+        use crate::mobility_geometry::link_geometry;
         let agent = self.agents.get(agent_id)?;
         match &agent.state {
-            AgentMobilityState::Walking { link_id, .. } => {
+            AgentMobilityState::Walking { link_id, progress } => {
                 let geom = link_geometry(&link_id.0)?;
-                Some(direction_from_delta(
-                    geom.end.0 - geom.start.0,
-                    geom.end.1 - geom.start.1,
-                ))
+                Some(geom.direction_at_progress(*progress))
             }
             AgentMobilityState::InVehicle { vehicle_id, .. } => {
                 self.direction_for_vehicle(vehicle_id)
@@ -1134,8 +1127,9 @@ mod tests {
         let coord = world
             .world_coord_for_agent(&agent_id)
             .expect("agent resolves to coord");
-        assert!((coord.0 - (geom.start.0 + (geom.end.0 - geom.start.0) * 0.5)).abs() < 0.01);
-        assert!((coord.1 - (geom.start.1 + (geom.end.1 - geom.start.1) * 0.5)).abs() < 0.01);
+        let expected = geom.world_coord_at_progress(0.5);
+        assert!((coord.0 - expected.0).abs() < 0.01);
+        assert!((coord.1 - expected.1).abs() < 0.01);
     }
 
     #[test]

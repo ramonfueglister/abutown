@@ -10,10 +10,70 @@ fn chunk_center(cx: i32, cy: i32) -> (f32, f32) {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinkGeometry {
-    pub start: (f32, f32),
-    pub end: (f32, f32),
+    pub points: Vec<(f32, f32)>,
+}
+
+impl LinkGeometry {
+    pub fn world_coord_at_progress(&self, progress: f32) -> (f32, f32) {
+        if self.points.len() < 2 {
+            return self.points.first().copied().unwrap_or((0.0, 0.0));
+        }
+        let t = progress.clamp(0.0, 1.0);
+        let total = self.arc_length();
+        if total <= 0.0 {
+            return self.points[0];
+        }
+        let target = t * total;
+        let mut walked = 0.0;
+        for window in self.points.windows(2) {
+            let (ax, ay) = window[0];
+            let (bx, by) = window[1];
+            let seg = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+            if walked + seg >= target {
+                let local_t = if seg > 0.0 { (target - walked) / seg } else { 0.0 };
+                return (ax + (bx - ax) * local_t, ay + (by - ay) * local_t);
+            }
+            walked += seg;
+        }
+        *self.points.last().unwrap()
+    }
+
+    pub fn direction_at_progress(&self, progress: f32) -> abutown_protocol::DirectionDto {
+        if self.points.len() < 2 {
+            return abutown_protocol::DirectionDto::S;
+        }
+        let t = progress.clamp(0.0, 1.0);
+        let total = self.arc_length();
+        if total <= 0.0 {
+            return abutown_protocol::DirectionDto::S;
+        }
+        let target = t * total;
+        let mut walked = 0.0;
+        for window in self.points.windows(2) {
+            let (ax, ay) = window[0];
+            let (bx, by) = window[1];
+            let seg = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+            if walked + seg >= target {
+                return direction_from_delta(bx - ax, by - ay);
+            }
+            walked += seg;
+        }
+        let (ax, ay) = self.points[self.points.len() - 2];
+        let (bx, by) = *self.points.last().unwrap();
+        direction_from_delta(bx - ax, by - ay)
+    }
+
+    fn arc_length(&self) -> f32 {
+        let mut total = 0.0;
+        for window in self.points.windows(2) {
+            let (ax, ay) = window[0];
+            let (bx, by) = window[1];
+            total += ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+        }
+        total
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,16 +89,13 @@ pub struct ActivityGeometry {
 pub fn link_geometry(link_id: &str) -> Option<LinkGeometry> {
     match link_id {
         "link:horizontal:main" => Some(LinkGeometry {
-            start: chunk_center(4, 4),
-            end: chunk_center(5, 4),
+            points: vec![chunk_center(4, 4), chunk_center(5, 4)],
         }),
         "link:vertical:main" => Some(LinkGeometry {
-            start: chunk_center(4, 4),
-            end: chunk_center(4, 5),
+            points: vec![chunk_center(4, 4), chunk_center(4, 5)],
         }),
         "link:walk:default" => Some(LinkGeometry {
-            start: chunk_center(4, 4),
-            end: chunk_center(5, 4),
+            points: vec![chunk_center(4, 4), chunk_center(5, 4)],
         }),
         _ => None,
     }
@@ -86,11 +143,7 @@ pub fn route_link_world_coord(
         _ => return None,
     };
     let geom = link_geometry(link_id)?;
-    let t = progress.clamp(0.0, 1.0);
-    Some((
-        geom.start.0 + (geom.end.0 - geom.start.0) * t,
-        geom.start.1 + (geom.end.1 - geom.start.1) * t,
-    ))
+    Some(geom.world_coord_at_progress(progress))
 }
 
 /// Maps a unit-ish movement delta to the closest 8-way direction.
@@ -121,12 +174,14 @@ mod tests {
     #[test]
     fn link_geometry_lookup_returns_seeded_routes() {
         let h = link_geometry("link:horizontal:main").expect("horizontal link defined");
-        assert_eq!(h.start, (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0));
-        assert_eq!(h.end, (5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0));
+        assert_eq!(h.points.first(), Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0)));
+        assert_eq!(h.points.last(), Some(&(5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0)));
+        assert_eq!(h.points.len(), 2);
 
         let v = link_geometry("link:vertical:main").expect("vertical link defined");
-        assert_eq!(v.start, (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0));
-        assert_eq!(v.end, (4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0));
+        assert_eq!(v.points.first(), Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0)));
+        assert_eq!(v.points.last(), Some(&(4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0)));
+        assert_eq!(v.points.len(), 2);
 
         assert!(
             link_geometry("link:walk:default").is_some(),
@@ -168,5 +223,44 @@ mod tests {
         assert_eq!(direction_from_delta(0.0, 1.0), DirectionDto::S);
         assert_eq!(direction_from_delta(1.0, 1.0), DirectionDto::Se);
         assert_eq!(direction_from_delta(0.0, 0.0), DirectionDto::S);
+    }
+
+    #[test]
+    fn polyline_world_coord_at_progress_walks_arc_length() {
+        let geom = LinkGeometry {
+            points: vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+        };
+        // Total arc length = 20. At progress 0.25, we're 5 units in (along first segment).
+        assert_eq!(geom.world_coord_at_progress(0.0), (0.0, 0.0));
+        let mid_first = geom.world_coord_at_progress(0.25);
+        assert!((mid_first.0 - 5.0).abs() < 0.01);
+        assert!((mid_first.1 - 0.0).abs() < 0.01);
+
+        // At progress 0.75 we're 15 units in: full first segment (10) + 5 on second.
+        let mid_second = geom.world_coord_at_progress(0.75);
+        assert!((mid_second.0 - 10.0).abs() < 0.01);
+        assert!((mid_second.1 - 5.0).abs() < 0.01);
+
+        let end = geom.world_coord_at_progress(1.0);
+        assert!((end.0 - 10.0).abs() < 0.01);
+        assert!((end.1 - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn polyline_direction_at_progress_returns_local_segment_direction() {
+        use abutown_protocol::DirectionDto;
+        let geom = LinkGeometry {
+            points: vec![(0.0, 0.0), (10.0, 0.0), (10.0, -10.0)],
+        };
+        assert_eq!(geom.direction_at_progress(0.25), DirectionDto::E);
+        assert_eq!(geom.direction_at_progress(0.75), DirectionDto::N);
+    }
+
+    #[test]
+    fn polyline_with_two_points_matches_old_start_end_semantics() {
+        let geom = LinkGeometry {
+            points: vec![(0.0, 0.0), (10.0, 0.0)],
+        };
+        assert_eq!(geom.world_coord_at_progress(0.5), (5.0, 0.0));
     }
 }
