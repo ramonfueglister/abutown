@@ -8,7 +8,13 @@ After Phase 3 the backend simulates ~1015 entities (~960 walking agents + 51 car
 
 This phase introduces **Area-of-Interest (AoI) filtering** per the standard MMO pattern documented in the repo's `unity-netcode-ghost-snapshots.html` and `unreal-mass-entity.html`: a client only receives delta updates for entities inside its viewport.
 
-The AoI gate is the **same** chunk-subscription set the client already maintains for `TilePulse` updates. No new client→server message; one subscription drives both tile pulses and mobility deltas.
+The AoI gate is a per-connection **chunk subscription set**. Today the backend has no client→server message and no per-connection state — `TilePulse` and `MobilityDelta` are global broadcasts via a `tokio::sync::broadcast` channel. This phase introduces:
+
+1. A new client→server WebSocket message `ChunkSubscribeDto { coords: Vec<ChunkCoordDto> }` (additive — extends the chunks the client wants).
+2. A new client→server message `ChunkUnsubscribeDto { coords: Vec<ChunkCoordDto> }` (subtractive).
+3. Per-connection state in the WS task: the current subscription set and `last_visible_ids` for `entered`/`left` diffing.
+4. `MobilityDelta` is filtered per connection against the subscription before sending.
+5. `TilePulse` is **not** filtered in this phase — keeping it as a global broadcast is fine because it's small (one `(coord, local_index, kind)` per pulse). Phase 4 scope is mobility AoI only; TilePulse AoI is a follow-up if it ever becomes a bandwidth concern.
 
 After this phase the backend can sustainably populate ~10k entities — clients only pay for the ~200 entities visible in their viewport.
 
@@ -23,7 +29,20 @@ After this phase the backend can sustainably populate ~10k entities — clients 
 
 ### Per-connection AoI filter
 
-The WS broadcast loop in `backend/crates/sim-server/src/ws.rs` (or wherever the active per-connection task lives — verify during planning) already maintains a `ChunkSubscription` state per connection for `TilePulse` filtering. This state is the AoI for mobility too.
+The WS task lives in `backend/crates/sim-server/src/app.rs` (`stream_world_deltas`). Today it just forwards every broadcast `ServerMessageDto` to the socket. We refactor it into a `select!` loop that handles two sources:
+
+- Inbound client messages from `socket.recv()` — `ChunkSubscribe`/`ChunkUnsubscribe` mutate the per-connection state.
+- Outbound broadcast messages from `state.subscribe_deltas()` — pass through `TilePulse`/`WorldEvent`/`Hello` unmodified; `MobilityDelta` goes through the per-connection filter.
+
+Per-connection state struct (introduced in this phase):
+
+```rust
+struct ConnectionState {
+    subscription: HashSet<ChunkCoord>,
+    last_visible_agents: HashSet<EntityId>,
+    last_visible_vehicles: HashSet<EntityId>,
+}
+```
 
 For each tick:
 
@@ -64,6 +83,27 @@ This is one extra delta send per subscription change. With debounced camera upda
 
 ### Protocol changes
 
+New `ClientMessageDto` enum (discriminated union, snake_case):
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientMessageDto {
+    ChunkSubscribe(ChunkSubscribeDto),
+    ChunkUnsubscribe(ChunkUnsubscribeDto),
+}
+
+pub struct ChunkSubscribeDto {
+    pub protocol_version: u16,
+    pub coords: Vec<ChunkCoordDto>,
+}
+
+pub struct ChunkUnsubscribeDto {
+    pub protocol_version: u16,
+    pub coords: Vec<ChunkCoordDto>,
+}
+```
+
 `MobilityDeltaDto` gains two fields:
 
 ```rust
@@ -84,9 +124,9 @@ The two new fields are `Vec<EntityId>` (just strings). Serialised in snake_case 
 
 ### Initial connection
 
-Before the first `chunk_subscribe` arrives, the connection's subscription is empty. The filter produces empty arrays each tick → nothing is sent. The frontend already sends `chunk_subscribe` right after `Hello` (existing behaviour for tile pulses), so the first mobility data lands inside ~200ms of WS open.
+Before the first `chunk_subscribe` arrives, the connection's subscription is empty. The filter produces empty arrays each tick → nothing is sent for mobility. The frontend will send `chunk_subscribe` right after `Hello` for the chunks currently in viewport (new behavior introduced by this phase), so the first mobility data lands inside one tick (~100ms) of WS open.
 
-The startup `MobilitySnapshotDto` (sent on connect today) is **also** filtered through the connection's subscription — emit it lazily on the first subscribe.
+`Hello` is sent on connect as today (unchanged). `MobilitySnapshotDto` is **not** auto-sent on connect anymore — it's emitted as a synthetic delta when the first `chunk_subscribe` arrives, containing all entities in the just-subscribed chunks.
 
 ## Frontend changes
 
@@ -100,7 +140,13 @@ for (const id of delta.left_vehicles ?? []) state.vehicles.delete(id);
 
 Default `[]` for backward compatibility with snapshot tests that omit the field; the runtime DTO guard accepts missing/empty arrays.
 
-The existing `chunk_subscribe` flow (added in a prior phase for `TilePulse`) doesn't change. The frontend doesn't need to know about the mobility AoI mechanism — it just sees fewer entities in deltas.
+Add a new `src/backend/chunkSubscriptionClient.ts` module that:
+
+1. Computes the visible chunk set from the current camera viewport (intersect with world bounds).
+2. Sends a `chunk_subscribe` over the WebSocket immediately after `Hello` is received.
+3. Diffs visible chunks on camera change (with a 250 ms debounce); sends `chunk_subscribe` for newly visible chunks and `chunk_unsubscribe` for chunks that left.
+
+For Phase 4 default, send a generous initial subscription (e.g. the full 8×8-chunk world) so the user sees everything as today — the bandwidth win comes when zoom/clipping is later refined per camera. This keeps the visible UX unchanged in this phase; the architectural change is the gate, not the policy.
 
 ## Testing
 
