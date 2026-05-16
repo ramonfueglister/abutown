@@ -753,3 +753,66 @@ async fn postgres_mobility_state_survives_runtime_restart() {
         .execute(store.pool_for_test())
         .await;
 }
+
+#[tokio::test]
+async fn postgres_road_vehicle_state_survives_runtime_restart() {
+    use sim_core::events::InMemoryWorldEventStore;
+    use sim_core::persistence::{
+        InMemoryChunkSnapshotStore, InMemoryMobilitySnapshotStore, RoadVehicleSnapshotStore,
+    };
+    use sim_core::road_vehicles::seed;
+    use sim_server::postgres_road_vehicles::PostgresRoadVehicleSnapshotStore;
+    use sim_server::runtime::SimulationRuntime;
+
+    let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
+        eprintln!(
+            "skipping postgres_road_vehicle_state_survives_runtime_restart; \
+             ABUTOWN_TEST_DATABASE_URL not set"
+        );
+        return;
+    };
+
+    let world_id = format!("test:road_vehicle:{}", uuid::Uuid::now_v7());
+
+    let persisted_tick;
+    let persisted_world;
+    {
+        let road_store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+            .await
+            .expect("connect road vehicle store");
+        let mut runtime = SimulationRuntime::new_with_full_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(road_store),
+        );
+        runtime.override_world_id_for_test(&world_id);
+        runtime.set_road_vehicle_world_for_test(seed::initial_road_vehicles());
+
+        for _ in 0..3 {
+            runtime.next_server_messages();
+        }
+        let cloned = runtime.road_vehicle_world_clone_for_test();
+        persisted_tick = cloned.tick();
+        persisted_world = cloned;
+        runtime
+            .persist_road_vehicle_snapshot()
+            .await
+            .expect("persist");
+    }
+
+    let store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+        .await
+        .expect("reconnect");
+    let (tick, restored) = RoadVehicleSnapshotStore::read(&store, &world_id)
+        .await
+        .expect("read")
+        .expect("snapshot present");
+    assert_eq!(tick, persisted_tick);
+    assert_eq!(restored, persisted_world);
+
+    let _ = sqlx::query("DELETE FROM road_vehicle_snapshots WHERE world_id = $1")
+        .bind(&world_id)
+        .execute(store.pool_for_test())
+        .await;
+}

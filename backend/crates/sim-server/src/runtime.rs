@@ -161,6 +161,14 @@ impl SimulationRuntime {
         self.mobility = mobility;
     }
 
+    pub fn set_road_vehicle_world_for_test(&mut self, world: RoadVehicleWorld) {
+        self.road_vehicle_world = world;
+    }
+
+    pub fn road_vehicle_world_clone_for_test(&self) -> RoadVehicleWorld {
+        self.road_vehicle_world.clone()
+    }
+
     pub fn override_world_id_for_test(&mut self, world_id: &str) {
         self.world_id = WorldId(world_id.to_string());
     }
