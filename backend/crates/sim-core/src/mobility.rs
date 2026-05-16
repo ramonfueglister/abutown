@@ -402,10 +402,17 @@ impl MobilityWorld {
 
 impl From<&AgentRecord> for AgentMobilityDto {
     fn from(value: &AgentRecord) -> Self {
+        // Placeholder values for world_coord, direction, sprite_key.
+        // Task 3 of the visible-backend-mobility plan replaces this `From`
+        // path with a `MobilityWorld`-aware builder that computes the real
+        // coordinates and sprite hints per tick.
         Self {
             id: EntityId(value.id.0.clone()),
             state: AgentMobilityStateDto::from(&value.state),
             plan_cursor: value.plan_cursor,
+            world_coord: abutown_protocol::WorldCoordDto { x: 0.0, y: 0.0 },
+            direction: abutown_protocol::DirectionDto::S,
+            sprite_key: String::from("pedestrian:0"),
         }
     }
 }
@@ -450,6 +457,8 @@ impl From<&AgentMobilityState> for AgentMobilityStateDto {
 
 impl From<&VehicleRecord> for VehicleMobilityDto {
     fn from(value: &VehicleRecord) -> Self {
+        // Placeholder values for world_coord, direction, sprite_key — Task 3
+        // replaces this `From` path with a `MobilityWorld`-aware builder.
         Self {
             id: EntityId(value.id.0.clone()),
             route_id: value.route_id.0.clone(),
@@ -462,6 +471,9 @@ impl From<&VehicleRecord> for VehicleMobilityDto {
                 .map(|agent_id| EntityId(agent_id.0.clone()))
                 .collect(),
             dwell_ticks_remaining: value.dwell_ticks_remaining,
+            world_coord: abutown_protocol::WorldCoordDto { x: 0.0, y: 0.0 },
+            direction: abutown_protocol::DirectionDto::S,
+            sprite_key: String::from("tram:0"),
         }
     }
 }

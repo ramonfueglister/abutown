@@ -33,3 +33,12 @@ pub struct RouteId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LinkId(pub String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Serialize, Deserialize)]
+pub struct TileCoord {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RoadVehicleId(pub String);

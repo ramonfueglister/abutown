@@ -133,6 +133,7 @@ pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
     MobilityDelta(MobilityDeltaDto),
+    RoadVehicleDelta(RoadVehicleDeltaDto),
     WorldEvent { event: WorldEventDto },
     Error(ServerErrorDto),
 }
@@ -173,11 +174,33 @@ pub struct MobilityDeltaDto {
     pub changed_vehicles: Vec<VehicleMobilityDto>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WorldCoordDto {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectionDto {
+    N,
+    Ne,
+    E,
+    Se,
+    S,
+    Sw,
+    W,
+    Nw,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentMobilityDto {
     pub id: EntityId,
     pub state: AgentMobilityStateDto,
     pub plan_cursor: usize,
+    pub world_coord: WorldCoordDto,
+    pub direction: DirectionDto,
+    pub sprite_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,6 +239,33 @@ pub struct VehicleMobilityDto {
     pub capacity: u16,
     pub occupants: Vec<EntityId>,
     pub dwell_ticks_remaining: u16,
+    pub world_coord: WorldCoordDto,
+    pub direction: DirectionDto,
+    pub sprite_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoadVehicleDto {
+    pub id: String,
+    pub world_coord: WorldCoordDto,
+    pub direction: DirectionDto,
+    pub sprite_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoadVehicleSnapshotDto {
+    pub protocol_version: u16,
+    pub world_id: WorldId,
+    pub tick: u64,
+    pub vehicles: Vec<RoadVehicleDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoadVehicleDeltaDto {
+    pub protocol_version: u16,
+    pub world_id: WorldId,
+    pub tick: u64,
+    pub changed: Vec<RoadVehicleDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -393,6 +443,9 @@ mod tests {
                     seat_index: 0,
                 },
                 plan_cursor: 1,
+                world_coord: WorldCoordDto { x: 0.0, y: 0.0 },
+                direction: DirectionDto::E,
+                sprite_key: "pedestrian:0".to_string(),
             }],
             vehicles: vec![VehicleMobilityDto {
                 id: EntityId("vehicle:tram:0".to_string()),
@@ -402,6 +455,9 @@ mod tests {
                 capacity: 24,
                 occupants: vec![EntityId("agent:pedestrian:0".to_string())],
                 dwell_ticks_remaining: 0,
+                world_coord: WorldCoordDto { x: 0.0, y: 0.0 },
+                direction: DirectionDto::E,
+                sprite_key: "tram:0".to_string(),
             }],
             stops: vec![StopMobilityDto {
                 id: "stop:old-town".to_string(),
@@ -436,6 +492,9 @@ mod tests {
                     stop_id: "stop:old-town".to_string(),
                 },
                 plan_cursor: 0,
+                world_coord: WorldCoordDto { x: 0.0, y: 0.0 },
+                direction: DirectionDto::E,
+                sprite_key: "pedestrian:0".to_string(),
             }],
             changed_vehicles: vec![],
         });
@@ -452,5 +511,74 @@ mod tests {
             json["changed_agents"][0]["state"]["stop_id"],
             "stop:old-town"
         );
+    }
+
+    #[test]
+    fn world_coord_dto_round_trips() {
+        let coord = WorldCoordDto { x: 12.5, y: -3.25 };
+        let json = serde_json::to_value(&coord).unwrap();
+        assert_eq!(json["x"], 12.5);
+        assert_eq!(json["y"], -3.25);
+        let back: WorldCoordDto = serde_json::from_value(json).unwrap();
+        assert_eq!(back, coord);
+    }
+
+    #[test]
+    fn direction_dto_serializes_as_compass_string() {
+        assert_eq!(serde_json::to_value(&DirectionDto::N).unwrap(), serde_json::json!("n"));
+        assert_eq!(serde_json::to_value(&DirectionDto::Sw).unwrap(), serde_json::json!("sw"));
+        let parsed: DirectionDto = serde_json::from_value(serde_json::json!("ne")).unwrap();
+        assert_eq!(parsed, DirectionDto::Ne);
+    }
+
+    #[test]
+    fn agent_mobility_dto_carries_world_coord_direction_and_sprite_key() {
+        let dto = AgentMobilityDto {
+            id: EntityId("agent:seed:0".to_string()),
+            state: AgentMobilityStateDto::Walking { link_id: "link:demo".to_string(), progress: 0.5 },
+            plan_cursor: 0,
+            world_coord: WorldCoordDto { x: 1.0, y: 2.0 },
+            direction: DirectionDto::E,
+            sprite_key: "pedestrian:0".to_string(),
+        };
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["world_coord"]["x"], 1.0);
+        assert_eq!(json["world_coord"]["y"], 2.0);
+        assert_eq!(json["direction"], "e");
+        assert_eq!(json["sprite_key"], "pedestrian:0");
+    }
+
+    #[test]
+    fn road_vehicle_dto_serializes_full_shape() {
+        let dto = RoadVehicleDto {
+            id: "road_vehicle:seed:0".to_string(),
+            world_coord: WorldCoordDto { x: 5.0, y: 6.0 },
+            direction: DirectionDto::N,
+            sprite_key: "vehicle:0".to_string(),
+        };
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["id"], "road_vehicle:seed:0");
+        assert_eq!(json["world_coord"]["y"], 6.0);
+        assert_eq!(json["direction"], "n");
+        assert_eq!(json["sprite_key"], "vehicle:0");
+    }
+
+    #[test]
+    fn road_vehicle_delta_serializes_with_type_tag() {
+        let delta = ServerMessageDto::RoadVehicleDelta(RoadVehicleDeltaDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            tick: 4,
+            changed: vec![RoadVehicleDto {
+                id: "road_vehicle:seed:0".to_string(),
+                world_coord: WorldCoordDto { x: 5.0, y: 6.0 },
+                direction: DirectionDto::N,
+                sprite_key: "vehicle:0".to_string(),
+            }],
+        });
+        let json = serde_json::to_value(&delta).unwrap();
+        assert_eq!(json["type"], "road_vehicle_delta");
+        assert_eq!(json["tick"], 4);
+        assert_eq!(json["changed"][0]["id"], "road_vehicle:seed:0");
     }
 }
