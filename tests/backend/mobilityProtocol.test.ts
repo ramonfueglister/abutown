@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isMobilityDeltaDto,
   isMobilitySnapshotDto,
+  isWorldSummaryDto,
   parseServerMessage,
   type MobilitySnapshotDto,
 } from '../../src/backend/mobilityProtocol';
@@ -77,5 +78,50 @@ describe('mobility protocol guards', () => {
     });
     expect(parseServerMessage({ type: 'mobility_delta', tick: 1 })).toBeNull();
     expect(isMobilitySnapshotDto({ ...snapshot, agents: [{ id: 'agent:bad', state: { type: 'walking' }, plan_cursor: 0 }] })).toBe(false);
+  });
+});
+
+describe('isWorldSummaryDto', () => {
+  it('accepts a valid payload with tick_period_ms', () => {
+    const payload = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      chunk_size: 32,
+      loaded_chunks: [{ x: 4, y: 4 }, { x: 5, y: 4 }],
+      tick_period_ms: 100,
+    };
+    expect(isWorldSummaryDto(payload)).toBe(true);
+  });
+
+  it('rejects payloads missing tick_period_ms', () => {
+    const payload = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      chunk_size: 32,
+      loaded_chunks: [],
+    };
+    expect(isWorldSummaryDto(payload)).toBe(false);
+  });
+
+  it('rejects payloads with non-positive tick_period_ms', () => {
+    const payload = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      chunk_size: 32,
+      loaded_chunks: [],
+      tick_period_ms: 0,
+    };
+    expect(isWorldSummaryDto(payload)).toBe(false);
+  });
+
+  it('rejects payloads with malformed loaded_chunks entries', () => {
+    const payload = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      chunk_size: 32,
+      loaded_chunks: [{ x: 'nope', y: 4 }],
+      tick_period_ms: 100,
+    };
+    expect(isWorldSummaryDto(payload)).toBe(false);
   });
 });
