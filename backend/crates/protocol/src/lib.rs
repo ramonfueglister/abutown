@@ -48,6 +48,7 @@ pub struct WorldSummaryDto {
     pub world_id: WorldId,
     pub chunk_size: u16,
     pub loaded_chunks: Vec<ChunkCoordDto>,
+    pub tick_period_ms: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -570,6 +571,21 @@ mod tests {
         assert_eq!(json["world_coord"]["y"], 6.0);
         assert_eq!(json["direction"], "n");
         assert_eq!(json["sprite_key"], "vehicle:0");
+    }
+
+    #[test]
+    fn world_summary_dto_serializes_tick_period_ms() {
+        let dto = WorldSummaryDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            chunk_size: 32,
+            loaded_chunks: vec![],
+            tick_period_ms: 100,
+        };
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["tick_period_ms"], 100);
+        let back: WorldSummaryDto = serde_json::from_value(json).unwrap();
+        assert_eq!(back, dto);
     }
 
     #[test]
