@@ -32,7 +32,11 @@ impl LinkGeometry {
             let (bx, by) = window[1];
             let seg = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
             if walked + seg >= target {
-                let local_t = if seg > 0.0 { (target - walked) / seg } else { 0.0 };
+                let local_t = if seg > 0.0 {
+                    (target - walked) / seg
+                } else {
+                    0.0
+                };
                 return (ax + (bx - ax) * local_t, ay + (by - ay) * local_t);
             }
             walked += seg;
@@ -174,13 +178,25 @@ mod tests {
     #[test]
     fn link_geometry_lookup_returns_seeded_routes() {
         let h = link_geometry("link:horizontal:main").expect("horizontal link defined");
-        assert_eq!(h.points.first(), Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0)));
-        assert_eq!(h.points.last(), Some(&(5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0)));
+        assert_eq!(
+            h.points.first(),
+            Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0))
+        );
+        assert_eq!(
+            h.points.last(),
+            Some(&(5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0))
+        );
         assert_eq!(h.points.len(), 2);
 
         let v = link_geometry("link:vertical:main").expect("vertical link defined");
-        assert_eq!(v.points.first(), Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0)));
-        assert_eq!(v.points.last(), Some(&(4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0)));
+        assert_eq!(
+            v.points.first(),
+            Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0))
+        );
+        assert_eq!(
+            v.points.last(),
+            Some(&(4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0))
+        );
         assert_eq!(v.points.len(), 2);
 
         assert!(

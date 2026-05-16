@@ -578,5 +578,4 @@ mod tests {
         let back: VehicleMobilityDto = serde_json::from_value(json).unwrap();
         assert_eq!(back.kind, VehicleKindDto::Car);
     }
-
 }

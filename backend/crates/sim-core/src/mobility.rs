@@ -423,9 +423,14 @@ impl MobilityWorld {
         changed
     }
 
-    fn resolve_link_polyline(&self, link_id: &LinkId) -> Option<crate::mobility_geometry::LinkGeometry> {
+    fn resolve_link_polyline(
+        &self,
+        link_id: &LinkId,
+    ) -> Option<crate::mobility_geometry::LinkGeometry> {
         if let Some(points) = self.link_polylines.get(link_id) {
-            return Some(crate::mobility_geometry::LinkGeometry { points: points.clone() });
+            return Some(crate::mobility_geometry::LinkGeometry {
+                points: points.clone(),
+            });
         }
         crate::mobility_geometry::link_geometry(&link_id.0)
     }
@@ -900,16 +905,12 @@ pub mod seed {
                 let corridor_index = (n as usize) % network.pedestrian_corridors.len();
                 let agent_id = AgentId(format!("agent:walk:{n}"));
                 let link_id = LinkId(format!("link:walk:corridor:{corridor_index}"));
-                let progress =
-                    ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
+                let progress = ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
                 world.agents.insert(
                     agent_id.clone(),
                     AgentRecord {
                         id: agent_id,
-                        state: AgentMobilityState::Walking {
-                            link_id,
-                            progress,
-                        },
+                        state: AgentMobilityState::Walking { link_id, progress },
                         plan: vec![PlanStage::Activity {
                             activity_id: format!("activity:wander:{corridor_index}"),
                         }],
@@ -1380,7 +1381,10 @@ mod tests {
             version: 1,
             world_id: "test".to_string(),
             chunk_size: 32,
-            world_tiles: WorldTiles { width: 256, height: 256 },
+            world_tiles: WorldTiles {
+                width: 256,
+                height: 256,
+            },
             arterial_paths: vec![
                 vec![NetworkCoord { x: 10, y: 20 }, NetworkCoord { x: 30, y: 20 }],
                 vec![NetworkCoord { x: 40, y: 60 }, NetworkCoord { x: 60, y: 60 }],
@@ -1399,10 +1403,26 @@ mod tests {
         };
         let world = seed::from_network(&network, density);
 
-        let walking_agents = world.agents.values().filter(|a| matches!(a.state, AgentMobilityState::Walking { .. })).count();
-        let driving_agents = world.agents.values().filter(|a| matches!(a.state, AgentMobilityState::InVehicle { .. })).count();
-        let cars = world.vehicles.values().filter(|v| v.kind == VehicleKind::Car).count();
-        let trams = world.vehicles.values().filter(|v| v.kind == VehicleKind::Tram).count();
+        let walking_agents = world
+            .agents
+            .values()
+            .filter(|a| matches!(a.state, AgentMobilityState::Walking { .. }))
+            .count();
+        let driving_agents = world
+            .agents
+            .values()
+            .filter(|a| matches!(a.state, AgentMobilityState::InVehicle { .. }))
+            .count();
+        let cars = world
+            .vehicles
+            .values()
+            .filter(|v| v.kind == VehicleKind::Car)
+            .count();
+        let trams = world
+            .vehicles
+            .values()
+            .filter(|v| v.kind == VehicleKind::Tram)
+            .count();
 
         assert_eq!(walking_agents, 18, "3 corridors x 6 = 18 walkers");
         assert_eq!(cars, 8, "2 arterials x 4 = 8 cars");
@@ -1417,11 +1437,24 @@ mod tests {
             version: 1,
             world_id: "test".to_string(),
             chunk_size: 32,
-            world_tiles: WorldTiles { width: 256, height: 256 },
-            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
-            pedestrian_corridors: vec![vec![NetworkCoord { x: 0, y: 5 }, NetworkCoord { x: 10, y: 5 }]],
+            world_tiles: WorldTiles {
+                width: 256,
+                height: 256,
+            },
+            arterial_paths: vec![vec![
+                NetworkCoord { x: 0, y: 0 },
+                NetworkCoord { x: 10, y: 0 },
+            ]],
+            pedestrian_corridors: vec![vec![
+                NetworkCoord { x: 0, y: 5 },
+                NetworkCoord { x: 10, y: 5 },
+            ]],
         };
-        let density = seed::SeedDensity { pedestrians_per_corridor: 3, cars_per_arterial: 2, trams_total: 0 };
+        let density = seed::SeedDensity {
+            pedestrians_per_corridor: 3,
+            cars_per_arterial: 2,
+            trams_total: 0,
+        };
         let a = seed::from_network(&network, density);
         let b = seed::from_network(&network, density);
         assert_eq!(a, b);
@@ -1434,11 +1467,21 @@ mod tests {
             version: 1,
             world_id: "test".to_string(),
             chunk_size: 32,
-            world_tiles: WorldTiles { width: 256, height: 256 },
-            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
+            world_tiles: WorldTiles {
+                width: 256,
+                height: 256,
+            },
+            arterial_paths: vec![vec![
+                NetworkCoord { x: 0, y: 0 },
+                NetworkCoord { x: 10, y: 0 },
+            ]],
             pedestrian_corridors: vec![],
         };
-        let density = seed::SeedDensity { pedestrians_per_corridor: 0, cars_per_arterial: 2, trams_total: 0 };
+        let density = seed::SeedDensity {
+            pedestrians_per_corridor: 0,
+            cars_per_arterial: 2,
+            trams_total: 0,
+        };
         let world = seed::from_network(&network, density);
 
         assert_eq!(world.vehicles.len(), 2);
@@ -1464,18 +1507,34 @@ mod tests {
             version: 1,
             world_id: "test".to_string(),
             chunk_size: 32,
-            world_tiles: WorldTiles { width: 256, height: 256 },
-            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
-            pedestrian_corridors: vec![vec![NetworkCoord { x: 0, y: 5 }, NetworkCoord { x: 10, y: 5 }]],
+            world_tiles: WorldTiles {
+                width: 256,
+                height: 256,
+            },
+            arterial_paths: vec![vec![
+                NetworkCoord { x: 0, y: 0 },
+                NetworkCoord { x: 10, y: 0 },
+            ]],
+            pedestrian_corridors: vec![vec![
+                NetworkCoord { x: 0, y: 5 },
+                NetworkCoord { x: 10, y: 5 },
+            ]],
         };
-        let density = seed::SeedDensity { pedestrians_per_corridor: 2, cars_per_arterial: 2, trams_total: 0 };
+        let density = seed::SeedDensity {
+            pedestrians_per_corridor: 2,
+            cars_per_arterial: 2,
+            trams_total: 0,
+        };
         let world = seed::from_network(&network, density);
         let drivers: Vec<_> = world
             .agents
             .values()
             .filter(|a| matches!(a.state, AgentMobilityState::InVehicle { .. }))
             .collect();
-        assert!(!drivers.is_empty(), "test setup should contain at least one in_vehicle driver agent");
+        assert!(
+            !drivers.is_empty(),
+            "test setup should contain at least one in_vehicle driver agent"
+        );
 
         let world_id = WorldId("test".to_string());
         let delta_input = MobilityDelta {
@@ -1497,14 +1556,28 @@ mod tests {
             version: 1,
             world_id: "test".to_string(),
             chunk_size: 32,
-            world_tiles: WorldTiles { width: 256, height: 256 },
-            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
+            world_tiles: WorldTiles {
+                width: 256,
+                height: 256,
+            },
+            arterial_paths: vec![vec![
+                NetworkCoord { x: 0, y: 0 },
+                NetworkCoord { x: 10, y: 0 },
+            ]],
             pedestrian_corridors: vec![],
         };
-        let density = seed::SeedDensity { pedestrians_per_corridor: 0, cars_per_arterial: 2, trams_total: 0 };
+        let density = seed::SeedDensity {
+            pedestrians_per_corridor: 0,
+            cars_per_arterial: 2,
+            trams_total: 0,
+        };
         let world = seed::from_network(&network, density);
         let world_id = WorldId("test".to_string());
         let snap = build_mobility_snapshot_dto(&world_id, world.tick(), &world);
-        assert_eq!(snap.agents.len(), 2, "snapshot must include in_vehicle drivers so clients can hydrate state");
+        assert_eq!(
+            snap.agents.len(),
+            2,
+            "snapshot must include in_vehicle drivers so clients can hydrate state"
+        );
     }
 }

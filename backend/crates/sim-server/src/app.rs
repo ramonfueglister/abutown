@@ -114,11 +114,11 @@ impl AppState {
 }
 
 pub fn build_app() -> Router {
-    let runtime =
-        match sim_core::city_network::CityNetwork::from_path(resolve_city_network_path()) {
-            Ok(network) => SimulationRuntime::new_from_network(&network),
-            Err(_) => SimulationRuntime::new(),
-        };
+    let runtime = match sim_core::city_network::CityNetwork::from_path(resolve_city_network_path())
+    {
+        Ok(network) => SimulationRuntime::new_from_network(&network),
+        Err(_) => SimulationRuntime::new(),
+    };
     build_app_with_runtime(runtime)
 }
 

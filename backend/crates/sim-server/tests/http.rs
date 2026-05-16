@@ -735,4 +735,3 @@ async fn postgres_mobility_state_survives_runtime_restart() {
         .execute(store.pool_for_test())
         .await;
 }
-
