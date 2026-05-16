@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use abutown_protocol::{
-    ChunkSnapshotDto, ClientCommandDto, CommandResponseDto, HealthResponse, MobilitySnapshotDto,
-    ServerMessageDto, WorldSummaryDto,
+    ChunkSnapshotDto, ClientCommandDto, ClientMessageDto, CommandResponseDto, HealthResponse,
+    MobilityDeltaDto, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
 };
 use axum::{
     Json, Router,
@@ -295,6 +295,13 @@ async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl 
     ws.on_upgrade(move |socket| stream_world_deltas(socket, state))
 }
 
+#[derive(Default)]
+struct ConnectionState {
+    subscription: std::collections::HashSet<sim_core::ids::ChunkCoord>,
+    last_visible_agents: std::collections::HashSet<abutown_protocol::EntityId>,
+    last_visible_vehicles: std::collections::HashSet<abutown_protocol::EntityId>,
+}
+
 async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     let mut deltas = state.subscribe_deltas();
     let hello = {
@@ -306,16 +313,101 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
         return;
     }
 
-    loop {
-        let message = match deltas.recv().await {
-            Ok(message) => message,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => return,
-        };
+    let mut connection = ConnectionState::default();
 
-        if send_server_message(&mut socket, message).await.is_err() {
-            return;
+    loop {
+        tokio::select! {
+            inbound = socket.recv() => {
+                let Some(Ok(message)) = inbound else { return; };
+                let Message::Text(text) = message else { continue; };
+                let Ok(client_message) = serde_json::from_str::<ClientMessageDto>(&text) else {
+                    tracing::warn!(?text, "invalid client message");
+                    continue;
+                };
+                let synthetic = handle_client_message(&state, &client_message, &mut connection).await;
+                if let Some(dto) = synthetic
+                    && send_server_message(&mut socket, ServerMessageDto::MobilityDelta(dto))
+                        .await
+                        .is_err()
+                {
+                    return;
+                }
+            }
+            broadcast = deltas.recv() => {
+                let message = match broadcast {
+                    Ok(message) => message,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                };
+                let outbound = match message {
+                    ServerMessageDto::MobilityDelta(raw_delta) => {
+                        let dto = {
+                            let runtime = state.runtime();
+                            let runtime = runtime.lock().await;
+                            runtime.filtered_mobility_delta_from_dto(
+                                &raw_delta,
+                                &connection.subscription,
+                                &mut connection.last_visible_agents,
+                                &mut connection.last_visible_vehicles,
+                            )
+                        };
+                        if dto.changed_agents.is_empty()
+                            && dto.changed_vehicles.is_empty()
+                            && dto.left_agents.is_empty()
+                            && dto.left_vehicles.is_empty()
+                        {
+                            continue;
+                        }
+                        ServerMessageDto::MobilityDelta(dto)
+                    }
+                    other => other,
+                };
+                if send_server_message(&mut socket, outbound).await.is_err() {
+                    return;
+                }
+            }
         }
+    }
+}
+
+async fn handle_client_message(
+    state: &AppState,
+    message: &ClientMessageDto,
+    connection: &mut ConnectionState,
+) -> Option<MobilityDeltaDto> {
+    match message {
+        ClientMessageDto::ChunkSubscribe(payload) => {
+            for coord in &payload.coords {
+                connection.subscription.insert(sim_core::ids::ChunkCoord {
+                    x: coord.x,
+                    y: coord.y,
+                });
+            }
+        }
+        ClientMessageDto::ChunkUnsubscribe(payload) => {
+            for coord in &payload.coords {
+                connection.subscription.remove(&sim_core::ids::ChunkCoord {
+                    x: coord.x,
+                    y: coord.y,
+                });
+            }
+        }
+    }
+    let runtime = state.runtime();
+    let runtime = runtime.lock().await;
+    let dto = runtime.synthetic_mobility_delta_for_subscription(
+        &connection.subscription,
+        &mut connection.last_visible_agents,
+        &mut connection.last_visible_vehicles,
+    );
+    if dto.changed_agents.is_empty()
+        && dto.changed_vehicles.is_empty()
+        && dto.left_agents.is_empty()
+        && dto.left_vehicles.is_empty()
+    {
+        None
+    } else {
+        Some(dto)
     }
 }
 

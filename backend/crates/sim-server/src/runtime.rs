@@ -315,6 +315,67 @@ impl SimulationRuntime {
         build_mobility_delta_dto(&self.world_id, self.mobility.tick(), &self.mobility, &delta)
     }
 
+    pub fn filtered_mobility_delta_from_dto(
+        &self,
+        raw_delta_dto: &abutown_protocol::MobilityDeltaDto,
+        subscription: &std::collections::HashSet<sim_core::ids::ChunkCoord>,
+        last_visible_agents: &mut std::collections::HashSet<abutown_protocol::EntityId>,
+        last_visible_vehicles: &mut std::collections::HashSet<abutown_protocol::EntityId>,
+    ) -> abutown_protocol::MobilityDeltaDto {
+        let changed_agents: Vec<sim_core::mobility::AgentRecord> = raw_delta_dto
+            .changed_agents
+            .iter()
+            .filter_map(|dto| {
+                self.mobility
+                    .agent(&sim_core::ids::AgentId(dto.id.0.clone()))
+                    .cloned()
+            })
+            .collect();
+        let changed_vehicles: Vec<sim_core::mobility::VehicleRecord> = raw_delta_dto
+            .changed_vehicles
+            .iter()
+            .filter_map(|dto| {
+                self.mobility
+                    .vehicle(&sim_core::ids::VehicleId(dto.id.0.clone()))
+                    .cloned()
+            })
+            .collect();
+        let delta = sim_core::mobility::MobilityDelta {
+            changed_agents,
+            changed_vehicles,
+        };
+        sim_core::mobility::build_filtered_mobility_delta_dto(
+            &self.world_id,
+            self.mobility.tick(),
+            &self.mobility,
+            &delta,
+            subscription,
+            last_visible_agents,
+            last_visible_vehicles,
+        )
+    }
+
+    pub fn synthetic_mobility_delta_for_subscription(
+        &self,
+        subscription: &std::collections::HashSet<sim_core::ids::ChunkCoord>,
+        last_visible_agents: &mut std::collections::HashSet<abutown_protocol::EntityId>,
+        last_visible_vehicles: &mut std::collections::HashSet<abutown_protocol::EntityId>,
+    ) -> abutown_protocol::MobilityDeltaDto {
+        let empty_delta = sim_core::mobility::MobilityDelta {
+            changed_agents: vec![],
+            changed_vehicles: vec![],
+        };
+        sim_core::mobility::build_filtered_mobility_delta_dto(
+            &self.world_id,
+            self.mobility.tick(),
+            &self.mobility,
+            &empty_delta,
+            subscription,
+            last_visible_agents,
+            last_visible_vehicles,
+        )
+    }
+
     pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {
         vec![
             self.next_pulse(),

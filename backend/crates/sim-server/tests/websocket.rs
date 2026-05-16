@@ -1,12 +1,13 @@
 use std::time::Duration;
 
 use abutown_protocol::{
-    ClientCommandDto, PROTOCOL_VERSION, ServerMessageDto, SetTileKindCommandDto, TileKindDto,
-    TilePulseDeltaDto, WorldEventDto, WorldId,
+    ChunkCoordDto, ChunkSubscribeDto, ClientCommandDto, ClientMessageDto, PROTOCOL_VERSION,
+    ServerMessageDto, SetTileKindCommandDto, TileKindDto, TilePulseDeltaDto, WorldEventDto,
+    WorldId,
 };
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
@@ -17,12 +18,20 @@ use sim_server::{
     runtime::SimulationRuntime,
 };
 
+fn runtime_with_seeded_mobility() -> SimulationRuntime {
+    let mut runtime = SimulationRuntime::new();
+    runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
+    runtime
+}
+
 #[tokio::test]
 async fn websocket_sends_hello_and_tile_pulse() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        axum::serve(listener, build_app()).await.unwrap();
+        axum::serve(listener, build_app_with_runtime(runtime_with_seeded_mobility()))
+            .await
+            .unwrap();
     });
 
     let url = format!("ws://{addr}/ws");
@@ -30,6 +39,12 @@ async fn websocket_sends_hello_and_tile_pulse() {
 
     let hello = read_server_message(&mut stream).await;
     assert!(matches!(hello, ServerMessageDto::Hello(_)));
+
+    subscribe_to_seeded_chunks(&mut stream).await;
+    // Synthetic mobility delta echoing newly visible entities for the
+    // just-installed subscription arrives before any tick-driven traffic.
+    let synthetic = read_server_message(&mut stream).await;
+    assert!(matches!(synthetic, ServerMessageDto::MobilityDelta(_)));
 
     // 10 Hz tick: the first tile pulse arrives within roughly one tick period.
     // Use 250 ms to absorb scheduler jitter on slow CI without weakening intent.
@@ -45,12 +60,6 @@ async fn websocket_sends_hello_and_tile_pulse() {
     assert_eq!(first_pulse.tick, 1);
     assert_eq!(first_pulse.version, 1);
     assert!(first_pulse.local_index < 1024);
-
-    let mobility_after_tile = read_server_message(&mut stream).await;
-    assert!(matches!(
-        mobility_after_tile,
-        ServerMessageDto::MobilityDelta(_)
-    ));
 
     // Next tick arrives within one tick window.
     let next_pulse = tokio::time::timeout(
@@ -130,7 +139,9 @@ async fn websocket_sends_mobility_deltas_after_hello() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        axum::serve(listener, build_app()).await.unwrap();
+        axum::serve(listener, build_app_with_runtime(runtime_with_seeded_mobility()))
+            .await
+            .unwrap();
     });
 
     let url = format!("ws://{addr}/ws");
@@ -139,19 +150,17 @@ async fn websocket_sends_mobility_deltas_after_hello() {
     let hello = read_server_message(&mut stream).await;
     assert!(matches!(hello, ServerMessageDto::Hello(_)));
 
-    let first = read_server_message(&mut stream).await;
-    let second = read_server_message(&mut stream).await;
+    subscribe_to_seeded_chunks(&mut stream).await;
 
-    let mobility_delta = match (first, second) {
-        (ServerMessageDto::MobilityDelta(delta), _) => delta,
-        (_, ServerMessageDto::MobilityDelta(delta)) => delta,
-        _ => panic!("expected one mobility delta among first two broadcast messages"),
-    };
-
+    // The synthetic mobility delta from the subscribe carries the seeded
+    // pedestrian agents (walking on link:walk:default which crosses chunks
+    // (4,4) and (5,4)) as `changed_agents`.
+    let mobility_delta = read_next_mobility_delta(&mut stream).await;
     assert_eq!(mobility_delta.world_id.0, "abutown-main");
-    assert_eq!(mobility_delta.tick, 1);
-    assert!(mobility_delta.changed_agents.is_empty());
-    assert!(mobility_delta.changed_vehicles.is_empty());
+    assert!(
+        !mobility_delta.changed_agents.is_empty(),
+        "synthetic delta must include newly visible agents in the subscribed chunks"
+    );
 
     server.abort();
 }
@@ -314,4 +323,41 @@ where
             return delta;
         }
     }
+}
+
+async fn read_next_mobility_delta<S>(stream: &mut S) -> abutown_protocol::MobilityDeltaDto
+where
+    S: futures_util::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
+{
+    loop {
+        let message = read_server_message(stream).await;
+        if let ServerMessageDto::MobilityDelta(delta) = message {
+            return delta;
+        }
+    }
+}
+
+async fn subscribe_to_seeded_chunks<S>(stream: &mut S)
+where
+    S: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
+    <S as futures_util::Sink<tokio_tungstenite::tungstenite::Message>>::Error: std::fmt::Debug,
+{
+    let subscribe = ClientMessageDto::ChunkSubscribe(ChunkSubscribeDto {
+        protocol_version: PROTOCOL_VERSION,
+        coords: vec![
+            ChunkCoordDto { x: 4, y: 4 },
+            ChunkCoordDto { x: 5, y: 4 },
+            ChunkCoordDto { x: 4, y: 5 },
+        ],
+    });
+    let text = serde_json::to_string(&subscribe).unwrap();
+    stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+        .await
+        .expect("send subscribe");
 }
