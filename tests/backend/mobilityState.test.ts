@@ -129,7 +129,7 @@ describe('mobility state reducer', () => {
       ],
     });
     expect(state.roadVehicles.tick).toBe(5);
-    expect(state.roadVehicles.vehicles.get('road_vehicle:seed:0')?.world_coord.y).toBe(20);
+    expect(state.roadVehicles.vehicles.get('road_vehicle:seed:0')?.current.world_coord.y).toBe(20);
   });
 });
 

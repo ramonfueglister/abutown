@@ -28,19 +28,22 @@ const mobilityState = {
   })(),
   vehicles: new Map(),
   stops: new Map(),
-  roadVehicles: {
-    tick: 1,
-    vehicles: new Map([
-      ['road_vehicle:seed:0', {
-        id: 'road_vehicle:seed:0',
-        world_coord: { x: 32.0, y: 32.0 },
-        direction: 'n' as const,
-        sprite_key: 'vehicle:0',
-      }],
-    ]),
-    invalidMessages: 0,
-    lastUpdatedAt: 0,
-  },
+  roadVehicles: (() => {
+    const vehicle = {
+      id: 'road_vehicle:seed:0',
+      world_coord: { x: 32.0, y: 32.0 },
+      direction: 'n' as const,
+      sprite_key: 'vehicle:0',
+    };
+    return {
+      tick: 1,
+      vehicles: new Map([
+        ['road_vehicle:seed:0', { prev: vehicle, current: vehicle, lastTickAt: 0 }],
+      ]),
+      invalidMessages: 0,
+      lastUpdatedAt: 0,
+    };
+  })(),
   invalidMessages: 0,
   lastError: null,
   lastUpdatedAt: 0,

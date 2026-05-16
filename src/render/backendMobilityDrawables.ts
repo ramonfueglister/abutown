@@ -91,7 +91,9 @@ export function carsFromMobilityState(
 ): BackendCar[] {
   if (sprites.length === 0) return [];
   const out: BackendCar[] = [];
-  const vehicles = Array.from(state.roadVehicles.vehicles.values()).sort((a, b) => a.id.localeCompare(b.id));
+  const vehicles = Array.from(state.roadVehicles.vehicles.values())
+    .map((entry) => entry.current)
+    .sort((a, b) => a.id.localeCompare(b.id));
   for (const vehicle of vehicles) {
     const sprite = sprites[spriteIndexFromKey(vehicle.sprite_key, sprites.length)];
     out.push({
