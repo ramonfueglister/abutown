@@ -1,4 +1,5 @@
 import { resolveBackendBaseUrl } from './backendGate';
+import { createSubscriptionClient } from './chunkSubscriptionClient';
 import {
   isMobilitySnapshotDto,
   isWorldSummaryDto,
@@ -127,6 +128,16 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
     closeSocket();
     const url = websocketUrl(baseUrl, '/ws');
     socket = new WebSocketConstructor(url);
+
+    socket.onopen = () => {
+      const subscription = createSubscriptionClient({
+        send: (text) => socket?.send(text),
+        worldWidthTiles: 256,
+        worldHeightTiles: 256,
+        chunkSize: 32,
+      });
+      subscription.start();
+    };
 
     socket.onmessage = (event: MessageEvent<string>) => {
       const parsed = parseJson(event.data);
