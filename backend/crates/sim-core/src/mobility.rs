@@ -4,10 +4,11 @@ use abutown_protocol::{
     AgentMobilityDto, AgentMobilityStateDto, EntityId, MobilityDeltaDto, MobilitySnapshotDto,
     PROTOCOL_VERSION, StopMobilityDto, VehicleMobilityDto, WorldId,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentMobilityState {
     AtActivity {
         activity_id: String,
@@ -33,7 +34,7 @@ pub enum AgentMobilityState {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlanStage {
     WalkToStop {
         link_id: LinkId,
@@ -52,7 +53,7 @@ pub enum PlanStage {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentRecord {
     pub id: AgentId,
     pub state: AgentMobilityState,
@@ -61,7 +62,7 @@ pub struct AgentRecord {
     pub walk_speed_per_tick: f32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VehicleRecord {
     pub id: VehicleId,
     pub route_id: RouteId,
@@ -73,7 +74,7 @@ pub struct VehicleRecord {
     pub dwell_ticks_remaining: u16,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StopRecord {
     pub id: StopId,
     pub route_id: RouteId,
@@ -82,7 +83,7 @@ pub struct StopRecord {
     pub waiting_agents: VecDeque<AgentId>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RouteRecord {
     pub id: RouteId,
     pub links: Vec<LinkId>,
@@ -101,7 +102,7 @@ pub struct MobilityDelta {
     pub changed_vehicles: Vec<VehicleRecord>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MobilityWorld {
     tick: u64,
     agents: HashMap<AgentId, AgentRecord>,
@@ -669,6 +670,14 @@ mod tests {
             }
         );
         assert_eq!(arrived.plan_cursor, 3);
+    }
+
+    #[test]
+    fn mobility_world_serde_round_trip_preserves_state() {
+        let original = sample_world();
+        let json = serde_json::to_value(&original).expect("serialize");
+        let restored: MobilityWorld = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(restored, original);
     }
 
     fn sample_world() -> MobilityWorld {
