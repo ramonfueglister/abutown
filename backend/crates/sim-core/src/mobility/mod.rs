@@ -1,8 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::Schedule;
 
 use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
+use crate::mobility::components::*;
+use crate::mobility::resources::*;
 
 mod records;
 pub use records::*;
@@ -13,6 +16,7 @@ pub use dto::*;
 pub mod components;
 pub mod resources;
 pub mod seed;
+pub mod systems;
 
 pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
     let cs = chunk_size as f32;
@@ -29,309 +33,319 @@ fn stable_index(id: &str) -> u32 {
     hasher.finish() as u32
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+fn compute_agent_sprite_key(id: &AgentId) -> String {
+    format!("pedestrian:{}", stable_index(&id.0) % 16)
+}
+
+fn compute_vehicle_sprite_key(id: &VehicleId) -> String {
+    format!("tram:{}", stable_index(&id.0) % 4)
+}
+
 pub struct MobilityWorld {
-    tick: u64,
-    agents: HashMap<AgentId, AgentRecord>,
-    vehicles: HashMap<VehicleId, VehicleRecord>,
-    stops: HashMap<StopId, StopRecord>,
-    routes: HashMap<RouteId, RouteRecord>,
-    pub link_polylines: HashMap<LinkId, Vec<(f32, f32)>>,
+    pub(crate) world: World,
+    pub(crate) schedule: Schedule,
+    pub(crate) by_agent_id: HashMap<AgentId, Entity>,
+    pub(crate) by_vehicle_id: HashMap<VehicleId, Entity>,
+}
+
+impl MobilityWorld {
+    pub fn empty() -> Self {
+        let mut world = World::new();
+        world.insert_resource(Tick(0));
+        world.insert_resource(Routes::default());
+        world.insert_resource(Stops::default());
+        world.insert_resource(LinkPolylines::default());
+        world.insert_resource(DirtyAgents::default());
+        world.insert_resource(DirtyVehicles::default());
+
+        let mut schedule = Schedule::default();
+        crate::mobility::systems::install_systems(&mut schedule);
+
+        Self {
+            world,
+            schedule,
+            by_agent_id: HashMap::new(),
+            by_vehicle_id: HashMap::new(),
+        }
+    }
+}
+
+impl Default for MobilityWorld {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl std::fmt::Debug for MobilityWorld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MobilityWorld")
+            .field("tick", &self.tick())
+            .field("agents", &self.by_agent_id.len())
+            .field("vehicles", &self.by_vehicle_id.len())
+            .finish()
+    }
+}
+
+impl Clone for MobilityWorld {
+    fn clone(&self) -> Self {
+        let mut out = MobilityWorld::empty();
+        // Tick.
+        out.world.insert_resource(Tick(self.tick()));
+        // Routes.
+        for (id, record) in self.world.resource::<Routes>().0.iter() {
+            out.world
+                .resource_mut::<Routes>()
+                .0
+                .insert(id.clone(), record.clone());
+        }
+        // Stops.
+        for (id, record) in self.world.resource::<Stops>().0.iter() {
+            out.world
+                .resource_mut::<Stops>()
+                .0
+                .insert(id.clone(), record.clone());
+        }
+        // Link polylines.
+        for (id, points) in self.world.resource::<LinkPolylines>().0.iter() {
+            out.world
+                .resource_mut::<LinkPolylines>()
+                .0
+                .insert(id.clone(), points.clone());
+        }
+        // Re-spawn agents and vehicles from records.
+        for record in self.agents() {
+            out.spawn_agent_from_record(record);
+        }
+        for record in self.vehicles() {
+            out.spawn_vehicle_from_record(record);
+        }
+        out
+    }
+}
+
+impl PartialEq for MobilityWorld {
+    fn eq(&self, other: &Self) -> bool {
+        self.tick() == other.tick()
+            && self.routes() == other.routes()
+            && self.world.resource::<Stops>().0 == other.world.resource::<Stops>().0
+            && self.world.resource::<LinkPolylines>().0
+                == other.world.resource::<LinkPolylines>().0
+            && self.agents() == other.agents()
+            && self.vehicles() == other.vehicles()
+    }
 }
 
 impl MobilityWorld {
     pub fn tick(&self) -> u64 {
-        self.tick
+        self.world.resource::<Tick>().0
     }
 
-    pub fn agent(&self, id: &AgentId) -> Option<&AgentRecord> {
-        self.agents.get(id)
+    pub fn agent(&self, id: &AgentId) -> Option<AgentRecord> {
+        let entity = *self.by_agent_id.get(id)?;
+        self.agent_record_from_entity(entity)
     }
 
-    pub fn vehicle(&self, id: &VehicleId) -> Option<&VehicleRecord> {
-        self.vehicles.get(id)
+    pub fn vehicle(&self, id: &VehicleId) -> Option<VehicleRecord> {
+        let entity = *self.by_vehicle_id.get(id)?;
+        self.vehicle_record_from_entity(entity)
     }
 
-    pub fn stop(&self, id: &StopId) -> Option<&StopRecord> {
-        self.stops.get(id)
+    pub fn stop(&self, id: &StopId) -> Option<StopRecord> {
+        self.world.resource::<Stops>().0.get(id).cloned()
+    }
+
+    /// Sorted by id for deterministic output.
+    pub fn agents(&self) -> Vec<AgentRecord> {
+        let mut out: Vec<AgentRecord> = self
+            .by_agent_id
+            .keys()
+            .filter_map(|id| self.agent(id))
+            .collect();
+        out.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        out
+    }
+
+    /// Sorted by id.
+    pub fn vehicles(&self) -> Vec<VehicleRecord> {
+        let mut out: Vec<VehicleRecord> = self
+            .by_vehicle_id
+            .keys()
+            .filter_map(|id| self.vehicle(id))
+            .collect();
+        out.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        out
+    }
+
+    /// Sorted by id.
+    pub fn stops(&self) -> Vec<StopRecord> {
+        let mut out: Vec<StopRecord> = self
+            .world
+            .resource::<Stops>()
+            .0
+            .values()
+            .cloned()
+            .collect();
+        out.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        out
+    }
+
+    pub fn routes(&self) -> &HashMap<RouteId, RouteRecord> {
+        &self.world.resource::<Routes>().0
+    }
+
+    pub fn link_polyline(&self, link_id: &LinkId) -> Option<Vec<(f32, f32)>> {
+        self.world
+            .resource::<LinkPolylines>()
+            .0
+            .get(link_id)
+            .cloned()
+    }
+
+    /// Public iterator for callers that want all link polylines (used by serde + tests).
+    pub fn link_polylines_iter(&self) -> impl Iterator<Item = (&LinkId, &Vec<(f32, f32)>)> + '_ {
+        self.world.resource::<LinkPolylines>().0.iter()
     }
 
     pub fn snapshot(&self) -> MobilitySnapshot {
-        let mut agents: Vec<AgentRecord> = self.agents.values().cloned().collect();
-        agents.sort_by(|left, right| left.id.0.cmp(&right.id.0));
-        let mut vehicles: Vec<VehicleRecord> = self.vehicles.values().cloned().collect();
-        vehicles.sort_by(|left, right| left.id.0.cmp(&right.id.0));
-        let mut stops: Vec<StopRecord> = self.stops.values().cloned().collect();
-        stops.sort_by(|left, right| left.id.0.cmp(&right.id.0));
         MobilitySnapshot {
-            agents,
-            vehicles,
-            stops,
+            agents: self.agents(),
+            vehicles: self.vehicles(),
+            stops: self.stops(),
         }
     }
 
     pub fn tick_mobility(&mut self) -> MobilityDelta {
-        self.tick += 1;
-        let mut changed_agents = Vec::new();
-        let mut changed_vehicle_ids = HashSet::new();
-
-        for (agent_id, vehicle_id) in self.tick_boarding() {
-            if let Some(agent) = self.agents.get(&agent_id) {
-                changed_agents.push(agent.clone());
-            }
-            changed_vehicle_ids.insert(vehicle_id);
-        }
-
-        let agent_ids: Vec<AgentId> = self.agents.keys().cloned().collect();
-        for agent_id in agent_ids {
-            if self.tick_walking_agent(&agent_id)
-                && let Some(agent) = self.agents.get(&agent_id)
-            {
-                changed_agents.push(agent.clone());
-            }
-        }
-
-        for (agent_id, vehicle_id) in self.tick_alighting() {
-            if let Some(agent) = self.agents.get(&agent_id) {
-                changed_agents.push(agent.clone());
-            }
-            changed_vehicle_ids.insert(vehicle_id);
-        }
-
-        let vehicle_ids: Vec<VehicleId> = self.vehicles.keys().cloned().collect();
-        for vehicle_id in vehicle_ids {
-            if self.tick_vehicle(&vehicle_id) {
-                changed_vehicle_ids.insert(vehicle_id);
-            }
-        }
-
-        let mut changed_vehicle_ids: Vec<VehicleId> = changed_vehicle_ids.into_iter().collect();
-        changed_vehicle_ids.sort_by(|left, right| left.0.cmp(&right.0));
-        let changed_vehicles = changed_vehicle_ids
-            .into_iter()
-            .filter_map(|vehicle_id| self.vehicles.get(&vehicle_id).cloned())
+        // Run the (currently empty) schedule.
+        self.schedule.run(&mut self.world);
+        // Drain dirty sets (currently empty since no systems mark them yet).
+        let dirty_agents = std::mem::take(&mut self.world.resource_mut::<DirtyAgents>().0);
+        let dirty_vehicles = std::mem::take(&mut self.world.resource_mut::<DirtyVehicles>().0);
+        let changed_agents: Vec<AgentRecord> = dirty_agents
+            .iter()
+            .filter_map(|e| self.agent_record_from_entity(*e))
             .collect();
-
+        let changed_vehicles: Vec<VehicleRecord> = dirty_vehicles
+            .iter()
+            .filter_map(|e| self.vehicle_record_from_entity(*e))
+            .collect();
+        // Task 6 will add tick_increment_system. For this task, increment manually.
+        self.world.resource_mut::<Tick>().0 += 1;
         MobilityDelta {
             changed_agents,
             changed_vehicles,
         }
     }
 
-    fn tick_walking_agent(&mut self, agent_id: &AgentId) -> bool {
-        let Some(agent) = self.agents.get_mut(agent_id) else {
-            return false;
-        };
-
-        let AgentMobilityState::Walking { link_id, progress } = &agent.state else {
-            return false;
-        };
-
-        let next_progress = (*progress + agent.walk_speed_per_tick).min(1.0);
-        let link_id = link_id.clone();
-
-        if next_progress < 1.0 {
-            agent.state = AgentMobilityState::Walking {
-                link_id,
-                progress: next_progress,
-            };
-            return true;
-        }
-
-        match agent.plan.get(agent.plan_cursor).cloned() {
-            Some(PlanStage::WalkToStop { stop_id, .. }) => {
-                agent.plan_cursor += 1;
-                agent.state = AgentMobilityState::WaitingAtStop {
-                    stop_id: stop_id.clone(),
-                };
-
-                if let Some(stop) = self.stops.get_mut(&stop_id)
-                    && !stop.waiting_agents.contains(agent_id)
-                {
-                    stop.waiting_agents.push_back(agent_id.clone());
-                }
-                true
-            }
-            Some(PlanStage::WalkToActivity { activity_id, .. }) => {
-                agent.plan_cursor += 1;
-                agent.state = AgentMobilityState::AtActivity { activity_id };
-                true
-            }
-            _ => false,
-        }
+    pub fn spawn_agent_from_record(&mut self, record: AgentRecord) -> Entity {
+        let id = record.id.clone();
+        let sprite_key = compute_agent_sprite_key(&id);
+        let entity = self
+            .world
+            .spawn((
+                AgentMarker,
+                StableAgentId(record.id),
+                AgentMobilityStateComponent(record.state),
+                WalkPlan {
+                    stages: record.plan,
+                    cursor: record.plan_cursor,
+                },
+                WalkSpeed(record.walk_speed_per_tick),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(sprite_key),
+            ))
+            .id();
+        self.by_agent_id.insert(id, entity);
+        entity
     }
 
-    fn tick_vehicle(&mut self, vehicle_id: &VehicleId) -> bool {
-        let Some(vehicle) = self.vehicles.get_mut(vehicle_id) else {
-            return false;
-        };
-
-        if vehicle.dwell_ticks_remaining > 0 {
-            vehicle.dwell_ticks_remaining -= 1;
-            return true;
-        }
-
-        let Some(route) = self.routes.get(&vehicle.route_id) else {
-            return false;
-        };
-        if route.links.is_empty() || vehicle.progress >= 1.0 {
-            return false;
-        }
-
-        vehicle.progress = (vehicle.progress + vehicle.speed_per_tick).min(1.0);
-        true
+    pub fn spawn_vehicle_from_record(&mut self, record: VehicleRecord) -> Entity {
+        let id = record.id.clone();
+        let sprite_key = compute_vehicle_sprite_key(&id);
+        let entity = self
+            .world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(record.id),
+                VehicleKindComponent(record.kind),
+                RoutePosition {
+                    route_id: record.route_id,
+                    link_index: record.link_index,
+                    progress: record.progress,
+                    speed: record.speed_per_tick,
+                },
+                Capacity(record.capacity),
+                Occupants(record.occupants),
+                DwellTicksRemaining(record.dwell_ticks_remaining),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(sprite_key),
+            ))
+            .id();
+        self.by_vehicle_id.insert(id, entity);
+        entity
     }
 
-    fn tick_boarding(&mut self) -> Vec<(AgentId, VehicleId)> {
-        let mut changed = Vec::new();
-        let stop_ids: Vec<StopId> = self.stops.keys().cloned().collect();
-
-        for stop_id in stop_ids {
-            let Some((route_id, link_index, stop_progress, next_agent_id)) =
-                self.stops.get(&stop_id).and_then(|stop| {
-                    stop.waiting_agents.front().cloned().map(|agent_id| {
-                        (
-                            stop.route_id.clone(),
-                            stop.link_index,
-                            stop.progress,
-                            agent_id,
-                        )
-                    })
-                })
-            else {
-                continue;
-            };
-
-            let Some(vehicle_id) = self
-                .vehicles
-                .values()
-                .find(|vehicle| {
-                    vehicle.route_id == route_id
-                        && vehicle.link_index == link_index
-                        && vehicle.progress == stop_progress
-                        && vehicle.occupants.len() < usize::from(vehicle.capacity)
-                })
-                .map(|vehicle| vehicle.id.clone())
-            else {
-                continue;
-            };
-
-            let seat_index = {
-                let vehicle = self
-                    .vehicles
-                    .get_mut(&vehicle_id)
-                    .expect("selected vehicle exists");
-                let seat_index = vehicle.occupants.len() as u16;
-                vehicle.occupants.push(next_agent_id.clone());
-                seat_index
-            };
-
-            let stop = self.stops.get_mut(&stop_id).expect("selected stop exists");
-            let popped = stop.waiting_agents.pop_front();
-            assert_eq!(popped, Some(next_agent_id.clone()));
-
-            if let Some(agent) = self.agents.get_mut(&next_agent_id) {
-                agent.state = AgentMobilityState::InVehicle {
-                    vehicle_id: vehicle_id.clone(),
-                    seat_index,
-                };
-                changed.push((next_agent_id, vehicle_id));
-            }
-        }
-
-        changed
+    pub fn add_stop(&mut self, stop: StopRecord) {
+        self.world
+            .resource_mut::<Stops>()
+            .0
+            .insert(stop.id.clone(), stop);
     }
 
-    fn tick_alighting(&mut self) -> Vec<(AgentId, VehicleId)> {
-        let mut changed = Vec::new();
-        let vehicle_ids: Vec<VehicleId> = self.vehicles.keys().cloned().collect();
+    pub fn add_route(&mut self, route: RouteRecord) {
+        self.world
+            .resource_mut::<Routes>()
+            .0
+            .insert(route.id.clone(), route);
+    }
 
-        for vehicle_id in vehicle_ids {
-            let Some((route_id, link_index, progress, occupants)) =
-                self.vehicles.get(&vehicle_id).map(|vehicle| {
-                    (
-                        vehicle.route_id.clone(),
-                        vehicle.link_index,
-                        vehicle.progress,
-                        vehicle.occupants.clone(),
-                    )
-                })
-            else {
-                continue;
-            };
+    pub fn set_link_polyline(&mut self, link_id: LinkId, points: Vec<(f32, f32)>) {
+        self.world
+            .resource_mut::<LinkPolylines>()
+            .0
+            .insert(link_id, points);
+    }
 
-            let Some(stop_id) = self
-                .stops
-                .values()
-                .find(|stop| {
-                    stop.route_id == route_id
-                        && stop.link_index == link_index
-                        && stop.progress == progress
-                        && stop.progress == 1.0
-                })
-                .map(|stop| stop.id.clone())
-            else {
-                continue;
-            };
+    fn agent_record_from_entity(&self, entity: Entity) -> Option<AgentRecord> {
+        let stable = self.world.get::<StableAgentId>(entity)?;
+        let state = self.world.get::<AgentMobilityStateComponent>(entity)?;
+        let plan = self.world.get::<WalkPlan>(entity)?;
+        let speed = self.world.get::<WalkSpeed>(entity)?;
+        Some(AgentRecord {
+            id: stable.0.clone(),
+            state: state.0.clone(),
+            plan: plan.stages.clone(),
+            plan_cursor: plan.cursor,
+            walk_speed_per_tick: speed.0,
+        })
+    }
 
-            for agent_id in occupants {
-                let should_alight = self
-                    .agents
-                    .get(&agent_id)
-                    .and_then(|agent| agent.plan.get(agent.plan_cursor))
-                    .is_some_and(|stage| {
-                        matches!(
-                            stage,
-                            PlanStage::RideToStop {
-                                stop_id: target_stop_id,
-                                ..
-                            } if *target_stop_id == stop_id
-                        )
-                    });
-
-                if !should_alight {
-                    continue;
-                }
-
-                if let Some(vehicle) = self.vehicles.get_mut(&vehicle_id) {
-                    vehicle
-                        .occupants
-                        .retain(|occupant_id| occupant_id != &agent_id);
-                }
-
-                if let Some(agent) = self.agents.get_mut(&agent_id) {
-                    agent.plan_cursor += 1;
-                    match agent.plan.get(agent.plan_cursor).cloned() {
-                        Some(PlanStage::WalkToActivity { link_id, .. }) => {
-                            agent.state = AgentMobilityState::Walking {
-                                link_id,
-                                progress: 0.0,
-                            };
-                        }
-                        Some(PlanStage::Activity { activity_id }) => {
-                            agent.plan_cursor += 1;
-                            agent.state = AgentMobilityState::AtActivity { activity_id };
-                        }
-                        _ => {
-                            agent.state = AgentMobilityState::Alighting {
-                                vehicle_id: vehicle_id.clone(),
-                                stop_id: stop_id.clone(),
-                            };
-                        }
-                    }
-                    changed.push((agent_id, vehicle_id.clone()));
-                }
-            }
-        }
-
-        changed
+    fn vehicle_record_from_entity(&self, entity: Entity) -> Option<VehicleRecord> {
+        let stable = self.world.get::<StableVehicleId>(entity)?;
+        let kind = self.world.get::<VehicleKindComponent>(entity)?;
+        let pos = self.world.get::<RoutePosition>(entity)?;
+        let cap = self.world.get::<Capacity>(entity)?;
+        let occ = self.world.get::<Occupants>(entity)?;
+        let dwell = self.world.get::<DwellTicksRemaining>(entity)?;
+        Some(VehicleRecord {
+            id: stable.0.clone(),
+            kind: kind.0,
+            route_id: pos.route_id.clone(),
+            link_index: pos.link_index,
+            progress: pos.progress,
+            speed_per_tick: pos.speed,
+            capacity: cap.0,
+            occupants: occ.0.clone(),
+            dwell_ticks_remaining: dwell.0,
+        })
     }
 
     fn resolve_link_polyline(
         &self,
         link_id: &LinkId,
     ) -> Option<crate::mobility_geometry::LinkGeometry> {
-        if let Some(points) = self.link_polylines.get(link_id) {
+        if let Some(points) = self.world.resource::<LinkPolylines>().0.get(link_id) {
             return Some(crate::mobility_geometry::LinkGeometry {
                 points: points.clone(),
             });
@@ -341,8 +355,9 @@ impl MobilityWorld {
 
     pub fn world_coord_for_agent(&self, agent_id: &AgentId) -> Option<(f32, f32)> {
         use crate::mobility_geometry::{activity_geometry, stop_geometry};
-        let agent = self.agents.get(agent_id)?;
-        match &agent.state {
+        let entity = *self.by_agent_id.get(agent_id)?;
+        let state = self.world.get::<AgentMobilityStateComponent>(entity)?;
+        match &state.0 {
             AgentMobilityState::AtActivity { activity_id } => {
                 activity_geometry(activity_id).map(|g| g.coord)
             }
@@ -365,8 +380,9 @@ impl MobilityWorld {
         &self,
         agent_id: &AgentId,
     ) -> Option<abutown_protocol::DirectionDto> {
-        let agent = self.agents.get(agent_id)?;
-        match &agent.state {
+        let entity = *self.by_agent_id.get(agent_id)?;
+        let state = self.world.get::<AgentMobilityStateComponent>(entity)?;
+        match &state.0 {
             AgentMobilityState::Walking { link_id, progress } => {
                 let geom = self.resolve_link_polyline(link_id)?;
                 Some(geom.direction_at_progress(*progress))
@@ -379,11 +395,13 @@ impl MobilityWorld {
     }
 
     pub fn world_coord_for_vehicle(&self, vehicle_id: &VehicleId) -> Option<(f32, f32)> {
-        let vehicle = self.vehicles.get(vehicle_id)?;
-        let route = self.routes.get(&vehicle.route_id)?;
-        let link_id = route.links.get(vehicle.link_index)?;
+        let entity = *self.by_vehicle_id.get(vehicle_id)?;
+        let pos = self.world.get::<RoutePosition>(entity)?;
+        let routes = &self.world.resource::<Routes>().0;
+        let route = routes.get(&pos.route_id)?;
+        let link_id = route.links.get(pos.link_index)?;
         let geom = self.resolve_link_polyline(link_id)?;
-        Some(geom.world_coord_at_progress(vehicle.progress))
+        Some(geom.world_coord_at_progress(pos.progress))
     }
 
     pub fn direction_for_vehicle(
@@ -391,33 +409,38 @@ impl MobilityWorld {
         vehicle_id: &VehicleId,
     ) -> Option<abutown_protocol::DirectionDto> {
         use crate::mobility_geometry::direction_from_delta;
-        let vehicle = self.vehicles.get(vehicle_id)?;
-        let route = self.routes.get(&vehicle.route_id)?;
-        let link_id = route.links.get(vehicle.link_index)?;
+        let entity = *self.by_vehicle_id.get(vehicle_id)?;
+        let pos = self.world.get::<RoutePosition>(entity)?;
+        let routes = &self.world.resource::<Routes>().0;
+        let route = routes.get(&pos.route_id)?;
+        let link_id = route.links.get(pos.link_index)?;
         let geom = self.resolve_link_polyline(link_id)?;
-        let here = geom.world_coord_at_progress(vehicle.progress);
-        let ahead = geom.world_coord_at_progress((vehicle.progress + 0.1).min(1.0));
+        let here = geom.world_coord_at_progress(pos.progress);
+        let ahead = geom.world_coord_at_progress((pos.progress + 0.1).min(1.0));
         Some(direction_from_delta(ahead.0 - here.0, ahead.1 - here.1))
     }
 
     pub fn sprite_key_for_agent(&self, agent_id: &AgentId) -> Option<String> {
-        if !self.agents.contains_key(agent_id) {
+        if !self.by_agent_id.contains_key(agent_id) {
             return None;
         }
-        Some(format!("pedestrian:{}", stable_index(&agent_id.0) % 16))
+        Some(compute_agent_sprite_key(agent_id))
     }
 
     pub fn sprite_key_for_vehicle(&self, vehicle_id: &VehicleId) -> Option<String> {
-        if !self.vehicles.contains_key(vehicle_id) {
+        if !self.by_vehicle_id.contains_key(vehicle_id) {
             return None;
         }
-        Some(format!("tram:{}", stable_index(&vehicle_id.0) % 4))
+        Some(compute_vehicle_sprite_key(vehicle_id))
     }
 
     /// Builds an AgentMobilityDto for the given agent id, including the computed
     /// world_coord / direction / sprite_key. Returns None if the agent does not exist.
     pub fn agent_dto_for(&self, agent_id: &AgentId) -> Option<abutown_protocol::AgentMobilityDto> {
-        let agent = self.agents.get(agent_id)?;
+        let entity = *self.by_agent_id.get(agent_id)?;
+        let state = self.world.get::<AgentMobilityStateComponent>(entity)?;
+        let plan = self.world.get::<WalkPlan>(entity)?;
+        let stable = self.world.get::<StableAgentId>(entity)?;
         let (cx, cy) = self.world_coord_for_agent(agent_id).unwrap_or((0.0, 0.0));
         let direction = self
             .direction_for_agent(agent_id)
@@ -426,9 +449,9 @@ impl MobilityWorld {
             .sprite_key_for_agent(agent_id)
             .unwrap_or_else(|| "pedestrian:0".to_string());
         Some(abutown_protocol::AgentMobilityDto {
-            id: abutown_protocol::EntityId(agent.id.0.clone()),
-            state: abutown_protocol::AgentMobilityStateDto::from(&agent.state),
-            plan_cursor: agent.plan_cursor,
+            id: abutown_protocol::EntityId(stable.0.0.clone()),
+            state: abutown_protocol::AgentMobilityStateDto::from(&state.0),
+            plan_cursor: plan.cursor,
             world_coord: abutown_protocol::WorldCoordDto { x: cx, y: cy },
             direction,
             sprite_key,
@@ -439,7 +462,13 @@ impl MobilityWorld {
         &self,
         vehicle_id: &VehicleId,
     ) -> Option<abutown_protocol::VehicleMobilityDto> {
-        let vehicle = self.vehicles.get(vehicle_id)?;
+        let entity = *self.by_vehicle_id.get(vehicle_id)?;
+        let stable = self.world.get::<StableVehicleId>(entity)?;
+        let kind = self.world.get::<VehicleKindComponent>(entity)?;
+        let pos = self.world.get::<RoutePosition>(entity)?;
+        let cap = self.world.get::<Capacity>(entity)?;
+        let occ = self.world.get::<Occupants>(entity)?;
+        let dwell = self.world.get::<DwellTicksRemaining>(entity)?;
         let (cx, cy) = self
             .world_coord_for_vehicle(vehicle_id)
             .unwrap_or((0.0, 0.0));
@@ -450,18 +479,18 @@ impl MobilityWorld {
             .sprite_key_for_vehicle(vehicle_id)
             .unwrap_or_else(|| "tram:0".to_string());
         Some(abutown_protocol::VehicleMobilityDto {
-            id: abutown_protocol::EntityId(vehicle.id.0.clone()),
-            kind: vehicle.kind.into(),
-            route_id: vehicle.route_id.0.clone(),
-            link_index: vehicle.link_index,
-            progress: vehicle.progress,
-            capacity: vehicle.capacity,
-            occupants: vehicle
-                .occupants
+            id: abutown_protocol::EntityId(stable.0.0.clone()),
+            kind: kind.0.into(),
+            route_id: pos.route_id.0.clone(),
+            link_index: pos.link_index,
+            progress: pos.progress,
+            capacity: cap.0,
+            occupants: occ
+                .0
                 .iter()
                 .map(|agent_id| abutown_protocol::EntityId(agent_id.0.clone()))
                 .collect(),
-            dwell_ticks_remaining: vehicle.dwell_ticks_remaining,
+            dwell_ticks_remaining: dwell.0,
             world_coord: abutown_protocol::WorldCoordDto { x: cx, y: cy },
             direction,
             sprite_key,

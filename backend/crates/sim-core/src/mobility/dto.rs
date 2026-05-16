@@ -108,21 +108,25 @@ pub fn build_mobility_snapshot_dto(
     tick: u64,
     world: &MobilityWorld,
 ) -> MobilitySnapshotDto {
-    let mut agent_ids: Vec<AgentId> = world.agents.keys().cloned().collect();
-    agent_ids.sort_by(|left, right| left.0.cmp(&right.0));
-    let agents = agent_ids
+    let mut agent_records = world.agents();
+    agent_records.sort_by(|left, right| left.id.0.cmp(&right.id.0));
+    let agents = agent_records
         .iter()
-        .filter_map(|id| world.agent_dto_for(id))
+        .filter_map(|record| world.agent_dto_for(&record.id))
         .collect();
 
-    let mut vehicle_ids: Vec<VehicleId> = world.vehicles.keys().cloned().collect();
-    vehicle_ids.sort_by(|left, right| left.0.cmp(&right.0));
-    let vehicles = vehicle_ids
+    let mut vehicle_records = world.vehicles();
+    vehicle_records.sort_by(|left, right| left.id.0.cmp(&right.id.0));
+    let vehicles = vehicle_records
         .iter()
-        .filter_map(|id| world.vehicle_dto_for(id))
+        .filter_map(|record| world.vehicle_dto_for(&record.id))
         .collect();
 
-    let mut stops: Vec<StopMobilityDto> = world.stops.values().map(StopMobilityDto::from).collect();
+    let mut stops: Vec<StopMobilityDto> = world
+        .stops()
+        .iter()
+        .map(StopMobilityDto::from)
+        .collect();
     stops.sort_by(|left, right| left.id.cmp(&right.id));
 
     MobilitySnapshotDto {
@@ -177,7 +181,7 @@ pub fn build_filtered_mobility_delta_dto(
 
     let mut current_visible_agents: std::collections::HashSet<abutown_protocol::EntityId> =
         std::collections::HashSet::new();
-    for agent in world.agents.values() {
+    for agent in world.agents() {
         if matches!(agent.state, AgentMobilityState::InVehicle { .. }) {
             continue;
         }
@@ -189,7 +193,7 @@ pub fn build_filtered_mobility_delta_dto(
     }
     let mut current_visible_vehicles: std::collections::HashSet<abutown_protocol::EntityId> =
         std::collections::HashSet::new();
-    for vehicle in world.vehicles.values() {
+    for vehicle in world.vehicles() {
         if let Some((x, y)) = world.world_coord_for_vehicle(&vehicle.id)
             && subscription.contains(&chunk_of(x, y, CHUNK_SIZE))
         {
