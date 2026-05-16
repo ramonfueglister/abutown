@@ -33,6 +33,12 @@ use crate::{
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
+const CITY_NETWORK_DEFAULT_PATH: &str = "data/city/zurich-network.json";
+
+fn resolve_city_network_path() -> String {
+    std::env::var("ABUTOWN_CITY_NETWORK_PATH")
+        .unwrap_or_else(|_| CITY_NETWORK_DEFAULT_PATH.to_string())
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -108,7 +114,12 @@ impl AppState {
 }
 
 pub fn build_app() -> Router {
-    build_app_with_runtime(SimulationRuntime::new())
+    let runtime =
+        match sim_core::city_network::CityNetwork::from_path(resolve_city_network_path()) {
+            Ok(network) => SimulationRuntime::new_from_network(&network),
+            Err(_) => SimulationRuntime::new(),
+        };
+    build_app_with_runtime(runtime)
 }
 
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
@@ -118,6 +129,7 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 }
 
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
+    let network = sim_core::city_network::CityNetwork::from_path(resolve_city_network_path())?;
     let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
     let snapshot_store = PostgresChunkSnapshotStore::connect(
         &config.database_url,
@@ -133,6 +145,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         Box::new(event_store),
         Box::new(snapshot_store),
         Box::new(mobility_snapshot_store),
+        &network,
     )
     .await?;
 

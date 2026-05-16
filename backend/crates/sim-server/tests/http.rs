@@ -16,6 +16,20 @@ use sim_server::{
 const TEST_USER_A: &str = "00000000-0000-0000-0000-000000000001";
 const TEST_USER_B: &str = "00000000-0000-0000-0000-000000000002";
 
+fn empty_test_network() -> sim_core::city_network::CityNetwork {
+    sim_core::city_network::CityNetwork {
+        version: 1,
+        world_id: "test".to_string(),
+        chunk_size: 32,
+        world_tiles: sim_core::city_network::WorldTiles {
+            width: 256,
+            height: 256,
+        },
+        arterial_paths: vec![],
+        pedestrian_corridors: vec![],
+    }
+}
+
 #[tokio::test]
 async fn health_and_world_summary_are_available() {
     let app = build_app();
@@ -519,6 +533,7 @@ async fn postgres_world_state_survives_runtime_restart() {
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            &empty_test_network(),
         )
         .await
         .expect("hydrate first runtime");
@@ -564,6 +579,7 @@ async fn postgres_world_state_survives_runtime_restart() {
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            &empty_test_network(),
         )
         .await
         .expect("hydrate restarted runtime");

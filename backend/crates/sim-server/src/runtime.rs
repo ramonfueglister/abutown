@@ -48,6 +48,13 @@ const SEEDED_CHUNKS: [ChunkCoord; 3] = [
 const PULSE_STRIDE: u64 = 37;
 pub const TICK_PERIOD_MS: u32 = 100;
 
+pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
+    sim_core::mobility::seed::SeedDensity {
+        pedestrians_per_corridor: 6,
+        cars_per_arterial: 17,
+        trams_total: 4,
+    };
+
 pub struct SimulationRuntime {
     world_id: WorldId,
     registry: ChunkRegistry,
@@ -135,6 +142,14 @@ impl SimulationRuntime {
         runtime
     }
 
+    /// Build an in-memory runtime whose mobility world is seeded from the
+    /// shared city network descriptor instead of the tiny developer seed.
+    pub fn new_from_network(network: &sim_core::city_network::CityNetwork) -> Self {
+        let mut runtime = Self::new();
+        runtime.mobility = sim_core::mobility::seed::from_network(network, SEED_DENSITY);
+        runtime
+    }
+
     pub fn set_mobility_for_test(&mut self, mobility: MobilityWorld) {
         self.mobility = mobility;
     }
@@ -159,15 +174,23 @@ impl SimulationRuntime {
         event_store: Box<dyn WorldEventStore + Send>,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
+        network: &sim_core::city_network::CityNetwork,
     ) -> Result<Self, HydrationError> {
         let world_id = Self::default_world_id();
+        let fallback_mobility = || {
+            if network.arterial_paths.is_empty() && network.pedestrian_corridors.is_empty() {
+                sim_core::mobility::seed::tiny_world()
+            } else {
+                sim_core::mobility::seed::from_network(network, SEED_DENSITY)
+            }
+        };
         let mobility = match mobility_snapshot_store
             .read(&world_id.0)
             .await
             .map_err(HydrationError::Mobility)?
         {
             Some((_tick, world)) => world,
-            None => sim_core::mobility::seed::initial_world(),
+            None => fallback_mobility(),
         };
         let mut registry = ChunkRegistry::new(CHUNK_SIZE);
 
@@ -565,6 +588,20 @@ mod tests {
         delta
     }
 
+    fn empty_test_network() -> sim_core::city_network::CityNetwork {
+        sim_core::city_network::CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: sim_core::city_network::WorldTiles {
+                width: 256,
+                height: 256,
+            },
+            arterial_paths: vec![],
+            pedestrian_corridors: vec![],
+        }
+    }
+
     #[test]
     fn runtime_summarizes_multiple_loaded_chunks() {
         let runtime = SimulationRuntime::new();
@@ -846,6 +883,7 @@ mod tests {
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            &empty_test_network(),
         )
         .await
         .unwrap();
@@ -868,6 +906,7 @@ mod tests {
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            &empty_test_network(),
         )
         .await
         .unwrap();
@@ -1078,6 +1117,7 @@ mod tests {
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            &empty_test_network(),
         )
         .await
         .unwrap();
@@ -1110,6 +1150,7 @@ mod tests {
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(mobility_store),
+            &empty_test_network(),
         )
         .await
         .unwrap();
