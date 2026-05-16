@@ -715,6 +715,8 @@ pub fn build_mobility_delta_dto(
         tick,
         changed_agents,
         changed_vehicles,
+        left_agents: vec![],
+        left_vehicles: vec![],
     }
 }
 

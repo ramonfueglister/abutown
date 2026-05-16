@@ -130,6 +130,25 @@ pub struct TileKindSetEventDto {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientMessageDto {
+    ChunkSubscribe(ChunkSubscribeDto),
+    ChunkUnsubscribe(ChunkUnsubscribeDto),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChunkSubscribeDto {
+    pub protocol_version: u16,
+    pub coords: Vec<ChunkCoordDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChunkUnsubscribeDto {
+    pub protocol_version: u16,
+    pub coords: Vec<ChunkCoordDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
@@ -172,6 +191,10 @@ pub struct MobilityDeltaDto {
     pub tick: u64,
     pub changed_agents: Vec<AgentMobilityDto>,
     pub changed_vehicles: Vec<VehicleMobilityDto>,
+    #[serde(default)]
+    pub left_agents: Vec<EntityId>,
+    #[serde(default)]
+    pub left_vehicles: Vec<EntityId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -482,6 +505,8 @@ mod tests {
                 sprite_key: "pedestrian:0".to_string(),
             }],
             changed_vehicles: vec![],
+            left_agents: vec![],
+            left_vehicles: vec![],
         });
 
         let json = serde_json::to_value(&message).expect("mobility delta serializes");
@@ -496,6 +521,63 @@ mod tests {
             json["changed_agents"][0]["state"]["stop_id"],
             "stop:old-town"
         );
+    }
+
+    #[test]
+    fn client_message_chunk_subscribe_round_trips() {
+        let msg = ClientMessageDto::ChunkSubscribe(ChunkSubscribeDto {
+            protocol_version: 1,
+            coords: vec![ChunkCoordDto { x: 4, y: 4 }, ChunkCoordDto { x: 5, y: 4 }],
+        });
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["type"], "chunk_subscribe");
+        assert_eq!(json["coords"].as_array().unwrap().len(), 2);
+        let back: ClientMessageDto = serde_json::from_value(json).unwrap();
+        assert_eq!(back, msg);
+    }
+
+    #[test]
+    fn client_message_chunk_unsubscribe_round_trips() {
+        let msg = ClientMessageDto::ChunkUnsubscribe(ChunkUnsubscribeDto {
+            protocol_version: 1,
+            coords: vec![ChunkCoordDto { x: 4, y: 4 }],
+        });
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["type"], "chunk_unsubscribe");
+        let back: ClientMessageDto = serde_json::from_value(json).unwrap();
+        assert_eq!(back, msg);
+    }
+
+    #[test]
+    fn mobility_delta_dto_serializes_with_left_fields() {
+        let dto = MobilityDeltaDto {
+            protocol_version: 1,
+            world_id: WorldId("w".to_string()),
+            tick: 7,
+            changed_agents: vec![],
+            changed_vehicles: vec![],
+            left_agents: vec![EntityId("agent:walk:1".to_string())],
+            left_vehicles: vec![EntityId("vehicle:car:0:0".to_string())],
+        };
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["left_agents"].as_array().unwrap().len(), 1);
+        assert_eq!(json["left_vehicles"].as_array().unwrap().len(), 1);
+        let back: MobilityDeltaDto = serde_json::from_value(json).unwrap();
+        assert_eq!(back, dto);
+    }
+
+    #[test]
+    fn mobility_delta_dto_accepts_missing_left_fields_for_backward_compat() {
+        let json = serde_json::json!({
+            "protocol_version": 1,
+            "world_id": "w",
+            "tick": 0,
+            "changed_agents": [],
+            "changed_vehicles": []
+        });
+        let dto: MobilityDeltaDto = serde_json::from_value(json).unwrap();
+        assert_eq!(dto.left_agents, Vec::<EntityId>::new());
+        assert_eq!(dto.left_vehicles, Vec::<EntityId>::new());
     }
 
     #[test]
