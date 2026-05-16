@@ -728,6 +728,103 @@ pub fn build_mobility_delta_dto(
     }
 }
 
+pub fn build_filtered_mobility_delta_dto(
+    world_id: &WorldId,
+    tick: u64,
+    world: &MobilityWorld,
+    delta: &MobilityDelta,
+    subscription: &std::collections::HashSet<crate::ids::ChunkCoord>,
+    last_visible_agents: &mut std::collections::HashSet<abutown_protocol::EntityId>,
+    last_visible_vehicles: &mut std::collections::HashSet<abutown_protocol::EntityId>,
+) -> abutown_protocol::MobilityDeltaDto {
+    const CHUNK_SIZE: u16 = 32;
+
+    let mut current_visible_agents: std::collections::HashSet<abutown_protocol::EntityId> =
+        std::collections::HashSet::new();
+    for agent in world.agents.values() {
+        if matches!(agent.state, AgentMobilityState::InVehicle { .. }) {
+            continue;
+        }
+        if let Some((x, y)) = world.world_coord_for_agent(&agent.id)
+            && subscription.contains(&chunk_of(x, y, CHUNK_SIZE))
+        {
+            current_visible_agents.insert(abutown_protocol::EntityId(agent.id.0.clone()));
+        }
+    }
+    let mut current_visible_vehicles: std::collections::HashSet<abutown_protocol::EntityId> =
+        std::collections::HashSet::new();
+    for vehicle in world.vehicles.values() {
+        if let Some((x, y)) = world.world_coord_for_vehicle(&vehicle.id)
+            && subscription.contains(&chunk_of(x, y, CHUNK_SIZE))
+        {
+            current_visible_vehicles.insert(abutown_protocol::EntityId(vehicle.id.0.clone()));
+        }
+    }
+
+    // entered_*: newly visible — emit full DTO
+    let mut changed_agents: Vec<abutown_protocol::AgentMobilityDto> = Vec::new();
+    for entity_id in current_visible_agents.iter() {
+        if !last_visible_agents.contains(entity_id)
+            && let Some(dto) = world.agent_dto_for(&AgentId(entity_id.0.clone()))
+        {
+            changed_agents.push(dto);
+        }
+    }
+    let mut changed_vehicles: Vec<abutown_protocol::VehicleMobilityDto> = Vec::new();
+    for entity_id in current_visible_vehicles.iter() {
+        if !last_visible_vehicles.contains(entity_id)
+            && let Some(dto) = world.vehicle_dto_for(&VehicleId(entity_id.0.clone()))
+        {
+            changed_vehicles.push(dto);
+        }
+    }
+
+    // still-visible-changed: in delta AND already known to this connection
+    for agent in &delta.changed_agents {
+        let entity_id = abutown_protocol::EntityId(agent.id.0.clone());
+        if current_visible_agents.contains(&entity_id)
+            && last_visible_agents.contains(&entity_id)
+            && let Some(dto) = world.agent_dto_for(&agent.id)
+        {
+            changed_agents.push(dto);
+        }
+    }
+    for vehicle in &delta.changed_vehicles {
+        let entity_id = abutown_protocol::EntityId(vehicle.id.0.clone());
+        if current_visible_vehicles.contains(&entity_id)
+            && last_visible_vehicles.contains(&entity_id)
+            && let Some(dto) = world.vehicle_dto_for(&vehicle.id)
+        {
+            changed_vehicles.push(dto);
+        }
+    }
+
+    // left_*: previously visible, now not
+    let left_agents: Vec<abutown_protocol::EntityId> = last_visible_agents
+        .iter()
+        .filter(|id| !current_visible_agents.contains(id))
+        .cloned()
+        .collect();
+    let left_vehicles: Vec<abutown_protocol::EntityId> = last_visible_vehicles
+        .iter()
+        .filter(|id| !current_visible_vehicles.contains(id))
+        .cloned()
+        .collect();
+
+    *last_visible_agents = current_visible_agents;
+    *last_visible_vehicles = current_visible_vehicles;
+
+    abutown_protocol::MobilityDeltaDto {
+        protocol_version: abutown_protocol::PROTOCOL_VERSION,
+        world_id: world_id.clone(),
+        tick,
+        changed_agents,
+        changed_vehicles,
+        left_agents,
+        left_vehicles,
+    }
+}
+
 pub mod seed {
     use std::collections::{HashMap, VecDeque};
 
@@ -1604,5 +1701,135 @@ mod tests {
             2,
             "snapshot must include in_vehicle drivers so clients can hydrate state"
         );
+    }
+
+    #[test]
+    fn filter_excludes_entities_outside_subscription() {
+        use crate::ids::ChunkCoord;
+        use std::collections::HashSet;
+
+        let network = crate::city_network::CityNetwork {
+            version: 1,
+            world_id: "t".to_string(),
+            chunk_size: 32,
+            world_tiles: crate::city_network::WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![vec![
+                crate::city_network::NetworkCoord { x: 0, y: 0 },
+                crate::city_network::NetworkCoord { x: 200, y: 0 },
+            ]],
+            pedestrian_corridors: vec![],
+        };
+        let world = seed::from_network(&network, seed::SeedDensity {
+            pedestrians_per_corridor: 0,
+            cars_per_arterial: 1,
+            trams_total: 0,
+        });
+
+        let subscription: HashSet<ChunkCoord> = [ChunkCoord { x: 1, y: 0 }].into_iter().collect();
+        let mut last_visible_agents: HashSet<abutown_protocol::EntityId> = HashSet::new();
+        let mut last_visible_vehicles: HashSet<abutown_protocol::EntityId> = HashSet::new();
+
+        let delta = MobilityDelta {
+            changed_agents: world.agents.values().cloned().collect(),
+            changed_vehicles: world.vehicles.values().cloned().collect(),
+        };
+        let world_id = WorldId("t".to_string());
+        let dto = build_filtered_mobility_delta_dto(
+            &world_id,
+            world.tick(),
+            &world,
+            &delta,
+            &subscription,
+            &mut last_visible_agents,
+            &mut last_visible_vehicles,
+        );
+        assert!(dto.changed_agents.is_empty(), "agent at (0,0) not in subscription {{(1,0)}}");
+        assert!(dto.changed_vehicles.is_empty(), "vehicle at (0,0) not in subscription {{(1,0)}}");
+        assert!(dto.left_agents.is_empty());
+        assert!(dto.left_vehicles.is_empty());
+    }
+
+    #[test]
+    fn filter_emits_left_when_entity_leaves_subscription() {
+        use crate::ids::ChunkCoord;
+        use std::collections::HashSet;
+
+        let network = crate::city_network::CityNetwork {
+            version: 1,
+            world_id: "t".to_string(),
+            chunk_size: 32,
+            world_tiles: crate::city_network::WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![vec![
+                crate::city_network::NetworkCoord { x: 0, y: 0 },
+                crate::city_network::NetworkCoord { x: 200, y: 0 },
+            ]],
+            pedestrian_corridors: vec![],
+        };
+        let world = seed::from_network(&network, seed::SeedDensity {
+            pedestrians_per_corridor: 0,
+            cars_per_arterial: 1,
+            trams_total: 0,
+        });
+
+        let car_id = world.vehicles.keys().next().unwrap().clone();
+        let car_entity_id = abutown_protocol::EntityId(car_id.0.clone());
+        let subscription: HashSet<ChunkCoord> = [ChunkCoord { x: 1, y: 0 }].into_iter().collect();
+        let mut last_visible_agents: HashSet<abutown_protocol::EntityId> = HashSet::new();
+        let mut last_visible_vehicles: HashSet<abutown_protocol::EntityId> = [car_entity_id.clone()].into_iter().collect();
+
+        let delta = MobilityDelta { changed_agents: vec![], changed_vehicles: vec![] };
+        let world_id = WorldId("t".to_string());
+        let dto = build_filtered_mobility_delta_dto(
+            &world_id,
+            world.tick(),
+            &world,
+            &delta,
+            &subscription,
+            &mut last_visible_agents,
+            &mut last_visible_vehicles,
+        );
+        assert_eq!(dto.left_vehicles, vec![car_entity_id]);
+    }
+
+    #[test]
+    fn filter_emits_join_when_entity_enters_subscription() {
+        use crate::ids::ChunkCoord;
+        use std::collections::HashSet;
+
+        let network = crate::city_network::CityNetwork {
+            version: 1,
+            world_id: "t".to_string(),
+            chunk_size: 32,
+            world_tiles: crate::city_network::WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![vec![
+                crate::city_network::NetworkCoord { x: 0, y: 0 },
+                crate::city_network::NetworkCoord { x: 200, y: 0 },
+            ]],
+            pedestrian_corridors: vec![],
+        };
+        let world = seed::from_network(&network, seed::SeedDensity {
+            pedestrians_per_corridor: 0,
+            cars_per_arterial: 1,
+            trams_total: 0,
+        });
+
+        let subscription: HashSet<ChunkCoord> = [ChunkCoord { x: 0, y: 0 }].into_iter().collect();
+        let mut last_visible_agents: HashSet<abutown_protocol::EntityId> = HashSet::new();
+        let mut last_visible_vehicles: HashSet<abutown_protocol::EntityId> = HashSet::new();
+
+        let delta = MobilityDelta { changed_agents: vec![], changed_vehicles: vec![] };
+        let world_id = WorldId("t".to_string());
+        let dto = build_filtered_mobility_delta_dto(
+            &world_id,
+            world.tick(),
+            &world,
+            &delta,
+            &subscription,
+            &mut last_visible_agents,
+            &mut last_visible_vehicles,
+        );
+        assert_eq!(dto.changed_vehicles.len(), 1);
+        assert!(dto.left_vehicles.is_empty());
+        assert_eq!(last_visible_vehicles.len(), 1, "filter updated last_visible_vehicles");
     }
 }
