@@ -4,5 +4,6 @@ pub(crate) mod chunk_registry;
 pub mod commands;
 pub mod config;
 pub mod postgres_events;
+pub mod postgres_mobility;
 pub mod postgres_snapshots;
 pub mod runtime;

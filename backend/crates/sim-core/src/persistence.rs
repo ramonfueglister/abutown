@@ -5,6 +5,7 @@ use async_trait::async_trait;
 
 use crate::chunk::Chunk;
 use crate::ids::ChunkCoord;
+use crate::mobility::MobilityWorld;
 use crate::scheduler::ChunkActivity;
 use crate::tile::TileKind;
 
@@ -112,6 +113,61 @@ impl InMemoryChunkSnapshotStore {
     }
 }
 
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct MobilitySnapshotStoreError {
+    message: String,
+}
+
+impl MobilitySnapshotStoreError {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+#[async_trait]
+pub trait MobilitySnapshotStore: std::fmt::Debug + Send {
+    async fn write(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        snapshot: &MobilityWorld,
+    ) -> Result<(), MobilitySnapshotStoreError>;
+
+    async fn read(
+        &self,
+        world_id: &str,
+    ) -> Result<Option<(u64, MobilityWorld)>, MobilitySnapshotStoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct InMemoryMobilitySnapshotStore {
+    snapshots: HashMap<String, (u64, MobilityWorld)>,
+}
+
+#[async_trait]
+impl MobilitySnapshotStore for InMemoryMobilitySnapshotStore {
+    async fn write(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        snapshot: &MobilityWorld,
+    ) -> Result<(), MobilitySnapshotStoreError> {
+        self.snapshots
+            .insert(world_id.to_string(), (tick, snapshot.clone()));
+        Ok(())
+    }
+
+    async fn read(
+        &self,
+        world_id: &str,
+    ) -> Result<Option<(u64, MobilityWorld)>, MobilitySnapshotStoreError> {
+        Ok(self.snapshots.get(world_id).cloned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +260,34 @@ mod tests {
             .unwrap()
             .expect("snapshot exists");
         assert_eq!(stored, snapshot);
+    }
+
+    #[tokio::test]
+    async fn mobility_snapshot_store_writes_and_reads() {
+        use crate::mobility::seed;
+
+        let mut store = InMemoryMobilitySnapshotStore::default();
+        let world = seed::initial_world();
+
+        MobilitySnapshotStore::write(&mut store, "abutown-main", 42, &world)
+            .await
+            .unwrap();
+
+        let (tick, restored) = MobilitySnapshotStore::read(&store, "abutown-main")
+            .await
+            .unwrap()
+            .expect("snapshot exists");
+
+        assert_eq!(tick, 42);
+        assert_eq!(restored, world);
+    }
+
+    #[tokio::test]
+    async fn mobility_snapshot_store_read_returns_none_for_unknown_world() {
+        let store = InMemoryMobilitySnapshotStore::default();
+        let result = MobilitySnapshotStore::read(&store, "missing-world")
+            .await
+            .unwrap();
+        assert!(result.is_none());
     }
 }

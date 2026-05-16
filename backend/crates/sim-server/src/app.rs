@@ -25,6 +25,7 @@ use crate::{
     },
     config::ServerConfig,
     postgres_events::PostgresWorldEventStore,
+    postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
 };
@@ -123,12 +124,17 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         SimulationRuntime::default_world_id(),
     )
     .await?;
+    let mobility_snapshot_store =
+        PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
-    let runtime =
-        SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
-            .await?;
+    let runtime = SimulationRuntime::hydrate_from_stores(
+        Box::new(event_store),
+        Box::new(snapshot_store),
+        Box::new(mobility_snapshot_store),
+    )
+    .await?;
 
     Ok(build_app_with_runtime_and_card_hands(
         runtime, card_hands, auth,
@@ -305,7 +311,11 @@ async fn persist_snapshots_once(
 ) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
     let runtime = state.runtime();
     let mut runtime = runtime.lock().await;
-    runtime.persist_chunk_snapshots().await
+    let written = runtime.persist_chunk_snapshots().await?;
+    if let Err(error) = runtime.persist_mobility_snapshot().await {
+        tracing::warn!(%error, "failed to persist mobility snapshot");
+    }
+    Ok(written)
 }
 
 async fn send_server_message(

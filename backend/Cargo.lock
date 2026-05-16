@@ -2157,6 +2157,7 @@ dependencies = [
  "async-trait",
  "bevy_ecs",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "uuid",

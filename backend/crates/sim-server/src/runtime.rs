@@ -9,7 +9,10 @@ use sim_core::{
     events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
-    persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore},
+    persistence::{
+        ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore,
+        InMemoryMobilitySnapshotStore, MobilitySnapshotStore, MobilitySnapshotStoreError,
+    },
     scheduler::ChunkActivity,
     tile::TileKind,
 };
@@ -26,6 +29,8 @@ pub enum HydrationError {
     Apply(EventApplyError),
     #[error("chunk error during seed: {0}")]
     Chunk(ChunkError),
+    #[error("mobility store error: {0}")]
+    Mobility(sim_core::persistence::MobilitySnapshotStoreError),
 }
 
 use crate::{
@@ -47,6 +52,7 @@ pub struct SimulationRuntime {
     registry: ChunkRegistry,
     mobility: MobilityWorld,
     snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+    mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
     event_store: Box<dyn WorldEventStore + Send>,
     event_count: usize,
     tick: u64,
@@ -110,6 +116,7 @@ impl SimulationRuntime {
             registry,
             mobility: MobilityWorld::default(),
             snapshot_store,
+            mobility_snapshot_store: Box::new(InMemoryMobilitySnapshotStore::default()),
             event_store,
             event_count: 0,
             tick: 0,
@@ -117,11 +124,50 @@ impl SimulationRuntime {
         }
     }
 
+    pub fn new_with_all_stores(
+        event_store: Box<dyn WorldEventStore + Send>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
+    ) -> Self {
+        let mut runtime = Self::new_with_stores(event_store, snapshot_store);
+        runtime.mobility_snapshot_store = mobility_snapshot_store;
+        runtime
+    }
+
+    pub fn set_mobility_for_test(&mut self, mobility: MobilityWorld) {
+        self.mobility = mobility;
+    }
+
+    pub fn override_world_id_for_test(&mut self, world_id: &str) {
+        self.world_id = WorldId(world_id.to_string());
+    }
+
+    pub fn next_mobility_delta_for_test(&mut self) -> MobilityDeltaDto {
+        self.next_mobility_delta()
+    }
+
+    pub fn mobility_world_clone_for_test(&self) -> MobilityWorld {
+        self.mobility.clone()
+    }
+
+    pub fn mobility_tick(&self) -> u64 {
+        self.mobility.tick()
+    }
+
     pub async fn hydrate_from_stores(
         event_store: Box<dyn WorldEventStore + Send>,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
     ) -> Result<Self, HydrationError> {
         let world_id = Self::default_world_id();
+        let mobility = match mobility_snapshot_store
+            .read(&world_id.0)
+            .await
+            .map_err(HydrationError::Mobility)?
+        {
+            Some((_tick, world)) => world,
+            None => sim_core::mobility::seed::initial_world(),
+        };
         let mut registry = ChunkRegistry::new(CHUNK_SIZE);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
@@ -198,8 +244,9 @@ impl SimulationRuntime {
         Ok(Self {
             world_id,
             registry,
-            mobility: MobilityWorld::default(),
+            mobility,
             snapshot_store,
+            mobility_snapshot_store,
             event_store,
             event_count,
             tick: global_tick,
@@ -270,6 +317,12 @@ impl SimulationRuntime {
 
         self.registry.mark_snapshots_persisted(&persisted_coords);
         Ok(persisted_coords.len())
+    }
+
+    pub async fn persist_mobility_snapshot(&mut self) -> Result<(), MobilitySnapshotStoreError> {
+        self.mobility_snapshot_store
+            .write(&self.world_id.0, self.mobility.tick(), &self.mobility)
+            .await
     }
 
     pub async fn stored_chunk_snapshot(
@@ -464,6 +517,19 @@ impl SimulationRuntime {
 impl Default for SimulationRuntime {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+impl SimulationRuntime {
+    pub fn mobility_tick_for_test(&self) -> u64 {
+        self.mobility.tick()
+    }
+    pub fn mobility_agent_count_for_test(&self) -> usize {
+        self.mobility.snapshot().agents.len()
+    }
+    pub fn mobility_vehicle_count_for_test(&self) -> usize {
+        self.mobility.snapshot().vehicles.len()
     }
 }
 
@@ -778,10 +844,13 @@ mod tests {
             .await
             .unwrap();
 
-        let runtime =
-            SimulationRuntime::hydrate_from_stores(Box::new(event_store), Box::new(snapshot_store))
-                .await
-                .unwrap();
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+        )
+        .await
+        .unwrap();
 
         let restored = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
         assert_eq!(restored.chunk_version, 2);
@@ -800,6 +869,7 @@ mod tests {
         let runtime = SimulationRuntime::hydrate_from_stores(
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
         )
         .await
         .unwrap();
@@ -938,6 +1008,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_persists_mobility_snapshot_and_reloads_through_store() {
+        use sim_core::mobility::seed;
+        use sim_core::persistence::InMemoryMobilitySnapshotStore;
+
+        let store: Box<dyn MobilitySnapshotStore + Send> =
+            Box::new(InMemoryMobilitySnapshotStore::default());
+        let mut runtime = SimulationRuntime::new_with_all_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            store,
+        );
+        runtime.set_mobility_for_test(seed::initial_world());
+        runtime.persist_mobility_snapshot().await.unwrap();
+
+        let (tick, world) = runtime
+            .mobility_snapshot_store
+            .read(&runtime.world_id.0)
+            .await
+            .unwrap()
+            .expect("snapshot exists");
+
+        assert_eq!(tick, 0);
+        assert_eq!(world, seed::initial_world());
+    }
+
+    #[tokio::test]
     async fn race_handler_returns_winner_when_append_reports_duplicate() {
         use abutown_protocol::{
             ChunkCoordDto, ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto,
@@ -976,5 +1072,50 @@ mod tests {
             "race handler must return the planted winner event"
         );
         assert_eq!(result.response.event, winner);
+    }
+
+    #[tokio::test]
+    async fn hydrate_seeds_fresh_mobility_when_store_is_empty() {
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        assert_eq!(runtime.mobility_agent_count_for_test(), 20);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 4);
+    }
+
+    #[tokio::test]
+    async fn hydrate_restores_mobility_from_store_when_present() {
+        use sim_core::mobility::seed;
+
+        let mut authored = seed::initial_world();
+        // Advance one tick so the persisted state differs from a fresh seed.
+        let _ = authored.tick_mobility();
+        let persisted_tick = authored.tick();
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(
+            &mut mobility_store,
+            "abutown-main",
+            persisted_tick,
+            &authored,
+        )
+        .await
+        .unwrap();
+
+        let runtime = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), persisted_tick);
     }
 }
