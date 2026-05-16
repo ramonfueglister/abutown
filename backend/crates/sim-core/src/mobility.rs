@@ -132,6 +132,7 @@ pub struct MobilityWorld {
     vehicles: HashMap<VehicleId, VehicleRecord>,
     stops: HashMap<StopId, StopRecord>,
     routes: HashMap<RouteId, RouteRecord>,
+    pub link_polylines: HashMap<LinkId, Vec<(f32, f32)>>,
 }
 
 impl MobilityWorld {
@@ -422,15 +423,22 @@ impl MobilityWorld {
         changed
     }
 
+    fn resolve_link_polyline(&self, link_id: &LinkId) -> Option<crate::mobility_geometry::LinkGeometry> {
+        if let Some(points) = self.link_polylines.get(link_id) {
+            return Some(crate::mobility_geometry::LinkGeometry { points: points.clone() });
+        }
+        crate::mobility_geometry::link_geometry(&link_id.0)
+    }
+
     pub fn world_coord_for_agent(&self, agent_id: &AgentId) -> Option<(f32, f32)> {
-        use crate::mobility_geometry::{activity_geometry, link_geometry, stop_geometry};
+        use crate::mobility_geometry::{activity_geometry, stop_geometry};
         let agent = self.agents.get(agent_id)?;
         match &agent.state {
             AgentMobilityState::AtActivity { activity_id } => {
                 activity_geometry(activity_id).map(|g| g.coord)
             }
             AgentMobilityState::Walking { link_id, progress } => {
-                let geom = link_geometry(&link_id.0)?;
+                let geom = self.resolve_link_polyline(link_id)?;
                 Some(geom.world_coord_at_progress(*progress))
             }
             AgentMobilityState::WaitingAtStop { stop_id }
@@ -448,11 +456,10 @@ impl MobilityWorld {
         &self,
         agent_id: &AgentId,
     ) -> Option<abutown_protocol::DirectionDto> {
-        use crate::mobility_geometry::link_geometry;
         let agent = self.agents.get(agent_id)?;
         match &agent.state {
             AgentMobilityState::Walking { link_id, progress } => {
-                let geom = link_geometry(&link_id.0)?;
+                let geom = self.resolve_link_polyline(link_id)?;
                 Some(geom.direction_at_progress(*progress))
             }
             AgentMobilityState::InVehicle { vehicle_id, .. } => {
@@ -463,24 +470,24 @@ impl MobilityWorld {
     }
 
     pub fn world_coord_for_vehicle(&self, vehicle_id: &VehicleId) -> Option<(f32, f32)> {
-        use crate::mobility_geometry::route_link_world_coord;
         let vehicle = self.vehicles.get(vehicle_id)?;
-        route_link_world_coord(&vehicle.route_id.0, vehicle.link_index, vehicle.progress)
+        let route = self.routes.get(&vehicle.route_id)?;
+        let link_id = route.links.get(vehicle.link_index)?;
+        let geom = self.resolve_link_polyline(link_id)?;
+        Some(geom.world_coord_at_progress(vehicle.progress))
     }
 
     pub fn direction_for_vehicle(
         &self,
         vehicle_id: &VehicleId,
     ) -> Option<abutown_protocol::DirectionDto> {
-        use crate::mobility_geometry::{direction_from_delta, route_link_world_coord};
+        use crate::mobility_geometry::direction_from_delta;
         let vehicle = self.vehicles.get(vehicle_id)?;
-        let here =
-            route_link_world_coord(&vehicle.route_id.0, vehicle.link_index, vehicle.progress)?;
-        let ahead = route_link_world_coord(
-            &vehicle.route_id.0,
-            vehicle.link_index,
-            (vehicle.progress + 0.1).min(1.0),
-        )?;
+        let route = self.routes.get(&vehicle.route_id)?;
+        let link_id = route.links.get(vehicle.link_index)?;
+        let geom = self.resolve_link_polyline(link_id)?;
+        let here = geom.world_coord_at_progress(vehicle.progress);
+        let ahead = geom.world_coord_at_progress((vehicle.progress + 0.1).min(1.0));
         Some(direction_from_delta(ahead.0 - here.0, ahead.1 - here.1))
     }
 
@@ -714,12 +721,17 @@ pub mod seed {
     };
     use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
+    /// Backward-compatible wrapper — delegates to [`tiny_world`].
+    pub fn initial_world() -> MobilityWorld {
+        tiny_world()
+    }
+
     /// Build a deterministic populated mobility world for fresh server starts.
     ///
     /// Two routes traverse the seeded chunk neighbourhood; 4 vehicles and
     /// 20 agents are spawned with cyclic plans. Calling this function twice
     /// returns equal worlds.
-    pub fn initial_world() -> MobilityWorld {
+    pub fn tiny_world() -> MobilityWorld {
         let horizontal_route = RouteId("route:horizontal".to_string());
         let vertical_route = RouteId("route:vertical".to_string());
         let horizontal_link = LinkId("link:horizontal:main".to_string());
@@ -838,7 +850,156 @@ pub mod seed {
             vehicles,
             stops,
             routes,
+            link_polylines: HashMap::new(),
         }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct SeedDensity {
+        pub pedestrians_per_corridor: u32,
+        pub cars_per_arterial: u32,
+        pub trams_total: u32,
+    }
+
+    impl Default for SeedDensity {
+        fn default() -> Self {
+            Self {
+                pedestrians_per_corridor: 6,
+                cars_per_arterial: 4,
+                trams_total: 4,
+            }
+        }
+    }
+
+    pub fn from_network(
+        network: &crate::city_network::CityNetwork,
+        density: SeedDensity,
+    ) -> MobilityWorld {
+        use crate::city_network::NetworkCoord;
+
+        let mut world = MobilityWorld::default();
+        let mut routes: HashMap<RouteId, RouteRecord> = HashMap::new();
+        let mut links: Vec<(LinkId, Vec<(f32, f32)>)> = Vec::new();
+
+        // Register pedestrian corridors as walking links.
+        for (index, corridor) in network.pedestrian_corridors.iter().enumerate() {
+            let link_id = LinkId(format!("link:walk:corridor:{index}"));
+            let points: Vec<(f32, f32)> = corridor
+                .iter()
+                .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
+                .collect();
+            links.push((link_id, points));
+        }
+
+        // Spawn walking agents distributed across corridors.
+        if !network.pedestrian_corridors.is_empty() {
+            let pedestrian_count =
+                network.pedestrian_corridors.len() as u32 * density.pedestrians_per_corridor;
+            for n in 0..pedestrian_count {
+                let corridor_index = (n as usize) % network.pedestrian_corridors.len();
+                let agent_id = AgentId(format!("agent:walk:{n}"));
+                let link_id = LinkId(format!("link:walk:corridor:{corridor_index}"));
+                let progress =
+                    ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
+                world.agents.insert(
+                    agent_id.clone(),
+                    AgentRecord {
+                        id: agent_id,
+                        state: AgentMobilityState::Walking {
+                            link_id,
+                            progress,
+                        },
+                        plan: vec![PlanStage::Activity {
+                            activity_id: format!("activity:wander:{corridor_index}"),
+                        }],
+                        plan_cursor: 0,
+                        walk_speed_per_tick: 0.05,
+                    },
+                );
+            }
+        }
+
+        // Register arterial paths as routes for cars (one route per arterial, one link).
+        for (index, arterial) in network.arterial_paths.iter().enumerate() {
+            let route_id = RouteId(format!("route:arterial:{index}"));
+            let link_id = LinkId(format!("link:arterial:{index}"));
+            let points: Vec<(f32, f32)> = arterial
+                .iter()
+                .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
+                .collect();
+            links.push((link_id.clone(), points));
+            routes.insert(
+                route_id.clone(),
+                RouteRecord {
+                    id: route_id.clone(),
+                    links: vec![link_id],
+                },
+            );
+        }
+
+        // Spawn cars + drivers.
+        let mut driver_index: u32 = 0;
+        for (arterial_index, _arterial) in network.arterial_paths.iter().enumerate() {
+            for n in 0..density.cars_per_arterial {
+                let vehicle_id = VehicleId(format!("vehicle:car:{arterial_index}:{n}"));
+                let route_id = RouteId(format!("route:arterial:{arterial_index}"));
+                let driver_id = AgentId(format!("agent:driver:{driver_index}"));
+                driver_index += 1;
+                world.vehicles.insert(
+                    vehicle_id.clone(),
+                    VehicleRecord {
+                        id: vehicle_id.clone(),
+                        kind: VehicleKind::Car,
+                        route_id,
+                        link_index: 0,
+                        progress: if density.cars_per_arterial > 0 {
+                            (n as f32) / (density.cars_per_arterial as f32)
+                        } else {
+                            0.0
+                        },
+                        speed_per_tick: 0.02,
+                        capacity: 1,
+                        occupants: vec![driver_id.clone()],
+                        dwell_ticks_remaining: 0,
+                    },
+                );
+                world.agents.insert(
+                    driver_id.clone(),
+                    AgentRecord {
+                        id: driver_id,
+                        state: AgentMobilityState::InVehicle {
+                            vehicle_id,
+                            seat_index: 0,
+                        },
+                        plan: vec![PlanStage::Activity {
+                            activity_id: format!("activity:drive:{arterial_index}"),
+                        }],
+                        plan_cursor: 0,
+                        walk_speed_per_tick: 0.05,
+                    },
+                );
+            }
+        }
+
+        // Trams: reuse the existing tiny_world tram vehicles, routes, and stops.
+        // We do NOT copy the tiny_world pedestrian agents — they belong to
+        // the tiny seeded world only; this world seeds its own walkers above.
+        if density.trams_total > 0 {
+            let tram_seed = tiny_world();
+            for vehicle in tram_seed.vehicles.values() {
+                world.vehicles.insert(vehicle.id.clone(), vehicle.clone());
+            }
+            for (id, record) in &tram_seed.routes {
+                routes.insert(id.clone(), record.clone());
+            }
+            for stop in tram_seed.stops.values() {
+                world.stops.insert(stop.id.clone(), stop.clone());
+            }
+        }
+
+        world.routes = routes;
+        world.link_polylines = links.into_iter().collect();
+        world
     }
 }
 
@@ -1123,6 +1284,7 @@ mod tests {
             vehicles,
             stops,
             routes,
+            link_polylines: HashMap::new(),
         }
     }
 
@@ -1206,6 +1368,91 @@ mod tests {
         let world = seed::initial_world();
         for vehicle in world.vehicles.values() {
             assert_eq!(vehicle.kind, VehicleKind::Tram);
+        }
+    }
+
+    #[test]
+    fn from_network_produces_expected_population_counts() {
+        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+
+        let network = CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![
+                vec![NetworkCoord { x: 10, y: 20 }, NetworkCoord { x: 30, y: 20 }],
+                vec![NetworkCoord { x: 40, y: 60 }, NetworkCoord { x: 60, y: 60 }],
+            ],
+            pedestrian_corridors: vec![
+                vec![NetworkCoord { x: 11, y: 30 }, NetworkCoord { x: 31, y: 30 }],
+                vec![NetworkCoord { x: 41, y: 70 }, NetworkCoord { x: 61, y: 70 }],
+                vec![NetworkCoord { x: 71, y: 80 }, NetworkCoord { x: 91, y: 80 }],
+            ],
+        };
+
+        let density = seed::SeedDensity {
+            pedestrians_per_corridor: 6,
+            cars_per_arterial: 4,
+            trams_total: 4,
+        };
+        let world = seed::from_network(&network, density);
+
+        let walking_agents = world.agents.values().filter(|a| matches!(a.state, AgentMobilityState::Walking { .. })).count();
+        let driving_agents = world.agents.values().filter(|a| matches!(a.state, AgentMobilityState::InVehicle { .. })).count();
+        let cars = world.vehicles.values().filter(|v| v.kind == VehicleKind::Car).count();
+        let trams = world.vehicles.values().filter(|v| v.kind == VehicleKind::Tram).count();
+
+        assert_eq!(walking_agents, 18, "3 corridors x 6 = 18 walkers");
+        assert_eq!(cars, 8, "2 arterials x 4 = 8 cars");
+        assert_eq!(driving_agents, 8, "one driver per car");
+        assert_eq!(trams, 4);
+    }
+
+    #[test]
+    fn from_network_is_deterministic() {
+        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        let network = CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
+            pedestrian_corridors: vec![vec![NetworkCoord { x: 0, y: 5 }, NetworkCoord { x: 10, y: 5 }]],
+        };
+        let density = seed::SeedDensity { pedestrians_per_corridor: 3, cars_per_arterial: 2, trams_total: 0 };
+        let a = seed::from_network(&network, density);
+        let b = seed::from_network(&network, density);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn from_network_assigns_drivers_to_cars() {
+        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        let network = CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
+            pedestrian_corridors: vec![],
+        };
+        let density = seed::SeedDensity { pedestrians_per_corridor: 0, cars_per_arterial: 2, trams_total: 0 };
+        let world = seed::from_network(&network, density);
+
+        assert_eq!(world.vehicles.len(), 2);
+        for vehicle in world.vehicles.values() {
+            assert_eq!(vehicle.kind, VehicleKind::Car);
+            assert_eq!(vehicle.capacity, 1);
+            assert_eq!(vehicle.occupants.len(), 1, "each car has its driver");
+            let driver_id = &vehicle.occupants[0];
+            let driver = world.agents.get(driver_id).expect("driver agent exists");
+            match &driver.state {
+                AgentMobilityState::InVehicle { vehicle_id, .. } => {
+                    assert_eq!(vehicle_id, &vehicle.id);
+                }
+                other => panic!("driver state expected InVehicle, got {other:?}"),
+            }
         }
     }
 }
