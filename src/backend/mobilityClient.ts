@@ -6,10 +6,8 @@ import {
   type MobilitySnapshotDto,
   type WorldSummaryDto,
 } from './mobilityProtocol';
-import { isRoadVehicleSnapshotDto, type RoadVehicleSnapshotDto } from './roadVehicleProtocol';
 import {
   applyMobilitySnapshot,
-  applyRoadVehicleSnapshotToState,
   applyServerMessage,
   createMobilityOverlayState,
   markMobilityConnecting,
@@ -65,12 +63,10 @@ export async function requireMobilitySnapshot(options: MobilitySnapshotOptions =
   const tickPeriodMs = worldSummary.tick_period_ms > 0 ? worldSummary.tick_period_ms : DEFAULT_TICK_PERIOD_MS;
 
   const mobilityPayload = await requestMobilitySnapshot(baseUrl, fetchImpl);
-  const roadVehiclePayload = await requestRoadVehicleSnapshot(baseUrl, fetchImpl);
 
   let state = createMobilityOverlayState();
   state = markMobilityConnecting(state, now());
   state = applyMobilitySnapshot(state, mobilityPayload, now());
-  state = applyRoadVehicleSnapshotToState(state, roadVehiclePayload, now());
 
   return { state, tickPeriodMs };
 }
@@ -120,9 +116,6 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
       const mobilityPayload = await requestMobilitySnapshot(baseUrl, fetchImpl);
       if (stopped) return;
       currentState = applyMobilitySnapshot(currentState, mobilityPayload, now());
-      const roadVehiclePayload = await requestRoadVehicleSnapshot(baseUrl, fetchImpl);
-      if (stopped) return;
-      currentState = applyRoadVehicleSnapshotToState(currentState, roadVehiclePayload, now());
       notify();
       openSocket(WebSocketImpl);
     } catch (error) {
@@ -205,18 +198,6 @@ async function requestMobilitySnapshot(baseUrl: string, fetchImpl: typeof fetch)
 
   const payload: unknown = await response.json();
   if (!isMobilitySnapshotDto(payload)) throw new Error('Invalid mobility snapshot payload');
-  return payload;
-}
-
-async function requestRoadVehicleSnapshot(
-  baseUrl: string,
-  fetchImpl: typeof fetch,
-): Promise<RoadVehicleSnapshotDto> {
-  const response = await fetchImpl(new URL('/road-vehicles', baseUrl).toString());
-  if (!response.ok) throw new Error(`Road vehicle snapshot HTTP ${response.status}`);
-
-  const payload: unknown = await response.json();
-  if (!isRoadVehicleSnapshotDto(payload)) throw new Error('Invalid road vehicle snapshot payload');
   return payload;
 }
 

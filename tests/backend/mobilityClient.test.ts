@@ -6,7 +6,6 @@ import {
 } from '../../src/backend/mobilityClient';
 import { mobilityDiagnostics } from '../../src/backend/mobilityState';
 import type { MobilitySnapshotDto, WorldSummaryDto } from '../../src/backend/mobilityProtocol';
-import type { RoadVehicleSnapshotDto } from '../../src/backend/roadVehicleProtocol';
 
 const worldSummary: WorldSummaryDto = {
   protocol_version: 1,
@@ -33,6 +32,7 @@ const snapshot: MobilitySnapshotDto = {
   vehicles: [
     {
       id: 'vehicle-1',
+      kind: 'tram',
       route_id: 'route-1',
       link_index: 1,
       progress: 0.5,
@@ -55,17 +55,9 @@ const snapshot: MobilitySnapshotDto = {
   ],
 };
 
-const roadVehicleSnapshot: RoadVehicleSnapshotDto = {
-  protocol_version: 1,
-  world_id: 'abutown-main',
-  tick: 42,
-  vehicles: [],
-};
-
 function snapshotFetch(input: RequestInfo | URL): Response {
   const url = String(input);
   if (url.includes('/world')) return Response.json(worldSummary);
-  if (url.includes('/road-vehicles')) return Response.json(roadVehicleSnapshot);
   return Response.json(snapshot);
 }
 
@@ -115,7 +107,6 @@ describe('mobility backend client', () => {
     expect(requestedUrls).toEqual([
       'http://127.0.0.1:8080/world',
       'http://127.0.0.1:8080/mobility',
-      'http://127.0.0.1:8080/road-vehicles',
     ]);
     expect(result.tickPeriodMs).toBe(100);
     expect(mobilityDiagnostics(result.state)).toEqual({
@@ -124,7 +115,6 @@ describe('mobility backend client', () => {
       agents: 1,
       vehicles: 1,
       stops: 1,
-      roadVehicles: 0,
       invalidMessages: 0,
       lastError: null,
     });
@@ -147,17 +137,9 @@ describe('mobility backend client', () => {
       vehicles: [],
       stops: [],
     };
-    const roadVehiclesSnapshot: RoadVehicleSnapshotDto = {
-      protocol_version: 1,
-      world_id: 'abutown-main',
-      tick: 1,
-      vehicles: [],
-    };
     const fetchImpl = ((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (url.includes('/world')) return Promise.resolve(new Response(JSON.stringify(customWorldSummary)));
-      if (url.includes('/road-vehicles'))
-        return Promise.resolve(new Response(JSON.stringify(roadVehiclesSnapshot)));
       return Promise.resolve(new Response(JSON.stringify(mobilitySnapshot)));
     }) as typeof fetch;
 
@@ -198,7 +180,6 @@ describe('mobility backend client', () => {
 
     expect(requested).toEqual([
       'http://127.0.0.1:8080/mobility',
-      'http://127.0.0.1:8080/road-vehicles',
     ]);
     expect(sockets).toEqual(['ws://127.0.0.1:8080/ws']);
   });

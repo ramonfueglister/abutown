@@ -1,5 +1,8 @@
-import { interpolatedAgents, type MobilityOverlayState } from '../backend/mobilityState';
-import { interpolatedRoadVehicles } from '../backend/roadVehicleState';
+import {
+  interpolatedAgents,
+  interpolatedVehicles,
+  type MobilityOverlayState,
+} from '../backend/mobilityState';
 import type { DirectionDto } from '../backend/mobilityProtocol';
 
 export type Coord = { x: number; y: number };
@@ -68,7 +71,9 @@ export function pedestriansFromMobilityState(
   tickPeriodMs: number,
 ): BackendPedestrian[] {
   if (sprites.length === 0) return [];
-  const agents = interpolatedAgents(state, now, tickPeriodMs).sort((a, b) => a.id.localeCompare(b.id));
+  const agents = interpolatedAgents(state, now, tickPeriodMs)
+    .filter((agent) => agent.state.type !== 'in_vehicle')
+    .sort((a, b) => a.id.localeCompare(b.id));
   const out: BackendPedestrian[] = [];
   for (const agent of agents) {
     const sprite = sprites[spriteIndexFromKey(agent.sprite_key, sprites.length)];
@@ -92,9 +97,9 @@ export function carsFromMobilityState(
   tickPeriodMs: number,
 ): BackendCar[] {
   if (sprites.length === 0) return [];
-  const vehicles = interpolatedRoadVehicles(state.roadVehicles, now, tickPeriodMs).sort((a, b) =>
-    a.id.localeCompare(b.id),
-  );
+  const vehicles = interpolatedVehicles(state, now, tickPeriodMs)
+    .filter((vehicle) => vehicle.kind === 'car')
+    .sort((a, b) => a.id.localeCompare(b.id));
   const out: BackendCar[] = [];
   for (const vehicle of vehicles) {
     const sprite = sprites[spriteIndexFromKey(vehicle.sprite_key, sprites.length)];

@@ -1746,7 +1746,6 @@ window.render_game_to_text = () => {
         agents: backendMobility.agents,
         vehicles: backendMobility.vehicles,
         stops: backendMobility.stops,
-        roadVehicles: backendMobility.roadVehicles,
         invalidMessages: backendMobility.invalidMessages,
         lastError: backendMobility.lastError,
       },
