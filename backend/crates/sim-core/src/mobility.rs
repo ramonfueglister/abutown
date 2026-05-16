@@ -696,6 +696,7 @@ pub fn build_mobility_delta_dto(
     let changed_agents = delta
         .changed_agents
         .iter()
+        .filter(|agent| !matches!(agent.state, AgentMobilityState::InVehicle { .. }))
         .filter_map(|agent| world.agent_dto_for(&agent.id))
         .collect();
     let changed_vehicles = delta
@@ -1454,5 +1455,59 @@ mod tests {
                 other => panic!("driver state expected InVehicle, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn delta_dto_excludes_in_vehicle_agents() {
+        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        let network = CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
+            pedestrian_corridors: vec![vec![NetworkCoord { x: 0, y: 5 }, NetworkCoord { x: 10, y: 5 }]],
+        };
+        let density = seed::SeedDensity { pedestrians_per_corridor: 2, cars_per_arterial: 2, trams_total: 0 };
+        let world = seed::from_network(&network, density);
+        let drivers: Vec<_> = world
+            .agents
+            .values()
+            .filter(|a| matches!(a.state, AgentMobilityState::InVehicle { .. }))
+            .collect();
+        assert!(!drivers.is_empty(), "test setup should contain at least one in_vehicle driver agent");
+
+        let world_id = WorldId("test".to_string());
+        let delta_input = MobilityDelta {
+            changed_agents: world.agents.values().cloned().collect(),
+            changed_vehicles: vec![],
+        };
+        let dto = build_mobility_delta_dto(&world_id, world.tick(), &world, &delta_input);
+        for agent in &dto.changed_agents {
+            match &agent.state {
+                abutown_protocol::AgentMobilityStateDto::InVehicle { .. } => {
+                    panic!("in_vehicle agent leaked into delta: {}", agent.id.0);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn snapshot_dto_includes_all_agents_even_in_vehicle() {
+        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        let network = CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: WorldTiles { width: 256, height: 256 },
+            arterial_paths: vec![vec![NetworkCoord { x: 0, y: 0 }, NetworkCoord { x: 10, y: 0 }]],
+            pedestrian_corridors: vec![],
+        };
+        let density = seed::SeedDensity { pedestrians_per_corridor: 0, cars_per_arterial: 2, trams_total: 0 };
+        let world = seed::from_network(&network, density);
+        let world_id = WorldId("test".to_string());
+        let snap = build_mobility_snapshot_dto(&world_id, world.tick(), &world);
+        assert_eq!(snap.agents.len(), 2, "snapshot must include in_vehicle drivers so clients can hydrate state");
     }
 }
