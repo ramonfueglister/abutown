@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use crate::chunk::Chunk;
 use crate::ids::ChunkCoord;
 use crate::mobility::MobilityWorld;
+use crate::road_vehicles::RoadVehicleWorld;
 use crate::scheduler::ChunkActivity;
 use crate::tile::TileKind;
 
@@ -168,6 +169,61 @@ impl MobilitySnapshotStore for InMemoryMobilitySnapshotStore {
     }
 }
 
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct RoadVehicleSnapshotStoreError {
+    message: String,
+}
+
+impl RoadVehicleSnapshotStoreError {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+#[async_trait]
+pub trait RoadVehicleSnapshotStore: std::fmt::Debug + Send {
+    async fn write(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        snapshot: &RoadVehicleWorld,
+    ) -> Result<(), RoadVehicleSnapshotStoreError>;
+
+    async fn read(
+        &self,
+        world_id: &str,
+    ) -> Result<Option<(u64, RoadVehicleWorld)>, RoadVehicleSnapshotStoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct InMemoryRoadVehicleSnapshotStore {
+    snapshots: HashMap<String, (u64, RoadVehicleWorld)>,
+}
+
+#[async_trait]
+impl RoadVehicleSnapshotStore for InMemoryRoadVehicleSnapshotStore {
+    async fn write(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        snapshot: &RoadVehicleWorld,
+    ) -> Result<(), RoadVehicleSnapshotStoreError> {
+        self.snapshots
+            .insert(world_id.to_string(), (tick, snapshot.clone()));
+        Ok(())
+    }
+
+    async fn read(
+        &self,
+        world_id: &str,
+    ) -> Result<Option<(u64, RoadVehicleWorld)>, RoadVehicleSnapshotStoreError> {
+        Ok(self.snapshots.get(world_id).cloned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +345,34 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn road_vehicle_snapshot_store_writes_and_reads() {
+        use crate::road_vehicles::seed;
+
+        let mut store = InMemoryRoadVehicleSnapshotStore::default();
+        let world = seed::initial_road_vehicles();
+
+        RoadVehicleSnapshotStore::write(&mut store, "abutown-main", world.tick(), &world)
+            .await
+            .unwrap();
+
+        let (tick, restored) = RoadVehicleSnapshotStore::read(&store, "abutown-main")
+            .await
+            .unwrap()
+            .expect("snapshot exists");
+
+        assert_eq!(tick, world.tick());
+        assert_eq!(restored, world);
+    }
+
+    #[tokio::test]
+    async fn road_vehicle_snapshot_store_read_returns_none_for_unknown_world() {
+        let store = InMemoryRoadVehicleSnapshotStore::default();
+        assert!(RoadVehicleSnapshotStore::read(&store, "missing")
+            .await
+            .unwrap()
+            .is_none());
     }
 }
