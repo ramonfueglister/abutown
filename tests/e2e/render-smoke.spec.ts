@@ -68,8 +68,9 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.mobilityAgents.count).toBe(state.city.pedestrians);
   expect(state.city.mobilityAgents.selectedId).toBeNull();
   expect(state.city.mobilityAgents.agents.length).toBe(state.city.pedestrians);
+  expect(state.city.mobilityAgents.agents.length).toBeGreaterThanOrEqual(50);
   expect(state.city.mobilityAgents.agents[0]).toEqual(expect.objectContaining({
-    id: expect.stringMatching(/^agent:seed:/),
+    id: expect.stringMatching(/^agent:(walk|walker|driver|seed):/),
     kind: 'pedestrian',
     state: 'walking',
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
@@ -78,9 +79,14 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.mobilityVehicles.count).toBe(state.city.cars);
   expect(state.city.mobilityVehicles.selectedId).toBeNull();
   expect(state.city.mobilityVehicles.vehicles.length).toBe(state.city.cars);
+  expect(state.city.mobilityVehicles.vehicles.length).toBeGreaterThanOrEqual(10);
+  const carVehicle = state.city.mobilityVehicles.vehicles.find(
+    (v: { id: string }) => v.id.startsWith('vehicle:car:'),
+  );
+  expect(carVehicle).toBeDefined();
   expect(state.city.mobilityVehicles.vehicles[0]).toEqual(expect.objectContaining({
-    id: expect.stringMatching(/^road_vehicle:seed:/),
-    kind: 'road-vehicle',
+    id: expect.stringMatching(/^vehicle:car:/),
+    kind: 'car',
     state: 'driving',
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
