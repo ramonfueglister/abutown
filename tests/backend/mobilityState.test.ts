@@ -17,6 +17,9 @@ const snapshot: MobilitySnapshotDto = {
       id: 'agent:pedestrian:0',
       state: { type: 'walking', link_id: 'link:home-to-old-town-stop', progress: 0.5 },
       plan_cursor: 0,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'pedestrian:0',
     },
   ],
   vehicles: [
@@ -28,6 +31,9 @@ const snapshot: MobilitySnapshotDto = {
       capacity: 4,
       occupants: [],
       dwell_ticks_remaining: 0,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'tram:0',
     },
   ],
   stops: [
@@ -79,6 +85,9 @@ describe('mobility state reducer', () => {
             id: 'agent:pedestrian:0',
             state: { type: 'waiting_at_stop', stop_id: 'stop:old-town' },
             plan_cursor: 1,
+            world_coord: { x: 0, y: 0 },
+            direction: 'e',
+            sprite_key: 'pedestrian:0',
           },
         ],
         changed_vehicles: [

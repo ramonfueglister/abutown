@@ -16,6 +16,9 @@ const snapshot: MobilitySnapshotDto = {
       id: 'agent-1',
       state: { type: 'walking', link_id: 'link-1', progress: 0.25 },
       plan_cursor: 2,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'pedestrian:0',
     },
   ],
   vehicles: [
@@ -27,6 +30,9 @@ const snapshot: MobilitySnapshotDto = {
       capacity: 20,
       occupants: ['agent-1'],
       dwell_ticks_remaining: 0,
+      world_coord: { x: 0, y: 0 },
+      direction: 'e',
+      sprite_key: 'tram:0',
     },
   ],
   stops: [
