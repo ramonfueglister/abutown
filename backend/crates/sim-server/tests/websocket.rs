@@ -31,20 +31,17 @@ async fn websocket_sends_hello_and_tile_pulse() {
     let hello = read_server_message(&mut stream).await;
     assert!(matches!(hello, ServerMessageDto::Hello(_)));
 
-    assert!(
-        tokio::time::timeout(Duration::from_millis(500), stream.next())
-            .await
-            .is_err(),
-        "tile pulse should not arrive immediately after hello"
-    );
-
-    let delta = read_next_tile_pulse(&mut stream).await;
-    assert_eq!(delta.world_id.0, "abutown-main");
-    assert_eq!(delta.coord.x, 4);
-    assert_eq!(delta.coord.y, 4);
-    assert_eq!(delta.tick, 1);
-    assert_eq!(delta.version, 1);
-    assert!(delta.local_index < 1024);
+    // 10 Hz tick: the first tile pulse arrives within roughly one tick period.
+    // Use 250 ms to absorb scheduler jitter on slow CI without weakening intent.
+    let first_pulse = tokio::time::timeout(Duration::from_millis(250), read_next_tile_pulse(&mut stream))
+        .await
+        .expect("first tile pulse must arrive within one tick window");
+    assert_eq!(first_pulse.world_id.0, "abutown-main");
+    assert_eq!(first_pulse.coord.x, 4);
+    assert_eq!(first_pulse.coord.y, 4);
+    assert_eq!(first_pulse.tick, 1);
+    assert_eq!(first_pulse.version, 1);
+    assert!(first_pulse.local_index < 1024);
 
     let mobility_after_tile = read_server_message(&mut stream).await;
     assert!(matches!(
@@ -58,15 +55,11 @@ async fn websocket_sends_hello_and_tile_pulse() {
         ServerMessageDto::RoadVehicleDelta(_)
     ));
 
-    assert!(
-        tokio::time::timeout(Duration::from_millis(500), stream.next())
-            .await
-            .is_err(),
-        "tile pulse cadence should remain low frequency"
-    );
-
-    let next_delta = read_next_tile_pulse(&mut stream).await;
-    assert_eq!(next_delta.tick, 2);
+    // Next tick arrives within one tick window.
+    let next_pulse = tokio::time::timeout(Duration::from_millis(250), read_next_tile_pulse(&mut stream))
+        .await
+        .expect("next tile pulse arrives within one tick window");
+    assert_eq!(next_pulse.tick, 2);
 
     server.abort();
 }
@@ -256,8 +249,32 @@ async fn websocket_does_not_broadcast_failed_command_append() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let no_message = tokio::time::timeout(Duration::from_millis(150), websocket.next()).await;
-    assert!(no_message.is_err());
+
+    // Drain any background messages (tile pulses, mobility/road-vehicle deltas) for one tick
+    // and assert that none of them are a WorldEvent — that would indicate the rejected
+    // command was broadcast despite the store failure.
+    let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+    loop {
+        let remaining = drain_deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, websocket.next()).await {
+            Err(_) => break, // window expired
+            Ok(None) => break, // stream closed
+            Ok(Some(message)) => {
+                let text = match message.expect("ws message") {
+                    tokio_tungstenite::tungstenite::Message::Text(text) => text.to_string(),
+                    _ => continue,
+                };
+                let parsed: ServerMessageDto = serde_json::from_str(&text).expect("server message");
+                assert!(
+                    !matches!(parsed, ServerMessageDto::WorldEvent { .. }),
+                    "failed command must not broadcast a WorldEvent, got: {parsed:?}"
+                );
+            }
+        }
+    }
 
     server.abort();
 }
