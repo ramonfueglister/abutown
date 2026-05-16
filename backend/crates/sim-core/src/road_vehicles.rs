@@ -82,13 +82,19 @@ fn interpolate_path(vehicle: &RoadVehicleRecord) -> Option<(TileCoord, TileCoord
     Some((vehicle.path[base], vehicle.path[next], t))
 }
 
-pub fn build_road_vehicle_dto(world: &RoadVehicleWorld, id: &RoadVehicleId) -> Option<RoadVehicleDto> {
+pub fn build_road_vehicle_dto(
+    world: &RoadVehicleWorld,
+    id: &RoadVehicleId,
+) -> Option<RoadVehicleDto> {
     let vehicle = world.vehicles.get(id)?;
     let coord = world.world_coord(id).unwrap_or((0.0, 0.0));
     let direction = world.direction(id).unwrap_or(DirectionDto::S);
     Some(RoadVehicleDto {
         id: vehicle.id.0.clone(),
-        world_coord: WorldCoordDto { x: coord.0, y: coord.1 },
+        world_coord: WorldCoordDto {
+            x: coord.0,
+            y: coord.1,
+        },
         direction,
         sprite_key: vehicle.sprite_key.clone(),
     })
@@ -140,23 +146,47 @@ pub mod seed {
         let corridors: [Vec<TileCoord>; 4] = [
             // Horizontal across chunks (4,4) and (5,4) along their centers (y=144).
             vec![
-                TileCoord { x: 4 * 32 + 4, y: 4 * 32 + 16 },
-                TileCoord { x: 5 * 32 + 28, y: 4 * 32 + 16 },
+                TileCoord {
+                    x: 4 * 32 + 4,
+                    y: 4 * 32 + 16,
+                },
+                TileCoord {
+                    x: 5 * 32 + 28,
+                    y: 4 * 32 + 16,
+                },
             ],
             // Horizontal returning the other way.
             vec![
-                TileCoord { x: 5 * 32 + 28, y: 4 * 32 + 16 },
-                TileCoord { x: 4 * 32 + 4, y: 4 * 32 + 16 },
+                TileCoord {
+                    x: 5 * 32 + 28,
+                    y: 4 * 32 + 16,
+                },
+                TileCoord {
+                    x: 4 * 32 + 4,
+                    y: 4 * 32 + 16,
+                },
             ],
             // Vertical across chunks (4,4) and (4,5).
             vec![
-                TileCoord { x: 4 * 32 + 16, y: 4 * 32 + 4 },
-                TileCoord { x: 4 * 32 + 16, y: 5 * 32 + 28 },
+                TileCoord {
+                    x: 4 * 32 + 16,
+                    y: 4 * 32 + 4,
+                },
+                TileCoord {
+                    x: 4 * 32 + 16,
+                    y: 5 * 32 + 28,
+                },
             ],
             // Vertical returning.
             vec![
-                TileCoord { x: 4 * 32 + 16, y: 5 * 32 + 28 },
-                TileCoord { x: 4 * 32 + 16, y: 4 * 32 + 4 },
+                TileCoord {
+                    x: 4 * 32 + 16,
+                    y: 5 * 32 + 28,
+                },
+                TileCoord {
+                    x: 4 * 32 + 16,
+                    y: 4 * 32 + 4,
+                },
             ],
         ];
 
@@ -202,7 +232,10 @@ mod tests {
 
         world.tick_road_vehicles();
         let stored = world.get(&id).unwrap();
-        assert!((stored.offset - 0.5).abs() < 1e-5, "offset wraps past path length");
+        assert!(
+            (stored.offset - 0.5).abs() < 1e-5,
+            "offset wraps past path length"
+        );
     }
 
     #[test]
@@ -239,9 +272,15 @@ mod tests {
     #[test]
     fn initial_road_vehicles_seeds_a_useful_population() {
         let world = seed::initial_road_vehicles();
-        assert!(world.vehicles.len() >= 80, "seed must populate at least 80 road vehicles");
+        assert!(
+            world.vehicles.len() >= 80,
+            "seed must populate at least 80 road vehicles"
+        );
         for vehicle in world.vehicles.values() {
-            assert!(vehicle.path.len() >= 2, "every road vehicle path needs two points");
+            assert!(
+                vehicle.path.len() >= 2,
+                "every road vehicle path needs two points"
+            );
             assert!(vehicle.speed > 0.0);
             assert!(!vehicle.sprite_key.is_empty());
         }

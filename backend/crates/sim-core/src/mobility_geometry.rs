@@ -4,8 +4,10 @@ const CHUNK_SIZE_F: f32 = 32.0;
 
 #[inline]
 fn chunk_center(cx: i32, cy: i32) -> (f32, f32) {
-    (cx as f32 * CHUNK_SIZE_F + CHUNK_SIZE_F / 2.0,
-     cy as f32 * CHUNK_SIZE_F + CHUNK_SIZE_F / 2.0)
+    (
+        cx as f32 * CHUNK_SIZE_F + CHUNK_SIZE_F / 2.0,
+        cy as f32 * CHUNK_SIZE_F + CHUNK_SIZE_F / 2.0,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -44,24 +46,40 @@ pub fn link_geometry(link_id: &str) -> Option<LinkGeometry> {
 
 pub fn stop_geometry(stop_id: &str) -> Option<StopGeometry> {
     match stop_id {
-        "stop:horizontal:pickup" => Some(StopGeometry { coord: chunk_center(4, 4) }),
-        "stop:horizontal:dropoff" => Some(StopGeometry { coord: chunk_center(5, 4) }),
-        "stop:vertical:pickup" => Some(StopGeometry { coord: chunk_center(4, 4) }),
-        "stop:vertical:dropoff" => Some(StopGeometry { coord: chunk_center(4, 5) }),
+        "stop:horizontal:pickup" => Some(StopGeometry {
+            coord: chunk_center(4, 4),
+        }),
+        "stop:horizontal:dropoff" => Some(StopGeometry {
+            coord: chunk_center(5, 4),
+        }),
+        "stop:vertical:pickup" => Some(StopGeometry {
+            coord: chunk_center(4, 4),
+        }),
+        "stop:vertical:dropoff" => Some(StopGeometry {
+            coord: chunk_center(4, 5),
+        }),
         _ => None,
     }
 }
 
 pub fn activity_geometry(activity_id: &str) -> Option<ActivityGeometry> {
     match activity_id {
-        "activity:work" => Some(ActivityGeometry { coord: chunk_center(5, 4) }),
-        _ => Some(ActivityGeometry { coord: chunk_center(4, 4) }),
+        "activity:work" => Some(ActivityGeometry {
+            coord: chunk_center(5, 4),
+        }),
+        _ => Some(ActivityGeometry {
+            coord: chunk_center(4, 4),
+        }),
     }
 }
 
 /// Returns the world coordinate along a route at `(link_index, progress)`.
 /// Used when computing transit-vehicle positions.
-pub fn route_link_world_coord(route_id: &str, link_index: usize, progress: f32) -> Option<(f32, f32)> {
+pub fn route_link_world_coord(
+    route_id: &str,
+    link_index: usize,
+    progress: f32,
+) -> Option<(f32, f32)> {
     let link_id = match (route_id, link_index) {
         ("route:horizontal", 0) => "link:horizontal:main",
         ("route:vertical", 0) => "link:vertical:main",
@@ -110,7 +128,10 @@ mod tests {
         assert_eq!(v.start, (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0));
         assert_eq!(v.end, (4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0));
 
-        assert!(link_geometry("link:walk:default").is_some(), "walk link must be defined for seeded agents");
+        assert!(
+            link_geometry("link:walk:default").is_some(),
+            "walk link must be defined for seeded agents"
+        );
     }
 
     #[test]
@@ -125,7 +146,10 @@ mod tests {
     fn activity_geometry_falls_back_to_default_when_unknown() {
         let known = activity_geometry("activity:work").expect("work activity defined");
         assert!(known.coord.0 >= 0.0);
-        assert!(activity_geometry("activity:unknown").is_some(), "unknown activities must still resolve to a default coord");
+        assert!(
+            activity_geometry("activity:unknown").is_some(),
+            "unknown activities must still resolve to a default coord"
+        );
     }
 
     #[test]

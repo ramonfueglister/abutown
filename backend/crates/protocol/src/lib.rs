@@ -525,8 +525,14 @@ mod tests {
 
     #[test]
     fn direction_dto_serializes_as_compass_string() {
-        assert_eq!(serde_json::to_value(DirectionDto::N).unwrap(), serde_json::json!("n"));
-        assert_eq!(serde_json::to_value(DirectionDto::Sw).unwrap(), serde_json::json!("sw"));
+        assert_eq!(
+            serde_json::to_value(DirectionDto::N).unwrap(),
+            serde_json::json!("n")
+        );
+        assert_eq!(
+            serde_json::to_value(DirectionDto::Sw).unwrap(),
+            serde_json::json!("sw")
+        );
         let parsed: DirectionDto = serde_json::from_value(serde_json::json!("ne")).unwrap();
         assert_eq!(parsed, DirectionDto::Ne);
     }
@@ -535,7 +541,10 @@ mod tests {
     fn agent_mobility_dto_carries_world_coord_direction_and_sprite_key() {
         let dto = AgentMobilityDto {
             id: EntityId("agent:seed:0".to_string()),
-            state: AgentMobilityStateDto::Walking { link_id: "link:demo".to_string(), progress: 0.5 },
+            state: AgentMobilityStateDto::Walking {
+                link_id: "link:demo".to_string(),
+                progress: 0.5,
+            },
             plan_cursor: 0,
             world_coord: WorldCoordDto { x: 1.0, y: 2.0 },
             direction: DirectionDto::E,

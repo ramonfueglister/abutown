@@ -432,7 +432,10 @@ impl MobilityWorld {
         }
     }
 
-    pub fn direction_for_agent(&self, agent_id: &AgentId) -> Option<abutown_protocol::DirectionDto> {
+    pub fn direction_for_agent(
+        &self,
+        agent_id: &AgentId,
+    ) -> Option<abutown_protocol::DirectionDto> {
         use crate::mobility_geometry::{direction_from_delta, link_geometry};
         let agent = self.agents.get(agent_id)?;
         match &agent.state {
@@ -462,11 +465,8 @@ impl MobilityWorld {
     ) -> Option<abutown_protocol::DirectionDto> {
         use crate::mobility_geometry::{direction_from_delta, route_link_world_coord};
         let vehicle = self.vehicles.get(vehicle_id)?;
-        let here = route_link_world_coord(
-            &vehicle.route_id.0,
-            vehicle.link_index,
-            vehicle.progress,
-        )?;
+        let here =
+            route_link_world_coord(&vehicle.route_id.0, vehicle.link_index, vehicle.progress)?;
         let ahead = route_link_world_coord(
             &vehicle.route_id.0,
             vehicle.link_index,
@@ -515,7 +515,9 @@ impl MobilityWorld {
         vehicle_id: &VehicleId,
     ) -> Option<abutown_protocol::VehicleMobilityDto> {
         let vehicle = self.vehicles.get(vehicle_id)?;
-        let (cx, cy) = self.world_coord_for_vehicle(vehicle_id).unwrap_or((0.0, 0.0));
+        let (cx, cy) = self
+            .world_coord_for_vehicle(vehicle_id)
+            .unwrap_or((0.0, 0.0));
         let direction = self
             .direction_for_vehicle(vehicle_id)
             .unwrap_or(abutown_protocol::DirectionDto::S);
@@ -1169,7 +1171,10 @@ mod tests {
         let b = world
             .sprite_key_for_agent(&AgentId("agent:seed:0".to_string()))
             .unwrap();
-        assert_eq!(a, b, "sprite key must be deterministic across calls for the same id");
+        assert_eq!(
+            a, b,
+            "sprite key must be deterministic across calls for the same id"
+        );
         assert!(a.starts_with("pedestrian:"));
     }
 

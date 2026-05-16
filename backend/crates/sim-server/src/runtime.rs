@@ -148,11 +148,8 @@ impl SimulationRuntime {
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
         road_vehicle_snapshot_store: Box<dyn RoadVehicleSnapshotStore + Send>,
     ) -> Self {
-        let mut runtime = Self::new_with_all_stores(
-            event_store,
-            snapshot_store,
-            mobility_snapshot_store,
-        );
+        let mut runtime =
+            Self::new_with_all_stores(event_store, snapshot_store, mobility_snapshot_store);
         runtime.road_vehicle_snapshot_store = road_vehicle_snapshot_store;
         runtime
     }
@@ -329,12 +326,7 @@ impl SimulationRuntime {
 
     pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
         let delta = self.mobility.tick_mobility();
-        build_mobility_delta_dto(
-            &self.world_id,
-            self.mobility.tick(),
-            &self.mobility,
-            &delta,
-        )
+        build_mobility_delta_dto(&self.world_id, self.mobility.tick(), &self.mobility, &delta)
     }
 
     pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {

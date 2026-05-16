@@ -76,13 +76,12 @@ impl RoadVehicleSnapshotStore for PostgresRoadVehicleSnapshotStore {
         &self,
         world_id: &str,
     ) -> Result<Option<(u64, RoadVehicleWorld)>, RoadVehicleSnapshotStoreError> {
-        let row: Option<(i64, Value)> = sqlx::query_as(
-            "SELECT tick, payload FROM road_vehicle_snapshots WHERE world_id = $1",
-        )
-        .bind(world_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|error| RoadVehicleSnapshotStoreError::unavailable(error.to_string()))?;
+        let row: Option<(i64, Value)> =
+            sqlx::query_as("SELECT tick, payload FROM road_vehicle_snapshots WHERE world_id = $1")
+                .bind(world_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|error| RoadVehicleSnapshotStoreError::unavailable(error.to_string()))?;
 
         match row {
             None => Ok(None),
@@ -112,7 +111,9 @@ mod tests {
             return;
         };
 
-        let mut store = PostgresRoadVehicleSnapshotStore::connect(&database_url).await.unwrap();
+        let mut store = PostgresRoadVehicleSnapshotStore::connect(&database_url)
+            .await
+            .unwrap();
         let world = seed::initial_road_vehicles();
         let world_id = format!("test:road_vehicle:{}", uuid::Uuid::now_v7());
 

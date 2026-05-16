@@ -370,9 +370,11 @@ mod tests {
     #[tokio::test]
     async fn road_vehicle_snapshot_store_read_returns_none_for_unknown_world() {
         let store = InMemoryRoadVehicleSnapshotStore::default();
-        assert!(RoadVehicleSnapshotStore::read(&store, "missing")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            RoadVehicleSnapshotStore::read(&store, "missing")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }
