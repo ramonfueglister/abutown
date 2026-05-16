@@ -361,3 +361,71 @@ where
         .await
         .expect("send subscribe");
 }
+
+async fn send_chunk_subscribe<S>(stream: &mut S, coords: &[ChunkCoordDto])
+where
+    S: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
+    <S as futures_util::Sink<tokio_tungstenite::tungstenite::Message>>::Error: std::fmt::Debug,
+{
+    let subscribe = ClientMessageDto::ChunkSubscribe(ChunkSubscribeDto {
+        protocol_version: PROTOCOL_VERSION,
+        coords: coords.to_vec(),
+    });
+    let text = serde_json::to_string(&subscribe).unwrap();
+    stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+        .await
+        .expect("send chunk subscribe");
+}
+
+#[tokio::test]
+async fn two_clients_with_different_subscriptions_see_different_entities() {
+    // tiny_world places agents on link:walk:default which spans chunk_center(4,4)
+    // to chunk_center(5,4).  Agents with progress < 0.5 land in chunk (4,4),
+    // agents with progress >= 0.5 land in chunk (5,4), giving two disjoint sets.
+    let app = build_app_with_runtime(runtime_with_seeded_mobility());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let url = format!("ws://{addr}/ws");
+
+    // Client A subscribes only to chunk (4,4).
+    let (mut client_a, _) = connect_async(&url).await.unwrap();
+    let _ = read_server_message(&mut client_a).await; // drain hello
+    send_chunk_subscribe(&mut client_a, &[ChunkCoordDto { x: 4, y: 4 }]).await;
+
+    // Client B subscribes only to chunk (5,4).
+    let (mut client_b, _) = connect_async(&url).await.unwrap();
+    let _ = read_server_message(&mut client_b).await; // drain hello
+    send_chunk_subscribe(&mut client_b, &[ChunkCoordDto { x: 5, y: 4 }]).await;
+
+    // The synthetic delta on subscribe carries all entities currently in the
+    // subscribed chunk — read one delta from each client.
+    let delta_a = read_next_mobility_delta(&mut client_a).await;
+    let delta_b = read_next_mobility_delta(&mut client_b).await;
+
+    let ids_a: std::collections::HashSet<String> = delta_a
+        .changed_agents
+        .iter()
+        .map(|a| a.id.0.clone())
+        .chain(delta_a.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .collect();
+    let ids_b: std::collections::HashSet<String> = delta_b
+        .changed_agents
+        .iter()
+        .map(|a| a.id.0.clone())
+        .chain(delta_b.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .collect();
+
+    // Each client must receive at least one entity — otherwise the test is vacuous.
+    assert!(!ids_a.is_empty(), "client A should see entities in chunk (4,4)");
+    assert!(!ids_b.is_empty(), "client B should see entities in chunk (5,4)");
+
+    // The AoI filter must produce disjoint sets.
+    assert!(
+        ids_a.intersection(&ids_b).next().is_none(),
+        "client A and client B should see disjoint entity sets (A={ids_a:?}, B={ids_b:?})",
+    );
+}
