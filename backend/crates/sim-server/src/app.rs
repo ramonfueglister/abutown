@@ -311,7 +311,11 @@ async fn persist_snapshots_once(
 ) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
     let runtime = state.runtime();
     let mut runtime = runtime.lock().await;
-    runtime.persist_chunk_snapshots().await
+    let written = runtime.persist_chunk_snapshots().await?;
+    if let Err(error) = runtime.persist_mobility_snapshot().await {
+        tracing::warn!(%error, "failed to persist mobility snapshot");
+    }
+    Ok(written)
 }
 
 async fn send_server_message(
