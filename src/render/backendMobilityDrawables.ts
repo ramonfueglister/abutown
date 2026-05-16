@@ -67,7 +67,9 @@ export function pedestriansFromMobilityState(
   if (sprites.length === 0) return [];
   const out: BackendPedestrian[] = [];
   // Deterministic order by id so tests and the renderer see stable input each frame.
-  const agents = Array.from(state.agents.values()).sort((a, b) => a.id.localeCompare(b.id));
+  const agents = Array.from(state.agents.values())
+    .map((entry) => entry.current)
+    .sort((a, b) => a.id.localeCompare(b.id));
   for (const agent of agents) {
     const sprite = sprites[spriteIndexFromKey(agent.sprite_key, sprites.length)];
     out.push({

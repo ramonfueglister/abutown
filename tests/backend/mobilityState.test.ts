@@ -4,9 +4,10 @@ import {
   applyMobilitySnapshot,
   applyServerMessage,
   createMobilityOverlayState,
+  interpolatedAgents,
   mobilityDiagnostics,
 } from '../../src/backend/mobilityState';
-import type { MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
+import type { AgentMobilityDto, MobilityDeltaDto, MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
@@ -129,5 +130,141 @@ describe('mobility state reducer', () => {
     });
     expect(state.roadVehicles.tick).toBe(5);
     expect(state.roadVehicles.vehicles.get('road_vehicle:seed:0')?.world_coord.y).toBe(20);
+  });
+});
+
+function agentAt(id: string, x: number, y: number): AgentMobilityDto {
+  return {
+    id,
+    state: { type: 'walking', link_id: 'link:walk:default', progress: 0.0 },
+    plan_cursor: 0,
+    world_coord: { x, y },
+    direction: 'e',
+    sprite_key: 'pedestrian:0',
+  };
+}
+
+describe('mobility state interpolation buffer', () => {
+  it('initial snapshot sets prev == current for each agent', () => {
+    const snapshot: MobilitySnapshotDto = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      tick: 1,
+      agents: [agentAt('agent:seed:0', 100, 200)],
+      vehicles: [],
+      stops: [],
+    };
+    const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 1000);
+    const entry = state.agents.get('agent:seed:0')!;
+    expect(entry.prev.world_coord).toEqual({ x: 100, y: 200 });
+    expect(entry.current.world_coord).toEqual({ x: 100, y: 200 });
+    expect(entry.lastTickAt).toBe(1000);
+  });
+
+  it('delta moves prev<-current and sets current=new dto', () => {
+    let state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'abutown-main',
+        tick: 1,
+        agents: [agentAt('agent:seed:0', 100, 200)],
+        vehicles: [],
+        stops: [],
+      },
+      1000,
+    );
+    const delta: MobilityDeltaDto = {
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      tick: 2,
+      changed_agents: [agentAt('agent:seed:0', 110, 200)],
+      changed_vehicles: [],
+    };
+    state = applyMobilityDelta(state, delta, 1100);
+    const entry = state.agents.get('agent:seed:0')!;
+    expect(entry.prev.world_coord).toEqual({ x: 100, y: 200 });
+    expect(entry.current.world_coord).toEqual({ x: 110, y: 200 });
+    expect(entry.lastTickAt).toBe(1100);
+  });
+
+  it('delta for a new agent sets prev == current', () => {
+    let state = createMobilityOverlayState();
+    state = applyMobilityDelta(
+      state,
+      {
+        protocol_version: 1,
+        world_id: 'abutown-main',
+        tick: 1,
+        changed_agents: [agentAt('agent:seed:0', 50, 60)],
+        changed_vehicles: [],
+      },
+      500,
+    );
+    const entry = state.agents.get('agent:seed:0')!;
+    expect(entry.prev.world_coord).toEqual({ x: 50, y: 60 });
+    expect(entry.current.world_coord).toEqual({ x: 50, y: 60 });
+  });
+
+  it('interpolatedAgents lerps world_coord by t = (now - lastTickAt) / tickPeriodMs', () => {
+    let state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'abutown-main',
+        tick: 1,
+        agents: [agentAt('agent:seed:0', 100, 200)],
+        vehicles: [],
+        stops: [],
+      },
+      1000,
+    );
+    state = applyMobilityDelta(
+      state,
+      {
+        protocol_version: 1,
+        world_id: 'abutown-main',
+        tick: 2,
+        changed_agents: [agentAt('agent:seed:0', 110, 200)],
+        changed_vehicles: [],
+      },
+      1100,
+    );
+    const agents = interpolatedAgents(state, 1150, 100);
+    expect(agents).toHaveLength(1);
+    expect(agents[0].world_coord.x).toBeCloseTo(105.0, 5);
+    expect(agents[0].world_coord.y).toBeCloseTo(200.0, 5);
+  });
+
+  it('interpolatedAgents clamps t to [0, 1]', () => {
+    let state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'abutown-main',
+        tick: 1,
+        agents: [agentAt('agent:seed:0', 0, 0)],
+        vehicles: [],
+        stops: [],
+      },
+      0,
+    );
+    state = applyMobilityDelta(
+      state,
+      {
+        protocol_version: 1,
+        world_id: 'abutown-main',
+        tick: 2,
+        changed_agents: [agentAt('agent:seed:0', 100, 0)],
+        changed_vehicles: [],
+      },
+      1000,
+    );
+    // now < lastTickAt → t clamps to 0 → prev coord
+    const earlyAgents = interpolatedAgents(state, 500, 100);
+    expect(earlyAgents[0].world_coord.x).toBeCloseTo(0, 5);
+    // now >> lastTickAt + tickPeriodMs → t clamps to 1 → current coord
+    const lateAgents = interpolatedAgents(state, 5000, 100);
+    expect(lateAgents[0].world_coord.x).toBeCloseTo(100, 5);
   });
 });

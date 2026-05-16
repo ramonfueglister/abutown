@@ -13,16 +13,19 @@ const vehicleSprites = [
 const mobilityState = {
   status: 'connected' as const,
   tick: 1,
-  agents: new Map([
-    ['agent:seed:0', {
+  agents: (() => {
+    const agent = {
       id: 'agent:seed:0',
       state: { type: 'walking' as const, link_id: 'link:walk:default', progress: 0.5 },
       plan_cursor: 0,
       world_coord: { x: 10.5, y: 20.0 },
       direction: 'e' as const,
       sprite_key: 'pedestrian:0',
-    }],
-  ]),
+    };
+    return new Map([
+      ['agent:seed:0', { prev: agent, current: agent, lastTickAt: 0 }],
+    ]);
+  })(),
   vehicles: new Map(),
   stops: new Map(),
   roadVehicles: {
