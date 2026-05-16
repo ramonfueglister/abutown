@@ -29,9 +29,12 @@ async fn websocket_sends_hello_and_tile_pulse() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        axum::serve(listener, build_app_with_runtime(runtime_with_seeded_mobility()))
-            .await
-            .unwrap();
+        axum::serve(
+            listener,
+            build_app_with_runtime(runtime_with_seeded_mobility()),
+        )
+        .await
+        .unwrap();
     });
 
     let url = format!("ws://{addr}/ws");
@@ -139,9 +142,12 @@ async fn websocket_sends_mobility_deltas_after_hello() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        axum::serve(listener, build_app_with_runtime(runtime_with_seeded_mobility()))
-            .await
-            .unwrap();
+        axum::serve(
+            listener,
+            build_app_with_runtime(runtime_with_seeded_mobility()),
+        )
+        .await
+        .unwrap();
     });
 
     let url = format!("ws://{addr}/ws");
@@ -420,8 +426,14 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
         .collect();
 
     // Each client must receive at least one entity — otherwise the test is vacuous.
-    assert!(!ids_a.is_empty(), "client A should see entities in chunk (4,4)");
-    assert!(!ids_b.is_empty(), "client B should see entities in chunk (5,4)");
+    assert!(
+        !ids_a.is_empty(),
+        "client A should see entities in chunk (4,4)"
+    );
+    assert!(
+        !ids_b.is_empty(),
+        "client B should see entities in chunk (5,4)"
+    );
 
     // The AoI filter must produce disjoint sets.
     assert!(
