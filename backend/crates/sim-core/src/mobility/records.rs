@@ -1,0 +1,115 @@
+use std::collections::VecDeque;
+
+use serde::{Deserialize, Serialize};
+
+use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VehicleKind {
+    Car,
+    Tram,
+}
+
+impl From<VehicleKind> for abutown_protocol::VehicleKindDto {
+    fn from(value: VehicleKind) -> Self {
+        match value {
+            VehicleKind::Car => abutown_protocol::VehicleKindDto::Car,
+            VehicleKind::Tram => abutown_protocol::VehicleKindDto::Tram,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AgentMobilityState {
+    AtActivity {
+        activity_id: String,
+    },
+    Walking {
+        link_id: LinkId,
+        progress: f32,
+    },
+    WaitingAtStop {
+        stop_id: StopId,
+    },
+    Boarding {
+        vehicle_id: VehicleId,
+        stop_id: StopId,
+    },
+    InVehicle {
+        vehicle_id: VehicleId,
+        seat_index: u16,
+    },
+    Alighting {
+        vehicle_id: VehicleId,
+        stop_id: StopId,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlanStage {
+    WalkToStop {
+        link_id: LinkId,
+        stop_id: StopId,
+    },
+    RideToStop {
+        route_id: RouteId,
+        stop_id: StopId,
+    },
+    WalkToActivity {
+        link_id: LinkId,
+        activity_id: String,
+    },
+    Activity {
+        activity_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentRecord {
+    pub id: AgentId,
+    pub state: AgentMobilityState,
+    pub plan: Vec<PlanStage>,
+    pub plan_cursor: usize,
+    pub walk_speed_per_tick: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VehicleRecord {
+    pub id: VehicleId,
+    pub kind: VehicleKind,
+    pub route_id: RouteId,
+    pub link_index: usize,
+    pub progress: f32,
+    pub speed_per_tick: f32,
+    pub capacity: u16,
+    pub occupants: Vec<AgentId>,
+    pub dwell_ticks_remaining: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StopRecord {
+    pub id: StopId,
+    pub route_id: RouteId,
+    pub link_index: usize,
+    pub progress: f32,
+    pub waiting_agents: VecDeque<AgentId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteRecord {
+    pub id: RouteId,
+    pub links: Vec<LinkId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobilitySnapshot {
+    pub agents: Vec<AgentRecord>,
+    pub vehicles: Vec<VehicleRecord>,
+    pub stops: Vec<StopRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobilityDelta {
+    pub changed_agents: Vec<AgentRecord>,
+    pub changed_vehicles: Vec<VehicleRecord>,
+}
