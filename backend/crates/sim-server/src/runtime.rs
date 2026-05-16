@@ -282,16 +282,17 @@ impl SimulationRuntime {
     }
 
     pub fn mobility_snapshot(&self) -> MobilitySnapshotDto {
-        build_mobility_snapshot_dto(
-            &self.world_id,
-            self.mobility.tick(),
-            self.mobility.snapshot(),
-        )
+        build_mobility_snapshot_dto(&self.world_id, self.mobility.tick(), &self.mobility)
     }
 
     pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
         let delta = self.mobility.tick_mobility();
-        build_mobility_delta_dto(&self.world_id, self.mobility.tick(), delta)
+        build_mobility_delta_dto(
+            &self.world_id,
+            self.mobility.tick(),
+            &self.mobility,
+            &delta,
+        )
     }
 
     pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {

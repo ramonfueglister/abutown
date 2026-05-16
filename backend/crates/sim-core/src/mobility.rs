@@ -8,6 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
+fn stable_index(id: &str) -> u32 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hasher);
+    hasher.finish() as u32
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentMobilityState {
     AtActivity {
@@ -398,6 +405,140 @@ impl MobilityWorld {
 
         changed
     }
+
+    pub fn world_coord_for_agent(&self, agent_id: &AgentId) -> Option<(f32, f32)> {
+        use crate::mobility_geometry::{activity_geometry, link_geometry, stop_geometry};
+        let agent = self.agents.get(agent_id)?;
+        match &agent.state {
+            AgentMobilityState::AtActivity { activity_id } => {
+                activity_geometry(activity_id).map(|g| g.coord)
+            }
+            AgentMobilityState::Walking { link_id, progress } => {
+                let geom = link_geometry(&link_id.0)?;
+                let t = progress.clamp(0.0, 1.0);
+                Some((
+                    geom.start.0 + (geom.end.0 - geom.start.0) * t,
+                    geom.start.1 + (geom.end.1 - geom.start.1) * t,
+                ))
+            }
+            AgentMobilityState::WaitingAtStop { stop_id }
+            | AgentMobilityState::Boarding { stop_id, .. }
+            | AgentMobilityState::Alighting { stop_id, .. } => {
+                stop_geometry(&stop_id.0).map(|g| g.coord)
+            }
+            AgentMobilityState::InVehicle { vehicle_id, .. } => {
+                self.world_coord_for_vehicle(vehicle_id)
+            }
+        }
+    }
+
+    pub fn direction_for_agent(&self, agent_id: &AgentId) -> Option<abutown_protocol::DirectionDto> {
+        use crate::mobility_geometry::{direction_from_delta, link_geometry};
+        let agent = self.agents.get(agent_id)?;
+        match &agent.state {
+            AgentMobilityState::Walking { link_id, .. } => {
+                let geom = link_geometry(&link_id.0)?;
+                Some(direction_from_delta(
+                    geom.end.0 - geom.start.0,
+                    geom.end.1 - geom.start.1,
+                ))
+            }
+            AgentMobilityState::InVehicle { vehicle_id, .. } => {
+                self.direction_for_vehicle(vehicle_id)
+            }
+            _ => Some(abutown_protocol::DirectionDto::S),
+        }
+    }
+
+    pub fn world_coord_for_vehicle(&self, vehicle_id: &VehicleId) -> Option<(f32, f32)> {
+        use crate::mobility_geometry::route_link_world_coord;
+        let vehicle = self.vehicles.get(vehicle_id)?;
+        route_link_world_coord(&vehicle.route_id.0, vehicle.link_index, vehicle.progress)
+    }
+
+    pub fn direction_for_vehicle(
+        &self,
+        vehicle_id: &VehicleId,
+    ) -> Option<abutown_protocol::DirectionDto> {
+        use crate::mobility_geometry::{direction_from_delta, route_link_world_coord};
+        let vehicle = self.vehicles.get(vehicle_id)?;
+        let here = route_link_world_coord(
+            &vehicle.route_id.0,
+            vehicle.link_index,
+            vehicle.progress,
+        )?;
+        let ahead = route_link_world_coord(
+            &vehicle.route_id.0,
+            vehicle.link_index,
+            (vehicle.progress + 0.1).min(1.0),
+        )?;
+        Some(direction_from_delta(ahead.0 - here.0, ahead.1 - here.1))
+    }
+
+    pub fn sprite_key_for_agent(&self, agent_id: &AgentId) -> Option<String> {
+        if !self.agents.contains_key(agent_id) {
+            return None;
+        }
+        Some(format!("pedestrian:{}", stable_index(&agent_id.0) % 16))
+    }
+
+    pub fn sprite_key_for_vehicle(&self, vehicle_id: &VehicleId) -> Option<String> {
+        if !self.vehicles.contains_key(vehicle_id) {
+            return None;
+        }
+        Some(format!("tram:{}", stable_index(&vehicle_id.0) % 4))
+    }
+
+    /// Builds an AgentMobilityDto for the given agent id, including the computed
+    /// world_coord / direction / sprite_key. Returns None if the agent does not exist.
+    pub fn agent_dto_for(&self, agent_id: &AgentId) -> Option<abutown_protocol::AgentMobilityDto> {
+        let agent = self.agents.get(agent_id)?;
+        let (cx, cy) = self.world_coord_for_agent(agent_id).unwrap_or((0.0, 0.0));
+        let direction = self
+            .direction_for_agent(agent_id)
+            .unwrap_or(abutown_protocol::DirectionDto::S);
+        let sprite_key = self
+            .sprite_key_for_agent(agent_id)
+            .unwrap_or_else(|| "pedestrian:0".to_string());
+        Some(abutown_protocol::AgentMobilityDto {
+            id: abutown_protocol::EntityId(agent.id.0.clone()),
+            state: abutown_protocol::AgentMobilityStateDto::from(&agent.state),
+            plan_cursor: agent.plan_cursor,
+            world_coord: abutown_protocol::WorldCoordDto { x: cx, y: cy },
+            direction,
+            sprite_key,
+        })
+    }
+
+    pub fn vehicle_dto_for(
+        &self,
+        vehicle_id: &VehicleId,
+    ) -> Option<abutown_protocol::VehicleMobilityDto> {
+        let vehicle = self.vehicles.get(vehicle_id)?;
+        let (cx, cy) = self.world_coord_for_vehicle(vehicle_id).unwrap_or((0.0, 0.0));
+        let direction = self
+            .direction_for_vehicle(vehicle_id)
+            .unwrap_or(abutown_protocol::DirectionDto::S);
+        let sprite_key = self
+            .sprite_key_for_vehicle(vehicle_id)
+            .unwrap_or_else(|| "tram:0".to_string());
+        Some(abutown_protocol::VehicleMobilityDto {
+            id: abutown_protocol::EntityId(vehicle.id.0.clone()),
+            route_id: vehicle.route_id.0.clone(),
+            link_index: vehicle.link_index,
+            progress: vehicle.progress,
+            capacity: vehicle.capacity,
+            occupants: vehicle
+                .occupants
+                .iter()
+                .map(|agent_id| abutown_protocol::EntityId(agent_id.0.clone()))
+                .collect(),
+            dwell_ticks_remaining: vehicle.dwell_ticks_remaining,
+            world_coord: abutown_protocol::WorldCoordDto { x: cx, y: cy },
+            direction,
+            sprite_key,
+        })
+    }
 }
 
 impl From<&AgentRecord> for AgentMobilityDto {
@@ -497,41 +638,57 @@ impl From<&StopRecord> for StopMobilityDto {
 pub fn build_mobility_snapshot_dto(
     world_id: &WorldId,
     tick: u64,
-    snapshot: MobilitySnapshot,
+    world: &MobilityWorld,
 ) -> MobilitySnapshotDto {
+    let mut agent_ids: Vec<AgentId> = world.agents.keys().cloned().collect();
+    agent_ids.sort_by(|left, right| left.0.cmp(&right.0));
+    let agents = agent_ids
+        .iter()
+        .filter_map(|id| world.agent_dto_for(id))
+        .collect();
+
+    let mut vehicle_ids: Vec<VehicleId> = world.vehicles.keys().cloned().collect();
+    vehicle_ids.sort_by(|left, right| left.0.cmp(&right.0));
+    let vehicles = vehicle_ids
+        .iter()
+        .filter_map(|id| world.vehicle_dto_for(id))
+        .collect();
+
+    let mut stops: Vec<StopMobilityDto> = world.stops.values().map(StopMobilityDto::from).collect();
+    stops.sort_by(|left, right| left.id.cmp(&right.id));
+
     MobilitySnapshotDto {
         protocol_version: PROTOCOL_VERSION,
         world_id: world_id.clone(),
         tick,
-        agents: snapshot.agents.iter().map(AgentMobilityDto::from).collect(),
-        vehicles: snapshot
-            .vehicles
-            .iter()
-            .map(VehicleMobilityDto::from)
-            .collect(),
-        stops: snapshot.stops.iter().map(StopMobilityDto::from).collect(),
+        agents,
+        vehicles,
+        stops,
     }
 }
 
 pub fn build_mobility_delta_dto(
     world_id: &WorldId,
     tick: u64,
-    delta: MobilityDelta,
+    world: &MobilityWorld,
+    delta: &MobilityDelta,
 ) -> MobilityDeltaDto {
+    let changed_agents = delta
+        .changed_agents
+        .iter()
+        .filter_map(|agent| world.agent_dto_for(&agent.id))
+        .collect();
+    let changed_vehicles = delta
+        .changed_vehicles
+        .iter()
+        .filter_map(|vehicle| world.vehicle_dto_for(&vehicle.id))
+        .collect();
     MobilityDeltaDto {
         protocol_version: PROTOCOL_VERSION,
         world_id: world_id.clone(),
         tick,
-        changed_agents: delta
-            .changed_agents
-            .iter()
-            .map(AgentMobilityDto::from)
-            .collect(),
-        changed_vehicles: delta
-            .changed_vehicles
-            .iter()
-            .map(VehicleMobilityDto::from)
-            .collect(),
+        changed_agents,
+        changed_vehicles,
     }
 }
 
@@ -952,5 +1109,76 @@ mod tests {
             stops,
             routes,
         }
+    }
+
+    #[test]
+    fn world_coord_for_walking_agent_interpolates_link() {
+        use crate::mobility_geometry::link_geometry;
+
+        let mut world = seed::initial_world();
+        let agent_id = AgentId("agent:seed:0".to_string());
+        if let Some(agent) = world.agents.get_mut(&agent_id) {
+            agent.state = AgentMobilityState::Walking {
+                link_id: LinkId("link:walk:default".to_string()),
+                progress: 0.5,
+            };
+        }
+
+        let geom = link_geometry("link:walk:default").unwrap();
+        let coord = world
+            .world_coord_for_agent(&agent_id)
+            .expect("agent resolves to coord");
+        assert!((coord.0 - (geom.start.0 + (geom.end.0 - geom.start.0) * 0.5)).abs() < 0.01);
+        assert!((coord.1 - (geom.start.1 + (geom.end.1 - geom.start.1) * 0.5)).abs() < 0.01);
+    }
+
+    #[test]
+    fn world_coord_for_agent_waiting_at_stop_uses_stop_coord() {
+        let mut world = seed::initial_world();
+        let agent_id = AgentId("agent:seed:0".to_string());
+        if let Some(agent) = world.agents.get_mut(&agent_id) {
+            agent.state = AgentMobilityState::WaitingAtStop {
+                stop_id: StopId("stop:horizontal:pickup".to_string()),
+            };
+        }
+        let coord = world.world_coord_for_agent(&agent_id).unwrap();
+        assert_eq!(coord, (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0));
+    }
+
+    #[test]
+    fn world_coord_for_transit_vehicle_interpolates_route() {
+        let mut world = seed::initial_world();
+        let vehicle_id = VehicleId("vehicle:seed:0".to_string());
+        if let Some(vehicle) = world.vehicles.get_mut(&vehicle_id) {
+            vehicle.route_id = RouteId("route:horizontal".to_string());
+            vehicle.link_index = 0;
+            vehicle.progress = 0.5;
+        }
+        let coord = world
+            .world_coord_for_vehicle(&vehicle_id)
+            .expect("vehicle resolves");
+        assert!((coord.0 - (4.0 * 32.0 + 16.0 + 16.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn sprite_key_for_agent_is_deterministic_by_id_hash() {
+        let world = seed::initial_world();
+        let a = world
+            .sprite_key_for_agent(&AgentId("agent:seed:0".to_string()))
+            .unwrap();
+        let b = world
+            .sprite_key_for_agent(&AgentId("agent:seed:0".to_string()))
+            .unwrap();
+        assert_eq!(a, b, "sprite key must be deterministic across calls for the same id");
+        assert!(a.starts_with("pedestrian:"));
+    }
+
+    #[test]
+    fn agent_dto_built_through_world_includes_world_coord_direction_and_sprite_key() {
+        let world = seed::initial_world();
+        let agent_id = AgentId("agent:seed:0".to_string());
+        let dto = world.agent_dto_for(&agent_id).expect("agent exists");
+        assert!(dto.sprite_key.starts_with("pedestrian:"));
+        assert!(dto.world_coord.x.is_finite());
     }
 }
