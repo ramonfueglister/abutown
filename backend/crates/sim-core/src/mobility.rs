@@ -15,6 +15,21 @@ fn stable_index(id: &str) -> u32 {
     hasher.finish() as u32
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VehicleKind {
+    Car,
+    Tram,
+}
+
+impl From<VehicleKind> for abutown_protocol::VehicleKindDto {
+    fn from(value: VehicleKind) -> Self {
+        match value {
+            VehicleKind::Car => abutown_protocol::VehicleKindDto::Car,
+            VehicleKind::Tram => abutown_protocol::VehicleKindDto::Tram,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentMobilityState {
     AtActivity {
@@ -72,6 +87,7 @@ pub struct AgentRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VehicleRecord {
     pub id: VehicleId,
+    pub kind: VehicleKind,
     pub route_id: RouteId,
     pub link_index: usize,
     pub progress: f32,
@@ -519,7 +535,7 @@ impl MobilityWorld {
             .unwrap_or_else(|| "tram:0".to_string());
         Some(abutown_protocol::VehicleMobilityDto {
             id: abutown_protocol::EntityId(vehicle.id.0.clone()),
-            kind: abutown_protocol::VehicleKindDto::Tram,
+            kind: vehicle.kind.into(),
             route_id: vehicle.route_id.0.clone(),
             link_index: vehicle.link_index,
             progress: vehicle.progress,
@@ -596,11 +612,9 @@ impl From<&VehicleRecord> for VehicleMobilityDto {
     fn from(value: &VehicleRecord) -> Self {
         // Placeholder values for world_coord, direction, sprite_key — Task 3
         // replaces this `From` path with a `MobilityWorld`-aware builder.
-        // kind is hardcoded to Tram here; Task 5 will read value.kind once
-        // VehicleRecord has that field.
         Self {
             id: EntityId(value.id.0.clone()),
-            kind: abutown_protocol::VehicleKindDto::Tram,
+            kind: value.kind.into(),
             route_id: value.route_id.0.clone(),
             link_index: value.link_index,
             progress: value.progress,
@@ -696,7 +710,7 @@ pub mod seed {
 
     use super::{
         AgentMobilityState, AgentRecord, MobilityWorld, PlanStage, RouteRecord, StopRecord,
-        VehicleRecord,
+        VehicleKind, VehicleRecord,
     };
     use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
@@ -766,6 +780,7 @@ pub mod seed {
                 vehicle_id.clone(),
                 VehicleRecord {
                     id: vehicle_id,
+                    kind: VehicleKind::Tram,
                     route_id,
                     link_index: 0,
                     progress: (offset as f32) * 0.25,
@@ -1091,6 +1106,7 @@ mod tests {
             vehicle_id.clone(),
             VehicleRecord {
                 id: vehicle_id,
+                kind: VehicleKind::Tram,
                 route_id,
                 link_index: 0,
                 progress: 0.0,
@@ -1183,5 +1199,13 @@ mod tests {
         let dto = world.agent_dto_for(&agent_id).expect("agent exists");
         assert!(dto.sprite_key.starts_with("pedestrian:"));
         assert!(dto.world_coord.x.is_finite());
+    }
+
+    #[test]
+    fn seeded_world_vehicles_default_to_tram_kind() {
+        let world = seed::initial_world();
+        for vehicle in world.vehicles.values() {
+            assert_eq!(vehicle.kind, VehicleKind::Tram);
+        }
     }
 }
