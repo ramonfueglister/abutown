@@ -33,9 +33,12 @@ async fn websocket_sends_hello_and_tile_pulse() {
 
     // 10 Hz tick: the first tile pulse arrives within roughly one tick period.
     // Use 250 ms to absorb scheduler jitter on slow CI without weakening intent.
-    let first_pulse = tokio::time::timeout(Duration::from_millis(250), read_next_tile_pulse(&mut stream))
-        .await
-        .expect("first tile pulse must arrive within one tick window");
+    let first_pulse = tokio::time::timeout(
+        Duration::from_millis(250),
+        read_next_tile_pulse(&mut stream),
+    )
+    .await
+    .expect("first tile pulse must arrive within one tick window");
     assert_eq!(first_pulse.world_id.0, "abutown-main");
     assert_eq!(first_pulse.coord.x, 4);
     assert_eq!(first_pulse.coord.y, 4);
@@ -56,9 +59,12 @@ async fn websocket_sends_hello_and_tile_pulse() {
     ));
 
     // Next tick arrives within one tick window.
-    let next_pulse = tokio::time::timeout(Duration::from_millis(250), read_next_tile_pulse(&mut stream))
-        .await
-        .expect("next tile pulse arrives within one tick window");
+    let next_pulse = tokio::time::timeout(
+        Duration::from_millis(250),
+        read_next_tile_pulse(&mut stream),
+    )
+    .await
+    .expect("next tile pulse arrives within one tick window");
     assert_eq!(next_pulse.tick, 2);
 
     server.abort();
@@ -260,7 +266,7 @@ async fn websocket_does_not_broadcast_failed_command_append() {
             break;
         }
         match tokio::time::timeout(remaining, websocket.next()).await {
-            Err(_) => break, // window expired
+            Err(_) => break,   // window expired
             Ok(None) => break, // stream closed
             Ok(Some(message)) => {
                 let text = match message.expect("ws message") {
