@@ -276,6 +276,32 @@ async fn mobility_snapshot_is_available() {
 }
 
 #[tokio::test]
+async fn road_vehicles_endpoint_returns_seeded_snapshot() {
+    let app = build_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/road-vehicles")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["protocol_version"], 1);
+    assert_eq!(json["world_id"], "abutown-main");
+    let vehicles = json["vehicles"].as_array().expect("vehicles array");
+    assert!(vehicles.len() >= 80, "seed must populate at least 80 vehicles");
+    assert!(vehicles[0]["sprite_key"].is_string());
+    assert!(vehicles[0]["direction"].is_string());
+    assert!(vehicles[0]["world_coord"]["x"].is_number());
+}
+
+#[tokio::test]
 async fn command_sets_tile_kind_and_returns_event() {
     let app = build_app();
     let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
