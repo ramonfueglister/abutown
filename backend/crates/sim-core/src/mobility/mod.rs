@@ -297,6 +297,24 @@ impl MobilityWorld {
         }
     }
 
+    /// Test-only helper: mark a wide range of chunks as `Active` so the LOD
+    /// activity filter does not skip them. Used by integration tests that
+    /// exercise `tick_mobility()` without standing up a full ChunkSubscribers
+    /// pipeline.
+    #[cfg(test)]
+    pub fn force_all_chunks_active_for_test(&mut self) {
+        use crate::ids::ChunkCoord;
+        use crate::mobility::lod::MobilityActivity;
+        let mut activities = self.world.resource_mut::<ChunkActivities>();
+        for x in -16..=32 {
+            for y in -16..=32 {
+                activities
+                    .0
+                    .insert(ChunkCoord { x, y }, MobilityActivity::Active);
+            }
+        }
+    }
+
     pub fn tick_mobility(&mut self) -> MobilityDelta {
         // Run the (currently empty) schedule.
         self.schedule.run(&mut self.world);
@@ -638,6 +656,7 @@ mod tests {
     #[test]
     fn walking_agent_reaches_pickup_stop_and_waits() {
         let mut world = sample_world();
+        world.force_all_chunks_active_for_test();
         let agent_id = AgentId("agent:pedestrian:0".to_string());
 
         let first_delta = world.tick_mobility();
@@ -674,6 +693,7 @@ mod tests {
     #[test]
     fn vehicle_respects_initial_dwell_then_moves_on_route() {
         let mut world = sample_world();
+        world.force_all_chunks_active_for_test();
         let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
 
         let first_delta = world.tick_mobility();
@@ -698,6 +718,7 @@ mod tests {
     #[test]
     fn agent_boards_rides_alights_and_walks_to_activity() {
         let mut world = sample_world();
+        world.force_all_chunks_active_for_test();
         let agent_id = AgentId("agent:pedestrian:0".to_string());
         let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
 

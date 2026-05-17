@@ -13,6 +13,21 @@ fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::Di
     crate::mobility_geometry::direction_at_progress_slice(points, progress)
 }
 
+/// Returns true if the chunk containing the entity is Active or Hot.
+/// Asleep/Warm chunks are skipped by the Advance/Output systems so only
+/// hot entities tick at full fidelity.
+fn chunk_is_simulated(pos: &Position, activities: &ChunkActivities) -> bool {
+    let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
+    matches!(
+        activities
+            .0
+            .get(&chunk)
+            .copied()
+            .unwrap_or(MobilityActivity::Asleep),
+        MobilityActivity::Active | MobilityActivity::Hot,
+    )
+}
+
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum MobilitySet {
     Advance,
@@ -59,10 +74,22 @@ pub fn install_systems(schedule: &mut Schedule) {
 }
 
 pub fn walk_advance_system(
-    mut query: Query<(Entity, &mut AgentMobilityStateComponent, &WalkSpeed), With<AgentMarker>>,
+    mut query: Query<
+        (
+            Entity,
+            &Position,
+            &mut AgentMobilityStateComponent,
+            &WalkSpeed,
+        ),
+        With<AgentMarker>,
+    >,
+    activities: Res<ChunkActivities>,
     mut dirty: ResMut<DirtyAgents>,
 ) {
-    for (entity, mut state, speed) in query.iter_mut() {
+    for (entity, pos, mut state, speed) in query.iter_mut() {
+        if !chunk_is_simulated(pos, &activities) {
+            continue;
+        }
         if let AgentMobilityState::Walking { progress, .. } = &mut state.0 {
             let next = (*progress + speed.0).min(1.0);
             if next != *progress {
@@ -74,11 +101,23 @@ pub fn walk_advance_system(
 }
 
 pub fn vehicle_advance_system(
-    mut query: Query<(Entity, &mut RoutePosition, &mut DwellTicksRemaining), With<VehicleMarker>>,
+    mut query: Query<
+        (
+            Entity,
+            &Position,
+            &mut RoutePosition,
+            &mut DwellTicksRemaining,
+        ),
+        With<VehicleMarker>,
+    >,
+    activities: Res<ChunkActivities>,
     routes: Res<Routes>,
     mut dirty: ResMut<DirtyVehicles>,
 ) {
-    for (entity, mut pos, mut dwell) in query.iter_mut() {
+    for (entity, world_pos, mut pos, mut dwell) in query.iter_mut() {
+        if !chunk_is_simulated(world_pos, &activities) {
+            continue;
+        }
         // dwell counts down first
         if dwell.0 > 0 {
             dwell.0 -= 1;
@@ -104,16 +143,21 @@ pub fn stop_arrival_system(
     mut query: Query<
         (
             Entity,
+            &Position,
             &StableAgentId,
             &mut AgentMobilityStateComponent,
             &mut WalkPlan,
         ),
         With<AgentMarker>,
     >,
+    activities: Res<ChunkActivities>,
     mut stops: ResMut<Stops>,
     mut dirty: ResMut<DirtyAgents>,
 ) {
-    for (entity, stable, mut state, mut plan) in query.iter_mut() {
+    for (entity, pos, stable, mut state, mut plan) in query.iter_mut() {
+        if !chunk_is_simulated(pos, &activities) {
+            continue;
+        }
         let completed_walking = matches!(
             &state.0,
             AgentMobilityState::Walking { progress, .. } if *progress >= 1.0
@@ -152,6 +196,7 @@ pub fn boarding_alighting_system(
         Query<
             (
                 Entity,
+                &Position,
                 &StableAgentId,
                 &mut AgentMobilityStateComponent,
                 &mut WalkPlan,
@@ -161,6 +206,7 @@ pub fn boarding_alighting_system(
         Query<
             (
                 Entity,
+                &Position,
                 &StableVehicleId,
                 &mut Occupants,
                 &Capacity,
@@ -169,6 +215,7 @@ pub fn boarding_alighting_system(
             With<VehicleMarker>,
         >,
     )>,
+    activities: Res<ChunkActivities>,
     mut stops: ResMut<Stops>,
     mut dirty_agents: ResMut<DirtyAgents>,
     mut dirty_vehicles: ResMut<DirtyVehicles>,
@@ -176,11 +223,25 @@ pub fn boarding_alighting_system(
     // ------------------------------------------------------------------
     // Phase A: BOARDING
     // ------------------------------------------------------------------
+    // A.0 — gather positions of all waiting-at-stop agents so we can filter by
+    // chunk activity. Only agents whose chunk is Active/Hot are eligible.
+    let mut agent_simulated: std::collections::HashMap<AgentId, bool> =
+        std::collections::HashMap::new();
+    {
+        let agents = sets.p0();
+        for (_a_entity, a_pos, a_stable, _a_state, _a_plan) in agents.iter() {
+            agent_simulated.insert(a_stable.0.clone(), chunk_is_simulated(a_pos, &activities));
+        }
+    }
+
     // A.1 — collect (stop_id, front agent, route/link/progress) for each stop
-    // that has at least one waiting agent.
+    // that has at least one waiting agent IN AN ACTIVE/HOT CHUNK.
     let mut boarding_candidates: Vec<(StopId, AgentId, RouteId, usize, f32)> = Vec::new();
     for (stop_id, stop) in stops.0.iter() {
         if let Some(agent_id) = stop.waiting_agents.front() {
+            if !agent_simulated.get(agent_id).copied().unwrap_or(false) {
+                continue;
+            }
             boarding_candidates.push((
                 stop_id.clone(),
                 agent_id.clone(),
@@ -191,12 +252,16 @@ pub fn boarding_alighting_system(
         }
     }
 
-    // A.2 — find a matching vehicle for each candidate.
+    // A.2 — find a matching vehicle for each candidate (vehicle must be in an
+    // Active/Hot chunk too).
     let mut boardings: Vec<(StopId, AgentId, Entity, VehicleId, u16)> = Vec::new();
     {
         let vehicles = sets.p1();
         for (stop_id, agent_id, route_id, link_index, stop_progress) in boarding_candidates {
-            for (v_entity, v_stable, v_occ, v_cap, v_pos) in vehicles.iter() {
+            for (v_entity, v_pos_world, v_stable, v_occ, v_cap, v_pos) in vehicles.iter() {
+                if !chunk_is_simulated(v_pos_world, &activities) {
+                    continue;
+                }
                 if v_pos.route_id == route_id
                     && v_pos.link_index == link_index
                     && (v_pos.progress - stop_progress).abs() < 1e-6
@@ -220,7 +285,7 @@ pub fn boarding_alighting_system(
     {
         let mut vehicles = sets.p1();
         for (_stop_id, agent_id, v_entity, _v_id, _seat) in &boardings {
-            if let Ok((_, _, mut v_occ, _, _)) = vehicles.get_mut(*v_entity) {
+            if let Ok((_, _, _, mut v_occ, _, _)) = vehicles.get_mut(*v_entity) {
                 v_occ.0.push(agent_id.clone());
                 dirty_vehicles.0.insert(*v_entity);
             }
@@ -240,7 +305,7 @@ pub fn boarding_alighting_system(
     {
         let mut agents = sets.p0();
         for (_stop_id, agent_id, _v_entity, v_id, seat_index) in &boardings {
-            for (a_entity, a_stable, mut a_state, _a_plan) in agents.iter_mut() {
+            for (a_entity, _a_pos, a_stable, mut a_state, _a_plan) in agents.iter_mut() {
                 if &a_stable.0 == agent_id {
                     a_state.0 = AgentMobilityState::InVehicle {
                         vehicle_id: v_id.clone(),
@@ -257,11 +322,14 @@ pub fn boarding_alighting_system(
     // Phase B: ALIGHTING
     // ------------------------------------------------------------------
     // B.1 — collect (vehicle_entity, vehicle_id, end-of-link stop_id, occupants)
-    // for every vehicle parked at an end-of-link stop.
+    // for every vehicle parked at an end-of-link stop IN AN ACTIVE/HOT CHUNK.
     let mut alighting_candidates: Vec<(Entity, VehicleId, StopId, Vec<AgentId>)> = Vec::new();
     {
         let vehicles = sets.p1();
-        for (v_entity, v_stable, v_occ, _cap, v_pos) in vehicles.iter() {
+        for (v_entity, v_pos_world, v_stable, v_occ, _cap, v_pos) in vehicles.iter() {
+            if !chunk_is_simulated(v_pos_world, &activities) {
+                continue;
+            }
             let stop_match = stops.0.values().find(|stop| {
                 stop.route_id == v_pos.route_id
                     && stop.link_index == v_pos.link_index
@@ -281,13 +349,17 @@ pub fn boarding_alighting_system(
 
     // B.2 — for each occupant, check whether its current plan stage is a
     // RideToStop targeting this stop AND its state is InVehicle for this vehicle.
+    // Also require the occupant agent's chunk to be Active/Hot.
     let mut to_alight: Vec<(Entity, VehicleId, StopId, AgentId)> = Vec::new();
     {
         let agents = sets.p0();
         for (v_entity, v_id, stop_id, occupants) in &alighting_candidates {
             for agent_id in occupants {
-                for (_a_entity, a_stable, a_state, a_plan) in agents.iter() {
+                for (_a_entity, a_pos, a_stable, a_state, a_plan) in agents.iter() {
                     if &a_stable.0 == agent_id {
+                        if !chunk_is_simulated(a_pos, &activities) {
+                            break;
+                        }
                         let stage = a_plan.stages.get(a_plan.cursor);
                         let matches_alight = matches!(
                             stage,
@@ -316,14 +388,14 @@ pub fn boarding_alighting_system(
     for (v_entity, v_id, stop_id, agent_id) in &to_alight {
         {
             let mut vehicles = sets.p1();
-            if let Ok((_, _, mut v_occ, _, _)) = vehicles.get_mut(*v_entity) {
+            if let Ok((_, _, _, mut v_occ, _, _)) = vehicles.get_mut(*v_entity) {
                 v_occ.0.retain(|x| x != agent_id);
                 dirty_vehicles.0.insert(*v_entity);
             }
         }
         {
             let mut agents = sets.p0();
-            for (a_entity, a_stable, mut a_state, mut a_plan) in agents.iter_mut() {
+            for (a_entity, _a_pos, a_stable, mut a_state, mut a_plan) in agents.iter_mut() {
                 if &a_stable.0 == agent_id {
                     a_plan.cursor += 1;
                     let next = a_plan.stages.get(a_plan.cursor).cloned();
@@ -361,12 +433,16 @@ pub fn compute_world_coord_system(
         (&RoutePosition, &mut Position),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
+    activities: Res<ChunkActivities>,
     routes: Res<Routes>,
     stops: Res<Stops>,
     link_polylines: Res<LinkPolylines>,
 ) {
     // Vehicles first.
     for (rp, mut pos) in vehicles.iter_mut() {
+        if !chunk_is_simulated(&pos, &activities) {
+            continue;
+        }
         let Some(route) = routes.0.get(&rp.route_id) else {
             continue;
         };
@@ -383,6 +459,9 @@ pub fn compute_world_coord_system(
 
     // Agents.
     for (state, mut pos) in agents.iter_mut() {
+        if !chunk_is_simulated(&pos, &activities) {
+            continue;
+        }
         let coord = match &state.0 {
             AgentMobilityState::Walking { link_id, progress } => link_polylines
                 .0
@@ -409,17 +488,21 @@ pub fn compute_world_coord_system(
 #[allow(clippy::type_complexity)]
 pub fn compute_direction_system(
     mut agents: Query<
-        (&AgentMobilityStateComponent, &mut Direction),
+        (&Position, &AgentMobilityStateComponent, &mut Direction),
         (With<AgentMarker>, Without<VehicleMarker>),
     >,
     mut vehicles: Query<
-        (&RoutePosition, &mut Direction),
+        (&Position, &RoutePosition, &mut Direction),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
+    activities: Res<ChunkActivities>,
     routes: Res<Routes>,
     link_polylines: Res<LinkPolylines>,
 ) {
-    for (rp, mut dir) in vehicles.iter_mut() {
+    for (pos, rp, mut dir) in vehicles.iter_mut() {
+        if !chunk_is_simulated(pos, &activities) {
+            continue;
+        }
         let Some(route) = routes.0.get(&rp.route_id) else {
             continue;
         };
@@ -431,7 +514,10 @@ pub fn compute_direction_system(
         };
         dir.0 = dir_at_progress(points, rp.progress);
     }
-    for (state, mut dir) in agents.iter_mut() {
+    for (pos, state, mut dir) in agents.iter_mut() {
+        if !chunk_is_simulated(pos, &activities) {
+            continue;
+        }
         if let AgentMobilityState::Walking { link_id, progress } = &state.0
             && let Some(points) = link_polylines.0.get(link_id)
         {
@@ -725,6 +811,20 @@ fn lod_seed(x: i32, y: i32, tick: u64, n: u64) -> u64 {
 mod tests {
     use super::*;
 
+    /// Returns a `ChunkActivities` resource pre-populated so that every chunk
+    /// in a generous range around the origin is `Active`. Tests that exercise
+    /// the LOD-filtered Advance/Output systems use this so the filter doesn't
+    /// skip their fixtures.
+    fn all_active() -> ChunkActivities {
+        let mut a = ChunkActivities::default();
+        for x in -10..=20 {
+            for y in -10..=20 {
+                a.0.insert(crate::ids::ChunkCoord { x, y }, MobilityActivity::Active);
+            }
+        }
+        a
+    }
+
     #[test]
     fn tick_increment_system_advances_tick_by_one_per_schedule_run() {
         let mut world = World::new();
@@ -734,6 +834,7 @@ mod tests {
         world.insert_resource(LinkPolylines::default());
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
+        world.insert_resource(all_active());
 
         let mut schedule = Schedule::default();
         install_systems(&mut schedule);
@@ -751,6 +852,7 @@ mod tests {
 
         let mut world = World::new();
         world.insert_resource(DirtyAgents::default());
+        world.insert_resource(all_active());
 
         let mut stops = Stops::default();
         stops.0.insert(
@@ -820,6 +922,7 @@ mod tests {
         world.insert_resource(LinkPolylines::default());
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
+        world.insert_resource(all_active());
 
         let mut stops = Stops::default();
         stops.0.insert(
@@ -915,6 +1018,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
+        world.insert_resource(all_active());
 
         let mut stops = Stops::default();
         stops.0.insert(
@@ -1011,6 +1115,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(Tick(0));
         world.insert_resource(DirtyAgents::default());
+        world.insert_resource(all_active());
 
         let entity = world
             .spawn((
@@ -1055,6 +1160,7 @@ mod tests {
 
         let mut world = World::new();
         world.insert_resource(DirtyAgents::default());
+        world.insert_resource(all_active());
 
         let entity = world
             .spawn((
@@ -1100,6 +1206,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(Routes::default());
         world.insert_resource(DirtyVehicles::default());
+        world.insert_resource(all_active());
 
         let entity = world
             .spawn((
@@ -1141,6 +1248,7 @@ mod tests {
         use crate::mobility::records::{RouteRecord, VehicleKind};
 
         let mut world = World::new();
+        world.insert_resource(all_active());
         let mut routes = Routes::default();
         routes.0.insert(
             RouteId("r:1".into()),
@@ -1187,6 +1295,7 @@ mod tests {
         use crate::mobility::records::AgentMobilityState;
 
         let mut world = World::new();
+        world.insert_resource(all_active());
         let mut polylines = LinkPolylines::default();
         polylines
             .0
@@ -1233,6 +1342,7 @@ mod tests {
         use crate::mobility::records::AgentMobilityState;
 
         let mut world = World::new();
+        world.insert_resource(all_active());
         let mut polylines = LinkPolylines::default();
         polylines
             .0
@@ -1329,6 +1439,7 @@ mod tests {
         use crate::mobility::records::{RouteRecord, VehicleKind};
 
         let mut world = World::new();
+        world.insert_resource(all_active());
         let mut polylines = LinkPolylines::default();
         polylines
             .0
@@ -1652,5 +1763,100 @@ mod tests {
             a, b,
             "promote must be deterministic across runs (same chunk + tick → same ids)"
         );
+    }
+
+    #[test]
+    fn walk_advance_skips_agents_in_asleep_chunks() {
+        use crate::ids::*;
+        use crate::mobility::records::AgentMobilityState;
+
+        let mut world = World::new();
+        world.insert_resource(ChunkActivities::default()); // empty = all Asleep
+        world.insert_resource(DirtyAgents::default());
+
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:0".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:0".into()),
+                    progress: 0.5,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.1),
+                Position { x: 100.0, y: 100.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(walk_advance_system);
+        schedule.run(&mut world);
+
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        match &state.0 {
+            AgentMobilityState::Walking { progress, .. } => {
+                assert!(
+                    (progress - 0.5).abs() < 1e-6,
+                    "progress unchanged in Asleep chunk"
+                );
+            }
+            _ => panic!(),
+        }
+        assert!(
+            !world.resource::<DirtyAgents>().0.contains(&entity),
+            "Asleep-chunk agent must not be marked dirty"
+        );
+    }
+
+    #[test]
+    fn walk_advance_advances_agents_in_active_chunks() {
+        use crate::ids::*;
+        use crate::mobility::records::AgentMobilityState;
+
+        let mut world = World::new();
+        let mut activities = ChunkActivities::default();
+        // Position (100, 100) → chunk (3, 3) for chunk_size = 32.
+        activities
+            .0
+            .insert(ChunkCoord { x: 3, y: 3 }, MobilityActivity::Active);
+        world.insert_resource(activities);
+        world.insert_resource(DirtyAgents::default());
+
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:0".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:0".into()),
+                    progress: 0.5,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.1),
+                Position { x: 100.0, y: 100.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(walk_advance_system);
+        schedule.run(&mut world);
+
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        match &state.0 {
+            AgentMobilityState::Walking { progress, .. } => {
+                assert!((progress - 0.6).abs() < 1e-6);
+            }
+            _ => panic!(),
+        }
+        assert!(world.resource::<DirtyAgents>().0.contains(&entity));
     }
 }
