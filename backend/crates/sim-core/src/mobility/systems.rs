@@ -580,6 +580,96 @@ pub fn promote_warm_to_active_system(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn demote_active_to_warm_system(
+    transitions: Res<ChunkTransitions>,
+    agents: Query<(Entity, &Position, &AgentMobilityStateComponent), With<AgentMarker>>,
+    vehicles: Query<(Entity, &Position), With<VehicleMarker>>,
+    routes: Res<Routes>,
+    link_polylines: Res<LinkPolylines>,
+    stops: Res<Stops>,
+    mut flow_cells: ResMut<FlowCells>,
+    mut commands: Commands,
+) {
+    for (chunk, prev, next) in &transitions.0 {
+        if !matches!(prev, MobilityActivity::Active | MobilityActivity::Hot) {
+            continue;
+        }
+        if *next != MobilityActivity::Warm {
+            continue;
+        }
+
+        let mut despawn_count = 0u32;
+        let mut outflow_counts: std::collections::HashMap<crate::ids::ChunkCoord, u32> =
+            std::collections::HashMap::new();
+
+        for (entity, pos, state) in agents.iter() {
+            let entity_chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
+            if entity_chunk != *chunk {
+                continue;
+            }
+            let dest = agent_destination_chunk(state, &routes, &link_polylines, &stops)
+                .unwrap_or(*chunk);
+            despawn_count += 1;
+            *outflow_counts.entry(dest).or_insert(0) += 1;
+            commands.entity(entity).despawn();
+        }
+
+        for (entity, pos) in vehicles.iter() {
+            let entity_chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
+            if entity_chunk != *chunk {
+                continue;
+            }
+            despawn_count += 1;
+            *outflow_counts.entry(*chunk).or_insert(0) += 1;
+            commands.entity(entity).despawn();
+        }
+
+        if despawn_count == 0 {
+            continue;
+        }
+
+        let cell = flow_cells.0.entry(*chunk).or_default();
+        cell.population += despawn_count as f32;
+        for (dest, count) in outflow_counts {
+            let rate = count as f32 / 100.0; // amortise over ~100 ticks
+            if let Some(entry) = cell.outflow.iter_mut().find(|(d, _)| *d == dest) {
+                entry.1 += rate;
+            } else {
+                cell.outflow.push((dest, rate));
+            }
+        }
+    }
+}
+
+fn agent_destination_chunk(
+    state: &AgentMobilityStateComponent,
+    routes: &Routes,
+    link_polylines: &LinkPolylines,
+    stops: &Stops,
+) -> Option<crate::ids::ChunkCoord> {
+    match &state.0 {
+        AgentMobilityState::Walking { link_id, .. } => link_polylines
+            .0
+            .get(link_id)
+            .and_then(|points| points.last())
+            .map(|(x, y)| crate::mobility::chunk_of(*x, *y, 32)),
+        AgentMobilityState::WaitingAtStop { stop_id }
+        | AgentMobilityState::Boarding { stop_id, .. }
+        | AgentMobilityState::Alighting { stop_id, .. } => {
+            let stop = stops.0.get(stop_id)?;
+            let route = routes.0.get(&stop.route_id)?;
+            let link_id = route.links.get(stop.link_index)?;
+            link_polylines
+                .0
+                .get(link_id)
+                .and_then(|p| p.last())
+                .map(|(x, y)| crate::mobility::chunk_of(*x, *y, 32))
+        }
+        _ => None,
+    }
+}
+
 fn lod_seed(x: i32, y: i32, tick: u64, n: u64) -> u64 {
     // FNV-1a hash for deterministic seeding (does NOT depend on RandomState).
     let mut h: u64 = 0xcbf29ce484222325;
@@ -1347,6 +1437,75 @@ mod tests {
 
         let cell = world.resource::<FlowCells>().0.get(&chunk).unwrap();
         assert!((cell.population - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn demote_active_to_warm_collapses_agents_into_flow_cell() {
+        use crate::ids::*;
+        use crate::mobility::lod::MobilityActivity;
+        use crate::mobility::records::AgentMobilityState;
+
+        let mut world = World::new();
+        let chunk = ChunkCoord { x: 0, y: 0 };
+
+        let mut polylines = LinkPolylines::default();
+        polylines
+            .0
+            .insert(LinkId("l:end".into()), vec![(5.0, 5.0), (40.0, 5.0)]); // ends in chunk (1, 0)
+        world.insert_resource(polylines);
+        world.insert_resource(Routes::default());
+        world.insert_resource(Stops::default());
+        world.insert_resource(FlowCells::default());
+
+        let mut transitions = ChunkTransitions::default();
+        transitions
+            .0
+            .push((chunk, MobilityActivity::Active, MobilityActivity::Warm));
+        world.insert_resource(transitions);
+
+        for n in 0..3 {
+            world.spawn((
+                AgentMarker,
+                StableAgentId(AgentId(format!("a:{n}"))),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:end".into()),
+                    progress: 0.1,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.05),
+                Position {
+                    x: 5.0 + n as f32,
+                    y: 5.0,
+                },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ));
+        }
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(demote_active_to_warm_system);
+        schedule.run(&mut world);
+
+        let cell = world
+            .resource::<FlowCells>()
+            .0
+            .get(&chunk)
+            .expect("flow cell created");
+        assert!((cell.population - 3.0).abs() < 1e-6);
+        let dest = ChunkCoord { x: 1, y: 0 };
+        assert!(
+            cell.outflow.iter().any(|(d, _)| *d == dest),
+            "outflow should target end-of-link chunk"
+        );
+
+        let remaining: u32 = {
+            let mut q = world.query_filtered::<Entity, With<AgentMarker>>();
+            q.iter(&world).count() as u32
+        };
+        assert_eq!(remaining, 0, "agents despawned");
     }
 
     #[test]
