@@ -2,21 +2,14 @@ use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
-use crate::mobility_geometry::LinkGeometry;
 use bevy_ecs::prelude::*;
 
 fn coord_at_progress(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
-    LinkGeometry {
-        points: points.to_vec(),
-    }
-    .world_coord_at_progress(progress)
+    crate::mobility_geometry::world_coord_at_progress_slice(points, progress)
 }
 
 fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::DirectionDto {
-    LinkGeometry {
-        points: points.to_vec(),
-    }
-    .direction_at_progress(progress)
+    crate::mobility_geometry::direction_at_progress_slice(points, progress)
 }
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]

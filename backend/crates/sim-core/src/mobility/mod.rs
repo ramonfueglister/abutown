@@ -481,30 +481,23 @@ impl MobilityWorld {
         &self,
         vehicle_id: &VehicleId,
     ) -> Option<abutown_protocol::DirectionDto> {
-        use crate::mobility_geometry::direction_from_delta;
         let entity = *self.by_vehicle_id.get(vehicle_id)?;
         let pos = self.world.get::<RoutePosition>(entity)?;
         let routes = &self.world.resource::<Routes>().0;
         let route = routes.get(&pos.route_id)?;
         let link_id = route.links.get(pos.link_index)?;
         let geom = self.resolve_link_polyline(link_id)?;
-        let here = geom.world_coord_at_progress(pos.progress);
-        let ahead = geom.world_coord_at_progress((pos.progress + 0.1).min(1.0));
-        Some(direction_from_delta(ahead.0 - here.0, ahead.1 - here.1))
+        Some(geom.direction_at_progress(pos.progress))
     }
 
     pub fn sprite_key_for_agent(&self, agent_id: &AgentId) -> Option<String> {
-        if !self.by_agent_id.contains_key(agent_id) {
-            return None;
-        }
-        Some(compute_agent_sprite_key(agent_id))
+        let entity = *self.by_agent_id.get(agent_id)?;
+        self.world.get::<SpriteKey>(entity).map(|s| s.0.clone())
     }
 
     pub fn sprite_key_for_vehicle(&self, vehicle_id: &VehicleId) -> Option<String> {
-        if !self.by_vehicle_id.contains_key(vehicle_id) {
-            return None;
-        }
-        Some(compute_vehicle_sprite_key(vehicle_id))
+        let entity = *self.by_vehicle_id.get(vehicle_id)?;
+        self.world.get::<SpriteKey>(entity).map(|s| s.0.clone())
     }
 
     /// Builds an AgentMobilityDto for the given agent id, including the computed

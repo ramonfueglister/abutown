@@ -15,68 +15,83 @@ pub struct LinkGeometry {
     pub points: Vec<(f32, f32)>,
 }
 
+/// Computes the world coordinate at `progress` along the given polyline slice.
+/// Zero allocations — operates on the slice directly.
+pub fn world_coord_at_progress_slice(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
+    if points.len() < 2 {
+        return points.first().copied().unwrap_or((0.0, 0.0));
+    }
+    let t = progress.clamp(0.0, 1.0);
+    let total = arc_length_slice(points);
+    if total <= 0.0 {
+        return points[0];
+    }
+    let target = t * total;
+    let mut walked = 0.0;
+    for window in points.windows(2) {
+        let (ax, ay) = window[0];
+        let (bx, by) = window[1];
+        let seg = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+        if walked + seg >= target {
+            let local_t = if seg > 0.0 {
+                (target - walked) / seg
+            } else {
+                0.0
+            };
+            return (ax + (bx - ax) * local_t, ay + (by - ay) * local_t);
+        }
+        walked += seg;
+    }
+    *points.last().unwrap()
+}
+
+/// Computes the facing direction at `progress` along the given polyline slice.
+/// Zero allocations — operates on the slice directly.
+pub fn direction_at_progress_slice(
+    points: &[(f32, f32)],
+    progress: f32,
+) -> abutown_protocol::DirectionDto {
+    if points.len() < 2 {
+        return abutown_protocol::DirectionDto::S;
+    }
+    let t = progress.clamp(0.0, 1.0);
+    let total = arc_length_slice(points);
+    if total <= 0.0 {
+        return abutown_protocol::DirectionDto::S;
+    }
+    let target = t * total;
+    let mut walked = 0.0;
+    for window in points.windows(2) {
+        let (ax, ay) = window[0];
+        let (bx, by) = window[1];
+        let seg = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+        if walked + seg >= target {
+            return direction_from_delta(bx - ax, by - ay);
+        }
+        walked += seg;
+    }
+    let (ax, ay) = points[points.len() - 2];
+    let (bx, by) = *points.last().unwrap();
+    direction_from_delta(bx - ax, by - ay)
+}
+
+fn arc_length_slice(points: &[(f32, f32)]) -> f32 {
+    let mut total = 0.0;
+    for window in points.windows(2) {
+        let (ax, ay) = window[0];
+        let (bx, by) = window[1];
+        total += ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+    }
+    total
+}
+
 impl LinkGeometry {
     pub fn world_coord_at_progress(&self, progress: f32) -> (f32, f32) {
-        if self.points.len() < 2 {
-            return self.points.first().copied().unwrap_or((0.0, 0.0));
-        }
-        let t = progress.clamp(0.0, 1.0);
-        let total = self.arc_length();
-        if total <= 0.0 {
-            return self.points[0];
-        }
-        let target = t * total;
-        let mut walked = 0.0;
-        for window in self.points.windows(2) {
-            let (ax, ay) = window[0];
-            let (bx, by) = window[1];
-            let seg = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
-            if walked + seg >= target {
-                let local_t = if seg > 0.0 {
-                    (target - walked) / seg
-                } else {
-                    0.0
-                };
-                return (ax + (bx - ax) * local_t, ay + (by - ay) * local_t);
-            }
-            walked += seg;
-        }
-        *self.points.last().unwrap()
+        world_coord_at_progress_slice(&self.points, progress)
     }
 
     pub fn direction_at_progress(&self, progress: f32) -> abutown_protocol::DirectionDto {
-        if self.points.len() < 2 {
-            return abutown_protocol::DirectionDto::S;
-        }
-        let t = progress.clamp(0.0, 1.0);
-        let total = self.arc_length();
-        if total <= 0.0 {
-            return abutown_protocol::DirectionDto::S;
-        }
-        let target = t * total;
-        let mut walked = 0.0;
-        for window in self.points.windows(2) {
-            let (ax, ay) = window[0];
-            let (bx, by) = window[1];
-            let seg = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
-            if walked + seg >= target {
-                return direction_from_delta(bx - ax, by - ay);
-            }
-            walked += seg;
-        }
-        let (ax, ay) = self.points[self.points.len() - 2];
-        let (bx, by) = *self.points.last().unwrap();
-        direction_from_delta(bx - ax, by - ay)
-    }
-
-    fn arc_length(&self) -> f32 {
-        let mut total = 0.0;
-        for window in self.points.windows(2) {
-            let (ax, ay) = window[0];
-            let (bx, by) = window[1];
-            total += ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
-        }
-        total
+        direction_at_progress_slice(&self.points, progress)
     }
 }
 

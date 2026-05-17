@@ -75,7 +75,3 @@ pub struct Occupants(pub Vec<AgentId>);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DwellTicksRemaining(pub u16);
 
-/// Sparse marker: present on any entity that mutated in the current tick.
-/// Drained by `MobilityWorld::tick_mobility` for delta-building.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Dirty;

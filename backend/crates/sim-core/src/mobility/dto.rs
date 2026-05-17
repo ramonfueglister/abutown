@@ -108,16 +108,14 @@ pub fn build_mobility_snapshot_dto(
     tick: u64,
     world: &MobilityWorld,
 ) -> MobilitySnapshotDto {
-    let mut agent_records = world.agents();
-    agent_records.sort_by(|left, right| left.id.0.cmp(&right.id.0));
-    let agents = agent_records
+    let agents = world
+        .agents()
         .iter()
         .filter_map(|record| world.agent_dto_for(&record.id))
         .collect();
 
-    let mut vehicle_records = world.vehicles();
-    vehicle_records.sort_by(|left, right| left.id.0.cmp(&right.id.0));
-    let vehicles = vehicle_records
+    let vehicles = world
+        .vehicles()
         .iter()
         .filter_map(|record| world.vehicle_dto_for(&record.id))
         .collect();
