@@ -328,9 +328,59 @@ impl MobilityWorld {
     }
 
     pub fn tick_mobility(&mut self) -> MobilityDelta {
-        // Run the (currently empty) schedule.
         self.schedule.run(&mut self.world);
-        // Drain dirty sets (currently empty since no systems mark them yet).
+
+        // Sync by_agent_id with newly-spawned agents (from promote_warm_to_active_system).
+        let mut new_agents: Vec<(AgentId, Entity)> = Vec::new();
+        {
+            let mut q = self.world.query::<(Entity, &StableAgentId)>();
+            for (entity, stable) in q.iter(&self.world) {
+                if !self.by_agent_id.contains_key(&stable.0) {
+                    new_agents.push((stable.0.clone(), entity));
+                }
+            }
+        }
+        for (id, entity) in new_agents {
+            self.by_agent_id.insert(id, entity);
+        }
+
+        // Remove despawned agents from the index (from demote_active_to_warm_system).
+        let agent_ids_to_remove: Vec<AgentId> = self
+            .by_agent_id
+            .iter()
+            .filter(|(_, entity)| self.world.get_entity(**entity).is_err())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in agent_ids_to_remove {
+            self.by_agent_id.remove(&id);
+        }
+
+        // Same for vehicles — sync newly-spawned vehicles.
+        let mut new_vehicles: Vec<(VehicleId, Entity)> = Vec::new();
+        {
+            let mut q = self.world.query::<(Entity, &StableVehicleId)>();
+            for (entity, stable) in q.iter(&self.world) {
+                if !self.by_vehicle_id.contains_key(&stable.0) {
+                    new_vehicles.push((stable.0.clone(), entity));
+                }
+            }
+        }
+        for (id, entity) in new_vehicles {
+            self.by_vehicle_id.insert(id, entity);
+        }
+
+        // Remove despawned vehicles from the index.
+        let vehicle_ids_to_remove: Vec<VehicleId> = self
+            .by_vehicle_id
+            .iter()
+            .filter(|(_, entity)| self.world.get_entity(**entity).is_err())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in vehicle_ids_to_remove {
+            self.by_vehicle_id.remove(&id);
+        }
+
+        // Drain dirty sets populated by the Advance systems.
         let dirty_agents = std::mem::take(&mut self.world.resource_mut::<DirtyAgents>().0);
         let dirty_vehicles = std::mem::take(&mut self.world.resource_mut::<DirtyVehicles>().0);
         let changed_agents: Vec<AgentRecord> = dirty_agents
@@ -1407,5 +1457,53 @@ mod tests {
             1,
             "filter updated last_visible_vehicles"
         );
+    }
+
+    #[test]
+    fn tick_mobility_indexes_lod_spawned_agents() {
+        use crate::ids::ChunkCoord;
+        use crate::mobility::lod::{FlowCell, MobilityActivity};
+
+        let mut world = MobilityWorld::empty();
+        world.set_link_polyline(LinkId("l:0".into()), vec![(10.0, 10.0), (20.0, 10.0)]);
+
+        let chunk = ChunkCoord { x: 0, y: 0 };
+
+        // Set up the flow cell with 2 agents worth of population.
+        {
+            let mut cells = world.world.resource_mut::<FlowCells>();
+            cells.0.insert(
+                chunk,
+                FlowCell {
+                    population: 2.0,
+                    outflow: Vec::new(),
+                    attractiveness: 1.0,
+                    last_tick: 0,
+                },
+            );
+        }
+
+        // Mark chunk as Warm so classify_activity_system will see a Warm → Active
+        // transition when it finds 1 subscriber.
+        {
+            let mut activities = world.world.resource_mut::<ChunkActivities>();
+            activities.0.insert(chunk, MobilityActivity::Warm);
+        }
+
+        // Add 1 subscriber so classify_activity_system promotes to Active.
+        {
+            let mut subscribers = world.world.resource_mut::<ChunkSubscribers>();
+            subscribers.0.insert(chunk, 1);
+        }
+
+        world.tick_mobility();
+
+        // Find the spawned agent ids in by_agent_id.
+        let lod_agents: Vec<_> = world
+            .by_agent_id
+            .keys()
+            .filter(|id| id.0.starts_with("agent:lod:"))
+            .collect();
+        assert_eq!(lod_agents.len(), 2, "by_agent_id contains 2 LOD-spawned agents");
     }
 }
