@@ -670,6 +670,41 @@ fn agent_destination_chunk(
     }
 }
 
+pub fn warm_chunk_flow_system(
+    tick: Res<Tick>,
+    activities: Res<ChunkActivities>,
+    mut flow_cells: ResMut<FlowCells>,
+) {
+    if !tick.0.is_multiple_of(10) { return; }
+
+    let warm_chunks: Vec<crate::ids::ChunkCoord> = activities
+        .0
+        .iter()
+        .filter(|(_, a)| matches!(a, MobilityActivity::Warm))
+        .map(|(c, _)| *c)
+        .collect();
+
+    let mut transfers: Vec<(crate::ids::ChunkCoord, crate::ids::ChunkCoord, f32)> = Vec::new();
+    for chunk in &warm_chunks {
+        let Some(cell) = flow_cells.0.get(chunk) else { continue; };
+        for (dest, rate) in &cell.outflow {
+            let delta = (rate * 10.0).min(cell.population);
+            if delta > 0.0 {
+                transfers.push((*chunk, *dest, delta));
+            }
+        }
+    }
+    for (from, to, delta) in transfers {
+        if let Some(cell) = flow_cells.0.get_mut(&from) {
+            cell.population = (cell.population - delta).max(0.0);
+            cell.last_tick = tick.0;
+        }
+        let dest_cell = flow_cells.0.entry(to).or_default();
+        dest_cell.population += delta;
+        dest_cell.last_tick = tick.0;
+    }
+}
+
 fn lod_seed(x: i32, y: i32, tick: u64, n: u64) -> u64 {
     // FNV-1a hash for deterministic seeding (does NOT depend on RandomState).
     let mut h: u64 = 0xcbf29ce484222325;
@@ -1506,6 +1541,65 @@ mod tests {
             q.iter(&world).count() as u32
         };
         assert_eq!(remaining, 0, "agents despawned");
+    }
+
+    #[test]
+    fn warm_chunk_flow_transfers_population_between_chunks() {
+        use crate::ids::ChunkCoord;
+        use crate::mobility::lod::{FlowCell, MobilityActivity};
+
+        let mut world = World::new();
+        world.insert_resource(Tick(10));
+        let mut activities = ChunkActivities::default();
+        activities.0.insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
+        world.insert_resource(activities);
+
+        let mut flow = FlowCells::default();
+        let mut outflow = Vec::new();
+        outflow.push((ChunkCoord { x: 1, y: 0 }, 0.5));
+        flow.0.insert(ChunkCoord { x: 0, y: 0 }, FlowCell {
+            population: 10.0, outflow, attractiveness: 1.0, last_tick: 0,
+        });
+        world.insert_resource(flow);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(warm_chunk_flow_system);
+        schedule.run(&mut world);
+
+        let cells = world.resource::<FlowCells>();
+        let src = cells.0.get(&ChunkCoord { x: 0, y: 0 }).unwrap();
+        let dst = cells.0.get(&ChunkCoord { x: 1, y: 0 }).unwrap();
+        assert!((src.population - 5.0).abs() < 1e-3);
+        assert!((dst.population - 5.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn warm_chunk_flow_skips_non_multiple_of_10_ticks() {
+        use crate::ids::ChunkCoord;
+        use crate::mobility::lod::{FlowCell, MobilityActivity};
+
+        let mut world = World::new();
+        world.insert_resource(Tick(5));
+        let mut activities = ChunkActivities::default();
+        activities.0.insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
+        world.insert_resource(activities);
+
+        let mut flow = FlowCells::default();
+        flow.0.insert(ChunkCoord { x: 0, y: 0 }, FlowCell {
+            population: 10.0,
+            outflow: vec![(ChunkCoord { x: 1, y: 0 }, 0.5)],
+            attractiveness: 1.0,
+            last_tick: 0,
+        });
+        world.insert_resource(flow);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(warm_chunk_flow_system);
+        schedule.run(&mut world);
+
+        let cells = world.resource::<FlowCells>();
+        let src = cells.0.get(&ChunkCoord { x: 0, y: 0 }).unwrap();
+        assert!((src.population - 10.0).abs() < 1e-3, "skipped on non-multiple-of-10 tick");
     }
 
     #[test]
