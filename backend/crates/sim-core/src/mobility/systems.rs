@@ -508,6 +508,94 @@ pub fn classify_activity_system(
     });
 }
 
+pub fn promote_warm_to_active_system(
+    transitions: Res<ChunkTransitions>,
+    mut flow_cells: ResMut<FlowCells>,
+    link_polylines: Res<LinkPolylines>,
+    tick: Res<Tick>,
+    mut commands: Commands,
+) {
+    for (chunk, prev, next) in &transitions.0 {
+        if *prev != MobilityActivity::Warm {
+            continue;
+        }
+        if !matches!(next, MobilityActivity::Active | MobilityActivity::Hot) {
+            continue;
+        }
+        let Some(cell) = flow_cells.0.get_mut(chunk) else {
+            continue;
+        };
+        let to_spawn = cell.population.floor() as u32;
+        if to_spawn == 0 {
+            continue;
+        }
+
+        // Find a link whose polyline passes through this chunk.
+        let mut spawn_link: Option<crate::ids::LinkId> = None;
+        for (link_id, points) in &link_polylines.0 {
+            if points
+                .iter()
+                .any(|(x, y)| crate::mobility::chunk_of(*x, *y, 32) == *chunk)
+            {
+                spawn_link = Some(link_id.clone());
+                break;
+            }
+        }
+        let Some(spawn_link) = spawn_link else {
+            continue;
+        };
+
+        for n in 0..to_spawn {
+            let agent_id = crate::ids::AgentId(format!(
+                "agent:lod:{}:{}:{}:{}",
+                chunk.x, chunk.y, tick.0, n
+            ));
+            // Deterministic pseudo-random progress in [0, 1).
+            let seed = lod_seed(chunk.x, chunk.y, tick.0, n as u64);
+            let progress = (seed % 1000) as f32 / 1000.0;
+            let sprite_key = format!("pedestrian:{}", seed % 16);
+            commands.spawn((
+                AgentMarker,
+                StableAgentId(agent_id),
+                AgentMobilityStateComponent(
+                    crate::mobility::records::AgentMobilityState::Walking {
+                        link_id: spawn_link.clone(),
+                        progress,
+                    },
+                ),
+                WalkPlan {
+                    stages: vec![crate::mobility::records::PlanStage::Activity {
+                        activity_id: format!("activity:lod:{}:{}:{}", chunk.x, chunk.y, n),
+                    }],
+                    cursor: 0,
+                },
+                WalkSpeed(0.05),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(sprite_key),
+            ));
+        }
+        cell.population -= to_spawn as f32;
+        cell.outflow.clear();
+    }
+}
+
+fn lod_seed(x: i32, y: i32, tick: u64, n: u64) -> u64 {
+    // FNV-1a hash for deterministic seeding (does NOT depend on RandomState).
+    let mut h: u64 = 0xcbf29ce484222325;
+    for byte in (x as u32)
+        .to_le_bytes()
+        .iter()
+        .chain((y as u32).to_le_bytes().iter())
+        .chain(tick.to_le_bytes().iter())
+        .chain(n.to_le_bytes().iter())
+    {
+        h ^= *byte as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1213,5 +1301,103 @@ mod tests {
         assert_eq!(next, MobilityActivity::Active);
         let cd = world.resource::<ChunkActivityCooldowns>();
         assert_eq!(cd.0.get(&ChunkCoord { x: 0, y: 0 }), Some(&ACTIVITY_HYSTERESIS_TICKS));
+    }
+
+    #[test]
+    fn promote_warm_spawns_floor_population_agents() {
+        use crate::ids::*;
+        use crate::mobility::lod::{FlowCell, MobilityActivity};
+
+        let mut world = World::new();
+        let chunk = ChunkCoord { x: 0, y: 0 };
+
+        let mut flow = FlowCells::default();
+        flow.0.insert(
+            chunk,
+            FlowCell {
+                population: 3.7,
+                outflow: Vec::new(),
+                attractiveness: 1.0,
+                last_tick: 0,
+            },
+        );
+        world.insert_resource(flow);
+
+        let mut polylines = LinkPolylines::default();
+        polylines
+            .0
+            .insert(LinkId("l:0".into()), vec![(10.0, 10.0), (20.0, 10.0)]);
+        world.insert_resource(polylines);
+
+        let mut transitions = ChunkTransitions::default();
+        transitions
+            .0
+            .push((chunk, MobilityActivity::Warm, MobilityActivity::Active));
+        world.insert_resource(transitions);
+
+        world.insert_resource(Tick(100));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(promote_warm_to_active_system);
+        schedule.run(&mut world);
+
+        let mut query = world.query_filtered::<Entity, With<AgentMarker>>();
+        let spawned: Vec<Entity> = query.iter(&world).collect();
+        assert_eq!(spawned.len(), 3);
+
+        let cell = world.resource::<FlowCells>().0.get(&chunk).unwrap();
+        assert!((cell.population - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn promote_warm_is_deterministic_across_runs() {
+        use crate::ids::*;
+        use crate::mobility::lod::{FlowCell, MobilityActivity};
+
+        fn run_promote() -> Vec<String> {
+            let mut world = World::new();
+            let chunk = ChunkCoord { x: 2, y: 3 };
+            let mut flow = FlowCells::default();
+            flow.0.insert(
+                chunk,
+                FlowCell {
+                    population: 5.0,
+                    outflow: Vec::new(),
+                    attractiveness: 1.0,
+                    last_tick: 0,
+                },
+            );
+            world.insert_resource(flow);
+            let mut polylines = LinkPolylines::default();
+            polylines
+                .0
+                .insert(LinkId("l:0".into()), vec![(70.0, 100.0), (90.0, 100.0)]);
+            world.insert_resource(polylines);
+            let mut transitions = ChunkTransitions::default();
+            transitions
+                .0
+                .push((chunk, MobilityActivity::Warm, MobilityActivity::Active));
+            world.insert_resource(transitions);
+            world.insert_resource(Tick(42));
+
+            let mut schedule = Schedule::default();
+            schedule.add_systems(promote_warm_to_active_system);
+            schedule.run(&mut world);
+
+            let mut query = world.query::<&StableAgentId>();
+            let mut ids: Vec<String> = query
+                .iter(&world)
+                .map(|s| s.0 .0.clone())
+                .collect();
+            ids.sort();
+            ids
+        }
+
+        let a = run_promote();
+        let b = run_promote();
+        assert_eq!(
+            a, b,
+            "promote must be deterministic across runs (same chunk + tick → same ids)"
+        );
     }
 }
