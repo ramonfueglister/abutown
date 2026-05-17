@@ -1,5 +1,6 @@
 use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
+use crate::mobility::lod::{classify_chunk_mobility_activity, MobilityActivity, ACTIVITY_HYSTERESIS_TICKS};
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
 use bevy_ecs::prelude::*;
@@ -465,6 +466,46 @@ pub fn track_chunk_populations_system(
             *populations.0.entry(*chunk).or_insert(0) += aggregate;
         }
     }
+}
+
+pub fn classify_activity_system(
+    subscribers: Res<ChunkSubscribers>,
+    populations: Res<ChunkPopulations>,
+    mut activities: ResMut<ChunkActivities>,
+    mut cooldowns: ResMut<ChunkActivityCooldowns>,
+    mut transitions: ResMut<ChunkTransitions>,
+) {
+    transitions.0.clear();
+    let candidate_chunks: std::collections::HashSet<crate::ids::ChunkCoord> = subscribers
+        .0
+        .keys()
+        .copied()
+        .chain(populations.0.keys().copied())
+        .chain(activities.0.keys().copied())
+        .collect();
+
+    for chunk in candidate_chunks {
+        let subs = subscribers.0.get(&chunk).copied().unwrap_or(0);
+        let pop = populations.0.get(&chunk).copied().unwrap_or(0);
+        let previous = activities.0.get(&chunk).copied().unwrap_or(MobilityActivity::Asleep);
+        let cooldown_now = cooldowns.0.get(&chunk).copied().unwrap_or(0);
+
+        let next = classify_chunk_mobility_activity(subs, pop, previous, cooldown_now);
+
+        if next != previous {
+            transitions.0.push((chunk, previous, next));
+            cooldowns.0.insert(chunk, ACTIVITY_HYSTERESIS_TICKS);
+        } else if cooldown_now > 0 {
+            cooldowns.0.insert(chunk, cooldown_now - 1);
+        }
+        activities.0.insert(chunk, next);
+    }
+
+    activities.0.retain(|chunk, activity| {
+        !matches!(activity, MobilityActivity::Asleep)
+            || subscribers.0.contains_key(chunk)
+            || populations.0.contains_key(chunk)
+    });
 }
 
 #[cfg(test)]
@@ -1122,5 +1163,55 @@ mod tests {
             pos.x
         );
         assert!(pos.y.abs() < 1e-3);
+    }
+
+    #[test]
+    fn classify_activity_marks_subscribed_chunk_active() {
+        use crate::ids::ChunkCoord;
+
+        let mut world = World::new();
+        let mut subs = ChunkSubscribers::default();
+        subs.0.insert(ChunkCoord { x: 4, y: 4 }, 1);
+        world.insert_resource(subs);
+        world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(ChunkActivities::default());
+        world.insert_resource(ChunkActivityCooldowns::default());
+        world.insert_resource(ChunkTransitions::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(classify_activity_system);
+        schedule.run(&mut world);
+
+        let activities = world.resource::<ChunkActivities>();
+        assert_eq!(
+            activities.0.get(&ChunkCoord { x: 4, y: 4 }),
+            Some(&MobilityActivity::Active),
+        );
+    }
+
+    #[test]
+    fn classify_activity_records_transitions_and_starts_cooldown() {
+        use crate::ids::ChunkCoord;
+        let mut world = World::new();
+        let mut subs = ChunkSubscribers::default();
+        subs.0.insert(ChunkCoord { x: 0, y: 0 }, 1);
+        world.insert_resource(subs);
+        world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(ChunkActivities::default());
+        world.insert_resource(ChunkActivityCooldowns::default());
+        world.insert_resource(ChunkTransitions::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(classify_activity_system);
+        schedule.run(&mut world);
+
+        let transitions = world.resource::<ChunkTransitions>();
+        assert_eq!(transitions.0.len(), 1);
+        let (chunk, prev, next) = transitions.0[0];
+        assert_eq!(chunk, ChunkCoord { x: 0, y: 0 });
+        assert_eq!(prev, MobilityActivity::Asleep);
+        assert_eq!(next, MobilityActivity::Active);
+        let cd = world.resource::<ChunkActivityCooldowns>();
+        assert_eq!(cd.0.get(&ChunkCoord { x: 0, y: 0 }), Some(&ACTIVITY_HYSTERESIS_TICKS));
     }
 }
