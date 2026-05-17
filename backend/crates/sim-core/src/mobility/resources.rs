@@ -28,3 +28,33 @@ pub struct DirtyAgents(pub HashSet<Entity>);
 /// Companion to `DirtyAgents` for vehicle entities.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct DirtyVehicles(pub HashSet<Entity>);
+
+use crate::ids::ChunkCoord;
+use crate::mobility::lod::{FlowCell, MobilityActivity};
+
+/// Per-chunk activity state. Driven by `classify_activity_system` each tick.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ChunkActivities(pub HashMap<ChunkCoord, MobilityActivity>);
+
+/// Per-chunk cooldown counter — decremented each tick, set to 30 on transition.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ChunkActivityCooldowns(pub HashMap<ChunkCoord, u8>);
+
+/// Per-chunk aggregate state for warm chunks.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct FlowCells(pub HashMap<ChunkCoord, FlowCell>);
+
+/// Per-chunk count of connected clients currently subscribed.
+/// Updated by the WS task on chunk_subscribe / chunk_unsubscribe / disconnect.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ChunkSubscribers(pub HashMap<ChunkCoord, u8>);
+
+/// Per-chunk population: agents + vehicles + floor(flow_cell.population).
+/// Rebuilt each tick by `track_chunk_populations_system`.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ChunkPopulations(pub HashMap<ChunkCoord, u32>);
+
+/// Transient list of activity transitions for promote/demote systems.
+/// Cleared at start of each tick by `classify_activity_system`.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ChunkTransitions(pub Vec<(ChunkCoord, MobilityActivity, MobilityActivity)>);
