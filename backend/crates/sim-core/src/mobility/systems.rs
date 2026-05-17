@@ -444,6 +444,29 @@ pub fn tick_increment_system(mut tick: ResMut<Tick>) {
     tick.0 += 1;
 }
 
+pub fn track_chunk_populations_system(
+    agents: Query<&Position, With<AgentMarker>>,
+    vehicles: Query<&Position, With<VehicleMarker>>,
+    flow_cells: Res<FlowCells>,
+    mut populations: ResMut<ChunkPopulations>,
+) {
+    populations.0.clear();
+    for pos in agents.iter() {
+        let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
+        *populations.0.entry(chunk).or_insert(0) += 1;
+    }
+    for pos in vehicles.iter() {
+        let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
+        *populations.0.entry(chunk).or_insert(0) += 1;
+    }
+    for (chunk, cell) in &flow_cells.0 {
+        let aggregate = cell.population.floor().max(0.0) as u32;
+        if aggregate > 0 {
+            *populations.0.entry(*chunk).or_insert(0) += aggregate;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -989,6 +1012,61 @@ mod tests {
         let dir = world.get::<Direction>(entity).unwrap();
         // East-pointing polyline → DirectionDto::E
         assert_eq!(dir.0, abutown_protocol::DirectionDto::E);
+    }
+
+    #[test]
+    fn track_chunk_populations_sums_agents_vehicles_and_flow_cells() {
+        use crate::ids::*;
+        use crate::mobility::lod::FlowCell;
+        use crate::mobility::records::{AgentMobilityState, VehicleKind};
+
+        let mut world = World::new();
+        let mut flow_cells = FlowCells::default();
+        flow_cells.0.insert(ChunkCoord { x: 0, y: 0 }, FlowCell {
+            population: 3.7,
+            outflow: Vec::new(),
+            attractiveness: 1.0,
+            last_tick: 0,
+        });
+        world.insert_resource(flow_cells);
+        world.insert_resource(ChunkPopulations::default());
+
+        for n in 0..2 {
+            world.spawn((
+                AgentMarker,
+                StableAgentId(AgentId(format!("a:{n}"))),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l".into()),
+                    progress: 0.0,
+                }),
+                WalkPlan { stages: vec![], cursor: 0 },
+                WalkSpeed(0.0),
+                Position { x: 40.0, y: 16.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ));
+        }
+        world.spawn((
+            VehicleMarker,
+            StableVehicleId(VehicleId("v:1".into())),
+            VehicleKindComponent(VehicleKind::Tram),
+            RoutePosition { route_id: RouteId("r".into()), link_index: 0, progress: 0.0, speed: 0.0 },
+            Capacity(1),
+            Occupants(vec![]),
+            DwellTicksRemaining(0),
+            Position { x: 80.0, y: 16.0 },
+            Direction(abutown_protocol::DirectionDto::S),
+            SpriteKey(String::new()),
+        ));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(track_chunk_populations_system);
+        schedule.run(&mut world);
+
+        let pops = world.resource::<ChunkPopulations>();
+        assert_eq!(pops.0.get(&ChunkCoord { x: 1, y: 0 }), Some(&2)); // two agents
+        assert_eq!(pops.0.get(&ChunkCoord { x: 2, y: 0 }), Some(&1)); // one vehicle
+        assert_eq!(pops.0.get(&ChunkCoord { x: 0, y: 0 }), Some(&3)); // floor(3.7) flow cell
     }
 
     #[test]
