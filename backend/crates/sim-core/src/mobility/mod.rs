@@ -58,6 +58,13 @@ impl MobilityWorld {
         world.insert_resource(LinkPolylines::default());
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
+        // Phase 6 LOD resources
+        world.insert_resource(ChunkActivities::default());
+        world.insert_resource(ChunkActivityCooldowns::default());
+        world.insert_resource(FlowCells::default());
+        world.insert_resource(ChunkSubscribers::default());
+        world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(ChunkTransitions::default());
 
         let mut schedule = Schedule::default();
         crate::mobility::systems::install_systems(&mut schedule);
