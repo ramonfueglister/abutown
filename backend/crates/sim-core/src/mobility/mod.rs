@@ -301,16 +301,28 @@ impl MobilityWorld {
     /// activity filter does not skip them. Used by integration tests that
     /// exercise `tick_mobility()` without standing up a full ChunkSubscribers
     /// pipeline.
+    ///
+    /// Sets both `ChunkActivities` and `ChunkSubscribers` (1 subscriber per
+    /// chunk) so that `classify_activity_system` — which now runs in
+    /// `MobilitySet::LOD` before Advance — does not immediately reclassify
+    /// these chunks back to `Asleep`.
     #[cfg(test)]
     pub fn force_all_chunks_active_for_test(&mut self) {
         use crate::ids::ChunkCoord;
         use crate::mobility::lod::MobilityActivity;
-        let mut activities = self.world.resource_mut::<ChunkActivities>();
-        for x in -16..=32 {
-            for y in -16..=32 {
-                activities
-                    .0
-                    .insert(ChunkCoord { x, y }, MobilityActivity::Active);
+        let chunks: Vec<ChunkCoord> = (-16..=32)
+            .flat_map(|x: i32| (-16..=32).map(move |y| ChunkCoord { x, y }))
+            .collect();
+        {
+            let mut activities = self.world.resource_mut::<ChunkActivities>();
+            for chunk in &chunks {
+                activities.0.insert(*chunk, MobilityActivity::Active);
+            }
+        }
+        {
+            let mut subscribers = self.world.resource_mut::<ChunkSubscribers>();
+            for chunk in &chunks {
+                subscribers.0.insert(*chunk, 1);
             }
         }
     }

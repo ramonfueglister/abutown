@@ -30,6 +30,7 @@ fn chunk_is_simulated(pos: &Position, activities: &ChunkActivities) -> bool {
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum MobilitySet {
+    LOD,
     Advance,
     Output,
     Bookkeeping,
@@ -37,26 +38,41 @@ pub enum MobilitySet {
 
 pub fn install_systems(schedule: &mut Schedule) {
     schedule.configure_sets((
-        MobilitySet::Advance,
+        MobilitySet::LOD,
+        MobilitySet::Advance.after(MobilitySet::LOD),
         MobilitySet::Output.after(MobilitySet::Advance),
         MobilitySet::Bookkeeping.after(MobilitySet::Output),
     ));
+    // LOD set: population tracking + classification + promote/demote
     schedule.add_systems((
-        // Ordering within Advance (each step observes the previous step's
-        // output, but is staged so that "newly waiting" agents are not
-        // immediately boarded in the same tick they arrived at the stop, and
-        // "just alighted" agents do not immediately walk further in the same
-        // tick they got off):
-        //
-        //   1. walk_advance        — push Walking agents along their link.
-        //   2. boarding_alighting  — apply Phase-3 boarding + alighting using
-        //                            the PRE-stop_arrival waiting queue. This
-        //                            means an agent that arrived at the stop
-        //                            in step 3 of this same tick won't board
-        //                            until the next tick.
-        //   3. stop_arrival        — convert progress=1.0 walkers into
-        //                            WaitingAtStop / AtActivity.
-        //   4. vehicle_advance     — decrement dwell or push progress.
+        track_chunk_populations_system.in_set(MobilitySet::LOD),
+        classify_activity_system
+            .in_set(MobilitySet::LOD)
+            .after(track_chunk_populations_system),
+        promote_warm_to_active_system
+            .in_set(MobilitySet::LOD)
+            .after(classify_activity_system),
+        demote_active_to_warm_system
+            .in_set(MobilitySet::LOD)
+            .after(classify_activity_system),
+    ));
+    // Advance set: existing Phase-5 systems + warm flow
+    // Ordering within Advance (each step observes the previous step's
+    // output, but is staged so that "newly waiting" agents are not
+    // immediately boarded in the same tick they arrived at the stop, and
+    // "just alighted" agents do not immediately walk further in the same
+    // tick they got off):
+    //
+    //   1. walk_advance        — push Walking agents along their link.
+    //   2. boarding_alighting  — apply Phase-3 boarding + alighting using
+    //                            the PRE-stop_arrival waiting queue. This
+    //                            means an agent that arrived at the stop
+    //                            in step 3 of this same tick won't board
+    //                            until the next tick.
+    //   3. stop_arrival        — convert progress=1.0 walkers into
+    //                            WaitingAtStop / AtActivity.
+    //   4. vehicle_advance     — decrement dwell or push progress.
+    schedule.add_systems((
         walk_advance_system.in_set(MobilitySet::Advance),
         boarding_alighting_system
             .in_set(MobilitySet::Advance)
@@ -67,8 +83,11 @@ pub fn install_systems(schedule: &mut Schedule) {
         vehicle_advance_system
             .in_set(MobilitySet::Advance)
             .after(stop_arrival_system),
+        warm_chunk_flow_system.in_set(MobilitySet::Advance),
+        // Output set
         compute_world_coord_system.in_set(MobilitySet::Output),
         compute_direction_system.in_set(MobilitySet::Output),
+        // Bookkeeping
         tick_increment_system.in_set(MobilitySet::Bookkeeping),
     ));
 }
@@ -835,6 +854,12 @@ mod tests {
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
         world.insert_resource(all_active());
+        // Resources required by the new LOD set
+        world.insert_resource(ChunkSubscribers::default());
+        world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(ChunkActivityCooldowns::default());
+        world.insert_resource(FlowCells::default());
+        world.insert_resource(ChunkTransitions::default());
 
         let mut schedule = Schedule::default();
         install_systems(&mut schedule);
