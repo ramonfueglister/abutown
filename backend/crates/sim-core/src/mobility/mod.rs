@@ -14,6 +14,7 @@ mod dto;
 pub use dto::*;
 
 pub mod components;
+pub mod lod;
 pub mod resources;
 pub mod seed;
 pub mod systems;
