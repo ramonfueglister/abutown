@@ -318,7 +318,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     loop {
         tokio::select! {
             inbound = socket.recv() => {
-                let Some(Ok(message)) = inbound else { return; };
+                let Some(Ok(message)) = inbound else { break; };
                 let Message::Text(text) = message else { continue; };
                 let Ok(client_message) = serde_json::from_str::<ClientMessageDto>(&text) else {
                     tracing::warn!(?text, "invalid client message");
@@ -330,14 +330,14 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                         .await
                         .is_err()
                 {
-                    return;
+                    break;
                 }
             }
             broadcast = deltas.recv() => {
                 let message = match broadcast {
                     Ok(message) => message,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => return,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 };
                 let outbound = match message {
                     ServerMessageDto::MobilityDelta(raw_delta) => {
@@ -363,10 +363,19 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                     other => other,
                 };
                 if send_server_message(&mut socket, outbound).await.is_err() {
-                    return;
+                    break;
                 }
             }
         }
+    }
+
+    // Cleanup: drop this connection's chunk subscriptions so the shared
+    // ChunkSubscribers count stays consistent after disconnect.
+    if !connection.subscription.is_empty() {
+        let runtime = state.runtime();
+        let mut runtime = runtime.lock().await;
+        let empty = std::collections::HashSet::new();
+        runtime.update_chunk_subscribers(&connection.subscription, &empty);
     }
 }
 
@@ -375,6 +384,7 @@ async fn handle_client_message(
     message: &ClientMessageDto,
     connection: &mut ConnectionState,
 ) -> Option<MobilityDeltaDto> {
+    let before = connection.subscription.clone();
     match message {
         ClientMessageDto::ChunkSubscribe(payload) => {
             for coord in &payload.coords {
@@ -394,7 +404,8 @@ async fn handle_client_message(
         }
     }
     let runtime = state.runtime();
-    let runtime = runtime.lock().await;
+    let mut runtime = runtime.lock().await;
+    runtime.update_chunk_subscribers(&before, &connection.subscription);
     let dto = runtime.synthetic_mobility_delta_for_subscription(
         &connection.subscription,
         &mut connection.last_visible_agents,

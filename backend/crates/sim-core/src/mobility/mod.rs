@@ -199,6 +199,47 @@ impl<'de> serde::Deserialize<'de> for MobilityWorld {
     }
 }
 
+impl MobilityWorld {
+    /// Apply a diff of chunk subscriptions held by a single connection.
+    /// Increments for chunks newly in `after`, decrements for chunks dropped
+    /// from `before`. Entries that hit zero are removed.
+    pub fn update_chunk_subscribers(
+        &mut self,
+        before: &std::collections::HashSet<crate::ids::ChunkCoord>,
+        after: &std::collections::HashSet<crate::ids::ChunkCoord>,
+    ) {
+        let mut subs = self.world.resource_mut::<ChunkSubscribers>();
+        for added in after.difference(before) {
+            *subs.0.entry(*added).or_insert(0) += 1;
+        }
+        for removed in before.difference(after) {
+            if let Some(entry) = subs.0.get_mut(removed) {
+                *entry = entry.saturating_sub(1);
+                if *entry == 0 {
+                    subs.0.remove(removed);
+                }
+            }
+        }
+    }
+
+    /// Read-only accessor: current activity class of a chunk, or `None` if
+    /// the chunk has no entry (treated as Asleep).
+    pub fn activity_for_chunk(
+        &self,
+        chunk: crate::ids::ChunkCoord,
+    ) -> Option<crate::mobility::lod::MobilityActivity> {
+        self.world.resource::<ChunkActivities>().0.get(&chunk).copied()
+    }
+
+    /// Read-only accessor: aggregate flow-cell state for a chunk if present.
+    pub fn flow_cell_for_chunk(
+        &self,
+        chunk: crate::ids::ChunkCoord,
+    ) -> Option<crate::mobility::lod::FlowCell> {
+        self.world.resource::<FlowCells>().0.get(&chunk).cloned()
+    }
+}
+
 impl std::fmt::Debug for MobilityWorld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MobilityWorld")

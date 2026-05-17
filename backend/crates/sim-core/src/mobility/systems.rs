@@ -1691,8 +1691,7 @@ mod tests {
         world.insert_resource(activities);
 
         let mut flow = FlowCells::default();
-        let mut outflow = Vec::new();
-        outflow.push((ChunkCoord { x: 1, y: 0 }, 0.5));
+        let outflow = vec![(ChunkCoord { x: 1, y: 0 }, 0.5)];
         flow.0.insert(ChunkCoord { x: 0, y: 0 }, FlowCell {
             population: 10.0, outflow, attractiveness: 1.0, last_tick: 0,
         });
