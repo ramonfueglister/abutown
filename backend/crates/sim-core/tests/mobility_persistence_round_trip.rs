@@ -9,14 +9,13 @@ fn phase3_snapshot_round_trips_byte_for_byte() {
         .expect("phase3 fixture should deserialize into ECS MobilityWorld");
 
     // Re-serialize through the new ECS path
-    let reserialized = serde_json::to_string_pretty(&world)
-        .expect("re-serialize should not fail");
+    let reserialized = serde_json::to_string_pretty(&world).expect("re-serialize should not fail");
 
     // Compare as JSON values (whitespace-insensitive, key-order-insensitive)
-    let fixture_value: serde_json::Value = serde_json::from_str(fixture)
-        .expect("fixture is valid JSON");
-    let reserialized_value: serde_json::Value = serde_json::from_str(&reserialized)
-        .expect("our re-serialized output is valid JSON");
+    let fixture_value: serde_json::Value =
+        serde_json::from_str(fixture).expect("fixture is valid JSON");
+    let reserialized_value: serde_json::Value =
+        serde_json::from_str(&reserialized).expect("our re-serialized output is valid JSON");
 
     assert_eq!(
         fixture_value, reserialized_value,

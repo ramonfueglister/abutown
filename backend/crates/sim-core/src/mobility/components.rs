@@ -1,7 +1,7 @@
-use bevy_ecs::prelude::*;
-use abutown_protocol::DirectionDto;
 use crate::ids::{AgentId, RouteId, VehicleId};
 use crate::mobility::records::{AgentMobilityState, PlanStage, VehicleKind};
+use abutown_protocol::DirectionDto;
+use bevy_ecs::prelude::*;
 
 /// Marker component for pedestrian/agent entities.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]

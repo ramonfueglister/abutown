@@ -210,8 +210,7 @@ impl PartialEq for MobilityWorld {
         self.tick() == other.tick()
             && self.routes() == other.routes()
             && self.world.resource::<Stops>().0 == other.world.resource::<Stops>().0
-            && self.world.resource::<LinkPolylines>().0
-                == other.world.resource::<LinkPolylines>().0
+            && self.world.resource::<LinkPolylines>().0 == other.world.resource::<LinkPolylines>().0
             && self.agents() == other.agents()
             && self.vehicles() == other.vehicles()
     }
@@ -260,13 +259,7 @@ impl MobilityWorld {
 
     /// Sorted by id.
     pub fn stops(&self) -> Vec<StopRecord> {
-        let mut out: Vec<StopRecord> = self
-            .world
-            .resource::<Stops>()
-            .0
-            .values()
-            .cloned()
-            .collect();
+        let mut out: Vec<StopRecord> = self.world.resource::<Stops>().0.values().cloned().collect();
         out.sort_by(|a, b| a.id.0.cmp(&b.id.0));
         out
     }
@@ -582,8 +575,8 @@ impl MobilityWorld {
 mod tests {
     use super::*;
     use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
-    use std::collections::VecDeque;
     use abutown_protocol::WorldId;
+    use std::collections::VecDeque;
 
     #[test]
     fn initial_world_seeds_expected_population() {
@@ -763,8 +756,7 @@ mod tests {
     fn mobility_world_serde_round_trip_preserves_state() {
         let world = sample_world();
         let json = serde_json::to_value(&world).expect("serialize");
-        let back: MobilityWorld =
-            serde_json::from_value(json.clone()).expect("deserialize");
+        let back: MobilityWorld = serde_json::from_value(json.clone()).expect("deserialize");
         let rejson = serde_json::to_value(&back).expect("re-serialize");
         assert_eq!(json, rejson, "round-trip should preserve state");
     }

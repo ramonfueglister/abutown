@@ -1,16 +1,22 @@
-use bevy_ecs::prelude::*;
 use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
 use crate::mobility_geometry::LinkGeometry;
+use bevy_ecs::prelude::*;
 
 fn coord_at_progress(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
-    LinkGeometry { points: points.to_vec() }.world_coord_at_progress(progress)
+    LinkGeometry {
+        points: points.to_vec(),
+    }
+    .world_coord_at_progress(progress)
 }
 
 fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::DirectionDto {
-    LinkGeometry { points: points.to_vec() }.direction_at_progress(progress)
+    LinkGeometry {
+        points: points.to_vec(),
+    }
+    .direction_at_progress(progress)
 }
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -21,13 +27,11 @@ pub enum MobilitySet {
 }
 
 pub fn install_systems(schedule: &mut Schedule) {
-    schedule.configure_sets(
-        (
-            MobilitySet::Advance,
-            MobilitySet::Output.after(MobilitySet::Advance),
-            MobilitySet::Bookkeeping.after(MobilitySet::Output),
-        )
-    );
+    schedule.configure_sets((
+        MobilitySet::Advance,
+        MobilitySet::Output.after(MobilitySet::Advance),
+        MobilitySet::Bookkeeping.after(MobilitySet::Output),
+    ));
     schedule.add_systems((
         // Ordering within Advance (each step observes the previous step's
         // output, but is staged so that "newly waiting" agents are not
@@ -45,9 +49,15 @@ pub fn install_systems(schedule: &mut Schedule) {
         //                            WaitingAtStop / AtActivity.
         //   4. vehicle_advance     — decrement dwell or push progress.
         walk_advance_system.in_set(MobilitySet::Advance),
-        boarding_alighting_system.in_set(MobilitySet::Advance).after(walk_advance_system),
-        stop_arrival_system.in_set(MobilitySet::Advance).after(boarding_alighting_system),
-        vehicle_advance_system.in_set(MobilitySet::Advance).after(stop_arrival_system),
+        boarding_alighting_system
+            .in_set(MobilitySet::Advance)
+            .after(walk_advance_system),
+        stop_arrival_system
+            .in_set(MobilitySet::Advance)
+            .after(boarding_alighting_system),
+        vehicle_advance_system
+            .in_set(MobilitySet::Advance)
+            .after(stop_arrival_system),
         compute_world_coord_system.in_set(MobilitySet::Output),
         compute_direction_system.in_set(MobilitySet::Output),
         tick_increment_system.in_set(MobilitySet::Bookkeeping),
@@ -55,10 +65,7 @@ pub fn install_systems(schedule: &mut Schedule) {
 }
 
 pub fn walk_advance_system(
-    mut query: Query<
-        (Entity, &mut AgentMobilityStateComponent, &WalkSpeed),
-        With<AgentMarker>,
-    >,
+    mut query: Query<(Entity, &mut AgentMobilityStateComponent, &WalkSpeed), With<AgentMarker>>,
     mut dirty: ResMut<DirtyAgents>,
 ) {
     for (entity, mut state, speed) in query.iter_mut() {
@@ -73,10 +80,7 @@ pub fn walk_advance_system(
 }
 
 pub fn vehicle_advance_system(
-    mut query: Query<
-        (Entity, &mut RoutePosition, &mut DwellTicksRemaining),
-        With<VehicleMarker>,
-    >,
+    mut query: Query<(Entity, &mut RoutePosition, &mut DwellTicksRemaining), With<VehicleMarker>>,
     routes: Res<Routes>,
     mut dirty: ResMut<DirtyVehicles>,
 ) {
@@ -88,7 +92,9 @@ pub fn vehicle_advance_system(
             continue;
         }
         // can only advance if route exists and progress < 1.0
-        let Some(route) = routes.0.get(&pos.route_id) else { continue; };
+        let Some(route) = routes.0.get(&pos.route_id) else {
+            continue;
+        };
         if route.links.is_empty() || pos.progress >= 1.0 {
             continue;
         }
@@ -102,7 +108,12 @@ pub fn vehicle_advance_system(
 
 pub fn stop_arrival_system(
     mut query: Query<
-        (Entity, &StableAgentId, &mut AgentMobilityStateComponent, &mut WalkPlan),
+        (
+            Entity,
+            &StableAgentId,
+            &mut AgentMobilityStateComponent,
+            &mut WalkPlan,
+        ),
         With<AgentMarker>,
     >,
     mut stops: ResMut<Stops>,
@@ -145,11 +156,22 @@ pub fn stop_arrival_system(
 pub fn boarding_alighting_system(
     mut sets: ParamSet<(
         Query<
-            (Entity, &StableAgentId, &mut AgentMobilityStateComponent, &mut WalkPlan),
+            (
+                Entity,
+                &StableAgentId,
+                &mut AgentMobilityStateComponent,
+                &mut WalkPlan,
+            ),
             With<AgentMarker>,
         >,
         Query<
-            (Entity, &StableVehicleId, &mut Occupants, &Capacity, &RoutePosition),
+            (
+                Entity,
+                &StableVehicleId,
+                &mut Occupants,
+                &Capacity,
+                &RoutePosition,
+            ),
             With<VehicleMarker>,
         >,
     )>,
@@ -351,9 +373,15 @@ pub fn compute_world_coord_system(
 ) {
     // Vehicles first.
     for (rp, mut pos) in vehicles.iter_mut() {
-        let Some(route) = routes.0.get(&rp.route_id) else { continue; };
-        let Some(link_id) = route.links.get(rp.link_index) else { continue; };
-        let Some(points) = link_polylines.0.get(link_id) else { continue; };
+        let Some(route) = routes.0.get(&rp.route_id) else {
+            continue;
+        };
+        let Some(link_id) = route.links.get(rp.link_index) else {
+            continue;
+        };
+        let Some(points) = link_polylines.0.get(link_id) else {
+            continue;
+        };
         let (x, y) = coord_at_progress(points, rp.progress);
         pos.x = x;
         pos.y = y;
@@ -362,19 +390,18 @@ pub fn compute_world_coord_system(
     // Agents.
     for (state, mut pos) in agents.iter_mut() {
         let coord = match &state.0 {
-            AgentMobilityState::Walking { link_id, progress } => {
-                link_polylines.0.get(link_id).map(|p| coord_at_progress(p, *progress))
-            }
+            AgentMobilityState::Walking { link_id, progress } => link_polylines
+                .0
+                .get(link_id)
+                .map(|p| coord_at_progress(p, *progress)),
             AgentMobilityState::WaitingAtStop { stop_id }
             | AgentMobilityState::Boarding { stop_id, .. }
-            | AgentMobilityState::Alighting { stop_id, .. } => {
-                stops.0.get(stop_id).and_then(|s| {
-                    let route = routes.0.get(&s.route_id)?;
-                    let link_id = route.links.get(s.link_index)?;
-                    let points = link_polylines.0.get(link_id)?;
-                    Some(coord_at_progress(points, s.progress))
-                })
-            }
+            | AgentMobilityState::Alighting { stop_id, .. } => stops.0.get(stop_id).and_then(|s| {
+                let route = routes.0.get(&s.route_id)?;
+                let link_id = route.links.get(s.link_index)?;
+                let points = link_polylines.0.get(link_id)?;
+                Some(coord_at_progress(points, s.progress))
+            }),
             // InVehicle and AtActivity: leave Position unchanged.
             _ => None,
         };
@@ -399,9 +426,15 @@ pub fn compute_direction_system(
     link_polylines: Res<LinkPolylines>,
 ) {
     for (rp, mut dir) in vehicles.iter_mut() {
-        let Some(route) = routes.0.get(&rp.route_id) else { continue; };
-        let Some(link_id) = route.links.get(rp.link_index) else { continue; };
-        let Some(points) = link_polylines.0.get(link_id) else { continue; };
+        let Some(route) = routes.0.get(&rp.route_id) else {
+            continue;
+        };
+        let Some(link_id) = route.links.get(rp.link_index) else {
+            continue;
+        };
+        let Some(points) = link_polylines.0.get(link_id) else {
+            continue;
+        };
         dir.0 = dir_at_progress(points, rp.progress);
     }
     for (state, mut dir) in agents.iter_mut() {
@@ -539,7 +572,10 @@ mod tests {
                 AgentMobilityStateComponent(AgentMobilityState::WaitingAtStop {
                     stop_id: StopId("s:1".into()),
                 }),
-                WalkPlan { stages: vec![], cursor: 0 },
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
                 WalkSpeed(0.05),
                 Position { x: 0.0, y: 0.0 },
                 Direction(abutown_protocol::DirectionDto::S),
@@ -592,18 +628,18 @@ mod tests {
             .unwrap();
         assert!(stop.waiting_agents.is_empty());
         assert!(world.resource::<DirtyAgents>().0.contains(&agent_entity));
-        assert!(world
-            .resource::<DirtyVehicles>()
-            .0
-            .contains(&vehicle_entity));
+        assert!(
+            world
+                .resource::<DirtyVehicles>()
+                .0
+                .contains(&vehicle_entity)
+        );
     }
 
     #[test]
     fn alighting_system_drops_occupant_at_end_of_link_destination_stop() {
         use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
-        use crate::mobility::records::{
-            AgentMobilityState, PlanStage, StopRecord, VehicleKind,
-        };
+        use crate::mobility::records::{AgentMobilityState, PlanStage, StopRecord, VehicleKind};
         use std::collections::VecDeque;
 
         let mut world = World::new();
@@ -689,10 +725,12 @@ mod tests {
         let occ = world.get::<Occupants>(vehicle_entity).unwrap();
         assert!(occ.0.is_empty());
         assert!(world.resource::<DirtyAgents>().0.contains(&agent_entity));
-        assert!(world
-            .resource::<DirtyVehicles>()
-            .0
-            .contains(&vehicle_entity));
+        assert!(
+            world
+                .resource::<DirtyVehicles>()
+                .0
+                .contains(&vehicle_entity)
+        );
     }
 
     #[test]
@@ -704,19 +742,24 @@ mod tests {
         world.insert_resource(Tick(0));
         world.insert_resource(DirtyAgents::default());
 
-        let entity = world.spawn((
-            AgentMarker,
-            StableAgentId(AgentId("a:1".into())),
-            AgentMobilityStateComponent(AgentMobilityState::Walking {
-                link_id: LinkId("link:test".into()),
-                progress: 0.2,
-            }),
-            WalkPlan { stages: vec![], cursor: 0 },
-            WalkSpeed(0.1),
-            Position { x: 0.0, y: 0.0 },
-            Direction(abutown_protocol::DirectionDto::S),
-            SpriteKey(String::new()),
-        )).id();
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:1".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("link:test".into()),
+                    progress: 0.2,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.1),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(walk_advance_system);
@@ -725,7 +768,10 @@ mod tests {
         let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
         match &state.0 {
             AgentMobilityState::Walking { progress, .. } => {
-                assert!((progress - 0.3).abs() < 1e-6, "progress should be 0.3, got {progress}");
+                assert!(
+                    (progress - 0.3).abs() < 1e-6,
+                    "progress should be 0.3, got {progress}"
+                );
             }
             other => panic!("expected Walking, got {other:?}"),
         }
@@ -740,19 +786,24 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(DirtyAgents::default());
 
-        let entity = world.spawn((
-            AgentMarker,
-            StableAgentId(AgentId("a:near".into())),
-            AgentMobilityStateComponent(AgentMobilityState::Walking {
-                link_id: LinkId("link:test".into()),
-                progress: 0.95,
-            }),
-            WalkPlan { stages: vec![], cursor: 0 },
-            WalkSpeed(0.1),
-            Position { x: 0.0, y: 0.0 },
-            Direction(abutown_protocol::DirectionDto::S),
-            SpriteKey(String::new()),
-        )).id();
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:near".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("link:test".into()),
+                    progress: 0.95,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.1),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(walk_advance_system);
@@ -761,7 +812,10 @@ mod tests {
         let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
         match &state.0 {
             AgentMobilityState::Walking { progress, .. } => {
-                assert!((progress - 1.0).abs() < 1e-6, "progress clamped to 1.0, got {progress}");
+                assert!(
+                    (progress - 1.0).abs() < 1e-6,
+                    "progress clamped to 1.0, got {progress}"
+                );
             }
             _ => panic!(),
         }
@@ -770,25 +824,32 @@ mod tests {
 
     #[test]
     fn vehicle_advance_decrements_dwell_when_positive() {
-        use crate::ids::{VehicleId, RouteId};
+        use crate::ids::{RouteId, VehicleId};
         use crate::mobility::records::VehicleKind;
 
         let mut world = World::new();
         world.insert_resource(Routes::default());
         world.insert_resource(DirtyVehicles::default());
 
-        let entity = world.spawn((
-            VehicleMarker,
-            StableVehicleId(VehicleId("v:1".into())),
-            VehicleKindComponent(VehicleKind::Tram),
-            RoutePosition { route_id: RouteId("r:1".into()), link_index: 0, progress: 0.5, speed: 0.1 },
-            Capacity(4),
-            Occupants(vec![]),
-            DwellTicksRemaining(3),
-            Position { x: 0.0, y: 0.0 },
-            Direction(abutown_protocol::DirectionDto::S),
-            SpriteKey(String::new()),
-        )).id();
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:1".into())),
+                VehicleKindComponent(VehicleKind::Tram),
+                RoutePosition {
+                    route_id: RouteId("r:1".into()),
+                    link_index: 0,
+                    progress: 0.5,
+                    speed: 0.1,
+                },
+                Capacity(4),
+                Occupants(vec![]),
+                DwellTicksRemaining(3),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(vehicle_advance_system);
@@ -797,36 +858,49 @@ mod tests {
         let dwell = world.get::<DwellTicksRemaining>(entity).unwrap();
         assert_eq!(dwell.0, 2);
         let pos = world.get::<RoutePosition>(entity).unwrap();
-        assert!((pos.progress - 0.5).abs() < 1e-6, "progress unchanged during dwell");
+        assert!(
+            (pos.progress - 0.5).abs() < 1e-6,
+            "progress unchanged during dwell"
+        );
         assert!(world.resource::<DirtyVehicles>().0.contains(&entity));
     }
 
     #[test]
     fn vehicle_advance_progresses_when_not_dwelling() {
-        use crate::ids::{VehicleId, RouteId, LinkId};
-        use crate::mobility::records::{VehicleKind, RouteRecord};
+        use crate::ids::{LinkId, RouteId, VehicleId};
+        use crate::mobility::records::{RouteRecord, VehicleKind};
 
         let mut world = World::new();
         let mut routes = Routes::default();
-        routes.0.insert(RouteId("r:1".into()), RouteRecord {
-            id: RouteId("r:1".into()),
-            links: vec![LinkId("l:1".into())],
-        });
+        routes.0.insert(
+            RouteId("r:1".into()),
+            RouteRecord {
+                id: RouteId("r:1".into()),
+                links: vec![LinkId("l:1".into())],
+            },
+        );
         world.insert_resource(routes);
         world.insert_resource(DirtyVehicles::default());
 
-        let entity = world.spawn((
-            VehicleMarker,
-            StableVehicleId(VehicleId("v:1".into())),
-            VehicleKindComponent(VehicleKind::Tram),
-            RoutePosition { route_id: RouteId("r:1".into()), link_index: 0, progress: 0.4, speed: 0.1 },
-            Capacity(4),
-            Occupants(vec![]),
-            DwellTicksRemaining(0),
-            Position { x: 0.0, y: 0.0 },
-            Direction(abutown_protocol::DirectionDto::S),
-            SpriteKey(String::new()),
-        )).id();
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:1".into())),
+                VehicleKindComponent(VehicleKind::Tram),
+                RoutePosition {
+                    route_id: RouteId("r:1".into()),
+                    link_index: 0,
+                    progress: 0.4,
+                    speed: 0.1,
+                },
+                Capacity(4),
+                Occupants(vec![]),
+                DwellTicksRemaining(0),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(vehicle_advance_system);
@@ -844,31 +918,42 @@ mod tests {
 
         let mut world = World::new();
         let mut polylines = LinkPolylines::default();
-        polylines.0.insert(LinkId("l:1".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
+        polylines
+            .0
+            .insert(LinkId("l:1".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
         world.insert_resource(polylines);
         world.insert_resource(Routes::default());
         world.insert_resource(Stops::default());
 
-        let entity = world.spawn((
-            AgentMarker,
-            StableAgentId(AgentId("a:1".into())),
-            AgentMobilityStateComponent(AgentMobilityState::Walking {
-                link_id: LinkId("l:1".into()),
-                progress: 0.5,
-            }),
-            WalkPlan { stages: vec![], cursor: 0 },
-            WalkSpeed(0.0),
-            Position { x: 99.0, y: 99.0 },
-            Direction(abutown_protocol::DirectionDto::S),
-            SpriteKey(String::new()),
-        )).id();
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:1".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:1".into()),
+                    progress: 0.5,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.0),
+                Position { x: 99.0, y: 99.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(compute_world_coord_system);
         schedule.run(&mut world);
 
         let pos = world.get::<Position>(entity).unwrap();
-        assert!((pos.x - 5.0).abs() < 1e-3, "x at midpoint of 0..10 = 5.0, got {}", pos.x);
+        assert!(
+            (pos.x - 5.0).abs() < 1e-3,
+            "x at midpoint of 0..10 = 5.0, got {}",
+            pos.x
+        );
         assert!(pos.y.abs() < 1e-3);
     }
 
@@ -879,23 +964,30 @@ mod tests {
 
         let mut world = World::new();
         let mut polylines = LinkPolylines::default();
-        polylines.0.insert(LinkId("l:1".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
+        polylines
+            .0
+            .insert(LinkId("l:1".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
         world.insert_resource(polylines);
         world.insert_resource(Routes::default());
 
-        let entity = world.spawn((
-            AgentMarker,
-            StableAgentId(AgentId("a:1".into())),
-            AgentMobilityStateComponent(AgentMobilityState::Walking {
-                link_id: LinkId("l:1".into()),
-                progress: 0.5,
-            }),
-            WalkPlan { stages: vec![], cursor: 0 },
-            WalkSpeed(0.0),
-            Position { x: 0.0, y: 0.0 },
-            Direction(abutown_protocol::DirectionDto::S),
-            SpriteKey(String::new()),
-        )).id();
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:1".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:1".into()),
+                    progress: 0.5,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.0),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(compute_direction_system);
@@ -913,35 +1005,51 @@ mod tests {
 
         let mut world = World::new();
         let mut polylines = LinkPolylines::default();
-        polylines.0.insert(LinkId("l:1".into()), vec![(0.0, 0.0), (20.0, 0.0)]);
+        polylines
+            .0
+            .insert(LinkId("l:1".into()), vec![(0.0, 0.0), (20.0, 0.0)]);
         world.insert_resource(polylines);
         let mut routes = Routes::default();
-        routes.0.insert(RouteId("r:1".into()), RouteRecord {
-            id: RouteId("r:1".into()),
-            links: vec![LinkId("l:1".into())],
-        });
+        routes.0.insert(
+            RouteId("r:1".into()),
+            RouteRecord {
+                id: RouteId("r:1".into()),
+                links: vec![LinkId("l:1".into())],
+            },
+        );
         world.insert_resource(routes);
         world.insert_resource(Stops::default());
 
-        let entity = world.spawn((
-            VehicleMarker,
-            StableVehicleId(VehicleId("v:1".into())),
-            VehicleKindComponent(VehicleKind::Tram),
-            RoutePosition { route_id: RouteId("r:1".into()), link_index: 0, progress: 0.25, speed: 0.0 },
-            Capacity(4),
-            Occupants(vec![]),
-            DwellTicksRemaining(0),
-            Position { x: 99.0, y: 99.0 },
-            Direction(abutown_protocol::DirectionDto::S),
-            SpriteKey(String::new()),
-        )).id();
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:1".into())),
+                VehicleKindComponent(VehicleKind::Tram),
+                RoutePosition {
+                    route_id: RouteId("r:1".into()),
+                    link_index: 0,
+                    progress: 0.25,
+                    speed: 0.0,
+                },
+                Capacity(4),
+                Occupants(vec![]),
+                DwellTicksRemaining(0),
+                Position { x: 99.0, y: 99.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(compute_world_coord_system);
         schedule.run(&mut world);
 
         let pos = world.get::<Position>(entity).unwrap();
-        assert!((pos.x - 5.0).abs() < 1e-3, "0.25 of 0..20 = 5.0, got {}", pos.x);
+        assert!(
+            (pos.x - 5.0).abs() < 1e-3,
+            "0.25 of 0..20 = 5.0, got {}",
+            pos.x
+        );
         assert!(pos.y.abs() < 1e-3);
     }
 }

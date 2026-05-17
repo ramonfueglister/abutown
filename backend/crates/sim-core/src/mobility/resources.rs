@@ -1,7 +1,7 @@
-use bevy_ecs::prelude::*;
-use std::collections::{HashMap, HashSet};
 use crate::ids::{LinkId, RouteId, StopId};
 use crate::mobility::records::{RouteRecord, StopRecord};
+use bevy_ecs::prelude::*;
+use std::collections::{HashMap, HashSet};
 
 /// Monotonic simulation tick counter. Incremented by `tick_increment_system`.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]

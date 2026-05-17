@@ -1,6 +1,6 @@
 use abutown_protocol::{
     AgentMobilityDto, AgentMobilityStateDto, EntityId, MobilityDeltaDto, MobilitySnapshotDto,
-    StopMobilityDto, VehicleMobilityDto, WorldId, PROTOCOL_VERSION,
+    PROTOCOL_VERSION, StopMobilityDto, VehicleMobilityDto, WorldId,
 };
 
 use crate::ids::{AgentId, VehicleId};
@@ -122,11 +122,7 @@ pub fn build_mobility_snapshot_dto(
         .filter_map(|record| world.vehicle_dto_for(&record.id))
         .collect();
 
-    let mut stops: Vec<StopMobilityDto> = world
-        .stops()
-        .iter()
-        .map(StopMobilityDto::from)
-        .collect();
+    let mut stops: Vec<StopMobilityDto> = world.stops().iter().map(StopMobilityDto::from).collect();
     stops.sort_by(|left, right| left.id.cmp(&right.id));
 
     MobilitySnapshotDto {
