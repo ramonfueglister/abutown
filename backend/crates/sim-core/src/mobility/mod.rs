@@ -96,6 +96,8 @@ impl serde::Serialize for MobilityWorld {
             stops: &'a HashMap<StopId, StopRecord>,
             routes: &'a HashMap<RouteId, RouteRecord>,
             link_polylines: &'a HashMap<LinkId, Vec<(f32, f32)>>,
+            flow_cells: Vec<(crate::ids::ChunkCoord, &'a crate::mobility::lod::FlowCell)>,
+            chunk_activities: Vec<(crate::ids::ChunkCoord, crate::mobility::lod::MobilityActivity)>,
         }
 
         let agents_map: HashMap<&AgentId, AgentRecord> = self
@@ -109,6 +111,27 @@ impl serde::Serialize for MobilityWorld {
             .filter_map(|id| self.vehicle(id).map(|rec| (id, rec)))
             .collect();
 
+        // Sort chunk-keyed entries for deterministic output.
+        let mut flow_cells: Vec<(crate::ids::ChunkCoord, &crate::mobility::lod::FlowCell)> = self
+            .world
+            .resource::<FlowCells>()
+            .0
+            .iter()
+            .map(|(k, v)| (*k, v))
+            .collect();
+        flow_cells.sort_by_key(|(c, _)| (c.x, c.y));
+        let mut chunk_activities: Vec<(
+            crate::ids::ChunkCoord,
+            crate::mobility::lod::MobilityActivity,
+        )> = self
+            .world
+            .resource::<ChunkActivities>()
+            .0
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect();
+        chunk_activities.sort_by_key(|(c, _)| (c.x, c.y));
+
         WorldRepr {
             tick: self.tick(),
             agents: agents_map,
@@ -116,6 +139,8 @@ impl serde::Serialize for MobilityWorld {
             stops: &self.world.resource::<Stops>().0,
             routes: &self.world.resource::<Routes>().0,
             link_polylines: &self.world.resource::<LinkPolylines>().0,
+            flow_cells,
+            chunk_activities,
         }
         .serialize(ser)
     }
@@ -133,6 +158,11 @@ impl<'de> serde::Deserialize<'de> for MobilityWorld {
             stops: HashMap<StopId, StopRecord>,
             routes: HashMap<RouteId, RouteRecord>,
             link_polylines: HashMap<LinkId, Vec<(f32, f32)>>,
+            #[serde(default)]
+            flow_cells: Vec<(crate::ids::ChunkCoord, crate::mobility::lod::FlowCell)>,
+            #[serde(default)]
+            chunk_activities:
+                Vec<(crate::ids::ChunkCoord, crate::mobility::lod::MobilityActivity)>,
         }
 
         let repr = WorldRepr::deserialize(de)?;
@@ -162,6 +192,9 @@ impl<'de> serde::Deserialize<'de> for MobilityWorld {
                 links_res.0.insert(id, points);
             }
         }
+        world.world.resource_mut::<FlowCells>().0 = repr.flow_cells.into_iter().collect();
+        world.world.resource_mut::<ChunkActivities>().0 =
+            repr.chunk_activities.into_iter().collect();
         Ok(world)
     }
 }
@@ -1505,5 +1538,35 @@ mod tests {
             .filter(|id| id.0.starts_with("agent:lod:"))
             .collect();
         assert_eq!(lod_agents.len(), 2, "by_agent_id contains 2 LOD-spawned agents");
+    }
+
+    #[test]
+    fn phase6_snapshot_with_flow_cells_round_trips() {
+        use crate::ids::ChunkCoord;
+        use crate::mobility::lod::{FlowCell, MobilityActivity};
+
+        let mut world = MobilityWorld::empty();
+        {
+            let mut cells = world.world.resource_mut::<FlowCells>();
+            cells.0.insert(
+                ChunkCoord { x: 1, y: 1 },
+                FlowCell {
+                    population: 4.2,
+                    outflow: vec![(ChunkCoord { x: 2, y: 1 }, 0.3)],
+                    attractiveness: 1.5,
+                    last_tick: 100,
+                },
+            );
+        }
+        {
+            let mut activities = world.world.resource_mut::<ChunkActivities>();
+            activities
+                .0
+                .insert(ChunkCoord { x: 1, y: 1 }, MobilityActivity::Warm);
+        }
+        let json = serde_json::to_value(&world).unwrap();
+        let back: MobilityWorld = serde_json::from_value(json.clone()).unwrap();
+        let rejson = serde_json::to_value(&back).unwrap();
+        assert_eq!(json, rejson);
     }
 }

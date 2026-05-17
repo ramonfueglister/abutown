@@ -17,8 +17,13 @@ fn phase3_snapshot_round_trips_byte_for_byte() {
     let reserialized_value: serde_json::Value =
         serde_json::from_str(&reserialized).expect("our re-serialized output is valid JSON");
 
-    assert_eq!(
-        fixture_value, reserialized_value,
-        "round-trip diverged: ECS-backed serde produces different JSON than the frozen Phase-3 fixture"
-    );
+    // Phase 6: re-serialize emits `flow_cells` and `chunk_activities` fields that
+    // didn't exist in the frozen Phase-3 fixture. Compare only the legacy fields.
+    for key in ["tick", "agents", "vehicles", "stops", "routes", "link_polylines"] {
+        assert_eq!(
+            fixture_value.get(key),
+            reserialized_value.get(key),
+            "round-trip diverged on legacy key `{key}`"
+        );
+    }
 }
