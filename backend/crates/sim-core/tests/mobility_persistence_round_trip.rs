@@ -19,7 +19,14 @@ fn phase3_snapshot_round_trips_byte_for_byte() {
 
     // Phase 6: re-serialize emits `flow_cells` and `chunk_activities` fields that
     // didn't exist in the frozen Phase-3 fixture. Compare only the legacy fields.
-    for key in ["tick", "agents", "vehicles", "stops", "routes", "link_polylines"] {
+    for key in [
+        "tick",
+        "agents",
+        "vehicles",
+        "stops",
+        "routes",
+        "link_polylines",
+    ] {
         assert_eq!(
             fixture_value.get(key),
             reserialized_value.get(key),

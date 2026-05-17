@@ -1,6 +1,8 @@
 use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
-use crate::mobility::lod::{classify_chunk_mobility_activity, MobilityActivity, ACTIVITY_HYSTERESIS_TICKS};
+use crate::mobility::lod::{
+    ACTIVITY_HYSTERESIS_TICKS, MobilityActivity, classify_chunk_mobility_activity,
+};
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
 use bevy_ecs::prelude::*;
@@ -592,7 +594,11 @@ pub fn classify_activity_system(
     for chunk in candidate_chunks {
         let subs = subscribers.0.get(&chunk).copied().unwrap_or(0);
         let pop = populations.0.get(&chunk).copied().unwrap_or(0);
-        let previous = activities.0.get(&chunk).copied().unwrap_or(MobilityActivity::Asleep);
+        let previous = activities
+            .0
+            .get(&chunk)
+            .copied()
+            .unwrap_or(MobilityActivity::Asleep);
         let cooldown_now = cooldowns.0.get(&chunk).copied().unwrap_or(0);
 
         let next = classify_chunk_mobility_activity(subs, pop, previous, cooldown_now);
@@ -713,8 +719,8 @@ pub fn demote_active_to_warm_system(
             if entity_chunk != *chunk {
                 continue;
             }
-            let dest = agent_destination_chunk(state, &routes, &link_polylines, &stops)
-                .unwrap_or(*chunk);
+            let dest =
+                agent_destination_chunk(state, &routes, &link_polylines, &stops).unwrap_or(*chunk);
             despawn_count += 1;
             *outflow_counts.entry(dest).or_insert(0) += 1;
             commands.entity(entity).despawn();
@@ -780,7 +786,9 @@ pub fn warm_chunk_flow_system(
     activities: Res<ChunkActivities>,
     mut flow_cells: ResMut<FlowCells>,
 ) {
-    if !tick.0.is_multiple_of(10) { return; }
+    if !tick.0.is_multiple_of(10) {
+        return;
+    }
 
     let warm_chunks: Vec<crate::ids::ChunkCoord> = activities
         .0
@@ -791,7 +799,9 @@ pub fn warm_chunk_flow_system(
 
     let mut transfers: Vec<(crate::ids::ChunkCoord, crate::ids::ChunkCoord, f32)> = Vec::new();
     for chunk in &warm_chunks {
-        let Some(cell) = flow_cells.0.get(chunk) else { continue; };
+        let Some(cell) = flow_cells.0.get(chunk) else {
+            continue;
+        };
         for (dest, rate) in &cell.outflow {
             let delta = (rate * 10.0).min(cell.population);
             if delta > 0.0 {
@@ -1411,12 +1421,15 @@ mod tests {
 
         let mut world = World::new();
         let mut flow_cells = FlowCells::default();
-        flow_cells.0.insert(ChunkCoord { x: 0, y: 0 }, FlowCell {
-            population: 3.7,
-            outflow: Vec::new(),
-            attractiveness: 1.0,
-            last_tick: 0,
-        });
+        flow_cells.0.insert(
+            ChunkCoord { x: 0, y: 0 },
+            FlowCell {
+                population: 3.7,
+                outflow: Vec::new(),
+                attractiveness: 1.0,
+                last_tick: 0,
+            },
+        );
         world.insert_resource(flow_cells);
         world.insert_resource(ChunkPopulations::default());
 
@@ -1428,7 +1441,10 @@ mod tests {
                     link_id: LinkId("l".into()),
                     progress: 0.0,
                 }),
-                WalkPlan { stages: vec![], cursor: 0 },
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
                 WalkSpeed(0.0),
                 Position { x: 40.0, y: 16.0 },
                 Direction(abutown_protocol::DirectionDto::S),
@@ -1439,7 +1455,12 @@ mod tests {
             VehicleMarker,
             StableVehicleId(VehicleId("v:1".into())),
             VehicleKindComponent(VehicleKind::Tram),
-            RoutePosition { route_id: RouteId("r".into()), link_index: 0, progress: 0.0, speed: 0.0 },
+            RoutePosition {
+                route_id: RouteId("r".into()),
+                link_index: 0,
+                progress: 0.0,
+                speed: 0.0,
+            },
             Capacity(1),
             Occupants(vec![]),
             DwellTicksRemaining(0),
@@ -1561,7 +1582,10 @@ mod tests {
         assert_eq!(prev, MobilityActivity::Asleep);
         assert_eq!(next, MobilityActivity::Active);
         let cd = world.resource::<ChunkActivityCooldowns>();
-        assert_eq!(cd.0.get(&ChunkCoord { x: 0, y: 0 }), Some(&ACTIVITY_HYSTERESIS_TICKS));
+        assert_eq!(
+            cd.0.get(&ChunkCoord { x: 0, y: 0 }),
+            Some(&ACTIVITY_HYSTERESIS_TICKS)
+        );
     }
 
     #[test]
@@ -1687,14 +1711,22 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(Tick(10));
         let mut activities = ChunkActivities::default();
-        activities.0.insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
+        activities
+            .0
+            .insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
         world.insert_resource(activities);
 
         let mut flow = FlowCells::default();
         let outflow = vec![(ChunkCoord { x: 1, y: 0 }, 0.5)];
-        flow.0.insert(ChunkCoord { x: 0, y: 0 }, FlowCell {
-            population: 10.0, outflow, attractiveness: 1.0, last_tick: 0,
-        });
+        flow.0.insert(
+            ChunkCoord { x: 0, y: 0 },
+            FlowCell {
+                population: 10.0,
+                outflow,
+                attractiveness: 1.0,
+                last_tick: 0,
+            },
+        );
         world.insert_resource(flow);
 
         let mut schedule = Schedule::default();
@@ -1716,16 +1748,21 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(Tick(5));
         let mut activities = ChunkActivities::default();
-        activities.0.insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
+        activities
+            .0
+            .insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
         world.insert_resource(activities);
 
         let mut flow = FlowCells::default();
-        flow.0.insert(ChunkCoord { x: 0, y: 0 }, FlowCell {
-            population: 10.0,
-            outflow: vec![(ChunkCoord { x: 1, y: 0 }, 0.5)],
-            attractiveness: 1.0,
-            last_tick: 0,
-        });
+        flow.0.insert(
+            ChunkCoord { x: 0, y: 0 },
+            FlowCell {
+                population: 10.0,
+                outflow: vec![(ChunkCoord { x: 1, y: 0 }, 0.5)],
+                attractiveness: 1.0,
+                last_tick: 0,
+            },
+        );
         world.insert_resource(flow);
 
         let mut schedule = Schedule::default();
@@ -1734,7 +1771,10 @@ mod tests {
 
         let cells = world.resource::<FlowCells>();
         let src = cells.0.get(&ChunkCoord { x: 0, y: 0 }).unwrap();
-        assert!((src.population - 10.0).abs() < 1e-3, "skipped on non-multiple-of-10 tick");
+        assert!(
+            (src.population - 10.0).abs() < 1e-3,
+            "skipped on non-multiple-of-10 tick"
+        );
     }
 
     #[test]
@@ -1773,10 +1813,7 @@ mod tests {
             schedule.run(&mut world);
 
             let mut query = world.query::<&StableAgentId>();
-            let mut ids: Vec<String> = query
-                .iter(&world)
-                .map(|s| s.0 .0.clone())
-                .collect();
+            let mut ids: Vec<String> = query.iter(&world).map(|s| s.0.0.clone()).collect();
             ids.sort();
             ids
         }

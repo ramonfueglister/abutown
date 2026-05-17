@@ -97,7 +97,10 @@ impl serde::Serialize for MobilityWorld {
             routes: &'a HashMap<RouteId, RouteRecord>,
             link_polylines: &'a HashMap<LinkId, Vec<(f32, f32)>>,
             flow_cells: Vec<(crate::ids::ChunkCoord, &'a crate::mobility::lod::FlowCell)>,
-            chunk_activities: Vec<(crate::ids::ChunkCoord, crate::mobility::lod::MobilityActivity)>,
+            chunk_activities: Vec<(
+                crate::ids::ChunkCoord,
+                crate::mobility::lod::MobilityActivity,
+            )>,
         }
 
         let agents_map: HashMap<&AgentId, AgentRecord> = self
@@ -161,8 +164,10 @@ impl<'de> serde::Deserialize<'de> for MobilityWorld {
             #[serde(default)]
             flow_cells: Vec<(crate::ids::ChunkCoord, crate::mobility::lod::FlowCell)>,
             #[serde(default)]
-            chunk_activities:
-                Vec<(crate::ids::ChunkCoord, crate::mobility::lod::MobilityActivity)>,
+            chunk_activities: Vec<(
+                crate::ids::ChunkCoord,
+                crate::mobility::lod::MobilityActivity,
+            )>,
         }
 
         let repr = WorldRepr::deserialize(de)?;
@@ -228,7 +233,11 @@ impl MobilityWorld {
         &self,
         chunk: crate::ids::ChunkCoord,
     ) -> Option<crate::mobility::lod::MobilityActivity> {
-        self.world.resource::<ChunkActivities>().0.get(&chunk).copied()
+        self.world
+            .resource::<ChunkActivities>()
+            .0
+            .get(&chunk)
+            .copied()
     }
 
     /// Read-only accessor: aggregate flow-cell state for a chunk if present.
@@ -1578,7 +1587,11 @@ mod tests {
             .keys()
             .filter(|id| id.0.starts_with("agent:lod:"))
             .collect();
-        assert_eq!(lod_agents.len(), 2, "by_agent_id contains 2 LOD-spawned agents");
+        assert_eq!(
+            lod_agents.len(),
+            2,
+            "by_agent_id contains 2 LOD-spawned agents"
+        );
     }
 
     #[test]

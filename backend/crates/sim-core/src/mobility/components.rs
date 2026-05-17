@@ -74,4 +74,3 @@ pub struct Occupants(pub Vec<AgentId>);
 /// Remaining ticks at the current stop (counts down). Stored on vehicles only.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DwellTicksRemaining(pub u16);
-

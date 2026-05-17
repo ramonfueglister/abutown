@@ -1,7 +1,7 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use sim_core::city_network::{CityNetwork, NetworkCoord, WorldTiles};
 use sim_core::ids::ChunkCoord;
-use sim_core::mobility::seed::{from_network, SeedDensity};
+use sim_core::mobility::seed::{SeedDensity, from_network};
 use std::collections::HashSet;
 
 fn very_big_network() -> CityNetwork {

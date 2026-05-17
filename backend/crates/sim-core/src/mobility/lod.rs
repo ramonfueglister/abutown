@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::ids::ChunkCoord;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum MobilityActivity {
@@ -48,34 +48,58 @@ mod tests {
 
     #[test]
     fn classifies_to_hot_when_two_or_more_subscribers() {
-        assert_eq!(classify_chunk_mobility_activity(2, 0, MobilityActivity::Hot, 0), MobilityActivity::Hot);
-        assert_eq!(classify_chunk_mobility_activity(5, 100, MobilityActivity::Asleep, 0), MobilityActivity::Hot);
+        assert_eq!(
+            classify_chunk_mobility_activity(2, 0, MobilityActivity::Hot, 0),
+            MobilityActivity::Hot
+        );
+        assert_eq!(
+            classify_chunk_mobility_activity(5, 100, MobilityActivity::Asleep, 0),
+            MobilityActivity::Hot
+        );
     }
 
     #[test]
     fn classifies_to_active_with_single_subscriber() {
-        assert_eq!(classify_chunk_mobility_activity(1, 0, MobilityActivity::Active, 0), MobilityActivity::Active);
-        assert_eq!(classify_chunk_mobility_activity(1, 100, MobilityActivity::Warm, 0), MobilityActivity::Active);
+        assert_eq!(
+            classify_chunk_mobility_activity(1, 0, MobilityActivity::Active, 0),
+            MobilityActivity::Active
+        );
+        assert_eq!(
+            classify_chunk_mobility_activity(1, 100, MobilityActivity::Warm, 0),
+            MobilityActivity::Active
+        );
     }
 
     #[test]
     fn classifies_to_warm_with_population_no_subscribers() {
-        assert_eq!(classify_chunk_mobility_activity(0, 5, MobilityActivity::Warm, 0), MobilityActivity::Warm);
+        assert_eq!(
+            classify_chunk_mobility_activity(0, 5, MobilityActivity::Warm, 0),
+            MobilityActivity::Warm
+        );
     }
 
     #[test]
     fn classifies_to_asleep_when_empty() {
-        assert_eq!(classify_chunk_mobility_activity(0, 0, MobilityActivity::Asleep, 0), MobilityActivity::Asleep);
+        assert_eq!(
+            classify_chunk_mobility_activity(0, 0, MobilityActivity::Asleep, 0),
+            MobilityActivity::Asleep
+        );
     }
 
     #[test]
     fn hysteresis_holds_previous_state_during_cooldown() {
-        assert_eq!(classify_chunk_mobility_activity(0, 5, MobilityActivity::Hot, 10), MobilityActivity::Hot);
+        assert_eq!(
+            classify_chunk_mobility_activity(0, 5, MobilityActivity::Hot, 10),
+            MobilityActivity::Hot
+        );
     }
 
     #[test]
     fn hysteresis_allows_transition_after_cooldown_expires() {
-        assert_eq!(classify_chunk_mobility_activity(0, 5, MobilityActivity::Hot, 0), MobilityActivity::Warm);
+        assert_eq!(
+            classify_chunk_mobility_activity(0, 5, MobilityActivity::Hot, 0),
+            MobilityActivity::Warm
+        );
     }
 
     #[test]
