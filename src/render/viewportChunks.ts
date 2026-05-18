@@ -1,4 +1,3 @@
-import { screenToWorld, type CameraState } from '../cameraController';
 import type { ChunkCoordDto } from '../backend/mobilityProtocol';
 
 export function chunkOf(x: number, y: number, chunkSize: number): { x: number; y: number } {
@@ -8,8 +7,15 @@ export function chunkOf(x: number, y: number, chunkSize: number): { x: number; y
   };
 }
 
+/// Compute the set of chunks intersecting the viewport, plus a `margin` ring,
+/// clamped to the world. The caller supplies `screenToTile` — a projection
+/// from a CSS screen pixel to mobility tile coords (the same coordinate
+/// system the backend uses for `Position` / `chunk_of`).
+///
+/// The isometric frontend composes `worldToGrid(screenToWorld(camera, p))`
+/// for this; a unit-camera test can pass the identity.
 export function visibleChunks(
-  camera: CameraState,
+  screenToTile: (screen: { x: number; y: number }) => { x: number; y: number },
   viewport: { width: number; height: number },
   world: { widthTiles: number; heightTiles: number },
   chunkSize: number,
@@ -22,8 +28,8 @@ export function visibleChunks(
     { x: viewport.width, y: viewport.height },
   ];
   const cornerChunks = screenCorners
-    .map((p) => screenToWorld(camera, p))
-    .map((w) => chunkOf(w.x, w.y, chunkSize));
+    .map(screenToTile)
+    .map((tile) => chunkOf(tile.x, tile.y, chunkSize));
 
   const xs = cornerChunks.map((c) => c.x);
   const ys = cornerChunks.map((c) => c.y);

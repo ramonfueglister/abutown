@@ -27,6 +27,7 @@ import {
 } from './cameraController';
 import { cleanupSpritePixels } from './render/spriteCleanup';
 import { shouldRenderDetail } from './render/detailRenderPolicy';
+import { iso as isoProject, worldToGrid as worldToGridShared } from './render/isoProjection';
 import {
   candidateVehicleSprites,
   screenRightLaneOffset,
@@ -143,6 +144,7 @@ type DistrictSeed = {
 const activeAssetPack = pak128AssetPack;
 const TILE_W = activeAssetPack.tile.width;
 const TILE_H = activeAssetPack.tile.height;
+const tileSize = { width: TILE_W, height: TILE_H };
 const CAMERA_EDGE_MARGIN = 8;
 const CAMERA_EDGE_SOFTNESS = 4;
 const CAMERA_MIN_SCALE = 0.24;
@@ -241,7 +243,9 @@ async function startRuntime(): Promise<void> {
         mobilityState = state;
       },
       viewport: {
-        getCamera: () => camera,
+        // Compose screen → render-world → tile so visibleChunks gets coords
+        // in the same space the backend's `chunk_of` math operates on.
+        getScreenToTile: () => (screen) => worldToGrid(screenToWorld(screen)),
         getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
         getWorldDims: () => ({
           widthTiles: zurichWorld.width,
@@ -1300,19 +1304,11 @@ function isStraightNorthSouth(mask: number): boolean {
 }
 
 function iso(coord: Coord): Coord {
-  return {
-    x: (coord.x - coord.y) * (TILE_W / 2),
-    y: (coord.x + coord.y) * (TILE_H / 2),
-  };
+  return isoProject(coord, tileSize);
 }
 
 function worldToGrid(point: Coord): Coord {
-  const projectedX = point.x / (TILE_W / 2);
-  const projectedY = point.y / (TILE_H / 2);
-  return {
-    x: (projectedY + projectedX) / 2,
-    y: (projectedY - projectedX) / 2,
-  };
+  return worldToGridShared(point, tileSize);
 }
 
 function buildStaticDrawables(): StaticDrawable[] {

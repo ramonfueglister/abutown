@@ -16,7 +16,6 @@ import {
   type MobilityOverlayState,
 } from './mobilityState';
 import { visibleChunks } from '../render/viewportChunks';
-import type { CameraState } from '../cameraController';
 
 export type MobilityBackendBridge = {
   state: () => MobilityOverlayState;
@@ -24,8 +23,13 @@ export type MobilityBackendBridge = {
   stop: () => void;
 };
 
+/// `getScreenToTile` returns a projection from CSS screen pixels to mobility
+/// tile coordinates (in the same units as the backend's `Position` / `chunk_of`
+/// math). For the isometric renderer this composes `worldToGrid` and
+/// `screenToWorld`; for tests it can be the identity. Returns `null` while
+/// the camera isn't ready yet.
 export type MobilityViewportGetters = {
-  getCamera: () => CameraState | null;
+  getScreenToTile: () => ((screen: { x: number; y: number }) => { x: number; y: number }) | null;
   getViewport: () => { width: number; height: number } | null;
   getWorldDims: () => { widthTiles: number; heightTiles: number; chunkSize: number };
 };
@@ -159,11 +163,11 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
       });
       const pollSubscription = () => {
         if (socket?.readyState !== WS_READY_STATE_OPEN) return;
-        const camera = options.viewport.getCamera();
+        const screenToTile = options.viewport.getScreenToTile();
         const view = options.viewport.getViewport();
-        if (!camera || !view) return;
+        if (!screenToTile || !view) return;
         const world = options.viewport.getWorldDims();
-        const visible = visibleChunks(camera, view, world, world.chunkSize, 1);
+        const visible = visibleChunks(screenToTile, view, world, world.chunkSize, 1);
         subscription?.update(visible);
       };
       pollSubscription(); // Initial subscribe immediately so the client doesn't wait the poll interval for entities.

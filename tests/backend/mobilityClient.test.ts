@@ -8,7 +8,9 @@ import {
 } from '../../src/backend/mobilityClient';
 import { mobilityDiagnostics } from '../../src/backend/mobilityState';
 import type { MobilitySnapshotDto, WorldSummaryDto } from '../../src/backend/mobilityProtocol';
-import { createCameraState, type CameraState } from '../../src/cameraController';
+type ScreenToTile = (screen: { x: number; y: number }) => { x: number; y: number };
+const identityScreenToTile: ScreenToTile = (s) => ({ x: s.x, y: s.y });
+const nullScreenToTile = null as unknown as ScreenToTile;
 
 type MockSocket = {
   readyState: number;
@@ -59,15 +61,15 @@ function mockWebSocketImpl(): { Impl: typeof WebSocket; sockets: MockSocket[] } 
 const TEST_WORLD = { widthTiles: 1024, heightTiles: 1024, chunkSize: 32 };
 
 function stubViewport(opts: {
-  camera?: CameraState | null;
+  screenToTile?: ScreenToTile | null;
   viewport?: { width: number; height: number } | null;
   world?: { widthTiles: number; heightTiles: number; chunkSize: number };
 }): MobilityViewportGetters {
-  let camera = opts.camera === undefined ? createCameraState({ x: 0, y: 0, scale: 1 }) : opts.camera;
-  let viewport = opts.viewport === undefined ? { width: 256, height: 256 } : opts.viewport;
+  const screenToTile = opts.screenToTile === undefined ? identityScreenToTile : opts.screenToTile;
+  const viewport = opts.viewport === undefined ? { width: 256, height: 256 } : opts.viewport;
   const world = opts.world ?? TEST_WORLD;
   return {
-    getCamera: () => camera,
+    getScreenToTile: () => screenToTile,
     getViewport: () => viewport,
     getWorldDims: () => world,
   };
@@ -289,7 +291,7 @@ describe('mobility backend client', () => {
     const bridge = connectMobilityBackend({
       fetchImpl: snapshotFetch as unknown as typeof fetch,
       WebSocketImpl: Impl,
-      viewport: stubViewport({ camera: null }),
+      viewport: stubViewport({ screenToTile: nullScreenToTile }),
       setIntervalImpl: setIntervalImpl as unknown as typeof setInterval,
     });
 
@@ -312,7 +314,7 @@ describe('mobility backend client', () => {
 
     let viewport = { width: 64, height: 64 }; // tiny → very few chunks
     const getters: MobilityViewportGetters = {
-      getCamera: () => createCameraState({ x: 0, y: 0, scale: 1 }),
+      getScreenToTile: () => identityScreenToTile,
       getViewport: () => viewport,
       getWorldDims: () => TEST_WORLD,
     };
