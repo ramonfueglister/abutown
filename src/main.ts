@@ -240,6 +240,15 @@ async function startRuntime(): Promise<void> {
       onState: (state) => {
         mobilityState = state;
       },
+      viewport: {
+        getCamera: () => camera,
+        getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+        getWorldDims: () => ({
+          widthTiles: zurichWorld.width,
+          heightTiles: zurichWorld.height,
+          chunkSize: zurichWorld.chunkSize,
+        }),
+      },
     });
     window.addEventListener('beforeunload', () => mobilityBackendBridge?.stop(), { once: true });
   } catch (error) {
