@@ -374,8 +374,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     if !connection.subscription.is_empty() {
         let runtime = state.runtime();
         let mut runtime = runtime.lock().await;
-        let empty = std::collections::HashSet::new();
-        runtime.update_chunk_subscribers(&connection.subscription, &empty);
+        runtime.apply_subscription_diff(std::iter::empty(), connection.subscription.iter());
     }
 }
 
@@ -384,28 +383,32 @@ async fn handle_client_message(
     message: &ClientMessageDto,
     connection: &mut ConnectionState,
 ) -> Option<MobilityDeltaDto> {
-    let before = connection.subscription.clone();
-    match message {
+    let (added, removed): (
+        Vec<sim_core::ids::ChunkCoord>,
+        Vec<sim_core::ids::ChunkCoord>,
+    ) = match message {
         ClientMessageDto::ChunkSubscribe(payload) => {
-            for coord in &payload.coords {
-                connection.subscription.insert(sim_core::ids::ChunkCoord {
-                    x: coord.x,
-                    y: coord.y,
-                });
-            }
+            let added: Vec<_> = payload
+                .coords
+                .iter()
+                .map(sim_core::ids::ChunkCoord::from)
+                .filter(|c| connection.subscription.insert(*c))
+                .collect();
+            (added, Vec::new())
         }
         ClientMessageDto::ChunkUnsubscribe(payload) => {
-            for coord in &payload.coords {
-                connection.subscription.remove(&sim_core::ids::ChunkCoord {
-                    x: coord.x,
-                    y: coord.y,
-                });
-            }
+            let removed: Vec<_> = payload
+                .coords
+                .iter()
+                .map(sim_core::ids::ChunkCoord::from)
+                .filter(|c| connection.subscription.remove(c))
+                .collect();
+            (Vec::new(), removed)
         }
-    }
+    };
     let runtime = state.runtime();
     let mut runtime = runtime.lock().await;
-    runtime.update_chunk_subscribers(&before, &connection.subscription);
+    runtime.apply_subscription_diff(&added, &removed);
     let dto = runtime.synthetic_mobility_delta_for_subscription(
         &connection.subscription,
         &mut connection.last_visible_agents,

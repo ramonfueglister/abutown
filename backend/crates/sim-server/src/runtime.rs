@@ -374,14 +374,14 @@ impl SimulationRuntime {
         )
     }
 
-    /// Forward a per-connection chunk-subscription diff into the mobility
+    /// Forward a per-connection chunk-subscription delta into the mobility
     /// world's `ChunkSubscribers` resource.
-    pub fn update_chunk_subscribers(
-        &mut self,
-        before: &std::collections::HashSet<sim_core::ids::ChunkCoord>,
-        after: &std::collections::HashSet<sim_core::ids::ChunkCoord>,
-    ) {
-        self.mobility.update_chunk_subscribers(before, after);
+    pub fn apply_subscription_diff<'a, A, R>(&mut self, added: A, removed: R)
+    where
+        A: IntoIterator<Item = &'a sim_core::ids::ChunkCoord>,
+        R: IntoIterator<Item = &'a sim_core::ids::ChunkCoord>,
+    {
+        self.mobility.apply_subscription_diff(added, removed);
     }
 
     pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {

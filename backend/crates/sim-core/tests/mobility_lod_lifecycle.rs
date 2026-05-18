@@ -1,23 +1,16 @@
 use sim_core::ids::{AgentId, ChunkCoord, LinkId};
-use sim_core::mobility::lod::MobilityActivity;
+use sim_core::mobility::lod::{ACTIVITY_HYSTERESIS_TICKS, MobilityActivity};
 use sim_core::mobility::{AgentMobilityState, AgentRecord, MobilityWorld, PlanStage};
-use std::collections::HashSet;
 
-/// Hot (2 subscribers) → Warm (0 subscribers, population remains) →
-/// Active (1 subscriber re-attaches, population re-promotes to entities).
-///
-/// "Asleep" is not exercised separately because the test seeds a single
-/// agent that is never removed; once the agent is demoted into a FlowCell,
-/// population stays > 0, which means the chunk stays Warm rather than
-/// Asleep. The Hot → Warm → Active path covers the demote / promote
-/// round trip we actually need.
+// One classify pass past the hysteresis window so the new activity has settled.
+const SETTLE_TICKS: u32 = ACTIVITY_HYSTERESIS_TICKS as u32 + 10;
+
 #[test]
 fn chunk_cycles_through_hot_warm_active() {
     let mut world = MobilityWorld::empty();
     let chunk = ChunkCoord { x: 0, y: 0 };
 
-    // Static agent in the chunk — walk speed 0 so it doesn't drift to a
-    // neighbouring chunk during the cooldown ticks.
+    // Walk speed 0 so the agent stays in this chunk for the whole test.
     world.set_link_polyline(LinkId("l:0".into()), vec![(5.0, 5.0), (15.0, 15.0)]);
     world.spawn_agent_from_record(AgentRecord {
         id: AgentId("a:1".into()),
@@ -33,11 +26,7 @@ fn chunk_cycles_through_hot_warm_active() {
     });
 
     // Two subscribers → Hot.
-    let empty: HashSet<ChunkCoord> = HashSet::new();
-    let mut one = HashSet::new();
-    one.insert(chunk);
-    world.update_chunk_subscribers(&empty, &one);
-    world.update_chunk_subscribers(&empty, &one);
+    world.apply_subscription_diff(&[chunk, chunk], std::iter::empty());
     world.tick_mobility();
     assert_eq!(
         world.activity_for_chunk(chunk),
@@ -45,11 +34,10 @@ fn chunk_cycles_through_hot_warm_active() {
         "two subscribers should drive chunk Hot on first classify tick",
     );
 
-    // Both unsubscribe → after cooldown (30) + one classify tick the chunk
-    // should fall through to Warm (population still > 0, no subscribers).
-    world.update_chunk_subscribers(&one, &empty);
-    world.update_chunk_subscribers(&one, &empty);
-    for _ in 0..40 {
+    // Both unsubscribe → after hysteresis the chunk falls to Warm (population
+    // > 0, no subscribers) and the agent is demoted into the FlowCell.
+    world.apply_subscription_diff(std::iter::empty(), &[chunk, chunk]);
+    for _ in 0..SETTLE_TICKS {
         world.tick_mobility();
     }
     assert_eq!(
@@ -57,8 +45,6 @@ fn chunk_cycles_through_hot_warm_active() {
         Some(MobilityActivity::Warm),
         "chunk should be Warm after cooldown with population but no subscribers",
     );
-
-    // Demote should have collapsed the agent into the flow cell.
     let cell = world
         .flow_cell_for_chunk(chunk)
         .expect("flow cell exists after demote");
@@ -68,9 +54,13 @@ fn chunk_cycles_through_hot_warm_active() {
         cell.population
     );
 
-    // Subscribe one → after cooldown the chunk should be Active.
-    world.update_chunk_subscribers(&empty, &one);
-    for _ in 0..40 {
+    // One subscriber re-attaches → after hysteresis the chunk promotes to
+    // Active and the population is re-spawned as discrete agents.
+    //
+    // Asleep is not exercised here: with one seeded agent population stays
+    // > 0, so the chunk holds at Warm rather than transitioning to Asleep.
+    world.apply_subscription_diff(&[chunk], std::iter::empty());
+    for _ in 0..SETTLE_TICKS {
         world.tick_mobility();
     }
     assert_eq!(
@@ -78,9 +68,6 @@ fn chunk_cycles_through_hot_warm_active() {
         Some(MobilityActivity::Active),
         "single subscriber after cooldown should promote chunk to Active",
     );
-
-    // And the population should have re-promoted into at least one discrete
-    // agent in the world.
     assert!(
         !world.agents().is_empty(),
         "agent re-promoted from flow cell into the world",

@@ -58,7 +58,6 @@ impl MobilityWorld {
         world.insert_resource(LinkPolylines::default());
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
-        // Phase 6 LOD resources
         world.insert_resource(ChunkActivities::default());
         world.insert_resource(ChunkActivityCooldowns::default());
         world.insert_resource(FlowCells::default());
@@ -114,7 +113,7 @@ impl serde::Serialize for MobilityWorld {
             .filter_map(|id| self.vehicle(id).map(|rec| (id, rec)))
             .collect();
 
-        // Sort chunk-keyed entries for deterministic output.
+        // Sort chunk-keyed entries — JSON output must round-trip byte-stably.
         let mut flow_cells: Vec<(crate::ids::ChunkCoord, &crate::mobility::lod::FlowCell)> = self
             .world
             .resource::<FlowCells>()
@@ -205,23 +204,24 @@ impl<'de> serde::Deserialize<'de> for MobilityWorld {
 }
 
 impl MobilityWorld {
-    /// Apply a diff of chunk subscriptions held by a single connection.
-    /// Increments for chunks newly in `after`, decrements for chunks dropped
-    /// from `before`. Entries that hit zero are removed.
-    pub fn update_chunk_subscribers(
-        &mut self,
-        before: &std::collections::HashSet<crate::ids::ChunkCoord>,
-        after: &std::collections::HashSet<crate::ids::ChunkCoord>,
-    ) {
+    /// Apply a subscription delta for a single connection: increment for each
+    /// chunk in `added`, saturating-decrement (and drop on zero) for each
+    /// chunk in `removed`. The caller is responsible for de-duplicating
+    /// against the connection's existing set if no-op messages matter.
+    pub fn apply_subscription_diff<'a, A, R>(&mut self, added: A, removed: R)
+    where
+        A: IntoIterator<Item = &'a crate::ids::ChunkCoord>,
+        R: IntoIterator<Item = &'a crate::ids::ChunkCoord>,
+    {
         let mut subs = self.world.resource_mut::<ChunkSubscribers>();
-        for added in after.difference(before) {
-            *subs.0.entry(*added).or_insert(0) += 1;
+        for coord in added {
+            *subs.0.entry(*coord).or_insert(0) += 1;
         }
-        for removed in before.difference(after) {
-            if let Some(entry) = subs.0.get_mut(removed) {
+        for coord in removed {
+            if let Some(entry) = subs.0.get_mut(coord) {
                 *entry = entry.saturating_sub(1);
                 if *entry == 0 {
-                    subs.0.remove(removed);
+                    subs.0.remove(coord);
                 }
             }
         }
@@ -1595,7 +1595,7 @@ mod tests {
     }
 
     #[test]
-    fn phase6_snapshot_with_flow_cells_round_trips() {
+    fn snapshot_with_flow_cells_and_activities_round_trips() {
         use crate::ids::ChunkCoord;
         use crate::mobility::lod::{FlowCell, MobilityActivity};
 

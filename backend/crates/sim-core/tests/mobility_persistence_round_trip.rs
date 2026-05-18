@@ -17,8 +17,8 @@ fn phase3_snapshot_round_trips_byte_for_byte() {
     let reserialized_value: serde_json::Value =
         serde_json::from_str(&reserialized).expect("our re-serialized output is valid JSON");
 
-    // Phase 6: re-serialize emits `flow_cells` and `chunk_activities` fields that
-    // didn't exist in the frozen Phase-3 fixture. Compare only the legacy fields.
+    // Re-serialize emits `flow_cells` and `chunk_activities` keys that the
+    // frozen Phase-3 fixture predates; compare only the legacy snapshot shape.
     for key in [
         "tick",
         "agents",

@@ -2,7 +2,6 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use sim_core::city_network::{CityNetwork, NetworkCoord, WorldTiles};
 use sim_core::ids::ChunkCoord;
 use sim_core::mobility::seed::{SeedDensity, from_network};
-use std::collections::HashSet;
 
 fn very_big_network() -> CityNetwork {
     let mut corridors = Vec::with_capacity(2000);
@@ -50,15 +49,10 @@ fn tick_100k_with_5_subscribed(c: &mut Criterion) {
             },
         );
 
-        let empty: HashSet<ChunkCoord> = HashSet::new();
-        let mut subscribed: HashSet<ChunkCoord> = HashSet::new();
-        for i in 0..5 {
-            subscribed.insert(ChunkCoord { x: 8 + i, y: 4 });
-        }
-        world.update_chunk_subscribers(&empty, &subscribed);
+        let subscribed: Vec<ChunkCoord> = (0..5).map(|i| ChunkCoord { x: 8 + i, y: 4 }).collect();
+        world.apply_subscription_diff(&subscribed, std::iter::empty());
 
-        // Warm up: let LOD demote the non-subscribed chunks into FlowCells
-        // and let the hysteresis cooldown settle.
+        // Warm-up: ensure non-subscribed chunks have demoted past hysteresis.
         for _ in 0..50 {
             world.tick_mobility();
         }

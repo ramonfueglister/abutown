@@ -16,6 +16,15 @@ impl From<ChunkCoord> for ChunkCoordDto {
     }
 }
 
+impl From<&ChunkCoordDto> for ChunkCoord {
+    fn from(value: &ChunkCoordDto) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StableEntityId(pub String);
 
