@@ -15,11 +15,19 @@ import {
   markMobilityDisconnected,
   type MobilityOverlayState,
 } from './mobilityState';
+import { visibleChunks } from '../render/viewportChunks';
+import type { CameraState } from '../cameraController';
 
 export type MobilityBackendBridge = {
   state: () => MobilityOverlayState;
   reconnect: () => void;
   stop: () => void;
+};
+
+export type MobilityViewportGetters = {
+  getCamera: () => CameraState | null;
+  getViewport: () => { width: number; height: number } | null;
+  getWorldDims: () => { widthTiles: number; heightTiles: number; chunkSize: number };
 };
 
 export type MobilityBackendBridgeOptions = {
@@ -32,6 +40,7 @@ export type MobilityBackendBridgeOptions = {
   now?: () => number;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
+  viewport: MobilityViewportGetters;
 };
 
 export type MobilitySnapshotOptions = {
@@ -72,7 +81,7 @@ export async function requireMobilitySnapshot(options: MobilitySnapshotOptions =
   return { state, tickPeriodMs };
 }
 
-export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {}): MobilityBackendBridge {
+export function connectMobilityBackend(options: MobilityBackendBridgeOptions): MobilityBackendBridge {
   const baseUrl = options.baseUrl ?? resolveMobilityBackendBaseUrl();
   const reconnectDelayMs = Math.max(500, options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS);
   const fetchImpl = resolveFetch(options);
@@ -85,6 +94,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
   let stopped = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let subscriptionInterval: ReturnType<typeof setInterval> | null = null;
 
   notify();
   void connect();
@@ -132,11 +142,18 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
     socket.onopen = () => {
       const subscription = createSubscriptionClient({
         send: (text) => socket?.send(text),
-        worldWidthTiles: 256,
-        worldHeightTiles: 256,
-        chunkSize: 32,
       });
-      subscription.start();
+      const pollSubscription = () => {
+        if (socket?.readyState !== WebSocket.OPEN) return;
+        const camera = options.viewport.getCamera();
+        const view = options.viewport.getViewport();
+        if (!camera || !view) return;
+        const world = options.viewport.getWorldDims();
+        const visible = visibleChunks(camera, view, world, world.chunkSize, 1);
+        subscription.update(visible);
+      };
+      pollSubscription(); // Initial subscribe immediately so the client doesn't wait 200 ms for entities.
+      subscriptionInterval = setInterval(pollSubscription, 200);
     };
 
     socket.onmessage = (event: MessageEvent<string>) => {
@@ -152,6 +169,10 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
     };
 
     socket.onclose = () => {
+      if (subscriptionInterval !== null) {
+        clearInterval(subscriptionInterval);
+        subscriptionInterval = null;
+      }
       if (stopped) return;
       markDisconnectedAndSchedule('Mobility websocket closed');
     };
@@ -176,6 +197,10 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions = {
   }
 
   function closeSocket(): void {
+    if (subscriptionInterval !== null) {
+      clearInterval(subscriptionInterval);
+      subscriptionInterval = null;
+    }
     if (!socket) return;
     socket.onclose = null;
     socket.onerror = null;
