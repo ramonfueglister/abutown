@@ -10,26 +10,21 @@ function key(coord: ChunkCoordDto): string {
   return `${coord.x},${coord.y}`;
 }
 
-function unkey(k: string): ChunkCoordDto {
-  const [x, y] = k.split(',').map((s) => Number.parseInt(s, 10));
-  return { x, y };
-}
-
 export function createSubscriptionClient(opts: {
   send: (text: string) => void;
 }): SubscriptionClient {
-  let current = new Set<string>();
+  let current = new Map<string, ChunkCoordDto>();
 
   return {
     update(visible) {
-      const next = new Set(visible.map(key));
+      const next = new Map(visible.map((coord) => [key(coord), coord]));
       const added: ChunkCoordDto[] = [];
       const removed: ChunkCoordDto[] = [];
-      for (const k of next) {
-        if (!current.has(k)) added.push(unkey(k));
+      for (const [k, coord] of next) {
+        if (!current.has(k)) added.push(coord);
       }
-      for (const k of current) {
-        if (!next.has(k)) removed.push(unkey(k));
+      for (const [k, coord] of current) {
+        if (!next.has(k)) removed.push(coord);
       }
       if (added.length > 0) {
         opts.send(encodeClientMessage({
@@ -48,7 +43,7 @@ export function createSubscriptionClient(opts: {
       current = next;
     },
     reset() {
-      current = new Set();
+      current = new Map();
     },
   };
 }
