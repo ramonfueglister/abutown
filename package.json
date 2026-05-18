@@ -8,7 +8,7 @@
     "dev:stack": "node scripts/run-dev-stack.mjs dev",
     "preview": "vite preview --host 127.0.0.1",
     "preview:stack": "node scripts/run-dev-stack.mjs preview",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/build.mjs",
     "assets:pak128": "node scripts/import-pak128-assets.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && playwright test",
