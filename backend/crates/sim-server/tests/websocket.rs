@@ -596,13 +596,12 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
     let (mut client, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let _ = client.next().await.unwrap().unwrap(); // hello
 
-    // Subscribe to (0,0) to activate agents (Position=0,0) + (4,4) to receive
-    // the delta (world_coord fallback places tiny_world agents there).
-    send_chunk_subscribe(
-        &mut client,
-        &[ChunkCoordDto { x: 0, y: 0 }, ChunkCoordDto { x: 4, y: 4 }],
-    )
-    .await;
+    // Subscribe only to (4,4), the chunk where seeded tiny_world agents live.
+    // (The previous chunk(0,0) workaround was needed because seeded agents had
+    // default Position(0,0), which caused LOD to mass-demote them to a single
+    // chunk before they ever ticked. Spawn-time Position init makes that
+    // workaround unnecessary.)
+    send_chunk_subscribe(&mut client, &[ChunkCoordDto { x: 4, y: 4 }]).await;
 
     let mut snapshot_seen = false;
     let mut delta_seen = false;

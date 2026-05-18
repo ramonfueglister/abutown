@@ -118,18 +118,35 @@ const checks = {
   got_chunk_snapshots_on_subscribe: recv.mobility_chunk_snapshot.count > 0,
   one_snapshot_per_subscribed_chunk:
     Object.keys(recv.mobility_chunk_snapshot.chunks).length >= 9, // at least a 3×3 visible area
+  // Re-enabled after the spawn-time Position init fix: seeded agents are
+  // now LOD-classified into their real chunks (not all into chunk(0,0))
+  // so subscribed chunks actually receive per-tick deltas.
+  got_chunk_deltas_per_tick: recv.mobility_chunk_delta.count > 0,
+  // Client gets real entity data within the smoke window — either via a
+  // snapshot frame or via per-tick deltas. The previous bug let empty
+  // payloads flow undetected because we only counted frame counts.
+  //
+  // Note: snapshots-on-subscribe are typically EMPTY for chunks whose
+  // population sits in a FlowCell (because the snapshot is built before
+  // promote_warm_to_active respawns from the FlowCell on the next tick).
+  // The chunk_delta on the following tick carries the entities. Both paths
+  // would be acceptable for this assertion.
+  client_receives_entity_data: receivedFrames.some((f) => {
+    try {
+      const m = JSON.parse(f);
+      if (m.type === 'mobility_chunk_snapshot')
+        return m.agents.length > 0 || m.vehicles.length > 0;
+      if (m.type === 'mobility_chunk_delta')
+        return m.changed_agents.length > 0 || m.changed_vehicles.length > 0;
+      return false;
+    } catch { return false; }
+  }),
   // Old global delta is gone (state of the art mandate).
   no_legacy_mobility_delta: recv.mobility_delta_LEGACY === 0,
   // Frontend wiring works end-to-end.
   client_sent_chunk_subscribe: sent.chunk_subscribe > 0,
   pan_added_more_frames: afterPanReceivedCount > initialReceivedCount,
   no_console_errors: consoleErrors.length === 0,
-  // NOTE: `mobility_chunk_delta` per-tick frames are not asserted here because
-  // their production depends on the Phase-6 LOD classification using the
-  // agent's ECS Position component — which is (0,0) for seeded agents until
-  // compute_world_coord_system runs. A camera that doesn't cover chunk (0,0)
-  // never triggers LOD activation. The wire path itself is verified by the
-  // backend integration test `subscribed_chunk_receives_mobility_chunk_delta_each_tick`.
 };
 
 const summary = {

@@ -27,6 +27,21 @@ pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
     }
 }
 
+/// Resolve a link's polyline points either from the registered
+/// `LinkPolylines` resource or from the hardcoded fallback geometry in
+/// `mobility_geometry::link_geometry`. Mirrors the per-instance helper
+/// `MobilityWorld::resolve_link_polyline` but as a free function so the
+/// spawn-time helpers below can use it without a `&MobilityWorld`.
+fn resolve_link_points(
+    link_id: &LinkId,
+    link_polylines: &resources::LinkPolylines,
+) -> Option<Vec<(f32, f32)>> {
+    if let Some(points) = link_polylines.0.get(link_id) {
+        return Some(points.clone());
+    }
+    crate::mobility_geometry::link_geometry(&link_id.0).map(|g| g.points)
+}
+
 /// World coord for an agent given its mobility state. Returns `None` for
 /// states where there is no unambiguous spawn-time coord (`InVehicle`,
 /// `AtActivity`).
@@ -34,6 +49,11 @@ pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
 /// Used by both `compute_world_coord_system` (per-tick) and
 /// `spawn_agent_from_record` (one-shot at spawn time) so LOD systems see
 /// the real position immediately on Tick 1 instead of the default `(0,0)`.
+///
+/// Mirrors `MobilityWorld::world_coord_for_agent`'s fallback chain: stop
+/// states resolve via `stop_geometry` if the StopRecord isn't registered;
+/// walking states resolve via `resolve_link_points` which falls back to
+/// the hardcoded `link_geometry`.
 pub fn agent_world_coord(
     state: &AgentMobilityState,
     routes: &resources::Routes,
@@ -41,24 +61,31 @@ pub fn agent_world_coord(
     link_polylines: &resources::LinkPolylines,
 ) -> Option<(f32, f32)> {
     match state {
-        AgentMobilityState::Walking { link_id, progress } => link_polylines
-            .0
-            .get(link_id)
-            .map(|points| crate::mobility_geometry::world_coord_at_progress_slice(points, *progress)),
+        AgentMobilityState::Walking { link_id, progress } => resolve_link_points(link_id, link_polylines)
+            .map(|points| crate::mobility_geometry::world_coord_at_progress_slice(&points, *progress)),
         AgentMobilityState::WaitingAtStop { stop_id }
         | AgentMobilityState::Boarding { stop_id, .. }
-        | AgentMobilityState::Alighting { stop_id, .. } => stops.0.get(stop_id).and_then(|stop| {
-            let route = routes.0.get(&stop.route_id)?;
-            let link_id = route.links.get(stop.link_index)?;
-            let points = link_polylines.0.get(link_id)?;
-            Some(crate::mobility_geometry::world_coord_at_progress_slice(points, stop.progress))
-        }),
+        | AgentMobilityState::Alighting { stop_id, .. } => {
+            // Prefer the StopRecord (rebuilds the coord through route+link+polyline) but
+            // fall back to the hardcoded stop_geometry table when the stop isn't registered.
+            stops
+                .0
+                .get(stop_id)
+                .and_then(|stop| {
+                    let route = routes.0.get(&stop.route_id)?;
+                    let link_id = route.links.get(stop.link_index)?;
+                    let points = resolve_link_points(link_id, link_polylines)?;
+                    Some(crate::mobility_geometry::world_coord_at_progress_slice(&points, stop.progress))
+                })
+                .or_else(|| crate::mobility_geometry::stop_geometry(&stop_id.0).map(|g| g.coord))
+        }
         _ => None,
     }
 }
 
 /// World coord for a vehicle given its route position. Returns `None` if
-/// the route or link is missing from resources.
+/// neither the registered route+polyline nor the hardcoded fallback
+/// `link_geometry` can resolve a coord.
 pub fn vehicle_world_coord(
     route_position: &components::RoutePosition,
     routes: &resources::Routes,
@@ -66,8 +93,8 @@ pub fn vehicle_world_coord(
 ) -> Option<(f32, f32)> {
     let route = routes.0.get(&route_position.route_id)?;
     let link_id = route.links.get(route_position.link_index)?;
-    let points = link_polylines.0.get(link_id)?;
-    Some(crate::mobility_geometry::world_coord_at_progress_slice(points, route_position.progress))
+    let points = resolve_link_points(link_id, link_polylines)?;
+    Some(crate::mobility_geometry::world_coord_at_progress_slice(&points, route_position.progress))
 }
 
 fn stable_index(id: &str) -> u32 {
