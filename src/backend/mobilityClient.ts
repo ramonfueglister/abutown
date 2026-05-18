@@ -60,6 +60,15 @@ const DEFAULT_TICK_PERIOD_MS = 100;
 
 const DEFAULT_RECONNECT_DELAY_MS = 2500;
 
+/// Interval between viewport-subscription recomputations. Small enough that a
+/// pan/zoom is reflected within a frame the user notices, large enough to bound
+/// per-client WS traffic at ~5 diff messages / sec.
+export const SUBSCRIPTION_POLL_INTERVAL_MS = 200;
+
+/// `WebSocket.OPEN` per the spec. Hardcoded so the polling guard doesn't read
+/// a browser-only global (vitest runs in the `node` environment).
+const WS_READY_STATE_OPEN = 1;
+
 export function resolveMobilityBackendBaseUrl(envUrl?: unknown): string {
   return resolveBackendBaseUrl(envUrl);
 }
@@ -149,7 +158,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
         send: (text) => socket?.send(text),
       });
       const pollSubscription = () => {
-        if (socket?.readyState !== WebSocket.OPEN) return;
+        if (socket?.readyState !== WS_READY_STATE_OPEN) return;
         const camera = options.viewport.getCamera();
         const view = options.viewport.getViewport();
         if (!camera || !view) return;
@@ -157,8 +166,8 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
         const visible = visibleChunks(camera, view, world, world.chunkSize, 1);
         subscription?.update(visible);
       };
-      pollSubscription(); // Initial subscribe immediately so the client doesn't wait 200 ms for entities.
-      subscriptionInterval = setIntervalFn(pollSubscription, 200);
+      pollSubscription(); // Initial subscribe immediately so the client doesn't wait the poll interval for entities.
+      subscriptionInterval = setIntervalFn(pollSubscription, SUBSCRIPTION_POLL_INTERVAL_MS);
     };
 
     socket.onmessage = (event: MessageEvent<string>) => {
