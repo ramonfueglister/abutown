@@ -22,7 +22,7 @@ describe('visibleChunks', () => {
   const chunkSize = 32;
   const viewport = { width: 256, height: 256 };
 
-  it('returns the chunk under a camera centred on world origin at scale 1, with 0 margin', () => {
+  it('returns all 64 chunks when the entire world fits the viewport at scale 1, margin 0', () => {
     const camera = createCameraState({ x: 0, y: 0, scale: 1 });
     const result = visibleChunks(camera, viewport, world, chunkSize, 0);
     expect(result).toHaveLength(64);
@@ -53,7 +53,9 @@ describe('visibleChunks', () => {
     const zero = visibleChunks(camera, viewport, world, chunkSize, 0);
     const one = visibleChunks(camera, viewport, world, chunkSize, 1);
     expect(zero.length).toBeLessThan(one.length);
-    expect(one.length).toBeLessThanOrEqual(9);
+    const visibleChunkCount = 1;
+    const maxWithRing = (visibleChunkCount + 1 * 2) * (visibleChunkCount + 1 * 2); // (1 + 2*margin)^2 per axis
+    expect(one.length).toBeLessThanOrEqual(maxWithRing);
   });
 
   it('emits no duplicate chunk coords', () => {
