@@ -1,7 +1,10 @@
 use abutown_protocol::ChunkCoordDto;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+// `Ord` is x-major lexicographic (field-declaration order). All ChunkCoord
+// sort sites — snapshot key order, mobility serde tuple lists — use this
+// single ordering for byte-stable output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ChunkCoord {
     pub x: i32,
     pub y: i32,

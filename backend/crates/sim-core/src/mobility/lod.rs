@@ -56,7 +56,7 @@ mod chunk_keyed_map {
         ser: S,
     ) -> Result<S::Ok, S::Error> {
         let mut entries: Vec<(ChunkCoord, f32)> = map.iter().map(|(k, v)| (*k, *v)).collect();
-        entries.sort_unstable_by_key(|(c, _)| (c.x, c.y));
+        entries.sort_unstable_by_key(|(c, _)| *c);
         entries.serialize(ser)
     }
 

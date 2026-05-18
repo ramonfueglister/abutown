@@ -121,7 +121,7 @@ impl serde::Serialize for MobilityWorld {
             .iter()
             .map(|(k, v)| (*k, v))
             .collect();
-        flow_cells.sort_by_key(|(c, _)| (c.x, c.y));
+        flow_cells.sort_unstable_by_key(|(c, _)| *c);
         let mut chunk_activities: Vec<(
             crate::ids::ChunkCoord,
             crate::mobility::lod::MobilityActivity,
@@ -132,7 +132,7 @@ impl serde::Serialize for MobilityWorld {
             .iter()
             .map(|(k, v)| (*k, *v))
             .collect();
-        chunk_activities.sort_by_key(|(c, _)| (c.x, c.y));
+        chunk_activities.sort_unstable_by_key(|(c, _)| *c);
 
         WorldRepr {
             tick: self.tick(),

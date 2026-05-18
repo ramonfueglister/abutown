@@ -108,7 +108,7 @@ impl InMemoryChunkSnapshotStore {
 
     pub fn snapshot_coords(&self) -> Vec<ChunkCoord> {
         let mut coords: Vec<ChunkCoord> = self.snapshots.keys().copied().collect();
-        coords.sort_by_key(|coord| (coord.y, coord.x));
+        coords.sort_unstable();
         coords
     }
 }
