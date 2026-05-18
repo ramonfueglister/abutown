@@ -143,14 +143,9 @@ impl AppState {
             interval.tick().await;
             loop {
                 interval.tick().await;
-                // NEW (Task 7): per-chunk fan-out; this is now THE mobility ticker.
-                // `tick_world_mobility` is called here under write-lock, so the
-                // old `next_mobility_delta` path below MUST NOT call tick_mobility
-                // again — we only emit `next_pulse` from the legacy broadcast now.
+                // Per-chunk fan-out: tick mobility and broadcast deltas to subscribed chunk channels.
                 tick_and_fan_out(&state).await;
-                // OLD (legacy until Task 8): broadcast only the tile pulse.
-                // The MobilityDelta half of next_server_messages() is intentionally
-                // dropped here to prevent a double-tick.
+                // Broadcast tile pulse to all connected clients via the global broadcast channel.
                 let pulse = {
                     let runtime_arc = state.runtime();
                     let mut runtime = runtime_arc.write().await;
@@ -369,8 +364,6 @@ async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl 
 
 struct ConnectionState {
     subscription: std::collections::HashSet<sim_core::ids::ChunkCoord>,
-    last_visible_agents: std::collections::HashSet<abutown_protocol::EntityId>,
-    last_visible_vehicles: std::collections::HashSet<abutown_protocol::EntityId>,
     chunk_streams: StreamMap<sim_core::ids::ChunkCoord, BroadcastStream<MobilityChunkDeltaDto>>,
 }
 
@@ -378,8 +371,6 @@ impl ConnectionState {
     fn new() -> Self {
         Self {
             subscription: std::collections::HashSet::new(),
-            last_visible_agents: std::collections::HashSet::new(),
-            last_visible_vehicles: std::collections::HashSet::new(),
             chunk_streams: StreamMap::new(),
         }
     }
@@ -455,30 +446,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                let outbound = match message {
-                    ServerMessageDto::MobilityDelta(raw_delta) => {
-                        let dto = {
-                            let runtime = state.runtime();
-                            let runtime = runtime.read().await;
-                            runtime.filtered_mobility_delta_from_dto(
-                                &raw_delta,
-                                &connection.subscription,
-                                &mut connection.last_visible_agents,
-                                &mut connection.last_visible_vehicles,
-                            )
-                        };
-                        if dto.changed_agents.is_empty()
-                            && dto.changed_vehicles.is_empty()
-                            && dto.left_agents.is_empty()
-                            && dto.left_vehicles.is_empty()
-                        {
-                            continue;
-                        }
-                        ServerMessageDto::MobilityDelta(dto)
-                    }
-                    other => other,
-                };
-                if send_server_message(&mut socket, outbound).await.is_err() {
+                if send_server_message(&mut socket, message).await.is_err() {
                     break;
                 }
             }
@@ -627,20 +595,6 @@ async fn handle_client_message(
                     let snapshot = runtime.mobility().build_chunk_snapshot(*coord);
                     let dto = chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick);
                     out.push(ServerMessageDto::MobilityChunkSnapshot(dto));
-                }
-
-                // Keep the old synthetic-delta path running in parallel (Task 8 will remove it).
-                let synthetic = runtime.synthetic_mobility_delta_for_subscription(
-                    &connection.subscription,
-                    &mut connection.last_visible_agents,
-                    &mut connection.last_visible_vehicles,
-                );
-                if !synthetic.changed_agents.is_empty()
-                    || !synthetic.changed_vehicles.is_empty()
-                    || !synthetic.left_agents.is_empty()
-                    || !synthetic.left_vehicles.is_empty()
-                {
-                    out.push(ServerMessageDto::MobilityDelta(synthetic));
                 }
             }
         }

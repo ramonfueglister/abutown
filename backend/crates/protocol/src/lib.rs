@@ -152,7 +152,6 @@ pub struct ChunkUnsubscribeDto {
 pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
-    MobilityDelta(MobilityDeltaDto),
     MobilityChunkDelta(MobilityChunkDeltaDto),
     MobilityChunkSnapshot(MobilityChunkSnapshotDto),
     WorldEvent { event: WorldEventDto },
@@ -186,18 +185,6 @@ pub struct MobilitySnapshotDto {
     pub stops: Vec<StopMobilityDto>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MobilityDeltaDto {
-    pub protocol_version: u16,
-    pub world_id: WorldId,
-    pub tick: u64,
-    pub changed_agents: Vec<AgentMobilityDto>,
-    pub changed_vehicles: Vec<VehicleMobilityDto>,
-    #[serde(default)]
-    pub left_agents: Vec<EntityId>,
-    #[serde(default)]
-    pub left_vehicles: Vec<EntityId>,
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MobilityChunkDeltaDto {
@@ -512,40 +499,6 @@ mod tests {
         assert_eq!(json["stops"][0]["id"], "stop:old-town");
     }
 
-    #[test]
-    fn websocket_mobility_delta_serializes_with_type_tag() {
-        let message = ServerMessageDto::MobilityDelta(MobilityDeltaDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 8,
-            changed_agents: vec![AgentMobilityDto {
-                id: EntityId("agent:pedestrian:0".to_string()),
-                state: AgentMobilityStateDto::WaitingAtStop {
-                    stop_id: "stop:old-town".to_string(),
-                },
-                plan_cursor: 0,
-                world_coord: WorldCoordDto { x: 0.0, y: 0.0 },
-                direction: DirectionDto::E,
-                sprite_key: "pedestrian:0".to_string(),
-            }],
-            changed_vehicles: vec![],
-            left_agents: vec![],
-            left_vehicles: vec![],
-        });
-
-        let json = serde_json::to_value(&message).expect("mobility delta serializes");
-
-        assert_eq!(json["type"], "mobility_delta");
-        assert_eq!(json["tick"], 8);
-        assert_eq!(
-            json["changed_agents"][0]["state"]["type"],
-            "waiting_at_stop"
-        );
-        assert_eq!(
-            json["changed_agents"][0]["state"]["stop_id"],
-            "stop:old-town"
-        );
-    }
 
     #[test]
     fn client_message_chunk_subscribe_round_trips() {
@@ -572,37 +525,6 @@ mod tests {
         assert_eq!(back, msg);
     }
 
-    #[test]
-    fn mobility_delta_dto_serializes_with_left_fields() {
-        let dto = MobilityDeltaDto {
-            protocol_version: 1,
-            world_id: WorldId("w".to_string()),
-            tick: 7,
-            changed_agents: vec![],
-            changed_vehicles: vec![],
-            left_agents: vec![EntityId("agent:walk:1".to_string())],
-            left_vehicles: vec![EntityId("vehicle:car:0:0".to_string())],
-        };
-        let json = serde_json::to_value(&dto).unwrap();
-        assert_eq!(json["left_agents"].as_array().unwrap().len(), 1);
-        assert_eq!(json["left_vehicles"].as_array().unwrap().len(), 1);
-        let back: MobilityDeltaDto = serde_json::from_value(json).unwrap();
-        assert_eq!(back, dto);
-    }
-
-    #[test]
-    fn mobility_delta_dto_accepts_missing_left_fields_for_backward_compat() {
-        let json = serde_json::json!({
-            "protocol_version": 1,
-            "world_id": "w",
-            "tick": 0,
-            "changed_agents": [],
-            "changed_vehicles": []
-        });
-        let dto: MobilityDeltaDto = serde_json::from_value(json).unwrap();
-        assert_eq!(dto.left_agents, Vec::<EntityId>::new());
-        assert_eq!(dto.left_vehicles, Vec::<EntityId>::new());
-    }
 
     #[test]
     fn world_coord_dto_round_trips() {

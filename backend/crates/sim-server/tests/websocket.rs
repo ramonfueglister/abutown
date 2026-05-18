@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use abutown_protocol::{
-    ChunkCoordDto, ChunkSubscribeDto, ClientCommandDto, ClientMessageDto, PROTOCOL_VERSION,
-    ServerMessageDto, SetTileKindCommandDto, TileKindDto, TilePulseDeltaDto, WorldEventDto,
-    WorldId,
+    ChunkCoordDto, ChunkSubscribeDto, ClientCommandDto, ClientMessageDto, MobilityChunkSnapshotDto,
+    PROTOCOL_VERSION, ServerMessageDto, SetTileKindCommandDto, TileKindDto, TilePulseDeltaDto,
+    WorldEventDto, WorldId,
 };
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -45,9 +45,6 @@ async fn websocket_sends_hello_and_tile_pulse() {
     assert!(matches!(hello, ServerMessageDto::Hello(_)));
 
     subscribe_to_seeded_chunks(&mut stream).await;
-    // Subscribe now emits one MobilityChunkSnapshot per subscribed chunk first,
-    // then the synthetic MobilityDelta. Drain until we find the delta.
-    let _synthetic = read_next_mobility_delta(&mut stream).await;
 
     // 10 Hz tick: the first tile pulse arrives within roughly one tick period.
     // Use 250 ms to absorb scheduler jitter on slow CI without weakening intent.
@@ -138,7 +135,7 @@ async fn websocket_clients_receive_the_same_broadcast_tick() {
 }
 
 #[tokio::test]
-async fn websocket_sends_mobility_deltas_after_hello() {
+async fn websocket_sends_mobility_snapshots_after_subscribe() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -158,14 +155,20 @@ async fn websocket_sends_mobility_deltas_after_hello() {
 
     subscribe_to_seeded_chunks(&mut stream).await;
 
-    // The synthetic mobility delta from the subscribe carries the seeded
-    // pedestrian agents (walking on link:walk:default which crosses chunks
-    // (4,4) and (5,4)) as `changed_agents`.
-    let mobility_delta = read_next_mobility_delta(&mut stream).await;
-    assert_eq!(mobility_delta.world_id.0, "abutown-main");
+    // Subscribe emits one MobilityChunkSnapshot per chunk. Collect all three.
+    let mut snapshots: Vec<MobilityChunkSnapshotDto> = Vec::new();
+    while snapshots.len() < 3 {
+        let msg = read_server_message(&mut stream).await;
+        if let ServerMessageDto::MobilityChunkSnapshot(snap) = msg {
+            assert_eq!(snap.world_id.0, "abutown-main");
+            snapshots.push(snap);
+        }
+    }
+    // At least one snapshot must carry agents (tiny_world has walking agents in these chunks).
+    let total_agents: usize = snapshots.iter().map(|s| s.agents.len()).sum();
     assert!(
-        !mobility_delta.changed_agents.is_empty(),
-        "synthetic delta must include newly visible agents in the subscribed chunks"
+        total_agents > 0,
+        "at least one chunk snapshot must include agents in the subscribed chunks"
     );
 
     server.abort();
@@ -331,7 +334,7 @@ where
     }
 }
 
-async fn read_next_mobility_delta<S>(stream: &mut S) -> abutown_protocol::MobilityDeltaDto
+async fn read_next_chunk_snapshot<S>(stream: &mut S) -> MobilityChunkSnapshotDto
 where
     S: futures_util::Stream<
             Item = Result<
@@ -342,8 +345,8 @@ where
 {
     loop {
         let message = read_server_message(stream).await;
-        if let ServerMessageDto::MobilityDelta(delta) = message {
-            return delta;
+        if let ServerMessageDto::MobilityChunkSnapshot(snap) = message {
+            return snap;
         }
     }
 }
@@ -443,22 +446,21 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
     let _ = read_server_message(&mut client_b).await; // drain hello
     send_chunk_subscribe(&mut client_b, &[ChunkCoordDto { x: 5, y: 4 }]).await;
 
-    // The synthetic delta on subscribe carries all entities currently in the
-    // subscribed chunk — read one delta from each client.
-    let delta_a = read_next_mobility_delta(&mut client_a).await;
-    let delta_b = read_next_mobility_delta(&mut client_b).await;
+    // Subscribe emits one MobilityChunkSnapshot per subscribed chunk — read it.
+    let snap_a = read_next_chunk_snapshot(&mut client_a).await;
+    let snap_b = read_next_chunk_snapshot(&mut client_b).await;
 
-    let ids_a: std::collections::HashSet<String> = delta_a
-        .changed_agents
+    let ids_a: std::collections::HashSet<String> = snap_a
+        .agents
         .iter()
         .map(|a| a.id.0.clone())
-        .chain(delta_a.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .chain(snap_a.vehicles.iter().map(|v| v.id.0.clone()))
         .collect();
-    let ids_b: std::collections::HashSet<String> = delta_b
-        .changed_agents
+    let ids_b: std::collections::HashSet<String> = snap_b
+        .agents
         .iter()
         .map(|a| a.id.0.clone())
-        .chain(delta_b.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .chain(snap_b.vehicles.iter().map(|v| v.id.0.clone()))
         .collect();
 
     // Each client must receive at least one entity — otherwise the test is vacuous.
@@ -471,7 +473,7 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
         "client B should see entities in chunk (5,4)"
     );
 
-    // The AoI filter must produce disjoint sets.
+    // Per-chunk snapshots carry only entities in that chunk — sets are disjoint by construction.
     assert!(
         ids_a.intersection(&ids_b).next().is_none(),
         "client A and client B should see disjoint entity sets (A={ids_a:?}, B={ids_b:?})",
@@ -487,9 +489,8 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
     // chunk_center(4,4) to chunk_center(4,5), so vehicle:seed:3 (progress 0.75)
     // lands in chunk (4,5). Three fully disjoint entity sets — one per chunk.
     //
-    // This test exercises the RwLock read-side parallelism introduced in Task 5:
-    // three concurrent readers all filter the same shared subscription map
-    // without serialising each other.
+    // This test exercises the per-chunk channel architecture: each client
+    // subscribes to a distinct chunk and receives only entities in that chunk.
     let app = build_app_with_runtime(runtime_with_seeded_mobility());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -513,29 +514,28 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
     let _ = read_server_message(&mut client_c).await; // drain hello
     send_chunk_subscribe(&mut client_c, &[ChunkCoordDto { x: 4, y: 5 }]).await;
 
-    // The synthetic delta on subscribe carries all entities currently in the
-    // subscribed chunk — read one delta from each client.
-    let delta_a = read_next_mobility_delta(&mut client_a).await;
-    let delta_b = read_next_mobility_delta(&mut client_b).await;
-    let delta_c = read_next_mobility_delta(&mut client_c).await;
+    // Subscribe emits one MobilityChunkSnapshot per subscribed chunk — read one per client.
+    let snap_a = read_next_chunk_snapshot(&mut client_a).await;
+    let snap_b = read_next_chunk_snapshot(&mut client_b).await;
+    let snap_c = read_next_chunk_snapshot(&mut client_c).await;
 
-    let ids_a: std::collections::HashSet<String> = delta_a
-        .changed_agents
+    let ids_a: std::collections::HashSet<String> = snap_a
+        .agents
         .iter()
         .map(|a| a.id.0.clone())
-        .chain(delta_a.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .chain(snap_a.vehicles.iter().map(|v| v.id.0.clone()))
         .collect();
-    let ids_b: std::collections::HashSet<String> = delta_b
-        .changed_agents
+    let ids_b: std::collections::HashSet<String> = snap_b
+        .agents
         .iter()
         .map(|a| a.id.0.clone())
-        .chain(delta_b.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .chain(snap_b.vehicles.iter().map(|v| v.id.0.clone()))
         .collect();
-    let ids_c: std::collections::HashSet<String> = delta_c
-        .changed_agents
+    let ids_c: std::collections::HashSet<String> = snap_c
+        .agents
         .iter()
         .map(|a| a.id.0.clone())
-        .chain(delta_c.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .chain(snap_c.vehicles.iter().map(|v| v.id.0.clone()))
         .collect();
 
     // Each client must receive at least one entity — otherwise the test is vacuous.
@@ -552,7 +552,7 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
         "client C should see entities in chunk (4,5)"
     );
 
-    // The AoI filter must produce pairwise disjoint sets.
+    // Per-chunk snapshots carry only entities in that chunk — sets are disjoint by construction.
     assert!(
         ids_a.intersection(&ids_b).next().is_none(),
         "client A and client B should see disjoint entity sets (A={ids_a:?}, B={ids_b:?})",

@@ -1,6 +1,6 @@
 use abutown_protocol::{
     ChunkCoordDto, ChunkSnapshotDto, ClientCommandDto, CommandAcceptedDto, HealthResponse,
-    MobilityDeltaDto, MobilitySnapshotDto, PROTOCOL_VERSION, ServerHelloDto, ServerMessageDto,
+    MobilitySnapshotDto, PROTOCOL_VERSION, ServerHelloDto, ServerMessageDto,
     SetTileKindCommandDto, TileKindSetEventDto, TilePulseDeltaDto, WorldEventDto, WorldId,
     WorldSummaryDto,
 };
@@ -8,7 +8,7 @@ use sim_core::{
     chunk::{Chunk, ChunkError, EventApplyError, SnapshotDecodeError},
     events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
-    mobility::{MobilityWorld, build_mobility_delta_dto, build_mobility_snapshot_dto},
+    mobility::{MobilityWorld, build_mobility_snapshot_dto},
     persistence::{
         ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore,
     },
@@ -133,8 +133,11 @@ impl SimulationRuntime {
         self.world_id = WorldId(world_id.to_string());
     }
 
-    pub fn next_mobility_delta_for_test(&mut self) -> MobilityDeltaDto {
-        self.next_mobility_delta()
+    /// Advance the mobility world by one tick (discards the per-chunk delta).
+    /// Used by tests that need to advance simulation state without going through
+    /// the full fan-out pipeline.
+    pub fn advance_mobility_tick_for_test(&mut self) {
+        let _ = self.mobility.tick_mobility();
     }
 
     pub fn mobility_world_clone_for_test(&self) -> MobilityWorld {
@@ -295,82 +298,6 @@ impl SimulationRuntime {
         build_mobility_snapshot_dto(&self.world_id, self.mobility.tick(), &self.mobility)
     }
 
-    pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
-        let per_chunk = self.mobility.tick_mobility();
-        // Glue: flatten per-chunk map back into a global delta so the old
-        // broadcast path keeps working until Task 8 deletes it.
-        let mut changed_agents = Vec::new();
-        let mut changed_vehicles = Vec::new();
-        for delta in per_chunk.into_values() {
-            changed_agents.extend(delta.changed_agents);
-            changed_vehicles.extend(delta.changed_vehicles);
-        }
-        let delta = sim_core::mobility::MobilityDelta {
-            changed_agents,
-            changed_vehicles,
-        };
-        build_mobility_delta_dto(&self.world_id, self.mobility.tick(), &self.mobility, &delta)
-    }
-
-    pub fn filtered_mobility_delta_from_dto(
-        &self,
-        raw_delta_dto: &abutown_protocol::MobilityDeltaDto,
-        subscription: &std::collections::HashSet<sim_core::ids::ChunkCoord>,
-        last_visible_agents: &mut std::collections::HashSet<abutown_protocol::EntityId>,
-        last_visible_vehicles: &mut std::collections::HashSet<abutown_protocol::EntityId>,
-    ) -> abutown_protocol::MobilityDeltaDto {
-        let changed_agents: Vec<sim_core::mobility::AgentRecord> = raw_delta_dto
-            .changed_agents
-            .iter()
-            .filter_map(|dto| {
-                self.mobility
-                    .agent(&sim_core::ids::AgentId(dto.id.0.clone()))
-            })
-            .collect();
-        let changed_vehicles: Vec<sim_core::mobility::VehicleRecord> = raw_delta_dto
-            .changed_vehicles
-            .iter()
-            .filter_map(|dto| {
-                self.mobility
-                    .vehicle(&sim_core::ids::VehicleId(dto.id.0.clone()))
-            })
-            .collect();
-        let delta = sim_core::mobility::MobilityDelta {
-            changed_agents,
-            changed_vehicles,
-        };
-        sim_core::mobility::build_filtered_mobility_delta_dto(
-            &self.world_id,
-            self.mobility.tick(),
-            &self.mobility,
-            &delta,
-            subscription,
-            last_visible_agents,
-            last_visible_vehicles,
-        )
-    }
-
-    pub fn synthetic_mobility_delta_for_subscription(
-        &self,
-        subscription: &std::collections::HashSet<sim_core::ids::ChunkCoord>,
-        last_visible_agents: &mut std::collections::HashSet<abutown_protocol::EntityId>,
-        last_visible_vehicles: &mut std::collections::HashSet<abutown_protocol::EntityId>,
-    ) -> abutown_protocol::MobilityDeltaDto {
-        let empty_delta = sim_core::mobility::MobilityDelta {
-            changed_agents: vec![],
-            changed_vehicles: vec![],
-        };
-        sim_core::mobility::build_filtered_mobility_delta_dto(
-            &self.world_id,
-            self.mobility.tick(),
-            &self.mobility,
-            &empty_delta,
-            subscription,
-            last_visible_agents,
-            last_visible_vehicles,
-        )
-    }
-
     /// Forward a per-connection chunk-subscription delta into the mobility
     /// world's `ChunkSubscribers` resource.
     pub fn apply_subscription_diff<'a, A, R>(&mut self, added: A, removed: R)
@@ -392,13 +319,6 @@ impl SimulationRuntime {
         sim_core::mobility::MobilityChunkDelta,
     > {
         self.mobility.tick_mobility()
-    }
-
-    pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {
-        vec![
-            self.next_pulse(),
-            ServerMessageDto::MobilityDelta(self.next_mobility_delta()),
-        ]
     }
 
     /// Collect all chunk snapshots that are due for persistence.

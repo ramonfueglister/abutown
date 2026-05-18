@@ -716,7 +716,7 @@ async fn postgres_mobility_state_survives_runtime_restart() {
         runtime.set_mobility_for_test(seed::initial_world());
 
         for _ in 0..5 {
-            let _ = runtime.next_mobility_delta_for_test();
+            runtime.advance_mobility_tick_for_test();
         }
         persisted_tick = runtime.mobility_tick();
         persisted_world = runtime.mobility_world_clone_for_test();

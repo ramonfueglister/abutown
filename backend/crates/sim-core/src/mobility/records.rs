@@ -128,13 +128,7 @@ pub struct MobilitySnapshot {
     pub stops: Vec<StopRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct MobilityDelta {
-    pub changed_agents: Vec<AgentRecord>,
-    pub changed_vehicles: Vec<VehicleRecord>,
-}
-
-/// The new per-chunk delta produced by `tick_mobility`. Mirrors
+/// The per-chunk delta produced by `tick_mobility`. Mirrors
 /// `MobilityChunkDeltaDto` shape but uses sim-core record types directly.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MobilityChunkDelta {
