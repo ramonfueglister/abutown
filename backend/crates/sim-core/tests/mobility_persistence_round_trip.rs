@@ -17,16 +17,17 @@ fn phase3_snapshot_round_trips_byte_for_byte() {
     let reserialized_value: serde_json::Value =
         serde_json::from_str(&reserialized).expect("our re-serialized output is valid JSON");
 
-    // Re-serialize emits `flow_cells` and `chunk_activities` keys that the
-    // frozen Phase-3 fixture predates; compare only the legacy snapshot shape.
-    for key in [
-        "tick",
-        "agents",
-        "vehicles",
-        "stops",
-        "routes",
-        "link_polylines",
-    ] {
+    // Re-serialize may emit newer top-level keys (e.g. `flow_cells`,
+    // `chunk_activities`) that the frozen Phase-3 fixture predates. The
+    // legacy keys present in the fixture itself drive the comparison, so
+    // adding another legacy key to the fixture later automatically widens
+    // the assertion without touching this test.
+    let fixture_keys: Vec<&String> = fixture_value
+        .as_object()
+        .expect("fixture is a JSON object")
+        .keys()
+        .collect();
+    for key in fixture_keys {
         assert_eq!(
             fixture_value.get(key),
             reserialized_value.get(key),
