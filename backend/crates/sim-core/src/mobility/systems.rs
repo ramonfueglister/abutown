@@ -609,6 +609,8 @@ pub fn promote_warm_to_active_system(
     transitions: Res<ChunkTransitions>,
     mut flow_cells: ResMut<FlowCells>,
     link_polylines: Res<LinkPolylines>,
+    routes: Res<Routes>,
+    stops: Res<Stops>,
     tick: Res<Tick>,
     mut commands: Commands,
 ) {
@@ -651,15 +653,21 @@ pub fn promote_warm_to_active_system(
             let seed = lod_seed(chunk.x, chunk.y, tick.0, n as u64);
             let progress = (seed % 1000) as f32 / 1000.0;
             let sprite_key = format!("pedestrian:{}", seed % 16);
+            let spawned_state = crate::mobility::records::AgentMobilityState::Walking {
+                link_id: spawn_link.clone(),
+                progress,
+            };
+            let (px, py) = crate::mobility::agent_world_coord(
+                &spawned_state,
+                &routes,
+                &stops,
+                &link_polylines,
+            )
+            .unwrap_or((0.0, 0.0));
             commands.spawn((
                 AgentMarker,
                 StableAgentId(agent_id),
-                AgentMobilityStateComponent(
-                    crate::mobility::records::AgentMobilityState::Walking {
-                        link_id: spawn_link.clone(),
-                        progress,
-                    },
-                ),
+                AgentMobilityStateComponent(spawned_state),
                 WalkPlan {
                     stages: vec![crate::mobility::records::PlanStage::Activity {
                         activity_id: format!("activity:lod:{}:{}:{}", chunk.x, chunk.y, n),
@@ -667,7 +675,7 @@ pub fn promote_warm_to_active_system(
                     cursor: 0,
                 },
                 WalkSpeed(0.05),
-                Position { x: 0.0, y: 0.0 },
+                Position { x: px, y: py },
                 Direction(abutown_protocol::DirectionDto::S),
                 SpriteKey(sprite_key),
             ));
@@ -1644,6 +1652,8 @@ mod tests {
         world.insert_resource(transitions);
 
         world.insert_resource(Tick(100));
+        world.insert_resource(Routes::default());
+        world.insert_resource(Stops::default());
 
         let mut schedule = Schedule::default();
         schedule.add_systems(promote_warm_to_active_system);
@@ -1835,6 +1845,8 @@ mod tests {
                 .push((chunk, MobilityActivity::Warm, MobilityActivity::Active));
             world.insert_resource(transitions);
             world.insert_resource(Tick(42));
+            world.insert_resource(Routes::default());
+            world.insert_resource(Stops::default());
 
             let mut schedule = Schedule::default();
             schedule.add_systems(promote_warm_to_active_system);

@@ -732,6 +732,13 @@ impl MobilityWorld {
     pub fn spawn_agent_from_record(&mut self, record: AgentRecord) -> Entity {
         let id = record.id.clone();
         let sprite_key = compute_agent_sprite_key(&id);
+        let (px, py) = {
+            let routes = self.world.resource::<Routes>();
+            let stops = self.world.resource::<Stops>();
+            let link_polylines = self.world.resource::<LinkPolylines>();
+            crate::mobility::agent_world_coord(&record.state, routes, stops, link_polylines)
+                .unwrap_or((0.0, 0.0))
+        };
         let entity = self
             .world
             .spawn((
@@ -743,7 +750,7 @@ impl MobilityWorld {
                     cursor: record.plan_cursor,
                 },
                 WalkSpeed(record.walk_speed_per_tick),
-                Position { x: 0.0, y: 0.0 },
+                Position { x: px, y: py },
                 Direction(abutown_protocol::DirectionDto::S),
                 SpriteKey(sprite_key),
             ))
@@ -755,6 +762,18 @@ impl MobilityWorld {
     pub fn spawn_vehicle_from_record(&mut self, record: VehicleRecord) -> Entity {
         let id = record.id.clone();
         let sprite_key = compute_vehicle_sprite_key(&id);
+        let (px, py) = {
+            let routes = self.world.resource::<Routes>();
+            let link_polylines = self.world.resource::<LinkPolylines>();
+            let rp = crate::mobility::components::RoutePosition {
+                route_id: record.route_id.clone(),
+                link_index: record.link_index,
+                progress: record.progress,
+                speed: record.speed_per_tick,
+            };
+            crate::mobility::vehicle_world_coord(&rp, routes, link_polylines)
+                .unwrap_or((0.0, 0.0))
+        };
         let entity = self
             .world
             .spawn((
@@ -770,7 +789,7 @@ impl MobilityWorld {
                 Capacity(record.capacity),
                 Occupants(record.occupants),
                 DwellTicksRemaining(record.dwell_ticks_remaining),
-                Position { x: 0.0, y: 0.0 },
+                Position { x: px, y: py },
                 Direction(abutown_protocol::DirectionDto::S),
                 SpriteKey(sprite_key),
             ))
@@ -1813,5 +1832,65 @@ mod tests {
         );
         assert!(snapshot.vehicles.is_empty());
         assert_eq!(snapshot.chunk, ChunkCoord { x: 0, y: 0 });
+    }
+
+    #[test]
+    fn spawn_agent_from_record_initializes_position_from_link_polyline() {
+        use crate::ids::{AgentId, LinkId};
+        use crate::mobility::components::Position;
+
+        let mut world = MobilityWorld::empty();
+        world.set_link_polyline(LinkId("l".into()), vec![(10.0, 20.0), (30.0, 40.0)]);
+        world.spawn_agent_from_record(AgentRecord::new(
+            AgentId("a".into()),
+            AgentMobilityState::Walking {
+                link_id: LinkId("l".into()),
+                progress: 0.0,
+            },
+            vec![PlanStage::Activity { activity_id: "act".into() }],
+            0.0,
+        ));
+
+        // Before fix: Position is (0, 0) until compute_world_coord_system runs.
+        // After fix: Position is (10, 20) — start of the polyline — immediately.
+        let entity = *world.by_agent_id.get(&AgentId("a".into())).unwrap();
+        let pos = world.world.entity(entity).get::<Position>().unwrap();
+        assert_eq!((pos.x, pos.y), (10.0, 20.0));
+    }
+
+    #[test]
+    fn spawn_vehicle_from_record_initializes_position_from_route() {
+        use crate::ids::{LinkId, RouteId, VehicleId};
+        use crate::mobility::components::Position;
+
+        let mut world = MobilityWorld::empty();
+        world.set_link_polyline(LinkId("v".into()), vec![(100.0, 200.0), (300.0, 400.0)]);
+        // Register a route that uses the link above.
+        world
+            .world
+            .resource_mut::<crate::mobility::resources::Routes>()
+            .0
+            .insert(
+                RouteId("r".into()),
+                RouteRecord {
+                    id: RouteId("r".into()),
+                    links: vec![LinkId("v".into())],
+                },
+            );
+        world.spawn_vehicle_from_record(VehicleRecord {
+            id: VehicleId("v1".into()),
+            kind: VehicleKind::Tram,
+            route_id: RouteId("r".into()),
+            link_index: 0,
+            progress: 0.0,
+            speed_per_tick: 0.0,
+            capacity: 0,
+            occupants: vec![],
+            dwell_ticks_remaining: 0,
+        });
+
+        let entity = *world.by_vehicle_id.get(&VehicleId("v1".into())).unwrap();
+        let pos = world.world.entity(entity).get::<Position>().unwrap();
+        assert_eq!((pos.x, pos.y), (100.0, 200.0));
     }
 }
