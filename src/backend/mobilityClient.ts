@@ -40,6 +40,8 @@ export type MobilityBackendBridgeOptions = {
   now?: () => number;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
+  setIntervalImpl?: typeof setInterval;
+  clearIntervalImpl?: typeof clearInterval;
   viewport: MobilityViewportGetters;
 };
 
@@ -89,6 +91,8 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
   const now = options.now ?? Date.now;
   const setTimeoutImpl = options.setTimeoutImpl ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutImpl = options.clearTimeoutImpl ?? globalThis.clearTimeout.bind(globalThis);
+  const setIntervalFn = options.setIntervalImpl ?? globalThis.setInterval.bind(globalThis);
+  const clearIntervalFn = options.clearIntervalImpl ?? globalThis.clearInterval.bind(globalThis);
 
   let currentState = options.initialState ?? markMobilityConnecting(createMobilityOverlayState(), now());
   let stopped = false;
@@ -153,7 +157,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
         subscription.update(visible);
       };
       pollSubscription(); // Initial subscribe immediately so the client doesn't wait 200 ms for entities.
-      subscriptionInterval = setInterval(pollSubscription, 200);
+      subscriptionInterval = setIntervalFn(pollSubscription, 200);
     };
 
     socket.onmessage = (event: MessageEvent<string>) => {
@@ -170,7 +174,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
 
     socket.onclose = () => {
       if (subscriptionInterval !== null) {
-        clearInterval(subscriptionInterval);
+        clearIntervalFn(subscriptionInterval);
         subscriptionInterval = null;
       }
       if (stopped) return;
