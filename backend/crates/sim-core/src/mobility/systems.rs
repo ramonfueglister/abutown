@@ -744,11 +744,7 @@ pub fn demote_active_to_warm_system(
         cell.population += despawn_count as f32;
         for (dest, count) in outflow_counts {
             let rate = count as f32 / 100.0; // amortise over ~100 ticks
-            if let Some(entry) = cell.outflow.iter_mut().find(|(d, _)| *d == dest) {
-                entry.1 += rate;
-            } else {
-                cell.outflow.push((dest, rate));
-            }
+            *cell.outflow.entry(dest).or_insert(0.0) += rate;
         }
     }
 }
@@ -1425,7 +1421,7 @@ mod tests {
             ChunkCoord { x: 0, y: 0 },
             FlowCell {
                 population: 3.7,
-                outflow: Vec::new(),
+                outflow: std::collections::HashMap::new(),
                 attractiveness: 1.0,
                 last_tick: 0,
             },
@@ -1601,7 +1597,7 @@ mod tests {
             chunk,
             FlowCell {
                 population: 3.7,
-                outflow: Vec::new(),
+                outflow: std::collections::HashMap::new(),
                 attractiveness: 1.0,
                 last_tick: 0,
             },
@@ -1692,7 +1688,7 @@ mod tests {
         assert!((cell.population - 3.0).abs() < 1e-6);
         let dest = ChunkCoord { x: 1, y: 0 };
         assert!(
-            cell.outflow.iter().any(|(d, _)| *d == dest),
+            cell.outflow.contains_key(&dest),
             "outflow should target end-of-link chunk"
         );
 
@@ -1717,12 +1713,11 @@ mod tests {
         world.insert_resource(activities);
 
         let mut flow = FlowCells::default();
-        let outflow = vec![(ChunkCoord { x: 1, y: 0 }, 0.5)];
         flow.0.insert(
             ChunkCoord { x: 0, y: 0 },
             FlowCell {
                 population: 10.0,
-                outflow,
+                outflow: std::collections::HashMap::from([(ChunkCoord { x: 1, y: 0 }, 0.5)]),
                 attractiveness: 1.0,
                 last_tick: 0,
             },
@@ -1758,7 +1753,7 @@ mod tests {
             ChunkCoord { x: 0, y: 0 },
             FlowCell {
                 population: 10.0,
-                outflow: vec![(ChunkCoord { x: 1, y: 0 }, 0.5)],
+                outflow: std::collections::HashMap::from([(ChunkCoord { x: 1, y: 0 }, 0.5)]),
                 attractiveness: 1.0,
                 last_tick: 0,
             },
@@ -1790,7 +1785,7 @@ mod tests {
                 chunk,
                 FlowCell {
                     population: 5.0,
-                    outflow: Vec::new(),
+                    outflow: std::collections::HashMap::new(),
                     attractiveness: 1.0,
                     last_tick: 0,
                 },

@@ -1,5 +1,6 @@
 use crate::ids::ChunkCoord;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum MobilityActivity {
@@ -37,9 +38,34 @@ pub fn classify_chunk_mobility_activity(
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowCell {
     pub population: f32,
-    pub outflow: Vec<(ChunkCoord, f32)>,
+    /// Per-destination outflow rate (population units / tick). JSON keys are
+    /// `ChunkCoord` structs, so the map serializes as a deterministic
+    /// `Vec<(ChunkCoord, f32)>` via `chunk_keyed_map`.
+    #[serde(with = "chunk_keyed_map")]
+    pub outflow: HashMap<ChunkCoord, f32>,
     pub attractiveness: f32,
     pub last_tick: u64,
+}
+
+mod chunk_keyed_map {
+    use super::{ChunkCoord, HashMap};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        map: &HashMap<ChunkCoord, f32>,
+        ser: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut entries: Vec<(ChunkCoord, f32)> = map.iter().map(|(k, v)| (*k, *v)).collect();
+        entries.sort_unstable_by_key(|(c, _)| (c.x, c.y));
+        entries.serialize(ser)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        de: D,
+    ) -> Result<HashMap<ChunkCoord, f32>, D::Error> {
+        let entries: Vec<(ChunkCoord, f32)> = Vec::deserialize(de)?;
+        Ok(entries.into_iter().collect())
+    }
 }
 
 #[cfg(test)]

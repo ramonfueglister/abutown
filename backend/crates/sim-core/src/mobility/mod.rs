@@ -1559,7 +1559,7 @@ mod tests {
                 chunk,
                 FlowCell {
                     population: 2.0,
-                    outflow: Vec::new(),
+                    outflow: std::collections::HashMap::new(),
                     attractiveness: 1.0,
                     last_tick: 0,
                 },
@@ -1606,7 +1606,7 @@ mod tests {
                 ChunkCoord { x: 1, y: 1 },
                 FlowCell {
                     population: 4.2,
-                    outflow: vec![(ChunkCoord { x: 2, y: 1 }, 0.3)],
+                    outflow: std::collections::HashMap::from([(ChunkCoord { x: 2, y: 1 }, 0.3)]),
                     attractiveness: 1.5,
                     last_tick: 100,
                 },
