@@ -249,6 +249,39 @@ impl MobilityWorld {
     }
 }
 
+#[cfg(test)]
+impl MobilityWorld {
+    pub(crate) fn seed_flow_cell(
+        &mut self,
+        chunk: crate::ids::ChunkCoord,
+        cell: crate::mobility::lod::FlowCell,
+    ) {
+        self.world.resource_mut::<FlowCells>().0.insert(chunk, cell);
+    }
+
+    pub(crate) fn seed_chunk_activity(
+        &mut self,
+        chunk: crate::ids::ChunkCoord,
+        activity: crate::mobility::lod::MobilityActivity,
+    ) {
+        self.world
+            .resource_mut::<ChunkActivities>()
+            .0
+            .insert(chunk, activity);
+    }
+
+    pub(crate) fn seed_chunk_subscriber_count(
+        &mut self,
+        chunk: crate::ids::ChunkCoord,
+        count: u8,
+    ) {
+        self.world
+            .resource_mut::<ChunkSubscribers>()
+            .0
+            .insert(chunk, count);
+    }
+}
+
 impl std::fmt::Debug for MobilityWorld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MobilityWorld")
@@ -1552,32 +1585,18 @@ mod tests {
 
         let chunk = ChunkCoord { x: 0, y: 0 };
 
-        // Set up the flow cell with 2 agents worth of population.
-        {
-            let mut cells = world.world.resource_mut::<FlowCells>();
-            cells.0.insert(
-                chunk,
-                FlowCell {
-                    population: 2.0,
-                    outflow: std::collections::HashMap::new(),
-                    attractiveness: 1.0,
-                    last_tick: 0,
-                },
-            );
-        }
-
-        // Mark chunk as Warm so classify_activity_system will see a Warm → Active
-        // transition when it finds 1 subscriber.
-        {
-            let mut activities = world.world.resource_mut::<ChunkActivities>();
-            activities.0.insert(chunk, MobilityActivity::Warm);
-        }
-
-        // Add 1 subscriber so classify_activity_system promotes to Active.
-        {
-            let mut subscribers = world.world.resource_mut::<ChunkSubscribers>();
-            subscribers.0.insert(chunk, 1);
-        }
+        world.seed_flow_cell(
+            chunk,
+            FlowCell {
+                population: 2.0,
+                outflow: std::collections::HashMap::new(),
+                attractiveness: 1.0,
+                last_tick: 0,
+            },
+        );
+        // Warm + 1 subscriber: classify_activity_system promotes Warm → Active.
+        world.seed_chunk_activity(chunk, MobilityActivity::Warm);
+        world.seed_chunk_subscriber_count(chunk, 1);
 
         world.tick_mobility();
 
@@ -1600,24 +1619,17 @@ mod tests {
         use crate::mobility::lod::{FlowCell, MobilityActivity};
 
         let mut world = MobilityWorld::empty();
-        {
-            let mut cells = world.world.resource_mut::<FlowCells>();
-            cells.0.insert(
-                ChunkCoord { x: 1, y: 1 },
-                FlowCell {
-                    population: 4.2,
-                    outflow: std::collections::HashMap::from([(ChunkCoord { x: 2, y: 1 }, 0.3)]),
-                    attractiveness: 1.5,
-                    last_tick: 100,
-                },
-            );
-        }
-        {
-            let mut activities = world.world.resource_mut::<ChunkActivities>();
-            activities
-                .0
-                .insert(ChunkCoord { x: 1, y: 1 }, MobilityActivity::Warm);
-        }
+        let chunk = ChunkCoord { x: 1, y: 1 };
+        world.seed_flow_cell(
+            chunk,
+            FlowCell {
+                population: 4.2,
+                outflow: std::collections::HashMap::from([(ChunkCoord { x: 2, y: 1 }, 0.3)]),
+                attractiveness: 1.5,
+                last_tick: 100,
+            },
+        );
+        world.seed_chunk_activity(chunk, MobilityActivity::Warm);
         let json = serde_json::to_value(&world).unwrap();
         let back: MobilityWorld = serde_json::from_value(json.clone()).unwrap();
         let rejson = serde_json::to_value(&back).unwrap();
