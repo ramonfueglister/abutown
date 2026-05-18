@@ -284,7 +284,7 @@ describe('mobility backend client', () => {
     expect(clearIntervalImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('pollSubscription is a silent no-op when getCamera() returns null', async () => {
+  it('pollSubscription is a silent no-op when getScreenToTile() returns null', async () => {
     const { Impl, sockets } = mockWebSocketImpl();
     const setIntervalImpl = vi.fn<typeof setInterval>(() => 1 as unknown as ReturnType<typeof setInterval>);
 
@@ -298,8 +298,27 @@ describe('mobility backend client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     sockets[0].triggerOpen();
 
-    // pollSubscription has been called once immediately, with camera=null.
+    // pollSubscription has been called once immediately, projection getter null.
     // No subscribe should have been sent.
+    expect(sockets[0].sent).toEqual([]);
+    bridge.stop();
+  });
+
+  it('pollSubscription is a silent no-op when getViewport() returns null', async () => {
+    const { Impl, sockets } = mockWebSocketImpl();
+    const setIntervalImpl = vi.fn<typeof setInterval>(() => 1 as unknown as ReturnType<typeof setInterval>);
+
+    const bridge = connectMobilityBackend({
+      fetchImpl: snapshotFetch as unknown as typeof fetch,
+      WebSocketImpl: Impl,
+      viewport: stubViewport({ viewport: null }),
+      setIntervalImpl: setIntervalImpl as unknown as typeof setInterval,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sockets[0].triggerOpen();
+
+    // Viewport not yet measured (e.g. first frame before resize fires).
     expect(sockets[0].sent).toEqual([]);
     bridge.stop();
   });
