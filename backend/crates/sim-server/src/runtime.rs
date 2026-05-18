@@ -296,7 +296,19 @@ impl SimulationRuntime {
     }
 
     pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
-        let delta = self.mobility.tick_mobility();
+        let per_chunk = self.mobility.tick_mobility();
+        // Glue: flatten per-chunk map back into a global delta so the old
+        // broadcast path keeps working until Task 8 deletes it.
+        let mut changed_agents = Vec::new();
+        let mut changed_vehicles = Vec::new();
+        for delta in per_chunk.into_values() {
+            changed_agents.extend(delta.changed_agents);
+            changed_vehicles.extend(delta.changed_vehicles);
+        }
+        let delta = sim_core::mobility::MobilityDelta {
+            changed_agents,
+            changed_vehicles,
+        };
         build_mobility_delta_dto(&self.world_id, self.mobility.tick(), &self.mobility, &delta)
     }
 

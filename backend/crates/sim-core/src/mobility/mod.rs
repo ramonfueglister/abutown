@@ -472,7 +472,9 @@ impl MobilityWorld {
         }
     }
 
-    pub fn tick_mobility(&mut self) -> MobilityDelta {
+    pub fn tick_mobility(
+        &mut self,
+    ) -> std::collections::HashMap<crate::ids::ChunkCoord, MobilityChunkDelta> {
         self.schedule.run(&mut self.world);
 
         // Sync by_agent_id with newly-spawned agents (from promote_warm_to_active_system).
@@ -526,20 +528,146 @@ impl MobilityWorld {
         }
 
         // Drain dirty sets populated by the Advance systems.
-        let dirty_agents = std::mem::take(&mut self.world.resource_mut::<DirtyAgents>().0);
-        let dirty_vehicles = std::mem::take(&mut self.world.resource_mut::<DirtyVehicles>().0);
-        let changed_agents: Vec<AgentRecord> = dirty_agents
-            .iter()
-            .filter_map(|e| self.agent_record_from_entity(*e))
-            .collect();
-        let changed_vehicles: Vec<VehicleRecord> = dirty_vehicles
-            .iter()
-            .filter_map(|e| self.vehicle_record_from_entity(*e))
-            .collect();
-        MobilityDelta {
-            changed_agents,
-            changed_vehicles,
+        let dirty_agents: Vec<Entity> =
+            std::mem::take(&mut self.world.resource_mut::<DirtyAgents>().0)
+                .into_iter()
+                .collect();
+        let dirty_vehicles: Vec<Entity> =
+            std::mem::take(&mut self.world.resource_mut::<DirtyVehicles>().0)
+                .into_iter()
+                .collect();
+
+        // Build (current chunk → changed records) for agents.
+        let mut changed_by_chunk_agents: HashMap<crate::ids::ChunkCoord, Vec<AgentRecord>> =
+            HashMap::new();
+        let mut current_agent_chunks: HashMap<crate::ids::AgentId, crate::ids::ChunkCoord> =
+            HashMap::new();
+        for entity in &dirty_agents {
+            if let Some(record) = self.agent_record_from_entity(*entity) {
+                // Fall back to (0,0) for agents whose geometry cannot be resolved
+                // (e.g. link polyline not registered), so they are never silently dropped.
+                let (x, y) = self.world_coord_for_agent(&record.id).unwrap_or((0.0, 0.0));
+                let chunk = crate::mobility::chunk_of(x, y, 32);
+                current_agent_chunks.insert(record.id.clone(), chunk);
+                changed_by_chunk_agents.entry(chunk).or_default().push(record);
+            }
         }
+
+        // Same for vehicles.
+        let mut changed_by_chunk_vehicles: HashMap<crate::ids::ChunkCoord, Vec<VehicleRecord>> =
+            HashMap::new();
+        let mut current_vehicle_chunks: HashMap<crate::ids::VehicleId, crate::ids::ChunkCoord> =
+            HashMap::new();
+        for entity in &dirty_vehicles {
+            if let Some(record) = self.vehicle_record_from_entity(*entity) {
+                // Fall back to (0,0) for vehicles whose geometry cannot be resolved.
+                let (x, y) = self.world_coord_for_vehicle(&record.id).unwrap_or((0.0, 0.0));
+                let chunk = crate::mobility::chunk_of(x, y, 32);
+                current_vehicle_chunks.insert(record.id.clone(), chunk);
+                changed_by_chunk_vehicles
+                    .entry(chunk)
+                    .or_default()
+                    .push(record);
+            }
+        }
+
+        // Compute left_* by comparing current chunk vs PreviousAgentChunks.
+        let mut left_by_chunk_agents: HashMap<crate::ids::ChunkCoord, Vec<crate::ids::AgentId>> =
+            HashMap::new();
+        {
+            let prev = self.world.resource::<PreviousAgentChunks>();
+            for (id, current_chunk) in &current_agent_chunks {
+                if let Some(prev_chunk) = prev.0.get(id)
+                    && prev_chunk != current_chunk
+                {
+                    left_by_chunk_agents
+                        .entry(*prev_chunk)
+                        .or_default()
+                        .push(id.clone());
+                }
+            }
+        }
+        let mut left_by_chunk_vehicles: HashMap<
+            crate::ids::ChunkCoord,
+            Vec<crate::ids::VehicleId>,
+        > = HashMap::new();
+        {
+            let prev = self.world.resource::<PreviousVehicleChunks>();
+            for (id, current_chunk) in &current_vehicle_chunks {
+                if let Some(prev_chunk) = prev.0.get(id)
+                    && prev_chunk != current_chunk
+                {
+                    left_by_chunk_vehicles
+                        .entry(*prev_chunk)
+                        .or_default()
+                        .push(id.clone());
+                }
+            }
+        }
+
+        // Update PreviousAgentChunks + PreviousVehicleChunks for next tick.
+        {
+            let mut prev = self.world.resource_mut::<PreviousAgentChunks>();
+            for (id, chunk) in &current_agent_chunks {
+                prev.0.insert(id.clone(), *chunk);
+            }
+        }
+        {
+            let mut prev = self.world.resource_mut::<PreviousVehicleChunks>();
+            for (id, chunk) in &current_vehicle_chunks {
+                prev.0.insert(id.clone(), *chunk);
+            }
+        }
+
+        // Assemble per-chunk delta map: union of all chunks that have either
+        // a changed entity or a left entity.
+        let mut out: HashMap<crate::ids::ChunkCoord, MobilityChunkDelta> = HashMap::new();
+        for (chunk, agents) in changed_by_chunk_agents {
+            out.entry(chunk)
+                .or_insert_with(|| MobilityChunkDelta {
+                    chunk,
+                    changed_agents: Vec::new(),
+                    changed_vehicles: Vec::new(),
+                    left_agents: Vec::new(),
+                    left_vehicles: Vec::new(),
+                })
+                .changed_agents = agents;
+        }
+        for (chunk, vehicles) in changed_by_chunk_vehicles {
+            out.entry(chunk)
+                .or_insert_with(|| MobilityChunkDelta {
+                    chunk,
+                    changed_agents: Vec::new(),
+                    changed_vehicles: Vec::new(),
+                    left_agents: Vec::new(),
+                    left_vehicles: Vec::new(),
+                })
+                .changed_vehicles = vehicles;
+        }
+        for (chunk, ids) in left_by_chunk_agents {
+            out.entry(chunk)
+                .or_insert_with(|| MobilityChunkDelta {
+                    chunk,
+                    changed_agents: Vec::new(),
+                    changed_vehicles: Vec::new(),
+                    left_agents: Vec::new(),
+                    left_vehicles: Vec::new(),
+                })
+                .left_agents = ids;
+        }
+        for (chunk, ids) in left_by_chunk_vehicles {
+            out.entry(chunk)
+                .or_insert_with(|| MobilityChunkDelta {
+                    chunk,
+                    changed_agents: Vec::new(),
+                    changed_vehicles: Vec::new(),
+                    left_agents: Vec::new(),
+                    left_vehicles: Vec::new(),
+                })
+                .left_vehicles = ids;
+        }
+
+        out
     }
 
     pub fn spawn_agent_from_record(&mut self, record: AgentRecord) -> Entity {
@@ -866,7 +994,7 @@ mod tests {
         world.force_all_chunks_active_for_test();
         let agent_id = AgentId("agent:pedestrian:0".to_string());
 
-        let first_delta = world.tick_mobility();
+        let first_map = world.tick_mobility();
         let agent = world.agent(&agent_id).expect("agent exists");
         assert_eq!(
             agent.state,
@@ -875,9 +1003,12 @@ mod tests {
                 progress: 0.5
             }
         );
-        assert_eq!(first_delta.changed_agents.len(), 1);
+        assert_eq!(
+            first_map.values().flat_map(|d| d.changed_agents.iter()).count(),
+            1
+        );
 
-        let second_delta = world.tick_mobility();
+        let second_map = world.tick_mobility();
         let agent = world.agent(&agent_id).expect("agent exists");
         let stop = world
             .stop(&StopId("stop:old-town".to_string()))
@@ -894,7 +1025,10 @@ mod tests {
             stop.waiting_agents.iter().cloned().collect::<Vec<_>>(),
             vec![agent_id]
         );
-        assert_eq!(second_delta.changed_agents.len(), 1);
+        assert_eq!(
+            second_map.values().flat_map(|d| d.changed_agents.iter()).count(),
+            1
+        );
     }
 
     #[test]
@@ -903,23 +1037,32 @@ mod tests {
         world.force_all_chunks_active_for_test();
         let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
 
-        let first_delta = world.tick_mobility();
+        let first_map = world.tick_mobility();
         let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
         assert_eq!(vehicle.progress, 0.0);
         assert_eq!(vehicle.dwell_ticks_remaining, 1);
-        assert_eq!(first_delta.changed_vehicles.len(), 1);
+        assert_eq!(
+            first_map.values().flat_map(|d| d.changed_vehicles.iter()).count(),
+            1
+        );
 
-        let second_delta = world.tick_mobility();
+        let second_map = world.tick_mobility();
         let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
         assert_eq!(vehicle.progress, 0.0);
         assert_eq!(vehicle.dwell_ticks_remaining, 0);
-        assert_eq!(second_delta.changed_vehicles.len(), 1);
+        assert_eq!(
+            second_map.values().flat_map(|d| d.changed_vehicles.iter()).count(),
+            1
+        );
 
-        let third_delta = world.tick_mobility();
+        let third_map = world.tick_mobility();
         let vehicle = world.vehicle(&vehicle_id).expect("vehicle exists");
         assert_eq!(vehicle.progress, 0.5);
         assert_eq!(vehicle.dwell_ticks_remaining, 0);
-        assert_eq!(third_delta.changed_vehicles.len(), 1);
+        assert_eq!(
+            third_map.values().flat_map(|d| d.changed_vehicles.iter()).count(),
+            1
+        );
     }
 
     #[test]
@@ -1661,6 +1804,89 @@ mod tests {
         let back: MobilityWorld = serde_json::from_value(json.clone()).unwrap();
         let rejson = serde_json::to_value(&back).unwrap();
         assert_eq!(json, rejson);
+    }
+
+    #[test]
+    fn tick_mobility_returns_per_chunk_deltas_with_changed_and_left() {
+        use crate::ids::{AgentId, ChunkCoord, LinkId};
+
+        let mut world = MobilityWorld::empty();
+        world.force_all_chunks_active_for_test();
+        // A walkable polyline that crosses chunk boundary: chunk_size 32.
+        // The polyline goes from x=4 (deep in chunk 0) to x=60 (chunk 1).
+        // Total length = 56.  With walk_speed=0.1 the agent advances
+        // progress by 0.1/tick, covering 5.6 world-units/tick.  It reaches
+        // x=32 (chunk boundary) after roughly (32-4)/5.6 ≈ 5 ticks, well
+        // within the 20-tick window.  On tick 1 it is still at x≈8.6, firmly
+        // inside chunk(0,0).
+        world.set_link_polyline(LinkId("l".into()), vec![(4.0, 10.0), (60.0, 10.0)]);
+
+        // Walk speed 0.1 per tick so it takes several ticks to cross.
+        world.spawn_agent_from_record(AgentRecord::new(
+            AgentId("walker".into()),
+            AgentMobilityState::Walking { link_id: LinkId("l".into()), progress: 0.0 },
+            vec![PlanStage::Activity { activity_id: "act".into() }],
+            0.1,
+        ));
+
+        // First tick: agent enters world still inside chunk(0,0).
+        let map1 = world.tick_mobility();
+        assert!(map1.contains_key(&ChunkCoord { x: 0, y: 0 }),
+            "tick 1: agent should be in chunk(0,0); map keys: {:?}", map1.keys().collect::<Vec<_>>());
+        let delta1 = &map1[&ChunkCoord { x: 0, y: 0 }];
+        assert!(!delta1.changed_agents.is_empty());
+        assert!(delta1.left_agents.is_empty(), "first tick: no previous chunk to leave");
+
+        // Tick enough times to cross into chunk(1,0).
+        let mut crossed = false;
+        for _ in 0..20 {
+            let map = world.tick_mobility();
+            if let Some(delta) = map.get(&ChunkCoord { x: 0, y: 0 })
+                && !delta.left_agents.is_empty()
+            {
+                assert!(
+                    delta.left_agents.iter().any(|id| id.0 == "walker"),
+                    "walker shows up in chunk(0,0).left_agents when it crosses out"
+                );
+                assert!(
+                    map.get(&ChunkCoord { x: 1, y: 0 })
+                        .map(|d| d.changed_agents.iter().any(|r| r.id.0 == "walker"))
+                        .unwrap_or(false),
+                    "walker shows up in chunk(1,0).changed_agents when it crosses in"
+                );
+                crossed = true;
+                break;
+            }
+        }
+        assert!(crossed, "agent must cross chunk boundary within 20 ticks");
+    }
+
+    #[test]
+    fn tick_mobility_omits_unchanged_chunks() {
+        use crate::ids::{AgentId, ChunkCoord, LinkId};
+        let mut world = MobilityWorld::empty();
+        world.force_all_chunks_active_for_test();
+        world.set_link_polyline(LinkId("l".into()), vec![(10.0, 10.0), (20.0, 10.0)]);
+
+        // walk_speed=0 → no progress change → no dirty agents → empty delta map.
+        world.spawn_agent_from_record(AgentRecord::new(
+            AgentId("stationary".into()),
+            AgentMobilityState::Walking { link_id: LinkId("l".into()), progress: 0.0 },
+            vec![PlanStage::Activity { activity_id: "act".into() }],
+            0.0,
+        ));
+
+        // First tick spawns the agent → it's "changed" because newly created.
+        let _ = world.tick_mobility();
+
+        // Second tick: no movement, no plan transitions.
+        let map = world.tick_mobility();
+        assert!(
+            map.get(&ChunkCoord { x: 0, y: 0 })
+                .map(|d| d.changed_agents.is_empty() && d.left_agents.is_empty())
+                .unwrap_or(true),
+            "chunk with no changes should either be absent or have empty changed/left lists"
+        );
     }
 
     #[test]
