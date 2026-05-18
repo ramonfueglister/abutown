@@ -82,13 +82,13 @@ pub fn tiny_world() -> MobilityWorld {
             (&vertical_pickup, &vertical_dropoff, &vertical_route)
         };
 
-        world.spawn_agent_from_record(AgentRecord {
-            id: agent_id,
-            state: AgentMobilityState::Walking {
+        world.spawn_agent_from_record(AgentRecord::new(
+            agent_id,
+            AgentMobilityState::Walking {
                 link_id: walk_link.clone(),
                 progress: (offset as f32) * 0.05,
             },
-            plan: vec![
+            vec![
                 PlanStage::WalkToStop {
                     link_id: walk_link.clone(),
                     stop_id: pickup.clone(),
@@ -105,9 +105,8 @@ pub fn tiny_world() -> MobilityWorld {
                     activity_id: work_activity.clone(),
                 },
             ],
-            plan_cursor: 0,
-            walk_speed_per_tick: 0.5,
-        });
+            0.5,
+        ));
     }
 
     world
@@ -155,15 +154,14 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
             let agent_id = AgentId(format!("agent:walk:{n}"));
             let link_id = LinkId(format!("link:walk:corridor:{corridor_index}"));
             let progress = ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
-            world.spawn_agent_from_record(AgentRecord {
-                id: agent_id,
-                state: AgentMobilityState::Walking { link_id, progress },
-                plan: vec![PlanStage::Activity {
+            world.spawn_agent_from_record(AgentRecord::new(
+                agent_id,
+                AgentMobilityState::Walking { link_id, progress },
+                vec![PlanStage::Activity {
                     activity_id: format!("activity:wander:{corridor_index}"),
                 }],
-                plan_cursor: 0,
-                walk_speed_per_tick: 0.05,
-            });
+                0.05,
+            ));
         }
     }
 
@@ -205,18 +203,17 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
                 occupants: vec![driver_id.clone()],
                 dwell_ticks_remaining: 0,
             });
-            world.spawn_agent_from_record(AgentRecord {
-                id: driver_id,
-                state: AgentMobilityState::InVehicle {
+            world.spawn_agent_from_record(AgentRecord::new(
+                driver_id,
+                AgentMobilityState::InVehicle {
                     vehicle_id,
                     seat_index: 0,
                 },
-                plan: vec![PlanStage::Activity {
+                vec![PlanStage::Activity {
                     activity_id: format!("activity:drive:{arterial_index}"),
                 }],
-                plan_cursor: 0,
-                walk_speed_per_tick: 0.05,
-            });
+                0.05,
+            ));
         }
     }
 

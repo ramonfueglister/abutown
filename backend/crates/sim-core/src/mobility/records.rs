@@ -73,6 +73,26 @@ pub struct AgentRecord {
     pub walk_speed_per_tick: f32,
 }
 
+impl AgentRecord {
+    /// Construct an agent fresh — `plan_cursor` starts at 0 (the first plan
+    /// stage). For agents being rehydrated from a snapshot, build the
+    /// struct literal directly to preserve the persisted cursor.
+    pub fn new(
+        id: AgentId,
+        state: AgentMobilityState,
+        plan: Vec<PlanStage>,
+        walk_speed_per_tick: f32,
+    ) -> Self {
+        Self {
+            id,
+            state,
+            plan,
+            plan_cursor: 0,
+            walk_speed_per_tick,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VehicleRecord {
     pub id: VehicleId,

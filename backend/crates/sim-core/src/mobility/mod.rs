@@ -1005,13 +1005,13 @@ mod tests {
         let mut agents = HashMap::new();
         agents.insert(
             agent_id.clone(),
-            AgentRecord {
-                id: agent_id,
-                state: AgentMobilityState::Walking {
+            AgentRecord::new(
+                agent_id,
+                AgentMobilityState::Walking {
                     link_id: walk_to_pickup.clone(),
                     progress: 0.0,
                 },
-                plan: vec![
+                vec![
                     PlanStage::WalkToStop {
                         link_id: walk_to_pickup,
                         stop_id: pickup_stop_id,
@@ -1028,9 +1028,8 @@ mod tests {
                         activity_id: "activity:work".to_string(),
                     },
                 ],
-                plan_cursor: 0,
-                walk_speed_per_tick: 0.5,
-            },
+                0.5,
+            ),
         );
 
         let mut vehicles = HashMap::new();
@@ -1101,18 +1100,17 @@ mod tests {
             waiting_agents: VecDeque::new(),
         });
         let agent_id = AgentId("agent:waiter".to_string());
-        world.spawn_agent_from_record(AgentRecord {
-            id: agent_id.clone(),
-            state: AgentMobilityState::WaitingAtStop {
+        world.spawn_agent_from_record(AgentRecord::new(
+            agent_id.clone(),
+            AgentMobilityState::WaitingAtStop {
                 stop_id: stop_id.clone(),
             },
-            plan: vec![PlanStage::RideToStop {
+            vec![PlanStage::RideToStop {
                 route_id,
                 stop_id: stop_id.clone(),
             }],
-            plan_cursor: 0,
-            walk_speed_per_tick: 0.5,
-        });
+            0.5,
+        ));
         let coord = world
             .world_coord_for_agent(&agent_id)
             .expect("agent coord resolves");

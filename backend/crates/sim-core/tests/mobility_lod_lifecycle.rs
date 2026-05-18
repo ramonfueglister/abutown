@@ -12,18 +12,17 @@ fn chunk_cycles_through_hot_warm_active() {
 
     // Walk speed 0 so the agent stays in this chunk for the whole test.
     world.set_link_polyline(LinkId("l:0".into()), vec![(5.0, 5.0), (15.0, 15.0)]);
-    world.spawn_agent_from_record(AgentRecord {
-        id: AgentId("a:1".into()),
-        state: AgentMobilityState::Walking {
+    world.spawn_agent_from_record(AgentRecord::new(
+        AgentId("a:1".into()),
+        AgentMobilityState::Walking {
             link_id: LinkId("l:0".into()),
             progress: 0.0,
         },
-        plan: vec![PlanStage::Activity {
+        vec![PlanStage::Activity {
             activity_id: "act".into(),
         }],
-        plan_cursor: 0,
-        walk_speed_per_tick: 0.0,
-    });
+        0.0,
+    ));
 
     // Two subscribers → Hot.
     world.apply_subscription_diff(&[chunk, chunk], std::iter::empty());
