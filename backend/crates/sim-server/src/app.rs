@@ -412,6 +412,36 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                     break;
                 }
             }
+            Some((chunk, item)) = tokio_stream::StreamExt::next(&mut connection.chunk_streams), if !connection.chunk_streams.is_empty() => {
+                use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+                match item {
+                    Ok(delta) => {
+                        if send_server_message(
+                            &mut socket,
+                            ServerMessageDto::MobilityChunkDelta(delta),
+                        ).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(BroadcastStreamRecvError::Lagged(_)) => {
+                        // Recovery: re-send a fresh snapshot for this chunk.
+                        let snap = {
+                            let runtime_arc = state.runtime();
+                            let runtime = runtime_arc.read().await;
+                            let snapshot = runtime.mobility().build_chunk_snapshot(chunk);
+                            let world_id = runtime.world_id_for_persist().clone();
+                            let tick = runtime.mobility_tick();
+                            chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick)
+                        };
+                        if send_server_message(
+                            &mut socket,
+                            ServerMessageDto::MobilityChunkSnapshot(snap),
+                        ).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
             broadcast = deltas.recv() => {
                 let message = match broadcast {
                     Ok(message) => message,
