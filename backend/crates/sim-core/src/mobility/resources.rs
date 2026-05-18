@@ -69,3 +69,17 @@ pub struct VehiclesByChunk(pub HashMap<ChunkCoord, Vec<Entity>>);
 /// Cleared at start of each tick by `classify_activity_system`.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct ChunkTransitions(pub Vec<(ChunkCoord, MobilityActivity, MobilityActivity)>);
+
+use crate::ids::{AgentId, VehicleId};
+
+/// Per-agent record of the chunk that agent was in at the END of the
+/// previous tick. Used by `tick_mobility` to compute `left_*` lists in the
+/// new per-chunk delta — an agent whose previous chunk differs from its
+/// current chunk is "leaving" the previous chunk and "arriving" in the
+/// current chunk.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct PreviousAgentChunks(pub HashMap<AgentId, ChunkCoord>);
+
+/// Mirror of `PreviousAgentChunks` for vehicles.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct PreviousVehicleChunks(pub HashMap<VehicleId, ChunkCoord>);

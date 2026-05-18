@@ -66,6 +66,8 @@ impl MobilityWorld {
         world.insert_resource(AgentsByChunk::default());
         world.insert_resource(VehiclesByChunk::default());
         world.insert_resource(ChunkTransitions::default());
+        world.insert_resource(PreviousAgentChunks::default());
+        world.insert_resource(PreviousVehicleChunks::default());
 
         let mut schedule = Schedule::default();
         crate::mobility::systems::install_systems(&mut schedule);

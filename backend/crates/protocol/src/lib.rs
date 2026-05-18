@@ -153,6 +153,8 @@ pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
     MobilityDelta(MobilityDeltaDto),
+    MobilityChunkDelta(MobilityChunkDeltaDto),
+    MobilityChunkSnapshot(MobilityChunkSnapshotDto),
     WorldEvent { event: WorldEventDto },
     Error(ServerErrorDto),
 }
@@ -195,6 +197,28 @@ pub struct MobilityDeltaDto {
     pub left_agents: Vec<EntityId>,
     #[serde(default)]
     pub left_vehicles: Vec<EntityId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MobilityChunkDeltaDto {
+    pub protocol_version: u16,
+    pub world_id: WorldId,
+    pub tick: u64,
+    pub chunk: ChunkCoordDto,
+    pub changed_agents: Vec<AgentMobilityDto>,
+    pub changed_vehicles: Vec<VehicleMobilityDto>,
+    pub left_agents: Vec<EntityId>,
+    pub left_vehicles: Vec<EntityId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MobilityChunkSnapshotDto {
+    pub protocol_version: u16,
+    pub world_id: WorldId,
+    pub tick: u64,
+    pub chunk: ChunkCoordDto,
+    pub agents: Vec<AgentMobilityDto>,
+    pub vehicles: Vec<VehicleMobilityDto>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -659,5 +683,54 @@ mod tests {
 
         let back: VehicleMobilityDto = serde_json::from_value(json).unwrap();
         assert_eq!(back.kind, VehicleKindDto::Car);
+    }
+
+    #[test]
+    fn mobility_chunk_delta_round_trips() {
+        let dto = MobilityChunkDeltaDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("test".into()),
+            tick: 42,
+            chunk: ChunkCoordDto { x: 1, y: 2 },
+            changed_agents: vec![],
+            changed_vehicles: vec![],
+            left_agents: vec![EntityId("a1".into())],
+            left_vehicles: vec![],
+        };
+        let json = serde_json::to_string(&dto).unwrap();
+        let back: MobilityChunkDeltaDto = serde_json::from_str(&json).unwrap();
+        assert_eq!(dto, back);
+    }
+
+    #[test]
+    fn mobility_chunk_snapshot_round_trips() {
+        let dto = MobilityChunkSnapshotDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("test".into()),
+            tick: 42,
+            chunk: ChunkCoordDto { x: 0, y: 0 },
+            agents: vec![],
+            vehicles: vec![],
+        };
+        let json = serde_json::to_string(&dto).unwrap();
+        let back: MobilityChunkSnapshotDto = serde_json::from_str(&json).unwrap();
+        assert_eq!(dto, back);
+    }
+
+    #[test]
+    fn server_message_chunk_delta_variant_parses() {
+        let dto = ServerMessageDto::MobilityChunkDelta(MobilityChunkDeltaDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("test".into()),
+            tick: 1,
+            chunk: ChunkCoordDto { x: 0, y: 0 },
+            changed_agents: vec![],
+            changed_vehicles: vec![],
+            left_agents: vec![],
+            left_vehicles: vec![],
+        });
+        let json = serde_json::to_string(&dto).unwrap();
+        let back: ServerMessageDto = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, ServerMessageDto::MobilityChunkDelta(_)));
     }
 }
