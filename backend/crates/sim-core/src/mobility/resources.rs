@@ -1,4 +1,5 @@
-use crate::ids::{LinkId, RouteId, StopId};
+use crate::ids::{AgentId, ChunkCoord, LinkId, RouteId, StopId, VehicleId};
+use crate::mobility::lod::{FlowCell, MobilityActivity};
 use crate::mobility::records::{RouteRecord, StopRecord};
 use bevy_ecs::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -28,9 +29,6 @@ pub struct DirtyAgents(pub HashSet<Entity>);
 /// Companion to `DirtyAgents` for vehicle entities.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct DirtyVehicles(pub HashSet<Entity>);
-
-use crate::ids::ChunkCoord;
-use crate::mobility::lod::{FlowCell, MobilityActivity};
 
 /// Per-chunk activity state. Driven by `classify_activity_system` each tick.
 #[derive(Resource, Debug, Default, Clone)]
@@ -69,8 +67,6 @@ pub struct VehiclesByChunk(pub HashMap<ChunkCoord, Vec<Entity>>);
 /// Cleared at start of each tick by `classify_activity_system`.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct ChunkTransitions(pub Vec<(ChunkCoord, MobilityActivity, MobilityActivity)>);
-
-use crate::ids::{AgentId, VehicleId};
 
 /// Per-agent record of the chunk that agent was in at the END of the
 /// previous tick. Used by `tick_mobility` to compute `left_*` lists in the
