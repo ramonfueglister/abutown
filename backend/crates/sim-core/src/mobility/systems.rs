@@ -7,10 +7,6 @@ use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
 use bevy_ecs::prelude::*;
 
-fn coord_at_progress(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
-    crate::mobility_geometry::world_coord_at_progress_slice(points, progress)
-}
-
 fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::DirectionDto {
     crate::mobility_geometry::direction_at_progress_slice(points, progress)
 }
@@ -459,47 +455,24 @@ pub fn compute_world_coord_system(
     stops: Res<Stops>,
     link_polylines: Res<LinkPolylines>,
 ) {
-    // Vehicles first.
     for (rp, mut pos) in vehicles.iter_mut() {
         if !chunk_is_simulated(&pos, &activities) {
             continue;
         }
-        let Some(route) = routes.0.get(&rp.route_id) else {
-            continue;
-        };
-        let Some(link_id) = route.links.get(rp.link_index) else {
-            continue;
-        };
-        let Some(points) = link_polylines.0.get(link_id) else {
-            continue;
-        };
-        let (x, y) = coord_at_progress(points, rp.progress);
-        pos.x = x;
-        pos.y = y;
+        if let Some((x, y)) =
+            crate::mobility::vehicle_world_coord(rp, &routes, &link_polylines)
+        {
+            pos.x = x;
+            pos.y = y;
+        }
     }
-
-    // Agents.
     for (state, mut pos) in agents.iter_mut() {
         if !chunk_is_simulated(&pos, &activities) {
             continue;
         }
-        let coord = match &state.0 {
-            AgentMobilityState::Walking { link_id, progress } => link_polylines
-                .0
-                .get(link_id)
-                .map(|p| coord_at_progress(p, *progress)),
-            AgentMobilityState::WaitingAtStop { stop_id }
-            | AgentMobilityState::Boarding { stop_id, .. }
-            | AgentMobilityState::Alighting { stop_id, .. } => stops.0.get(stop_id).and_then(|s| {
-                let route = routes.0.get(&s.route_id)?;
-                let link_id = route.links.get(s.link_index)?;
-                let points = link_polylines.0.get(link_id)?;
-                Some(coord_at_progress(points, s.progress))
-            }),
-            // InVehicle and AtActivity: leave Position unchanged.
-            _ => None,
-        };
-        if let Some((x, y)) = coord {
+        if let Some((x, y)) =
+            crate::mobility::agent_world_coord(&state.0, &routes, &stops, &link_polylines)
+        {
             pos.x = x;
             pos.y = y;
         }
