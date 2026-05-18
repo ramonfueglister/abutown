@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   encodeClientMessage,
-  isMobilityDeltaDto,
+  isMobilityChunkDeltaDto,
+  isMobilityChunkSnapshotDto,
   isMobilitySnapshotDto,
   isWorldSummaryDto,
   parseServerMessage,
@@ -57,19 +58,35 @@ describe('mobility protocol guards', () => {
     expect(isMobilitySnapshotDto(snapshot)).toBe(true);
   });
 
-  it('accepts a valid mobility delta server message', () => {
+  it('accepts a valid MobilityChunkDelta message', () => {
     const message = {
-      type: 'mobility_delta',
+      type: 'mobility_chunk_delta',
       protocol_version: 1,
       world_id: 'abutown-main',
       tick: 4,
+      chunk: { x: 4, y: 4 },
       changed_agents: snapshot.agents,
       changed_vehicles: snapshot.vehicles,
       left_agents: [] as string[],
       left_vehicles: [] as string[],
     };
 
-    expect(isMobilityDeltaDto(message)).toBe(true);
+    expect(isMobilityChunkDeltaDto(message)).toBe(true);
+    expect(parseServerMessage(message)).toEqual(message);
+  });
+
+  it('accepts a valid MobilityChunkSnapshot message', () => {
+    const message = {
+      type: 'mobility_chunk_snapshot',
+      protocol_version: 1,
+      world_id: 'abutown-main',
+      tick: 4,
+      chunk: { x: 4, y: 4 },
+      agents: snapshot.agents,
+      vehicles: snapshot.vehicles,
+    };
+
+    expect(isMobilityChunkSnapshotDto(message)).toBe(true);
     expect(parseServerMessage(message)).toEqual(message);
   });
 
@@ -80,7 +97,7 @@ describe('mobility protocol guards', () => {
       world_id: 'abutown-main',
       chunk_size: 32,
     });
-    expect(parseServerMessage({ type: 'mobility_delta', tick: 1 })).toBeNull();
+    expect(parseServerMessage({ type: 'mobility_chunk_delta', tick: 1 })).toBeNull();
     expect(isMobilitySnapshotDto({ ...snapshot, agents: [{ id: 'agent:bad', state: { type: 'walking' }, plan_cursor: 0 }] })).toBe(false);
   });
 });
@@ -150,36 +167,32 @@ it('encodes chunk_unsubscribe message', () => {
   expect(JSON.parse(wire).type).toBe('chunk_unsubscribe');
 });
 
-it('parses MobilityDelta with left_agents/left_vehicles', () => {
-  const result = parseServerMessage(JSON.stringify({
-    type: 'mobility_delta',
+it('parses a MobilityChunkDelta server message', () => {
+  const raw = {
+    type: 'mobility_chunk_delta',
     protocol_version: 1,
-    world_id: 'w',
-    tick: 0,
+    world_id: 'abutown-main',
+    tick: 5,
+    chunk: { x: 4, y: 4 },
     changed_agents: [],
     changed_vehicles: [],
-    left_agents: ['agent:walk:1'],
-    left_vehicles: ['vehicle:car:0:0'],
-  }));
-  expect(result?.type).toBe('mobility_delta');
-  if (result?.type === 'mobility_delta') {
-    expect(result.left_agents).toEqual(['agent:walk:1']);
-    expect(result.left_vehicles).toEqual(['vehicle:car:0:0']);
-  }
+    left_agents: [],
+    left_vehicles: [],
+  };
+  const msg = parseServerMessage(raw);
+  expect(msg?.type).toBe('mobility_chunk_delta');
 });
 
-it('parses MobilityDelta missing left_* fields for backward compat', () => {
-  const result = parseServerMessage(JSON.stringify({
-    type: 'mobility_delta',
+it('parses a MobilityChunkSnapshot server message', () => {
+  const raw = {
+    type: 'mobility_chunk_snapshot',
     protocol_version: 1,
-    world_id: 'w',
-    tick: 0,
-    changed_agents: [],
-    changed_vehicles: [],
-  }));
-  expect(result?.type).toBe('mobility_delta');
-  if (result?.type === 'mobility_delta') {
-    expect(result.left_agents).toEqual([]);
-    expect(result.left_vehicles).toEqual([]);
-  }
+    world_id: 'abutown-main',
+    tick: 5,
+    chunk: { x: 4, y: 4 },
+    agents: [],
+    vehicles: [],
+  };
+  const msg = parseServerMessage(raw);
+  expect(msg?.type).toBe('mobility_chunk_snapshot');
 });

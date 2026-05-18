@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
-  applyMobilityDelta,
+  applyMobilityChunkDelta,
+  applyMobilityChunkSnapshot,
   applyMobilitySnapshot,
   applyServerMessage,
   createMobilityOverlayState,
   interpolatedAgents,
   mobilityDiagnostics,
 } from '../../src/backend/mobilityState';
-import type { AgentMobilityDto, MobilityDeltaDto, MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
-import type { MobilityDeltaServerMessage } from '../../src/backend/mobilityProtocol';
+import type { AgentMobilityDto, MobilityChunkDeltaDto, MobilityChunkSnapshotDto, MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
@@ -75,14 +75,16 @@ describe('mobility state reducer', () => {
     expect(diagnostics).not.toHaveProperty('seededAgentState');
   });
 
-  it('applies mobility deltas by replacing changed agents and vehicles', () => {
+  it('applies chunk deltas by replacing changed agents and vehicles', () => {
     const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
-    const next = applyMobilityDelta(
+    const next = applyMobilityChunkDelta(
       state,
       {
+        type: 'mobility_chunk_delta',
         protocol_version: 1,
         world_id: 'abutown-main',
         tick: 3,
+        chunk: { x: 0, y: 0 },
         changed_agents: [
           {
             id: 'agent:pedestrian:0',
@@ -99,6 +101,8 @@ describe('mobility state reducer', () => {
             dwell_ticks_remaining: 1,
           },
         ],
+        left_agents: [],
+        left_vehicles: [],
       },
       200
     );
@@ -108,12 +112,12 @@ describe('mobility state reducer', () => {
 
   it('counts invalid messages without dropping known records', () => {
     const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
-    const next = applyServerMessage(state, { type: 'mobility_delta', tick: 3 }, 200);
+    const next = applyServerMessage(state, { type: 'mobility_chunk_delta', tick: 3 }, 200);
 
     expect(mobilityDiagnostics(next)).toMatchObject({ agents: 1, invalidMessages: 1 });
   });
 
-  it('applyMobilityDelta drops entities listed in left_agents and left_vehicles', () => {
+  it('applyMobilityChunkDelta drops entities listed in left_agents and left_vehicles', () => {
     const state = applyMobilitySnapshot(
       createMobilityOverlayState(),
       {
@@ -148,18 +152,80 @@ describe('mobility state reducer', () => {
     expect(state.agents.size).toBe(1);
     expect(state.vehicles.size).toBe(1);
 
-    const after = applyMobilityDelta(state, {
-      type: 'mobility_delta',
+    const after = applyMobilityChunkDelta(state, {
+      type: 'mobility_chunk_delta',
       protocol_version: 1,
       world_id: 'w',
       tick: 1,
+      chunk: { x: 0, y: 0 },
       changed_agents: [],
       changed_vehicles: [],
       left_agents: ['agent:walk:1'],
       left_vehicles: ['vehicle:car:0:0'],
-    } as MobilityDeltaServerMessage, 100);
+    }, 100);
     expect(after.agents.size).toBe(0);
     expect(after.vehicles.size).toBe(0);
+  });
+
+  it('applyMobilityChunkSnapshot replaces entities for that chunk only', () => {
+    // agent in chunk (0,0): world_coord x in [0,31], y in [0,31]
+    // agent in chunk (1,0): world_coord x in [32,63], y in [0,31]
+    const seedState = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'w',
+        tick: 0,
+        agents: [
+          {
+            id: 'agent:chunk00',
+            state: { type: 'walking', link_id: 'l', progress: 0 },
+            plan_cursor: 0,
+            world_coord: { x: 0, y: 0 },
+            direction: 'e',
+            sprite_key: 'p:0',
+          },
+          {
+            id: 'agent:chunk10',
+            state: { type: 'walking', link_id: 'l', progress: 0 },
+            plan_cursor: 0,
+            world_coord: { x: 32, y: 0 },
+            direction: 'e',
+            sprite_key: 'p:0',
+          },
+        ],
+        vehicles: [],
+        stops: [],
+      },
+      0,
+    );
+    expect(seedState.agents.size).toBe(2);
+
+    // Apply snapshot for chunk (0,0) with a different agent
+    const chunkSnap: MobilityChunkSnapshotDto = {
+      type: 'mobility_chunk_snapshot',
+      protocol_version: 1,
+      world_id: 'w',
+      tick: 1,
+      chunk: { x: 0, y: 0 },
+      agents: [{
+        id: 'agent:chunk00:new',
+        state: { type: 'walking', link_id: 'l', progress: 0 },
+        plan_cursor: 0,
+        world_coord: { x: 10, y: 10 },
+        direction: 'e',
+        sprite_key: 'p:0',
+      }],
+      vehicles: [],
+    };
+
+    const after = applyMobilityChunkSnapshot(seedState, chunkSnap, 100);
+    // Old chunk (0,0) agent gone, new snapshot agent present
+    expect(after.agents.has('agent:chunk00')).toBe(false);
+    expect(after.agents.has('agent:chunk00:new')).toBe(true);
+    // chunk (1,0) agent untouched
+    expect(after.agents.has('agent:chunk10')).toBe(true);
+    expect(after.agents.size).toBe(2);
   });
 
 });
@@ -192,7 +258,7 @@ describe('mobility state interpolation buffer', () => {
     expect(entry.lastTickAt).toBe(1000);
   });
 
-  it('delta moves prev<-current and sets current=new dto', () => {
+  it('chunk delta moves prev<-current and sets current=new dto', () => {
     let state = applyMobilitySnapshot(
       createMobilityOverlayState(),
       {
@@ -205,30 +271,38 @@ describe('mobility state interpolation buffer', () => {
       },
       1000,
     );
-    const delta: MobilityDeltaDto = {
+    const delta: MobilityChunkDeltaDto = {
+      type: 'mobility_chunk_delta',
       protocol_version: 1,
       world_id: 'abutown-main',
       tick: 2,
+      chunk: { x: 3, y: 6 },
       changed_agents: [agentAt('agent:seed:0', 110, 200)],
       changed_vehicles: [],
+      left_agents: [],
+      left_vehicles: [],
     };
-    state = applyMobilityDelta(state, delta, 1100);
+    state = applyMobilityChunkDelta(state, delta, 1100);
     const entry = state.agents.get('agent:seed:0')!;
     expect(entry.prev.world_coord).toEqual({ x: 100, y: 200 });
     expect(entry.current.world_coord).toEqual({ x: 110, y: 200 });
     expect(entry.lastTickAt).toBe(1100);
   });
 
-  it('delta for a new agent sets prev == current', () => {
+  it('chunk delta for a new agent sets prev == current', () => {
     let state = createMobilityOverlayState();
-    state = applyMobilityDelta(
+    state = applyMobilityChunkDelta(
       state,
       {
+        type: 'mobility_chunk_delta',
         protocol_version: 1,
         world_id: 'abutown-main',
         tick: 1,
+        chunk: { x: 1, y: 1 },
         changed_agents: [agentAt('agent:seed:0', 50, 60)],
         changed_vehicles: [],
+        left_agents: [],
+        left_vehicles: [],
       },
       500,
     );
@@ -250,14 +324,18 @@ describe('mobility state interpolation buffer', () => {
       },
       1000,
     );
-    state = applyMobilityDelta(
+    state = applyMobilityChunkDelta(
       state,
       {
+        type: 'mobility_chunk_delta',
         protocol_version: 1,
         world_id: 'abutown-main',
         tick: 2,
+        chunk: { x: 3, y: 6 },
         changed_agents: [agentAt('agent:seed:0', 110, 200)],
         changed_vehicles: [],
+        left_agents: [],
+        left_vehicles: [],
       },
       1100,
     );
@@ -280,14 +358,18 @@ describe('mobility state interpolation buffer', () => {
       },
       0,
     );
-    state = applyMobilityDelta(
+    state = applyMobilityChunkDelta(
       state,
       {
+        type: 'mobility_chunk_delta',
         protocol_version: 1,
         world_id: 'abutown-main',
         tick: 2,
+        chunk: { x: 0, y: 0 },
         changed_agents: [agentAt('agent:seed:0', 100, 0)],
         changed_vehicles: [],
+        left_agents: [],
+        left_vehicles: [],
       },
       1000,
     );

@@ -1,12 +1,19 @@
 import {
-  isMobilityDeltaDto,
   parseServerMessage,
   type AgentMobilityDto,
-  type MobilityDeltaDto,
+  type MobilityChunkDeltaDto,
+  type MobilityChunkSnapshotDto,
   type MobilitySnapshotDto,
   type StopMobilityDto,
   type VehicleMobilityDto,
 } from './mobilityProtocol';
+
+const CHUNK_SIZE = 32;
+
+function chunkOfWorldCoord(coord: { x: number; y: number } | undefined): string {
+  if (!coord) return '';
+  return `${Math.floor(coord.x / CHUNK_SIZE)},${Math.floor(coord.y / CHUNK_SIZE)}`;
+}
 
 export type MobilityConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -83,14 +90,49 @@ export function applyMobilitySnapshot(
   };
 }
 
-export function applyMobilityDelta(
+export function applyMobilityChunkSnapshot(
   state: MobilityOverlayState,
-  delta: MobilityDeltaDto,
+  msg: MobilityChunkSnapshotDto,
+  now = Date.now(),
+): MobilityOverlayState {
+  const chunkKey = `${msg.chunk.x},${msg.chunk.y}`;
+  const agents = new Map(state.agents);
+  for (const [id, entry] of agents) {
+    if (chunkOfWorldCoord(entry.current.world_coord) === chunkKey) {
+      agents.delete(id);
+    }
+  }
+  for (const dto of msg.agents) {
+    agents.set(dto.id, { prev: dto, current: dto, lastTickAt: now });
+  }
+  const vehicles = new Map(state.vehicles);
+  for (const [id, entry] of vehicles) {
+    if (chunkOfWorldCoord(entry.current.world_coord) === chunkKey) {
+      vehicles.delete(id);
+    }
+  }
+  for (const dto of msg.vehicles) {
+    vehicles.set(dto.id, { prev: dto, current: dto, lastTickAt: now });
+  }
+  return {
+    ...state,
+    status: 'connected',
+    tick: msg.tick,
+    agents,
+    vehicles,
+    lastError: null,
+    lastUpdatedAt: now,
+  };
+}
+
+export function applyMobilityChunkDelta(
+  state: MobilityOverlayState,
+  msg: MobilityChunkDeltaDto,
   now = Date.now(),
 ): MobilityOverlayState {
   const agents = new Map(state.agents);
-  for (const id of delta.left_agents ?? []) agents.delete(id);
-  for (const agent of delta.changed_agents) {
+  for (const id of msg.left_agents) agents.delete(id);
+  for (const agent of msg.changed_agents) {
     const previous = agents.get(agent.id);
     agents.set(agent.id, {
       prev: previous?.current ?? agent,
@@ -99,8 +141,8 @@ export function applyMobilityDelta(
     });
   }
   const vehicles = new Map(state.vehicles);
-  for (const id of delta.left_vehicles ?? []) vehicles.delete(id);
-  for (const vehicle of delta.changed_vehicles) {
+  for (const id of msg.left_vehicles) vehicles.delete(id);
+  for (const vehicle of msg.changed_vehicles) {
     const previous = vehicles.get(vehicle.id);
     vehicles.set(vehicle.id, {
       prev: previous?.current ?? vehicle,
@@ -111,7 +153,7 @@ export function applyMobilityDelta(
   return {
     ...state,
     status: 'connected',
-    tick: delta.tick,
+    tick: msg.tick,
     agents,
     vehicles,
     lastError: null,
@@ -125,8 +167,11 @@ export function applyServerMessage(
   now = Date.now(),
 ): MobilityOverlayState {
   const message = parseServerMessage(value);
-  if (message?.type === 'mobility_delta' && isMobilityDeltaDto(message)) {
-    return applyMobilityDelta(state, message, now);
+  if (message?.type === 'mobility_chunk_snapshot') {
+    return applyMobilityChunkSnapshot(state, message, now);
+  }
+  if (message?.type === 'mobility_chunk_delta') {
+    return applyMobilityChunkDelta(state, message, now);
   }
   if (message !== null) return state;
   return { ...state, invalidMessages: state.invalidMessages + 1, lastUpdatedAt: now };

@@ -52,14 +52,28 @@ export type MobilitySnapshotDto = {
   stops: StopMobilityDto[];
 };
 
-export type MobilityDeltaDto = {
+export type ChunkCoordDto = { x: number; y: number };
+
+export type MobilityChunkDeltaDto = {
+  type: 'mobility_chunk_delta';
   protocol_version: number;
   world_id: string;
   tick: number;
+  chunk: ChunkCoordDto;
   changed_agents: AgentMobilityDto[];
   changed_vehicles: VehicleMobilityDto[];
-  left_agents?: string[];
-  left_vehicles?: string[];
+  left_agents: string[];
+  left_vehicles: string[];
+};
+
+export type MobilityChunkSnapshotDto = {
+  type: 'mobility_chunk_snapshot';
+  protocol_version: number;
+  world_id: string;
+  tick: number;
+  chunk: ChunkCoordDto;
+  agents: AgentMobilityDto[];
+  vehicles: VehicleMobilityDto[];
 };
 
 export type ServerHelloDto = {
@@ -79,12 +93,6 @@ export type TilePulseDeltaDto = {
   local_index: number;
 };
 
-export type MobilityDeltaServerMessage = MobilityDeltaDto & {
-  type: 'mobility_delta';
-  left_agents: string[];
-  left_vehicles: string[];
-};
-
 export type ServerErrorDto = {
   type: 'error';
   protocol_version: number;
@@ -96,10 +104,9 @@ export type ServerErrorDto = {
 export type ServerMessageDto =
   | ServerHelloDto
   | TilePulseDeltaDto
-  | MobilityDeltaServerMessage
+  | MobilityChunkDeltaDto
+  | MobilityChunkSnapshotDto
   | ServerErrorDto;
-
-export type ChunkCoordDto = { x: number; y: number };
 
 export type ChunkSubscribeMessage = {
   type: 'chunk_subscribe';
@@ -157,32 +164,49 @@ export function isWorldSummaryDto(value: unknown): value is WorldSummaryDto {
   return value.loaded_chunks.every((coord) => isObject(coord) && isNumber(coord.x) && isNumber(coord.y));
 }
 
-export function isMobilityDeltaDto(value: unknown): value is MobilityDeltaDto | MobilityDeltaServerMessage {
+export function isMobilityChunkDeltaDto(value: unknown): value is MobilityChunkDeltaDto {
   if (!isObject(value)) return false;
   return (
+    value.type === 'mobility_chunk_delta' &&
     isNumber(value.protocol_version) &&
     isString(value.world_id) &&
     isNumber(value.tick) &&
+    isObject(value.chunk) &&
+    isNumber(value.chunk.x) &&
+    isNumber(value.chunk.y) &&
     Array.isArray(value.changed_agents) &&
-    value.changed_agents.every(isAgentMobilityDto) &&
+    (value.changed_agents as unknown[]).every(isAgentMobilityDto) &&
     Array.isArray(value.changed_vehicles) &&
-    value.changed_vehicles.every(isVehicleMobilityDto)
+    (value.changed_vehicles as unknown[]).every(isVehicleMobilityDto) &&
+    Array.isArray(value.left_agents) &&
+    (value.left_agents as unknown[]).every(isString) &&
+    Array.isArray(value.left_vehicles) &&
+    (value.left_vehicles as unknown[]).every(isString)
+  );
+}
+
+export function isMobilityChunkSnapshotDto(value: unknown): value is MobilityChunkSnapshotDto {
+  if (!isObject(value)) return false;
+  return (
+    value.type === 'mobility_chunk_snapshot' &&
+    isNumber(value.protocol_version) &&
+    isString(value.world_id) &&
+    isNumber(value.tick) &&
+    isObject(value.chunk) &&
+    isNumber(value.chunk.x) &&
+    isNumber(value.chunk.y) &&
+    Array.isArray(value.agents) &&
+    (value.agents as unknown[]).every(isAgentMobilityDto) &&
+    Array.isArray(value.vehicles) &&
+    (value.vehicles as unknown[]).every(isVehicleMobilityDto)
   );
 }
 
 export function parseServerMessage(value: unknown): ServerMessageDto | null {
   const parsed: unknown = isString(value) ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value;
   if (!isObject(parsed) || !isString(parsed.type)) return null;
-  if (parsed.type === 'mobility_delta') {
-    if (!isMobilityDeltaDto(parsed)) return null;
-    const left_agents = Array.isArray(parsed.left_agents)
-      ? (parsed.left_agents as unknown[]).filter(isString)
-      : [];
-    const left_vehicles = Array.isArray(parsed.left_vehicles)
-      ? (parsed.left_vehicles as unknown[]).filter(isString)
-      : [];
-    return { ...parsed, type: 'mobility_delta', left_agents, left_vehicles };
-  }
+  if (parsed.type === 'mobility_chunk_delta') return isMobilityChunkDeltaDto(parsed) ? parsed : null;
+  if (parsed.type === 'mobility_chunk_snapshot') return isMobilityChunkSnapshotDto(parsed) ? parsed : null;
   if (parsed.type === 'hello') return isServerHelloDto(parsed) ? parsed : null;
   if (parsed.type === 'tile_pulse') return isTilePulseDeltaDto(parsed) ? parsed : null;
   if (parsed.type === 'error') return isServerErrorDto(parsed) ? parsed : null;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pedestriansFromMobilityState, carsFromMobilityState } from '../../src/render/backendMobilityDrawables';
 import {
-  applyMobilityDelta,
+  applyMobilityChunkDelta,
   applyMobilitySnapshot,
   createMobilityOverlayState,
 } from '../../src/backend/mobilityState';
@@ -49,12 +49,14 @@ describe('backendMobilityDrawables (interpolated)', () => {
       ],
       [],
     );
-    state = applyMobilityDelta(
+    state = applyMobilityChunkDelta(
       state,
       {
+        type: 'mobility_chunk_delta',
         protocol_version: 1,
         world_id: 'abutown-main',
         tick: 2,
+        chunk: { x: 0, y: 0 },
         changed_agents: [
           {
             id: 'agent:seed:0',
@@ -66,6 +68,8 @@ describe('backendMobilityDrawables (interpolated)', () => {
           },
         ],
         changed_vehicles: [],
+        left_agents: [],
+        left_vehicles: [],
       },
       100,
     );
@@ -93,12 +97,14 @@ describe('backendMobilityDrawables (interpolated)', () => {
         },
       ],
     );
-    state = applyMobilityDelta(
+    state = applyMobilityChunkDelta(
       state,
       {
+        type: 'mobility_chunk_delta',
         protocol_version: 1,
         world_id: 'abutown-main',
         tick: 2,
+        chunk: { x: 0, y: 0 },
         changed_agents: [],
         changed_vehicles: [
           {
@@ -115,6 +121,8 @@ describe('backendMobilityDrawables (interpolated)', () => {
             sprite_key: 'vehicle:0',
           },
         ],
+        left_agents: [],
+        left_vehicles: [],
       },
       100,
     );
