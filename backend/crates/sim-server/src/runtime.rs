@@ -381,6 +381,19 @@ impl SimulationRuntime {
         self.mobility.apply_subscription_diff(added, removed);
     }
 
+    /// Expose the per-chunk tick result for the new fan-out path (Task 7).
+    /// This is the authoritative ticker for mobility; `next_mobility_delta`
+    /// (used by the legacy broadcast path) MUST NOT also be called in the same
+    /// interval — it would tick mobility twice.  See `spawn_delta_loop` in app.rs.
+    pub fn tick_world_mobility(
+        &mut self,
+    ) -> std::collections::HashMap<
+        sim_core::ids::ChunkCoord,
+        sim_core::mobility::MobilityChunkDelta,
+    > {
+        self.mobility.tick_mobility()
+    }
+
     pub fn next_server_messages(&mut self) -> Vec<ServerMessageDto> {
         vec![
             self.next_pulse(),

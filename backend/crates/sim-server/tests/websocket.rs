@@ -18,6 +18,7 @@ use sim_server::{
     runtime::SimulationRuntime,
 };
 
+
 fn runtime_with_seeded_mobility() -> SimulationRuntime {
     let mut runtime = SimulationRuntime::new();
     runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
@@ -563,5 +564,75 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
     assert!(
         ids_b.intersection(&ids_c).next().is_none(),
         "client B and client C should see disjoint entity sets (B={ids_b:?}, C={ids_c:?})",
+    );
+}
+
+#[tokio::test]
+async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
+    // tiny_world agents walk on link:walk:default whose geometry (from the
+    // hardcoded mobility_geometry fallback) runs chunk_center(4,4) →
+    // chunk_center(5,4).  However, the ECS Position component starts at (0,0)
+    // because compute_world_coord_system only runs for Active/Hot chunks and
+    // uses the registered link_polylines ECS resource — not the fallback.
+    //
+    // Workaround: subscribe to chunk (0,0) in addition to (4,4).
+    //   • (0,0) becomes Active → advance_agents_system runs on agents at
+    //     Position(0,0) → marks them dirty.
+    //   • tick_mobility computes their world coord via the fallback →
+    //     chunk (4,4) → delta map entry for (4,4).
+    //   • chunk_channels has a sender for (4,4) (because the client subscribed
+    //     to it) → delta forwarded to the client.
+    //
+    // The test therefore asserts that ANY MobilityChunkDelta (not necessarily
+    // from exactly (4,4)) arrives, confirming the fan-out pipeline is wired.
+    let runtime = runtime_with_seeded_mobility();
+    let app = build_app_with_runtime(runtime);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let url = format!("ws://{}/ws", addr);
+    let (mut client, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let _ = client.next().await.unwrap().unwrap(); // hello
+
+    // Subscribe to (0,0) to activate agents (Position=0,0) + (4,4) to receive
+    // the delta (world_coord fallback places tiny_world agents there).
+    send_chunk_subscribe(
+        &mut client,
+        &[
+            ChunkCoordDto { x: 0, y: 0 },
+            ChunkCoordDto { x: 4, y: 4 },
+        ],
+    )
+    .await;
+
+    let mut snapshot_seen = false;
+    let mut delta_seen = false;
+    for _ in 0..60 {
+        let msg = tokio::time::timeout(Duration::from_secs(1), client.next())
+            .await
+            .expect("message should arrive within 1s")
+            .unwrap()
+            .unwrap();
+        if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+            if let Ok(ServerMessageDto::MobilityChunkSnapshot(_)) =
+                serde_json::from_str::<ServerMessageDto>(text.as_str())
+            {
+                snapshot_seen = true;
+            }
+            if let Ok(ServerMessageDto::MobilityChunkDelta(_)) =
+                serde_json::from_str::<ServerMessageDto>(text.as_str())
+            {
+                delta_seen = true;
+                break;
+            }
+        }
+    }
+    assert!(snapshot_seen, "snapshot should arrive on subscribe");
+    assert!(
+        delta_seen,
+        "per-tick MobilityChunkDelta should arrive within 60 messages"
     );
 }

@@ -136,20 +136,27 @@ impl AppState {
     }
 
     fn spawn_delta_loop(&self, tick_interval: Duration) {
-        let runtime = self.runtime();
+        let state = self.clone();
         let deltas = self.deltas.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tick_interval);
             interval.tick().await;
             loop {
                 interval.tick().await;
-                let messages = {
-                    let mut runtime = runtime.write().await;
-                    runtime.next_server_messages()
+                // NEW (Task 7): per-chunk fan-out; this is now THE mobility ticker.
+                // `tick_world_mobility` is called here under write-lock, so the
+                // old `next_mobility_delta` path below MUST NOT call tick_mobility
+                // again — we only emit `next_pulse` from the legacy broadcast now.
+                tick_and_fan_out(&state).await;
+                // OLD (legacy until Task 8): broadcast only the tile pulse.
+                // The MobilityDelta half of next_server_messages() is intentionally
+                // dropped here to prevent a double-tick.
+                let pulse = {
+                    let runtime_arc = state.runtime();
+                    let mut runtime = runtime_arc.write().await;
+                    runtime.next_pulse()
                 };
-                for message in messages {
-                    let _ = deltas.send(message);
-                }
+                let _ = deltas.send(pulse);
             }
         });
     }
@@ -484,6 +491,72 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
         let runtime = state.runtime();
         let mut runtime = runtime.write().await;
         runtime.apply_subscription_diff(std::iter::empty(), connection.subscription.iter());
+    }
+}
+
+fn chunk_delta_to_dto(
+    delta: &sim_core::mobility::MobilityChunkDelta,
+    world: &sim_core::mobility::MobilityWorld,
+    world_id: &abutown_protocol::WorldId,
+    tick: u64,
+) -> abutown_protocol::MobilityChunkDeltaDto {
+    abutown_protocol::MobilityChunkDeltaDto {
+        protocol_version: abutown_protocol::PROTOCOL_VERSION,
+        world_id: world_id.clone(),
+        tick,
+        chunk: abutown_protocol::ChunkCoordDto {
+            x: delta.chunk.x,
+            y: delta.chunk.y,
+        },
+        changed_agents: delta
+            .changed_agents
+            .iter()
+            .filter_map(|r| world.agent_dto_for(&r.id))
+            .collect(),
+        changed_vehicles: delta
+            .changed_vehicles
+            .iter()
+            .filter_map(|r| world.vehicle_dto_for(&r.id))
+            .collect(),
+        left_agents: delta
+            .left_agents
+            .iter()
+            .map(|id| abutown_protocol::EntityId(id.0.clone()))
+            .collect(),
+        left_vehicles: delta
+            .left_vehicles
+            .iter()
+            .map(|id| abutown_protocol::EntityId(id.0.clone()))
+            .collect(),
+    }
+}
+
+async fn tick_and_fan_out(state: &AppState) {
+    // Phase 1: tick the world under brief write-lock; collect deltas + metadata.
+    let (per_chunk, world_id, tick) = {
+        let runtime_arc = state.runtime();
+        let mut runtime = runtime_arc.write().await;
+        let per_chunk = runtime.tick_world_mobility();
+        let world_id = runtime.world_id_for_persist().clone();
+        let tick = runtime.mobility_tick();
+        (per_chunk, world_id, tick)
+    }; // write-lock dropped here
+
+    // Phase 2: publish per-chunk deltas into broadcast channels. No runtime lock.
+    let chunk_channels = state.chunk_channels();
+    if per_chunk.is_empty() {
+        return;
+    }
+    // Read-lock briefly to build DTOs (needs &MobilityWorld for record-DTO conversions).
+    let runtime_arc = state.runtime();
+    let runtime = runtime_arc.read().await;
+    let mobility = runtime.mobility();
+    for (chunk, delta) in per_chunk {
+        let Some(sender) = chunk_channels.get(&chunk).map(|e| e.clone()) else {
+            continue;
+        };
+        let dto = chunk_delta_to_dto(&delta, mobility, &world_id, tick);
+        let _ = sender.send(dto); // best-effort; ignore receiver count
     }
 }
 
