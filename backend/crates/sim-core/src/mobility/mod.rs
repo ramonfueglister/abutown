@@ -244,8 +244,8 @@ impl MobilityWorld {
     pub fn flow_cell_for_chunk(
         &self,
         chunk: crate::ids::ChunkCoord,
-    ) -> Option<crate::mobility::lod::FlowCell> {
-        self.world.resource::<FlowCells>().0.get(&chunk).cloned()
+    ) -> Option<&crate::mobility::lod::FlowCell> {
+        self.world.resource::<FlowCells>().0.get(&chunk)
     }
 }
 
