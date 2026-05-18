@@ -1,39 +1,23 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use sim_core::city_network::{CityNetwork, NetworkCoord, WorldTiles};
 use sim_core::mobility::seed::{SeedDensity, from_network};
 
-fn big_network() -> CityNetwork {
-    let mut corridors = Vec::with_capacity(1000);
-    for i in 0..1000u32 {
-        let y = (i % 200) * 2;
-        let x_start = ((i / 200) * 50) as i32;
-        corridors.push(vec![
-            NetworkCoord {
-                x: x_start,
-                y: y as i32,
-            },
-            NetworkCoord {
-                x: x_start + 40,
-                y: y as i32,
-            },
-        ]);
+mod common;
+use common::SyntheticNetwork;
+
+fn big_network() -> sim_core::city_network::CityNetwork {
+    SyntheticNetwork {
+        world_id: "bench",
+        world_w: 512,
+        world_h: 512,
+        corridor_count: 1000,
+        corridor_rows: 200,
+        corridor_x_step: 50,
+        corridor_len: 40,
+        arterial_count: 50,
+        arterial_y_step: 4,
+        arterial_len: 250,
     }
-    let mut arterials = Vec::with_capacity(50);
-    for i in 0..50u32 {
-        let y = (i * 4) as i32;
-        arterials.push(vec![NetworkCoord { x: 0, y }, NetworkCoord { x: 250, y }]);
-    }
-    CityNetwork {
-        version: 1,
-        world_id: "bench".to_string(),
-        chunk_size: 32,
-        world_tiles: WorldTiles {
-            width: 512,
-            height: 512,
-        },
-        arterial_paths: arterials,
-        pedestrian_corridors: corridors,
-    }
+    .build()
 }
 
 fn tick_10k_walkers_1k_cars(c: &mut Criterion) {
