@@ -59,9 +59,9 @@ pub struct SimulationRuntime {
     world_id: WorldId,
     registry: ChunkRegistry,
     mobility: MobilityWorld,
-    snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
-    mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
-    event_store: Box<dyn WorldEventStore + Send>,
+    snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
+    mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
+    event_store: Box<dyn WorldEventStore + Send + Sync>,
     event_count: usize,
     tick: u64,
     version: u64,
@@ -90,13 +90,13 @@ impl SimulationRuntime {
         WorldId(WORLD_ID.to_string())
     }
 
-    pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send>) -> Self {
+    pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send + Sync>) -> Self {
         Self::new_with_stores(event_store, Box::new(InMemoryChunkSnapshotStore::default()))
     }
 
     pub fn new_with_stores(
-        event_store: Box<dyn WorldEventStore + Send>,
-        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
+        event_store: Box<dyn WorldEventStore + Send + Sync>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
     ) -> Self {
         let mut registry = ChunkRegistry::new(CHUNK_SIZE);
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
@@ -133,9 +133,9 @@ impl SimulationRuntime {
     }
 
     pub fn new_with_all_stores(
-        event_store: Box<dyn WorldEventStore + Send>,
-        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
-        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
+        event_store: Box<dyn WorldEventStore + Send + Sync>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
+        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
     ) -> Self {
         let mut runtime = Self::new_with_stores(event_store, snapshot_store);
         runtime.mobility_snapshot_store = mobility_snapshot_store;
@@ -171,9 +171,9 @@ impl SimulationRuntime {
     }
 
     pub async fn hydrate_from_stores(
-        event_store: Box<dyn WorldEventStore + Send>,
-        snapshot_store: Box<dyn ChunkSnapshotStore + Send>,
-        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
+        event_store: Box<dyn WorldEventStore + Send + Sync>,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
+        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
         network: &sim_core::city_network::CityNetwork,
     ) -> Result<Self, HydrationError> {
         let world_id = Self::default_world_id();
@@ -1118,7 +1118,7 @@ mod tests {
         use sim_core::mobility::seed;
         use sim_core::persistence::InMemoryMobilitySnapshotStore;
 
-        let store: Box<dyn MobilitySnapshotStore + Send> =
+        let store: Box<dyn MobilitySnapshotStore + Send + Sync> =
             Box::new(InMemoryMobilitySnapshotStore::default());
         let mut runtime = SimulationRuntime::new_with_all_stores(
             Box::new(InMemoryWorldEventStore::default()),

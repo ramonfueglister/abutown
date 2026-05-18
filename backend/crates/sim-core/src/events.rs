@@ -56,7 +56,7 @@ impl WorldEventStoreError {
 }
 
 #[async_trait]
-pub trait WorldEventStore: std::fmt::Debug + Send {
+pub trait WorldEventStore: std::fmt::Debug + Send + Sync {
     async fn append(&mut self, event: WorldEventDto) -> Result<(), WorldEventStoreError>;
 
     async fn find_event_by_command(

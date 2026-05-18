@@ -52,7 +52,7 @@ impl ChunkSnapshotStoreError {
 }
 
 #[async_trait]
-pub trait ChunkSnapshotStore: std::fmt::Debug + Send {
+pub trait ChunkSnapshotStore: std::fmt::Debug + Send + Sync {
     async fn write_snapshot(
         &mut self,
         snapshot: ChunkSnapshotDto,
@@ -128,7 +128,7 @@ impl MobilitySnapshotStoreError {
 }
 
 #[async_trait]
-pub trait MobilitySnapshotStore: std::fmt::Debug + Send {
+pub trait MobilitySnapshotStore: std::fmt::Debug + Send + Sync {
     async fn write(
         &mut self,
         world_id: &str,

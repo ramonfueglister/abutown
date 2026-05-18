@@ -15,7 +15,7 @@ use axum::{
     routing::{get, post},
 };
 use sim_core::ids::ChunkCoord;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{RwLock, broadcast};
 use tower_http::cors::CorsLayer;
 
 use crate::{
@@ -42,7 +42,7 @@ fn resolve_city_network_path() -> String {
 
 #[derive(Clone)]
 pub struct AppState {
-    runtime: Arc<Mutex<SimulationRuntime>>,
+    runtime: Arc<RwLock<SimulationRuntime>>,
     deltas: broadcast::Sender<ServerMessageDto>,
     card_hands: CardHandStore,
     auth: AuthVerifier,
@@ -64,14 +64,14 @@ impl AppState {
     ) -> Self {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         Self {
-            runtime: Arc::new(Mutex::new(runtime)),
+            runtime: Arc::new(RwLock::new(runtime)),
             deltas,
             card_hands,
             auth,
         }
     }
 
-    pub(crate) fn runtime(&self) -> Arc<Mutex<SimulationRuntime>> {
+    pub(crate) fn runtime(&self) -> Arc<RwLock<SimulationRuntime>> {
         Arc::clone(&self.runtime)
     }
 
@@ -88,7 +88,7 @@ impl AppState {
             loop {
                 interval.tick().await;
                 let messages = {
-                    let mut runtime = runtime.lock().await;
+                    let mut runtime = runtime.write().await;
                     runtime.next_server_messages()
                 };
                 for message in messages {
@@ -186,19 +186,19 @@ pub fn build_app_with_runtime_and_card_hands(
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let runtime = state.runtime();
-    let runtime = runtime.lock().await;
+    let runtime = runtime.read().await;
     Json(runtime.health())
 }
 
 async fn world(State(state): State<AppState>) -> Json<WorldSummaryDto> {
     let runtime = state.runtime();
-    let runtime = runtime.lock().await;
+    let runtime = runtime.read().await;
     Json(runtime.world_summary())
 }
 
 async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
     let runtime = state.runtime();
-    let runtime = runtime.lock().await;
+    let runtime = runtime.read().await;
     Json(runtime.mobility_snapshot())
 }
 
@@ -258,7 +258,7 @@ async fn chunk(
     Path((x, y)): Path<(i32, i32)>,
 ) -> Result<Json<ChunkSnapshotDto>, StatusCode> {
     let runtime = state.runtime();
-    let runtime = runtime.lock().await;
+    let runtime = runtime.read().await;
     runtime
         .chunk_snapshot(ChunkCoord { x, y })
         .map(Json)
@@ -268,7 +268,7 @@ async fn chunk(
 async fn command(State(state): State<AppState>, Json(command): Json<ClientCommandDto>) -> Response {
     let result = {
         let runtime = state.runtime();
-        let mut runtime = runtime.lock().await;
+        let mut runtime = runtime.write().await;
         runtime.apply_client_command(command).await
     };
 
@@ -306,7 +306,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     let mut deltas = state.subscribe_deltas();
     let hello = {
         let runtime = state.runtime();
-        let runtime = runtime.lock().await;
+        let runtime = runtime.read().await;
         runtime.hello()
     };
     if send_server_message(&mut socket, hello).await.is_err() {
@@ -343,7 +343,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                     ServerMessageDto::MobilityDelta(raw_delta) => {
                         let dto = {
                             let runtime = state.runtime();
-                            let runtime = runtime.lock().await;
+                            let runtime = runtime.read().await;
                             runtime.filtered_mobility_delta_from_dto(
                                 &raw_delta,
                                 &connection.subscription,
@@ -373,7 +373,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     // ChunkSubscribers count stays consistent after disconnect.
     if !connection.subscription.is_empty() {
         let runtime = state.runtime();
-        let mut runtime = runtime.lock().await;
+        let mut runtime = runtime.write().await;
         runtime.apply_subscription_diff(std::iter::empty(), connection.subscription.iter());
     }
 }
@@ -407,7 +407,7 @@ async fn handle_client_message(
         }
     };
     let runtime = state.runtime();
-    let mut runtime = runtime.lock().await;
+    let mut runtime = runtime.write().await;
     runtime.apply_subscription_diff(&added, &removed);
     let dto = runtime.synthetic_mobility_delta_for_subscription(
         &connection.subscription,
@@ -429,7 +429,7 @@ async fn persist_snapshots_once(
     state: &AppState,
 ) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
     let runtime = state.runtime();
-    let mut runtime = runtime.lock().await;
+    let mut runtime = runtime.write().await;
     let written = runtime.persist_chunk_snapshots().await?;
     if let Err(error) = runtime.persist_mobility_snapshot().await {
         tracing::warn!(%error, "failed to persist mobility snapshot");
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(persist_snapshots_once(&state).await.unwrap(), 3);
 
         let runtime = state.runtime();
-        let runtime = runtime.lock().await;
+        let runtime = runtime.read().await;
         let snapshot = runtime
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
             .await
