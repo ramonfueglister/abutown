@@ -142,9 +142,10 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
     closeSocket();
     const url = websocketUrl(baseUrl, '/ws');
     socket = new WebSocketConstructor(url);
+    let subscription: ReturnType<typeof createSubscriptionClient> | null = null;
 
     socket.onopen = () => {
-      const subscription = createSubscriptionClient({
+      subscription = createSubscriptionClient({
         send: (text) => socket?.send(text),
       });
       const pollSubscription = () => {
@@ -154,7 +155,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
         if (!camera || !view) return;
         const world = options.viewport.getWorldDims();
         const visible = visibleChunks(camera, view, world, world.chunkSize, 1);
-        subscription.update(visible);
+        subscription?.update(visible);
       };
       pollSubscription(); // Initial subscribe immediately so the client doesn't wait 200 ms for entities.
       subscriptionInterval = setIntervalFn(pollSubscription, 200);
@@ -177,6 +178,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
         clearIntervalFn(subscriptionInterval);
         subscriptionInterval = null;
       }
+      subscription?.reset();
       if (stopped) return;
       markDisconnectedAndSchedule('Mobility websocket closed');
     };
@@ -202,7 +204,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
 
   function closeSocket(): void {
     if (subscriptionInterval !== null) {
-      clearInterval(subscriptionInterval);
+      clearIntervalFn(subscriptionInterval);
       subscriptionInterval = null;
     }
     if (!socket) return;
