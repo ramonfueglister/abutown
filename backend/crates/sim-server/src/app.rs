@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use abutown_protocol::{
     ChunkSnapshotDto, ClientCommandDto, ClientMessageDto, CommandResponseDto, HealthResponse,
-    MobilityDeltaDto, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
+    MobilityChunkDeltaDto, MobilityDeltaDto, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
 };
 use axum::{
     Json, Router,
@@ -14,6 +14,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use dashmap::DashMap;
 use sim_core::{
     ids::ChunkCoord,
     persistence::{
@@ -54,6 +55,8 @@ pub struct AppState {
     auth: AuthVerifier,
     snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
+    #[allow(dead_code)]
+    chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
 }
 
 impl AppState {
@@ -96,6 +99,7 @@ impl AppState {
             auth,
             snapshot_store: Arc::new(Mutex::new(snapshot_store)),
             mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
+            chunk_channels: Arc::new(DashMap::new()),
         }
     }
 
@@ -109,6 +113,11 @@ impl AppState {
 
     fn mobility_snapshot_store(&self) -> Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>> {
         Arc::clone(&self.mobility_snapshot_store)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn chunk_channels(&self) -> Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>> {
+        Arc::clone(&self.chunk_channels)
     }
 
     /// Read a chunk snapshot directly from the snapshot store.
