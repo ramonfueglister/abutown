@@ -54,6 +54,17 @@ pub struct ChunkSubscribers(pub HashMap<ChunkCoord, u8>);
 #[derive(Resource, Debug, Default, Clone)]
 pub struct ChunkPopulations(pub HashMap<ChunkCoord, u32>);
 
+/// Per-chunk reverse-index of agent entities, rebuilt each tick by
+/// `track_chunk_populations_system`. Lets `demote_active_to_warm_system`
+/// despawn an entire chunk's residents in O(K) instead of scanning all
+/// `N_agents` per transitioning chunk.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct AgentsByChunk(pub HashMap<ChunkCoord, Vec<Entity>>);
+
+/// Per-chunk reverse-index of vehicle entities; mirror of `AgentsByChunk`.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct VehiclesByChunk(pub HashMap<ChunkCoord, Vec<Entity>>);
+
 /// Transient list of activity transitions for promote/demote systems.
 /// Cleared at start of each tick by `classify_activity_system`.
 #[derive(Resource, Debug, Default, Clone)]

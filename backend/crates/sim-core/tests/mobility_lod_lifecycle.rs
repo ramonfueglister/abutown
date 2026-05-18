@@ -72,3 +72,50 @@ fn chunk_cycles_through_hot_warm_active() {
         "agent re-promoted from flow cell into the world",
     );
 }
+
+/// Mirrors the Phase-6 production flow where agents are loaded from a
+/// snapshot (or seeded via `from_network`) directly into chunks that have
+/// no subscriber. After the first classify pass these chunks must collapse
+/// straight from Asleep into Warm AND demote their population into the
+/// FlowCell — otherwise every Advance/Output system pays the full
+/// per-entity cost for the rest of the run.
+#[test]
+fn unsubscribed_populated_chunks_demote_on_first_classification() {
+    let mut world = MobilityWorld::empty();
+
+    // Seed 50 agents across 50 distinct chunks (one each) — no subscribers.
+    for i in 0..50_i32 {
+        let link_id = LinkId(format!("l:{i}"));
+        // Polyline anchors put the agent at world coord (i*64+5, 5) which
+        // maps to chunk (i*2, 0) via chunk_of(_, _, 32).
+        let x = i * 64 + 5;
+        world.set_link_polyline(link_id.clone(), vec![(x as f32, 5.0), (x as f32, 25.0)]);
+        world.spawn_agent_from_record(AgentRecord::new(
+            AgentId(format!("a:{i}")),
+            AgentMobilityState::Walking {
+                link_id,
+                progress: 0.0,
+            },
+            vec![PlanStage::Activity {
+                activity_id: "stay".into(),
+            }],
+            0.0,
+        ));
+    }
+    assert_eq!(
+        world.agents().len(),
+        50,
+        "precondition: 50 agents seeded directly into unsubscribed chunks",
+    );
+
+    // One tick is enough: track_chunk_populations + classify push the
+    // Asleep→Warm transitions, demote should fire on those.
+    world.tick_mobility();
+
+    assert_eq!(
+        world.agents().len(),
+        0,
+        "all unsubscribed populated chunks must demote their agents into FlowCells \
+         (this is the regression that makes the 100k bench iterate 101k entities per tick)",
+    );
+}

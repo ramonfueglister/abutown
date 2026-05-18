@@ -63,6 +63,8 @@ impl MobilityWorld {
         world.insert_resource(FlowCells::default());
         world.insert_resource(ChunkSubscribers::default());
         world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(AgentsByChunk::default());
+        world.insert_resource(VehiclesByChunk::default());
         world.insert_resource(ChunkTransitions::default());
 
         let mut schedule = Schedule::default();

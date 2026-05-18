@@ -553,19 +553,29 @@ pub fn tick_increment_system(mut tick: ResMut<Tick>) {
 }
 
 pub fn track_chunk_populations_system(
-    agents: Query<&Position, With<AgentMarker>>,
-    vehicles: Query<&Position, With<VehicleMarker>>,
+    agents: Query<(Entity, &Position), With<AgentMarker>>,
+    vehicles: Query<(Entity, &Position), With<VehicleMarker>>,
     flow_cells: Res<FlowCells>,
     mut populations: ResMut<ChunkPopulations>,
+    mut agents_by_chunk: ResMut<AgentsByChunk>,
+    mut vehicles_by_chunk: ResMut<VehiclesByChunk>,
 ) {
     populations.0.clear();
-    for pos in agents.iter() {
-        let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
-        *populations.0.entry(chunk).or_insert(0) += 1;
+    for bucket in agents_by_chunk.0.values_mut() {
+        bucket.clear();
     }
-    for pos in vehicles.iter() {
+    for bucket in vehicles_by_chunk.0.values_mut() {
+        bucket.clear();
+    }
+    for (entity, pos) in agents.iter() {
         let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
         *populations.0.entry(chunk).or_insert(0) += 1;
+        agents_by_chunk.0.entry(chunk).or_default().push(entity);
+    }
+    for (entity, pos) in vehicles.iter() {
+        let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
+        *populations.0.entry(chunk).or_insert(0) += 1;
+        vehicles_by_chunk.0.entry(chunk).or_default().push(entity);
     }
     for (chunk, cell) in &flow_cells.0 {
         let aggregate = cell.population.floor().max(0.0) as u32;
@@ -573,6 +583,9 @@ pub fn track_chunk_populations_system(
             *populations.0.entry(*chunk).or_insert(0) += aggregate;
         }
     }
+    // Drop empty buckets so demote doesn't pay for dead entries.
+    agents_by_chunk.0.retain(|_, bucket| !bucket.is_empty());
+    vehicles_by_chunk.0.retain(|_, bucket| !bucket.is_empty());
 }
 
 pub fn classify_activity_system(
@@ -694,46 +707,66 @@ pub fn promote_warm_to_active_system(
 #[allow(clippy::too_many_arguments)]
 pub fn demote_active_to_warm_system(
     transitions: Res<ChunkTransitions>,
-    agents: Query<(Entity, &Position, &AgentMobilityStateComponent), With<AgentMarker>>,
-    vehicles: Query<(Entity, &Position), With<VehicleMarker>>,
+    agents: Query<&AgentMobilityStateComponent, With<AgentMarker>>,
+    agents_by_chunk: Res<AgentsByChunk>,
+    vehicles_by_chunk: Res<VehiclesByChunk>,
     routes: Res<Routes>,
     link_polylines: Res<LinkPolylines>,
     stops: Res<Stops>,
     mut flow_cells: ResMut<FlowCells>,
     mut commands: Commands,
 ) {
-    for (chunk, prev, next) in &transitions.0 {
-        if !matches!(prev, MobilityActivity::Active | MobilityActivity::Hot) {
-            continue;
-        }
+    // Trigger on any transition *into* Warm, regardless of the previous state.
+    // The legacy `Active|Hot → Warm` restriction missed the production path
+    // where agents are seeded directly into chunks (snapshot hydration,
+    // `from_network`) and the chunk's very first classification is
+    // `Asleep → Warm`. Those agents would otherwise stay alive forever and
+    // the per-tick Advance/Output systems would pay the full O(N) cost.
+    for (chunk, _prev, next) in &transitions.0 {
         if *next != MobilityActivity::Warm {
             continue;
         }
+
+        let Some(agent_entities) = agents_by_chunk.0.get(chunk) else {
+            // No agents in this chunk — nothing to despawn. Vehicles might
+            // still be present, fall through to vehicle handling.
+            if !vehicles_by_chunk.0.contains_key(chunk) {
+                continue;
+            }
+            despawn_vehicles_into_flow_cell(
+                *chunk,
+                vehicles_by_chunk
+                    .0
+                    .get(chunk)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                &mut flow_cells,
+                &mut commands,
+            );
+            continue;
+        };
 
         let mut despawn_count = 0u32;
         let mut outflow_counts: std::collections::HashMap<crate::ids::ChunkCoord, u32> =
             std::collections::HashMap::new();
 
-        for (entity, pos, state) in agents.iter() {
-            let entity_chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
-            if entity_chunk != *chunk {
+        for entity in agent_entities {
+            let Ok(state) = agents.get(*entity) else {
                 continue;
-            }
+            };
             let dest =
                 agent_destination_chunk(state, &routes, &link_polylines, &stops).unwrap_or(*chunk);
             despawn_count += 1;
             *outflow_counts.entry(dest).or_insert(0) += 1;
-            commands.entity(entity).despawn();
+            commands.entity(*entity).despawn();
         }
 
-        for (entity, pos) in vehicles.iter() {
-            let entity_chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
-            if entity_chunk != *chunk {
-                continue;
+        if let Some(vehicle_entities) = vehicles_by_chunk.0.get(chunk) {
+            despawn_count += vehicle_entities.len() as u32;
+            *outflow_counts.entry(*chunk).or_insert(0) += vehicle_entities.len() as u32;
+            for entity in vehicle_entities {
+                commands.entity(*entity).despawn();
             }
-            despawn_count += 1;
-            *outflow_counts.entry(*chunk).or_insert(0) += 1;
-            commands.entity(entity).despawn();
         }
 
         if despawn_count == 0 {
@@ -746,6 +779,23 @@ pub fn demote_active_to_warm_system(
             let rate = count as f32 / 100.0; // amortise over ~100 ticks
             *cell.outflow.entry(dest).or_insert(0.0) += rate;
         }
+    }
+}
+
+fn despawn_vehicles_into_flow_cell(
+    chunk: crate::ids::ChunkCoord,
+    vehicle_entities: &[Entity],
+    flow_cells: &mut ResMut<FlowCells>,
+    commands: &mut Commands,
+) {
+    if vehicle_entities.is_empty() {
+        return;
+    }
+    let cell = flow_cells.0.entry(chunk).or_default();
+    cell.population += vehicle_entities.len() as f32;
+    *cell.outflow.entry(chunk).or_insert(0.0) += vehicle_entities.len() as f32 / 100.0;
+    for entity in vehicle_entities {
+        commands.entity(*entity).despawn();
     }
 }
 
@@ -863,6 +913,8 @@ mod tests {
         // Resources required by the new LOD set
         world.insert_resource(ChunkSubscribers::default());
         world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(AgentsByChunk::default());
+        world.insert_resource(VehiclesByChunk::default());
         world.insert_resource(ChunkActivityCooldowns::default());
         world.insert_resource(FlowCells::default());
         world.insert_resource(ChunkTransitions::default());
@@ -1428,6 +1480,8 @@ mod tests {
         );
         world.insert_resource(flow_cells);
         world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(AgentsByChunk::default());
+        world.insert_resource(VehiclesByChunk::default());
 
         for n in 0..2 {
             world.spawn((
@@ -1647,6 +1701,9 @@ mod tests {
         world.insert_resource(Routes::default());
         world.insert_resource(Stops::default());
         world.insert_resource(FlowCells::default());
+        world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(AgentsByChunk::default());
+        world.insert_resource(VehiclesByChunk::default());
 
         let mut transitions = ChunkTransitions::default();
         transitions
@@ -1677,7 +1734,10 @@ mod tests {
         }
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(demote_active_to_warm_system);
+        schedule.add_systems((
+            track_chunk_populations_system,
+            demote_active_to_warm_system.after(track_chunk_populations_system),
+        ));
         schedule.run(&mut world);
 
         let cell = world
