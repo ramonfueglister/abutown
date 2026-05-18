@@ -725,7 +725,7 @@ async fn postgres_mobility_state_survives_runtime_restart() {
             &mut mobility_store,
             &world_id,
             persisted_tick,
-            runtime.mobility_for_persist(),
+            &runtime.mobility_world_clone_for_persist(),
         )
         .await
         .expect("persist mobility snapshot");

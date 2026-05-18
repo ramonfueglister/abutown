@@ -117,24 +117,6 @@ impl SimulationRuntime {
         }
     }
 
-    /// Kept for backward compatibility: ignores the snapshot_store argument
-    /// (stores now live in AppState) and constructs with the given event store.
-    pub fn new_with_stores(
-        event_store: Box<dyn WorldEventStore + Send + Sync>,
-        _snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
-    ) -> Self {
-        Self::new_with_event_store(event_store)
-    }
-
-    /// Kept for backward compatibility: ignores both snapshot_store arguments.
-    pub fn new_with_all_stores(
-        event_store: Box<dyn WorldEventStore + Send + Sync>,
-        _snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
-        _mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
-    ) -> Self {
-        Self::new_with_event_store(event_store)
-    }
-
     /// Build an in-memory runtime whose mobility world is seeded from the
     /// shared city network descriptor instead of the tiny developer seed.
     pub fn new_from_network(network: &sim_core::city_network::CityNetwork) -> Self {
@@ -405,9 +387,10 @@ impl SimulationRuntime {
         self.registry.mark_snapshots_persisted(coords);
     }
 
-    /// Return a reference to the mobility world for use by persist functions.
-    pub fn mobility_for_persist(&self) -> &MobilityWorld {
-        &self.mobility
+    /// Clone the mobility world so persist functions can release the runtime
+    /// read-lock before performing DB writes.
+    pub fn mobility_world_clone_for_persist(&self) -> MobilityWorld {
+        self.mobility.clone()
     }
 
     /// Return the world ID for use by persist functions outside the runtime lock.
@@ -1080,7 +1063,6 @@ mod tests {
             ChunkCoordDto, ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto,
             TileKindSetEventDto, WorldEventDto, WorldId,
         };
-        use sim_core::persistence::InMemoryChunkSnapshotStore;
 
         let winner = WorldEventDto::TileKindSet(TileKindSetEventDto {
             protocol_version: PROTOCOL_VERSION,
@@ -1093,10 +1075,8 @@ mod tests {
             local_index: 0,
             kind: TileKindDto::Water,
         });
-        let mut runtime = SimulationRuntime::new_with_stores(
-            Box::new(RaceyEventStore::new(winner.clone())),
-            Box::new(InMemoryChunkSnapshotStore::default()),
-        );
+        let mut runtime =
+            SimulationRuntime::new_with_event_store(Box::new(RaceyEventStore::new(winner.clone())));
 
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,

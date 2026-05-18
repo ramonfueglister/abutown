@@ -484,8 +484,9 @@ async fn handle_client_message(
 async fn persist_snapshots_once(
     state: &AppState,
 ) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
-    // Phase 1: collect snapshot data under a brief read-lock.
-    let (snapshots, coords, world_id, mobility_tick) = {
+    // Phase 1: collect everything under a brief read-lock — mobility snapshot
+    // is cloned here so the lock can be released before any DB write.
+    let (snapshots, coords, world_id, mobility_tick, mobility_snapshot) = {
         let runtime_arc = state.runtime();
         let runtime = runtime_arc.read().await;
         let snapshots = runtime.collect_chunk_snapshots();
@@ -498,14 +499,14 @@ async fn persist_snapshots_once(
             .collect();
         let world_id = runtime.world_id_for_persist().clone();
         let mobility_tick = runtime.mobility_tick();
-        (snapshots, coords, world_id, mobility_tick)
-        // read-lock released here
+        let mobility_snapshot = runtime.mobility_world_clone_for_persist();
+        (snapshots, coords, world_id, mobility_tick, mobility_snapshot)
+        // read-lock released here — no DB write has happened yet
     };
 
     let written = coords.len();
 
-    // Phase 2: write chunk snapshots under the store's own mutex — runtime
-    // lock NOT held, so readers are never blocked during slow DB writes.
+    // Phase 2a: chunk DB writes — store-mutex only, no runtime lock held.
     {
         let store = state.snapshot_store();
         let mut store = store.lock().await;
@@ -514,22 +515,19 @@ async fn persist_snapshots_once(
         }
     }
 
-    // Phase 3a: persist mobility snapshot — re-acquire read-lock briefly to
-    // access the mobility world, then hold the mobility store mutex.
+    // Phase 2b: mobility DB write — store-mutex only, no runtime lock held.
     {
-        let runtime_arc = state.runtime();
-        let runtime = runtime_arc.read().await;
         let mob_store = state.mobility_snapshot_store();
         let mut mob_store = mob_store.lock().await;
         if let Err(error) = mob_store
-            .write(&world_id.0, mobility_tick, runtime.mobility_for_persist())
+            .write(&world_id.0, mobility_tick, &mobility_snapshot)
             .await
         {
             tracing::warn!(%error, "failed to persist mobility snapshot");
         }
     }
 
-    // Phase 3b: brief write-lock to mark chunk snapshots as persisted.
+    // Phase 3: brief write-lock to mark chunk snapshots as persisted.
     {
         let runtime_arc = state.runtime();
         let mut runtime = runtime_arc.write().await;
@@ -643,5 +641,53 @@ mod tests {
         );
 
         persist.await.unwrap().unwrap();
+    }
+
+    /// A snapshot store that always fails writes to simulate a DB error.
+    #[derive(Debug, Default)]
+    struct FailingSnapshotStore;
+
+    #[async_trait::async_trait]
+    impl ChunkSnapshotStore for FailingSnapshotStore {
+        async fn write_snapshot(
+            &mut self,
+            _snapshot: ChunkSnapshotDto,
+        ) -> Result<(), ChunkSnapshotStoreError> {
+            Err(ChunkSnapshotStoreError::unavailable("test failure"))
+        }
+
+        async fn read_snapshot(
+            &self,
+            _coord: ChunkCoord,
+        ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn snapshot_write_failure_preserves_dirty_state() {
+        use sim_core::persistence::InMemoryMobilitySnapshotStore;
+
+        let state = AppState::new_with_stores(
+            SimulationRuntime::new(),
+            Box::new(FailingSnapshotStore),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            CardHandStore::memory(),
+            AuthVerifier::local_bearer_uuid(),
+        );
+
+        // First persist attempt must fail because the store always errors.
+        let result = persist_snapshots_once(&state).await;
+        assert!(result.is_err(), "persist should propagate the store error");
+
+        // The chunks must still be dirty — mark_chunk_snapshots_persisted must
+        // NOT have been called after a failed write.
+        let runtime_arc = state.runtime();
+        let runtime = runtime_arc.read().await;
+        let still_dirty = runtime.collect_chunk_snapshots();
+        assert!(
+            !still_dirty.is_empty(),
+            "snapshot write failure must not mark chunks persisted (snapshots remain dirty)"
+        );
     }
 }
