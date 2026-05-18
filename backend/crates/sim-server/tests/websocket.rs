@@ -441,3 +441,92 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
         "client A and client B should see disjoint entity sets (A={ids_a:?}, B={ids_b:?})",
     );
 }
+
+#[tokio::test]
+async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
+    // tiny_world places 20 walking agents on link:walk:default (chunk_center(4,4)
+    // → chunk_center(5,4)) and 4 tram vehicles split across horizontal and
+    // vertical routes. Progress < 0.5 → chunk (4,4); progress >= 0.5 → chunk
+    // (5,4) for horizontal/walk entities.  The vertical route runs from
+    // chunk_center(4,4) to chunk_center(4,5), so vehicle:seed:3 (progress 0.75)
+    // lands in chunk (4,5). Three fully disjoint entity sets — one per chunk.
+    //
+    // This test exercises the RwLock read-side parallelism introduced in Task 5:
+    // three concurrent readers all filter the same shared subscription map
+    // without serialising each other.
+    let app = build_app_with_runtime(runtime_with_seeded_mobility());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let url = format!("ws://{addr}/ws");
+
+    // Client A subscribes only to chunk (4,4).
+    let (mut client_a, _) = connect_async(&url).await.unwrap();
+    let _ = read_server_message(&mut client_a).await; // drain hello
+    send_chunk_subscribe(&mut client_a, &[ChunkCoordDto { x: 4, y: 4 }]).await;
+
+    // Client B subscribes only to chunk (5,4).
+    let (mut client_b, _) = connect_async(&url).await.unwrap();
+    let _ = read_server_message(&mut client_b).await; // drain hello
+    send_chunk_subscribe(&mut client_b, &[ChunkCoordDto { x: 5, y: 4 }]).await;
+
+    // Client C subscribes only to chunk (4,5) — vertical-route vehicles end here.
+    let (mut client_c, _) = connect_async(&url).await.unwrap();
+    let _ = read_server_message(&mut client_c).await; // drain hello
+    send_chunk_subscribe(&mut client_c, &[ChunkCoordDto { x: 4, y: 5 }]).await;
+
+    // The synthetic delta on subscribe carries all entities currently in the
+    // subscribed chunk — read one delta from each client.
+    let delta_a = read_next_mobility_delta(&mut client_a).await;
+    let delta_b = read_next_mobility_delta(&mut client_b).await;
+    let delta_c = read_next_mobility_delta(&mut client_c).await;
+
+    let ids_a: std::collections::HashSet<String> = delta_a
+        .changed_agents
+        .iter()
+        .map(|a| a.id.0.clone())
+        .chain(delta_a.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .collect();
+    let ids_b: std::collections::HashSet<String> = delta_b
+        .changed_agents
+        .iter()
+        .map(|a| a.id.0.clone())
+        .chain(delta_b.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .collect();
+    let ids_c: std::collections::HashSet<String> = delta_c
+        .changed_agents
+        .iter()
+        .map(|a| a.id.0.clone())
+        .chain(delta_c.changed_vehicles.iter().map(|v| v.id.0.clone()))
+        .collect();
+
+    // Each client must receive at least one entity — otherwise the test is vacuous.
+    assert!(
+        !ids_a.is_empty(),
+        "client A should see entities in chunk (4,4)"
+    );
+    assert!(
+        !ids_b.is_empty(),
+        "client B should see entities in chunk (5,4)"
+    );
+    assert!(
+        !ids_c.is_empty(),
+        "client C should see entities in chunk (4,5)"
+    );
+
+    // The AoI filter must produce pairwise disjoint sets.
+    assert!(
+        ids_a.intersection(&ids_b).next().is_none(),
+        "client A and client B should see disjoint entity sets (A={ids_a:?}, B={ids_b:?})",
+    );
+    assert!(
+        ids_a.intersection(&ids_c).next().is_none(),
+        "client A and client C should see disjoint entity sets (A={ids_a:?}, C={ids_c:?})",
+    );
+    assert!(
+        ids_b.intersection(&ids_c).next().is_none(),
+        "client B and client C should see disjoint entity sets (B={ids_b:?}, C={ids_c:?})",
+    );
+}
