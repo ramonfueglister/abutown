@@ -12,3 +12,5 @@ artifacts/
 .worktrees/
 worktrees
 worktrees/
+.claude/
+.playwright-mcp/

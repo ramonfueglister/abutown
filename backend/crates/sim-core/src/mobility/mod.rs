@@ -270,11 +270,7 @@ impl MobilityWorld {
             .insert(chunk, activity);
     }
 
-    pub(crate) fn seed_chunk_subscriber_count(
-        &mut self,
-        chunk: crate::ids::ChunkCoord,
-        count: u8,
-    ) {
+    pub(crate) fn seed_chunk_subscriber_count(&mut self, chunk: crate::ids::ChunkCoord, count: u8) {
         self.world
             .resource_mut::<ChunkSubscribers>()
             .0
