@@ -1,17 +1,14 @@
 use abutown_protocol::{
     ChunkCoordDto, ChunkSnapshotDto, ClientCommandDto, CommandAcceptedDto, HealthResponse,
-    MobilitySnapshotDto, PROTOCOL_VERSION, ServerHelloDto, ServerMessageDto,
-    SetTileKindCommandDto, TileKindSetEventDto, TilePulseDeltaDto, WorldEventDto, WorldId,
-    WorldSummaryDto,
+    MobilitySnapshotDto, PROTOCOL_VERSION, ServerHelloDto, ServerMessageDto, SetTileKindCommandDto,
+    TileKindSetEventDto, TilePulseDeltaDto, WorldEventDto, WorldId, WorldSummaryDto,
 };
 use sim_core::{
     chunk::{Chunk, ChunkError, EventApplyError, SnapshotDecodeError},
     events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_snapshot_dto},
-    persistence::{
-        ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore,
-    },
+    persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore},
     scheduler::ChunkActivity,
     tile::TileKind,
 };
@@ -314,10 +311,8 @@ impl SimulationRuntime {
     /// interval — it would tick mobility twice.  See `spawn_delta_loop` in app.rs.
     pub fn tick_world_mobility(
         &mut self,
-    ) -> std::collections::HashMap<
-        sim_core::ids::ChunkCoord,
-        sim_core::mobility::MobilityChunkDelta,
-    > {
+    ) -> std::collections::HashMap<sim_core::ids::ChunkCoord, sim_core::mobility::MobilityChunkDelta>
+    {
         self.mobility.tick_mobility()
     }
 

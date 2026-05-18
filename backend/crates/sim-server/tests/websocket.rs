@@ -18,7 +18,6 @@ use sim_server::{
     runtime::SimulationRuntime,
 };
 
-
 fn runtime_with_seeded_mobility() -> SimulationRuntime {
     let mut runtime = SimulationRuntime::new();
     runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
@@ -601,10 +600,7 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
     // the delta (world_coord fallback places tiny_world agents there).
     send_chunk_subscribe(
         &mut client,
-        &[
-            ChunkCoordDto { x: 0, y: 0 },
-            ChunkCoordDto { x: 4, y: 4 },
-        ],
+        &[ChunkCoordDto { x: 0, y: 0 }, ChunkCoordDto { x: 4, y: 4 }],
     )
     .await;
 

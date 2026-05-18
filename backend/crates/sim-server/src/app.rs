@@ -116,7 +116,9 @@ impl AppState {
         Arc::clone(&self.mobility_snapshot_store)
     }
 
-    pub(crate) fn chunk_channels(&self) -> Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>> {
+    pub(crate) fn chunk_channels(
+        &self,
+    ) -> Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>> {
         Arc::clone(&self.chunk_channels)
     }
 
@@ -199,13 +201,14 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
-    let (runtime, snapshot_store, mobility_snapshot_store) = SimulationRuntime::hydrate_from_stores(
-        Box::new(event_store),
-        Box::new(snapshot_store),
-        Box::new(mobility_snapshot_store),
-        &network,
-    )
-    .await?;
+    let (runtime, snapshot_store, mobility_snapshot_store) =
+        SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+            Box::new(mobility_snapshot_store),
+            &network,
+        )
+        .await?;
 
     let state = AppState::new_with_stores(
         runtime,
@@ -647,7 +650,13 @@ async fn persist_snapshots_once(
         let world_id = runtime.world_id_for_persist().clone();
         let mobility_tick = runtime.mobility_tick();
         let mobility_snapshot = runtime.mobility_world_clone_for_persist();
-        (snapshots, coords, world_id, mobility_tick, mobility_snapshot)
+        (
+            snapshots,
+            coords,
+            world_id,
+            mobility_tick,
+            mobility_snapshot,
+        )
         // read-lock released here — no DB write has happened yet
     };
 
@@ -697,9 +706,9 @@ async fn send_server_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abutown_protocol::ChunkSnapshotDto;
     use sim_core::ids::ChunkCoord;
     use sim_core::persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError};
-    use abutown_protocol::ChunkSnapshotDto;
 
     #[tokio::test]
     async fn persist_snapshots_once_writes_runtime_snapshots() {
@@ -742,13 +751,15 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_reads_proceed_during_snapshot_persist() {
-        use std::time::{Duration, Instant};
         use sim_core::persistence::InMemoryMobilitySnapshotStore;
+        use std::time::{Duration, Instant};
 
         // Build AppState with a slow snapshot store (100 ms per write, 3 chunks = 300 ms total).
         let state = AppState::new_with_stores(
             SimulationRuntime::new(),
-            Box::new(SlowSnapshotStore { write_delay_ms: 100 }),
+            Box::new(SlowSnapshotStore {
+                write_delay_ms: 100,
+            }),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             CardHandStore::memory(),
             AuthVerifier::local_bearer_uuid(),

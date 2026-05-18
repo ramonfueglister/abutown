@@ -185,7 +185,6 @@ pub struct MobilitySnapshotDto {
     pub stops: Vec<StopMobilityDto>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MobilityChunkDeltaDto {
     pub protocol_version: u16,
@@ -499,7 +498,6 @@ mod tests {
         assert_eq!(json["stops"][0]["id"], "stop:old-town");
     }
 
-
     #[test]
     fn client_message_chunk_subscribe_round_trips() {
         let msg = ClientMessageDto::ChunkSubscribe(ChunkSubscribeDto {
@@ -524,7 +522,6 @@ mod tests {
         let back: ClientMessageDto = serde_json::from_value(json).unwrap();
         assert_eq!(back, msg);
     }
-
 
     #[test]
     fn world_coord_dto_round_trips() {

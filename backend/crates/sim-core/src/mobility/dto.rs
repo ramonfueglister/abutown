@@ -1,6 +1,6 @@
 use abutown_protocol::{
-    AgentMobilityDto, AgentMobilityStateDto, EntityId, MobilitySnapshotDto,
-    PROTOCOL_VERSION, StopMobilityDto, VehicleMobilityDto, WorldId,
+    AgentMobilityDto, AgentMobilityStateDto, EntityId, MobilitySnapshotDto, PROTOCOL_VERSION,
+    StopMobilityDto, VehicleMobilityDto, WorldId,
 };
 
 use crate::mobility::records::*;
@@ -131,4 +131,3 @@ pub fn build_mobility_snapshot_dto(
         stops,
     }
 }
-

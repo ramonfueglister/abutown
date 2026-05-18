@@ -427,10 +427,7 @@ impl MobilityWorld {
     /// `chunk`. The new WS subscribe path sends this as a `MobilityChunkSnapshot`
     /// frame so a client gets the current state of newly-subscribed chunks
     /// without waiting for the next tick.
-    pub fn build_chunk_snapshot(
-        &self,
-        chunk: crate::ids::ChunkCoord,
-    ) -> MobilityChunkSnapshot {
+    pub fn build_chunk_snapshot(&self, chunk: crate::ids::ChunkCoord) -> MobilityChunkSnapshot {
         let agents = self
             .agents()
             .into_iter()
@@ -449,7 +446,11 @@ impl MobilityWorld {
                     .unwrap_or(false)
             })
             .collect();
-        MobilityChunkSnapshot { chunk, agents, vehicles }
+        MobilityChunkSnapshot {
+            chunk,
+            agents,
+            vehicles,
+        }
     }
 
     /// Test-only helper: mark a wide range of chunks as `Active` so the LOD
@@ -559,7 +560,10 @@ impl MobilityWorld {
                 let (x, y) = self.world_coord_for_agent(&record.id).unwrap_or((0.0, 0.0));
                 let chunk = crate::mobility::chunk_of(x, y, 32);
                 current_agent_chunks.insert(record.id.clone(), chunk);
-                changed_by_chunk_agents.entry(chunk).or_default().push(record);
+                changed_by_chunk_agents
+                    .entry(chunk)
+                    .or_default()
+                    .push(record);
             }
         }
 
@@ -571,7 +575,9 @@ impl MobilityWorld {
         for entity in &dirty_vehicles {
             if let Some(record) = self.vehicle_record_from_entity(*entity) {
                 // Fall back to (0,0) for vehicles whose geometry cannot be resolved.
-                let (x, y) = self.world_coord_for_vehicle(&record.id).unwrap_or((0.0, 0.0));
+                let (x, y) = self
+                    .world_coord_for_vehicle(&record.id)
+                    .unwrap_or((0.0, 0.0));
                 let chunk = crate::mobility::chunk_of(x, y, 32);
                 current_vehicle_chunks.insert(record.id.clone(), chunk);
                 changed_by_chunk_vehicles
@@ -1014,7 +1020,10 @@ mod tests {
             }
         );
         assert_eq!(
-            first_map.values().flat_map(|d| d.changed_agents.iter()).count(),
+            first_map
+                .values()
+                .flat_map(|d| d.changed_agents.iter())
+                .count(),
             1
         );
 
@@ -1036,7 +1045,10 @@ mod tests {
             vec![agent_id]
         );
         assert_eq!(
-            second_map.values().flat_map(|d| d.changed_agents.iter()).count(),
+            second_map
+                .values()
+                .flat_map(|d| d.changed_agents.iter())
+                .count(),
             1
         );
     }
@@ -1052,7 +1064,10 @@ mod tests {
         assert_eq!(vehicle.progress, 0.0);
         assert_eq!(vehicle.dwell_ticks_remaining, 1);
         assert_eq!(
-            first_map.values().flat_map(|d| d.changed_vehicles.iter()).count(),
+            first_map
+                .values()
+                .flat_map(|d| d.changed_vehicles.iter())
+                .count(),
             1
         );
 
@@ -1061,7 +1076,10 @@ mod tests {
         assert_eq!(vehicle.progress, 0.0);
         assert_eq!(vehicle.dwell_ticks_remaining, 0);
         assert_eq!(
-            second_map.values().flat_map(|d| d.changed_vehicles.iter()).count(),
+            second_map
+                .values()
+                .flat_map(|d| d.changed_vehicles.iter())
+                .count(),
             1
         );
 
@@ -1070,7 +1088,10 @@ mod tests {
         assert_eq!(vehicle.progress, 0.5);
         assert_eq!(vehicle.dwell_ticks_remaining, 0);
         assert_eq!(
-            third_map.values().flat_map(|d| d.changed_vehicles.iter()).count(),
+            third_map
+                .values()
+                .flat_map(|d| d.changed_vehicles.iter())
+                .count(),
             1
         );
     }
@@ -1494,7 +1515,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn chunk_of_truncates_to_chunk_grid() {
         use crate::ids::ChunkCoord;
@@ -1541,7 +1561,6 @@ mod tests {
             "snapshot must include in_vehicle drivers so clients can hydrate state"
         );
     }
-
 
     #[test]
     fn tick_mobility_indexes_lod_spawned_agents() {
@@ -1622,18 +1641,29 @@ mod tests {
         // Walk speed 0.1 per tick so it takes several ticks to cross.
         world.spawn_agent_from_record(AgentRecord::new(
             AgentId("walker".into()),
-            AgentMobilityState::Walking { link_id: LinkId("l".into()), progress: 0.0 },
-            vec![PlanStage::Activity { activity_id: "act".into() }],
+            AgentMobilityState::Walking {
+                link_id: LinkId("l".into()),
+                progress: 0.0,
+            },
+            vec![PlanStage::Activity {
+                activity_id: "act".into(),
+            }],
             0.1,
         ));
 
         // First tick: agent enters world still inside chunk(0,0).
         let map1 = world.tick_mobility();
-        assert!(map1.contains_key(&ChunkCoord { x: 0, y: 0 }),
-            "tick 1: agent should be in chunk(0,0); map keys: {:?}", map1.keys().collect::<Vec<_>>());
+        assert!(
+            map1.contains_key(&ChunkCoord { x: 0, y: 0 }),
+            "tick 1: agent should be in chunk(0,0); map keys: {:?}",
+            map1.keys().collect::<Vec<_>>()
+        );
         let delta1 = &map1[&ChunkCoord { x: 0, y: 0 }];
         assert!(!delta1.changed_agents.is_empty());
-        assert!(delta1.left_agents.is_empty(), "first tick: no previous chunk to leave");
+        assert!(
+            delta1.left_agents.is_empty(),
+            "first tick: no previous chunk to leave"
+        );
 
         // Tick enough times to cross into chunk(1,0).
         let mut crossed = false;
@@ -1669,8 +1699,13 @@ mod tests {
         // walk_speed=0 → no progress change → no dirty agents → empty delta map.
         world.spawn_agent_from_record(AgentRecord::new(
             AgentId("stationary".into()),
-            AgentMobilityState::Walking { link_id: LinkId("l".into()), progress: 0.0 },
-            vec![PlanStage::Activity { activity_id: "act".into() }],
+            AgentMobilityState::Walking {
+                link_id: LinkId("l".into()),
+                progress: 0.0,
+            },
+            vec![PlanStage::Activity {
+                activity_id: "act".into(),
+            }],
             0.0,
         ));
 
@@ -1700,14 +1735,24 @@ mod tests {
 
         world.spawn_agent_from_record(AgentRecord::new(
             AgentId("agent-a".into()),
-            AgentMobilityState::Walking { link_id: LinkId("l:a".into()), progress: 0.0 },
-            vec![PlanStage::Activity { activity_id: "act".into() }],
+            AgentMobilityState::Walking {
+                link_id: LinkId("l:a".into()),
+                progress: 0.0,
+            },
+            vec![PlanStage::Activity {
+                activity_id: "act".into(),
+            }],
             0.0,
         ));
         world.spawn_agent_from_record(AgentRecord::new(
             AgentId("agent-b".into()),
-            AgentMobilityState::Walking { link_id: LinkId("l:b".into()), progress: 0.0 },
-            vec![PlanStage::Activity { activity_id: "act".into() }],
+            AgentMobilityState::Walking {
+                link_id: LinkId("l:b".into()),
+                progress: 0.0,
+            },
+            vec![PlanStage::Activity {
+                activity_id: "act".into(),
+            }],
             0.0,
         ));
 
@@ -1718,7 +1763,11 @@ mod tests {
 
         let snapshot = world.build_chunk_snapshot(ChunkCoord { x: 0, y: 0 });
         let agent_ids: Vec<String> = snapshot.agents.iter().map(|a| a.id.0.clone()).collect();
-        assert_eq!(agent_ids, vec!["agent-a"], "snapshot returns only chunk(0,0) agents");
+        assert_eq!(
+            agent_ids,
+            vec!["agent-a"],
+            "snapshot returns only chunk(0,0) agents"
+        );
         assert!(snapshot.vehicles.is_empty());
         assert_eq!(snapshot.chunk, ChunkCoord { x: 0, y: 0 });
     }
