@@ -14,8 +14,14 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use sim_core::ids::ChunkCoord;
-use tokio::sync::{RwLock, broadcast};
+use sim_core::{
+    ids::ChunkCoord,
+    persistence::{
+        ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore,
+        InMemoryMobilitySnapshotStore, MobilitySnapshotStore,
+    },
+};
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tower_http::cors::CorsLayer;
 
 use crate::{
@@ -46,12 +52,16 @@ pub struct AppState {
     deltas: broadcast::Sender<ServerMessageDto>,
     card_hands: CardHandStore,
     auth: AuthVerifier,
+    snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
+    mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
 }
 
 impl AppState {
     pub fn new(runtime: SimulationRuntime) -> Self {
-        Self::new_with_card_hands(
+        Self::new_with_stores(
             runtime,
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
             CardHandStore::memory(),
             AuthVerifier::local_bearer_uuid(),
         )
@@ -62,17 +72,54 @@ impl AppState {
         card_hands: CardHandStore,
         auth: AuthVerifier,
     ) -> Self {
+        Self::new_with_stores(
+            runtime,
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            card_hands,
+            auth,
+        )
+    }
+
+    pub fn new_with_stores(
+        runtime: SimulationRuntime,
+        snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
+        mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
+        card_hands: CardHandStore,
+        auth: AuthVerifier,
+    ) -> Self {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         Self {
             runtime: Arc::new(RwLock::new(runtime)),
             deltas,
             card_hands,
             auth,
+            snapshot_store: Arc::new(Mutex::new(snapshot_store)),
+            mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
         }
     }
 
     pub(crate) fn runtime(&self) -> Arc<RwLock<SimulationRuntime>> {
         Arc::clone(&self.runtime)
+    }
+
+    fn snapshot_store(&self) -> Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>> {
+        Arc::clone(&self.snapshot_store)
+    }
+
+    fn mobility_snapshot_store(&self) -> Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>> {
+        Arc::clone(&self.mobility_snapshot_store)
+    }
+
+    /// Read a chunk snapshot directly from the snapshot store.
+    /// Used by tests and diagnostic tooling; not on the hot path.
+    pub async fn stored_chunk_snapshot(
+        &self,
+        coord: ChunkCoord,
+    ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
+        let store = self.snapshot_store();
+        let store = store.lock().await;
+        store.read_snapshot(coord).await
     }
 
     fn subscribe_deltas(&self) -> broadcast::Receiver<ServerMessageDto> {
@@ -141,7 +188,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
-    let runtime = SimulationRuntime::hydrate_from_stores(
+    let (runtime, snapshot_store, mobility_snapshot_store) = SimulationRuntime::hydrate_from_stores(
         Box::new(event_store),
         Box::new(snapshot_store),
         Box::new(mobility_snapshot_store),
@@ -149,9 +196,14 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     )
     .await?;
 
-    Ok(build_app_with_runtime_and_card_hands(
-        runtime, card_hands, auth,
-    ))
+    let state = AppState::new_with_stores(
+        runtime,
+        snapshot_store,
+        mobility_snapshot_store,
+        card_hands,
+        auth,
+    );
+    Ok(build_router_from_state(state))
 }
 
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
@@ -168,6 +220,10 @@ pub fn build_app_with_runtime_and_card_hands(
     auth: AuthVerifier,
 ) -> Router {
     let state = AppState::new_with_card_hands(runtime, card_hands, auth);
+    build_router_from_state(state)
+}
+
+fn build_router_from_state(state: AppState) -> Router {
     state.spawn_delta_loop(SIMULATION_TICK_INTERVAL);
     state.spawn_snapshot_loop(SNAPSHOT_INTERVAL);
 
@@ -428,12 +484,58 @@ async fn handle_client_message(
 async fn persist_snapshots_once(
     state: &AppState,
 ) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
-    let runtime = state.runtime();
-    let mut runtime = runtime.write().await;
-    let written = runtime.persist_chunk_snapshots().await?;
-    if let Err(error) = runtime.persist_mobility_snapshot().await {
-        tracing::warn!(%error, "failed to persist mobility snapshot");
+    // Phase 1: collect snapshot data under a brief read-lock.
+    let (snapshots, coords, world_id, mobility_tick) = {
+        let runtime_arc = state.runtime();
+        let runtime = runtime_arc.read().await;
+        let snapshots = runtime.collect_chunk_snapshots();
+        let coords: Vec<ChunkCoord> = snapshots
+            .iter()
+            .map(|s| ChunkCoord {
+                x: s.coord.x,
+                y: s.coord.y,
+            })
+            .collect();
+        let world_id = runtime.world_id_for_persist().clone();
+        let mobility_tick = runtime.mobility_tick();
+        (snapshots, coords, world_id, mobility_tick)
+        // read-lock released here
+    };
+
+    let written = coords.len();
+
+    // Phase 2: write chunk snapshots under the store's own mutex — runtime
+    // lock NOT held, so readers are never blocked during slow DB writes.
+    {
+        let store = state.snapshot_store();
+        let mut store = store.lock().await;
+        for snapshot in snapshots {
+            store.write_snapshot(snapshot).await?;
+        }
     }
+
+    // Phase 3a: persist mobility snapshot — re-acquire read-lock briefly to
+    // access the mobility world, then hold the mobility store mutex.
+    {
+        let runtime_arc = state.runtime();
+        let runtime = runtime_arc.read().await;
+        let mob_store = state.mobility_snapshot_store();
+        let mut mob_store = mob_store.lock().await;
+        if let Err(error) = mob_store
+            .write(&world_id.0, mobility_tick, runtime.mobility_for_persist())
+            .await
+        {
+            tracing::warn!(%error, "failed to persist mobility snapshot");
+        }
+    }
+
+    // Phase 3b: brief write-lock to mark chunk snapshots as persisted.
+    {
+        let runtime_arc = state.runtime();
+        let mut runtime = runtime_arc.write().await;
+        runtime.mark_chunk_snapshots_persisted(&coords);
+    }
+
     Ok(written)
 }
 
@@ -451,6 +553,8 @@ async fn send_server_message(
 mod tests {
     use super::*;
     use sim_core::ids::ChunkCoord;
+    use sim_core::persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError};
+    use abutown_protocol::ChunkSnapshotDto;
 
     #[tokio::test]
     async fn persist_snapshots_once_writes_runtime_snapshots() {
@@ -458,14 +562,86 @@ mod tests {
 
         assert_eq!(persist_snapshots_once(&state).await.unwrap(), 3);
 
-        let runtime = state.runtime();
-        let runtime = runtime.read().await;
-        let snapshot = runtime
+        let snapshot = state
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
             .await
             .unwrap()
             .expect("visible snapshot stored");
         assert_eq!(snapshot.coord.x, 4);
         assert_eq!(snapshot.coord.y, 4);
+    }
+
+    /// A snapshot store that sleeps during writes to simulate slow DB I/O.
+    #[derive(Debug, Default)]
+    struct SlowSnapshotStore {
+        write_delay_ms: u64,
+    }
+
+    #[async_trait::async_trait]
+    impl ChunkSnapshotStore for SlowSnapshotStore {
+        async fn write_snapshot(
+            &mut self,
+            _snapshot: ChunkSnapshotDto,
+        ) -> Result<(), ChunkSnapshotStoreError> {
+            tokio::time::sleep(std::time::Duration::from_millis(self.write_delay_ms)).await;
+            Ok(())
+        }
+
+        async fn read_snapshot(
+            &self,
+            _coord: ChunkCoord,
+        ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_reads_proceed_during_snapshot_persist() {
+        use std::time::{Duration, Instant};
+        use sim_core::persistence::InMemoryMobilitySnapshotStore;
+
+        // Build AppState with a slow snapshot store (100 ms per write, 3 chunks = 300 ms total).
+        let state = AppState::new_with_stores(
+            SimulationRuntime::new(),
+            Box::new(SlowSnapshotStore { write_delay_ms: 100 }),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            CardHandStore::memory(),
+            AuthVerifier::local_bearer_uuid(),
+        );
+
+        // Spawn persist; it should release the runtime lock during the slow DB write.
+        let state_for_persist = state.clone();
+        let persist = tokio::spawn(async move { persist_snapshots_once(&state_for_persist).await });
+
+        // Briefly wait so persist enters its DB-write phase (still inside the 100 ms sleep).
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // Now do concurrent reads. They MUST complete quickly because the
+        // runtime read-lock should NOT be held during the DB write.
+        let read_start = Instant::now();
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let s = state.clone();
+            handles.push(tokio::spawn(async move {
+                let runtime_arc = s.runtime();
+                let runtime = runtime_arc.read().await;
+                let _health = runtime.health();
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+        let read_elapsed = read_start.elapsed();
+
+        // Before the fix: reads serialized behind persist's write lock → ~280 ms wait.
+        // After the fix: reads proceed in parallel → a few ms total.
+        // Use a generous threshold (50 ms) so the test is not flaky on slow CI.
+        assert!(
+            read_elapsed < Duration::from_millis(50),
+            "reads blocked during persist: took {}ms (expected < 50ms)",
+            read_elapsed.as_millis()
+        );
+
+        persist.await.unwrap().unwrap();
     }
 }

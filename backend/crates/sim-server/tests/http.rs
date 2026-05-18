@@ -529,7 +529,7 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store");
-        let mut runtime = SimulationRuntime::hydrate_from_stores(
+        let (mut runtime, mut snapshot_store_box, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
@@ -554,10 +554,22 @@ async fn postgres_world_state_survives_runtime_restart() {
             }
             Err(other) => panic!("unexpected rejection: {other:?}"),
         }
-        runtime
-            .persist_chunk_snapshots()
-            .await
-            .expect("persist chunk snapshots");
+        // Persist using the store directly (stores now live outside the runtime).
+        let snapshots = runtime.collect_chunk_snapshots();
+        let coords: Vec<sim_core::ids::ChunkCoord> = snapshots
+            .iter()
+            .map(|s| sim_core::ids::ChunkCoord {
+                x: s.coord.x,
+                y: s.coord.y,
+            })
+            .collect();
+        for snapshot in snapshots {
+            snapshot_store_box
+                .write_snapshot(snapshot)
+                .await
+                .expect("persist chunk snapshots");
+        }
+        runtime.mark_chunk_snapshots_persisted(&coords);
         // runtime drops here, severing the in-memory state from the DB.
     }
 
@@ -575,7 +587,7 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store (restart)");
-        let runtime = SimulationRuntime::hydrate_from_stores(
+        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
@@ -677,9 +689,8 @@ async fn postgres_duplicate_command_returns_same_response() {
 
 #[tokio::test]
 async fn postgres_mobility_state_survives_runtime_restart() {
-    use sim_core::events::InMemoryWorldEventStore;
     use sim_core::mobility::seed;
-    use sim_core::persistence::{InMemoryChunkSnapshotStore, MobilitySnapshotStore};
+    use sim_core::persistence::MobilitySnapshotStore;
     use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
     use sim_server::runtime::SimulationRuntime;
 
@@ -696,14 +707,10 @@ async fn postgres_mobility_state_survives_runtime_restart() {
     let persisted_tick;
     let persisted_world;
     {
-        let mobility_store = PostgresMobilitySnapshotStore::connect(&database_url)
+        let mut mobility_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect mobility store (first runtime)");
-        let mut runtime = SimulationRuntime::new_with_all_stores(
-            Box::new(InMemoryWorldEventStore::default()),
-            Box::new(InMemoryChunkSnapshotStore::default()),
-            Box::new(mobility_store),
-        );
+        let mut runtime = SimulationRuntime::new();
 
         runtime.override_world_id_for_test(&world_id);
         runtime.set_mobility_for_test(seed::initial_world());
@@ -713,10 +720,15 @@ async fn postgres_mobility_state_survives_runtime_restart() {
         }
         persisted_tick = runtime.mobility_tick();
         persisted_world = runtime.mobility_world_clone_for_test();
-        runtime
-            .persist_mobility_snapshot()
-            .await
-            .expect("persist mobility snapshot");
+        // Persist mobility directly through the store (stores now live outside the runtime).
+        MobilitySnapshotStore::write(
+            &mut mobility_store,
+            &world_id,
+            persisted_tick,
+            runtime.mobility_for_persist(),
+        )
+        .await
+        .expect("persist mobility snapshot");
     }
 
     let store = PostgresMobilitySnapshotStore::connect(&database_url)
