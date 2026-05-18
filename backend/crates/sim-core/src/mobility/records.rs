@@ -133,3 +133,22 @@ pub struct MobilityDelta {
     pub changed_agents: Vec<AgentRecord>,
     pub changed_vehicles: Vec<VehicleRecord>,
 }
+
+/// The new per-chunk delta produced by `tick_mobility`. Mirrors
+/// `MobilityChunkDeltaDto` shape but uses sim-core record types directly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobilityChunkDelta {
+    pub chunk: crate::ids::ChunkCoord,
+    pub changed_agents: Vec<AgentRecord>,
+    pub changed_vehicles: Vec<VehicleRecord>,
+    pub left_agents: Vec<crate::ids::AgentId>,
+    pub left_vehicles: Vec<crate::ids::VehicleId>,
+}
+
+/// What `build_chunk_snapshot` returns: the current entities inside a chunk.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobilityChunkSnapshot {
+    pub chunk: crate::ids::ChunkCoord,
+    pub agents: Vec<AgentRecord>,
+    pub vehicles: Vec<VehicleRecord>,
+}

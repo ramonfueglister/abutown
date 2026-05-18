@@ -413,6 +413,35 @@ impl MobilityWorld {
         }
     }
 
+    /// Collect all agents + vehicles whose current position falls inside
+    /// `chunk`. The new WS subscribe path sends this as a `MobilityChunkSnapshot`
+    /// frame so a client gets the current state of newly-subscribed chunks
+    /// without waiting for the next tick.
+    pub fn build_chunk_snapshot(
+        &self,
+        chunk: crate::ids::ChunkCoord,
+    ) -> MobilityChunkSnapshot {
+        let agents = self
+            .agents()
+            .into_iter()
+            .filter(|record| {
+                self.world_coord_for_agent(&record.id)
+                    .map(|(x, y)| crate::mobility::chunk_of(x, y, 32) == chunk)
+                    .unwrap_or(false)
+            })
+            .collect();
+        let vehicles = self
+            .vehicles()
+            .into_iter()
+            .filter(|record| {
+                self.world_coord_for_vehicle(&record.id)
+                    .map(|(x, y)| crate::mobility::chunk_of(x, y, 32) == chunk)
+                    .unwrap_or(false)
+            })
+            .collect();
+        MobilityChunkSnapshot { chunk, agents, vehicles }
+    }
+
     /// Test-only helper: mark a wide range of chunks as `Active` so the LOD
     /// activity filter does not skip them. Used by integration tests that
     /// exercise `tick_mobility()` without standing up a full ChunkSubscribers
@@ -1632,5 +1661,41 @@ mod tests {
         let back: MobilityWorld = serde_json::from_value(json.clone()).unwrap();
         let rejson = serde_json::to_value(&back).unwrap();
         assert_eq!(json, rejson);
+    }
+
+    #[test]
+    fn build_chunk_snapshot_returns_only_entities_in_that_chunk() {
+        use crate::ids::{AgentId, ChunkCoord, LinkId};
+
+        let mut world = MobilityWorld::empty();
+
+        // Two distinct chunks at chunk_size=32: chunk (0,0) covers world x,y in [0,32);
+        // chunk (1,0) covers x in [32,64), y in [0,32).
+        world.set_link_polyline(LinkId("l:a".into()), vec![(10.0, 10.0), (20.0, 10.0)]);
+        world.set_link_polyline(LinkId("l:b".into()), vec![(40.0, 10.0), (50.0, 10.0)]);
+
+        world.spawn_agent_from_record(AgentRecord::new(
+            AgentId("agent-a".into()),
+            AgentMobilityState::Walking { link_id: LinkId("l:a".into()), progress: 0.0 },
+            vec![PlanStage::Activity { activity_id: "act".into() }],
+            0.0,
+        ));
+        world.spawn_agent_from_record(AgentRecord::new(
+            AgentId("agent-b".into()),
+            AgentMobilityState::Walking { link_id: LinkId("l:b".into()), progress: 0.0 },
+            vec![PlanStage::Activity { activity_id: "act".into() }],
+            0.0,
+        ));
+
+        // Ensure chunks are active so tick_mobility does not demote/despawn agents.
+        world.force_all_chunks_active_for_test();
+        // Tick once so compute_world_coord_system runs and Position components are set.
+        world.tick_mobility();
+
+        let snapshot = world.build_chunk_snapshot(ChunkCoord { x: 0, y: 0 });
+        let agent_ids: Vec<String> = snapshot.agents.iter().map(|a| a.id.0.clone()).collect();
+        assert_eq!(agent_ids, vec!["agent-a"], "snapshot returns only chunk(0,0) agents");
+        assert!(snapshot.vehicles.is_empty());
+        assert_eq!(snapshot.chunk, ChunkCoord { x: 0, y: 0 });
     }
 }
