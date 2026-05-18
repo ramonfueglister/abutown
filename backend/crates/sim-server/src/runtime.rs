@@ -405,6 +405,17 @@ impl SimulationRuntime {
         self.mobility.clone()
     }
 
+    /// Borrow the mobility world — usable inside a runtime read/write lock block
+    /// without paying the clone cost.
+    pub fn mobility(&self) -> &MobilityWorld {
+        &self.mobility
+    }
+
+    /// Return the number of active WS subscribers for a chunk.
+    pub fn chunk_subscriber_count(&self, chunk: sim_core::ids::ChunkCoord) -> u8 {
+        self.mobility.chunk_subscriber_count(chunk)
+    }
+
     /// Return the world ID for use by persist functions outside the runtime lock.
     pub fn world_id_for_persist(&self) -> &WorldId {
         &self.world_id

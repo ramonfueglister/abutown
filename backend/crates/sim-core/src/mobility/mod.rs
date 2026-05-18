@@ -251,6 +251,16 @@ impl MobilityWorld {
     ) -> Option<&crate::mobility::lod::FlowCell> {
         self.world.resource::<FlowCells>().0.get(&chunk)
     }
+
+    /// Return the number of active WS subscribers for a chunk (0 if none).
+    pub fn chunk_subscriber_count(&self, chunk: crate::ids::ChunkCoord) -> u8 {
+        self.world
+            .resource::<ChunkSubscribers>()
+            .0
+            .get(&chunk)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]

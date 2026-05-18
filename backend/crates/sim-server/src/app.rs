@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use abutown_protocol::{
     ChunkSnapshotDto, ClientCommandDto, ClientMessageDto, CommandResponseDto, HealthResponse,
-    MobilityChunkDeltaDto, MobilityDeltaDto, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
+    MobilityChunkDeltaDto, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
 };
 use axum::{
     Json, Router,
@@ -23,6 +23,8 @@ use sim_core::{
     },
 };
 use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio_stream::StreamMap;
+use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
 
 use crate::{
@@ -55,7 +57,6 @@ pub struct AppState {
     auth: AuthVerifier,
     snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
-    #[allow(dead_code)]
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
 }
 
@@ -115,7 +116,6 @@ impl AppState {
         Arc::clone(&self.mobility_snapshot_store)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn chunk_channels(&self) -> Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>> {
         Arc::clone(&self.chunk_channels)
     }
@@ -360,11 +360,22 @@ async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl 
     ws.on_upgrade(move |socket| stream_world_deltas(socket, state))
 }
 
-#[derive(Default)]
 struct ConnectionState {
     subscription: std::collections::HashSet<sim_core::ids::ChunkCoord>,
     last_visible_agents: std::collections::HashSet<abutown_protocol::EntityId>,
     last_visible_vehicles: std::collections::HashSet<abutown_protocol::EntityId>,
+    chunk_streams: StreamMap<sim_core::ids::ChunkCoord, BroadcastStream<MobilityChunkDeltaDto>>,
+}
+
+impl ConnectionState {
+    fn new() -> Self {
+        Self {
+            subscription: std::collections::HashSet::new(),
+            last_visible_agents: std::collections::HashSet::new(),
+            last_visible_vehicles: std::collections::HashSet::new(),
+            chunk_streams: StreamMap::new(),
+        }
+    }
 }
 
 async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
@@ -378,7 +389,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
         return;
     }
 
-    let mut connection = ConnectionState::default();
+    let mut connection = ConnectionState::new();
 
     loop {
         tokio::select! {
@@ -389,12 +400,15 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                     tracing::warn!(?text, "invalid client message");
                     continue;
                 };
-                let synthetic = handle_client_message(&state, &client_message, &mut connection).await;
-                if let Some(dto) = synthetic
-                    && send_server_message(&mut socket, ServerMessageDto::MobilityDelta(dto))
-                        .await
-                        .is_err()
-                {
+                let outgoing = handle_client_message(&state, &client_message, &mut connection).await;
+                let mut errored = false;
+                for msg in outgoing {
+                    if send_server_message(&mut socket, msg).await.is_err() {
+                        errored = true;
+                        break;
+                    }
+                }
+                if errored {
                     break;
                 }
             }
@@ -443,51 +457,118 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     }
 }
 
+fn chunk_snapshot_to_dto(
+    snapshot: &sim_core::mobility::MobilityChunkSnapshot,
+    world: &sim_core::mobility::MobilityWorld,
+    world_id: &abutown_protocol::WorldId,
+    tick: u64,
+) -> abutown_protocol::MobilityChunkSnapshotDto {
+    abutown_protocol::MobilityChunkSnapshotDto {
+        protocol_version: abutown_protocol::PROTOCOL_VERSION,
+        world_id: world_id.clone(),
+        tick,
+        chunk: abutown_protocol::ChunkCoordDto {
+            x: snapshot.chunk.x,
+            y: snapshot.chunk.y,
+        },
+        agents: snapshot
+            .agents
+            .iter()
+            .filter_map(|record| world.agent_dto_for(&record.id))
+            .collect(),
+        vehicles: snapshot
+            .vehicles
+            .iter()
+            .filter_map(|record| world.vehicle_dto_for(&record.id))
+            .collect(),
+    }
+}
+
 async fn handle_client_message(
     state: &AppState,
     message: &ClientMessageDto,
     connection: &mut ConnectionState,
-) -> Option<MobilityDeltaDto> {
-    let (added, removed): (
-        Vec<sim_core::ids::ChunkCoord>,
-        Vec<sim_core::ids::ChunkCoord>,
-    ) = match message {
+) -> Vec<ServerMessageDto> {
+    let mut out: Vec<ServerMessageDto> = Vec::new();
+
+    match message {
         ClientMessageDto::ChunkSubscribe(payload) => {
-            let added: Vec<_> = payload
+            let added: Vec<sim_core::ids::ChunkCoord> = payload
                 .coords
                 .iter()
                 .map(sim_core::ids::ChunkCoord::from)
                 .filter(|c| connection.subscription.insert(*c))
                 .collect();
-            (added, Vec::new())
+
+            if !added.is_empty() {
+                let chunk_channels = state.chunk_channels();
+                let runtime_arc = state.runtime();
+                let mut runtime = runtime_arc.write().await;
+                runtime.apply_subscription_diff(&added, std::iter::empty());
+
+                let world_id = runtime.world_id_for_persist().clone();
+                let tick = runtime.mobility_tick();
+
+                for coord in &added {
+                    // Get-or-create broadcast channel for this chunk.
+                    let sender = chunk_channels
+                        .entry(*coord)
+                        .or_insert_with(|| broadcast::channel(8).0)
+                        .clone();
+                    // Subscribe and store receiver in chunk_streams.
+                    let receiver = sender.subscribe();
+                    connection
+                        .chunk_streams
+                        .insert(*coord, BroadcastStream::new(receiver));
+                    // Build current snapshot of this chunk and push as MobilityChunkSnapshot.
+                    let snapshot = runtime.mobility().build_chunk_snapshot(*coord);
+                    let dto = chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick);
+                    out.push(ServerMessageDto::MobilityChunkSnapshot(dto));
+                }
+
+                // Keep the old synthetic-delta path running in parallel (Task 8 will remove it).
+                let synthetic = runtime.synthetic_mobility_delta_for_subscription(
+                    &connection.subscription,
+                    &mut connection.last_visible_agents,
+                    &mut connection.last_visible_vehicles,
+                );
+                if !synthetic.changed_agents.is_empty()
+                    || !synthetic.changed_vehicles.is_empty()
+                    || !synthetic.left_agents.is_empty()
+                    || !synthetic.left_vehicles.is_empty()
+                {
+                    out.push(ServerMessageDto::MobilityDelta(synthetic));
+                }
+            }
         }
+
         ClientMessageDto::ChunkUnsubscribe(payload) => {
-            let removed: Vec<_> = payload
+            let removed: Vec<sim_core::ids::ChunkCoord> = payload
                 .coords
                 .iter()
                 .map(sim_core::ids::ChunkCoord::from)
                 .filter(|c| connection.subscription.remove(c))
                 .collect();
-            (Vec::new(), removed)
+
+            if !removed.is_empty() {
+                let chunk_channels = state.chunk_channels();
+                let runtime_arc = state.runtime();
+                let mut runtime = runtime_arc.write().await;
+                runtime.apply_subscription_diff(std::iter::empty(), &removed);
+
+                for coord in &removed {
+                    // Drop this connection's receiver for the chunk.
+                    connection.chunk_streams.remove(coord);
+                    // Reap the channel if no other client is subscribed to this chunk.
+                    if runtime.chunk_subscriber_count(*coord) == 0 {
+                        chunk_channels.remove(coord);
+                    }
+                }
+            }
         }
-    };
-    let runtime = state.runtime();
-    let mut runtime = runtime.write().await;
-    runtime.apply_subscription_diff(&added, &removed);
-    let dto = runtime.synthetic_mobility_delta_for_subscription(
-        &connection.subscription,
-        &mut connection.last_visible_agents,
-        &mut connection.last_visible_vehicles,
-    );
-    if dto.changed_agents.is_empty()
-        && dto.changed_vehicles.is_empty()
-        && dto.left_agents.is_empty()
-        && dto.left_vehicles.is_empty()
-    {
-        None
-    } else {
-        Some(dto)
     }
+
+    out
 }
 
 async fn persist_snapshots_once(

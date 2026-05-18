@@ -44,10 +44,9 @@ async fn websocket_sends_hello_and_tile_pulse() {
     assert!(matches!(hello, ServerMessageDto::Hello(_)));
 
     subscribe_to_seeded_chunks(&mut stream).await;
-    // Synthetic mobility delta echoing newly visible entities for the
-    // just-installed subscription arrives before any tick-driven traffic.
-    let synthetic = read_server_message(&mut stream).await;
-    assert!(matches!(synthetic, ServerMessageDto::MobilityDelta(_)));
+    // Subscribe now emits one MobilityChunkSnapshot per subscribed chunk first,
+    // then the synthetic MobilityDelta. Drain until we find the delta.
+    let _synthetic = read_next_mobility_delta(&mut stream).await;
 
     // 10 Hz tick: the first tile pulse arrives within roughly one tick period.
     // Use 250 ms to absorb scheduler jitter on slow CI without weakening intent.
@@ -382,6 +381,42 @@ where
         .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
         .await
         .expect("send chunk subscribe");
+}
+
+#[tokio::test]
+async fn chunk_subscribe_emits_chunk_snapshot_frame() {
+    let runtime = SimulationRuntime::new();
+    let app = build_app_with_runtime(runtime);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let url = format!("ws://{}/ws", addr);
+    let (mut client, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    // Drain the Hello frame.
+    let _ = client.next().await.unwrap().unwrap();
+
+    send_chunk_subscribe(&mut client, &[ChunkCoordDto { x: 4, y: 4 }]).await;
+
+    let mut got_snapshot = false;
+    for _ in 0..10 {
+        let msg = client.next().await.unwrap().unwrap();
+        if let tokio_tungstenite::tungstenite::Message::Text(text) = msg
+            && let Ok(ServerMessageDto::MobilityChunkSnapshot(snap)) =
+                serde_json::from_str::<ServerMessageDto>(text.as_str())
+        {
+            assert_eq!(snap.chunk.x, 4);
+            assert_eq!(snap.chunk.y, 4);
+            got_snapshot = true;
+            break;
+        }
+    }
+    assert!(
+        got_snapshot,
+        "subscribe should emit a MobilityChunkSnapshot for the new chunk"
+    );
 }
 
 #[tokio::test]
