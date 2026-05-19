@@ -120,6 +120,8 @@ impl MobilityWorld {
         world.insert_resource(ChunkTransitions::default());
         world.insert_resource(PreviousAgentChunks::default());
         world.insert_resource(PreviousVehicleChunks::default());
+        world.insert_resource(crate::mobility::resources::AgentIdIndex::default());
+        world.insert_resource(crate::mobility::resources::VehicleIdIndex::default());
 
         let mut schedule = Schedule::default();
         crate::mobility::systems::install_systems(&mut schedule);
@@ -570,7 +572,11 @@ impl MobilityWorld {
             }
         }
         for (id, entity) in new_agents {
-            self.by_agent_id.insert(id, entity);
+            self.by_agent_id.insert(id.clone(), entity);
+            self.world
+                .resource_mut::<crate::mobility::resources::AgentIdIndex>()
+                .0
+                .insert(id, entity);
         }
 
         // Remove despawned agents from the index (from demote_active_to_warm_system).
@@ -580,8 +586,16 @@ impl MobilityWorld {
             .filter(|(_, entity)| self.world.get_entity(**entity).is_err())
             .map(|(id, _)| id.clone())
             .collect();
-        for id in agent_ids_to_remove {
-            self.by_agent_id.remove(&id);
+        for id in &agent_ids_to_remove {
+            self.by_agent_id.remove(id);
+        }
+        {
+            let mut index = self
+                .world
+                .resource_mut::<crate::mobility::resources::AgentIdIndex>();
+            for id in &agent_ids_to_remove {
+                index.0.remove(id);
+            }
         }
 
         // Same for vehicles — sync newly-spawned vehicles.
@@ -595,7 +609,11 @@ impl MobilityWorld {
             }
         }
         for (id, entity) in new_vehicles {
-            self.by_vehicle_id.insert(id, entity);
+            self.by_vehicle_id.insert(id.clone(), entity);
+            self.world
+                .resource_mut::<crate::mobility::resources::VehicleIdIndex>()
+                .0
+                .insert(id, entity);
         }
 
         // Remove despawned vehicles from the index.
@@ -605,8 +623,16 @@ impl MobilityWorld {
             .filter(|(_, entity)| self.world.get_entity(**entity).is_err())
             .map(|(id, _)| id.clone())
             .collect();
-        for id in vehicle_ids_to_remove {
-            self.by_vehicle_id.remove(&id);
+        for id in &vehicle_ids_to_remove {
+            self.by_vehicle_id.remove(id);
+        }
+        {
+            let mut index = self
+                .world
+                .resource_mut::<crate::mobility::resources::VehicleIdIndex>();
+            for id in &vehicle_ids_to_remove {
+                index.0.remove(id);
+            }
         }
 
         // Drain dirty sets populated by the Advance systems.
@@ -780,7 +806,11 @@ impl MobilityWorld {
                 SpriteKey(sprite_key),
             ))
             .id();
-        self.by_agent_id.insert(id, entity);
+        self.by_agent_id.insert(id.clone(), entity);
+        self.world
+            .resource_mut::<crate::mobility::resources::AgentIdIndex>()
+            .0
+            .insert(id, entity);
         entity
     }
 
@@ -818,7 +848,11 @@ impl MobilityWorld {
                 SpriteKey(sprite_key),
             ))
             .id();
-        self.by_vehicle_id.insert(id, entity);
+        self.by_vehicle_id.insert(id.clone(), entity);
+        self.world
+            .resource_mut::<crate::mobility::resources::VehicleIdIndex>()
+            .0
+            .insert(id, entity);
         entity
     }
 
@@ -1923,5 +1957,63 @@ mod tests {
         let entity = *world.by_vehicle_id.get(&VehicleId("v1".into())).unwrap();
         let pos = world.world.entity(entity).get::<Position>().unwrap();
         assert_eq!((pos.x, pos.y), (100.0, 200.0));
+    }
+
+    #[test]
+    fn agent_id_index_resource_matches_by_agent_id_after_spawn() {
+        use crate::mobility::resources::AgentIdIndex;
+
+        let mut world = MobilityWorld::empty();
+        let id_a = AgentId("a:1".into());
+        let id_b = AgentId("a:2".into());
+        world.spawn_agent_from_record(AgentRecord::new(
+            id_a.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "act".into(),
+            },
+            vec![],
+            0.05,
+        ));
+        world.spawn_agent_from_record(AgentRecord::new(
+            id_b.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "act".into(),
+            },
+            vec![],
+            0.05,
+        ));
+
+        let by_agent_a = world.by_agent_id.get(&id_a).copied();
+        let by_agent_b = world.by_agent_id.get(&id_b).copied();
+        let index = world.profile_world_mut().resource::<AgentIdIndex>();
+        assert_eq!(index.0.len(), 2);
+        assert_eq!(index.0.get(&id_a).copied(), by_agent_a);
+        assert_eq!(index.0.get(&id_b).copied(), by_agent_b);
+    }
+
+    #[test]
+    fn vehicle_id_index_resource_matches_by_vehicle_id_after_spawn() {
+        use crate::ids::{RouteId, VehicleId};
+        use crate::mobility::records::VehicleKind;
+        use crate::mobility::resources::VehicleIdIndex;
+
+        let mut world = MobilityWorld::empty();
+        let id_v = VehicleId("v:1".into());
+        world.spawn_vehicle_from_record(VehicleRecord {
+            id: id_v.clone(),
+            kind: VehicleKind::Car,
+            route_id: RouteId("r:1".into()),
+            link_index: 0,
+            progress: 0.0,
+            speed_per_tick: 0.1,
+            capacity: 1,
+            occupants: vec![],
+            dwell_ticks_remaining: 0,
+        });
+
+        let by_vehicle = world.by_vehicle_id.get(&id_v).copied();
+        let index = world.profile_world_mut().resource::<VehicleIdIndex>();
+        assert_eq!(index.0.len(), 1);
+        assert_eq!(index.0.get(&id_v).copied(), by_vehicle);
     }
 }

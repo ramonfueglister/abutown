@@ -79,3 +79,14 @@ pub struct PreviousAgentChunks(pub HashMap<AgentId, ChunkCoord>);
 /// Mirror of `PreviousAgentChunks` for vehicles.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct PreviousVehicleChunks(pub HashMap<VehicleId, ChunkCoord>);
+
+/// Stable AgentId → Entity. Spec §3 — exposed as a Resource so systems can
+/// do O(1) lookups inside Queries instead of scanning all agents.
+/// Maintained in lockstep with `MobilityWorld.by_agent_id` by the spawn
+/// helpers and the post-tick sync in `MobilityWorld::tick_mobility`.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct AgentIdIndex(pub HashMap<AgentId, Entity>);
+
+/// Mirror of `AgentIdIndex` for vehicle entities.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct VehicleIdIndex(pub HashMap<VehicleId, Entity>);
