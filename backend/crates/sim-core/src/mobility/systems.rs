@@ -102,6 +102,7 @@ pub fn walk_advance_system(
     >,
     activities: Res<ChunkActivities>,
     mut dirty: ResMut<DirtyAgents>,
+    mut commands: Commands,
 ) {
     for (entity, pos, mut state, speed) in query.iter_mut() {
         if !chunk_is_simulated(pos, &activities) {
@@ -112,6 +113,9 @@ pub fn walk_advance_system(
             if next != *progress {
                 *progress = next;
                 dirty.0.insert(entity);
+                if next >= 1.0 {
+                    commands.entity(entity).insert(NearStop);
+                }
             }
         }
     }
@@ -156,6 +160,7 @@ pub fn vehicle_advance_system(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn stop_arrival_system(
     mut query: Query<
         (
@@ -165,13 +170,18 @@ pub fn stop_arrival_system(
             &mut AgentMobilityStateComponent,
             &mut WalkPlan,
         ),
-        With<AgentMarker>,
+        (With<AgentMarker>, With<NearStop>),
     >,
     activities: Res<ChunkActivities>,
     mut stops: ResMut<Stops>,
     mut dirty: ResMut<DirtyAgents>,
+    mut commands: Commands,
 ) {
     for (entity, pos, stable, mut state, mut plan) in query.iter_mut() {
+        // Always remove the marker so the next tick doesn't revisit this
+        // agent — even if the body falls through to the catch-all arm.
+        commands.entity(entity).remove::<NearStop>();
+
         if !chunk_is_simulated(pos, &activities) {
             continue;
         }
@@ -951,6 +961,7 @@ mod tests {
                 Position { x: 0.0, y: 0.0 },
                 Direction(abutown_protocol::DirectionDto::S),
                 SpriteKey(String::new()),
+                NearStop,
             ))
             .id();
 
@@ -1970,5 +1981,98 @@ mod tests {
             _ => panic!(),
         }
         assert!(world.resource::<DirtyAgents>().0.contains(&entity));
+    }
+
+    #[test]
+    fn walk_advance_inserts_near_stop_marker_when_progress_saturates() {
+        use crate::ids::{AgentId, LinkId};
+
+        let mut world = World::new();
+        world.insert_resource(DirtyAgents::default());
+        world.insert_resource(all_active());
+
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:1".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:1".into()),
+                    progress: 0.99,
+                }),
+                WalkPlan {
+                    stages: vec![],
+                    cursor: 0,
+                },
+                WalkSpeed(0.05),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(walk_advance_system);
+        schedule.run(&mut world);
+
+        assert!(
+            world.get::<NearStop>(entity).is_some(),
+            "walk_advance should add NearStop when progress saturates to 1.0"
+        );
+    }
+
+    #[test]
+    fn stop_arrival_removes_near_stop_marker_after_transition() {
+        use crate::ids::{AgentId, LinkId, RouteId, StopId};
+        use crate::mobility::records::StopRecord;
+        use std::collections::VecDeque;
+
+        let mut world = World::new();
+        world.insert_resource(DirtyAgents::default());
+        world.insert_resource(all_active());
+
+        let mut stops = Stops::default();
+        stops.0.insert(
+            StopId("s:1".into()),
+            StopRecord {
+                id: StopId("s:1".into()),
+                route_id: RouteId("r:1".into()),
+                link_index: 0,
+                progress: 1.0,
+                waiting_agents: VecDeque::new(),
+            },
+        );
+        world.insert_resource(stops);
+
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:1".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:1".into()),
+                    progress: 1.0,
+                }),
+                WalkPlan {
+                    stages: vec![PlanStage::WalkToStop {
+                        link_id: LinkId("l:1".into()),
+                        stop_id: StopId("s:1".into()),
+                    }],
+                    cursor: 0,
+                },
+                WalkSpeed(0.05),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+                NearStop,
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(stop_arrival_system);
+        schedule.run(&mut world);
+
+        assert!(
+            world.get::<NearStop>(entity).is_none(),
+            "stop_arrival should remove NearStop after state transition"
+        );
     }
 }

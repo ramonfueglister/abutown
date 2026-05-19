@@ -74,3 +74,11 @@ pub struct Occupants(pub Vec<AgentId>);
 /// Remaining ticks at the current stop (counts down). Stored on vehicles only.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DwellTicksRemaining(pub u16);
+
+/// Tagging an agent whose walking progress saturated to 1.0 this tick.
+/// Only agents with this marker are visited by `stop_arrival_system`,
+/// which avoids iterating all 100k agents. Added by `walk_advance_system`
+/// on saturation, removed by `stop_arrival_system` after the state
+/// transition completes.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NearStop;
