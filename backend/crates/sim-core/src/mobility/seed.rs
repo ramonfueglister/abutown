@@ -30,6 +30,17 @@ pub fn tiny_world() -> MobilityWorld {
 
     let mut world = MobilityWorld::empty();
 
+    // Register the three seeded polylines so spawn-time / runtime coord
+    // resolution can look them up directly without a hardcoded fallback.
+    // Coords use chunk-centre points for chunks (4,4), (5,4), (4,5) where
+    // chunk_size = 32 → centre = chunk * 32 + 16.
+    let c44 = (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
+    let c54 = (5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
+    let c45 = (4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0);
+    world.set_link_polyline(horizontal_link.clone(), vec![c44, c54]);
+    world.set_link_polyline(vertical_link.clone(), vec![c44, c45]);
+    world.set_link_polyline(walk_link.clone(), vec![c44, c54]);
+
     world.add_route(RouteRecord {
         id: horizontal_route.clone(),
         links: vec![horizontal_link.clone()],
@@ -133,16 +144,55 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
     use crate::city_network::NetworkCoord;
 
     let mut world = MobilityWorld::empty();
-    let mut links: Vec<(LinkId, Vec<(f32, f32)>)> = Vec::new();
 
-    // Register pedestrian corridors as walking links.
+    // Register pedestrian corridors as walking links BEFORE spawning any
+    // agents on them — spawn-time position resolution requires the polyline
+    // to be in `LinkPolylines` already.
     for (index, corridor) in network.pedestrian_corridors.iter().enumerate() {
         let link_id = LinkId(format!("link:walk:corridor:{index}"));
         let points: Vec<(f32, f32)> = corridor
             .iter()
             .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
             .collect();
-        links.push((link_id, points));
+        world.set_link_polyline(link_id, points);
+    }
+
+    // Register arterial paths as routes + polylines BEFORE spawning cars.
+    for (index, arterial) in network.arterial_paths.iter().enumerate() {
+        let route_id = RouteId(format!("route:arterial:{index}"));
+        let link_id = LinkId(format!("link:arterial:{index}"));
+        let points: Vec<(f32, f32)> = arterial
+            .iter()
+            .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
+            .collect();
+        world.set_link_polyline(link_id.clone(), points);
+        world.add_route(RouteRecord {
+            id: route_id.clone(),
+            links: vec![link_id],
+        });
+    }
+
+    // Trams: reuse the existing tiny_world tram polylines, routes, vehicles,
+    // and stops. Polylines copied first so subsequent tram-vehicle spawns can
+    // resolve their position. We do NOT copy tiny_world's pedestrian agents —
+    // those belong to the tiny seed only; this world seeds its own walkers below.
+    if density.trams_total > 0 {
+        let tram_seed = tiny_world();
+        for (id, points) in tram_seed.link_polylines_iter() {
+            world.set_link_polyline(id.clone(), points.clone());
+        }
+        for (id, record) in tram_seed.routes() {
+            world.add_route(RouteRecord {
+                id: id.clone(),
+                links: record.links.clone(),
+            });
+        }
+        for stop in tram_seed.stops() {
+            world.add_stop(stop);
+        }
+        for vehicle in tram_seed.vehicles() {
+            world.spawn_vehicle_from_record(vehicle);
+        }
     }
 
     // Spawn walking agents distributed across corridors.
@@ -163,21 +213,6 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
                 0.05,
             ));
         }
-    }
-
-    // Register arterial paths as routes for cars (one route per arterial, one link).
-    for (index, arterial) in network.arterial_paths.iter().enumerate() {
-        let route_id = RouteId(format!("route:arterial:{index}"));
-        let link_id = LinkId(format!("link:arterial:{index}"));
-        let points: Vec<(f32, f32)> = arterial
-            .iter()
-            .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
-            .collect();
-        links.push((link_id.clone(), points));
-        world.add_route(RouteRecord {
-            id: route_id.clone(),
-            links: vec![link_id],
-        });
     }
 
     // Spawn cars + drivers.
@@ -217,27 +252,5 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
         }
     }
 
-    // Trams: reuse the existing tiny_world tram vehicles, routes, and stops.
-    // We do NOT copy the tiny_world pedestrian agents — they belong to
-    // the tiny seeded world only; this world seeds its own walkers above.
-    if density.trams_total > 0 {
-        let tram_seed = tiny_world();
-        for vehicle in tram_seed.vehicles() {
-            world.spawn_vehicle_from_record(vehicle);
-        }
-        for (id, record) in tram_seed.routes() {
-            world.add_route(RouteRecord {
-                id: id.clone(),
-                links: record.links.clone(),
-            });
-        }
-        for stop in tram_seed.stops() {
-            world.add_stop(stop);
-        }
-    }
-
-    for (link_id, points) in links {
-        world.set_link_polyline(link_id, points);
-    }
     world
 }

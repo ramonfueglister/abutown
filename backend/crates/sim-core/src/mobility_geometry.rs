@@ -15,6 +15,11 @@ pub struct LinkGeometry {
     pub points: Vec<(f32, f32)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ActivityGeometry {
+    pub coord: (f32, f32),
+}
+
 /// Computes the world coordinate at `progress` along the given polyline slice.
 /// Zero allocations — operates on the slice directly.
 pub fn world_coord_at_progress_slice(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
@@ -95,49 +100,6 @@ impl LinkGeometry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct StopGeometry {
-    pub coord: (f32, f32),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ActivityGeometry {
-    pub coord: (f32, f32),
-}
-
-pub fn link_geometry(link_id: &str) -> Option<LinkGeometry> {
-    match link_id {
-        "link:horizontal:main" => Some(LinkGeometry {
-            points: vec![chunk_center(4, 4), chunk_center(5, 4)],
-        }),
-        "link:vertical:main" => Some(LinkGeometry {
-            points: vec![chunk_center(4, 4), chunk_center(4, 5)],
-        }),
-        "link:walk:default" => Some(LinkGeometry {
-            points: vec![chunk_center(4, 4), chunk_center(5, 4)],
-        }),
-        _ => None,
-    }
-}
-
-pub fn stop_geometry(stop_id: &str) -> Option<StopGeometry> {
-    match stop_id {
-        "stop:horizontal:pickup" => Some(StopGeometry {
-            coord: chunk_center(4, 4),
-        }),
-        "stop:horizontal:dropoff" => Some(StopGeometry {
-            coord: chunk_center(5, 4),
-        }),
-        "stop:vertical:pickup" => Some(StopGeometry {
-            coord: chunk_center(4, 4),
-        }),
-        "stop:vertical:dropoff" => Some(StopGeometry {
-            coord: chunk_center(4, 5),
-        }),
-        _ => None,
-    }
-}
-
 pub fn activity_geometry(activity_id: &str) -> Option<ActivityGeometry> {
     match activity_id {
         "activity:work" => Some(ActivityGeometry {
@@ -147,22 +109,6 @@ pub fn activity_geometry(activity_id: &str) -> Option<ActivityGeometry> {
             coord: chunk_center(4, 4),
         }),
     }
-}
-
-/// Returns the world coordinate along a route at `(link_index, progress)`.
-/// Used when computing transit-vehicle positions.
-pub fn route_link_world_coord(
-    route_id: &str,
-    link_index: usize,
-    progress: f32,
-) -> Option<(f32, f32)> {
-    let link_id = match (route_id, link_index) {
-        ("route:horizontal", 0) => "link:horizontal:main",
-        ("route:vertical", 0) => "link:vertical:main",
-        _ => return None,
-    };
-    let geom = link_geometry(link_id)?;
-    Some(geom.world_coord_at_progress(progress))
 }
 
 /// Maps a unit-ish movement delta to the closest 8-way direction.
@@ -191,44 +137,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn link_geometry_lookup_returns_seeded_routes() {
-        let h = link_geometry("link:horizontal:main").expect("horizontal link defined");
-        assert_eq!(
-            h.points.first(),
-            Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0))
-        );
-        assert_eq!(
-            h.points.last(),
-            Some(&(5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0))
-        );
-        assert_eq!(h.points.len(), 2);
-
-        let v = link_geometry("link:vertical:main").expect("vertical link defined");
-        assert_eq!(
-            v.points.first(),
-            Some(&(4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0))
-        );
-        assert_eq!(
-            v.points.last(),
-            Some(&(4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0))
-        );
-        assert_eq!(v.points.len(), 2);
-
-        assert!(
-            link_geometry("link:walk:default").is_some(),
-            "walk link must be defined for seeded agents"
-        );
-    }
-
-    #[test]
-    fn stop_geometry_lookup_returns_seeded_stops() {
-        let pickup = stop_geometry("stop:horizontal:pickup").expect("horizontal pickup defined");
-        assert_eq!(pickup.coord, (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0));
-        let dropoff = stop_geometry("stop:horizontal:dropoff").expect("horizontal dropoff defined");
-        assert_eq!(dropoff.coord, (5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0));
-    }
-
-    #[test]
     fn activity_geometry_falls_back_to_default_when_unknown() {
         let known = activity_geometry("activity:work").expect("work activity defined");
         assert!(known.coord.0 >= 0.0);
@@ -236,13 +144,6 @@ mod tests {
             activity_geometry("activity:unknown").is_some(),
             "unknown activities must still resolve to a default coord"
         );
-    }
-
-    #[test]
-    fn route_link_geometry_interpolates_progress() {
-        let coord = route_link_world_coord("route:horizontal", 0, 0.5).expect("route exists");
-        assert!((coord.0 - (4.0 * 32.0 + 16.0 + 16.0)).abs() < 0.01);
-        assert!((coord.1 - (4.0 * 32.0 + 16.0)).abs() < 0.01);
     }
 
     #[test]

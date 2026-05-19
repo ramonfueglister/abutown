@@ -459,9 +459,7 @@ pub fn compute_world_coord_system(
         if !chunk_is_simulated(&pos, &activities) {
             continue;
         }
-        if let Some((x, y)) =
-            crate::mobility::vehicle_world_coord(rp, &routes, &link_polylines)
-        {
+        if let Some((x, y)) = crate::mobility::vehicle_world_coord(rp, &routes, &link_polylines) {
             pos.x = x;
             pos.y = y;
         }

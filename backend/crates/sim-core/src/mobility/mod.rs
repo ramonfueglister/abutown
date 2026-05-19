@@ -27,33 +27,13 @@ pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
     }
 }
 
-/// Resolve a link's polyline points either from the registered
-/// `LinkPolylines` resource or from the hardcoded fallback geometry in
-/// `mobility_geometry::link_geometry`. Mirrors the per-instance helper
-/// `MobilityWorld::resolve_link_polyline` but as a free function so the
-/// spawn-time helpers below can use it without a `&MobilityWorld`.
-fn resolve_link_points(
-    link_id: &LinkId,
-    link_polylines: &resources::LinkPolylines,
-) -> Option<Vec<(f32, f32)>> {
-    if let Some(points) = link_polylines.0.get(link_id) {
-        return Some(points.clone());
-    }
-    crate::mobility_geometry::link_geometry(&link_id.0).map(|g| g.points)
-}
-
 /// World coord for an agent given its mobility state. Returns `None` for
 /// states where there is no unambiguous spawn-time coord (`InVehicle`,
-/// `AtActivity`).
+/// `AtActivity`) or when the referenced link/stop is not registered.
 ///
 /// Used by both `compute_world_coord_system` (per-tick) and
 /// `spawn_agent_from_record` (one-shot at spawn time) so LOD systems see
 /// the real position immediately on Tick 1 instead of the default `(0,0)`.
-///
-/// Mirrors `MobilityWorld::world_coord_for_agent`'s fallback chain: stop
-/// states resolve via `stop_geometry` if the StopRecord isn't registered;
-/// walking states resolve via `resolve_link_points` which falls back to
-/// the hardcoded `link_geometry`.
 pub fn agent_world_coord(
     state: &AgentMobilityState,
     routes: &resources::Routes,
@@ -61,31 +41,30 @@ pub fn agent_world_coord(
     link_polylines: &resources::LinkPolylines,
 ) -> Option<(f32, f32)> {
     match state {
-        AgentMobilityState::Walking { link_id, progress } => resolve_link_points(link_id, link_polylines)
-            .map(|points| crate::mobility_geometry::world_coord_at_progress_slice(&points, *progress)),
+        AgentMobilityState::Walking { link_id, progress } => {
+            let points = link_polylines.0.get(link_id)?;
+            Some(crate::mobility_geometry::world_coord_at_progress_slice(
+                points, *progress,
+            ))
+        }
         AgentMobilityState::WaitingAtStop { stop_id }
         | AgentMobilityState::Boarding { stop_id, .. }
         | AgentMobilityState::Alighting { stop_id, .. } => {
-            // Prefer the StopRecord (rebuilds the coord through route+link+polyline) but
-            // fall back to the hardcoded stop_geometry table when the stop isn't registered.
-            stops
-                .0
-                .get(stop_id)
-                .and_then(|stop| {
-                    let route = routes.0.get(&stop.route_id)?;
-                    let link_id = route.links.get(stop.link_index)?;
-                    let points = resolve_link_points(link_id, link_polylines)?;
-                    Some(crate::mobility_geometry::world_coord_at_progress_slice(&points, stop.progress))
-                })
-                .or_else(|| crate::mobility_geometry::stop_geometry(&stop_id.0).map(|g| g.coord))
+            let stop = stops.0.get(stop_id)?;
+            let route = routes.0.get(&stop.route_id)?;
+            let link_id = route.links.get(stop.link_index)?;
+            let points = link_polylines.0.get(link_id)?;
+            Some(crate::mobility_geometry::world_coord_at_progress_slice(
+                points,
+                stop.progress,
+            ))
         }
         _ => None,
     }
 }
 
 /// World coord for a vehicle given its route position. Returns `None` if
-/// neither the registered route+polyline nor the hardcoded fallback
-/// `link_geometry` can resolve a coord.
+/// the route or link is not registered, or its polyline missing.
 pub fn vehicle_world_coord(
     route_position: &components::RoutePosition,
     routes: &resources::Routes,
@@ -93,8 +72,11 @@ pub fn vehicle_world_coord(
 ) -> Option<(f32, f32)> {
     let route = routes.0.get(&route_position.route_id)?;
     let link_id = route.links.get(route_position.link_index)?;
-    let points = resolve_link_points(link_id, link_polylines)?;
-    Some(crate::mobility_geometry::world_coord_at_progress_slice(&points, route_position.progress))
+    let points = link_polylines.0.get(link_id)?;
+    Some(crate::mobility_geometry::world_coord_at_progress_slice(
+        points,
+        route_position.progress,
+    ))
 }
 
 fn stable_index(id: &str) -> u32 {
@@ -405,6 +387,15 @@ impl Clone for MobilityWorld {
         for record in self.vehicles() {
             out.spawn_vehicle_from_record(record);
         }
+        // LOD state: copy ChunkActivities + Cooldowns + FlowCells so a
+        // snapshot clone preserves the full simulation state. Without this
+        // the persisted JSON loses any chunk that has demoted into a
+        // FlowCell, and hydration resurrects an empty world.
+        out.world.resource_mut::<ChunkActivities>().0 =
+            self.world.resource::<ChunkActivities>().0.clone();
+        out.world.resource_mut::<ChunkActivityCooldowns>().0 =
+            self.world.resource::<ChunkActivityCooldowns>().0.clone();
+        out.world.resource_mut::<FlowCells>().0 = self.world.resource::<FlowCells>().0.clone();
         out
     }
 }
@@ -624,10 +615,9 @@ impl MobilityWorld {
         let mut current_agent_chunks: HashMap<crate::ids::AgentId, crate::ids::ChunkCoord> =
             HashMap::new();
         for entity in &dirty_agents {
-            if let Some(record) = self.agent_record_from_entity(*entity) {
-                // Fall back to (0,0) for agents whose geometry cannot be resolved
-                // (e.g. link polyline not registered), so they are never silently dropped.
-                let (x, y) = self.world_coord_for_agent(&record.id).unwrap_or((0.0, 0.0));
+            if let Some(record) = self.agent_record_from_entity(*entity)
+                && let Some((x, y)) = self.world_coord_for_agent(&record.id)
+            {
                 let chunk = crate::mobility::chunk_of(x, y, 32);
                 current_agent_chunks.insert(record.id.clone(), chunk);
                 changed_by_chunk_agents
@@ -643,11 +633,9 @@ impl MobilityWorld {
         let mut current_vehicle_chunks: HashMap<crate::ids::VehicleId, crate::ids::ChunkCoord> =
             HashMap::new();
         for entity in &dirty_vehicles {
-            if let Some(record) = self.vehicle_record_from_entity(*entity) {
-                // Fall back to (0,0) for vehicles whose geometry cannot be resolved.
-                let (x, y) = self
-                    .world_coord_for_vehicle(&record.id)
-                    .unwrap_or((0.0, 0.0));
+            if let Some(record) = self.vehicle_record_from_entity(*entity)
+                && let Some((x, y)) = self.world_coord_for_vehicle(&record.id)
+            {
                 let chunk = crate::mobility::chunk_of(x, y, 32);
                 current_vehicle_chunks.insert(record.id.clone(), chunk);
                 changed_by_chunk_vehicles
@@ -798,8 +786,7 @@ impl MobilityWorld {
                 progress: record.progress,
                 speed: record.speed_per_tick,
             };
-            crate::mobility::vehicle_world_coord(&rp, routes, link_polylines)
-                .unwrap_or((0.0, 0.0))
+            crate::mobility::vehicle_world_coord(&rp, routes, link_polylines).unwrap_or((0.0, 0.0))
         };
         let entity = self
             .world
@@ -884,34 +871,30 @@ impl MobilityWorld {
         &self,
         link_id: &LinkId,
     ) -> Option<crate::mobility_geometry::LinkGeometry> {
-        if let Some(points) = self.world.resource::<LinkPolylines>().0.get(link_id) {
-            return Some(crate::mobility_geometry::LinkGeometry {
+        self.world
+            .resource::<LinkPolylines>()
+            .0
+            .get(link_id)
+            .map(|points| crate::mobility_geometry::LinkGeometry {
                 points: points.clone(),
-            });
-        }
-        crate::mobility_geometry::link_geometry(&link_id.0)
+            })
     }
 
     pub fn world_coord_for_agent(&self, agent_id: &AgentId) -> Option<(f32, f32)> {
-        use crate::mobility_geometry::{activity_geometry, stop_geometry};
+        use crate::mobility_geometry::activity_geometry;
         let entity = *self.by_agent_id.get(agent_id)?;
         let state = self.world.get::<AgentMobilityStateComponent>(entity)?;
+        let routes = self.world.resource::<Routes>();
+        let stops = self.world.resource::<Stops>();
+        let link_polylines = self.world.resource::<LinkPolylines>();
         match &state.0 {
             AgentMobilityState::AtActivity { activity_id } => {
                 activity_geometry(activity_id).map(|g| g.coord)
             }
-            AgentMobilityState::Walking { link_id, progress } => {
-                let geom = self.resolve_link_polyline(link_id)?;
-                Some(geom.world_coord_at_progress(*progress))
-            }
-            AgentMobilityState::WaitingAtStop { stop_id }
-            | AgentMobilityState::Boarding { stop_id, .. }
-            | AgentMobilityState::Alighting { stop_id, .. } => {
-                stop_geometry(&stop_id.0).map(|g| g.coord)
-            }
             AgentMobilityState::InVehicle { vehicle_id, .. } => {
                 self.world_coord_for_vehicle(vehicle_id)
             }
+            other => agent_world_coord(other, routes, stops, link_polylines),
         }
     }
 
@@ -1341,6 +1324,20 @@ mod tests {
         );
 
         let mut world = MobilityWorld::empty();
+        // Register polylines for every link the agent/vehicle traverses so
+        // world-coord resolution succeeds at spawn time and during ticks.
+        world.set_link_polyline(
+            LinkId("link:home-to-old-town-stop".to_string()),
+            vec![(0.0, 0.0), (10.0, 0.0)],
+        );
+        world.set_link_polyline(
+            LinkId("link:old-town-to-station".to_string()),
+            vec![(10.0, 0.0), (20.0, 0.0)],
+        );
+        world.set_link_polyline(
+            LinkId("link:station-to-work".to_string()),
+            vec![(20.0, 0.0), (30.0, 0.0)],
+        );
         for (_, route) in routes {
             world.add_route(route);
         }
@@ -1358,31 +1355,30 @@ mod tests {
 
     #[test]
     fn world_coord_for_walking_agent_interpolates_link() {
-        use crate::mobility_geometry::link_geometry;
-
         let world = seed::initial_world();
         let agent_id = AgentId("agent:seed:0".to_string());
-        // Agent is already Walking on link:walk:default at progress 0.0 in tiny_world.
-        // We verify interpolation at progress 0.0 (the seeded value).
-        let geom = link_geometry("link:walk:default").unwrap();
+        // Agent is Walking on link:walk:default at progress 0.0 in tiny_world,
+        // which registers the polyline [chunk_center(4,4), chunk_center(5,4)].
+        let expected = (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
         let coord = world
             .world_coord_for_agent(&agent_id)
             .expect("agent resolves to coord");
-        let expected = geom.world_coord_at_progress(0.0);
         assert!((coord.0 - expected.0).abs() < 0.01);
         assert!((coord.1 - expected.1).abs() < 0.01);
     }
 
     #[test]
     fn world_coord_for_agent_waiting_at_stop_uses_stop_coord() {
-        use crate::mobility_geometry::stop_geometry;
-
         let mut world = MobilityWorld::empty();
         let stop_id = StopId("stop:horizontal:pickup".to_string());
         let route_id = RouteId("route:horizontal".to_string());
+        let link_id = LinkId("link:horizontal:main".to_string());
+        let start = (10.0, 20.0);
+        let end = (30.0, 20.0);
+        world.set_link_polyline(link_id.clone(), vec![start, end]);
         world.add_route(RouteRecord {
             id: route_id.clone(),
-            links: vec![LinkId("link:horizontal:main".to_string())],
+            links: vec![link_id],
         });
         world.add_stop(StopRecord {
             id: stop_id.clone(),
@@ -1397,30 +1393,27 @@ mod tests {
             AgentMobilityState::WaitingAtStop {
                 stop_id: stop_id.clone(),
             },
-            vec![PlanStage::RideToStop {
-                route_id,
-                stop_id: stop_id.clone(),
-            }],
+            vec![PlanStage::RideToStop { route_id, stop_id }],
             0.5,
         ));
         let coord = world
             .world_coord_for_agent(&agent_id)
             .expect("agent coord resolves");
-        let expected = stop_geometry(&stop_id.0).expect("stop has geometry").coord;
-        assert!((coord.0 - expected.0).abs() < 0.01);
-        assert!((coord.1 - expected.1).abs() < 0.01);
+        assert!((coord.0 - start.0).abs() < 0.01);
+        assert!((coord.1 - start.1).abs() < 0.01);
     }
 
     #[test]
     fn world_coord_for_transit_vehicle_interpolates_route() {
-        use crate::mobility_geometry::link_geometry;
-
         let mut world = MobilityWorld::empty();
         let route_id = RouteId("route:horizontal".to_string());
         let link_id = LinkId("link:horizontal:main".to_string());
+        let start = (0.0, 0.0);
+        let end = (100.0, 0.0);
+        world.set_link_polyline(link_id.clone(), vec![start, end]);
         world.add_route(RouteRecord {
             id: route_id.clone(),
-            links: vec![link_id.clone()],
+            links: vec![link_id],
         });
         let vehicle_id = VehicleId("vehicle:test".to_string());
         world.spawn_vehicle_from_record(VehicleRecord {
@@ -1437,10 +1430,9 @@ mod tests {
         let coord = world
             .world_coord_for_vehicle(&vehicle_id)
             .expect("vehicle coord resolves");
-        let geom = link_geometry(&link_id.0).expect("link geometry exists");
-        let expected = geom.world_coord_at_progress(0.5);
-        assert!((coord.0 - expected.0).abs() < 0.01);
-        assert!((coord.1 - expected.1).abs() < 0.01);
+        // At progress 0.5 along [(0,0), (100,0)] → (50, 0).
+        assert!((coord.0 - 50.0).abs() < 0.01);
+        assert!((coord.1 - 0.0).abs() < 0.01);
     }
 
     #[test]
@@ -1874,7 +1866,9 @@ mod tests {
                 link_id: LinkId("l".into()),
                 progress: 0.0,
             },
-            vec![PlanStage::Activity { activity_id: "act".into() }],
+            vec![PlanStage::Activity {
+                activity_id: "act".into(),
+            }],
             0.0,
         ));
 
