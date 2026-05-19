@@ -139,6 +139,16 @@ impl Default for MobilityWorld {
     }
 }
 
+impl MobilityWorld {
+    /// Profiling-only access to the inner bevy World. Used by
+    /// `examples/profile_lod_tick.rs` to time individual SystemSets on the
+    /// real seeded world without re-running the full schedule each time.
+    #[doc(hidden)]
+    pub fn profile_world_mut(&mut self) -> &mut bevy_ecs::world::World {
+        &mut self.world
+    }
+}
+
 impl serde::Serialize for MobilityWorld {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         use std::collections::HashMap;
