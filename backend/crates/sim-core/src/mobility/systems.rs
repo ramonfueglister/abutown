@@ -148,26 +148,30 @@ pub fn update_link_polyline_cache_system(
 ) {
     use std::sync::Arc;
 
-    // Agents: only Walking state has a link_id; other states get the cache
-    // removed (or skipped if absent).
+    // Agents: only Walking state has a link_id. Hot path is the steady
+    // state where Walking agents stay on the same link tick after tick —
+    // pass `want_id` by reference and only clone on the rare cache-miss
+    // path. The previous implementation cloned the LinkId for every
+    // Walking agent every tick, which at 100k agents cost ~3-4ms of
+    // String allocations and exactly cancelled the Output-system win.
     for (entity, state, cached) in agents.iter_mut() {
-        let want = match &state.0 {
-            AgentMobilityState::Walking { link_id, .. } => Some(link_id.clone()),
+        let want_id: Option<&crate::ids::LinkId> = match &state.0 {
+            AgentMobilityState::Walking { link_id, .. } => Some(link_id),
             _ => None,
         };
-        match (want, cached) {
+        match (want_id, cached) {
             (Some(want_id), Some(mut c)) => {
-                if c.link_id != want_id
-                    && let Some(points) = link_polylines.0.get(&want_id)
+                if c.link_id != *want_id
+                    && let Some(points) = link_polylines.0.get(want_id)
                 {
-                    c.link_id = want_id;
+                    c.link_id = want_id.clone();
                     c.points = Arc::new(points.clone());
                 }
             }
             (Some(want_id), None) => {
-                if let Some(points) = link_polylines.0.get(&want_id) {
+                if let Some(points) = link_polylines.0.get(want_id) {
                     commands.entity(entity).insert(CurrentLinkPolyline {
-                        link_id: want_id,
+                        link_id: want_id.clone(),
                         points: Arc::new(points.clone()),
                     });
                 }
@@ -179,26 +183,26 @@ pub fn update_link_polyline_cache_system(
         }
     }
 
-    // Vehicles: their link is routes[route_id].links[link_index].
+    // Vehicles: their link is routes[route_id].links[link_index]. Same
+    // reference-pass optimization as the agent loop.
     for (entity, rp, cached) in vehicles.iter_mut() {
-        let want_id = routes
+        let want_id: Option<&crate::ids::LinkId> = routes
             .0
             .get(&rp.route_id)
-            .and_then(|r| r.links.get(rp.link_index))
-            .cloned();
+            .and_then(|r| r.links.get(rp.link_index));
         match (want_id, cached) {
             (Some(want_id), Some(mut c)) => {
-                if c.link_id != want_id
-                    && let Some(points) = link_polylines.0.get(&want_id)
+                if c.link_id != *want_id
+                    && let Some(points) = link_polylines.0.get(want_id)
                 {
-                    c.link_id = want_id;
+                    c.link_id = want_id.clone();
                     c.points = Arc::new(points.clone());
                 }
             }
             (Some(want_id), None) => {
-                if let Some(points) = link_polylines.0.get(&want_id) {
+                if let Some(points) = link_polylines.0.get(want_id) {
                     commands.entity(entity).insert(CurrentLinkPolyline {
-                        link_id: want_id,
+                        link_id: want_id.clone(),
                         points: Arc::new(points.clone()),
                     });
                 }
