@@ -90,3 +90,18 @@ pub struct AgentIdIndex(pub HashMap<AgentId, Entity>);
 /// Mirror of `AgentIdIndex` for vehicle entities.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct VehicleIdIndex(pub HashMap<VehicleId, Entity>);
+
+/// Per-entity record of which chunk that entity was bucketed into during
+/// the previous run of `track_chunk_populations_system`. Lets the system
+/// run incrementally via `Changed<Position>` — when an entity's Position
+/// changes, we know which old bucket to remove from before inserting into
+/// the new one.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct PreviousChunkByEntity(pub HashMap<Entity, ChunkCoord>);
+
+/// Per-chunk FlowCell aggregate that was added to `ChunkPopulations` on
+/// the previous tick. Subtracted at the start of each incremental tick
+/// before the entity-count deltas are applied, then re-added after, so
+/// FlowCell contributions don't double-count across ticks.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct PreviousFlowCellContrib(pub HashMap<ChunkCoord, u32>);
