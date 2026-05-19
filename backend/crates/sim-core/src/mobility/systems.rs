@@ -178,13 +178,21 @@ pub fn stop_arrival_system(
     mut commands: Commands,
 ) {
     for (entity, pos, stable, mut state, mut plan) in query.iter_mut() {
-        // Always remove the marker so the next tick doesn't revisit this
-        // agent — even if the body falls through to the catch-all arm.
-        commands.entity(entity).remove::<NearStop>();
-
+        // Skip without clearing the marker if the agent's chunk is asleep
+        // this tick — we'll retry next tick when the chunk wakes. This
+        // matters because walk_advance only inserts NearStop on the tick
+        // progress saturates (next != *progress); if we removed the marker
+        // here on a non-simulated tick, the agent would be stuck at
+        // progress=1.0 forever without ever transitioning state.
         if !chunk_is_simulated(pos, &activities) {
             continue;
         }
+
+        // Chunk is simulated — always remove the marker now so the next
+        // tick doesn't revisit this agent, even if the body falls through
+        // to the catch-all arm (e.g., empty plan).
+        commands.entity(entity).remove::<NearStop>();
+
         let completed_walking = matches!(
             &state.0,
             AgentMobilityState::Walking { progress, .. } if *progress >= 1.0
