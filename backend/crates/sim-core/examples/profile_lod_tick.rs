@@ -163,16 +163,14 @@ fn main() {
     for v in samples.iter_mut() { v.reserve(N); }
     for _ in 0..N {
         let w = world.profile_world_mut();
-        let mut idx = 0;
-        for sched in [
+        for (idx, sched) in [
             &mut s_track, &mut s_classify, &mut s_promote, &mut s_demote,
             &mut s_walk, &mut s_board, &mut s_arrive, &mut s_vehadv, &mut s_warmflow,
             &mut s_coord, &mut s_dir, &mut s_book,
-        ] {
+        ].into_iter().enumerate() {
             let t = Instant::now();
             sched.run(w);
             samples[idx].push(t.elapsed().as_secs_f64() * 1000.0);
-            idx += 1;
         }
     }
     let report = |label: &str, samples: &[f64]| {
