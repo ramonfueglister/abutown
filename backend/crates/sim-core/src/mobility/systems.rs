@@ -71,7 +71,10 @@ pub fn install_systems(schedule: &mut Schedule) {
     //                            WaitingAtStop / AtActivity.
     //   4. vehicle_advance     — decrement dwell or push progress.
     schedule.add_systems((
-        walk_advance_system.in_set(MobilitySet::Advance),
+        update_link_polyline_cache_system.in_set(MobilitySet::Advance),
+        walk_advance_system
+            .in_set(MobilitySet::Advance)
+            .after(update_link_polyline_cache_system),
         boarding_alighting_system
             .in_set(MobilitySet::Advance)
             .after(walk_advance_system),
@@ -117,6 +120,93 @@ pub fn walk_advance_system(
                     commands.entity(entity).insert(NearStop);
                 }
             }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+pub fn update_link_polyline_cache_system(
+    mut agents: Query<
+        (
+            Entity,
+            &AgentMobilityStateComponent,
+            Option<&mut CurrentLinkPolyline>,
+        ),
+        (With<AgentMarker>, Without<VehicleMarker>),
+    >,
+    mut vehicles: Query<
+        (
+            Entity,
+            &RoutePosition,
+            Option<&mut CurrentLinkPolyline>,
+        ),
+        (With<VehicleMarker>, Without<AgentMarker>),
+    >,
+    routes: Res<Routes>,
+    link_polylines: Res<LinkPolylines>,
+    mut commands: Commands,
+) {
+    use std::sync::Arc;
+
+    // Agents: only Walking state has a link_id; other states get the cache
+    // removed (or skipped if absent).
+    for (entity, state, cached) in agents.iter_mut() {
+        let want = match &state.0 {
+            AgentMobilityState::Walking { link_id, .. } => Some(link_id.clone()),
+            _ => None,
+        };
+        match (want, cached) {
+            (Some(want_id), Some(mut c)) => {
+                if c.link_id != want_id
+                    && let Some(points) = link_polylines.0.get(&want_id)
+                {
+                    c.link_id = want_id;
+                    c.points = Arc::new(points.clone());
+                }
+            }
+            (Some(want_id), None) => {
+                if let Some(points) = link_polylines.0.get(&want_id) {
+                    commands.entity(entity).insert(CurrentLinkPolyline {
+                        link_id: want_id,
+                        points: Arc::new(points.clone()),
+                    });
+                }
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<CurrentLinkPolyline>();
+            }
+            (None, None) => {}
+        }
+    }
+
+    // Vehicles: their link is routes[route_id].links[link_index].
+    for (entity, rp, cached) in vehicles.iter_mut() {
+        let want_id = routes
+            .0
+            .get(&rp.route_id)
+            .and_then(|r| r.links.get(rp.link_index))
+            .cloned();
+        match (want_id, cached) {
+            (Some(want_id), Some(mut c)) => {
+                if c.link_id != want_id
+                    && let Some(points) = link_polylines.0.get(&want_id)
+                {
+                    c.link_id = want_id;
+                    c.points = Arc::new(points.clone());
+                }
+            }
+            (Some(want_id), None) => {
+                if let Some(points) = link_polylines.0.get(&want_id) {
+                    commands.entity(entity).insert(CurrentLinkPolyline {
+                        link_id: want_id,
+                        points: Arc::new(points.clone()),
+                    });
+                }
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<CurrentLinkPolyline>();
+            }
+            (None, None) => {}
         }
     }
 }
@@ -462,11 +552,19 @@ pub fn boarding_alighting_system(
 #[allow(clippy::type_complexity)]
 pub fn compute_world_coord_system(
     mut agents: Query<
-        (&AgentMobilityStateComponent, &mut Position),
+        (
+            &AgentMobilityStateComponent,
+            &mut Position,
+            Option<&CurrentLinkPolyline>,
+        ),
         (With<AgentMarker>, Without<VehicleMarker>),
     >,
     mut vehicles: Query<
-        (&RoutePosition, &mut Position),
+        (
+            &RoutePosition,
+            &mut Position,
+            Option<&CurrentLinkPolyline>,
+        ),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
     activities: Res<ChunkActivities>,
@@ -474,20 +572,34 @@ pub fn compute_world_coord_system(
     stops: Res<Stops>,
     link_polylines: Res<LinkPolylines>,
 ) {
-    for (rp, mut pos) in vehicles.iter_mut() {
+    for (rp, mut pos, cached) in vehicles.iter_mut() {
         if !chunk_is_simulated(&pos, &activities) {
             continue;
         }
-        if let Some((x, y)) = crate::mobility::vehicle_world_coord(rp, &routes, &link_polylines) {
+        if let Some(c) = cached {
+            // Fast path: progress along cached polyline.
+            let (x, y) = crate::mobility_geometry::world_coord_at_progress_slice(
+                &c.points, rp.progress,
+            );
+            pos.x = x;
+            pos.y = y;
+        } else if let Some((x, y)) =
+            crate::mobility::vehicle_world_coord(rp, &routes, &link_polylines)
+        {
             pos.x = x;
             pos.y = y;
         }
     }
-    for (state, mut pos) in agents.iter_mut() {
+    for (state, mut pos, cached) in agents.iter_mut() {
         if !chunk_is_simulated(&pos, &activities) {
             continue;
         }
-        if let Some((x, y)) =
+        if let (AgentMobilityState::Walking { progress, .. }, Some(c)) = (&state.0, cached) {
+            let (x, y) =
+                crate::mobility_geometry::world_coord_at_progress_slice(&c.points, *progress);
+            pos.x = x;
+            pos.y = y;
+        } else if let Some((x, y)) =
             crate::mobility::agent_world_coord(&state.0, &routes, &stops, &link_polylines)
         {
             pos.x = x;
@@ -499,21 +611,36 @@ pub fn compute_world_coord_system(
 #[allow(clippy::type_complexity)]
 pub fn compute_direction_system(
     mut agents: Query<
-        (&Position, &AgentMobilityStateComponent, &mut Direction),
+        (
+            &Position,
+            &AgentMobilityStateComponent,
+            &mut Direction,
+            Option<&CurrentLinkPolyline>,
+        ),
         (With<AgentMarker>, Without<VehicleMarker>),
     >,
     mut vehicles: Query<
-        (&Position, &RoutePosition, &mut Direction),
+        (
+            &Position,
+            &RoutePosition,
+            &mut Direction,
+            Option<&CurrentLinkPolyline>,
+        ),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
     activities: Res<ChunkActivities>,
     routes: Res<Routes>,
     link_polylines: Res<LinkPolylines>,
 ) {
-    for (pos, rp, mut dir) in vehicles.iter_mut() {
+    for (pos, rp, mut dir, cached) in vehicles.iter_mut() {
         if !chunk_is_simulated(pos, &activities) {
             continue;
         }
+        if let Some(c) = cached {
+            dir.0 = dir_at_progress(&c.points, rp.progress);
+            continue;
+        }
+        // Slow path: resolve link from route table.
         let Some(route) = routes.0.get(&rp.route_id) else {
             continue;
         };
@@ -525,14 +652,16 @@ pub fn compute_direction_system(
         };
         dir.0 = dir_at_progress(points, rp.progress);
     }
-    for (pos, state, mut dir) in agents.iter_mut() {
+    for (pos, state, mut dir, cached) in agents.iter_mut() {
         if !chunk_is_simulated(pos, &activities) {
             continue;
         }
-        if let AgentMobilityState::Walking { link_id, progress } = &state.0
-            && let Some(points) = link_polylines.0.get(link_id)
-        {
-            dir.0 = dir_at_progress(points, *progress);
+        if let AgentMobilityState::Walking { link_id, progress } = &state.0 {
+            if let Some(c) = cached {
+                dir.0 = dir_at_progress(&c.points, *progress);
+            } else if let Some(points) = link_polylines.0.get(link_id) {
+                dir.0 = dir_at_progress(points, *progress);
+            }
         }
         // Other states: keep current Direction unchanged.
     }
@@ -2081,6 +2210,128 @@ mod tests {
         assert!(
             world.get::<NearStop>(entity).is_none(),
             "stop_arrival should remove NearStop after state transition"
+        );
+    }
+
+    #[test]
+    fn current_link_polyline_invalidates_on_walker_link_change() {
+        use crate::ids::{AgentId, LinkId};
+        use std::sync::Arc;
+
+        let mut world = World::new();
+        world.insert_resource(LinkPolylines::default());
+        world.insert_resource(all_active());
+
+        let mut links = LinkPolylines::default();
+        links.0.insert(LinkId("l:a".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
+        links.0.insert(LinkId("l:b".into()), vec![(0.0, 0.0), (0.0, 10.0)]);
+        world.insert_resource(links);
+        world.insert_resource(Routes::default());
+
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(AgentId("a:1".into())),
+                AgentMobilityStateComponent(AgentMobilityState::Walking {
+                    link_id: LinkId("l:a".into()),
+                    progress: 0.0,
+                }),
+                WalkPlan { stages: vec![], cursor: 0 },
+                WalkSpeed(0.05),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+                CurrentLinkPolyline {
+                    link_id: LinkId("l:a".into()),
+                    points: Arc::new(vec![(0.0, 0.0), (10.0, 0.0)]),
+                },
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(update_link_polyline_cache_system);
+
+        // Tick 1: cache already matches → no change.
+        schedule.run(&mut world);
+        assert_eq!(
+            world.get::<CurrentLinkPolyline>(entity).unwrap().link_id,
+            LinkId("l:a".into())
+        );
+
+        // Mutate the agent to a different link.
+        if let Some(mut s) = world.get_mut::<AgentMobilityStateComponent>(entity) {
+            s.0 = AgentMobilityState::Walking {
+                link_id: LinkId("l:b".into()),
+                progress: 0.0,
+            };
+        }
+        schedule.run(&mut world);
+        assert_eq!(
+            world.get::<CurrentLinkPolyline>(entity).unwrap().link_id,
+            LinkId("l:b".into())
+        );
+        let cached = world.get::<CurrentLinkPolyline>(entity).unwrap();
+        assert_eq!(cached.points.as_ref(), &vec![(0.0, 0.0), (0.0, 10.0)]);
+    }
+
+    #[test]
+    fn current_link_polyline_invalidates_on_vehicle_link_change() {
+        use crate::ids::{LinkId, RouteId, VehicleId};
+        use crate::mobility::records::{RouteRecord, VehicleKind};
+        use std::sync::Arc;
+
+        let mut world = World::new();
+        world.insert_resource(all_active());
+
+        let mut routes = Routes::default();
+        routes.0.insert(
+            RouteId("r:1".into()),
+            RouteRecord {
+                id: RouteId("r:1".into()),
+                links: vec![LinkId("l:a".into()), LinkId("l:b".into())],
+            },
+        );
+        world.insert_resource(routes);
+
+        let mut links = LinkPolylines::default();
+        links.0.insert(LinkId("l:a".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
+        links.0.insert(LinkId("l:b".into()), vec![(0.0, 0.0), (0.0, 10.0)]);
+        world.insert_resource(links);
+
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:1".into())),
+                VehicleKindComponent(VehicleKind::Car),
+                RoutePosition {
+                    route_id: RouteId("r:1".into()),
+                    link_index: 0,
+                    progress: 0.0,
+                    speed: 0.1,
+                },
+                Capacity(1),
+                Occupants(vec![]),
+                DwellTicksRemaining(0),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+                CurrentLinkPolyline {
+                    link_id: LinkId("l:a".into()),
+                    points: Arc::new(vec![(0.0, 0.0), (10.0, 0.0)]),
+                },
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(update_link_polyline_cache_system);
+
+        if let Some(mut rp) = world.get_mut::<RoutePosition>(entity) {
+            rp.link_index = 1;
+        }
+        schedule.run(&mut world);
+        assert_eq!(
+            world.get::<CurrentLinkPolyline>(entity).unwrap().link_id,
+            LinkId("l:b".into())
         );
     }
 }

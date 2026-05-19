@@ -1,7 +1,8 @@
-use crate::ids::{AgentId, RouteId, VehicleId};
+use crate::ids::{AgentId, LinkId, RouteId, VehicleId};
 use crate::mobility::records::{AgentMobilityState, PlanStage, VehicleKind};
 use abutown_protocol::DirectionDto;
 use bevy_ecs::prelude::*;
+use std::sync::Arc;
 
 /// Marker component for pedestrian/agent entities.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,3 +83,14 @@ pub struct DwellTicksRemaining(pub u16);
 /// transition completes.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NearStop;
+
+/// Cached resolved polyline for the link this entity currently traverses.
+/// Refreshed by `update_link_polyline_cache_system` (runs first in Advance)
+/// when the entity's link changes. Eliminates the per-tick HashMap chain
+/// (RouteId → RouteRecord → LinkId → polyline) in compute_world_coord /
+/// compute_direction.
+#[derive(Component, Debug, Clone)]
+pub struct CurrentLinkPolyline {
+    pub link_id: LinkId,
+    pub points: Arc<Vec<(f32, f32)>>,
+}
