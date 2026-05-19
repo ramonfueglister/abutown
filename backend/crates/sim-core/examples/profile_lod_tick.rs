@@ -1,8 +1,9 @@
 //! One-off profiling tool for Phase 6 perf followup.
 //!
-//! Builds the same world as `mobility_tick_lod` bench (100k walkers, 5
-//! subscribed chunks, warm up 50 ticks), then runs N timed ticks and prints
-//! per-SystemSet timings so we can see where the 13.6 ms / tick goes.
+//! Builds the same world as `mobility_tick_lod` bench (100k walkers, all
+//! 512 chunks subscribed so no LOD demotion, warm up 50 ticks), then runs
+//! N timed ticks and prints per-SystemSet timings so we can see where the
+//! ~24 ms / tick goes.
 //!
 //! Not a criterion bench — wall-clock numbers per system over a single run.
 //! Run with: `cargo run --release -p sim-core --example profile_lod_tick`.
