@@ -233,32 +233,19 @@ pub fn boarding_alighting_system(
         >,
     )>,
     activities: Res<ChunkActivities>,
+    agent_index: Res<crate::mobility::resources::AgentIdIndex>,
     mut stops: ResMut<Stops>,
     mut dirty_agents: ResMut<DirtyAgents>,
     mut dirty_vehicles: ResMut<DirtyVehicles>,
 ) {
-    // ------------------------------------------------------------------
-    // Phase A: BOARDING
-    // ------------------------------------------------------------------
-    // A.0 — gather positions of all waiting-at-stop agents so we can filter by
-    // chunk activity. Only agents whose chunk is Active/Hot are eligible.
-    let mut agent_simulated: std::collections::HashMap<AgentId, bool> =
-        std::collections::HashMap::new();
-    {
-        let agents = sets.p0();
-        for (_a_entity, a_pos, a_stable, _a_state, _a_plan) in agents.iter() {
-            agent_simulated.insert(a_stable.0.clone(), chunk_is_simulated(a_pos, &activities));
-        }
-    }
+    // ----- PHASE A: BOARDING -----
 
     // A.1 — collect (stop_id, front agent, route/link/progress) for each stop
-    // that has at least one waiting agent IN AN ACTIVE/HOT CHUNK.
+    // that has at least one waiting agent. Defer the chunk-activity filter to
+    // A.2 so we don't pre-pass over all 100k agents.
     let mut boarding_candidates: Vec<(StopId, AgentId, RouteId, usize, f32)> = Vec::new();
     for (stop_id, stop) in stops.0.iter() {
         if let Some(agent_id) = stop.waiting_agents.front() {
-            if !agent_simulated.get(agent_id).copied().unwrap_or(false) {
-                continue;
-            }
             boarding_candidates.push((
                 stop_id.clone(),
                 agent_id.clone(),
@@ -269,12 +256,28 @@ pub fn boarding_alighting_system(
         }
     }
 
-    // A.2 — find a matching vehicle for each candidate (vehicle must be in an
-    // Active/Hot chunk too).
+    // A.2 — find a matching vehicle for each candidate. Both the candidate
+    // agent AND the matched vehicle must live in an Active/Hot chunk.
+    // Two-phase: first lookup candidate agent positions (p0 borrow), then
+    // match against vehicles (p1 borrow) — ParamSet only permits one inner
+    // query borrow at a time.
+    let mut candidates_with_pos: Vec<(StopId, AgentId, RouteId, usize, f32)> = Vec::new();
+    {
+        let agents = sets.p0();
+        for (stop_id, agent_id, route_id, link_index, stop_progress) in boarding_candidates {
+            let Some(agent_entity) = agent_index.0.get(&agent_id).copied() else { continue };
+            let Ok((_, pos, _, _, _)) = agents.get(agent_entity) else { continue };
+            if !chunk_is_simulated(pos, &activities) {
+                continue;
+            }
+            candidates_with_pos.push((stop_id, agent_id, route_id, link_index, stop_progress));
+        }
+    }
+
     let mut boardings: Vec<(StopId, AgentId, Entity, VehicleId, u16)> = Vec::new();
     {
         let vehicles = sets.p1();
-        for (stop_id, agent_id, route_id, link_index, stop_progress) in boarding_candidates {
+        for (stop_id, agent_id, route_id, link_index, stop_progress) in candidates_with_pos {
             for (v_entity, v_pos_world, v_stable, v_occ, v_cap, v_pos) in vehicles.iter() {
                 if !chunk_is_simulated(v_pos_world, &activities) {
                     continue;
@@ -318,28 +321,27 @@ pub fn boarding_alighting_system(
         }
     }
 
-    // A.5 — agent-side mutations: state becomes InVehicle.
+    // A.5 — agent-side mutations: state becomes InVehicle. O(1) lookup via index.
     {
         let mut agents = sets.p0();
         for (_stop_id, agent_id, _v_entity, v_id, seat_index) in &boardings {
-            for (a_entity, _a_pos, a_stable, mut a_state, _a_plan) in agents.iter_mut() {
-                if &a_stable.0 == agent_id {
-                    a_state.0 = AgentMobilityState::InVehicle {
-                        vehicle_id: v_id.clone(),
-                        seat_index: *seat_index,
-                    };
-                    dirty_agents.0.insert(a_entity);
-                    break;
-                }
+            let Some(a_entity) = agent_index.0.get(agent_id).copied() else {
+                continue;
+            };
+            if let Ok((_, _, _, mut a_state, _)) = agents.get_mut(a_entity) {
+                a_state.0 = AgentMobilityState::InVehicle {
+                    vehicle_id: v_id.clone(),
+                    seat_index: *seat_index,
+                };
+                dirty_agents.0.insert(a_entity);
             }
         }
     }
 
-    // ------------------------------------------------------------------
-    // Phase B: ALIGHTING
-    // ------------------------------------------------------------------
+    // ----- PHASE B: ALIGHTING -----
+
     // B.1 — collect (vehicle_entity, vehicle_id, end-of-link stop_id, occupants)
-    // for every vehicle parked at an end-of-link stop IN AN ACTIVE/HOT CHUNK.
+    // for every vehicle parked at an end-of-link stop in an Active/Hot chunk.
     let mut alighting_candidates: Vec<(Entity, VehicleId, StopId, Vec<AgentId>)> = Vec::new();
     {
         let vehicles = sets.p1();
@@ -364,44 +366,43 @@ pub fn boarding_alighting_system(
         }
     }
 
-    // B.2 — for each occupant, check whether its current plan stage is a
-    // RideToStop targeting this stop AND its state is InVehicle for this vehicle.
-    // Also require the occupant agent's chunk to be Active/Hot.
+    // B.2 — for each occupant, check plan stage + state. O(1) lookups via index.
     let mut to_alight: Vec<(Entity, VehicleId, StopId, AgentId)> = Vec::new();
     {
         let agents = sets.p0();
         for (v_entity, v_id, stop_id, occupants) in &alighting_candidates {
             for agent_id in occupants {
-                for (_a_entity, a_pos, a_stable, a_state, a_plan) in agents.iter() {
-                    if &a_stable.0 == agent_id {
-                        if !chunk_is_simulated(a_pos, &activities) {
-                            break;
-                        }
-                        let stage = a_plan.stages.get(a_plan.cursor);
-                        let matches_alight = matches!(
-                            stage,
-                            Some(PlanStage::RideToStop { stop_id: target, .. }) if target == stop_id
-                        );
-                        let in_this_vehicle = matches!(
-                            &a_state.0,
-                            AgentMobilityState::InVehicle { vehicle_id, .. } if vehicle_id == v_id
-                        );
-                        if matches_alight && in_this_vehicle {
-                            to_alight.push((
-                                *v_entity,
-                                v_id.clone(),
-                                stop_id.clone(),
-                                agent_id.clone(),
-                            ));
-                        }
-                        break;
-                    }
+                let Some(a_entity) = agent_index.0.get(agent_id).copied() else {
+                    continue;
+                };
+                let Ok((_, a_pos, _, a_state, a_plan)) = agents.get(a_entity) else {
+                    continue;
+                };
+                if !chunk_is_simulated(a_pos, &activities) {
+                    continue;
+                }
+                let stage = a_plan.stages.get(a_plan.cursor);
+                let matches_alight = matches!(
+                    stage,
+                    Some(PlanStage::RideToStop { stop_id: target, .. }) if target == stop_id
+                );
+                let in_this_vehicle = matches!(
+                    &a_state.0,
+                    AgentMobilityState::InVehicle { vehicle_id, .. } if vehicle_id == v_id
+                );
+                if matches_alight && in_this_vehicle {
+                    to_alight.push((
+                        *v_entity,
+                        v_id.clone(),
+                        stop_id.clone(),
+                        agent_id.clone(),
+                    ));
                 }
             }
         }
     }
 
-    // B.3 — apply alighting mutations (vehicle drops occupant, agent advances plan).
+    // B.3 — apply alighting mutations. O(1) lookup via index.
     for (v_entity, v_id, stop_id, agent_id) in &to_alight {
         {
             let mut vehicles = sets.p1();
@@ -412,29 +413,29 @@ pub fn boarding_alighting_system(
         }
         {
             let mut agents = sets.p0();
-            for (a_entity, _a_pos, a_stable, mut a_state, mut a_plan) in agents.iter_mut() {
-                if &a_stable.0 == agent_id {
-                    a_plan.cursor += 1;
-                    let next = a_plan.stages.get(a_plan.cursor).cloned();
-                    a_state.0 = match next {
-                        Some(PlanStage::WalkToActivity { link_id, .. }) => {
-                            AgentMobilityState::Walking {
-                                link_id,
-                                progress: 0.0,
-                            }
+            let Some(a_entity) = agent_index.0.get(agent_id).copied() else {
+                continue;
+            };
+            if let Ok((_, _, _, mut a_state, mut a_plan)) = agents.get_mut(a_entity) {
+                a_plan.cursor += 1;
+                let next = a_plan.stages.get(a_plan.cursor).cloned();
+                a_state.0 = match next {
+                    Some(PlanStage::WalkToActivity { link_id, .. }) => {
+                        AgentMobilityState::Walking {
+                            link_id,
+                            progress: 0.0,
                         }
-                        Some(PlanStage::Activity { activity_id }) => {
-                            a_plan.cursor += 1;
-                            AgentMobilityState::AtActivity { activity_id }
-                        }
-                        _ => AgentMobilityState::Alighting {
-                            vehicle_id: v_id.clone(),
-                            stop_id: stop_id.clone(),
-                        },
-                    };
-                    dirty_agents.0.insert(a_entity);
-                    break;
-                }
+                    }
+                    Some(PlanStage::Activity { activity_id }) => {
+                        a_plan.cursor += 1;
+                        AgentMobilityState::AtActivity { activity_id }
+                    }
+                    _ => AgentMobilityState::Alighting {
+                        vehicle_id: v_id.clone(),
+                        stop_id: stop_id.clone(),
+                    },
+                };
+                dirty_agents.0.insert(a_entity);
             }
         }
     }
@@ -897,6 +898,8 @@ mod tests {
         world.insert_resource(ChunkActivityCooldowns::default());
         world.insert_resource(FlowCells::default());
         world.insert_resource(ChunkTransitions::default());
+        world.insert_resource(crate::mobility::resources::AgentIdIndex::default());
+        world.insert_resource(crate::mobility::resources::VehicleIdIndex::default());
 
         let mut schedule = Schedule::default();
         install_systems(&mut schedule);
@@ -999,6 +1002,7 @@ mod tests {
         );
         world.insert_resource(stops);
         world.insert_resource(Routes::default());
+        world.insert_resource(crate::mobility::resources::AgentIdIndex::default());
 
         let agent_entity = world
             .spawn((
@@ -1017,6 +1021,10 @@ mod tests {
                 SpriteKey(String::new()),
             ))
             .id();
+        world
+            .resource_mut::<crate::mobility::resources::AgentIdIndex>()
+            .0
+            .insert(AgentId("a:1".into()), agent_entity);
         let vehicle_entity = world
             .spawn((
                 VehicleMarker,
@@ -1094,6 +1102,7 @@ mod tests {
             },
         );
         world.insert_resource(stops);
+        world.insert_resource(crate::mobility::resources::AgentIdIndex::default());
 
         let agent_entity = world
             .spawn((
@@ -1122,6 +1131,10 @@ mod tests {
                 SpriteKey(String::new()),
             ))
             .id();
+        world
+            .resource_mut::<crate::mobility::resources::AgentIdIndex>()
+            .0
+            .insert(AgentId("a:1".into()), agent_entity);
         let vehicle_entity = world
             .spawn((
                 VehicleMarker,
