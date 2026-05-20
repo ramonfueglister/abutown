@@ -8,9 +8,19 @@ use sim_core::{
     events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
     mobility::{MobilityWorld, build_mobility_snapshot_dto},
-    persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore},
+    persistence::{
+        ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore,
+        build_chunk_snapshot_from_parts,
+    },
     scheduler::ChunkActivity,
     tile::TileKind,
+    world::{
+        components::{
+            ChunkVersion, DirtyTiles, LastPersistedVersion, LastSnapshotAt, Tiles,
+        },
+        resources::ChunksByCoord,
+        systems::{apply_set_tile_kind_ecs, chunk_snapshot_data, TileMutationError},
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -29,10 +39,7 @@ pub enum HydrationError {
     Mobility(sim_core::persistence::MobilitySnapshotStoreError),
 }
 
-use crate::{
-    chunk_registry::{ChunkMutationError, ChunkRegistry},
-    commands::{AppliedCommand, CommandRejection},
-};
+use crate::commands::{AppliedCommand, CommandRejection};
 
 const WORLD_ID: &str = "abutown-main";
 const CHUNK_SIZE: u16 = 32;
@@ -53,7 +60,7 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
 
 pub struct SimulationRuntime {
     world_id: WorldId,
-    registry: ChunkRegistry,
+    chunk_size: u16,
     mobility: MobilityWorld,
     event_store: Box<dyn WorldEventStore + Send + Sync>,
     event_count: usize,
@@ -65,7 +72,7 @@ impl std::fmt::Debug for SimulationRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimulationRuntime")
             .field("world_id", &self.world_id)
-            .field("registry", &self.registry)
+            .field("chunk_size", &self.chunk_size)
             .field("tick", &self.tick)
             .field("version", &self.version)
             .finish_non_exhaustive()
@@ -82,57 +89,52 @@ impl SimulationRuntime {
     }
 
     pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send + Sync>) -> Self {
-        let mut registry = ChunkRegistry::new(CHUNK_SIZE);
-
-        // Collect seed data before inserting into registry so we can dual-write
-        // chunk entities (ChunkRegistry + ECS) without needing a public accessor.
-        let mut seed_entries: Vec<(sim_core::ids::ChunkCoord, Vec<sim_core::tile::TileRecord>, u64, ChunkActivity)> =
-            Vec::with_capacity(SEEDED_CHUNKS.len());
-
+        // Build mobility world and spawn chunk entities directly into its ECS
+        // world. The chunk-entity is the sole source of truth for tile data.
+        //
+        // To match the legacy `ChunkRegistry::new + insert_chunk` semantics, we
+        // spawn each chunk at version 0 (with the seed tile in its default
+        // state) and then apply the seed mutation through the ECS path. That
+        // bumps `ChunkVersion` to 1 while keeping `LastPersistedVersion` at 0,
+        // so the first `collect_chunk_snapshots` correctly emits the seeded
+        // chunks for persistence.
+        let mut mobility = MobilityWorld::default();
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
-            let mut chunk = Chunk::new(coord, CHUNK_SIZE);
+            let tiles =
+                vec![sim_core::tile::TileRecord::default(); (CHUNK_SIZE as usize).pow(2)];
             let seed_index = (offset as u16) * 17;
             let seed_kind = match offset {
                 0 => TileKind::Road,
                 1 => TileKind::Water,
                 _ => TileKind::BuildingFootprint,
             };
-            chunk
-                .set_tile_kind(seed_index, seed_kind)
-                .expect("seed tile index is valid for seeded chunk");
-
             let activity = if offset == 0 {
                 ChunkActivity::Active
             } else {
                 ChunkActivity::Warm
             };
 
-            // Collect the tile Vec before moving the chunk into the registry.
-            let tiles: Vec<sim_core::tile::TileRecord> = (0..chunk.tile_count())
-                .filter_map(|i| chunk.tile_at(i))
-                .collect();
-            let version = chunk.version();
-            seed_entries.push((coord, tiles, version, activity));
-
-            registry.insert_chunk(chunk, activity);
-        }
-
-        // Build mobility world and dual-write chunk entities into its ECS world.
-        let mut mobility = MobilityWorld::default();
-        for (coord, tiles, version, activity) in seed_entries {
             sim_core::world::systems::spawn_chunk_entity(
                 mobility.profile_world_mut(),
                 coord,
                 CHUNK_SIZE,
                 tiles,
-                version,
+                0,
                 activity,
             );
+            apply_set_tile_kind_ecs(
+                mobility.profile_world_mut(),
+                coord,
+                seed_index,
+                seed_kind,
+                0,
+            )
+            .expect("seed mutation should apply for a freshly-spawned chunk entity");
         }
 
         Self {
             world_id: Self::default_world_id(),
-            registry,
+            chunk_size: CHUNK_SIZE,
             mobility,
             event_store,
             event_count: 0,
@@ -197,7 +199,7 @@ impl SimulationRuntime {
                 sim_core::mobility::seed::from_network(network, SEED_DENSITY)
             }
         };
-        let mobility = match mobility_snapshot_store
+        let mut mobility = match mobility_snapshot_store
             .read(&world_id.0)
             .await
             .map_err(HydrationError::Mobility)?
@@ -205,7 +207,6 @@ impl SimulationRuntime {
             Some((_tick, world)) => world,
             None => fallback_mobility(),
         };
-        let mut registry = ChunkRegistry::new(CHUNK_SIZE);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let snap = snapshot_store
@@ -261,7 +262,20 @@ impl SimulationRuntime {
                 chunk_version = next_version;
             }
 
-            registry.insert_hydrated(chunk, chunk_version, activity);
+            // Materialize the chunk's tile vec then spawn a chunk entity in
+            // the ECS world. The Chunk value is consumed here; the entity is
+            // the sole source of truth thereafter.
+            let tiles: Vec<sim_core::tile::TileRecord> = (0..chunk.tile_count())
+                .filter_map(|i| chunk.tile_at(i))
+                .collect();
+            sim_core::world::systems::spawn_chunk_entity(
+                mobility.profile_world_mut(),
+                coord,
+                CHUNK_SIZE,
+                tiles,
+                chunk_version,
+                activity,
+            );
         }
 
         let global_tick = event_store
@@ -280,7 +294,7 @@ impl SimulationRuntime {
 
         let runtime = Self {
             world_id,
-            registry,
+            chunk_size: CHUNK_SIZE,
             mobility,
             event_store,
             event_count,
@@ -303,19 +317,38 @@ impl SimulationRuntime {
         WorldSummaryDto {
             protocol_version: PROTOCOL_VERSION,
             world_id: self.world_id.clone(),
-            chunk_size: self.registry.chunk_size(),
-            loaded_chunks: self
-                .registry
-                .loaded_coords()
-                .into_iter()
-                .map(ChunkCoordDto::from)
-                .collect(),
+            chunk_size: self.chunk_size,
+            loaded_chunks: self.loaded_coords().into_iter().map(ChunkCoordDto::from).collect(),
             tick_period_ms: TICK_PERIOD_MS,
         }
     }
 
     pub fn chunk_snapshot(&self, coord: ChunkCoord) -> Option<ChunkSnapshotDto> {
-        self.registry.chunk_snapshot(&self.world_id, coord)
+        let world = self.mobility.world_view();
+        let (_chunk_size, version, tiles, activity) = chunk_snapshot_data(world, coord)?;
+        Some(build_chunk_snapshot_from_parts(
+            &self.world_id.0,
+            coord,
+            &tiles,
+            version,
+            activity,
+        ))
+    }
+
+    /// Deterministically sorted list (`(y, x)`) of loaded chunk coords from
+    /// the ECS world. Matches the legacy `ChunkRegistry::loaded_coords()`
+    /// ordering.
+    fn loaded_coords(&self) -> Vec<ChunkCoord> {
+        let by_coord = self.mobility.world_view().resource::<ChunksByCoord>();
+        let mut coords: Vec<ChunkCoord> = by_coord.0.keys().copied().collect();
+        coords.sort_by_key(|c| (c.y, c.x));
+        coords
+    }
+
+    /// Read-only ECS world view (chunk + mobility entities live in the same
+    /// World today).
+    pub fn world_view(&self) -> &sim_core::bevy_ecs::world::World {
+        self.mobility.world_view()
     }
 
     pub fn mobility_snapshot(&self) -> MobilitySnapshotDto {
@@ -345,13 +378,61 @@ impl SimulationRuntime {
 
     /// Collect all chunk snapshots that are due for persistence.
     /// Does NOT mark them as persisted (call `mark_chunk_snapshots_persisted` after writing).
+    ///
+    /// "Due" matches the legacy `ChunkRegistry::collect_snapshots` policy:
+    /// emit if the chunk's `ChunkVersion` is ahead of `LastPersistedVersion`,
+    /// OR `LastSnapshotAt` is older than the 30s ceiling.
     pub fn collect_chunk_snapshots(&self) -> Vec<ChunkSnapshotDto> {
-        self.registry.collect_snapshots(&self.world_id)
+        let ceiling = std::time::Duration::from_secs(30);
+        let now = std::time::Instant::now();
+        let world = self.mobility.world_view();
+        let by_coord = world.resource::<ChunksByCoord>();
+        let mut due: Vec<ChunkCoord> = by_coord
+            .0
+            .iter()
+            .filter_map(|(coord, entity)| {
+                let version = world.get::<ChunkVersion>(*entity)?.0;
+                let last_persisted = world.get::<LastPersistedVersion>(*entity)?.0;
+                let last_at = world.get::<LastSnapshotAt>(*entity)?.0;
+                let is_due = version > last_persisted || now.duration_since(last_at) >= ceiling;
+                if is_due { Some(*coord) } else { None }
+            })
+            .collect();
+        due.sort_by_key(|c| (c.y, c.x));
+        due.into_iter()
+            .filter_map(|coord| self.chunk_snapshot(coord))
+            .collect()
     }
 
     /// Mark the given chunks as persisted (clear dirty state, update timestamps).
     pub fn mark_chunk_snapshots_persisted(&mut self, coords: &[ChunkCoord]) {
-        self.registry.mark_snapshots_persisted(coords);
+        let now = std::time::Instant::now();
+        let world = self.mobility.profile_world_mut();
+        // Snapshot (entity, current_version) pairs first to release the &World
+        // borrow before we take entity_mut for each.
+        let updates: Vec<(sim_core::bevy_ecs::entity::Entity, u64)> = {
+            let by_coord = world.resource::<ChunksByCoord>();
+            coords
+                .iter()
+                .filter_map(|coord| {
+                    let entity = *by_coord.0.get(coord)?;
+                    let version = world.get::<ChunkVersion>(entity)?.0;
+                    Some((entity, version))
+                })
+                .collect()
+        };
+        for (entity, version) in updates {
+            let mut ent = world.entity_mut(entity);
+            if let Some(mut last) = ent.get_mut::<LastPersistedVersion>() {
+                last.0 = version;
+            }
+            if let Some(mut at) = ent.get_mut::<LastSnapshotAt>() {
+                at.0 = now;
+            }
+            if let Some(mut dirty) = ent.get_mut::<DirtyTiles>() {
+                dirty.0.clear();
+            }
+        }
     }
 
     /// Clone the mobility world so persist functions can release the runtime
@@ -448,32 +529,53 @@ impl SimulationRuntime {
             y: command.coord.y,
         };
         let kind = TileKind::from(command.kind);
-        let plan = self
-            .registry
-            .plan_set_tile_kind(coord, command.local_index, kind)
-            .map_err(|error| match error {
-                ChunkMutationError::ChunkNotLoaded { coord } => CommandRejection {
+
+        // Pre-flight validation against ECS state (no mutation yet — we only
+        // commit after the event store accepts the append).
+        let (preview_version, _existing_kind) = {
+            let world = self.mobility.world_view();
+            let entity = world
+                .resource::<ChunksByCoord>()
+                .0
+                .get(&coord)
+                .copied()
+                .ok_or_else(|| CommandRejection {
                     world_id: Some(command.world_id.clone()),
                     command_id: Some(command.command_id.clone()),
                     code: "chunk_not_loaded",
                     message: format!("chunk {}:{} is not loaded", coord.x, coord.y),
-                },
-                ChunkMutationError::TileOutOfBounds { index, tile_count } => CommandRejection {
-                    world_id: Some(command.world_id.clone()),
-                    command_id: Some(command.command_id.clone()),
+                })?;
+            let tiles = world.get::<Tiles>(entity).expect("Tiles on chunk entity");
+            let tile_count = tiles.0.len() as u32;
+            if command.local_index as u32 >= tile_count {
+                return Err(CommandRejection {
+                    world_id: Some(command.world_id),
+                    command_id: Some(command.command_id),
                     code: "tile_out_of_bounds",
-                    message: format!("tile index {index} is outside chunk tile count {tile_count}"),
-                },
-                ChunkMutationError::NoStateChange { coord, local_index } => CommandRejection {
-                    world_id: Some(command.world_id.clone()),
-                    command_id: Some(command.command_id.clone()),
+                    message: format!(
+                        "tile index {} is outside chunk tile count {}",
+                        command.local_index, tile_count
+                    ),
+                });
+            }
+            let existing_kind = tiles.0[command.local_index as usize].kind;
+            if existing_kind == kind {
+                return Err(CommandRejection {
+                    world_id: Some(command.world_id),
+                    command_id: Some(command.command_id),
                     code: "no_state_change",
                     message: format!(
-                        "tile {local_index} in chunk {}:{} already has the requested kind",
-                        coord.x, coord.y
+                        "tile {} in chunk {}:{} already has the requested kind",
+                        command.local_index, coord.x, coord.y
                     ),
-                },
-            })?;
+                });
+            }
+            let version = world
+                .get::<ChunkVersion>(entity)
+                .expect("ChunkVersion on chunk entity")
+                .0;
+            (version + 1, existing_kind)
+        };
 
         let event_id = format!("event:{}", uuid::Uuid::now_v7());
         let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
@@ -482,7 +584,7 @@ impl SimulationRuntime {
             command_id: command.command_id.clone(),
             world_id: self.world_id.clone(),
             tick: self.tick,
-            version: plan.version,
+            version: preview_version,
             coord: command.coord,
             local_index: command.local_index,
             kind: command.kind,
@@ -520,9 +622,37 @@ impl SimulationRuntime {
         }
 
         self.event_count += 1;
-        self.registry
-            .apply_set_tile_kind(plan)
-            .expect("planned mutation should apply after event append");
+        let mutation_result = apply_set_tile_kind_ecs(
+            self.mobility.profile_world_mut(),
+            coord,
+            command.local_index,
+            kind,
+            self.tick,
+        )
+        .map_err(|error| match error {
+            TileMutationError::ChunkNotLoaded { coord } => CommandRejection {
+                world_id: Some(self.world_id.clone()),
+                command_id: Some(command.command_id.clone()),
+                code: "chunk_not_loaded",
+                message: format!("chunk {}:{} is not loaded", coord.x, coord.y),
+            },
+            TileMutationError::TileOutOfBounds { index, tile_count } => CommandRejection {
+                world_id: Some(self.world_id.clone()),
+                command_id: Some(command.command_id.clone()),
+                code: "tile_out_of_bounds",
+                message: format!("tile index {index} is outside chunk tile count {tile_count}"),
+            },
+            TileMutationError::NoStateChange { coord, local_index, .. } => CommandRejection {
+                world_id: Some(self.world_id.clone()),
+                command_id: Some(command.command_id.clone()),
+                code: "no_state_change",
+                message: format!(
+                    "tile {local_index} in chunk {}:{} already has the requested kind",
+                    coord.x, coord.y
+                ),
+            },
+        })?;
+        debug_assert_eq!(mutation_result.new_version, preview_version);
 
         Ok(self.build_accepted(command.command_id, event))
     }
@@ -531,20 +661,25 @@ impl SimulationRuntime {
         ServerMessageDto::Hello(ServerHelloDto {
             protocol_version: PROTOCOL_VERSION,
             world_id: self.world_id.clone(),
-            chunk_size: self.registry.chunk_size(),
+            chunk_size: self.chunk_size,
         })
     }
 
     pub fn next_pulse(&mut self) -> ServerMessageDto {
         self.tick += 1;
         self.version += 1;
-        let loaded_coords = self.registry.loaded_coords();
+        let loaded_coords = self.loaded_coords();
         let coord = loaded_coords[((self.tick - 1) as usize) % loaded_coords.len()];
-        let tile_count = u64::from(
-            self.registry
-                .tile_count(coord)
-                .expect("pulse chunk should be loaded"),
-        );
+        let tile_count = {
+            let world = self.mobility.world_view();
+            let entity = world
+                .resource::<ChunksByCoord>()
+                .0
+                .get(&coord)
+                .copied()
+                .expect("pulse chunk should be loaded");
+            world.get::<Tiles>(entity).expect("Tiles on chunk entity").0.len() as u64
+        };
         let local_index = ((self.tick * PULSE_STRIDE) % tile_count) as u16;
 
         ServerMessageDto::TilePulse(TilePulseDeltaDto {

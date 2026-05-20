@@ -1,6 +1,5 @@
 pub mod app;
 pub mod card_hand;
-pub(crate) mod chunk_registry;
 pub mod commands;
 pub mod config;
 pub mod postgres_events;

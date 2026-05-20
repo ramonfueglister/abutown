@@ -37,6 +37,39 @@ pub fn build_chunk_snapshot(
     }
 }
 
+/// Build a `ChunkSnapshotDto` from raw ECS data (tiles, version, coord,
+/// activity). Produces a payload byte-identical to `build_chunk_snapshot`,
+/// which is the wire-stability guarantee. Use this when the source of the
+/// chunk's state is the ECS World rather than a `Chunk` value.
+pub fn build_chunk_snapshot_from_parts(
+    world_id: impl Into<String>,
+    coord: ChunkCoord,
+    tiles: &[crate::tile::TileRecord],
+    chunk_version: u64,
+    activity: ChunkActivity,
+) -> ChunkSnapshotDto {
+    let tile_count = tiles.len() as u16;
+    let mut emitted: Vec<TileMutationDto> = Vec::new();
+    for (index, tile) in tiles.iter().enumerate() {
+        if tile.kind != TileKind::default() {
+            emitted.push(TileMutationDto {
+                local_index: index as u16,
+                kind: tile.kind.into(),
+                version: tile.version,
+            });
+        }
+    }
+    ChunkSnapshotDto {
+        protocol_version: PROTOCOL_VERSION,
+        world_id: WorldId(world_id.into()),
+        coord: coord.into(),
+        chunk_state: activity.into(),
+        chunk_version,
+        tile_count,
+        tiles: emitted,
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 #[error("{message}")]
 pub struct ChunkSnapshotStoreError {
