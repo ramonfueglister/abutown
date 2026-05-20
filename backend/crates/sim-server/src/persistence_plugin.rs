@@ -20,7 +20,9 @@ impl SimPlugin for PersistencePlugin {
         providers.0.push(Box::new(ChunkSnapshotProvider {
             world_id: self.world_id.clone(),
         }));
-        // MobilitySnapshotProvider gets pushed in Task 11.
+        providers.0.push(Box::new(sim_core::mobility::snapshot_provider::MobilitySnapshotProvider {
+            world_id: self.world_id.clone(),
+        }));
     }
 }
 
@@ -30,16 +32,16 @@ mod tests {
     use sim_core::world::plugin::CorePlugin;
 
     #[test]
-    fn persistence_plugin_registers_chunk_snapshot_provider() {
+    fn persistence_plugin_registers_both_providers() {
         let mut world = World::new();
         let mut schedule = Schedule::default();
         CorePlugin::default().install(&mut world, &mut schedule);
-        PersistencePlugin {
-            world_id: "test".to_string(),
-        }
-        .install(&mut world, &mut schedule);
+        sim_core::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+        PersistencePlugin { world_id: "test".to_string() }.install(&mut world, &mut schedule);
         let providers = world.resource::<SnapshotProviders>();
-        assert_eq!(providers.0.len(), 1);
-        assert_eq!(providers.0[0].name(), "chunk");
+        assert_eq!(providers.0.len(), 2);
+        let names: Vec<&str> = providers.0.iter().map(|p| p.name()).collect();
+        assert!(names.contains(&"chunk"));
+        assert!(names.contains(&"mobility"));
     }
 }

@@ -8,8 +8,8 @@ use sim_core::{
     events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
     mobility::{
-        MobilityPersistSnapshot, api as mobility_api, apply_into_world, build_mobility_snapshot_dto,
-        extract_from_world, install_mobility,
+        MobilityPlugin, MobilityPersistSnapshot, api as mobility_api, apply_into_world,
+        build_mobility_snapshot_dto, extract_from_world,
     },
     persistence::{
         ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore,
@@ -99,7 +99,7 @@ impl SimulationRuntime {
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
         CorePlugin::default().install(&mut world, &mut schedule);
-        install_mobility(&mut world, &mut schedule);
+        MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: WORLD_ID.to_string(),
         }
@@ -207,7 +207,7 @@ impl SimulationRuntime {
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
         CorePlugin::default().install(&mut world, &mut schedule);
-        install_mobility(&mut world, &mut schedule);
+        MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: world_id.0.clone(),
         }

@@ -10,10 +10,22 @@ pub mod lod;
 pub mod persist_snapshot;
 pub mod resources;
 pub mod seed;
+pub mod snapshot_provider;
 pub mod systems;
 
 pub use api::install_mobility;
 pub use persist_snapshot::{MobilityPersistSnapshot, apply_into_world, extract_from_world};
+
+use crate::world::schedule::SimPlugin;
+
+pub struct MobilityPlugin;
+
+impl SimPlugin for MobilityPlugin {
+    fn name(&self) -> &'static str { "mobility" }
+    fn install(&self, world: &mut bevy_ecs::world::World, schedule: &mut bevy_ecs::schedule::Schedule) {
+        crate::mobility::api::install_mobility(world, schedule);
+    }
+}
 
 pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
     let cs = chunk_size as f32;
