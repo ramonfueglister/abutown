@@ -4,10 +4,16 @@ import { createSubscriptionClient } from './chunkSubscriptionClient';
 import {
   isMobilitySnapshotDto,
   isWorldSummaryDto,
+  mobilitySnapshotFromProto,
+  worldSummaryFromProto,
   type MobilitySnapshotDto,
   type WorldSummaryDto,
 } from './mobilityProtocol';
-import { ServerMessageSchema } from './proto/abutown_pb';
+import {
+  MobilitySnapshotSchema,
+  ServerMessageSchema,
+  WorldSummarySchema,
+} from './proto/abutown_pb';
 import {
   applyMobilitySnapshot,
   applyServerMessage,
@@ -270,7 +276,9 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
 async function requestWorldSummary(baseUrl: string, fetchImpl: typeof fetch): Promise<WorldSummaryDto> {
   const response = await fetchImpl(new URL('/world', baseUrl).toString());
   if (!response.ok) throw new Error(`World summary HTTP ${response.status}`);
-  const payload: unknown = await response.json();
+  // Phase: binary wire — /world returns application/x-protobuf.
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const payload = worldSummaryFromProto(fromBinary(WorldSummarySchema, bytes));
   if (!isWorldSummaryDto(payload)) throw new Error('Invalid world summary payload');
   return payload;
 }
@@ -279,7 +287,9 @@ async function requestMobilitySnapshot(baseUrl: string, fetchImpl: typeof fetch)
   const response = await fetchImpl(new URL('/mobility', baseUrl).toString());
   if (!response.ok) throw new Error(`Mobility snapshot HTTP ${response.status}`);
 
-  const payload: unknown = await response.json();
+  // Phase: binary wire — /mobility returns application/x-protobuf.
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const payload = mobilitySnapshotFromProto(fromBinary(MobilitySnapshotSchema, bytes));
   if (!isMobilitySnapshotDto(payload)) throw new Error('Invalid mobility snapshot payload');
   return payload;
 }

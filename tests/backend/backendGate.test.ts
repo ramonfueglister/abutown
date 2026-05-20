@@ -1,3 +1,4 @@
+import { create, toBinary } from '@bufbuild/protobuf';
 import { describe, expect, it } from 'vitest';
 import {
   backendErrorMessage,
@@ -5,6 +6,25 @@ import {
   requireBackend,
   resolveBackendBaseUrl,
 } from '../../src/backend/backendGate';
+import { HealthResponseSchema } from '../../src/backend/proto/abutown_pb';
+
+function healthProtoResponse(payload: {
+  service: string;
+  world_id: string;
+  ok: boolean;
+  protocol_version: number;
+}): Response {
+  const message = create(HealthResponseSchema, {
+    service: payload.service,
+    worldId: payload.world_id,
+    ok: payload.ok,
+    protocolVersion: payload.protocol_version,
+  });
+  return new Response(toBinary(HealthResponseSchema, message), {
+    status: 200,
+    headers: { 'content-type': 'application/x-protobuf' },
+  });
+}
 
 describe('backend startup gate', () => {
   it('uses the live local backend by default', () => {
@@ -46,7 +66,13 @@ describe('backend startup gate', () => {
 
   it('requires a valid healthy payload', async () => {
     await expect(requireBackend({
-      fetchImpl: async () => Response.json({ service: 'abutown-sim', ok: false }),
+      fetchImpl: async () =>
+        healthProtoResponse({
+          service: 'abutown-sim',
+          world_id: 'abutown-main',
+          ok: false,
+          protocol_version: 1,
+        }),
     })).rejects.toThrow('Invalid backend health payload');
   });
 
@@ -54,7 +80,7 @@ describe('backend startup gate', () => {
     const status = await requireBackend({
       fetchImpl: async (input) => {
         expect(String(input)).toBe('http://127.0.0.1:8080/health');
-        return Response.json({
+        return healthProtoResponse({
           service: 'abutown-sim',
           world_id: 'abutown-main',
           ok: true,

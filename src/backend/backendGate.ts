@@ -1,3 +1,7 @@
+import { fromBinary } from '@bufbuild/protobuf';
+import { HealthResponseSchema } from './proto/abutown_pb';
+import { healthResponseFromProto } from './mobilityProtocol';
+
 export type BackendHealthDto = {
   service: 'abutown-sim';
   world_id: string;
@@ -34,7 +38,10 @@ export async function requireBackend(options: BackendGateOptions = {}): Promise<
   const response = await fetchImpl(new URL('/health', baseUrl).toString());
   if (!response.ok) throw new Error(`Backend health HTTP ${response.status}`);
 
-  const payload: unknown = await response.json();
+  // Phase: binary wire — /health returns application/x-protobuf.
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const proto = fromBinary(HealthResponseSchema, bytes);
+  const payload = healthResponseFromProto(proto);
   if (!isBackendHealthDto(payload)) throw new Error('Invalid backend health payload');
   return payload;
 }

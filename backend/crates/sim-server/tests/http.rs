@@ -1,9 +1,9 @@
-use abutown_protocol::{
-    ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto, WorldId,
-};
+use abutown_protocol::wire as w;
+use abutown_protocol::{PROTOCOL_VERSION, TileKindDto, WorldId};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use prost::Message;
 use serde_json::Value;
 use serde_json::json;
 use tower::ServiceExt;
@@ -16,13 +16,14 @@ use sim_server::{
 const TEST_USER_A: &str = "00000000-0000-0000-0000-000000000001";
 const TEST_USER_B: &str = "00000000-0000-0000-0000-000000000002";
 
-/// Poll a GET endpoint until `predicate(json)` returns true, or panic after
-/// ~1s. Phase 7c made HTTP reads eventually-consistent (view is published
-/// every 100 ms tick) — tests that do read-after-write should poll instead
-/// of sleeping for a fixed interval.
-async fn poll_chunk_until<F>(app: &axum::Router, uri: &str, predicate: F) -> Value
+/// Poll a GET endpoint that returns a binary `ChunkSnapshot` protobuf body
+/// until `predicate(&snap)` returns true, or panic after ~1s. Phase 7c made
+/// HTTP reads eventually-consistent (view is published every 100 ms tick) —
+/// tests that do read-after-write should poll instead of sleeping for a
+/// fixed interval.
+async fn poll_chunk_until<F>(app: &axum::Router, uri: &str, predicate: F) -> w::ChunkSnapshot
 where
-    F: Fn(&Value) -> bool,
+    F: Fn(&w::ChunkSnapshot) -> bool,
 {
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
     loop {
@@ -33,15 +34,58 @@ where
             .unwrap();
         if response.status() == StatusCode::OK {
             let body = response.into_body().collect().await.unwrap().to_bytes();
-            let json: Value = serde_json::from_slice(&body).unwrap();
-            if predicate(&json) {
-                return json;
+            if let Ok(snap) = w::ChunkSnapshot::decode(body.as_ref())
+                && predicate(&snap)
+            {
+                return snap;
             }
         }
         if std::time::Instant::now() >= deadline {
             panic!("poll_chunk_until timed out after 1s waiting on {uri}");
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Encode a `ClientCommand` proto and POST it to /commands. Returns the
+/// raw HTTP response so tests can assert on status + decode the response
+/// proto themselves.
+async fn post_command(
+    app: &axum::Router,
+    command: w::ClientCommand,
+) -> axum::response::Response {
+    let body = command.encode_to_vec();
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/commands")
+                .header("content-type", "application/x-protobuf")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+fn set_tile_kind_proto(
+    command_id: &str,
+    x: i32,
+    y: i32,
+    local_index: u32,
+    kind: w::TileKind,
+) -> w::ClientCommand {
+    w::ClientCommand {
+        command: Some(w::client_command::Command::SetTileKind(
+            w::SetTileKindCommand {
+                protocol_version: u32::from(PROTOCOL_VERSION),
+                world_id: "abutown-main".to_string(),
+                command_id: command_id.to_string(),
+                coord: Some(w::ChunkCoord { x, y }),
+                local_index,
+                kind: kind as i32,
+            },
+        )),
     }
 }
 
@@ -74,6 +118,16 @@ async fn health_and_world_summary_are_available() {
         .await
         .unwrap();
     assert_eq!(health_response.status(), StatusCode::OK);
+    let health_body = health_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let health = w::HealthResponse::decode(health_body.as_ref()).unwrap();
+    assert_eq!(health.protocol_version, u32::from(PROTOCOL_VERSION));
+    assert_eq!(health.world_id, "abutown-main");
+    assert!(health.ok);
 
     let world_response = app
         .oneshot(
@@ -92,18 +146,15 @@ async fn health_and_world_summary_are_available() {
         .await
         .unwrap()
         .to_bytes();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["protocol_version"], 1);
-    assert_eq!(json["world_id"], "abutown-main");
-    assert_eq!(json["chunk_size"], 32);
-    assert_eq!(json["loaded_chunks"].as_array().unwrap().len(), 3);
-    assert_eq!(json["loaded_chunks"][0]["x"], 4);
-    assert_eq!(json["loaded_chunks"][0]["y"], 4);
-    assert_eq!(json["loaded_chunks"][1]["x"], 5);
-    assert_eq!(json["loaded_chunks"][1]["y"], 4);
-    assert_eq!(json["loaded_chunks"][2]["x"], 4);
-    assert_eq!(json["loaded_chunks"][2]["y"], 5);
-    assert_eq!(json["tick_period_ms"], 100);
+    let world = w::WorldSummary::decode(body.as_ref()).unwrap();
+    assert_eq!(world.protocol_version, u32::from(PROTOCOL_VERSION));
+    assert_eq!(world.world_id, "abutown-main");
+    assert_eq!(world.chunk_size, 32);
+    assert_eq!(world.loaded_chunks.len(), 3);
+    assert_eq!(world.loaded_chunks[0], w::ChunkCoord { x: 4, y: 4 });
+    assert_eq!(world.loaded_chunks[1], w::ChunkCoord { x: 5, y: 4 });
+    assert_eq!(world.loaded_chunks[2], w::ChunkCoord { x: 4, y: 5 });
+    assert_eq!(world.tick_period_ms, 100);
 }
 
 #[tokio::test]
@@ -237,18 +288,16 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body).unwrap();
+    let snap = w::ChunkSnapshot::decode(body.as_ref()).unwrap();
 
-    assert_eq!(json["world_id"], "abutown-main");
-    assert_eq!(json["coord"]["x"], 4);
-    assert_eq!(json["coord"]["y"], 4);
-    assert_eq!(json["tile_count"], 1024);
-    assert_eq!(json["chunk_state"], "active");
+    assert_eq!(snap.world_id, "abutown-main");
+    assert_eq!(snap.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
+    assert_eq!(snap.tile_count, 1024);
+    assert_eq!(snap.chunk_state, w::ChunkState::Active as i32);
 
-    let tiles = json["tiles"].as_array().unwrap();
-    assert_eq!(tiles.len(), 1);
-    assert_eq!(tiles[0]["local_index"], 0);
-    assert_eq!(tiles[0]["kind"], "road");
+    assert_eq!(snap.tiles.len(), 1);
+    assert_eq!(snap.tiles[0].local_index, 0);
+    assert_eq!(snap.tiles[0].kind, w::TileKind::Road as i32);
 }
 
 #[tokio::test]
@@ -269,10 +318,9 @@ async fn every_loaded_chunk_snapshot_is_available() {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["coord"]["x"], x);
-        assert_eq!(json["coord"]["y"], y);
-        assert_eq!(json["tile_count"], 1024);
+        let snap = w::ChunkSnapshot::decode(body.as_ref()).unwrap();
+        assert_eq!(snap.coord, Some(w::ChunkCoord { x, y }));
+        assert_eq!(snap.tile_count, 1024);
     }
 }
 
@@ -309,137 +357,93 @@ async fn mobility_snapshot_is_available() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body).unwrap();
+    let mobility = w::MobilitySnapshot::decode(body.as_ref()).unwrap();
 
-    assert_eq!(json["protocol_version"], 1);
-    assert_eq!(json["world_id"], "abutown-main");
-    assert_eq!(json["tick"], 0);
-    assert_eq!(json["agents"].as_array().unwrap().len(), 0);
-    assert_eq!(json["vehicles"].as_array().unwrap().len(), 0);
-    assert_eq!(json["stops"].as_array().unwrap().len(), 0);
+    assert_eq!(mobility.protocol_version, u32::from(PROTOCOL_VERSION));
+    assert_eq!(mobility.world_id, "abutown-main");
+    assert_eq!(mobility.tick, 0);
+    assert!(mobility.agents.is_empty());
+    assert!(mobility.vehicles.is_empty());
+    assert!(mobility.stops.is_empty());
 }
 
 #[tokio::test]
 async fn command_sets_tile_kind_and_returns_event() {
     let app = build_app();
-    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
-        protocol_version: PROTOCOL_VERSION,
-        world_id: WorldId("abutown-main".to_string()),
-        command_id: "command:http:1".to_string(),
-        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
-        local_index: 11,
-        kind: TileKindDto::Water,
-    });
+    let command = set_tile_kind_proto("command:http:1", 4, 4, 11, w::TileKind::Water);
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/commands")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&command).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = post_command(&app, command).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["status"], "accepted");
-    assert_eq!(json["event"]["type"], "tile_kind_set");
-    assert_eq!(json["event"]["command_id"], "command:http:1");
-    assert_eq!(json["event"]["local_index"], 11);
-    assert_eq!(json["event"]["kind"], "water");
+    let resp = w::CommandResponse::decode(body.as_ref()).unwrap();
+    let accepted = match resp.outcome {
+        Some(w::command_response::Outcome::Accepted(a)) => a,
+        other => panic!("expected accepted outcome, got: {other:?}"),
+    };
+    assert_eq!(accepted.command_id, "command:http:1");
+    let event = accepted.event.expect("accepted command must carry event");
+    let tk = match event.event {
+        Some(w::world_event::Event::TileKindSet(tk)) => tk,
+        other => panic!("expected tile_kind_set event, got: {other:?}"),
+    };
+    assert_eq!(tk.command_id, "command:http:1");
+    assert_eq!(tk.local_index, 11);
+    assert_eq!(tk.kind, w::TileKind::Water as i32);
 
     // Phase 7c: /chunks/{x}/{y} reads from the RuntimeReadView which is
     // published once per tick (100 ms). Poll for the mutation to become
     // visible instead of using a fixed sleep — faster + more robust on
     // slow CI than `sleep(150ms)`.
     let snapshot = poll_chunk_until(&app, "/chunks/4/4", |snap| {
-        snap["tiles"]
-            .as_array()
-            .map(|tiles| {
-                tiles
-                    .iter()
-                    .any(|tile| tile["local_index"] == 11 && tile["kind"] == "water")
-            })
-            .unwrap_or(false)
+        snap.tiles
+            .iter()
+            .any(|tile| tile.local_index == 11 && tile.kind == w::TileKind::Water as i32)
     })
     .await;
 
     assert!(
-        snapshot["tiles"]
-            .as_array()
-            .unwrap()
+        snapshot
+            .tiles
             .iter()
-            .any(|tile| tile["local_index"] == 11 && tile["kind"] == "water")
+            .any(|tile| tile.local_index == 11 && tile.kind == w::TileKind::Water as i32)
     );
 }
 
 #[tokio::test]
 async fn command_rejects_unloaded_chunk() {
     let app = build_app();
-    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
-        protocol_version: PROTOCOL_VERSION,
-        world_id: WorldId("abutown-main".to_string()),
-        command_id: "command:http:2".to_string(),
-        coord: abutown_protocol::ChunkCoordDto { x: 9, y: 9 },
-        local_index: 11,
-        kind: TileKindDto::Water,
-    });
+    let command = set_tile_kind_proto("command:http:2", 9, 9, 11, w::TileKind::Water);
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/commands")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&command).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = post_command(&app, command).await;
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["status"], "rejected");
-    assert_eq!(json["code"], "chunk_not_loaded");
-    assert_eq!(json["command_id"], "command:http:2");
+    let resp = w::CommandResponse::decode(body.as_ref()).unwrap();
+    let rejected = match resp.outcome {
+        Some(w::command_response::Outcome::Rejected(r)) => r,
+        other => panic!("expected rejected outcome, got: {other:?}"),
+    };
+    assert_eq!(rejected.code, "chunk_not_loaded");
+    assert_eq!(rejected.command_id, "command:http:2");
 }
 
 #[tokio::test]
 async fn command_rejects_tile_out_of_bounds() {
     let app = build_app();
-    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
-        protocol_version: PROTOCOL_VERSION,
-        world_id: WorldId("abutown-main".to_string()),
-        command_id: "command:http:3".to_string(),
-        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
-        local_index: 1024,
-        kind: TileKindDto::Water,
-    });
+    let command = set_tile_kind_proto("command:http:3", 4, 4, 1024, w::TileKind::Water);
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/commands")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&command).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = post_command(&app, command).await;
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["status"], "rejected");
-    assert_eq!(json["code"], "tile_out_of_bounds");
-    assert_eq!(json["command_id"], "command:http:3");
+    let resp = w::CommandResponse::decode(body.as_ref()).unwrap();
+    let rejected = match resp.outcome {
+        Some(w::command_response::Outcome::Rejected(r)) => r,
+        other => panic!("expected rejected outcome, got: {other:?}"),
+    };
+    assert_eq!(rejected.code, "tile_out_of_bounds");
+    assert_eq!(rejected.command_id, "command:http:3");
 }
 
 #[tokio::test]
@@ -464,35 +468,20 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
         .await
         .unwrap()
         .to_bytes();
-    let before: Value = serde_json::from_slice(&before_body).unwrap();
+    let before = w::ChunkSnapshot::decode(before_body.as_ref()).unwrap();
 
-    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
-        protocol_version: PROTOCOL_VERSION,
-        world_id: WorldId("abutown-main".to_string()),
-        command_id: "command:http:store-failure".to_string(),
-        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
-        local_index: 11,
-        kind: TileKindDto::Water,
-    });
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/commands")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&command).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let command =
+        set_tile_kind_proto("command:http:store-failure", 4, 4, 11, w::TileKind::Water);
+    let response = post_command(&app, command).await;
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["status"], "rejected");
-    assert_eq!(json["code"], "event_store_unavailable");
+    let resp = w::CommandResponse::decode(body.as_ref()).unwrap();
+    let rejected = match resp.outcome {
+        Some(w::command_response::Outcome::Rejected(r)) => r,
+        other => panic!("expected rejected outcome, got: {other:?}"),
+    };
+    assert_eq!(rejected.code, "event_store_unavailable");
 
     let after_response = app
         .oneshot(
@@ -509,7 +498,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
         .await
         .unwrap()
         .to_bytes();
-    let after: Value = serde_json::from_slice(&after_body).unwrap();
+    let after = w::ChunkSnapshot::decode(after_body.as_ref()).unwrap();
     assert_eq!(after, before);
 }
 
@@ -663,10 +652,15 @@ async fn postgres_duplicate_command_returns_same_response() {
     let unique_command_id = format!("command:dup-test:{}", uuid::Uuid::now_v7());
     // Pick a unique tile index per run so the first POST is unlikely to hit
     // `no_state_change` from prior pollution. Indices 0..=1023 are valid.
-    let local_index: u16 = ((uuid::Uuid::now_v7().as_u128() % 1024) as u16).max(1);
-    let body = format!(
-        r#"{{"type":"set_tile_kind","protocol_version":1,"world_id":"abutown-main","command_id":"{unique_command_id}","coord":{{"x":4,"y":4}},"local_index":{local_index},"kind":"water"}}"#
+    let local_index: u32 = ((uuid::Uuid::now_v7().as_u128() % 1024) as u32).clamp(1, 1023);
+    let command = set_tile_kind_proto(
+        &unique_command_id,
+        4,
+        4,
+        local_index,
+        w::TileKind::Water,
     );
+    let body = command.encode_to_vec();
 
     let first = app
         .clone()
@@ -674,7 +668,7 @@ async fn postgres_duplicate_command_returns_same_response() {
             Request::builder()
                 .method("POST")
                 .uri("/commands")
-                .header("content-type", "application/json")
+                .header("content-type", "application/x-protobuf")
                 .body(Body::from(body.clone()))
                 .unwrap(),
         )
@@ -688,7 +682,7 @@ async fn postgres_duplicate_command_returns_same_response() {
             Request::builder()
                 .method("POST")
                 .uri("/commands")
-                .header("content-type", "application/json")
+                .header("content-type", "application/x-protobuf")
                 .body(Body::from(body))
                 .unwrap(),
         )
@@ -700,14 +694,14 @@ async fn postgres_duplicate_command_returns_same_response() {
     assert_eq!(
         first_status,
         StatusCode::OK,
-        "first command must succeed (body: {})",
-        String::from_utf8_lossy(&first_body)
+        "first command must succeed (body: {} bytes)",
+        first_body.len()
     );
     assert_eq!(
         second_status,
         StatusCode::OK,
-        "duplicate command must also succeed idempotently (body: {})",
-        String::from_utf8_lossy(&second_body)
+        "duplicate command must also succeed idempotently (body: {} bytes)",
+        second_body.len()
     );
     assert_eq!(
         first_body, second_body,

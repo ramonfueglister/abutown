@@ -338,9 +338,13 @@ export function isWorldCoordDto(value: unknown): value is WorldCoordDto {
 import type {
   AgentMobility as AgentMobilityProto,
   AgentState as AgentStateProto,
+  HealthResponse as HealthResponseProto,
   MobilityChunkDelta as MobilityChunkDeltaProto,
   MobilityChunkSnapshot as MobilityChunkSnapshotProto,
+  MobilitySnapshot as MobilitySnapshotProto,
+  Stop as StopProto,
   VehicleMobility as VehicleMobilityProto,
+  WorldSummary as WorldSummaryProto,
 } from './proto/abutown_pb';
 import { Direction as DirectionProto, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
 
@@ -436,5 +440,57 @@ export function mobilityChunkSnapshotFromProto(p: MobilityChunkSnapshotProto): M
     chunk: { x: p.chunk?.x ?? 0, y: p.chunk?.y ?? 0 },
     agents: p.agents.map(agentMobilityFromProto),
     vehicles: p.vehicles.map(vehicleMobilityFromProto),
+  };
+}
+
+// ===== HTTP-endpoint proto → DTO converters (Task 6) =====
+//
+// The /health, /world, and /mobility HTTP endpoints now return binary
+// protobuf bodies (`application/x-protobuf`). These helpers decode the
+// generated proto types into the legacy DTO shapes the rest of the
+// frontend consumes.
+
+export function healthResponseFromProto(p: HealthResponseProto): {
+  service: string;
+  world_id: string;
+  ok: boolean;
+  protocol_version: number;
+} {
+  return {
+    service: p.service,
+    world_id: p.worldId,
+    ok: p.ok,
+    protocol_version: p.protocolVersion,
+  };
+}
+
+export function worldSummaryFromProto(p: WorldSummaryProto): WorldSummaryDto {
+  return {
+    protocol_version: p.protocolVersion,
+    world_id: p.worldId,
+    chunk_size: p.chunkSize,
+    loaded_chunks: p.loadedChunks.map((c) => ({ x: c.x, y: c.y })),
+    tick_period_ms: p.tickPeriodMs,
+  };
+}
+
+function stopFromProto(p: StopProto): StopMobilityDto {
+  return {
+    id: p.id,
+    route_id: p.routeId,
+    link_index: p.linkIndex,
+    progress: p.progress,
+    waiting_agents: [...p.waitingAgents],
+  };
+}
+
+export function mobilitySnapshotFromProto(p: MobilitySnapshotProto): MobilitySnapshotDto {
+  return {
+    protocol_version: p.protocolVersion,
+    world_id: p.worldId,
+    tick: Number(p.tick),
+    agents: p.agents.map(agentMobilityFromProto),
+    vehicles: p.vehicles.map(vehicleMobilityFromProto),
+    stops: p.stops.map(stopFromProto),
   };
 }

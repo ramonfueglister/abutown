@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fromBinary } from '@bufbuild/protobuf';
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import {
   connectMobilityBackend,
   requireMobilitySnapshot,
@@ -9,7 +9,100 @@ import {
 } from '../../src/backend/mobilityClient';
 import { mobilityDiagnostics } from '../../src/backend/mobilityState';
 import type { MobilitySnapshotDto, WorldSummaryDto } from '../../src/backend/mobilityProtocol';
-import { ClientMessageSchema } from '../../src/backend/proto/abutown_pb';
+import {
+  ClientMessageSchema,
+  MobilitySnapshotSchema,
+  WorldSummarySchema,
+  Direction as DirectionProto,
+  VehicleKind as VehicleKindProto,
+} from '../../src/backend/proto/abutown_pb';
+
+function worldSummaryProtoResponse(dto: WorldSummaryDto): Response {
+  const message = create(WorldSummarySchema, {
+    protocolVersion: dto.protocol_version,
+    worldId: dto.world_id,
+    chunkSize: dto.chunk_size,
+    loadedChunks: dto.loaded_chunks.map((c) => ({ x: c.x, y: c.y })),
+    tickPeriodMs: dto.tick_period_ms,
+  });
+  return new Response(toBinary(WorldSummarySchema, message), {
+    status: 200,
+    headers: { 'content-type': 'application/x-protobuf' },
+  });
+}
+
+function directionToProto(d: string): number {
+  switch (d) {
+    case 'n': return DirectionProto.N;
+    case 'ne': return DirectionProto.NE;
+    case 'e': return DirectionProto.E;
+    case 'se': return DirectionProto.SE;
+    case 's': return DirectionProto.S;
+    case 'sw': return DirectionProto.SW;
+    case 'w': return DirectionProto.W;
+    case 'nw': return DirectionProto.NW;
+    default: return DirectionProto.E;
+  }
+}
+
+function mobilitySnapshotProtoResponse(dto: MobilitySnapshotDto): Response {
+  const message = create(MobilitySnapshotSchema, {
+    protocolVersion: dto.protocol_version,
+    worldId: dto.world_id,
+    tick: BigInt(dto.tick),
+    agents: dto.agents.map((a) => ({
+      id: a.id,
+      planCursor: a.plan_cursor,
+      worldCoord: { x: a.world_coord.x, y: a.world_coord.y },
+      direction: directionToProto(a.direction),
+      spriteKey: a.sprite_key,
+      state: agentStateToProto(a.state),
+    })),
+    vehicles: dto.vehicles.map((v) => ({
+      id: v.id,
+      kind: v.kind === 'tram' ? VehicleKindProto.TRAM : VehicleKindProto.CAR,
+      routeId: v.route_id,
+      linkIndex: v.link_index,
+      progress: v.progress,
+      capacity: v.capacity,
+      occupants: v.occupants,
+      dwellTicksRemaining: v.dwell_ticks_remaining,
+      worldCoord: { x: v.world_coord.x, y: v.world_coord.y },
+      direction: directionToProto(v.direction),
+      spriteKey: v.sprite_key,
+    })),
+    stops: dto.stops.map((s) => ({
+      id: s.id,
+      routeId: s.route_id,
+      linkIndex: s.link_index,
+      progress: s.progress,
+      waitingAgents: s.waiting_agents,
+    })),
+  });
+  return new Response(toBinary(MobilitySnapshotSchema, message), {
+    status: 200,
+    headers: { 'content-type': 'application/x-protobuf' },
+  });
+}
+
+function agentStateToProto(state: MobilitySnapshotDto['agents'][number]['state']): {
+  state: { case: string; value: unknown };
+} {
+  switch (state.type) {
+    case 'walking':
+      return { state: { case: 'walking', value: { linkId: state.link_id, progress: state.progress } } };
+    case 'waiting_at_stop':
+      return { state: { case: 'waitingAtStop', value: { stopId: state.stop_id } } };
+    case 'in_vehicle':
+      return { state: { case: 'inVehicle', value: { vehicleId: state.vehicle_id, seatIndex: state.seat_index } } };
+    case 'boarding':
+      return { state: { case: 'boarding', value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
+    case 'alighting':
+      return { state: { case: 'alighting', value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
+    case 'at_activity':
+      return { state: { case: 'atActivity', value: { activityId: state.activity_id } } };
+  }
+}
 type ScreenToTile = (screen: { x: number; y: number }) => { x: number; y: number };
 const identityScreenToTile: ScreenToTile = (s) => ({ x: s.x, y: s.y });
 const nullScreenToTile = null as unknown as ScreenToTile;
@@ -138,8 +231,8 @@ const snapshot: MobilitySnapshotDto = {
 
 function snapshotFetch(input: RequestInfo | URL): Response {
   const url = String(input);
-  if (url.includes('/world')) return Response.json(worldSummary);
-  return Response.json(snapshot);
+  if (url.includes('/world')) return worldSummaryProtoResponse(worldSummary);
+  return mobilitySnapshotProtoResponse(snapshot);
 }
 
 describe('mobility backend client', () => {
@@ -159,20 +252,26 @@ describe('mobility backend client', () => {
     await expect(requireMobilitySnapshot({
       fetchImpl: async (input) => {
         const url = String(input);
-        if (url.includes('/world')) return Response.json(worldSummary);
-        return new Response('{}', { status: 503 });
+        if (url.includes('/world')) return worldSummaryProtoResponse(worldSummary);
+        return new Response(new Uint8Array(), { status: 503 });
       },
     })).rejects.toThrow('Mobility snapshot HTTP 503');
   });
 
   it('requires a valid initial snapshot payload', async () => {
+    // Send bytes that don't decode as a valid MobilitySnapshot protobuf.
+    // 0xff is an invalid wire tag in protobuf, so fromBinary throws.
+    const invalidBytes = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
     await expect(requireMobilitySnapshot({
       fetchImpl: async (input) => {
         const url = String(input);
-        if (url.includes('/world')) return Response.json(worldSummary);
-        return Response.json({ world_id: 'abutown-main', tick: 1 });
+        if (url.includes('/world')) return worldSummaryProtoResponse(worldSummary);
+        return new Response(invalidBytes, {
+          status: 200,
+          headers: { 'content-type': 'application/x-protobuf' },
+        });
       },
-    })).rejects.toThrow('Invalid mobility snapshot payload');
+    })).rejects.toThrow();
   });
 
   it('returns a connected state from the initial snapshot', async () => {
@@ -220,8 +319,8 @@ describe('mobility backend client', () => {
     };
     const fetchImpl = ((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/world')) return Promise.resolve(new Response(JSON.stringify(customWorldSummary)));
-      return Promise.resolve(new Response(JSON.stringify(mobilitySnapshot)));
+      if (url.includes('/world')) return Promise.resolve(worldSummaryProtoResponse(customWorldSummary));
+      return Promise.resolve(mobilitySnapshotProtoResponse(mobilitySnapshot));
     }) as typeof fetch;
 
     const result = await requireMobilitySnapshot({ baseUrl: 'http://localhost:8080', fetchImpl });

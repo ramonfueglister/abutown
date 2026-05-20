@@ -1,17 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
 use abutown_protocol::wire as w;
-use abutown_protocol::{
-    ChunkSnapshotDto, ClientCommandDto, CommandResponseDto, HealthResponse, MobilitySnapshotDto,
-    WorldSummaryDto,
-};
+use abutown_protocol::ChunkSnapshotDto;
 use axum::{
     Json, Router,
     extract::{
-        Path, State,
+        FromRequest, Path, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, StatusCode},
+    http::{self, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -356,18 +353,51 @@ fn build_router_from_state(state: AppState) -> Router {
         .layer(CorsLayer::permissive())
 }
 
-async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    Json(health_proto_to_dto(&state.view().load().health))
+async fn health(State(state): State<AppState>) -> Response {
+    proto_response(state.view().load().health.clone())
 }
 
-async fn world(State(state): State<AppState>) -> Json<WorldSummaryDto> {
-    Json(world_summary_proto_to_dto(&state.view().load().world_summary))
+async fn world(State(state): State<AppState>) -> Response {
+    proto_response(state.view().load().world_summary.clone())
 }
 
-async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
-    Json(mobility_snapshot_proto_to_dto(
-        &state.view().load().mobility_full_dto,
-    ))
+async fn mobility(State(state): State<AppState>) -> Response {
+    proto_response(state.view().load().mobility_full_dto.clone())
+}
+
+/// Encode any prost message as an `application/x-protobuf` HTTP response.
+fn proto_response<M: prost::Message>(message: M) -> Response {
+    let bytes = message.encode_to_vec();
+    (
+        [(http::header::CONTENT_TYPE, "application/x-protobuf")],
+        bytes,
+    )
+        .into_response()
+}
+
+/// Extractor that decodes the request body as a prost message. Mirrors the
+/// shape of `axum::Json` but for `application/x-protobuf` bodies. Used by
+/// `POST /commands` after Task 6.
+pub struct ProtoBody<M>(pub M);
+
+impl<S, M> FromRequest<S> for ProtoBody<M>
+where
+    S: Send + Sync,
+    M: prost::Message + Default,
+{
+    type Rejection = (StatusCode, String);
+
+    async fn from_request(
+        req: http::Request<axum::body::Body>,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024)
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        let msg = M::decode(bytes.as_ref())
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        Ok(ProtoBody(msg))
+    }
 }
 
 async fn cards() -> Json<Vec<crate::card_hand::CardDefinition>> {
@@ -424,63 +454,123 @@ fn card_hand_error(error: CardHandError) -> Response {
 async fn chunk(
     State(state): State<AppState>,
     Path((x, y)): Path<(i32, i32)>,
-) -> Result<Json<ChunkSnapshotDto>, StatusCode> {
+) -> Response {
     let coord = sim_core::ids::ChunkCoord { x, y };
-    state
-        .view()
-        .load()
-        .chunk_snapshots
-        .get(&coord)
-        .map(|snap| Json(chunk_snapshot_proto_to_dto(snap)))
-        .ok_or(StatusCode::NOT_FOUND)
+    match state.view().load().chunk_snapshots.get(&coord).cloned() {
+        Some(snap) => proto_response(snap),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
-async fn command(State(state): State<AppState>, Json(command): Json<ClientCommandDto>) -> Response {
+async fn command(
+    State(state): State<AppState>,
+    ProtoBody(command): ProtoBody<w::ClientCommand>,
+) -> Response {
+    // Convert proto ClientCommand → legacy serde ClientCommandDto so the
+    // existing Mutation::ApplyCommand pathway continues to work. Task 7
+    // drops the legacy DTO so the Mutation can carry proto directly and
+    // this helper goes away.
+    let legacy = match client_command_proto_to_dto(&command) {
+        Some(l) => l,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                proto_response(w::CommandResponse {
+                    outcome: Some(w::command_response::Outcome::Rejected(w::CommandRejected {
+                        protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+                        world_id: String::new(),
+                        command_id: String::new(),
+                        code: "missing_command".into(),
+                        message: "ClientCommand body missing inner command".into(),
+                    })),
+                }),
+            )
+                .into_response();
+        }
+    };
+
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     if state
         .mutations
         .send(crate::runtime_view::Mutation::ApplyCommand {
-            command,
+            command: legacy,
             reply: reply_tx,
         })
         .is_err()
     {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "error": "tick task gone" })),
-        )
-            .into_response();
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
 
     let result = match reply_rx.await {
         Ok(r) => r,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "command dropped" })),
-            )
-                .into_response();
-        }
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     match result {
         Ok(applied) => {
             let event_proto = world_event_dto_to_proto(&applied.event);
             let msg = w::ServerMessage {
-                body: Some(w::server_message::Body::WorldEvent(event_proto)),
+                body: Some(w::server_message::Body::WorldEvent(event_proto.clone())),
             };
             let _ = state.deltas.send(msg);
             (
                 StatusCode::OK,
-                Json(CommandResponseDto::Accepted(applied.response)),
+                proto_response(w::CommandResponse {
+                    outcome: Some(w::command_response::Outcome::Accepted(w::CommandAccepted {
+                        protocol_version: u32::from(applied.response.protocol_version),
+                        world_id: applied.response.world_id.0.clone(),
+                        command_id: applied.response.command_id.clone(),
+                        event: Some(event_proto),
+                    })),
+                }),
             )
                 .into_response()
         }
         Err(rejection) => (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(CommandResponseDto::Rejected(rejection.into_dto())),
+            proto_response(w::CommandResponse {
+                outcome: Some(w::command_response::Outcome::Rejected(w::CommandRejected {
+                    protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+                    world_id: rejection
+                        .world_id
+                        .as_ref()
+                        .map(|w| w.0.clone())
+                        .unwrap_or_default(),
+                    command_id: rejection.command_id.clone().unwrap_or_default(),
+                    code: rejection.code.to_string(),
+                    message: rejection.message.clone(),
+                })),
+            }),
         )
             .into_response(),
+    }
+}
+
+/// Convert a proto `ClientCommand` (HTTP body) into the legacy
+/// `ClientCommandDto` carried internally by `Mutation::ApplyCommand`.
+///
+/// This is the LAST proto→serde direction we still need. Task 7 will
+/// change `Mutation::ApplyCommand` to carry proto directly and delete
+/// this helper.
+fn client_command_proto_to_dto(
+    c: &w::ClientCommand,
+) -> Option<abutown_protocol::ClientCommandDto> {
+    use w::client_command::Command;
+    match c.command.as_ref()? {
+        Command::SetTileKind(s) => Some(abutown_protocol::ClientCommandDto::SetTileKind(
+            abutown_protocol::SetTileKindCommandDto {
+                protocol_version: s.protocol_version as u16,
+                world_id: abutown_protocol::WorldId(s.world_id.clone()),
+                command_id: s.command_id.clone(),
+                coord: s
+                    .coord
+                    .as_ref()
+                    .map(|c| abutown_protocol::ChunkCoordDto { x: c.x, y: c.y })
+                    .unwrap_or(abutown_protocol::ChunkCoordDto { x: 0, y: 0 }),
+                local_index: s.local_index as u16,
+                kind: tile_kind_proto_to_dto(s.kind),
+            },
+        )),
     }
 }
 
@@ -819,31 +909,14 @@ fn world_event_dto_to_proto(e: &abutown_protocol::WorldEventDto) -> w::WorldEven
     }
 }
 
-// ===== reverse helpers: proto → legacy serde DTO =====
+// ===== reverse helper: proto → legacy serde DTO =====
 //
-// HTTP endpoints in this crate still emit JSON (Task 6 will migrate them).
-// Since the RuntimeReadView now carries proto types on its wire-facing
-// fields, the HTTP handlers need a way to go back to serde DTOs for
-// `Json(_)` responses. These helpers do exactly that — they will be
-// deleted in Task 6 when /health, /world, /mobility, /chunks/* migrate
-// to protobuf bodies as well.
+// Only `tile_kind_proto_to_dto` survives Task 6 — it is used by
+// `client_command_proto_to_dto` to translate inbound HTTP command bodies
+// into the legacy `ClientCommandDto` that `Mutation::ApplyCommand`
+// still carries internally. Task 7 will drop the legacy DTO and this
+// helper goes away with it.
 
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn direction_proto_to_dto(d: i32) -> abutown_protocol::DirectionDto {
-    use abutown_protocol::DirectionDto as L;
-    match w::Direction::try_from(d).unwrap_or(w::Direction::Unspecified) {
-        w::Direction::Unspecified | w::Direction::N => L::N,
-        w::Direction::Ne => L::Ne,
-        w::Direction::E => L::E,
-        w::Direction::Se => L::Se,
-        w::Direction::S => L::S,
-        w::Direction::Sw => L::Sw,
-        w::Direction::W => L::W,
-        w::Direction::Nw => L::Nw,
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn tile_kind_proto_to_dto(k: i32) -> abutown_protocol::TileKindDto {
     use abutown_protocol::TileKindDto as L;
     match w::TileKind::try_from(k).unwrap_or(w::TileKind::Unspecified) {
@@ -851,171 +924,6 @@ fn tile_kind_proto_to_dto(k: i32) -> abutown_protocol::TileKindDto {
         w::TileKind::Water => L::Water,
         w::TileKind::Road => L::Road,
         w::TileKind::BuildingFootprint => L::BuildingFootprint,
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn chunk_state_proto_to_dto(s: i32) -> abutown_protocol::ChunkStateDto {
-    use abutown_protocol::ChunkStateDto as L;
-    match w::ChunkState::try_from(s).unwrap_or(w::ChunkState::Unspecified) {
-        w::ChunkState::Unspecified | w::ChunkState::Asleep => L::Asleep,
-        w::ChunkState::Warm => L::Warm,
-        w::ChunkState::Active => L::Active,
-        w::ChunkState::Hot => L::Hot,
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn vehicle_kind_proto_to_dto(k: i32) -> abutown_protocol::VehicleKindDto {
-    use abutown_protocol::VehicleKindDto as L;
-    match w::VehicleKind::try_from(k).unwrap_or(w::VehicleKind::Unspecified) {
-        w::VehicleKind::Unspecified | w::VehicleKind::Car => L::Car,
-        w::VehicleKind::Tram => L::Tram,
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn agent_proto_to_dto(a: &w::AgentMobility) -> abutown_protocol::AgentMobilityDto {
-    use abutown_protocol::AgentMobilityStateDto as State;
-    let state = match a.state.as_ref().and_then(|s| s.state.as_ref()) {
-        Some(w::agent_state::State::Walking(walk)) => State::Walking {
-            link_id: walk.link_id.clone(),
-            progress: walk.progress,
-        },
-        Some(w::agent_state::State::WaitingAtStop(wait)) => State::WaitingAtStop {
-            stop_id: wait.stop_id.clone(),
-        },
-        Some(w::agent_state::State::InVehicle(iv)) => State::InVehicle {
-            vehicle_id: abutown_protocol::EntityId(iv.vehicle_id.clone()),
-            seat_index: iv.seat_index as u16,
-        },
-        Some(w::agent_state::State::Boarding(b)) => State::Boarding {
-            vehicle_id: abutown_protocol::EntityId(b.vehicle_id.clone()),
-            stop_id: b.stop_id.clone(),
-        },
-        Some(w::agent_state::State::Alighting(al)) => State::Alighting {
-            vehicle_id: abutown_protocol::EntityId(al.vehicle_id.clone()),
-            stop_id: al.stop_id.clone(),
-        },
-        Some(w::agent_state::State::AtActivity(at)) => State::AtActivity {
-            activity_id: at.activity_id.clone(),
-        },
-        None => State::AtActivity {
-            activity_id: String::new(),
-        },
-    };
-    let wc = a.world_coord.unwrap_or(w::WorldCoord { x: 0.0, y: 0.0 });
-    abutown_protocol::AgentMobilityDto {
-        id: abutown_protocol::EntityId(a.id.clone()),
-        state,
-        plan_cursor: a.plan_cursor as usize,
-        world_coord: abutown_protocol::WorldCoordDto { x: wc.x, y: wc.y },
-        direction: direction_proto_to_dto(a.direction),
-        sprite_key: a.sprite_key.clone(),
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn vehicle_proto_to_dto(v: &w::VehicleMobility) -> abutown_protocol::VehicleMobilityDto {
-    let wc = v.world_coord.unwrap_or(w::WorldCoord { x: 0.0, y: 0.0 });
-    abutown_protocol::VehicleMobilityDto {
-        id: abutown_protocol::EntityId(v.id.clone()),
-        kind: vehicle_kind_proto_to_dto(v.kind),
-        route_id: v.route_id.clone(),
-        link_index: v.link_index as usize,
-        progress: v.progress,
-        capacity: v.capacity as u16,
-        occupants: v
-            .occupants
-            .iter()
-            .map(|s| abutown_protocol::EntityId(s.clone()))
-            .collect(),
-        dwell_ticks_remaining: v.dwell_ticks_remaining as u16,
-        world_coord: abutown_protocol::WorldCoordDto { x: wc.x, y: wc.y },
-        direction: direction_proto_to_dto(v.direction),
-        sprite_key: v.sprite_key.clone(),
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn stop_proto_to_dto(s: &w::Stop) -> abutown_protocol::StopMobilityDto {
-    abutown_protocol::StopMobilityDto {
-        id: s.id.clone(),
-        route_id: s.route_id.clone(),
-        link_index: s.link_index as usize,
-        progress: s.progress,
-        waiting_agents: s
-            .waiting_agents
-            .iter()
-            .map(|w| abutown_protocol::EntityId(w.clone()))
-            .collect(),
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn world_summary_proto_to_dto(s: &w::WorldSummary) -> abutown_protocol::WorldSummaryDto {
-    abutown_protocol::WorldSummaryDto {
-        protocol_version: s.protocol_version as u16,
-        world_id: abutown_protocol::WorldId(s.world_id.clone()),
-        chunk_size: s.chunk_size as u16,
-        loaded_chunks: s
-            .loaded_chunks
-            .iter()
-            .map(|c| abutown_protocol::ChunkCoordDto { x: c.x, y: c.y })
-            .collect(),
-        tick_period_ms: s.tick_period_ms,
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn health_proto_to_dto(h: &w::HealthResponse) -> abutown_protocol::HealthResponse {
-    abutown_protocol::HealthResponse {
-        protocol_version: h.protocol_version as u16,
-        service: h.service.clone(),
-        world_id: abutown_protocol::WorldId(h.world_id.clone()),
-        ok: h.ok,
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn chunk_snapshot_proto_to_dto(c: &w::ChunkSnapshot) -> abutown_protocol::ChunkSnapshotDto {
-    abutown_protocol::ChunkSnapshotDto {
-        protocol_version: c.protocol_version as u16,
-        world_id: abutown_protocol::WorldId(c.world_id.clone()),
-        coord: c
-            .coord
-            .as_ref()
-            .map(|coord| abutown_protocol::ChunkCoordDto {
-                x: coord.x,
-                y: coord.y,
-            })
-            .unwrap_or(abutown_protocol::ChunkCoordDto { x: 0, y: 0 }),
-        chunk_version: c.chunk_version,
-        chunk_state: chunk_state_proto_to_dto(c.chunk_state),
-        tile_count: c.tile_count as u16,
-        tiles: c
-            .tiles
-            .iter()
-            .map(|t| abutown_protocol::TileMutationDto {
-                local_index: t.local_index as u16,
-                kind: tile_kind_proto_to_dto(t.kind),
-                version: t.version,
-            })
-            .collect(),
-    }
-}
-
-// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
-fn mobility_snapshot_proto_to_dto(
-    s: &w::MobilitySnapshot,
-) -> abutown_protocol::MobilitySnapshotDto {
-    abutown_protocol::MobilitySnapshotDto {
-        protocol_version: s.protocol_version as u16,
-        world_id: abutown_protocol::WorldId(s.world_id.clone()),
-        tick: s.tick,
-        agents: s.agents.iter().map(agent_proto_to_dto).collect(),
-        vehicles: s.vehicles.iter().map(vehicle_proto_to_dto).collect(),
-        stops: s.stops.iter().map(stop_proto_to_dto).collect(),
     }
 }
 

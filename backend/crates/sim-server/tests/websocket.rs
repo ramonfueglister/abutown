@@ -1,9 +1,7 @@
 use std::time::Duration;
 
 use abutown_protocol::wire as w;
-use abutown_protocol::{
-    ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto, WorldId,
-};
+use abutown_protocol::PROTOCOL_VERSION;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures_util::{SinkExt, StreamExt};
@@ -199,22 +197,26 @@ async fn websocket_broadcasts_accepted_command_event() {
         Some(w::server_message::Body::Hello(_))
     ));
 
-    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
-        protocol_version: PROTOCOL_VERSION,
-        world_id: WorldId("abutown-main".to_string()),
-        command_id: "command:ws:1".to_string(),
-        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
-        local_index: 12,
-        kind: TileKindDto::BuildingFootprint,
-    });
+    let command = w::ClientCommand {
+        command: Some(w::client_command::Command::SetTileKind(
+            w::SetTileKindCommand {
+                protocol_version: u32::from(PROTOCOL_VERSION),
+                world_id: "abutown-main".to_string(),
+                command_id: "command:ws:1".to_string(),
+                coord: Some(w::ChunkCoord { x: 4, y: 4 }),
+                local_index: 12,
+                kind: w::TileKind::BuildingFootprint as i32,
+            },
+        )),
+    };
 
     let response = app
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/commands")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .header("content-type", "application/x-protobuf")
+                .body(Body::from(command.encode_to_vec()))
                 .unwrap(),
         )
         .await
@@ -253,22 +255,26 @@ async fn websocket_does_not_broadcast_failed_command_append() {
     let (mut websocket, _) = connect_async(format!("ws://{addr}/ws")).await.unwrap();
     let _hello = read_server_message(&mut websocket).await;
 
-    let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
-        protocol_version: PROTOCOL_VERSION,
-        world_id: WorldId("abutown-main".to_string()),
-        command_id: "command:ws:store-failure".to_string(),
-        coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
-        local_index: 11,
-        kind: TileKindDto::Water,
-    });
+    let command = w::ClientCommand {
+        command: Some(w::client_command::Command::SetTileKind(
+            w::SetTileKindCommand {
+                protocol_version: u32::from(PROTOCOL_VERSION),
+                world_id: "abutown-main".to_string(),
+                command_id: "command:ws:store-failure".to_string(),
+                coord: Some(w::ChunkCoord { x: 4, y: 4 }),
+                local_index: 11,
+                kind: w::TileKind::Water as i32,
+            },
+        )),
+    };
 
     let response = app
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/commands")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                .header("content-type", "application/x-protobuf")
+                .body(Body::from(command.encode_to_vec()))
                 .unwrap(),
         )
         .await
