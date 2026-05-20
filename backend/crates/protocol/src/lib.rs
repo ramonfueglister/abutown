@@ -751,7 +751,12 @@ mod proto_roundtrip_tests {
         let msg = ServerMessage {
             body: Some(server_message::Body::WorldEvent(WorldEvent {
                 event: Some(world_event::Event::TileKindSet(TileKindSetEvent {
+                    protocol_version: 16,
+                    event_id: "evt:1".into(),
                     command_id: "cmd:1".into(),
+                    world_id: "abutown-main".into(),
+                    tick: 100,
+                    version: 1,
                     coord: Some(sample_chunk()),
                     local_index: 11,
                     kind: TileKind::Water as i32,
@@ -802,9 +807,17 @@ mod proto_roundtrip_tests {
     fn roundtrip_command_response_accepted() {
         let msg = CommandResponse {
             outcome: Some(command_response::Outcome::Accepted(CommandAccepted {
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                command_id: "cmd:1".into(),
                 event: Some(WorldEvent {
                     event: Some(world_event::Event::TileKindSet(TileKindSetEvent {
+                        protocol_version: 16,
+                        event_id: "evt:1".into(),
                         command_id: "cmd:1".into(),
+                        world_id: "abutown-main".into(),
+                        tick: 100,
+                        version: 1,
                         coord: Some(sample_chunk()),
                         local_index: 11,
                         kind: TileKind::Water as i32,
@@ -819,7 +832,24 @@ mod proto_roundtrip_tests {
     fn roundtrip_command_response_rejected() {
         let msg = CommandResponse {
             outcome: Some(command_response::Outcome::Rejected(CommandRejected {
-                reason: "invalid coord".into(),
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                command_id: "cmd:1".into(),
+                code: "invalid_coord".into(),
+                message: "coord out of range".into(),
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_server_error() {
+        let msg = ServerMessage {
+            body: Some(server_message::Body::Error(ServerError {
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                code: "internal".into(),
+                message: "tick task gone".into(),
             })),
         };
         assert_roundtrip(&msg);
@@ -864,10 +894,10 @@ mod proto_roundtrip_tests {
 
     #[test]
     fn unknown_field_is_ignored() {
-        // Encode a MobilityChunkDelta with all fields populated, then attempt
-        // to decode as a Hello (different message type, same wire format
-        // tolerance). prost should skip unknown tags and return defaults
-        // for fields it does know but the data lacks.
+        // Encode a MobilityChunkDelta and decode as Hello. The shared first
+        // two tags (protocol_version u32, world_id string) are compatible
+        // and decode correctly; all higher tags in MobilityChunkDelta are
+        // unknown to Hello and prost must silently skip them.
         let delta = MobilityChunkDelta {
             protocol_version: 16,
             world_id: "abutown-main".into(),
@@ -879,17 +909,9 @@ mod proto_roundtrip_tests {
             left_vehicles: vec![],
         };
         let bytes = delta.encode_to_vec();
-        // Decode as Hello. Field 1 (protocol_version) is uint32 vs uint32
-        // — compatible. Field 2 (world_id) is string vs string — compatible.
-        // Field 3 (tick u64) vs (chunk_size u32) — wire format types differ
-        // (varint vs varint, both varint-encoded), prost decodes 100 as
-        // 100 for chunk_size. Other tags are unknown and ignored.
         let back = Hello::decode(bytes.as_slice()).expect("decode tolerates unknown fields");
         assert_eq!(back.protocol_version, 16);
         assert_eq!(back.world_id, "abutown-main");
-        // Fields beyond 1 and 2 in Hello are not set; tag 3 in MobilityChunkDelta
-        // is uint64 tick=100 which maps to varint and could read into
-        // chunk_size (uint32) as 100. Both are valid.
         assert_eq!(back.chunk_size, 100);
     }
 }
