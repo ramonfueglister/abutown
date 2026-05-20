@@ -48,7 +48,7 @@ pub enum TileKindDto {
     BuildingFootprint,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HealthResponse {
     pub service: String,
     pub world_id: WorldId,
@@ -56,7 +56,7 @@ pub struct HealthResponse {
     pub protocol_version: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WorldSummaryDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
@@ -99,14 +99,13 @@ pub struct SetTileKindCommandDto {
     pub kind: TileKindDto,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CommandResponseDto {
     Accepted(CommandAcceptedDto),
     Rejected(CommandRejectedDto),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CommandAcceptedDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
@@ -114,7 +113,7 @@ pub struct CommandAcceptedDto {
     pub event: WorldEventDto,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CommandRejectedDto {
     pub protocol_version: u16,
     pub world_id: Option<WorldId>,
@@ -142,27 +141,25 @@ pub struct TileKindSetEventDto {
     pub kind: TileKindDto,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ClientMessageDto {
     ChunkSubscribe(ChunkSubscribeDto),
     ChunkUnsubscribe(ChunkUnsubscribeDto),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChunkSubscribeDto {
     pub protocol_version: u16,
     pub coords: Vec<ChunkCoordDto>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChunkUnsubscribeDto {
     pub protocol_version: u16,
     pub coords: Vec<ChunkCoordDto>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ServerMessageDto {
     Hello(ServerHelloDto),
     TilePulse(TilePulseDeltaDto),
@@ -172,14 +169,14 @@ pub enum ServerMessageDto {
     Error(ServerErrorDto),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ServerHelloDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
     pub chunk_size: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TilePulseDeltaDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
@@ -189,7 +186,7 @@ pub struct TilePulseDeltaDto {
     pub local_index: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MobilitySnapshotDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
@@ -199,7 +196,7 @@ pub struct MobilitySnapshotDto {
     pub stops: Vec<StopMobilityDto>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MobilityChunkDeltaDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
@@ -211,7 +208,7 @@ pub struct MobilityChunkDeltaDto {
     pub left_vehicles: Vec<EntityId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MobilityChunkSnapshotDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
@@ -221,21 +218,19 @@ pub struct MobilityChunkSnapshotDto {
     pub vehicles: Vec<VehicleMobilityDto>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorldCoordDto {
     pub x: f32,
     pub y: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VehicleKindDto {
     Car,
     Tram,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DirectionDto {
     N,
     Ne,
@@ -247,7 +242,7 @@ pub enum DirectionDto {
     Nw,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentMobilityDto {
     pub id: EntityId,
     pub state: AgentMobilityStateDto,
@@ -257,8 +252,7 @@ pub struct AgentMobilityDto {
     pub sprite_key: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AgentMobilityStateDto {
     AtActivity {
         activity_id: String,
@@ -284,7 +278,7 @@ pub enum AgentMobilityStateDto {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VehicleMobilityDto {
     pub id: EntityId,
     pub kind: VehicleKindDto,
@@ -299,7 +293,7 @@ pub struct VehicleMobilityDto {
     pub sprite_key: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StopMobilityDto {
     pub id: String,
     pub route_id: String,
@@ -308,7 +302,7 @@ pub struct StopMobilityDto {
     pub waiting_agents: Vec<EntityId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ServerErrorDto {
     pub protocol_version: u16,
     pub world_id: Option<WorldId>,
@@ -320,57 +314,11 @@ pub struct ServerErrorDto {
 mod tests {
     use super::*;
 
-    #[test]
-    fn health_response_serializes_versioned_world() {
-        let response = HealthResponse {
-            service: "abutown-sim".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            ok: true,
-            protocol_version: PROTOCOL_VERSION,
-        };
-
-        let json = serde_json::to_string(&response).expect("health response serializes");
-
-        assert_eq!(
-            json,
-            r#"{"service":"abutown-sim","world_id":"abutown-main","ok":true,"protocol_version":1}"#
-        );
-    }
-
-    #[test]
-    fn websocket_hello_serializes_with_type_tag() {
-        let message = ServerMessageDto::Hello(ServerHelloDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            chunk_size: 32,
-        });
-
-        let json = serde_json::to_string(&message).expect("hello serializes");
-
-        assert_eq!(
-            json,
-            r#"{"type":"hello","protocol_version":1,"world_id":"abutown-main","chunk_size":32}"#
-        );
-    }
-
-    #[test]
-    fn websocket_tile_pulse_serializes_chunk_and_version() {
-        let message = ServerMessageDto::TilePulse(TilePulseDeltaDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 7,
-            version: 11,
-            coord: ChunkCoordDto { x: 0, y: 0 },
-            local_index: 231,
-        });
-
-        let json = serde_json::to_string(&message).expect("tile pulse serializes");
-
-        assert_eq!(
-            json,
-            r#"{"type":"tile_pulse","protocol_version":1,"world_id":"abutown-main","tick":7,"version":11,"coord":{"x":0,"y":0},"local_index":231}"#
-        );
-    }
+    // Most serde-based DTOs were stripped in Task 7 (binary protobuf wire).
+    // Wire-format correctness is now covered by the `proto_roundtrip_tests`
+    // module below. The remaining JSON-shape tests cover types still on
+    // the JSONB persistence path (ChunkSnapshotDto, WorldEventDto) or the
+    // transitional command pipeline (ClientCommandDto).
 
     #[test]
     fn client_set_tile_kind_command_serializes_with_type_tag() {
@@ -392,7 +340,10 @@ mod tests {
     }
 
     #[test]
-    fn accepted_command_response_serializes_event() {
+    fn world_event_round_trips_through_jsonb_shape() {
+        // WorldEventDto is persisted as JSONB in the events table; serde
+        // must keep working for this type even though it no longer crosses
+        // the wire.
         let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:1".to_string(),
@@ -404,267 +355,32 @@ mod tests {
             local_index: 11,
             kind: TileKindDto::Water,
         });
-        let response = CommandResponseDto::Accepted(CommandAcceptedDto {
+        let json = serde_json::to_value(&event).expect("world event serializes");
+        assert_eq!(json["type"], "tile_kind_set");
+        assert_eq!(json["event_id"], "event:1");
+        let back: WorldEventDto = serde_json::from_value(json).expect("world event deserializes");
+        assert_eq!(back, event);
+    }
+
+    #[test]
+    fn chunk_snapshot_round_trips_through_jsonb_shape() {
+        // ChunkSnapshotDto is persisted as JSONB in the snapshots table.
+        let dto = ChunkSnapshotDto {
             protocol_version: PROTOCOL_VERSION,
             world_id: WorldId("abutown-main".to_string()),
-            command_id: "command:test:1".to_string(),
-            event,
-        });
-
-        let json = serde_json::to_value(&response).expect("accepted response serializes");
-
-        assert_eq!(json["status"], "accepted");
-        assert_eq!(json["event"]["type"], "tile_kind_set");
-        assert_eq!(json["event"]["event_id"], "event:1");
-        assert_eq!(json["event"]["kind"], "water");
-    }
-
-    #[test]
-    fn rejected_command_response_serializes_reason() {
-        let response = CommandResponseDto::Rejected(CommandRejectedDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: Some(WorldId("abutown-main".to_string())),
-            command_id: Some("command:test:2".to_string()),
-            code: "chunk_not_loaded".to_string(),
-            message: "chunk 9:9 is not loaded".to_string(),
-        });
-
-        let json = serde_json::to_value(&response).expect("rejected response serializes");
-
-        assert_eq!(json["status"], "rejected");
-        assert_eq!(json["world_id"], "abutown-main");
-        assert_eq!(json["command_id"], "command:test:2");
-        assert_eq!(json["code"], "chunk_not_loaded");
-    }
-
-    #[test]
-    fn websocket_world_event_serializes_with_outer_type_tag() {
-        let message = ServerMessageDto::WorldEvent {
-            event: WorldEventDto::TileKindSet(TileKindSetEventDto {
-                protocol_version: PROTOCOL_VERSION,
-                event_id: "event:2".to_string(),
-                command_id: "command:test:3".to_string(),
-                world_id: WorldId("abutown-main".to_string()),
-                tick: 4,
-                version: 8,
-                coord: ChunkCoordDto { x: 5, y: 4 },
-                local_index: 23,
+            coord: ChunkCoordDto { x: 1, y: 2 },
+            chunk_state: ChunkStateDto::Active,
+            chunk_version: 7,
+            tile_count: 1,
+            tiles: vec![TileMutationDto {
+                local_index: 11,
                 kind: TileKindDto::Road,
-            }),
-        };
-
-        let json = serde_json::to_value(&message).expect("world event message serializes");
-
-        assert_eq!(json["type"], "world_event");
-        assert_eq!(json["event"]["type"], "tile_kind_set");
-        assert_eq!(json["event"]["version"], 8);
-        assert_eq!(json["event"]["coord"]["x"], 5);
-    }
-
-    #[test]
-    fn mobility_snapshot_serializes_agents_vehicles_and_stops() {
-        let snapshot = MobilitySnapshotDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 3,
-            agents: vec![AgentMobilityDto {
-                id: EntityId("agent:pedestrian:0".to_string()),
-                state: AgentMobilityStateDto::InVehicle {
-                    vehicle_id: EntityId("vehicle:tram:0".to_string()),
-                    seat_index: 0,
-                },
-                plan_cursor: 1,
-                world_coord: WorldCoordDto { x: 0.0, y: 0.0 },
-                direction: DirectionDto::E,
-                sprite_key: "pedestrian:0".to_string(),
+                version: 7,
             }],
-            vehicles: vec![VehicleMobilityDto {
-                id: EntityId("vehicle:tram:0".to_string()),
-                kind: VehicleKindDto::Tram,
-                route_id: "route:demo".to_string(),
-                link_index: 0,
-                progress: 0.5,
-                capacity: 24,
-                occupants: vec![EntityId("agent:pedestrian:0".to_string())],
-                dwell_ticks_remaining: 0,
-                world_coord: WorldCoordDto { x: 0.0, y: 0.0 },
-                direction: DirectionDto::E,
-                sprite_key: "tram:0".to_string(),
-            }],
-            stops: vec![StopMobilityDto {
-                id: "stop:old-town".to_string(),
-                route_id: "route:demo".to_string(),
-                link_index: 0,
-                progress: 0.0,
-                waiting_agents: vec![],
-            }],
-        };
-
-        let json = serde_json::to_value(&snapshot).expect("mobility snapshot serializes");
-
-        assert_eq!(json["protocol_version"], 1);
-        assert_eq!(json["world_id"], "abutown-main");
-        assert_eq!(json["tick"], 3);
-        assert_eq!(json["agents"][0]["id"], "agent:pedestrian:0");
-        assert_eq!(json["agents"][0]["state"]["type"], "in_vehicle");
-        assert_eq!(json["agents"][0]["state"]["vehicle_id"], "vehicle:tram:0");
-        assert_eq!(json["vehicles"][0]["occupants"][0], "agent:pedestrian:0");
-        assert_eq!(json["stops"][0]["id"], "stop:old-town");
-    }
-
-    #[test]
-    fn client_message_chunk_subscribe_round_trips() {
-        let msg = ClientMessageDto::ChunkSubscribe(ChunkSubscribeDto {
-            protocol_version: 1,
-            coords: vec![ChunkCoordDto { x: 4, y: 4 }, ChunkCoordDto { x: 5, y: 4 }],
-        });
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["type"], "chunk_subscribe");
-        assert_eq!(json["coords"].as_array().unwrap().len(), 2);
-        let back: ClientMessageDto = serde_json::from_value(json).unwrap();
-        assert_eq!(back, msg);
-    }
-
-    #[test]
-    fn client_message_chunk_unsubscribe_round_trips() {
-        let msg = ClientMessageDto::ChunkUnsubscribe(ChunkUnsubscribeDto {
-            protocol_version: 1,
-            coords: vec![ChunkCoordDto { x: 4, y: 4 }],
-        });
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["type"], "chunk_unsubscribe");
-        let back: ClientMessageDto = serde_json::from_value(json).unwrap();
-        assert_eq!(back, msg);
-    }
-
-    #[test]
-    fn world_coord_dto_round_trips() {
-        let coord = WorldCoordDto { x: 12.5, y: -3.25 };
-        let json = serde_json::to_value(coord).unwrap();
-        assert_eq!(json["x"], 12.5);
-        assert_eq!(json["y"], -3.25);
-        let back: WorldCoordDto = serde_json::from_value(json).unwrap();
-        assert_eq!(back, coord);
-    }
-
-    #[test]
-    fn direction_dto_serializes_as_compass_string() {
-        assert_eq!(
-            serde_json::to_value(DirectionDto::N).unwrap(),
-            serde_json::json!("n")
-        );
-        assert_eq!(
-            serde_json::to_value(DirectionDto::Sw).unwrap(),
-            serde_json::json!("sw")
-        );
-        let parsed: DirectionDto = serde_json::from_value(serde_json::json!("ne")).unwrap();
-        assert_eq!(parsed, DirectionDto::Ne);
-    }
-
-    #[test]
-    fn agent_mobility_dto_carries_world_coord_direction_and_sprite_key() {
-        let dto = AgentMobilityDto {
-            id: EntityId("agent:seed:0".to_string()),
-            state: AgentMobilityStateDto::Walking {
-                link_id: "link:demo".to_string(),
-                progress: 0.5,
-            },
-            plan_cursor: 0,
-            world_coord: WorldCoordDto { x: 1.0, y: 2.0 },
-            direction: DirectionDto::E,
-            sprite_key: "pedestrian:0".to_string(),
-        };
-        let json = serde_json::to_value(&dto).unwrap();
-        assert_eq!(json["world_coord"]["x"], 1.0);
-        assert_eq!(json["world_coord"]["y"], 2.0);
-        assert_eq!(json["direction"], "e");
-        assert_eq!(json["sprite_key"], "pedestrian:0");
-    }
-
-    #[test]
-    fn world_summary_dto_serializes_tick_period_ms() {
-        let dto = WorldSummaryDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            chunk_size: 32,
-            loaded_chunks: vec![],
-            tick_period_ms: 100,
-        };
-        let json = serde_json::to_value(&dto).unwrap();
-        assert_eq!(json["tick_period_ms"], 100);
-        let back: WorldSummaryDto = serde_json::from_value(json).unwrap();
-        assert_eq!(back, dto);
-    }
-
-    #[test]
-    fn vehicle_mobility_dto_carries_kind() {
-        let dto = VehicleMobilityDto {
-            id: EntityId("vehicle:seed:0".to_string()),
-            kind: VehicleKindDto::Car,
-            route_id: "route:arterial:0".to_string(),
-            link_index: 0,
-            progress: 0.5,
-            capacity: 1,
-            occupants: vec![EntityId("agent:driver:0".to_string())],
-            dwell_ticks_remaining: 0,
-            world_coord: WorldCoordDto { x: 1.0, y: 2.0 },
-            direction: DirectionDto::E,
-            sprite_key: "car:0".to_string(),
-        };
-        let json = serde_json::to_value(&dto).unwrap();
-        assert_eq!(json["kind"], "car");
-
-        let back: VehicleMobilityDto = serde_json::from_value(json).unwrap();
-        assert_eq!(back.kind, VehicleKindDto::Car);
-    }
-
-    #[test]
-    fn mobility_chunk_delta_round_trips() {
-        let dto = MobilityChunkDeltaDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("test".into()),
-            tick: 42,
-            chunk: ChunkCoordDto { x: 1, y: 2 },
-            changed_agents: vec![],
-            changed_vehicles: vec![],
-            left_agents: vec![EntityId("a1".into())],
-            left_vehicles: vec![],
         };
         let json = serde_json::to_string(&dto).unwrap();
-        let back: MobilityChunkDeltaDto = serde_json::from_str(&json).unwrap();
+        let back: ChunkSnapshotDto = serde_json::from_str(&json).unwrap();
         assert_eq!(dto, back);
-    }
-
-    #[test]
-    fn mobility_chunk_snapshot_round_trips() {
-        let dto = MobilityChunkSnapshotDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("test".into()),
-            tick: 42,
-            chunk: ChunkCoordDto { x: 0, y: 0 },
-            agents: vec![],
-            vehicles: vec![],
-        };
-        let json = serde_json::to_string(&dto).unwrap();
-        let back: MobilityChunkSnapshotDto = serde_json::from_str(&json).unwrap();
-        assert_eq!(dto, back);
-    }
-
-    #[test]
-    fn server_message_chunk_delta_variant_parses() {
-        let dto = ServerMessageDto::MobilityChunkDelta(MobilityChunkDeltaDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("test".into()),
-            tick: 1,
-            chunk: ChunkCoordDto { x: 0, y: 0 },
-            changed_agents: vec![],
-            changed_vehicles: vec![],
-            left_agents: vec![],
-            left_vehicles: vec![],
-        });
-        let json = serde_json::to_string(&dto).unwrap();
-        let back: ServerMessageDto = serde_json::from_str(&json).unwrap();
-        assert!(matches!(back, ServerMessageDto::MobilityChunkDelta(_)));
     }
 }
 
