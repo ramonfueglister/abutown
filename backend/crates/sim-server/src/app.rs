@@ -201,13 +201,24 @@ fn build_read_view_from_runtime(
         .map(|delta| chunk_delta_to_dto(delta, mobility, &world_id, mobility_tick))
         .collect();
 
-    // Pre-materialize per-chunk tile snapshots for every loaded chunk so HTTP
-    // /chunks/{x}/{y} can read without a lock.
+    // Pre-materialize per-chunk tile + mobility snapshots for every loaded
+    // chunk so HTTP /chunks/{x}/{y} and WS lagged-recovery can read without
+    // a lock. Single pass over loaded_chunks builds both maps.
+    //
+    // NOTE: this rebuilds snapshots for every loaded chunk every tick, even
+    // for chunks that didn't change. Bench stayed within the 5% tolerance
+    // (see plan §Task 4 step 5 — the optimization to only rebuild changed
+    // chunks is a documented escape hatch if bench regresses).
+    let world_summary = runtime.world_summary();
     let mut chunk_snapshots: std::collections::HashMap<
         sim_core::ids::ChunkCoord,
         abutown_protocol::ChunkSnapshotDto,
     > = std::collections::HashMap::new();
-    for coord_dto in runtime.world_summary().loaded_chunks.iter() {
+    let mut mobility_chunk_snapshots: std::collections::HashMap<
+        sim_core::ids::ChunkCoord,
+        abutown_protocol::MobilityChunkSnapshotDto,
+    > = std::collections::HashMap::new();
+    for coord_dto in world_summary.loaded_chunks.iter() {
         let coord = sim_core::ids::ChunkCoord {
             x: coord_dto.x,
             y: coord_dto.y,
@@ -215,20 +226,9 @@ fn build_read_view_from_runtime(
         if let Some(snap) = runtime.chunk_snapshot(coord) {
             chunk_snapshots.insert(coord, snap);
         }
-    }
-
-    let mut mobility_chunk_snapshots: std::collections::HashMap<
-        sim_core::ids::ChunkCoord,
-        abutown_protocol::MobilityChunkSnapshotDto,
-    > = std::collections::HashMap::new();
-    for coord_dto in runtime.world_summary().loaded_chunks.iter() {
-        let coord = sim_core::ids::ChunkCoord {
-            x: coord_dto.x,
-            y: coord_dto.y,
-        };
-        let snapshot = mobility.build_chunk_snapshot(coord);
-        let dto = chunk_snapshot_to_dto(&snapshot, mobility, &world_id, mobility_tick);
-        mobility_chunk_snapshots.insert(coord, dto);
+        let mob_snapshot = mobility.build_chunk_snapshot(coord);
+        let mob_dto = chunk_snapshot_to_dto(&mob_snapshot, mobility, &world_id, mobility_tick);
+        mobility_chunk_snapshots.insert(coord, mob_dto);
     }
 
     crate::runtime_view::RuntimeReadView {
@@ -236,7 +236,7 @@ fn build_read_view_from_runtime(
         world_id: world_id.clone(),
         mobility_tick,
         health: runtime.health(),
-        world_summary: runtime.world_summary(),
+        world_summary,
         chunk_snapshots,
         mobility_chunk_snapshots,
         mobility_full_dto: runtime.mobility_snapshot(),
