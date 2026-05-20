@@ -576,19 +576,24 @@ pub fn compute_world_coord_system(
     stops: Res<Stops>,
     link_polylines: Res<LinkPolylines>,
 ) {
+    // Equality-guarded writes: bevy's `Mut<T>` marks the component changed
+    // on every deref_mut, even if the new value is the same as the old one.
+    // Without this guard, `Changed<Position>` fires for every entity every
+    // tick and the incremental `track_chunk_populations_system` degenerates
+    // into a full rebuild — destroying Task 6's win.
     for (rp, mut pos, cached) in vehicles.iter_mut() {
         if !chunk_is_simulated(&pos, &activities) {
             continue;
         }
-        if let Some(c) = cached {
-            // Fast path: progress along cached polyline.
-            let (x, y) = crate::mobility_geometry::world_coord_at_progress_slice(
+        let new_xy = if let Some(c) = cached {
+            Some(crate::mobility_geometry::world_coord_at_progress_slice(
                 &c.points, rp.progress,
-            );
-            pos.x = x;
-            pos.y = y;
-        } else if let Some((x, y)) =
+            ))
+        } else {
             crate::mobility::vehicle_world_coord(rp, &routes, &link_polylines)
+        };
+        if let Some((x, y)) = new_xy
+            && (pos.x != x || pos.y != y)
         {
             pos.x = x;
             pos.y = y;
@@ -598,13 +603,17 @@ pub fn compute_world_coord_system(
         if !chunk_is_simulated(&pos, &activities) {
             continue;
         }
-        if let (AgentMobilityState::Walking { progress, .. }, Some(c)) = (&state.0, cached) {
-            let (x, y) =
-                crate::mobility_geometry::world_coord_at_progress_slice(&c.points, *progress);
-            pos.x = x;
-            pos.y = y;
-        } else if let Some((x, y)) =
+        let new_xy = if let (AgentMobilityState::Walking { progress, .. }, Some(c)) =
+            (&state.0, cached)
+        {
+            Some(crate::mobility_geometry::world_coord_at_progress_slice(
+                &c.points, *progress,
+            ))
+        } else {
             crate::mobility::agent_world_coord(&state.0, &routes, &stops, &link_polylines)
+        };
+        if let Some((x, y)) = new_xy
+            && (pos.x != x || pos.y != y)
         {
             pos.x = x;
             pos.y = y;
