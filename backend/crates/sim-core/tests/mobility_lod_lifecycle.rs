@@ -1,119 +1,115 @@
 use sim_core::ids::{AgentId, ChunkCoord, LinkId};
+use sim_core::mobility::api;
 use sim_core::mobility::lod::{ACTIVITY_HYSTERESIS_TICKS, MobilityActivity};
-use sim_core::mobility::{AgentMobilityState, AgentRecord, MobilityWorld, PlanStage};
+use sim_core::mobility::{AgentMobilityState, AgentRecord, PlanStage};
 
 // One classify pass past the hysteresis window so the new activity has settled.
 const SETTLE_TICKS: u32 = ACTIVITY_HYSTERESIS_TICKS as u32 + 10;
 
 #[test]
 fn chunk_cycles_through_hot_warm_active() {
-    let mut world = MobilityWorld::empty();
+    let (mut world, mut schedule) = api::empty_world_and_schedule();
     let chunk = ChunkCoord { x: 0, y: 0 };
 
-    // Walk speed 0 so the agent stays in this chunk for the whole test.
-    world.set_link_polyline(LinkId("l:0".into()), vec![(5.0, 5.0), (15.0, 15.0)]);
-    world.spawn_agent_from_record(AgentRecord::new(
-        AgentId("a:1".into()),
-        AgentMobilityState::Walking {
-            link_id: LinkId("l:0".into()),
-            progress: 0.0,
-        },
-        vec![PlanStage::Activity {
-            activity_id: "act".into(),
-        }],
-        0.0,
-    ));
+    api::set_link_polyline(
+        &mut world,
+        LinkId("l:0".into()),
+        vec![(5.0, 5.0), (15.0, 15.0)],
+    );
+    api::spawn_agent_from_record(
+        &mut world,
+        AgentRecord::new(
+            AgentId("a:1".into()),
+            AgentMobilityState::Walking {
+                link_id: LinkId("l:0".into()),
+                progress: 0.0,
+            },
+            vec![PlanStage::Activity {
+                activity_id: "act".into(),
+            }],
+            0.0,
+        ),
+    );
 
     // Two subscribers → Hot.
-    world.apply_subscription_diff(&[chunk, chunk], std::iter::empty());
-    world.tick_mobility();
+    api::apply_subscription_diff(&mut world, &[chunk, chunk], std::iter::empty());
+    api::tick_mobility(&mut world, &mut schedule);
     assert_eq!(
-        world.activity_for_chunk(chunk),
+        api::activity_for_chunk(&world, chunk),
         Some(MobilityActivity::Hot),
         "two subscribers should drive chunk Hot on first classify tick",
     );
 
-    // Both unsubscribe → after hysteresis the chunk falls to Warm (population
-    // > 0, no subscribers) and the agent is demoted into the FlowCell.
-    world.apply_subscription_diff(std::iter::empty(), &[chunk, chunk]);
+    // Both unsubscribe → after hysteresis the chunk falls to Warm.
+    api::apply_subscription_diff(&mut world, std::iter::empty(), &[chunk, chunk]);
     for _ in 0..SETTLE_TICKS {
-        world.tick_mobility();
+        api::tick_mobility(&mut world, &mut schedule);
     }
     assert_eq!(
-        world.activity_for_chunk(chunk),
+        api::activity_for_chunk(&world, chunk),
         Some(MobilityActivity::Warm),
         "chunk should be Warm after cooldown with population but no subscribers",
     );
-    let cell = world
-        .flow_cell_for_chunk(chunk)
-        .expect("flow cell exists after demote");
+    let cell_pop = api::flow_cell_for_chunk(&world, chunk)
+        .expect("flow cell exists after demote")
+        .population;
     assert!(
-        cell.population >= 1.0,
-        "agent collapsed into flow cell, got {}",
-        cell.population
+        cell_pop >= 1.0,
+        "agent collapsed into flow cell, got {cell_pop}",
     );
 
-    // One subscriber re-attaches → after hysteresis the chunk promotes to
-    // Active and the population is re-spawned as discrete agents.
-    //
-    // Asleep is not exercised here: with one seeded agent population stays
-    // > 0, so the chunk holds at Warm rather than transitioning to Asleep.
-    world.apply_subscription_diff(&[chunk], std::iter::empty());
+    api::apply_subscription_diff(&mut world, &[chunk], std::iter::empty());
     for _ in 0..SETTLE_TICKS {
-        world.tick_mobility();
+        api::tick_mobility(&mut world, &mut schedule);
     }
     assert_eq!(
-        world.activity_for_chunk(chunk),
+        api::activity_for_chunk(&world, chunk),
         Some(MobilityActivity::Active),
         "single subscriber after cooldown should promote chunk to Active",
     );
     assert!(
-        !world.agents().is_empty(),
+        !api::agents(&world).is_empty(),
         "agent re-promoted from flow cell into the world",
     );
 }
 
-/// Mirrors the Phase-6 production flow where agents are loaded from a
-/// snapshot (or seeded via `from_network`) directly into chunks that have
-/// no subscriber. After the first classify pass these chunks must collapse
-/// straight from Asleep into Warm AND demote their population into the
-/// FlowCell — otherwise every Advance/Output system pays the full
-/// per-entity cost for the rest of the run.
 #[test]
 fn unsubscribed_populated_chunks_demote_on_first_classification() {
-    let mut world = MobilityWorld::empty();
+    let (mut world, mut schedule) = api::empty_world_and_schedule();
 
-    // Seed 50 agents across 50 distinct chunks (one each) — no subscribers.
     for i in 0..50_i32 {
         let link_id = LinkId(format!("l:{i}"));
-        // Polyline anchors put the agent at world coord (i*64+5, 5) which
-        // maps to chunk (i*2, 0) via chunk_of(_, _, 32).
         let x = i * 64 + 5;
-        world.set_link_polyline(link_id.clone(), vec![(x as f32, 5.0), (x as f32, 25.0)]);
-        world.spawn_agent_from_record(AgentRecord::new(
-            AgentId(format!("a:{i}")),
-            AgentMobilityState::Walking {
-                link_id,
-                progress: 0.0,
-            },
-            vec![PlanStage::Activity {
-                activity_id: "stay".into(),
-            }],
-            0.0,
-        ));
+        api::set_link_polyline(
+            &mut world,
+            link_id.clone(),
+            vec![(x as f32, 5.0), (x as f32, 25.0)],
+        );
+        api::spawn_agent_from_record(
+            &mut world,
+            AgentRecord::new(
+                AgentId(format!("a:{i}")),
+                AgentMobilityState::Walking {
+                    link_id,
+                    progress: 0.0,
+                },
+                vec![PlanStage::Activity {
+                    activity_id: "stay".into(),
+                }],
+                0.0,
+            ),
+        );
     }
     assert_eq!(
-        world.agents().len(),
+        api::agents(&world).len(),
         50,
         "precondition: 50 agents seeded directly into unsubscribed chunks",
     );
 
-    // One tick is enough: track_chunk_populations + classify push the
-    // Asleep→Warm transitions, demote should fire on those.
-    world.tick_mobility();
+    api::tick_mobility(&mut world, &mut schedule);
 
     assert_eq!(
-        world.agents().len(),
+        api::agents(&world).len(),
         0,
         "all unsubscribed populated chunks must demote their agents into FlowCells \
          (this is the regression that makes the 100k bench iterate 101k entities per tick)",

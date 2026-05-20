@@ -1,5 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use sim_core::ids::ChunkCoord;
+use sim_core::mobility::api::{apply_subscription_diff, tick_mobility};
 use sim_core::mobility::seed::{SeedDensity, from_network};
 
 mod common;
@@ -24,25 +25,24 @@ fn very_big_network() -> sim_core::city_network::CityNetwork {
 fn tick_100k_with_5_subscribed(c: &mut Criterion) {
     let network = very_big_network();
     c.bench_function("tick_100k_with_5_subscribed_chunks", |b| {
-        let mut world = from_network(
+        let (mut world, mut schedule) = from_network(
             &network,
             SeedDensity {
-                pedestrians_per_corridor: 50, // 2000 × 50 = 100_000 walkers
+                pedestrians_per_corridor: 50,
                 cars_per_arterial: 10,
                 trams_total: 0,
             },
         );
 
         let subscribed: Vec<ChunkCoord> = (0..5).map(|i| ChunkCoord { x: 8 + i, y: 4 }).collect();
-        world.apply_subscription_diff(&subscribed, std::iter::empty());
+        apply_subscription_diff(&mut world, &subscribed, std::iter::empty());
 
-        // Warm-up: ensure non-subscribed chunks have demoted past hysteresis.
         for _ in 0..50 {
-            world.tick_mobility();
+            tick_mobility(&mut world, &mut schedule);
         }
 
         b.iter(|| {
-            world.tick_mobility();
+            tick_mobility(&mut world, &mut schedule);
         });
     });
 }
@@ -50,32 +50,29 @@ fn tick_100k_with_5_subscribed(c: &mut Criterion) {
 fn tick_100k_all_active(c: &mut Criterion) {
     let network = very_big_network();
     c.bench_function("tick_100k_all_active", |b| {
-        let mut world = from_network(
+        let (mut world, mut schedule) = from_network(
             &network,
             SeedDensity {
-                pedestrians_per_corridor: 50, // 2000 × 50 = 100_000 walkers
+                pedestrians_per_corridor: 50,
                 cars_per_arterial: 10,
                 trams_total: 0,
             },
         );
 
-        // World is 1024×512 tiles, chunk_size=32 → 32×16 = 512 chunks.
-        // Subscribe every chunk so NO entity gets demoted to a FlowCell —
-        // the bench measures the cost of 100k entities in the ECS hot path.
         let mut subscribed: Vec<ChunkCoord> = Vec::with_capacity(32 * 16);
         for x in 0..32 {
             for y in 0..16 {
                 subscribed.push(ChunkCoord { x, y });
             }
         }
-        world.apply_subscription_diff(&subscribed, std::iter::empty());
+        apply_subscription_diff(&mut world, &subscribed, std::iter::empty());
 
         for _ in 0..50 {
-            world.tick_mobility();
+            tick_mobility(&mut world, &mut schedule);
         }
 
         b.iter(|| {
-            world.tick_mobility();
+            tick_mobility(&mut world, &mut schedule);
         });
     });
 }

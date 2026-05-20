@@ -7,7 +7,7 @@
 use abutown_protocol::v1 as w;
 use abutown_protocol::{ChunkSnapshotDto, WorldId};
 use sim_core::ids::ChunkCoord;
-use sim_core::mobility::MobilityWorld;
+use sim_core::mobility::MobilityPersistSnapshot;
 use std::collections::HashMap;
 
 use crate::commands::{AppliedCommand, CommandRejection};
@@ -44,7 +44,7 @@ pub struct PersistPayload {
     pub chunk_snapshots: Vec<ChunkSnapshotDto>,
     pub world_id: WorldId,
     pub mobility_tick: u64,
-    pub mobility_world: MobilityWorld,
+    pub mobility_world: MobilityPersistSnapshot,
 }
 
 /// Lock-free read view of the runtime, published once per tick.

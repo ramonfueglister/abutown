@@ -1,17 +1,22 @@
-use sim_core::mobility::MobilityWorld;
+use sim_core::mobility::{MobilityPersistSnapshot, apply_into_world, api, extract_from_world};
 
 #[test]
 fn phase3_snapshot_round_trips_byte_for_byte() {
     let fixture = include_str!("fixtures/phase3-mobility-snapshot.json");
 
-    // Parse fixture → ECS-backed MobilityWorld
-    let world: MobilityWorld = serde_json::from_str(fixture)
-        .expect("phase3 fixture should deserialize into ECS MobilityWorld");
+    // Parse fixture → persist snapshot, hydrate into a real World, then
+    // re-extract for the byte comparison. This exercises the full
+    // World→snapshot→World round trip the persistence path takes.
+    let snap: MobilityPersistSnapshot = serde_json::from_str(fixture)
+        .expect("phase3 fixture should deserialize into ECS MobilityPersistSnapshot");
 
-    // Re-serialize through the new ECS path
-    let reserialized = serde_json::to_string_pretty(&world).expect("re-serialize should not fail");
+    let (mut world, _schedule) = api::empty_world_and_schedule();
+    apply_into_world(&mut world, snap);
+    let reloaded = extract_from_world(&world);
 
-    // Compare as JSON values (whitespace-insensitive, key-order-insensitive)
+    let reserialized =
+        serde_json::to_string_pretty(&reloaded).expect("re-serialize should not fail");
+
     let fixture_value: serde_json::Value =
         serde_json::from_str(fixture).expect("fixture is valid JSON");
     let reserialized_value: serde_json::Value =

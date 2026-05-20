@@ -1,4 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
+use sim_core::mobility::api::tick_mobility;
 use sim_core::mobility::seed::{SeedDensity, from_network};
 
 mod common;
@@ -23,7 +24,7 @@ fn big_network() -> sim_core::city_network::CityNetwork {
 fn tick_10k_walkers_1k_cars(c: &mut Criterion) {
     let network = big_network();
     c.bench_function("tick_10k_walkers_1k_cars", |b| {
-        let mut world = from_network(
+        let (mut world, mut schedule) = from_network(
             &network,
             SeedDensity {
                 pedestrians_per_corridor: 10, // 1000 × 10 = 10_000 walkers
@@ -32,7 +33,7 @@ fn tick_10k_walkers_1k_cars(c: &mut Criterion) {
             },
         );
         b.iter(|| {
-            world.tick_mobility();
+            tick_mobility(&mut world, &mut schedule);
         });
     });
 }

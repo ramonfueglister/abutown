@@ -217,6 +217,7 @@ fn build_read_view_from_runtime(
         .values()
         .map(|delta| chunk_delta_to_dto(delta, mobility, &world_id, mobility_tick))
         .collect();
+    // `mobility` is `&sim_core::bevy_ecs::world::World` after Task 9.
 
     // Pre-materialize per-chunk tile + mobility snapshots for every loaded
     // chunk so HTTP /chunks/{x}/{y} and WS lagged-recovery can read without
@@ -244,12 +245,13 @@ fn build_read_view_from_runtime(
         if let Some(snap) = runtime.chunk_snapshot(coord) {
             chunk_snapshots.insert(coord, chunk_snapshot_dto_to_proto(&snap));
         }
-        let mob_snapshot = mobility.build_chunk_snapshot(coord);
+        let mob_snapshot = sim_core::mobility::api::build_chunk_snapshot(mobility, coord);
         let mob_dto = chunk_snapshot_to_dto(&mob_snapshot, mobility, &world_id, mobility_tick);
         mobility_chunk_snapshots.insert(coord, mob_dto);
     }
 
-    let chunk_subscriber_counts = mobility.chunk_subscriber_counts_snapshot();
+    let chunk_subscriber_counts =
+        sim_core::mobility::api::chunk_subscriber_counts_snapshot(mobility);
     let mobility_full_legacy = runtime.mobility_snapshot();
     let mobility_full_dto = mobility_snapshot_dto_to_proto(&mobility_full_legacy);
     let health_legacy = runtime.health();
@@ -862,7 +864,7 @@ fn world_event_dto_to_proto(e: &abutown_protocol::WorldEventDto) -> w::WorldEven
 
 fn chunk_delta_to_dto(
     delta: &sim_core::mobility::MobilityChunkDelta,
-    world: &sim_core::mobility::MobilityWorld,
+    world: &sim_core::bevy_ecs::world::World,
     world_id: &abutown_protocol::WorldId,
     tick: u64,
 ) -> w::MobilityChunkDelta {
@@ -877,13 +879,13 @@ fn chunk_delta_to_dto(
         changed_agents: delta
             .changed_agents
             .iter()
-            .filter_map(|r| world.agent_dto_for(&r.id))
+            .filter_map(|r| sim_core::mobility::api::agent_dto_for(world, &r.id))
             .map(agent_dto_to_proto)
             .collect(),
         changed_vehicles: delta
             .changed_vehicles
             .iter()
-            .filter_map(|r| world.vehicle_dto_for(&r.id))
+            .filter_map(|r| sim_core::mobility::api::vehicle_dto_for(world, &r.id))
             .map(vehicle_dto_to_proto)
             .collect(),
         left_agents: delta.left_agents.iter().map(|id| id.0.clone()).collect(),
@@ -920,7 +922,8 @@ async fn apply_mutation_owned(
             let snapshots: Vec<w::MobilityChunkSnapshot> = added
                 .iter()
                 .map(|coord| {
-                    let snapshot = runtime.mobility().build_chunk_snapshot(*coord);
+                    let snapshot =
+                        sim_core::mobility::api::build_chunk_snapshot(runtime.mobility(), *coord);
                     chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick)
                 })
                 .collect();
@@ -934,7 +937,7 @@ async fn apply_mutation_owned(
                 chunk_snapshots: runtime.collect_chunk_snapshots(),
                 world_id: runtime.world_id_for_persist().clone(),
                 mobility_tick: runtime.mobility_tick(),
-                mobility_world: runtime.mobility_world_clone_for_persist(),
+                mobility_world: runtime.mobility_persist_snapshot(),
             };
             let _ = reply.send(payload);
         }
@@ -1034,7 +1037,7 @@ async fn tick_once(
 
 fn chunk_snapshot_to_dto(
     snapshot: &sim_core::mobility::MobilityChunkSnapshot,
-    world: &sim_core::mobility::MobilityWorld,
+    world: &sim_core::bevy_ecs::world::World,
     world_id: &abutown_protocol::WorldId,
     tick: u64,
 ) -> w::MobilityChunkSnapshot {
@@ -1049,13 +1052,13 @@ fn chunk_snapshot_to_dto(
         agents: snapshot
             .agents
             .iter()
-            .filter_map(|record| world.agent_dto_for(&record.id))
+            .filter_map(|record| sim_core::mobility::api::agent_dto_for(world, &record.id))
             .map(agent_dto_to_proto)
             .collect(),
         vehicles: snapshot
             .vehicles
             .iter()
-            .filter_map(|record| world.vehicle_dto_for(&record.id))
+            .filter_map(|record| sim_core::mobility::api::vehicle_dto_for(world, &record.id))
             .map(vehicle_dto_to_proto)
             .collect(),
     }

@@ -7,7 +7,10 @@ use sim_core::{
     chunk::{Chunk, ChunkError, EventApplyError, SnapshotDecodeError},
     events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
-    mobility::{MobilityWorld, build_mobility_snapshot_dto},
+    mobility::{
+        MobilityPersistSnapshot, api as mobility_api, apply_into_world, build_mobility_snapshot_dto,
+        extract_from_world, install_mobility,
+    },
     persistence::{
         ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore,
         build_chunk_snapshot_from_parts,
@@ -15,11 +18,11 @@ use sim_core::{
     scheduler::ChunkActivity,
     tile::TileKind,
     world::{
-        components::{
-            ChunkVersion, DirtyTiles, LastPersistedVersion, LastSnapshotAt, Tiles,
-        },
+        components::{ChunkVersion, DirtyTiles, LastPersistedVersion, LastSnapshotAt, Tiles},
+        plugin::CorePlugin,
         resources::ChunksByCoord,
-        systems::{apply_set_tile_kind_ecs, chunk_snapshot_data, TileMutationError},
+        schedule::SimPlugin,
+        systems::{TileMutationError, apply_set_tile_kind_ecs, chunk_snapshot_data},
     },
 };
 
@@ -61,7 +64,8 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
 pub struct SimulationRuntime {
     world_id: WorldId,
     chunk_size: u16,
-    mobility: MobilityWorld,
+    pub world: sim_core::bevy_ecs::world::World,
+    pub schedule: sim_core::bevy_ecs::schedule::Schedule,
     event_store: Box<dyn WorldEventStore + Send + Sync>,
     event_count: usize,
     tick: u64,
@@ -89,16 +93,14 @@ impl SimulationRuntime {
     }
 
     pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send + Sync>) -> Self {
-        // Build mobility world and spawn chunk entities directly into its ECS
-        // world. The chunk-entity is the sole source of truth for tile data.
-        //
-        // To match the legacy `ChunkRegistry::new + insert_chunk` semantics, we
-        // spawn each chunk at version 0 (with the seed tile in its default
-        // state) and then apply the seed mutation through the ECS path. That
-        // bumps `ChunkVersion` to 1 while keeping `LastPersistedVersion` at 0,
-        // so the first `collect_chunk_snapshots` correctly emits the seeded
-        // chunks for persistence.
-        let mut mobility = MobilityWorld::default();
+        // Build a fresh World + Schedule with CorePlugin + mobility installed
+        // directly. Phase 8a Task 9 dissolved the `MobilityWorld` wrapper —
+        // SimulationRuntime now owns the shared `World` + `Schedule` directly.
+        let mut world = sim_core::bevy_ecs::world::World::new();
+        let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
+        CorePlugin::default().install(&mut world, &mut schedule);
+        install_mobility(&mut world, &mut schedule);
+
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let tiles =
                 vec![sim_core::tile::TileRecord::default(); (CHUNK_SIZE as usize).pow(2)];
@@ -115,27 +117,22 @@ impl SimulationRuntime {
             };
 
             sim_core::world::systems::spawn_chunk_entity(
-                mobility.profile_world_mut(),
+                &mut world,
                 coord,
                 CHUNK_SIZE,
                 tiles,
                 0,
                 activity,
             );
-            apply_set_tile_kind_ecs(
-                mobility.profile_world_mut(),
-                coord,
-                seed_index,
-                seed_kind,
-                0,
-            )
-            .expect("seed mutation should apply for a freshly-spawned chunk entity");
+            apply_set_tile_kind_ecs(&mut world, coord, seed_index, seed_kind, 0)
+                .expect("seed mutation should apply for a freshly-spawned chunk entity");
         }
 
         Self {
             world_id: Self::default_world_id(),
             chunk_size: CHUNK_SIZE,
-            mobility,
+            world,
+            schedule,
             event_store,
             event_count: 0,
             tick: 0,
@@ -147,12 +144,22 @@ impl SimulationRuntime {
     /// shared city network descriptor instead of the tiny developer seed.
     pub fn new_from_network(network: &sim_core::city_network::CityNetwork) -> Self {
         let mut runtime = Self::new();
-        runtime.mobility = sim_core::mobility::seed::from_network(network, SEED_DENSITY);
+        let (seeded_world, _) = sim_core::mobility::seed::from_network(network, SEED_DENSITY);
+        let snap = extract_from_world(&seeded_world);
+        apply_into_world(&mut runtime.world, snap);
         runtime
     }
 
-    pub fn set_mobility_for_test(&mut self, mobility: MobilityWorld) {
-        self.mobility = mobility;
+    /// Test-only helper: replace the runtime's mobility state with the state
+    /// extracted from `(world, _schedule)` produced by `seed::*`. Chunk
+    /// entities already in the runtime are preserved.
+    pub fn set_mobility_for_test(
+        &mut self,
+        seeded: (sim_core::bevy_ecs::world::World, sim_core::bevy_ecs::schedule::Schedule),
+    ) {
+        let (seeded_world, _schedule) = seeded;
+        let snap = extract_from_world(&seeded_world);
+        apply_into_world(&mut self.world, snap);
     }
 
     pub fn override_world_id_for_test(&mut self, world_id: &str) {
@@ -160,18 +167,17 @@ impl SimulationRuntime {
     }
 
     /// Advance the mobility world by one tick (discards the per-chunk delta).
-    /// Used by tests that need to advance simulation state without going through
-    /// the full fan-out pipeline.
     pub fn advance_mobility_tick_for_test(&mut self) {
-        let _ = self.mobility.tick_mobility();
+        let _ = mobility_api::tick_mobility(&mut self.world, &mut self.schedule);
     }
 
-    pub fn mobility_world_clone_for_test(&self) -> MobilityWorld {
-        self.mobility.clone()
+    /// Snapshot of mobility state (for persist callers and tests).
+    pub fn mobility_snapshot_for_persist(&self) -> MobilityPersistSnapshot {
+        extract_from_world(&self.world)
     }
 
     pub fn mobility_tick(&self) -> u64 {
-        self.mobility.tick()
+        mobility_api::tick(&self.world)
     }
 
     /// Hydrate a runtime from the given stores.
@@ -192,21 +198,33 @@ impl SimulationRuntime {
         HydrationError,
     > {
         let world_id = Self::default_world_id();
-        let fallback_mobility = || {
-            if network.arterial_paths.is_empty() && network.pedestrian_corridors.is_empty() {
-                sim_core::mobility::seed::tiny_world()
-            } else {
-                sim_core::mobility::seed::from_network(network, SEED_DENSITY)
-            }
-        };
-        let mut mobility = match mobility_snapshot_store
+
+        // Build a fresh World + Schedule and install both plugins.
+        let mut world = sim_core::bevy_ecs::world::World::new();
+        let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
+        CorePlugin::default().install(&mut world, &mut schedule);
+        install_mobility(&mut world, &mut schedule);
+
+        // Hydrate mobility state from the snapshot store if present, else seed
+        // from the network descriptor.
+        let mobility_snap = match mobility_snapshot_store
             .read(&world_id.0)
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, world)) => world,
-            None => fallback_mobility(),
+            Some((_tick, snap)) => snap,
+            None => {
+                let (seeded_world, _) =
+                    if network.arterial_paths.is_empty() && network.pedestrian_corridors.is_empty()
+                    {
+                        sim_core::mobility::seed::tiny_world()
+                    } else {
+                        sim_core::mobility::seed::from_network(network, SEED_DENSITY)
+                    };
+                extract_from_world(&seeded_world)
+            }
         };
+        apply_into_world(&mut world, mobility_snap);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let snap = snapshot_store
@@ -269,7 +287,7 @@ impl SimulationRuntime {
                 .filter_map(|i| chunk.tile_at(i))
                 .collect();
             sim_core::world::systems::spawn_chunk_entity(
-                mobility.profile_world_mut(),
+                &mut world,
                 coord,
                 CHUNK_SIZE,
                 tiles,
@@ -295,7 +313,8 @@ impl SimulationRuntime {
         let runtime = Self {
             world_id,
             chunk_size: CHUNK_SIZE,
-            mobility,
+            world,
+            schedule,
             event_store,
             event_count,
             tick: global_tick,
@@ -324,8 +343,7 @@ impl SimulationRuntime {
     }
 
     pub fn chunk_snapshot(&self, coord: ChunkCoord) -> Option<ChunkSnapshotDto> {
-        let world = self.mobility.world_view();
-        let (_chunk_size, version, tiles, activity) = chunk_snapshot_data(world, coord)?;
+        let (_chunk_size, version, tiles, activity) = chunk_snapshot_data(&self.world, coord)?;
         Some(build_chunk_snapshot_from_parts(
             &self.world_id.0,
             coord,
@@ -336,56 +354,46 @@ impl SimulationRuntime {
     }
 
     /// Deterministically sorted list (`(y, x)`) of loaded chunk coords from
-    /// the ECS world. Matches the legacy `ChunkRegistry::loaded_coords()`
-    /// ordering.
+    /// the ECS world.
     fn loaded_coords(&self) -> Vec<ChunkCoord> {
-        let by_coord = self.mobility.world_view().resource::<ChunksByCoord>();
+        let by_coord = self.world.resource::<ChunksByCoord>();
         let mut coords: Vec<ChunkCoord> = by_coord.0.keys().copied().collect();
         coords.sort_by_key(|c| (c.y, c.x));
         coords
     }
 
-    /// Read-only ECS world view (chunk + mobility entities live in the same
-    /// World today).
+    /// Read-only ECS world view.
     pub fn world_view(&self) -> &sim_core::bevy_ecs::world::World {
-        self.mobility.world_view()
+        &self.world
     }
 
     pub fn mobility_snapshot(&self) -> MobilitySnapshotDto {
-        build_mobility_snapshot_dto(&self.world_id, self.mobility.tick(), &self.mobility)
+        build_mobility_snapshot_dto(&self.world_id, self.mobility_tick(), &self.world)
     }
 
-    /// Forward a per-connection chunk-subscription delta into the mobility
-    /// world's `ChunkSubscribers` resource.
+    /// Forward a per-connection chunk-subscription delta into the
+    /// `ChunkSubscribers` resource.
     pub fn apply_subscription_diff<'a, A, R>(&mut self, added: A, removed: R)
     where
         A: IntoIterator<Item = &'a sim_core::ids::ChunkCoord>,
         R: IntoIterator<Item = &'a sim_core::ids::ChunkCoord>,
     {
-        self.mobility.apply_subscription_diff(added, removed);
+        mobility_api::apply_subscription_diff(&mut self.world, added, removed);
     }
 
     /// Expose the per-chunk tick result for the new fan-out path (Task 7).
-    /// This is the authoritative ticker for mobility; `next_mobility_delta`
-    /// (used by the legacy broadcast path) MUST NOT also be called in the same
-    /// interval — it would tick mobility twice.  See `spawn_delta_loop` in app.rs.
     pub fn tick_world_mobility(
         &mut self,
     ) -> std::collections::HashMap<sim_core::ids::ChunkCoord, sim_core::mobility::MobilityChunkDelta>
     {
-        self.mobility.tick_mobility()
+        mobility_api::tick_mobility(&mut self.world, &mut self.schedule)
     }
 
     /// Collect all chunk snapshots that are due for persistence.
-    /// Does NOT mark them as persisted (call `mark_chunk_snapshots_persisted` after writing).
-    ///
-    /// "Due" matches the legacy `ChunkRegistry::collect_snapshots` policy:
-    /// emit if the chunk's `ChunkVersion` is ahead of `LastPersistedVersion`,
-    /// OR `LastSnapshotAt` is older than the 30s ceiling.
     pub fn collect_chunk_snapshots(&self) -> Vec<ChunkSnapshotDto> {
         let ceiling = std::time::Duration::from_secs(30);
         let now = std::time::Instant::now();
-        let world = self.mobility.world_view();
+        let world = &self.world;
         let by_coord = world.resource::<ChunksByCoord>();
         let mut due: Vec<ChunkCoord> = by_coord
             .0
@@ -407,7 +415,7 @@ impl SimulationRuntime {
     /// Mark the given chunks as persisted (clear dirty state, update timestamps).
     pub fn mark_chunk_snapshots_persisted(&mut self, coords: &[ChunkCoord]) {
         let now = std::time::Instant::now();
-        let world = self.mobility.profile_world_mut();
+        let world = &mut self.world;
         // Snapshot (entity, current_version) pairs first to release the &World
         // borrow before we take entity_mut for each.
         let updates: Vec<(sim_core::bevy_ecs::entity::Entity, u64)> = {
@@ -435,21 +443,21 @@ impl SimulationRuntime {
         }
     }
 
-    /// Clone the mobility world so persist functions can release the runtime
-    /// read-lock before performing DB writes.
-    pub fn mobility_world_clone_for_persist(&self) -> MobilityWorld {
-        self.mobility.clone()
+    /// Extract a persist-snapshot of mobility state so persist functions can
+    /// release the runtime read-lock before performing DB writes.
+    pub fn mobility_persist_snapshot(&self) -> MobilityPersistSnapshot {
+        extract_from_world(&self.world)
     }
 
-    /// Borrow the mobility world — usable inside a runtime read/write lock block
-    /// without paying the clone cost.
-    pub fn mobility(&self) -> &MobilityWorld {
-        &self.mobility
+    /// Borrow the runtime's bevy world — for callers that want to issue
+    /// `mobility::api` reads without paying the snapshot-extract cost.
+    pub fn mobility(&self) -> &sim_core::bevy_ecs::world::World {
+        &self.world
     }
 
     /// Return the number of active WS subscribers for a chunk.
     pub fn chunk_subscriber_count(&self, chunk: sim_core::ids::ChunkCoord) -> u8 {
-        self.mobility.chunk_subscriber_count(chunk)
+        mobility_api::chunk_subscriber_count(&self.world, chunk)
     }
 
     /// Return the world ID for use by persist functions outside the runtime lock.
@@ -533,7 +541,7 @@ impl SimulationRuntime {
         // Pre-flight validation against ECS state (no mutation yet — we only
         // commit after the event store accepts the append).
         let (preview_version, _existing_kind) = {
-            let world = self.mobility.world_view();
+            let world = &self.world;
             let entity = world
                 .resource::<ChunksByCoord>()
                 .0
@@ -623,7 +631,7 @@ impl SimulationRuntime {
 
         self.event_count += 1;
         let mutation_result = apply_set_tile_kind_ecs(
-            self.mobility.profile_world_mut(),
+            &mut self.world,
             coord,
             command.local_index,
             kind,
@@ -669,9 +677,14 @@ impl SimulationRuntime {
         self.tick += 1;
         self.version += 1;
         let loaded_coords = self.loaded_coords();
+        assert!(
+            !loaded_coords.is_empty(),
+            "next_pulse called on a runtime with no loaded chunks — \
+             callers must seed or hydrate at least one chunk first",
+        );
         let coord = loaded_coords[((self.tick - 1) as usize) % loaded_coords.len()];
         let tile_count = {
-            let world = self.mobility.world_view();
+            let world = &self.world;
             let entity = world
                 .resource::<ChunksByCoord>()
                 .0
@@ -702,13 +715,13 @@ impl Default for SimulationRuntime {
 #[cfg(test)]
 impl SimulationRuntime {
     pub fn mobility_tick_for_test(&self) -> u64 {
-        self.mobility.tick()
+        mobility_api::tick(&self.world)
     }
     pub fn mobility_agent_count_for_test(&self) -> usize {
-        self.mobility.snapshot().agents.len()
+        mobility_api::agents(&self.world).len()
     }
     pub fn mobility_vehicle_count_for_test(&self) -> usize {
-        self.mobility.snapshot().vehicles.len()
+        mobility_api::vehicles(&self.world).len()
     }
 }
 
@@ -718,9 +731,18 @@ mod tests {
     use abutown_protocol::{ChunkStateDto, TileKindDto};
 
     #[test]
+    fn simulation_runtime_holds_world_directly() {
+        let runtime = SimulationRuntime::new();
+        // After Task 9 dissolved MobilityWorld, SimulationRuntime owns the
+        // shared bevy World + Schedule directly.
+        let _world: &sim_core::bevy_ecs::world::World = &runtime.world;
+        let _schedule: &sim_core::bevy_ecs::schedule::Schedule = &runtime.schedule;
+    }
+
+    #[test]
     fn hydration_spawns_chunk_entity_per_loaded_chunk() {
         let runtime = SimulationRuntime::new();
-        let world = runtime.mobility.world_view();
+        let world = &runtime.world;
         let by_coord = world.resource::<sim_core::world::resources::ChunksByCoord>();
         // 3 seeded chunks expected.
         assert_eq!(by_coord.0.len(), 3);
@@ -1242,19 +1264,21 @@ mod tests {
 
     #[tokio::test]
     async fn hydrate_restores_mobility_from_store_when_present() {
-        use sim_core::mobility::seed;
+        use sim_core::mobility::api::tick_mobility as api_tick;
+        use sim_core::mobility::{extract_from_world, seed};
 
-        let mut authored = seed::initial_world();
+        let (mut authored, mut sched) = seed::initial_world();
         // Advance one tick so the persisted state differs from a fresh seed.
-        let _ = authored.tick_mobility();
-        let persisted_tick = authored.tick();
+        let _ = api_tick(&mut authored, &mut sched);
+        let persisted_tick = sim_core::mobility::api::tick(&authored);
+        let authored_snap = extract_from_world(&authored);
 
         let mut mobility_store = InMemoryMobilitySnapshotStore::default();
         MobilitySnapshotStore::write(
             &mut mobility_store,
             "abutown-main",
             persisted_tick,
-            &authored,
+            &authored_snap,
         )
         .await
         .unwrap();

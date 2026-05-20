@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
 
+use bevy_ecs::schedule::Schedule;
+use bevy_ecs::world::World;
+
 use super::*;
 use crate::city_network::CityNetwork;
 use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
 /// Backward-compatible wrapper — delegates to [`tiny_world`].
-pub fn initial_world() -> MobilityWorld {
+pub fn initial_world() -> (World, Schedule) {
     tiny_world()
 }
 
@@ -13,8 +16,8 @@ pub fn initial_world() -> MobilityWorld {
 ///
 /// Two routes traverse the seeded chunk neighbourhood; 4 vehicles and
 /// 20 agents are spawned with cyclic plans. Calling this function twice
-/// returns equal worlds.
-pub fn tiny_world() -> MobilityWorld {
+/// returns equal worlds (by `extract_from_world`).
+pub fn tiny_world() -> (World, Schedule) {
     let horizontal_route = RouteId("route:horizontal".to_string());
     let vertical_route = RouteId("route:vertical".to_string());
     let horizontal_link = LinkId("link:horizontal:main".to_string());
@@ -28,27 +31,30 @@ pub fn tiny_world() -> MobilityWorld {
     let walk_link = LinkId("link:walk:default".to_string());
     let work_activity = "activity:work".to_string();
 
-    let mut world = MobilityWorld::empty();
+    let (mut world, schedule) = api::empty_world_and_schedule();
 
-    // Register the three seeded polylines so spawn-time / runtime coord
-    // resolution can look them up directly without a hardcoded fallback.
-    // Coords use chunk-centre points for chunks (4,4), (5,4), (4,5) where
-    // chunk_size = 32 → centre = chunk * 32 + 16.
+    // Register the three seeded polylines.
     let c44 = (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
     let c54 = (5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
     let c45 = (4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0);
-    world.set_link_polyline(horizontal_link.clone(), vec![c44, c54]);
-    world.set_link_polyline(vertical_link.clone(), vec![c44, c45]);
-    world.set_link_polyline(walk_link.clone(), vec![c44, c54]);
+    api::set_link_polyline(&mut world, horizontal_link.clone(), vec![c44, c54]);
+    api::set_link_polyline(&mut world, vertical_link.clone(), vec![c44, c45]);
+    api::set_link_polyline(&mut world, walk_link.clone(), vec![c44, c54]);
 
-    world.add_route(RouteRecord {
-        id: horizontal_route.clone(),
-        links: vec![horizontal_link.clone()],
-    });
-    world.add_route(RouteRecord {
-        id: vertical_route.clone(),
-        links: vec![vertical_link.clone()],
-    });
+    api::add_route(
+        &mut world,
+        RouteRecord {
+            id: horizontal_route.clone(),
+            links: vec![horizontal_link.clone()],
+        },
+    );
+    api::add_route(
+        &mut world,
+        RouteRecord {
+            id: vertical_route.clone(),
+            links: vec![vertical_link.clone()],
+        },
+    );
 
     for (stop_id, route_id, progress) in [
         (&horizontal_pickup, &horizontal_route, 0.0_f32),
@@ -56,13 +62,16 @@ pub fn tiny_world() -> MobilityWorld {
         (&vertical_pickup, &vertical_route, 0.0_f32),
         (&vertical_dropoff, &vertical_route, 1.0_f32),
     ] {
-        world.add_stop(StopRecord {
-            id: stop_id.clone(),
-            route_id: route_id.clone(),
-            link_index: 0,
-            progress,
-            waiting_agents: VecDeque::new(),
-        });
+        api::add_stop(
+            &mut world,
+            StopRecord {
+                id: stop_id.clone(),
+                route_id: route_id.clone(),
+                link_index: 0,
+                progress,
+                waiting_agents: VecDeque::new(),
+            },
+        );
     }
 
     for offset in 0..4u32 {
@@ -72,17 +81,20 @@ pub fn tiny_world() -> MobilityWorld {
             vertical_route.clone()
         };
         let vehicle_id = VehicleId(format!("vehicle:seed:{offset}"));
-        world.spawn_vehicle_from_record(VehicleRecord {
-            id: vehicle_id,
-            kind: VehicleKind::Tram,
-            route_id,
-            link_index: 0,
-            progress: (offset as f32) * 0.25,
-            speed_per_tick: 0.1,
-            capacity: 4,
-            occupants: Vec::new(),
-            dwell_ticks_remaining: 0,
-        });
+        api::spawn_vehicle_from_record(
+            &mut world,
+            VehicleRecord {
+                id: vehicle_id,
+                kind: VehicleKind::Tram,
+                route_id,
+                link_index: 0,
+                progress: (offset as f32) * 0.25,
+                speed_per_tick: 0.1,
+                capacity: 4,
+                occupants: Vec::new(),
+                dwell_ticks_remaining: 0,
+            },
+        );
     }
 
     for offset in 0..20u32 {
@@ -93,34 +105,37 @@ pub fn tiny_world() -> MobilityWorld {
             (&vertical_pickup, &vertical_dropoff, &vertical_route)
         };
 
-        world.spawn_agent_from_record(AgentRecord::new(
-            agent_id,
-            AgentMobilityState::Walking {
-                link_id: walk_link.clone(),
-                progress: (offset as f32) * 0.05,
-            },
-            vec![
-                PlanStage::WalkToStop {
+        api::spawn_agent_from_record(
+            &mut world,
+            AgentRecord::new(
+                agent_id,
+                AgentMobilityState::Walking {
                     link_id: walk_link.clone(),
-                    stop_id: pickup.clone(),
+                    progress: (offset as f32) * 0.05,
                 },
-                PlanStage::RideToStop {
-                    route_id: route_id.clone(),
-                    stop_id: dropoff.clone(),
-                },
-                PlanStage::WalkToActivity {
-                    link_id: walk_link.clone(),
-                    activity_id: work_activity.clone(),
-                },
-                PlanStage::Activity {
-                    activity_id: work_activity.clone(),
-                },
-            ],
-            0.5,
-        ));
+                vec![
+                    PlanStage::WalkToStop {
+                        link_id: walk_link.clone(),
+                        stop_id: pickup.clone(),
+                    },
+                    PlanStage::RideToStop {
+                        route_id: route_id.clone(),
+                        stop_id: dropoff.clone(),
+                    },
+                    PlanStage::WalkToActivity {
+                        link_id: walk_link.clone(),
+                        activity_id: work_activity.clone(),
+                    },
+                    PlanStage::Activity {
+                        activity_id: work_activity.clone(),
+                    },
+                ],
+                0.5,
+            ),
+        );
     }
 
-    world
+    (world, schedule)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -140,24 +155,22 @@ impl Default for SeedDensity {
     }
 }
 
-pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorld {
+pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Schedule) {
     use crate::city_network::NetworkCoord;
 
-    let mut world = MobilityWorld::empty();
+    let (mut world, schedule) = api::empty_world_and_schedule();
 
-    // Register pedestrian corridors as walking links BEFORE spawning any
-    // agents on them — spawn-time position resolution requires the polyline
-    // to be in `LinkPolylines` already.
+    // Register pedestrian corridors as walking links.
     for (index, corridor) in network.pedestrian_corridors.iter().enumerate() {
         let link_id = LinkId(format!("link:walk:corridor:{index}"));
         let points: Vec<(f32, f32)> = corridor
             .iter()
             .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
             .collect();
-        world.set_link_polyline(link_id, points);
+        api::set_link_polyline(&mut world, link_id, points);
     }
 
-    // Register arterial paths as routes + polylines BEFORE spawning cars.
+    // Register arterial paths as routes + polylines.
     for (index, arterial) in network.arterial_paths.iter().enumerate() {
         let route_id = RouteId(format!("route:arterial:{index}"));
         let link_id = LinkId(format!("link:arterial:{index}"));
@@ -165,33 +178,36 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
             .iter()
             .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
             .collect();
-        world.set_link_polyline(link_id.clone(), points);
-        world.add_route(RouteRecord {
-            id: route_id.clone(),
-            links: vec![link_id],
-        });
+        api::set_link_polyline(&mut world, link_id.clone(), points);
+        api::add_route(
+            &mut world,
+            RouteRecord {
+                id: route_id.clone(),
+                links: vec![link_id],
+            },
+        );
     }
 
-    // Trams: reuse the existing tiny_world tram polylines, routes, vehicles,
-    // and stops. Polylines copied first so subsequent tram-vehicle spawns can
-    // resolve their position. We do NOT copy tiny_world's pedestrian agents —
-    // those belong to the tiny seed only; this world seeds its own walkers below.
+    // Trams: reuse the existing tiny_world tram polylines, routes, vehicles, and stops.
     if density.trams_total > 0 {
-        let tram_seed = tiny_world();
-        for (id, points) in tram_seed.link_polylines_iter() {
-            world.set_link_polyline(id.clone(), points.clone());
+        let (tram_world, _tram_schedule) = tiny_world();
+        for (id, points) in tram_world.resource::<resources::LinkPolylines>().0.iter() {
+            api::set_link_polyline(&mut world, id.clone(), points.clone());
         }
-        for (id, record) in tram_seed.routes() {
-            world.add_route(RouteRecord {
-                id: id.clone(),
-                links: record.links.clone(),
-            });
+        for (id, record) in tram_world.resource::<resources::Routes>().0.iter() {
+            api::add_route(
+                &mut world,
+                RouteRecord {
+                    id: id.clone(),
+                    links: record.links.clone(),
+                },
+            );
         }
-        for stop in tram_seed.stops() {
-            world.add_stop(stop);
+        for stop in api::stops(&tram_world) {
+            api::add_stop(&mut world, stop);
         }
-        for vehicle in tram_seed.vehicles() {
-            world.spawn_vehicle_from_record(vehicle);
+        for vehicle in api::vehicles(&tram_world) {
+            api::spawn_vehicle_from_record(&mut world, vehicle);
         }
     }
 
@@ -204,14 +220,17 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
             let agent_id = AgentId(format!("agent:walk:{n}"));
             let link_id = LinkId(format!("link:walk:corridor:{corridor_index}"));
             let progress = ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
-            world.spawn_agent_from_record(AgentRecord::new(
-                agent_id,
-                AgentMobilityState::Walking { link_id, progress },
-                vec![PlanStage::Activity {
-                    activity_id: format!("activity:wander:{corridor_index}"),
-                }],
-                0.05,
-            ));
+            api::spawn_agent_from_record(
+                &mut world,
+                AgentRecord::new(
+                    agent_id,
+                    AgentMobilityState::Walking { link_id, progress },
+                    vec![PlanStage::Activity {
+                        activity_id: format!("activity:wander:{corridor_index}"),
+                    }],
+                    0.05,
+                ),
+            );
         }
     }
 
@@ -223,34 +242,40 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> MobilityWorl
             let route_id = RouteId(format!("route:arterial:{arterial_index}"));
             let driver_id = AgentId(format!("agent:driver:{driver_index}"));
             driver_index += 1;
-            world.spawn_vehicle_from_record(VehicleRecord {
-                id: vehicle_id.clone(),
-                kind: VehicleKind::Car,
-                route_id,
-                link_index: 0,
-                progress: if density.cars_per_arterial > 0 {
-                    (n as f32) / (density.cars_per_arterial as f32)
-                } else {
-                    0.0
+            api::spawn_vehicle_from_record(
+                &mut world,
+                VehicleRecord {
+                    id: vehicle_id.clone(),
+                    kind: VehicleKind::Car,
+                    route_id,
+                    link_index: 0,
+                    progress: if density.cars_per_arterial > 0 {
+                        (n as f32) / (density.cars_per_arterial as f32)
+                    } else {
+                        0.0
+                    },
+                    speed_per_tick: 0.02,
+                    capacity: 1,
+                    occupants: vec![driver_id.clone()],
+                    dwell_ticks_remaining: 0,
                 },
-                speed_per_tick: 0.02,
-                capacity: 1,
-                occupants: vec![driver_id.clone()],
-                dwell_ticks_remaining: 0,
-            });
-            world.spawn_agent_from_record(AgentRecord::new(
-                driver_id,
-                AgentMobilityState::InVehicle {
-                    vehicle_id,
-                    seat_index: 0,
-                },
-                vec![PlanStage::Activity {
-                    activity_id: format!("activity:drive:{arterial_index}"),
-                }],
-                0.05,
-            ));
+            );
+            api::spawn_agent_from_record(
+                &mut world,
+                AgentRecord::new(
+                    driver_id,
+                    AgentMobilityState::InVehicle {
+                        vehicle_id,
+                        seat_index: 0,
+                    },
+                    vec![PlanStage::Activity {
+                        activity_id: format!("activity:drive:{arterial_index}"),
+                    }],
+                    0.05,
+                ),
+            );
         }
     }
 
-    world
+    (world, schedule)
 }

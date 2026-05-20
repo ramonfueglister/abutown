@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::chunk::Chunk;
 use crate::ids::ChunkCoord;
-use crate::mobility::MobilityWorld;
+use crate::mobility::MobilityPersistSnapshot;
 use crate::scheduler::ChunkActivity;
 use crate::tile::TileKind;
 
@@ -166,18 +166,18 @@ pub trait MobilitySnapshotStore: std::fmt::Debug + Send + Sync {
         &mut self,
         world_id: &str,
         tick: u64,
-        snapshot: &MobilityWorld,
+        snapshot: &MobilityPersistSnapshot,
     ) -> Result<(), MobilitySnapshotStoreError>;
 
     async fn read(
         &self,
         world_id: &str,
-    ) -> Result<Option<(u64, MobilityWorld)>, MobilitySnapshotStoreError>;
+    ) -> Result<Option<(u64, MobilityPersistSnapshot)>, MobilitySnapshotStoreError>;
 }
 
 #[derive(Debug, Default)]
 pub struct InMemoryMobilitySnapshotStore {
-    snapshots: HashMap<String, (u64, MobilityWorld)>,
+    snapshots: HashMap<String, (u64, MobilityPersistSnapshot)>,
 }
 
 #[async_trait]
@@ -186,7 +186,7 @@ impl MobilitySnapshotStore for InMemoryMobilitySnapshotStore {
         &mut self,
         world_id: &str,
         tick: u64,
-        snapshot: &MobilityWorld,
+        snapshot: &MobilityPersistSnapshot,
     ) -> Result<(), MobilitySnapshotStoreError> {
         self.snapshots
             .insert(world_id.to_string(), (tick, snapshot.clone()));
@@ -196,7 +196,7 @@ impl MobilitySnapshotStore for InMemoryMobilitySnapshotStore {
     async fn read(
         &self,
         world_id: &str,
-    ) -> Result<Option<(u64, MobilityWorld)>, MobilitySnapshotStoreError> {
+    ) -> Result<Option<(u64, MobilityPersistSnapshot)>, MobilitySnapshotStoreError> {
         Ok(self.snapshots.get(world_id).cloned())
     }
 }
@@ -297,12 +297,13 @@ mod tests {
 
     #[tokio::test]
     async fn mobility_snapshot_store_writes_and_reads() {
-        use crate::mobility::seed;
+        use crate::mobility::{extract_from_world, seed};
 
         let mut store = InMemoryMobilitySnapshotStore::default();
-        let world = seed::initial_world();
+        let (world, _) = seed::initial_world();
+        let snap = extract_from_world(&world);
 
-        MobilitySnapshotStore::write(&mut store, "abutown-main", 42, &world)
+        MobilitySnapshotStore::write(&mut store, "abutown-main", 42, &snap)
             .await
             .unwrap();
 
@@ -312,7 +313,7 @@ mod tests {
             .expect("snapshot exists");
 
         assert_eq!(tick, 42);
-        assert_eq!(restored, world);
+        assert_eq!(restored, snap);
     }
 
     #[tokio::test]

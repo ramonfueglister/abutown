@@ -3,9 +3,9 @@ use abutown_protocol::{
     StopMobilityDto, VehicleMobilityDto, WorldId,
 };
 
-use crate::mobility::records::*;
+use bevy_ecs::world::World;
 
-use super::MobilityWorld;
+use crate::mobility::records::*;
 
 impl From<&AgentRecord> for AgentMobilityDto {
     fn from(value: &AgentRecord) -> Self {
@@ -105,21 +105,22 @@ impl From<&StopRecord> for StopMobilityDto {
 pub fn build_mobility_snapshot_dto(
     world_id: &WorldId,
     tick: u64,
-    world: &MobilityWorld,
+    world: &World,
 ) -> MobilitySnapshotDto {
-    let agents = world
-        .agents()
+    let agents = crate::mobility::api::agents(world)
         .iter()
-        .filter_map(|record| world.agent_dto_for(&record.id))
+        .filter_map(|record| crate::mobility::api::agent_dto_for(world, &record.id))
         .collect();
 
-    let vehicles = world
-        .vehicles()
+    let vehicles = crate::mobility::api::vehicles(world)
         .iter()
-        .filter_map(|record| world.vehicle_dto_for(&record.id))
+        .filter_map(|record| crate::mobility::api::vehicle_dto_for(world, &record.id))
         .collect();
 
-    let mut stops: Vec<StopMobilityDto> = world.stops().iter().map(StopMobilityDto::from).collect();
+    let mut stops: Vec<StopMobilityDto> = crate::mobility::api::stops(world)
+        .iter()
+        .map(StopMobilityDto::from)
+        .collect();
     stops.sort_by(|left, right| left.id.cmp(&right.id));
 
     MobilitySnapshotDto {

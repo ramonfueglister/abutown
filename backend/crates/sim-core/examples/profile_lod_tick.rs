@@ -11,6 +11,7 @@
 use bevy_ecs::schedule::Schedule;
 use sim_core::city_network::{CityNetwork, NetworkCoord, WorldTiles};
 use sim_core::ids::ChunkCoord;
+use sim_core::mobility::api;
 use sim_core::mobility::seed::{SeedDensity, from_network};
 use sim_core::mobility::systems::*;
 use std::time::Instant;
@@ -61,7 +62,7 @@ fn main() {
     let network = very_big_network();
 
     println!("seeding world (100k walkers + 1k cars)…");
-    let mut world = from_network(
+    let (mut world, mut schedule) = from_network(
         &network,
         SeedDensity {
             pedestrians_per_corridor: 50, // 2000 × 50 = 100_000
@@ -78,11 +79,11 @@ fn main() {
             subscribed.push(ChunkCoord { x, y });
         }
     }
-    world.apply_subscription_diff(&subscribed, std::iter::empty());
+    api::apply_subscription_diff(&mut world, &subscribed, std::iter::empty());
 
     println!("warming up 50 ticks…");
     for _ in 0..50 {
-        world.tick_mobility();
+        api::tick_mobility(&mut world, &mut schedule);
     }
 
     // Now switch to manual per-set timing. The MobilityWorld owns its own
@@ -102,7 +103,7 @@ fn main() {
     let mut totals = Vec::with_capacity(N);
     for _ in 0..N {
         let t0 = Instant::now();
-        world.tick_mobility();
+        api::tick_mobility(&mut world, &mut schedule);
         totals.push(t0.elapsed().as_secs_f64() * 1000.0);
     }
     let mean = totals.iter().sum::<f64>() / totals.len() as f64;
@@ -158,7 +159,7 @@ fn main() {
     let mut samples: [Vec<f64>; 10] = Default::default();
     for v in samples.iter_mut() { v.reserve(N); }
     for _ in 0..N {
-        let w = world.profile_world_mut();
+        let w = &mut world;
         for (idx, sched) in [
             &mut s_track, &mut s_reclassify,
             &mut s_walk, &mut s_board, &mut s_arrive, &mut s_vehadv, &mut s_warmflow,
@@ -180,8 +181,9 @@ fn main() {
     }
 
     // Entity count sanity-check.
-    let w = world.profile_world_mut();
+    let w = &mut world;
     let agent_count = w.query::<&sim_core::mobility::components::AgentMarker>().iter(w).count();
     let vehicle_count = w.query::<&sim_core::mobility::components::VehicleMarker>().iter(w).count();
     println!("\nfinal entity count: agents={agent_count} vehicles={vehicle_count}");
+    let _ = &mut schedule; // silence unused warning when N=0
 }

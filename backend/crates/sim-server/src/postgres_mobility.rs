@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use sim_core::mobility::MobilityWorld;
+use sim_core::mobility::MobilityPersistSnapshot;
 use sim_core::persistence::{MobilitySnapshotStore, MobilitySnapshotStoreError};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
@@ -58,7 +58,7 @@ impl MobilitySnapshotStore for PostgresMobilitySnapshotStore {
         &mut self,
         world_id: &str,
         tick: u64,
-        snapshot: &MobilityWorld,
+        snapshot: &MobilityPersistSnapshot,
     ) -> Result<(), MobilitySnapshotStoreError> {
         let tick_i64 = i64::try_from(tick)
             .map_err(|_| MobilitySnapshotStoreError::unavailable("tick exceeds i64"))?;
@@ -88,7 +88,7 @@ impl MobilitySnapshotStore for PostgresMobilitySnapshotStore {
     async fn read(
         &self,
         world_id: &str,
-    ) -> Result<Option<(u64, MobilityWorld)>, MobilitySnapshotStoreError> {
+    ) -> Result<Option<(u64, MobilityPersistSnapshot)>, MobilitySnapshotStoreError> {
         let row: Option<(i64, Value)> =
             sqlx::query_as("SELECT tick, payload FROM mobility_snapshots WHERE world_id = $1")
                 .bind(world_id)
@@ -99,7 +99,7 @@ impl MobilitySnapshotStore for PostgresMobilitySnapshotStore {
         match row {
             None => Ok(None),
             Some((tick, payload)) => {
-                let world: MobilityWorld = serde_json::from_value(payload)
+                let world: MobilityPersistSnapshot = serde_json::from_value(payload)
                     .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
                 let tick = u64::try_from(tick)
                     .map_err(|_| MobilitySnapshotStoreError::unavailable("negative tick in row"))?;
@@ -115,7 +115,7 @@ mod tests {
 
     #[tokio::test]
     async fn postgres_mobility_store_round_trip_when_database_url_is_set() {
-        use sim_core::mobility::seed;
+        use sim_core::mobility::{extract_from_world, seed};
 
         let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
             eprintln!("skipping; ABUTOWN_TEST_DATABASE_URL not set");
@@ -125,10 +125,11 @@ mod tests {
         let mut store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .unwrap();
-        let world = seed::initial_world();
+        let (world, _) = seed::initial_world();
+        let snap = extract_from_world(&world);
         let world_id = format!("test:mobility:{}", uuid::Uuid::now_v7());
 
-        store.write(&world_id, 7, &world).await.unwrap();
+        store.write(&world_id, 7, &snap).await.unwrap();
         let (tick, restored) = store
             .read(&world_id)
             .await
@@ -136,7 +137,7 @@ mod tests {
             .expect("snapshot exists");
 
         assert_eq!(tick, 7);
-        assert_eq!(restored, world);
+        assert_eq!(restored, snap);
 
         // Best-effort cleanup of the test row
         let _ = sqlx::query("DELETE FROM mobility_snapshots WHERE world_id = $1")

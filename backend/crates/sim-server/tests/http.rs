@@ -751,13 +751,13 @@ async fn postgres_mobility_state_survives_runtime_restart() {
             runtime.advance_mobility_tick_for_test();
         }
         persisted_tick = runtime.mobility_tick();
-        persisted_world = runtime.mobility_world_clone_for_test();
+        persisted_world = runtime.mobility_persist_snapshot();
         // Persist mobility directly through the store (stores now live outside the runtime).
         MobilitySnapshotStore::write(
             &mut mobility_store,
             &world_id,
             persisted_tick,
-            &runtime.mobility_world_clone_for_persist(),
+            &runtime.mobility_persist_snapshot(),
         )
         .await
         .expect("persist mobility snapshot");
