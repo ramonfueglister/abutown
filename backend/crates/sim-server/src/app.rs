@@ -604,13 +604,12 @@ fn chunk_delta_to_dto(
 }
 
 async fn apply_mutation(
-    runtime_arc: &Arc<RwLock<SimulationRuntime>>,
+    runtime: &mut SimulationRuntime,
     mutation: crate::runtime_view::Mutation,
 ) {
     use crate::runtime_view::Mutation;
     match mutation {
         Mutation::ApplyCommand { command, reply } => {
-            let mut runtime = runtime_arc.write().await;
             let result = runtime.apply_client_command(command).await;
             let _ = reply.send(result);
         }
@@ -619,7 +618,6 @@ async fn apply_mutation(
             removed,
             reply,
         } => {
-            let mut runtime = runtime_arc.write().await;
             runtime.apply_subscription_diff(added.iter(), removed.iter());
             let world_id = runtime.world_id_for_persist().clone();
             let tick = runtime.mobility_tick();
@@ -633,19 +631,25 @@ async fn apply_mutation(
             let _ = reply.send(snapshots);
         }
         Mutation::MarkChunkSnapshotsPersisted { coords } => {
-            let mut runtime = runtime_arc.write().await;
             runtime.mark_chunk_snapshots_persisted(&coords);
         }
     }
 }
 
 async fn tick_and_fan_out(state: &AppState) {
-    // Phase 0: drain mutation queue and apply each under the write-lock.
+    // Phase 0: drain the entire mutation queue under one write-lock — avoids
+    // re-acquiring per mutation when several are pending in the same tick
+    // (e.g. a burst of unsubscribes after a client disconnect plus a
+    // snapshot-mark-persisted from the persist loop).
     {
         let mut rx = state.mutation_rx.lock().await;
-        let runtime_arc = state.runtime();
-        while let Ok(mutation) = rx.try_recv() {
-            apply_mutation(&runtime_arc, mutation).await;
+        if let Ok(first) = rx.try_recv() {
+            let runtime_arc = state.runtime();
+            let mut runtime = runtime_arc.write().await;
+            apply_mutation(&mut runtime, first).await;
+            while let Ok(mutation) = rx.try_recv() {
+                apply_mutation(&mut runtime, mutation).await;
+            }
         }
     }
 
@@ -737,10 +741,19 @@ async fn handle_client_message(
                     })
                     .is_err()
                 {
+                    // Mutation channel closed (tick task gone). Roll back the
+                    // optimistic insert into connection.subscription so the
+                    // disconnect cleanup doesn't try to un-subscribe chunks
+                    // the runtime never registered.
+                    for coord in &added {
+                        connection.subscription.remove(coord);
+                    }
                     return out;
                 }
 
-                // Set up per-chunk channel subscriptions while we wait for the reply.
+                // Set up per-chunk channel subscriptions while we wait for the
+                // reply — latency optimization, the channel setup is
+                // independent of the runtime mutation.
                 let chunk_channels = state.chunk_channels();
                 for coord in &added {
                     let sender = chunk_channels
@@ -754,9 +767,24 @@ async fn handle_client_message(
                 }
 
                 // Receive initial snapshots from the tick task.
-                if let Ok(snapshots) = reply_rx.await {
-                    for snap in snapshots {
-                        out.push(ServerMessageDto::MobilityChunkSnapshot(snap));
+                match reply_rx.await {
+                    Ok(snapshots) => {
+                        for snap in snapshots {
+                            out.push(ServerMessageDto::MobilityChunkSnapshot(snap));
+                        }
+                    }
+                    Err(_) => {
+                        // Reply channel dropped — tick task crashed mid-drain
+                        // or oneshot was canceled. Roll back our local state
+                        // so we don't have streams pointing at chunks the
+                        // runtime never registered as ours.
+                        tracing::warn!(
+                            "chunk_subscribe reply dropped; rolling back local state"
+                        );
+                        for coord in &added {
+                            connection.subscription.remove(coord);
+                            connection.chunk_streams.remove(coord);
+                        }
                     }
                 }
             }
