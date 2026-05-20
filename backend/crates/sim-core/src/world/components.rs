@@ -55,6 +55,34 @@ pub struct LodCooldown(pub u8);
 #[derive(Component, Copy, Clone, Debug, Default)]
 pub struct ChunkSubscriberCount(pub u8);
 
+// === Tile-entity scaffold ===
+
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Tile;
+
+#[derive(Component, Copy, Clone, Debug)]
+pub struct LocalIndex(pub u16);
+
+#[derive(Component, Debug)]
+#[relationship(relationship_target = ChunkTiles)]
+pub struct BelongsToChunk(pub Entity);
+
+#[derive(Component, Debug, Default)]
+#[relationship_target(relationship = BelongsToChunk)]
+pub struct ChunkTiles(Vec<Entity>);
+
+impl ChunkTiles {
+    pub fn iter(&self) -> impl Iterator<Item = &Entity> {
+        self.0.iter()
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
