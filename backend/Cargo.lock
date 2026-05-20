@@ -2539,6 +2539,7 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "jsonwebtoken",
+ "prost",
  "reqwest",
  "serde",
  "serde_json",

@@ -4,10 +4,8 @@
 //! HTTP/WS handler into the tick task. `RuntimeReadView` is the
 //! immutable per-tick snapshot published via `ArcSwap`.
 
-use abutown_protocol::{
-    ChunkSnapshotDto, ClientCommandDto, HealthResponse, MobilityChunkDeltaDto,
-    MobilityChunkSnapshotDto, MobilitySnapshotDto, WorldId, WorldSummaryDto,
-};
+use abutown_protocol::wire as w;
+use abutown_protocol::{ChunkSnapshotDto, ClientCommandDto, WorldId};
 use sim_core::ids::ChunkCoord;
 use sim_core::mobility::MobilityWorld;
 use std::collections::HashMap;
@@ -24,7 +22,7 @@ pub enum Mutation {
     SubscriptionDiff {
         added: Vec<ChunkCoord>,
         removed: Vec<ChunkCoord>,
-        reply: oneshot::Sender<Vec<MobilityChunkSnapshotDto>>,
+        reply: oneshot::Sender<Vec<w::MobilityChunkSnapshot>>,
     },
     MarkChunkSnapshotsPersisted {
         coords: Vec<ChunkCoord>,
@@ -39,6 +37,9 @@ pub enum Mutation {
 
 /// Everything the snapshot persist loop needs to issue DB writes without
 /// touching the live runtime.
+///
+/// Persist payloads remain serde DTOs — the storage path keeps the legacy
+/// schema until Task 6 / 7 revisit it. They never cross the WS wire.
 pub struct PersistPayload {
     pub chunk_snapshots: Vec<ChunkSnapshotDto>,
     pub world_id: WorldId,
@@ -54,12 +55,12 @@ pub struct RuntimeReadView {
     pub tick: u64,
     pub world_id: WorldId,
     pub mobility_tick: u64,
-    pub health: HealthResponse,
-    pub world_summary: WorldSummaryDto,
-    pub chunk_snapshots: HashMap<ChunkCoord, ChunkSnapshotDto>,
-    pub mobility_chunk_snapshots: HashMap<ChunkCoord, MobilityChunkSnapshotDto>,
-    pub mobility_full_dto: MobilitySnapshotDto,
-    pub per_chunk_deltas: Vec<MobilityChunkDeltaDto>,
+    pub health: w::HealthResponse,
+    pub world_summary: w::WorldSummary,
+    pub chunk_snapshots: HashMap<ChunkCoord, w::ChunkSnapshot>,
+    pub mobility_chunk_snapshots: HashMap<ChunkCoord, w::MobilityChunkSnapshot>,
+    pub mobility_full_dto: w::MobilitySnapshot,
+    pub per_chunk_deltas: Vec<w::MobilityChunkDelta>,
     pub pulse_sequence: u64,
     /// Subscriber-counts snapshot for chunk channels — moved into the view so
     /// WS chunk_unsubscribe can reap chunk channels without a runtime read-lock.

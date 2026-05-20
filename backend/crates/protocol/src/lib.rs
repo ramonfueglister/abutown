@@ -4,6 +4,14 @@ pub mod v1 {
     include!(concat!(env!("OUT_DIR"), "/abutown.v1.rs"));
 }
 
+/// Wire-format types (Protobuf). These cross the WebSocket boundary
+/// post-Task-4 and the HTTP boundary post-Task-6. Use `wire::*` at
+/// call sites to distinguish from the legacy serde DTOs that survive
+/// until Task 7 for storage / HTTP transitional paths.
+pub mod wire {
+    pub use crate::v1::*;
+}
+
 use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u16 = 1;

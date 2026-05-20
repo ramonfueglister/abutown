@@ -1,8 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
+use abutown_protocol::wire as w;
 use abutown_protocol::{
-    ChunkSnapshotDto, ClientCommandDto, ClientMessageDto, CommandResponseDto, HealthResponse,
-    MobilityChunkDeltaDto, MobilitySnapshotDto, ServerMessageDto, WorldSummaryDto,
+    ChunkSnapshotDto, ClientCommandDto, CommandResponseDto, HealthResponse, MobilitySnapshotDto,
+    WorldSummaryDto,
 };
 use axum::{
     Json, Router,
@@ -15,6 +16,7 @@ use axum::{
     routing::{get, post},
 };
 use dashmap::DashMap;
+use prost::Message as _;
 use sim_core::{
     ids::ChunkCoord,
     persistence::{
@@ -51,12 +53,12 @@ fn resolve_city_network_path() -> String {
 
 #[derive(Clone)]
 pub struct AppState {
-    deltas: broadcast::Sender<ServerMessageDto>,
+    deltas: broadcast::Sender<w::ServerMessage>,
     card_hands: CardHandStore,
     auth: AuthVerifier,
     snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
-    chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
+    chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
 }
@@ -168,7 +170,7 @@ impl AppState {
 
     pub(crate) fn chunk_channels(
         &self,
-    ) -> Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>> {
+    ) -> Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>> {
         Arc::clone(&self.chunk_channels)
     }
 
@@ -183,7 +185,7 @@ impl AppState {
         store.read_snapshot(coord).await
     }
 
-    fn subscribe_deltas(&self) -> broadcast::Receiver<ServerMessageDto> {
+    fn subscribe_deltas(&self) -> broadcast::Receiver<w::ServerMessage> {
         self.deltas.subscribe()
     }
 
@@ -214,7 +216,7 @@ fn build_read_view_from_runtime(
     let mobility_tick = runtime.mobility_tick();
     let mobility = runtime.mobility();
 
-    let per_chunk_deltas: Vec<abutown_protocol::MobilityChunkDeltaDto> = per_chunk
+    let per_chunk_deltas: Vec<w::MobilityChunkDelta> = per_chunk
         .values()
         .map(|delta| chunk_delta_to_dto(delta, mobility, &world_id, mobility_tick))
         .collect();
@@ -227,22 +229,23 @@ fn build_read_view_from_runtime(
     // for chunks that didn't change. Bench stayed within the 5% tolerance
     // (see plan §Task 4 step 5 — the optimization to only rebuild changed
     // chunks is a documented escape hatch if bench regresses).
-    let world_summary = runtime.world_summary();
+    let world_summary_legacy = runtime.world_summary();
+    let world_summary = world_summary_dto_to_proto(&world_summary_legacy);
     let mut chunk_snapshots: std::collections::HashMap<
         sim_core::ids::ChunkCoord,
-        abutown_protocol::ChunkSnapshotDto,
+        w::ChunkSnapshot,
     > = std::collections::HashMap::new();
     let mut mobility_chunk_snapshots: std::collections::HashMap<
         sim_core::ids::ChunkCoord,
-        abutown_protocol::MobilityChunkSnapshotDto,
+        w::MobilityChunkSnapshot,
     > = std::collections::HashMap::new();
-    for coord_dto in world_summary.loaded_chunks.iter() {
+    for coord_dto in world_summary_legacy.loaded_chunks.iter() {
         let coord = sim_core::ids::ChunkCoord {
             x: coord_dto.x,
             y: coord_dto.y,
         };
         if let Some(snap) = runtime.chunk_snapshot(coord) {
-            chunk_snapshots.insert(coord, snap);
+            chunk_snapshots.insert(coord, chunk_snapshot_dto_to_proto(&snap));
         }
         let mob_snapshot = mobility.build_chunk_snapshot(coord);
         let mob_dto = chunk_snapshot_to_dto(&mob_snapshot, mobility, &world_id, mobility_tick);
@@ -250,16 +253,20 @@ fn build_read_view_from_runtime(
     }
 
     let chunk_subscriber_counts = mobility.chunk_subscriber_counts_snapshot();
+    let mobility_full_legacy = runtime.mobility_snapshot();
+    let mobility_full_dto = mobility_snapshot_dto_to_proto(&mobility_full_legacy);
+    let health_legacy = runtime.health();
+    let health = health_dto_to_proto(&health_legacy);
 
     crate::runtime_view::RuntimeReadView {
         tick: mobility_tick,
         world_id: world_id.clone(),
         mobility_tick,
-        health: runtime.health(),
+        health,
         world_summary,
         chunk_snapshots,
         mobility_chunk_snapshots,
-        mobility_full_dto: runtime.mobility_snapshot(),
+        mobility_full_dto,
         per_chunk_deltas,
         pulse_sequence,
         chunk_subscriber_counts,
@@ -350,15 +357,17 @@ fn build_router_from_state(state: AppState) -> Router {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    Json(state.view().load().health.clone())
+    Json(health_proto_to_dto(&state.view().load().health))
 }
 
 async fn world(State(state): State<AppState>) -> Json<WorldSummaryDto> {
-    Json(state.view().load().world_summary.clone())
+    Json(world_summary_proto_to_dto(&state.view().load().world_summary))
 }
 
 async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
-    Json(state.view().load().mobility_full_dto.clone())
+    Json(mobility_snapshot_proto_to_dto(
+        &state.view().load().mobility_full_dto,
+    ))
 }
 
 async fn cards() -> Json<Vec<crate::card_hand::CardDefinition>> {
@@ -422,8 +431,7 @@ async fn chunk(
         .load()
         .chunk_snapshots
         .get(&coord)
-        .cloned()
-        .map(Json)
+        .map(|snap| Json(chunk_snapshot_proto_to_dto(snap)))
         .ok_or(StatusCode::NOT_FOUND)
 }
 
@@ -457,9 +465,11 @@ async fn command(State(state): State<AppState>, Json(command): Json<ClientComman
 
     match result {
         Ok(applied) => {
-            let _ = state.deltas.send(ServerMessageDto::WorldEvent {
-                event: applied.event.clone(),
-            });
+            let event_proto = world_event_dto_to_proto(&applied.event);
+            let msg = w::ServerMessage {
+                body: Some(w::server_message::Body::WorldEvent(event_proto)),
+            };
+            let _ = state.deltas.send(msg);
             (
                 StatusCode::OK,
                 Json(CommandResponseDto::Accepted(applied.response)),
@@ -480,7 +490,7 @@ async fn websocket(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl 
 
 struct ConnectionState {
     subscription: std::collections::HashSet<sim_core::ids::ChunkCoord>,
-    chunk_streams: StreamMap<sim_core::ids::ChunkCoord, BroadcastStream<MobilityChunkDeltaDto>>,
+    chunk_streams: StreamMap<sim_core::ids::ChunkCoord, BroadcastStream<w::MobilityChunkDelta>>,
 }
 
 impl ConnectionState {
@@ -496,11 +506,13 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     let mut deltas = state.subscribe_deltas();
     let hello = {
         let view = state.view().load();
-        ServerMessageDto::Hello(abutown_protocol::ServerHelloDto {
-            protocol_version: abutown_protocol::PROTOCOL_VERSION,
-            world_id: view.world_id.clone(),
-            chunk_size: view.world_summary.chunk_size,
-        })
+        w::ServerMessage {
+            body: Some(w::server_message::Body::Hello(w::Hello {
+                protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+                world_id: view.world_id.0.clone(),
+                chunk_size: view.world_summary.chunk_size,
+            })),
+        }
     };
     if send_server_message(&mut socket, hello).await.is_err() {
         return;
@@ -512,10 +524,13 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
         tokio::select! {
             inbound = socket.recv() => {
                 let Some(Ok(message)) = inbound else { break; };
-                let Message::Text(text) = message else { continue; };
-                let Ok(client_message) = serde_json::from_str::<ClientMessageDto>(&text) else {
-                    tracing::warn!(?text, "invalid client message");
-                    continue;
+                let Message::Binary(bytes) = message else { continue; };
+                let client_message = match w::ClientMessage::decode(bytes.as_ref()) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!(?e, "invalid client message");
+                        continue;
+                    }
                 };
                 let outgoing = handle_client_message(&state, &client_message, &mut connection).await;
                 let mut errored = false;
@@ -533,10 +548,10 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
                 match item {
                     Ok(delta) => {
-                        if send_server_message(
-                            &mut socket,
-                            ServerMessageDto::MobilityChunkDelta(delta),
-                        ).await.is_err() {
+                        let msg = w::ServerMessage {
+                            body: Some(w::server_message::Body::MobilityChunkDelta(delta)),
+                        };
+                        if send_server_message(&mut socket, msg).await.is_err() {
                             break;
                         }
                     }
@@ -545,13 +560,13 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                         // from the lock-free RuntimeReadView. If the chunk
                         // isn't in the view (e.g., it just unloaded), skip.
                         let snap = state.view().load().mobility_chunk_snapshots.get(&chunk).cloned();
-                        if let Some(snap) = snap
-                            && send_server_message(
-                                &mut socket,
-                                ServerMessageDto::MobilityChunkSnapshot(snap),
-                            ).await.is_err()
-                        {
-                            break;
+                        if let Some(snap) = snap {
+                            let msg = w::ServerMessage {
+                                body: Some(w::server_message::Body::MobilityChunkSnapshot(snap)),
+                            };
+                            if send_server_message(&mut socket, msg).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
@@ -583,40 +598,446 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     }
 }
 
+// ===== legacy serde DTO → proto wire helpers =====
+//
+// These convert the runtime's existing serde-DTO API surface into the
+// protobuf wire types now used on the WS hot path. They are internal
+// to sim-server; the legacy DTOs in `abutown_protocol::*` survive
+// until Task 7 because HTTP / DB persistence still consume them.
+
+fn direction_to_proto(d: abutown_protocol::DirectionDto) -> w::Direction {
+    use abutown_protocol::DirectionDto as L;
+    match d {
+        L::N => w::Direction::N,
+        L::Ne => w::Direction::Ne,
+        L::E => w::Direction::E,
+        L::Se => w::Direction::Se,
+        L::S => w::Direction::S,
+        L::Sw => w::Direction::Sw,
+        L::W => w::Direction::W,
+        L::Nw => w::Direction::Nw,
+    }
+}
+
+fn tile_kind_to_proto(k: abutown_protocol::TileKindDto) -> w::TileKind {
+    use abutown_protocol::TileKindDto as L;
+    match k {
+        L::Grass => w::TileKind::Grass,
+        L::Water => w::TileKind::Water,
+        L::Road => w::TileKind::Road,
+        L::BuildingFootprint => w::TileKind::BuildingFootprint,
+    }
+}
+
+fn chunk_state_to_proto(s: abutown_protocol::ChunkStateDto) -> w::ChunkState {
+    use abutown_protocol::ChunkStateDto as L;
+    match s {
+        L::Asleep => w::ChunkState::Asleep,
+        L::Warm => w::ChunkState::Warm,
+        L::Active => w::ChunkState::Active,
+        L::Hot => w::ChunkState::Hot,
+    }
+}
+
+fn agent_dto_to_proto(dto: abutown_protocol::AgentMobilityDto) -> w::AgentMobility {
+    use abutown_protocol::AgentMobilityStateDto as Legacy;
+    let state = match dto.state {
+        Legacy::Walking { link_id, progress } => w::agent_state::State::Walking(w::Walking {
+            link_id,
+            progress,
+        }),
+        Legacy::WaitingAtStop { stop_id } => {
+            w::agent_state::State::WaitingAtStop(w::WaitingAtStop { stop_id })
+        }
+        Legacy::InVehicle {
+            vehicle_id,
+            seat_index,
+        } => w::agent_state::State::InVehicle(w::InVehicle {
+            vehicle_id: vehicle_id.0,
+            seat_index: seat_index as u32,
+        }),
+        Legacy::Boarding {
+            vehicle_id,
+            stop_id,
+        } => w::agent_state::State::Boarding(w::Boarding {
+            vehicle_id: vehicle_id.0,
+            stop_id,
+        }),
+        Legacy::Alighting {
+            vehicle_id,
+            stop_id,
+        } => w::agent_state::State::Alighting(w::Alighting {
+            vehicle_id: vehicle_id.0,
+            stop_id,
+        }),
+        Legacy::AtActivity { activity_id } => {
+            w::agent_state::State::AtActivity(w::AtActivity { activity_id })
+        }
+    };
+    w::AgentMobility {
+        id: dto.id.0,
+        state: Some(w::AgentState { state: Some(state) }),
+        world_coord: Some(w::WorldCoord {
+            x: dto.world_coord.x,
+            y: dto.world_coord.y,
+        }),
+        direction: direction_to_proto(dto.direction) as i32,
+        sprite_key: dto.sprite_key,
+        plan_cursor: dto.plan_cursor as u32,
+    }
+}
+
+fn vehicle_dto_to_proto(dto: abutown_protocol::VehicleMobilityDto) -> w::VehicleMobility {
+    use abutown_protocol::VehicleKindDto;
+    let kind = match dto.kind {
+        VehicleKindDto::Car => w::VehicleKind::Car,
+        VehicleKindDto::Tram => w::VehicleKind::Tram,
+    };
+    w::VehicleMobility {
+        id: dto.id.0,
+        kind: kind as i32,
+        route_id: dto.route_id,
+        link_index: dto.link_index as u32,
+        progress: dto.progress,
+        capacity: dto.capacity as u32,
+        occupants: dto.occupants.into_iter().map(|e| e.0).collect(),
+        dwell_ticks_remaining: dto.dwell_ticks_remaining as u32,
+        world_coord: Some(w::WorldCoord {
+            x: dto.world_coord.x,
+            y: dto.world_coord.y,
+        }),
+        direction: direction_to_proto(dto.direction) as i32,
+        sprite_key: dto.sprite_key,
+    }
+}
+
+fn stop_dto_to_proto(s: &abutown_protocol::StopMobilityDto) -> w::Stop {
+    w::Stop {
+        id: s.id.clone(),
+        route_id: s.route_id.clone(),
+        link_index: s.link_index as u32,
+        progress: s.progress,
+        waiting_agents: s.waiting_agents.iter().map(|e| e.0.clone()).collect(),
+    }
+}
+
+fn world_summary_dto_to_proto(s: &abutown_protocol::WorldSummaryDto) -> w::WorldSummary {
+    w::WorldSummary {
+        protocol_version: u32::from(s.protocol_version),
+        world_id: s.world_id.0.clone(),
+        chunk_size: u32::from(s.chunk_size),
+        loaded_chunks: s
+            .loaded_chunks
+            .iter()
+            .map(|c| w::ChunkCoord { x: c.x, y: c.y })
+            .collect(),
+        tick_period_ms: s.tick_period_ms,
+    }
+}
+
+fn health_dto_to_proto(h: &abutown_protocol::HealthResponse) -> w::HealthResponse {
+    w::HealthResponse {
+        protocol_version: u32::from(h.protocol_version),
+        service: h.service.clone(),
+        world_id: h.world_id.0.clone(),
+        ok: h.ok,
+    }
+}
+
+fn chunk_snapshot_dto_to_proto(c: &abutown_protocol::ChunkSnapshotDto) -> w::ChunkSnapshot {
+    w::ChunkSnapshot {
+        protocol_version: u32::from(c.protocol_version),
+        world_id: c.world_id.0.clone(),
+        coord: Some(w::ChunkCoord {
+            x: c.coord.x,
+            y: c.coord.y,
+        }),
+        chunk_version: c.chunk_version,
+        chunk_state: chunk_state_to_proto(c.chunk_state) as i32,
+        tile_count: u32::from(c.tile_count),
+        tiles: c
+            .tiles
+            .iter()
+            .map(|t| w::TileMutation {
+                local_index: u32::from(t.local_index),
+                kind: tile_kind_to_proto(t.kind) as i32,
+                version: t.version,
+            })
+            .collect(),
+    }
+}
+
+fn mobility_snapshot_dto_to_proto(s: &abutown_protocol::MobilitySnapshotDto) -> w::MobilitySnapshot {
+    w::MobilitySnapshot {
+        protocol_version: u32::from(s.protocol_version),
+        world_id: s.world_id.0.clone(),
+        tick: s.tick,
+        agents: s.agents.iter().cloned().map(agent_dto_to_proto).collect(),
+        vehicles: s
+            .vehicles
+            .iter()
+            .cloned()
+            .map(vehicle_dto_to_proto)
+            .collect(),
+        stops: s.stops.iter().map(stop_dto_to_proto).collect(),
+    }
+}
+
+fn tile_pulse_dto_to_proto(p: &abutown_protocol::TilePulseDeltaDto) -> w::TilePulse {
+    w::TilePulse {
+        protocol_version: u32::from(p.protocol_version),
+        world_id: p.world_id.0.clone(),
+        tick: p.tick,
+        version: p.version,
+        coord: Some(w::ChunkCoord {
+            x: p.coord.x,
+            y: p.coord.y,
+        }),
+        local_index: u32::from(p.local_index),
+    }
+}
+
+fn world_event_dto_to_proto(e: &abutown_protocol::WorldEventDto) -> w::WorldEvent {
+    use abutown_protocol::WorldEventDto as L;
+    match e {
+        L::TileKindSet(tk) => w::WorldEvent {
+            event: Some(w::world_event::Event::TileKindSet(w::TileKindSetEvent {
+                protocol_version: u32::from(tk.protocol_version),
+                event_id: tk.event_id.clone(),
+                command_id: tk.command_id.clone(),
+                world_id: tk.world_id.0.clone(),
+                tick: tk.tick,
+                version: tk.version,
+                coord: Some(w::ChunkCoord {
+                    x: tk.coord.x,
+                    y: tk.coord.y,
+                }),
+                local_index: u32::from(tk.local_index),
+                kind: tile_kind_to_proto(tk.kind) as i32,
+            })),
+        },
+    }
+}
+
+// ===== reverse helpers: proto → legacy serde DTO =====
+//
+// HTTP endpoints in this crate still emit JSON (Task 6 will migrate them).
+// Since the RuntimeReadView now carries proto types on its wire-facing
+// fields, the HTTP handlers need a way to go back to serde DTOs for
+// `Json(_)` responses. These helpers do exactly that — they will be
+// deleted in Task 6 when /health, /world, /mobility, /chunks/* migrate
+// to protobuf bodies as well.
+
+fn direction_proto_to_dto(d: i32) -> abutown_protocol::DirectionDto {
+    use abutown_protocol::DirectionDto as L;
+    match w::Direction::try_from(d).unwrap_or(w::Direction::Unspecified) {
+        w::Direction::Unspecified | w::Direction::N => L::N,
+        w::Direction::Ne => L::Ne,
+        w::Direction::E => L::E,
+        w::Direction::Se => L::Se,
+        w::Direction::S => L::S,
+        w::Direction::Sw => L::Sw,
+        w::Direction::W => L::W,
+        w::Direction::Nw => L::Nw,
+    }
+}
+
+fn tile_kind_proto_to_dto(k: i32) -> abutown_protocol::TileKindDto {
+    use abutown_protocol::TileKindDto as L;
+    match w::TileKind::try_from(k).unwrap_or(w::TileKind::Unspecified) {
+        w::TileKind::Unspecified | w::TileKind::Grass => L::Grass,
+        w::TileKind::Water => L::Water,
+        w::TileKind::Road => L::Road,
+        w::TileKind::BuildingFootprint => L::BuildingFootprint,
+    }
+}
+
+fn chunk_state_proto_to_dto(s: i32) -> abutown_protocol::ChunkStateDto {
+    use abutown_protocol::ChunkStateDto as L;
+    match w::ChunkState::try_from(s).unwrap_or(w::ChunkState::Unspecified) {
+        w::ChunkState::Unspecified | w::ChunkState::Asleep => L::Asleep,
+        w::ChunkState::Warm => L::Warm,
+        w::ChunkState::Active => L::Active,
+        w::ChunkState::Hot => L::Hot,
+    }
+}
+
+fn vehicle_kind_proto_to_dto(k: i32) -> abutown_protocol::VehicleKindDto {
+    use abutown_protocol::VehicleKindDto as L;
+    match w::VehicleKind::try_from(k).unwrap_or(w::VehicleKind::Unspecified) {
+        w::VehicleKind::Unspecified | w::VehicleKind::Car => L::Car,
+        w::VehicleKind::Tram => L::Tram,
+    }
+}
+
+fn agent_proto_to_dto(a: &w::AgentMobility) -> abutown_protocol::AgentMobilityDto {
+    use abutown_protocol::AgentMobilityStateDto as State;
+    let state = match a.state.as_ref().and_then(|s| s.state.as_ref()) {
+        Some(w::agent_state::State::Walking(walk)) => State::Walking {
+            link_id: walk.link_id.clone(),
+            progress: walk.progress,
+        },
+        Some(w::agent_state::State::WaitingAtStop(wait)) => State::WaitingAtStop {
+            stop_id: wait.stop_id.clone(),
+        },
+        Some(w::agent_state::State::InVehicle(iv)) => State::InVehicle {
+            vehicle_id: abutown_protocol::EntityId(iv.vehicle_id.clone()),
+            seat_index: iv.seat_index as u16,
+        },
+        Some(w::agent_state::State::Boarding(b)) => State::Boarding {
+            vehicle_id: abutown_protocol::EntityId(b.vehicle_id.clone()),
+            stop_id: b.stop_id.clone(),
+        },
+        Some(w::agent_state::State::Alighting(al)) => State::Alighting {
+            vehicle_id: abutown_protocol::EntityId(al.vehicle_id.clone()),
+            stop_id: al.stop_id.clone(),
+        },
+        Some(w::agent_state::State::AtActivity(at)) => State::AtActivity {
+            activity_id: at.activity_id.clone(),
+        },
+        None => State::AtActivity {
+            activity_id: String::new(),
+        },
+    };
+    let wc = a.world_coord.unwrap_or(w::WorldCoord { x: 0.0, y: 0.0 });
+    abutown_protocol::AgentMobilityDto {
+        id: abutown_protocol::EntityId(a.id.clone()),
+        state,
+        plan_cursor: a.plan_cursor as usize,
+        world_coord: abutown_protocol::WorldCoordDto { x: wc.x, y: wc.y },
+        direction: direction_proto_to_dto(a.direction),
+        sprite_key: a.sprite_key.clone(),
+    }
+}
+
+fn vehicle_proto_to_dto(v: &w::VehicleMobility) -> abutown_protocol::VehicleMobilityDto {
+    let wc = v.world_coord.unwrap_or(w::WorldCoord { x: 0.0, y: 0.0 });
+    abutown_protocol::VehicleMobilityDto {
+        id: abutown_protocol::EntityId(v.id.clone()),
+        kind: vehicle_kind_proto_to_dto(v.kind),
+        route_id: v.route_id.clone(),
+        link_index: v.link_index as usize,
+        progress: v.progress,
+        capacity: v.capacity as u16,
+        occupants: v
+            .occupants
+            .iter()
+            .map(|s| abutown_protocol::EntityId(s.clone()))
+            .collect(),
+        dwell_ticks_remaining: v.dwell_ticks_remaining as u16,
+        world_coord: abutown_protocol::WorldCoordDto { x: wc.x, y: wc.y },
+        direction: direction_proto_to_dto(v.direction),
+        sprite_key: v.sprite_key.clone(),
+    }
+}
+
+fn stop_proto_to_dto(s: &w::Stop) -> abutown_protocol::StopMobilityDto {
+    abutown_protocol::StopMobilityDto {
+        id: s.id.clone(),
+        route_id: s.route_id.clone(),
+        link_index: s.link_index as usize,
+        progress: s.progress,
+        waiting_agents: s
+            .waiting_agents
+            .iter()
+            .map(|w| abutown_protocol::EntityId(w.clone()))
+            .collect(),
+    }
+}
+
+fn world_summary_proto_to_dto(s: &w::WorldSummary) -> abutown_protocol::WorldSummaryDto {
+    abutown_protocol::WorldSummaryDto {
+        protocol_version: s.protocol_version as u16,
+        world_id: abutown_protocol::WorldId(s.world_id.clone()),
+        chunk_size: s.chunk_size as u16,
+        loaded_chunks: s
+            .loaded_chunks
+            .iter()
+            .map(|c| abutown_protocol::ChunkCoordDto { x: c.x, y: c.y })
+            .collect(),
+        tick_period_ms: s.tick_period_ms,
+    }
+}
+
+fn health_proto_to_dto(h: &w::HealthResponse) -> abutown_protocol::HealthResponse {
+    abutown_protocol::HealthResponse {
+        protocol_version: h.protocol_version as u16,
+        service: h.service.clone(),
+        world_id: abutown_protocol::WorldId(h.world_id.clone()),
+        ok: h.ok,
+    }
+}
+
+fn chunk_snapshot_proto_to_dto(c: &w::ChunkSnapshot) -> abutown_protocol::ChunkSnapshotDto {
+    abutown_protocol::ChunkSnapshotDto {
+        protocol_version: c.protocol_version as u16,
+        world_id: abutown_protocol::WorldId(c.world_id.clone()),
+        coord: c
+            .coord
+            .as_ref()
+            .map(|coord| abutown_protocol::ChunkCoordDto {
+                x: coord.x,
+                y: coord.y,
+            })
+            .unwrap_or(abutown_protocol::ChunkCoordDto { x: 0, y: 0 }),
+        chunk_version: c.chunk_version,
+        chunk_state: chunk_state_proto_to_dto(c.chunk_state),
+        tile_count: c.tile_count as u16,
+        tiles: c
+            .tiles
+            .iter()
+            .map(|t| abutown_protocol::TileMutationDto {
+                local_index: t.local_index as u16,
+                kind: tile_kind_proto_to_dto(t.kind),
+                version: t.version,
+            })
+            .collect(),
+    }
+}
+
+fn mobility_snapshot_proto_to_dto(
+    s: &w::MobilitySnapshot,
+) -> abutown_protocol::MobilitySnapshotDto {
+    abutown_protocol::MobilitySnapshotDto {
+        protocol_version: s.protocol_version as u16,
+        world_id: abutown_protocol::WorldId(s.world_id.clone()),
+        tick: s.tick,
+        agents: s.agents.iter().map(agent_proto_to_dto).collect(),
+        vehicles: s.vehicles.iter().map(vehicle_proto_to_dto).collect(),
+        stops: s.stops.iter().map(stop_proto_to_dto).collect(),
+    }
+}
+
+// ===== per-chunk delta + snapshot builders (proto outputs) =====
+
 fn chunk_delta_to_dto(
     delta: &sim_core::mobility::MobilityChunkDelta,
     world: &sim_core::mobility::MobilityWorld,
     world_id: &abutown_protocol::WorldId,
     tick: u64,
-) -> abutown_protocol::MobilityChunkDeltaDto {
-    abutown_protocol::MobilityChunkDeltaDto {
-        protocol_version: abutown_protocol::PROTOCOL_VERSION,
-        world_id: world_id.clone(),
+) -> w::MobilityChunkDelta {
+    w::MobilityChunkDelta {
+        protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+        world_id: world_id.0.clone(),
         tick,
-        chunk: abutown_protocol::ChunkCoordDto {
+        chunk: Some(w::ChunkCoord {
             x: delta.chunk.x,
             y: delta.chunk.y,
-        },
+        }),
         changed_agents: delta
             .changed_agents
             .iter()
             .filter_map(|r| world.agent_dto_for(&r.id))
+            .map(agent_dto_to_proto)
             .collect(),
         changed_vehicles: delta
             .changed_vehicles
             .iter()
             .filter_map(|r| world.vehicle_dto_for(&r.id))
+            .map(vehicle_dto_to_proto)
             .collect(),
-        left_agents: delta
-            .left_agents
-            .iter()
-            .map(|id| abutown_protocol::EntityId(id.0.clone()))
-            .collect(),
-        left_vehicles: delta
-            .left_vehicles
-            .iter()
-            .map(|id| abutown_protocol::EntityId(id.0.clone()))
-            .collect(),
+        left_agents: delta.left_agents.iter().map(|id| id.0.clone()).collect(),
+        left_vehicles: delta.left_vehicles.iter().map(|id| id.0.clone()).collect(),
     }
 }
 
@@ -638,7 +1059,7 @@ async fn apply_mutation_owned(
             runtime.apply_subscription_diff(added.iter(), removed.iter());
             let world_id = runtime.world_id_for_persist().clone();
             let tick = runtime.mobility_tick();
-            let snapshots: Vec<abutown_protocol::MobilityChunkSnapshotDto> = added
+            let snapshots: Vec<w::MobilityChunkSnapshot> = added
                 .iter()
                 .map(|coord| {
                     let snapshot = runtime.mobility().build_chunk_snapshot(*coord);
@@ -669,8 +1090,8 @@ async fn tick_loop(
     mut runtime: SimulationRuntime,
     mut mutation_rx: tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
-    deltas: broadcast::Sender<ServerMessageDto>,
-    chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
+    deltas: broadcast::Sender<w::ServerMessage>,
+    chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
     interval: Duration,
 ) {
     let mut ticker = tokio::time::interval(interval);
@@ -694,8 +1115,8 @@ async fn tick_once(
     runtime: &mut SimulationRuntime,
     mutation_rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>,
     view: &Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
-    deltas: &broadcast::Sender<ServerMessageDto>,
-    chunk_channels: &Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
+    deltas: &broadcast::Sender<w::ServerMessage>,
+    chunk_channels: &Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
 ) {
     // Phase 0: drain the entire mutation queue. We own the runtime exclusively
     // — no lock acquisition between mutations.
@@ -726,8 +1147,31 @@ async fn tick_once(
     view.store(Arc::new(new_view));
 
     // Phase 4: legacy global tile pulse via the broadcast channel.
-    let pulse = runtime.next_pulse();
-    let _ = deltas.send(pulse);
+    // next_pulse() still returns the serde DTO; convert it to the wire
+    // ServerMessage envelope here so the broadcast channel carries proto.
+    let pulse_legacy = runtime.next_pulse();
+    let pulse_msg = match pulse_legacy {
+        abutown_protocol::ServerMessageDto::TilePulse(p) => w::ServerMessage {
+            body: Some(w::server_message::Body::TilePulse(tile_pulse_dto_to_proto(
+                &p,
+            ))),
+        },
+        // next_pulse is documented to only return TilePulse; any other variant
+        // would be a programming error — emit an explicit Error envelope so
+        // it's visible on the wire rather than silently dropped.
+        other => {
+            tracing::error!(?other, "next_pulse returned non-TilePulse variant");
+            w::ServerMessage {
+                body: Some(w::server_message::Body::Error(w::ServerError {
+                    protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+                    world_id: String::new(),
+                    code: "internal".into(),
+                    message: "next_pulse returned non-TilePulse variant".into(),
+                })),
+            }
+        }
+    };
+    let _ = deltas.send(pulse_msg);
 }
 
 fn chunk_snapshot_to_dto(
@@ -735,41 +1179,44 @@ fn chunk_snapshot_to_dto(
     world: &sim_core::mobility::MobilityWorld,
     world_id: &abutown_protocol::WorldId,
     tick: u64,
-) -> abutown_protocol::MobilityChunkSnapshotDto {
-    abutown_protocol::MobilityChunkSnapshotDto {
-        protocol_version: abutown_protocol::PROTOCOL_VERSION,
-        world_id: world_id.clone(),
+) -> w::MobilityChunkSnapshot {
+    w::MobilityChunkSnapshot {
+        protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+        world_id: world_id.0.clone(),
         tick,
-        chunk: abutown_protocol::ChunkCoordDto {
+        chunk: Some(w::ChunkCoord {
             x: snapshot.chunk.x,
             y: snapshot.chunk.y,
-        },
+        }),
         agents: snapshot
             .agents
             .iter()
             .filter_map(|record| world.agent_dto_for(&record.id))
+            .map(agent_dto_to_proto)
             .collect(),
         vehicles: snapshot
             .vehicles
             .iter()
             .filter_map(|record| world.vehicle_dto_for(&record.id))
+            .map(vehicle_dto_to_proto)
             .collect(),
     }
 }
 
 async fn handle_client_message(
     state: &AppState,
-    message: &ClientMessageDto,
+    message: &w::ClientMessage,
     connection: &mut ConnectionState,
-) -> Vec<ServerMessageDto> {
-    let mut out: Vec<ServerMessageDto> = Vec::new();
+) -> Vec<w::ServerMessage> {
+    use w::client_message::Body;
+    let mut out: Vec<w::ServerMessage> = Vec::new();
 
-    match message {
-        ClientMessageDto::ChunkSubscribe(payload) => {
+    match &message.body {
+        Some(Body::ChunkSubscribe(payload)) => {
             let added: Vec<sim_core::ids::ChunkCoord> = payload
                 .coords
                 .iter()
-                .map(sim_core::ids::ChunkCoord::from)
+                .map(|c| sim_core::ids::ChunkCoord { x: c.x, y: c.y })
                 .filter(|c| connection.subscription.insert(*c))
                 .collect();
 
@@ -820,7 +1267,9 @@ async fn handle_client_message(
                 match reply {
                     Ok(Ok(snapshots)) => {
                         for snap in snapshots {
-                            out.push(ServerMessageDto::MobilityChunkSnapshot(snap));
+                            out.push(w::ServerMessage {
+                                body: Some(w::server_message::Body::MobilityChunkSnapshot(snap)),
+                            });
                         }
                     }
                     Ok(Err(_)) | Err(_) => {
@@ -841,11 +1290,11 @@ async fn handle_client_message(
             }
         }
 
-        ClientMessageDto::ChunkUnsubscribe(payload) => {
+        Some(Body::ChunkUnsubscribe(payload)) => {
             let removed: Vec<sim_core::ids::ChunkCoord> = payload
                 .coords
                 .iter()
-                .map(sim_core::ids::ChunkCoord::from)
+                .map(|c| sim_core::ids::ChunkCoord { x: c.x, y: c.y })
                 .filter(|c| connection.subscription.remove(c))
                 .collect();
 
@@ -878,6 +1327,8 @@ async fn handle_client_message(
                 }
             }
         }
+
+        None => {}
     }
 
     out
@@ -973,11 +1424,10 @@ async fn persist_snapshots_once(
 
 async fn send_server_message(
     socket: &mut WebSocket,
-    message: ServerMessageDto,
+    message: w::ServerMessage,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let text = serde_json::to_string(&message)?;
-
-    socket.send(Message::Text(text.into())).await?;
+    let bytes = message.encode_to_vec();
+    socket.send(Message::Binary(bytes.into())).await?;
     Ok(())
 }
 
@@ -1201,8 +1651,9 @@ mod tests {
             .expect("reply within deadline")
             .expect("reply not dropped");
         assert_eq!(snapshots.len(), 1, "expected one snapshot for added chunk");
-        assert_eq!(snapshots[0].chunk.x, 4);
-        assert_eq!(snapshots[0].chunk.y, 4);
+        let chunk = snapshots[0].chunk.as_ref().expect("chunk coord present");
+        assert_eq!(chunk.x, 4);
+        assert_eq!(chunk.y, 4);
     }
 
     #[tokio::test]

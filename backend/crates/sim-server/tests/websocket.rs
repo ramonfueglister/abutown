@@ -1,14 +1,14 @@
 use std::time::Duration;
 
+use abutown_protocol::wire as w;
 use abutown_protocol::{
-    ChunkCoordDto, ChunkSubscribeDto, ClientCommandDto, ClientMessageDto, MobilityChunkSnapshotDto,
-    PROTOCOL_VERSION, ServerMessageDto, SetTileKindCommandDto, TileKindDto, TilePulseDeltaDto,
-    WorldEventDto, WorldId,
+    ClientCommandDto, PROTOCOL_VERSION, SetTileKindCommandDto, TileKindDto, WorldId,
 };
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
+use prost::Message as _;
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
 use tower::ServiceExt;
@@ -41,7 +41,10 @@ async fn websocket_sends_hello_and_tile_pulse() {
     let (mut stream, _) = connect_async(url).await.unwrap();
 
     let hello = read_server_message(&mut stream).await;
-    assert!(matches!(hello, ServerMessageDto::Hello(_)));
+    assert!(matches!(
+        hello.body,
+        Some(w::server_message::Body::Hello(_))
+    ));
 
     subscribe_to_seeded_chunks(&mut stream).await;
 
@@ -53,9 +56,10 @@ async fn websocket_sends_hello_and_tile_pulse() {
     )
     .await
     .expect("first tile pulse must arrive within one tick window");
-    assert_eq!(first_pulse.world_id.0, "abutown-main");
-    assert_eq!(first_pulse.coord.x, 4);
-    assert_eq!(first_pulse.coord.y, 4);
+    assert_eq!(first_pulse.world_id, "abutown-main");
+    let coord = first_pulse.coord.as_ref().expect("coord");
+    assert_eq!(coord.x, 4);
+    assert_eq!(coord.y, 4);
     assert_eq!(first_pulse.tick, 1);
     assert_eq!(first_pulse.version, 1);
     assert!(first_pulse.local_index < 1024);
@@ -84,24 +88,18 @@ async fn websocket_pulses_rotate_loaded_chunks() {
     let (mut stream, _) = connect_async(url).await.unwrap();
 
     let hello = read_server_message(&mut stream).await;
-    assert!(matches!(hello, ServerMessageDto::Hello(_)));
+    assert!(matches!(
+        hello.body,
+        Some(w::server_message::Body::Hello(_))
+    ));
 
     let first_delta = read_next_tile_pulse(&mut stream).await;
     let second_delta = read_next_tile_pulse(&mut stream).await;
     let third_delta = read_next_tile_pulse(&mut stream).await;
 
-    assert_eq!(
-        first_delta.coord,
-        abutown_protocol::ChunkCoordDto { x: 4, y: 4 }
-    );
-    assert_eq!(
-        second_delta.coord,
-        abutown_protocol::ChunkCoordDto { x: 5, y: 4 }
-    );
-    assert_eq!(
-        third_delta.coord,
-        abutown_protocol::ChunkCoordDto { x: 4, y: 5 }
-    );
+    assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
+    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 5, y: 4 }));
+    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 4, y: 5 }));
 
     server.abort();
 }
@@ -120,8 +118,14 @@ async fn websocket_clients_receive_the_same_broadcast_tick() {
 
     let first_hello = read_server_message(&mut first_stream).await;
     let second_hello = read_server_message(&mut second_stream).await;
-    assert!(matches!(first_hello, ServerMessageDto::Hello(_)));
-    assert!(matches!(second_hello, ServerMessageDto::Hello(_)));
+    assert!(matches!(
+        first_hello.body,
+        Some(w::server_message::Body::Hello(_))
+    ));
+    assert!(matches!(
+        second_hello.body,
+        Some(w::server_message::Body::Hello(_))
+    ));
 
     let first_delta = read_next_tile_pulse(&mut first_stream).await;
     let second_delta = read_next_tile_pulse(&mut second_stream).await;
@@ -150,16 +154,19 @@ async fn websocket_sends_mobility_snapshots_after_subscribe() {
     let (mut stream, _) = connect_async(url).await.unwrap();
 
     let hello = read_server_message(&mut stream).await;
-    assert!(matches!(hello, ServerMessageDto::Hello(_)));
+    assert!(matches!(
+        hello.body,
+        Some(w::server_message::Body::Hello(_))
+    ));
 
     subscribe_to_seeded_chunks(&mut stream).await;
 
     // Subscribe emits one MobilityChunkSnapshot per chunk. Collect all three.
-    let mut snapshots: Vec<MobilityChunkSnapshotDto> = Vec::new();
+    let mut snapshots: Vec<w::MobilityChunkSnapshot> = Vec::new();
     while snapshots.len() < 3 {
         let msg = read_server_message(&mut stream).await;
-        if let ServerMessageDto::MobilityChunkSnapshot(snap) = msg {
-            assert_eq!(snap.world_id.0, "abutown-main");
+        if let Some(w::server_message::Body::MobilityChunkSnapshot(snap)) = msg.body {
+            assert_eq!(snap.world_id, "abutown-main");
             snapshots.push(snap);
         }
     }
@@ -187,7 +194,10 @@ async fn websocket_broadcasts_accepted_command_event() {
     let (mut stream, _) = connect_async(url).await.unwrap();
 
     let hello = read_server_message(&mut stream).await;
-    assert!(matches!(hello, ServerMessageDto::Hello(_)));
+    assert!(matches!(
+        hello.body,
+        Some(w::server_message::Body::Hello(_))
+    ));
 
     let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
         protocol_version: PROTOCOL_VERSION,
@@ -214,14 +224,13 @@ async fn websocket_broadcasts_accepted_command_event() {
 
     loop {
         let message = read_server_message(&mut stream).await;
-        if let ServerMessageDto::WorldEvent {
-            event: WorldEventDto::TileKindSet(event),
-        } = message
+        if let Some(w::server_message::Body::WorldEvent(event)) = message.body
+            && let Some(w::world_event::Event::TileKindSet(tk)) = event.event
         {
-            assert_eq!(event.command_id, "command:ws:1");
-            assert_eq!(event.coord, abutown_protocol::ChunkCoordDto { x: 4, y: 4 });
-            assert_eq!(event.local_index, 12);
-            assert_eq!(event.kind, TileKindDto::BuildingFootprint);
+            assert_eq!(tk.command_id, "command:ws:1");
+            assert_eq!(tk.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
+            assert_eq!(tk.local_index, 12);
+            assert_eq!(tk.kind, w::TileKind::BuildingFootprint as i32);
             break;
         }
     }
@@ -280,13 +289,13 @@ async fn websocket_does_not_broadcast_failed_command_append() {
             Err(_) => break,   // window expired
             Ok(None) => break, // stream closed
             Ok(Some(message)) => {
-                let text = match message.expect("ws message") {
-                    tokio_tungstenite::tungstenite::Message::Text(text) => text.to_string(),
+                let bytes = match message.expect("ws message") {
+                    tokio_tungstenite::tungstenite::Message::Binary(b) => b,
                     _ => continue,
                 };
-                let parsed: ServerMessageDto = serde_json::from_str(&text).expect("server message");
+                let parsed = w::ServerMessage::decode(bytes.as_ref()).expect("server message");
                 assert!(
-                    !matches!(parsed, ServerMessageDto::WorldEvent { .. }),
+                    !matches!(parsed.body, Some(w::server_message::Body::WorldEvent(_))),
                     "failed command must not broadcast a WorldEvent, got: {parsed:?}"
                 );
             }
@@ -296,7 +305,7 @@ async fn websocket_does_not_broadcast_failed_command_append() {
     server.abort();
 }
 
-async fn read_server_message<S>(stream: &mut S) -> ServerMessageDto
+async fn read_server_message<S>(stream: &mut S) -> w::ServerMessage
 where
     S: futures_util::Stream<
             Item = Result<
@@ -305,18 +314,20 @@ where
             >,
         > + Unpin,
 {
-    let text = tokio::time::timeout(Duration::from_secs(2), stream.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap()
-        .into_text()
-        .unwrap()
-        .to_string();
-    serde_json::from_str(&text).unwrap()
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        if let tokio_tungstenite::tungstenite::Message::Binary(bytes) = message {
+            return w::ServerMessage::decode(bytes.as_ref()).expect("decode server message");
+        }
+        // ignore Ping/Pong/Close/Text noise
+    }
 }
 
-async fn read_next_tile_pulse<S>(stream: &mut S) -> TilePulseDeltaDto
+async fn read_next_tile_pulse<S>(stream: &mut S) -> w::TilePulse
 where
     S: futures_util::Stream<
             Item = Result<
@@ -327,13 +338,13 @@ where
 {
     loop {
         let message = read_server_message(stream).await;
-        if let ServerMessageDto::TilePulse(delta) = message {
+        if let Some(w::server_message::Body::TilePulse(delta)) = message.body {
             return delta;
         }
     }
 }
 
-async fn read_next_chunk_snapshot<S>(stream: &mut S) -> MobilityChunkSnapshotDto
+async fn read_next_chunk_snapshot<S>(stream: &mut S) -> w::MobilityChunkSnapshot
 where
     S: futures_util::Stream<
             Item = Result<
@@ -344,7 +355,7 @@ where
 {
     loop {
         let message = read_server_message(stream).await;
-        if let ServerMessageDto::MobilityChunkSnapshot(snap) = message {
+        if let Some(w::server_message::Body::MobilityChunkSnapshot(snap)) = message.body {
             return snap;
         }
     }
@@ -355,33 +366,41 @@ where
     S: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
     <S as futures_util::Sink<tokio_tungstenite::tungstenite::Message>>::Error: std::fmt::Debug,
 {
-    let subscribe = ClientMessageDto::ChunkSubscribe(ChunkSubscribeDto {
-        protocol_version: PROTOCOL_VERSION,
-        coords: vec![
-            ChunkCoordDto { x: 4, y: 4 },
-            ChunkCoordDto { x: 5, y: 4 },
-            ChunkCoordDto { x: 4, y: 5 },
-        ],
-    });
-    let text = serde_json::to_string(&subscribe).unwrap();
+    let subscribe = w::ClientMessage {
+        body: Some(w::client_message::Body::ChunkSubscribe(w::ChunkSubscribe {
+            protocol_version: u32::from(PROTOCOL_VERSION),
+            coords: vec![
+                w::ChunkCoord { x: 4, y: 4 },
+                w::ChunkCoord { x: 5, y: 4 },
+                w::ChunkCoord { x: 4, y: 5 },
+            ],
+        })),
+    };
+    let bytes = subscribe.encode_to_vec();
     stream
-        .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+        .send(tokio_tungstenite::tungstenite::Message::Binary(
+            bytes.into(),
+        ))
         .await
         .expect("send subscribe");
 }
 
-async fn send_chunk_subscribe<S>(stream: &mut S, coords: &[ChunkCoordDto])
+async fn send_chunk_subscribe<S>(stream: &mut S, coords: &[w::ChunkCoord])
 where
     S: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
     <S as futures_util::Sink<tokio_tungstenite::tungstenite::Message>>::Error: std::fmt::Debug,
 {
-    let subscribe = ClientMessageDto::ChunkSubscribe(ChunkSubscribeDto {
-        protocol_version: PROTOCOL_VERSION,
-        coords: coords.to_vec(),
-    });
-    let text = serde_json::to_string(&subscribe).unwrap();
+    let subscribe = w::ClientMessage {
+        body: Some(w::client_message::Body::ChunkSubscribe(w::ChunkSubscribe {
+            protocol_version: u32::from(PROTOCOL_VERSION),
+            coords: coords.to_vec(),
+        })),
+    };
+    let bytes = subscribe.encode_to_vec();
     stream
-        .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+        .send(tokio_tungstenite::tungstenite::Message::Binary(
+            bytes.into(),
+        ))
         .await
         .expect("send chunk subscribe");
 }
@@ -401,17 +420,18 @@ async fn chunk_subscribe_emits_chunk_snapshot_frame() {
     // Drain the Hello frame.
     let _ = client.next().await.unwrap().unwrap();
 
-    send_chunk_subscribe(&mut client, &[ChunkCoordDto { x: 4, y: 4 }]).await;
+    send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 4, y: 4 }]).await;
 
     let mut got_snapshot = false;
     for _ in 0..10 {
         let msg = client.next().await.unwrap().unwrap();
-        if let tokio_tungstenite::tungstenite::Message::Text(text) = msg
-            && let Ok(ServerMessageDto::MobilityChunkSnapshot(snap)) =
-                serde_json::from_str::<ServerMessageDto>(text.as_str())
+        if let tokio_tungstenite::tungstenite::Message::Binary(bytes) = msg
+            && let Ok(parsed) = w::ServerMessage::decode(bytes.as_ref())
+            && let Some(w::server_message::Body::MobilityChunkSnapshot(snap)) = parsed.body
         {
-            assert_eq!(snap.chunk.x, 4);
-            assert_eq!(snap.chunk.y, 4);
+            let coord = snap.chunk.as_ref().expect("chunk coord present");
+            assert_eq!(coord.x, 4);
+            assert_eq!(coord.y, 4);
             got_snapshot = true;
             break;
         }
@@ -438,12 +458,12 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
     // Client A subscribes only to chunk (4,4).
     let (mut client_a, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_a).await; // drain hello
-    send_chunk_subscribe(&mut client_a, &[ChunkCoordDto { x: 4, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 4, y: 4 }]).await;
 
     // Client B subscribes only to chunk (5,4).
     let (mut client_b, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_b).await; // drain hello
-    send_chunk_subscribe(&mut client_b, &[ChunkCoordDto { x: 5, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 5, y: 4 }]).await;
 
     // Subscribe emits one MobilityChunkSnapshot per subscribed chunk — read it.
     let snap_a = read_next_chunk_snapshot(&mut client_a).await;
@@ -452,14 +472,14 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
     let ids_a: std::collections::HashSet<String> = snap_a
         .agents
         .iter()
-        .map(|a| a.id.0.clone())
-        .chain(snap_a.vehicles.iter().map(|v| v.id.0.clone()))
+        .map(|a| a.id.clone())
+        .chain(snap_a.vehicles.iter().map(|v| v.id.clone()))
         .collect();
     let ids_b: std::collections::HashSet<String> = snap_b
         .agents
         .iter()
-        .map(|a| a.id.0.clone())
-        .chain(snap_b.vehicles.iter().map(|v| v.id.0.clone()))
+        .map(|a| a.id.clone())
+        .chain(snap_b.vehicles.iter().map(|v| v.id.clone()))
         .collect();
 
     // Each client must receive at least one entity — otherwise the test is vacuous.
@@ -501,17 +521,17 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
     // Client A subscribes only to chunk (4,4).
     let (mut client_a, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_a).await; // drain hello
-    send_chunk_subscribe(&mut client_a, &[ChunkCoordDto { x: 4, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 4, y: 4 }]).await;
 
     // Client B subscribes only to chunk (5,4).
     let (mut client_b, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_b).await; // drain hello
-    send_chunk_subscribe(&mut client_b, &[ChunkCoordDto { x: 5, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 5, y: 4 }]).await;
 
     // Client C subscribes only to chunk (4,5) — vertical-route vehicles end here.
     let (mut client_c, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_c).await; // drain hello
-    send_chunk_subscribe(&mut client_c, &[ChunkCoordDto { x: 4, y: 5 }]).await;
+    send_chunk_subscribe(&mut client_c, &[w::ChunkCoord { x: 4, y: 5 }]).await;
 
     // Subscribe emits one MobilityChunkSnapshot per subscribed chunk — read one per client.
     let snap_a = read_next_chunk_snapshot(&mut client_a).await;
@@ -521,20 +541,20 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
     let ids_a: std::collections::HashSet<String> = snap_a
         .agents
         .iter()
-        .map(|a| a.id.0.clone())
-        .chain(snap_a.vehicles.iter().map(|v| v.id.0.clone()))
+        .map(|a| a.id.clone())
+        .chain(snap_a.vehicles.iter().map(|v| v.id.clone()))
         .collect();
     let ids_b: std::collections::HashSet<String> = snap_b
         .agents
         .iter()
-        .map(|a| a.id.0.clone())
-        .chain(snap_b.vehicles.iter().map(|v| v.id.0.clone()))
+        .map(|a| a.id.clone())
+        .chain(snap_b.vehicles.iter().map(|v| v.id.clone()))
         .collect();
     let ids_c: std::collections::HashSet<String> = snap_c
         .agents
         .iter()
-        .map(|a| a.id.0.clone())
-        .chain(snap_c.vehicles.iter().map(|v| v.id.0.clone()))
+        .map(|a| a.id.clone())
+        .chain(snap_c.vehicles.iter().map(|v| v.id.clone()))
         .collect();
 
     // Each client must receive at least one entity — otherwise the test is vacuous.
@@ -601,7 +621,7 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
     // default Position(0,0), which caused LOD to mass-demote them to a single
     // chunk before they ever ticked. Spawn-time Position init makes that
     // workaround unnecessary.)
-    send_chunk_subscribe(&mut client, &[ChunkCoordDto { x: 4, y: 4 }]).await;
+    send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 4, y: 4 }]).await;
 
     let mut snapshot_seen = false;
     let mut delta_seen = false;
@@ -611,17 +631,18 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
             .expect("message should arrive within 1s")
             .unwrap()
             .unwrap();
-        if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
-            if let Ok(ServerMessageDto::MobilityChunkSnapshot(_)) =
-                serde_json::from_str::<ServerMessageDto>(text.as_str())
-            {
-                snapshot_seen = true;
-            }
-            if let Ok(ServerMessageDto::MobilityChunkDelta(_)) =
-                serde_json::from_str::<ServerMessageDto>(text.as_str())
-            {
-                delta_seen = true;
-                break;
+        if let tokio_tungstenite::tungstenite::Message::Binary(bytes) = msg
+            && let Ok(parsed) = w::ServerMessage::decode(bytes.as_ref())
+        {
+            match parsed.body {
+                Some(w::server_message::Body::MobilityChunkSnapshot(_)) => {
+                    snapshot_seen = true;
+                }
+                Some(w::server_message::Body::MobilityChunkDelta(_)) => {
+                    delta_seen = true;
+                    break;
+                }
+                _ => {}
             }
         }
     }

@@ -17,6 +17,7 @@ path = "src/main.rs"
 abutown-protocol = { path = "../protocol" }
 sim-core = { path = "../sim-core" }
 anyhow.workspace = true
+prost.workspace = true
 arc-swap = "1"
 async-trait.workspace = true
 axum.workspace = true
