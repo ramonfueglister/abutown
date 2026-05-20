@@ -454,6 +454,16 @@ pub fn boarding_alighting_system(
 
     // B.1 — collect (vehicle_entity, vehicle_id, end-of-link stop_id, occupants)
     // for every vehicle parked at an end-of-link stop in an Active/Hot chunk.
+    // Pre-index end-of-link stops by (RouteId, link_index) so each vehicle
+    // does an O(1) lookup instead of scanning all stops. Original `find()`
+    // pattern was the last O(N_vehicles × N_stops) in this system.
+    let end_of_link_stops: std::collections::HashMap<(&RouteId, usize), &crate::mobility::records::StopRecord> = stops
+        .0
+        .values()
+        .filter(|s| (s.progress - 1.0).abs() < 1e-6)
+        .map(|s| ((&s.route_id, s.link_index), s))
+        .collect();
+
     let mut alighting_candidates: Vec<(Entity, VehicleId, StopId, Vec<AgentId>)> = Vec::new();
     {
         let vehicles = sets.p1();
@@ -461,13 +471,10 @@ pub fn boarding_alighting_system(
             if !chunk_is_simulated(v_pos_world, &activities) {
                 continue;
             }
-            let stop_match = stops.0.values().find(|stop| {
-                stop.route_id == v_pos.route_id
-                    && stop.link_index == v_pos.link_index
-                    && (stop.progress - v_pos.progress).abs() < 1e-6
-                    && (stop.progress - 1.0).abs() < 1e-6
-            });
-            if let Some(stop) = stop_match {
+            if (v_pos.progress - 1.0).abs() >= 1e-6 {
+                continue;
+            }
+            if let Some(stop) = end_of_link_stops.get(&(&v_pos.route_id, v_pos.link_index)) {
                 alighting_candidates.push((
                     v_entity,
                     v_stable.0.clone(),
