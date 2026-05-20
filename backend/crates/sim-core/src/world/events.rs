@@ -1,5 +1,4 @@
 use bevy_ecs::prelude::*;
-use bevy_ecs::message::MessageCursor;
 
 use crate::ids::ChunkCoord;
 use crate::tile::TileKind;
@@ -98,7 +97,7 @@ mod tests {
             to: ChunkLod::Active,
         });
 
-        let mut cursor: MessageCursor<ChunkLodChanged> = messages.get_cursor();
+        let mut cursor = messages.get_cursor();
         let first_count = cursor.read(&messages).count();
         let second_count = cursor.read(&messages).count();
 
