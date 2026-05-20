@@ -809,20 +809,28 @@ async fn handle_client_message(
                         .insert(*coord, BroadcastStream::new(receiver));
                 }
 
-                // Receive initial snapshots from the tick task.
-                match reply_rx.await {
-                    Ok(snapshots) => {
+                // Receive initial snapshots from the tick task. Timeout at
+                // 5× tick interval protects against a stalled tick task
+                // hanging the WS handler indefinitely.
+                let reply = tokio::time::timeout(
+                    SIMULATION_TICK_INTERVAL.saturating_mul(5),
+                    reply_rx,
+                )
+                .await;
+                match reply {
+                    Ok(Ok(snapshots)) => {
                         for snap in snapshots {
                             out.push(ServerMessageDto::MobilityChunkSnapshot(snap));
                         }
                     }
-                    Err(_) => {
-                        // Reply channel dropped — tick task crashed mid-drain
-                        // or oneshot was canceled. Roll back our local state
-                        // so we don't have streams pointing at chunks the
-                        // runtime never registered as ours.
+                    Ok(Err(_)) | Err(_) => {
+                        // Reply channel dropped OR timed out — tick task
+                        // crashed mid-drain, oneshot was canceled, or the
+                        // task is stalled. Roll back so we don't have
+                        // streams pointing at chunks the runtime never
+                        // registered as ours.
                         tracing::warn!(
-                            "chunk_subscribe reply dropped; rolling back local state"
+                            "chunk_subscribe reply unavailable; rolling back local state"
                         );
                         for coord in &added {
                             connection.subscription.remove(coord);
@@ -890,11 +898,28 @@ async fn persist_snapshots_once(
             "tick task gone",
         ));
     }
-    let payload = match reply_rx.await {
-        Ok(p) => p,
-        Err(_) => {
+    // Timeout at 5× tick interval — generous (500 ms at 100 ms tick) but
+    // protects against a stalled tick task hanging the persist loop
+    // indefinitely. A real outage will return an error and let the snapshot
+    // loop schedule a retry on its next interval.
+    let payload = match tokio::time::timeout(
+        SIMULATION_TICK_INTERVAL.saturating_mul(5),
+        reply_rx,
+    )
+    .await
+    {
+        Ok(Ok(p)) => p,
+        Ok(Err(_)) => {
             return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
                 "collect-persist-data reply dropped",
+            ));
+        }
+        Err(_) => {
+            tracing::warn!(
+                "collect-persist-data timed out waiting for tick task; will retry next cycle"
+            );
+            return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
+                "collect-persist-data timed out",
             ));
         }
     };
