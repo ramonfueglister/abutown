@@ -1,5 +1,6 @@
 use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
+use std::collections::HashSet;
 use crate::mobility::lod::{
     ACTIVITY_HYSTERESIS_TICKS, MobilityActivity, classify_chunk_mobility_activity,
 };
@@ -721,13 +722,13 @@ pub fn track_chunk_populations_system(
         for (entity, pos) in all_agents.iter() {
             let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
             *populations.0.entry(chunk).or_insert(0) += 1;
-            agents_by_chunk.0.entry(chunk).or_default().push(entity);
+            agents_by_chunk.0.entry(chunk).or_default().insert(entity);
             previous.0.insert(entity, chunk);
         }
         for (entity, pos) in all_vehicles.iter() {
             let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
             *populations.0.entry(chunk).or_insert(0) += 1;
-            vehicles_by_chunk.0.entry(chunk).or_default().push(entity);
+            vehicles_by_chunk.0.entry(chunk).or_default().insert(entity);
             previous.0.insert(entity, chunk);
         }
     } else {
@@ -747,14 +748,14 @@ pub fn track_chunk_populations_system(
                     continue;
                 }
                 if let Some(bucket) = agents_by_chunk.0.get_mut(&old_chunk) {
-                    bucket.retain(|e| *e != entity);
+                    bucket.remove(&entity);
                 }
                 if let Some(p) = populations.0.get_mut(&old_chunk) {
                     *p = p.saturating_sub(1);
                 }
             }
             *populations.0.entry(new_chunk).or_insert(0) += 1;
-            agents_by_chunk.0.entry(new_chunk).or_default().push(entity);
+            agents_by_chunk.0.entry(new_chunk).or_default().insert(entity);
             previous.0.insert(entity, new_chunk);
         }
         for (entity, pos) in moved_vehicles.iter() {
@@ -764,14 +765,14 @@ pub fn track_chunk_populations_system(
                     continue;
                 }
                 if let Some(bucket) = vehicles_by_chunk.0.get_mut(&old_chunk) {
-                    bucket.retain(|e| *e != entity);
+                    bucket.remove(&entity);
                 }
                 if let Some(p) = populations.0.get_mut(&old_chunk) {
                     *p = p.saturating_sub(1);
                 }
             }
             *populations.0.entry(new_chunk).or_insert(0) += 1;
-            vehicles_by_chunk.0.entry(new_chunk).or_default().push(entity);
+            vehicles_by_chunk.0.entry(new_chunk).or_default().insert(entity);
             previous.0.insert(entity, new_chunk);
         }
 
@@ -786,10 +787,10 @@ pub fn track_chunk_populations_system(
         for entity in stale {
             if let Some(old_chunk) = previous.0.remove(&entity) {
                 if let Some(bucket) = agents_by_chunk.0.get_mut(&old_chunk) {
-                    bucket.retain(|e| *e != entity);
+                    bucket.remove(&entity);
                 }
                 if let Some(bucket) = vehicles_by_chunk.0.get_mut(&old_chunk) {
-                    bucket.retain(|e| *e != entity);
+                    bucket.remove(&entity);
                 }
                 if let Some(p) = populations.0.get_mut(&old_chunk) {
                     *p = p.saturating_sub(1);
@@ -967,13 +968,11 @@ pub fn demote_active_to_warm_system(
             if !vehicles_by_chunk.0.contains_key(chunk) {
                 continue;
             }
+            let empty: HashSet<Entity> = HashSet::new();
+            let vehicle_entities = vehicles_by_chunk.0.get(chunk).unwrap_or(&empty);
             despawn_vehicles_into_flow_cell(
                 *chunk,
-                vehicles_by_chunk
-                    .0
-                    .get(chunk)
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]),
+                vehicle_entities,
                 &mut flow_cells,
                 &mut commands,
             );
@@ -1018,7 +1017,7 @@ pub fn demote_active_to_warm_system(
 
 fn despawn_vehicles_into_flow_cell(
     chunk: crate::ids::ChunkCoord,
-    vehicle_entities: &[Entity],
+    vehicle_entities: &HashSet<Entity>,
     flow_cells: &mut ResMut<FlowCells>,
     commands: &mut Commands,
 ) {
@@ -2496,27 +2495,21 @@ mod tests {
 
         // Tick 2: incremental path.
         schedule.run(&mut world);
-        let after2_incremental: std::collections::HashMap<_, _> = world
-            .resource::<AgentsByChunk>()
-            .0
-            .iter()
-            .map(|(c, e)| {
-                let mut e = e.clone();
-                e.sort_by_key(|x| x.index());
-                (*c, e)
-            })
-            .collect();
+        let after2_incremental: std::collections::HashMap<crate::ids::ChunkCoord, HashSet<Entity>> =
+            world
+                .resource::<AgentsByChunk>()
+                .0
+                .iter()
+                .map(|(c, e)| (*c, e.clone()))
+                .collect();
 
         // Compare against a fresh full rebuild from query state.
-        let mut reference: std::collections::HashMap<crate::ids::ChunkCoord, Vec<Entity>> =
+        let mut reference: std::collections::HashMap<crate::ids::ChunkCoord, HashSet<Entity>> =
             std::collections::HashMap::new();
         let mut q2 = world.query::<(Entity, &Position, &AgentMarker)>();
         for (entity, pos, _) in q2.iter(&world) {
             let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
-            reference.entry(chunk).or_default().push(entity);
-        }
-        for bucket in reference.values_mut() {
-            bucket.sort_by_key(|x| x.index());
+            reference.entry(chunk).or_default().insert(entity);
         }
         assert_eq!(after2_incremental, reference);
         // Ensure the moved entity actually moved buckets.
