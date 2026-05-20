@@ -217,6 +217,20 @@ fn build_read_view_from_runtime(
         }
     }
 
+    let mut mobility_chunk_snapshots: std::collections::HashMap<
+        sim_core::ids::ChunkCoord,
+        abutown_protocol::MobilityChunkSnapshotDto,
+    > = std::collections::HashMap::new();
+    for coord_dto in runtime.world_summary().loaded_chunks.iter() {
+        let coord = sim_core::ids::ChunkCoord {
+            x: coord_dto.x,
+            y: coord_dto.y,
+        };
+        let snapshot = mobility.build_chunk_snapshot(coord);
+        let dto = chunk_snapshot_to_dto(&snapshot, mobility, &world_id, mobility_tick);
+        mobility_chunk_snapshots.insert(coord, dto);
+    }
+
     crate::runtime_view::RuntimeReadView {
         tick: mobility_tick,
         world_id: world_id.clone(),
@@ -224,6 +238,7 @@ fn build_read_view_from_runtime(
         health: runtime.health(),
         world_summary: runtime.world_summary(),
         chunk_snapshots,
+        mobility_chunk_snapshots,
         mobility_full_dto: runtime.mobility_snapshot(),
         per_chunk_deltas,
         pulse_sequence,
@@ -482,19 +497,16 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
                         }
                     }
                     Err(BroadcastStreamRecvError::Lagged(_)) => {
-                        // Recovery: re-send a fresh snapshot for this chunk.
-                        let snap = {
-                            let runtime_arc = state.runtime();
-                            let runtime = runtime_arc.read().await;
-                            let snapshot = runtime.mobility().build_chunk_snapshot(chunk);
-                            let world_id = runtime.world_id_for_persist().clone();
-                            let tick = runtime.mobility_tick();
-                            chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick)
-                        };
-                        if send_server_message(
-                            &mut socket,
-                            ServerMessageDto::MobilityChunkSnapshot(snap),
-                        ).await.is_err() {
+                        // Recovery: re-send a fresh snapshot for this chunk
+                        // from the lock-free RuntimeReadView. If the chunk
+                        // isn't in the view (e.g., it just unloaded), skip.
+                        let snap = state.view().load().mobility_chunk_snapshots.get(&chunk).cloned();
+                        if let Some(snap) = snap
+                            && send_server_message(
+                                &mut socket,
+                                ServerMessageDto::MobilityChunkSnapshot(snap),
+                            ).await.is_err()
+                        {
                             break;
                         }
                     }
@@ -834,6 +846,24 @@ mod tests {
             !view1.chunk_snapshots.is_empty(),
             "view should include chunk snapshots"
         );
+    }
+
+    #[tokio::test]
+    async fn view_holds_mobility_chunk_snapshots_for_loaded_chunks() {
+        let state = AppState::new(SimulationRuntime::new());
+        tick_and_fan_out(&state).await;
+        let view = state.view().load();
+        assert!(
+            !view.mobility_chunk_snapshots.is_empty(),
+            "view should hold mobility chunk snapshots for loaded chunks"
+        );
+        // Every loaded chunk should have both a tile chunk snapshot and a mobility chunk snapshot.
+        for coord in view.chunk_snapshots.keys() {
+            assert!(
+                view.mobility_chunk_snapshots.contains_key(coord),
+                "mobility_chunk_snapshots missing chunk {coord:?} (present in chunk_snapshots)"
+            );
+        }
     }
 
     #[tokio::test]

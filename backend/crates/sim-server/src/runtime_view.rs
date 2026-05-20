@@ -41,6 +41,7 @@ pub struct RuntimeReadView {
     pub health: HealthResponse,
     pub world_summary: WorldSummaryDto,
     pub chunk_snapshots: HashMap<ChunkCoord, ChunkSnapshotDto>,
+    pub mobility_chunk_snapshots: HashMap<ChunkCoord, MobilityChunkSnapshotDto>,
     pub mobility_full_dto: MobilitySnapshotDto,
     pub per_chunk_deltas: Vec<MobilityChunkDeltaDto>,
     pub pulse_sequence: u64,
