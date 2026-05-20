@@ -1,0 +1,7 @@
+syntax = "proto3";
+package abutown.v1;
+
+// Placeholder message. The full schema is added in Task 2.
+message Ping {
+  uint32 protocol_version = 1;
+}

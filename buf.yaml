@@ -1,0 +1,9 @@
+version: v2
+modules:
+  - path: backend/crates/protocol/proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - WIRE_JSON

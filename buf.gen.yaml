@@ -1,0 +1,9 @@
+version: v2
+plugins:
+  - remote: buf.build/bufbuild/es
+    out: src/backend/proto
+    opt:
+      - target=ts
+      - import_extension=js
+inputs:
+  - directory: backend/crates/protocol/proto

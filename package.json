@@ -8,18 +8,21 @@
     "dev:stack": "node scripts/run-dev-stack.mjs dev",
     "preview": "vite preview --host 127.0.0.1",
     "preview:stack": "node scripts/run-dev-stack.mjs preview",
-    "build": "node scripts/build.mjs",
+    "build": "npm run generate:proto && node scripts/build.mjs",
     "assets:pak128": "node scripts/import-pak128-assets.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && playwright test",
-    "generate:city-network": "node --import tsx/esm scripts/generate-city-network.mjs"
+    "generate:city-network": "node --import tsx/esm scripts/generate-city-network.mjs",
+    "generate:proto": "node scripts/generate-proto-ts.mjs"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.2.0",
     "@supabase/supabase-js": "^2.105.4",
     "@vitejs/plugin-basic-ssl": "^2.1.0",
     "vite": "^8.0.12"
   },
   "devDependencies": {
+    "@bufbuild/buf": "^1.45.0",
     "@playwright/test": "^1.60.0",
     "@types/node": "^25.7.0",
     "tsx": "^4.22.0",
