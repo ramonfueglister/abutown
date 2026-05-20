@@ -9,6 +9,8 @@ license.workspace = true
 abutown-protocol = { path = "../protocol" }
 async-trait.workspace = true
 bevy_ecs.workspace = true
+blake3 = "1"
+rand = "0.8"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
