@@ -571,12 +571,14 @@ async fn tick_and_fan_out(state: &AppState) {
         (per_chunk, world_id, tick)
     }; // write-lock dropped here
 
-    // Phase 2: publish per-chunk deltas into broadcast channels.
+    // Phase 2 + 3 share one read-lock — Phase 2 broadcasts per-chunk delta DTOs
+    // (needs &MobilityWorld for record→DTO conversion), Phase 3 builds the
+    // RuntimeReadView for lock-free readers (also needs &MobilityWorld).
     let chunk_channels = state.chunk_channels();
+    let runtime_arc = state.runtime();
+    let runtime = runtime_arc.read().await;
+
     if !per_chunk.is_empty() {
-        // Read-lock briefly to build DTOs (needs &MobilityWorld for record-DTO conversions).
-        let runtime_arc = state.runtime();
-        let runtime = runtime_arc.read().await;
         let mobility = runtime.mobility();
         for (chunk, delta) in &per_chunk {
             let Some(sender) = chunk_channels.get(chunk).map(|e| e.clone()) else {
@@ -587,14 +589,10 @@ async fn tick_and_fan_out(state: &AppState) {
         }
     }
 
-    // Phase 3: publish the RuntimeReadView (Phase 7c — readers will switch to this in Task 3).
-    {
-        let runtime_arc = state.runtime();
-        let runtime = runtime_arc.read().await;
-        let pulse_sequence = state.view.load().pulse_sequence;
-        let view = build_read_view_from_runtime(&runtime, &per_chunk, pulse_sequence);
-        state.view.store(std::sync::Arc::new(view));
-    }
+    // Phase 3 — Phase 7c readers (HTTP / WS init) will switch to this in Task 3.
+    let pulse_sequence = state.view.load().pulse_sequence;
+    let view = build_read_view_from_runtime(&runtime, &per_chunk, pulse_sequence);
+    state.view.store(Arc::new(view));
 }
 
 fn chunk_snapshot_to_dto(
