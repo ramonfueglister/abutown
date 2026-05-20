@@ -4,8 +4,8 @@
 //! HTTP/WS handler into the tick task. `RuntimeReadView` is the
 //! immutable per-tick snapshot published via `ArcSwap`.
 
-use abutown_protocol::wire as w;
-use abutown_protocol::{ChunkSnapshotDto, ClientCommandDto, WorldId};
+use abutown_protocol::v1 as w;
+use abutown_protocol::{ChunkSnapshotDto, WorldId};
 use sim_core::ids::ChunkCoord;
 use sim_core::mobility::MobilityWorld;
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ use tokio::sync::oneshot;
 /// All mutations to the runtime flow through one channel.
 pub enum Mutation {
     ApplyCommand {
-        command: ClientCommandDto,
+        command: w::ClientCommand,
         reply: oneshot::Sender<Result<AppliedCommand, CommandRejection>>,
     },
     SubscriptionDiff {

@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use abutown_protocol::wire as w;
+use abutown_protocol::v1 as w;
 use abutown_protocol::ChunkSnapshotDto;
 use axum::{
     Json, Router,
@@ -466,34 +466,11 @@ async fn command(
     State(state): State<AppState>,
     ProtoBody(command): ProtoBody<w::ClientCommand>,
 ) -> Response {
-    // Convert proto ClientCommand → legacy serde ClientCommandDto so the
-    // existing Mutation::ApplyCommand pathway continues to work. Task 7
-    // drops the legacy DTO so the Mutation can carry proto directly and
-    // this helper goes away.
-    let legacy = match client_command_proto_to_dto(&command) {
-        Some(l) => l,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                proto_response(w::CommandResponse {
-                    outcome: Some(w::command_response::Outcome::Rejected(w::CommandRejected {
-                        protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
-                        world_id: String::new(),
-                        command_id: String::new(),
-                        code: "missing_command".into(),
-                        message: "ClientCommand body missing inner command".into(),
-                    })),
-                }),
-            )
-                .into_response();
-        }
-    };
-
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     if state
         .mutations
         .send(crate::runtime_view::Mutation::ApplyCommand {
-            command: legacy,
+            command,
             reply: reply_tx,
         })
         .is_err()
@@ -543,34 +520,6 @@ async fn command(
             }),
         )
             .into_response(),
-    }
-}
-
-/// Convert a proto `ClientCommand` (HTTP body) into the legacy
-/// `ClientCommandDto` carried internally by `Mutation::ApplyCommand`.
-///
-/// This is the LAST proto→serde direction we still need. Task 7 will
-/// change `Mutation::ApplyCommand` to carry proto directly and delete
-/// this helper.
-fn client_command_proto_to_dto(
-    c: &w::ClientCommand,
-) -> Option<abutown_protocol::ClientCommandDto> {
-    use w::client_command::Command;
-    match c.command.as_ref()? {
-        Command::SetTileKind(s) => Some(abutown_protocol::ClientCommandDto::SetTileKind(
-            abutown_protocol::SetTileKindCommandDto {
-                protocol_version: s.protocol_version as u16,
-                world_id: abutown_protocol::WorldId(s.world_id.clone()),
-                command_id: s.command_id.clone(),
-                coord: s
-                    .coord
-                    .as_ref()
-                    .map(|c| abutown_protocol::ChunkCoordDto { x: c.x, y: c.y })
-                    .unwrap_or(abutown_protocol::ChunkCoordDto { x: 0, y: 0 }),
-                local_index: s.local_index as u16,
-                kind: tile_kind_proto_to_dto(s.kind),
-            },
-        )),
     }
 }
 
@@ -909,24 +858,6 @@ fn world_event_dto_to_proto(e: &abutown_protocol::WorldEventDto) -> w::WorldEven
     }
 }
 
-// ===== reverse helper: proto → legacy serde DTO =====
-//
-// Only `tile_kind_proto_to_dto` survives Task 6 — it is used by
-// `client_command_proto_to_dto` to translate inbound HTTP command bodies
-// into the legacy `ClientCommandDto` that `Mutation::ApplyCommand`
-// still carries internally. Task 7 will drop the legacy DTO and this
-// helper goes away with it.
-
-fn tile_kind_proto_to_dto(k: i32) -> abutown_protocol::TileKindDto {
-    use abutown_protocol::TileKindDto as L;
-    match w::TileKind::try_from(k).unwrap_or(w::TileKind::Unspecified) {
-        w::TileKind::Unspecified | w::TileKind::Grass => L::Grass,
-        w::TileKind::Water => L::Water,
-        w::TileKind::Road => L::Road,
-        w::TileKind::BuildingFootprint => L::BuildingFootprint,
-    }
-}
-
 // ===== per-chunk delta + snapshot builders (proto outputs) =====
 
 fn chunk_delta_to_dto(
@@ -967,7 +898,15 @@ async fn apply_mutation_owned(
     use crate::runtime_view::Mutation;
     match mutation {
         Mutation::ApplyCommand { command, reply } => {
-            let result = runtime.apply_client_command(command).await;
+            let result = match abutown_protocol::ClientCommandDto::try_from(command) {
+                Ok(dto) => runtime.apply_client_command(dto).await,
+                Err((code, message)) => Err(crate::commands::CommandRejection {
+                    world_id: None,
+                    command_id: None,
+                    code,
+                    message: message.to_string(),
+                }),
+            };
             let _ = reply.send(result);
         }
         Mutation::SubscriptionDiff {

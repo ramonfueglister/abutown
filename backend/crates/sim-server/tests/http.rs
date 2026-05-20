@@ -1,4 +1,4 @@
-use abutown_protocol::wire as w;
+use abutown_protocol::v1 as w;
 use abutown_protocol::{PROTOCOL_VERSION, TileKindDto, WorldId};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
