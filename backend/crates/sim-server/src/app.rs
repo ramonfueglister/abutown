@@ -59,6 +59,9 @@ pub struct AppState {
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
+    mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
+    mutation_rx:
+        Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>>>,
 }
 
 impl AppState {
@@ -99,6 +102,7 @@ impl AppState {
             &std::collections::HashMap::new(),
             0,
         );
+        let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             runtime: Arc::new(RwLock::new(runtime)),
             deltas,
@@ -108,6 +112,8 @@ impl AppState {
             mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
             chunk_channels: Arc::new(DashMap::new()),
             view: Arc::new(arc_swap::ArcSwap::from_pointee(initial_view)),
+            mutations: mutation_tx,
+            mutation_rx: Arc::new(tokio::sync::Mutex::new(mutation_rx)),
         }
     }
 
@@ -405,10 +411,31 @@ async fn chunk(
 }
 
 async fn command(State(state): State<AppState>, Json(command): Json<ClientCommandDto>) -> Response {
-    let result = {
-        let runtime = state.runtime();
-        let mut runtime = runtime.write().await;
-        runtime.apply_client_command(command).await
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    if state
+        .mutations
+        .send(crate::runtime_view::Mutation::ApplyCommand {
+            command,
+            reply: reply_tx,
+        })
+        .is_err()
+    {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "tick task gone" })),
+        )
+            .into_response();
+    }
+
+    let result = match reply_rx.await {
+        Ok(r) => r,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "command dropped" })),
+            )
+                .into_response();
+        }
     };
 
     match result {
@@ -528,9 +555,14 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     // Cleanup: drop this connection's chunk subscriptions so the shared
     // ChunkSubscribers count stays consistent after disconnect.
     if !connection.subscription.is_empty() {
-        let runtime = state.runtime();
-        let mut runtime = runtime.write().await;
-        runtime.apply_subscription_diff(std::iter::empty(), connection.subscription.iter());
+        let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+        let _ = state
+            .mutations
+            .send(crate::runtime_view::Mutation::SubscriptionDiff {
+                added: Vec::new(),
+                removed: connection.subscription.iter().copied().collect(),
+                reply: reply_tx,
+            });
     }
 }
 
@@ -571,7 +603,52 @@ fn chunk_delta_to_dto(
     }
 }
 
+async fn apply_mutation(
+    runtime_arc: &Arc<RwLock<SimulationRuntime>>,
+    mutation: crate::runtime_view::Mutation,
+) {
+    use crate::runtime_view::Mutation;
+    match mutation {
+        Mutation::ApplyCommand { command, reply } => {
+            let mut runtime = runtime_arc.write().await;
+            let result = runtime.apply_client_command(command).await;
+            let _ = reply.send(result);
+        }
+        Mutation::SubscriptionDiff {
+            added,
+            removed,
+            reply,
+        } => {
+            let mut runtime = runtime_arc.write().await;
+            runtime.apply_subscription_diff(added.iter(), removed.iter());
+            let world_id = runtime.world_id_for_persist().clone();
+            let tick = runtime.mobility_tick();
+            let snapshots: Vec<abutown_protocol::MobilityChunkSnapshotDto> = added
+                .iter()
+                .map(|coord| {
+                    let snapshot = runtime.mobility().build_chunk_snapshot(*coord);
+                    chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick)
+                })
+                .collect();
+            let _ = reply.send(snapshots);
+        }
+        Mutation::MarkChunkSnapshotsPersisted { coords } => {
+            let mut runtime = runtime_arc.write().await;
+            runtime.mark_chunk_snapshots_persisted(&coords);
+        }
+    }
+}
+
 async fn tick_and_fan_out(state: &AppState) {
+    // Phase 0: drain mutation queue and apply each under the write-lock.
+    {
+        let mut rx = state.mutation_rx.lock().await;
+        let runtime_arc = state.runtime();
+        while let Ok(mutation) = rx.try_recv() {
+            apply_mutation(&runtime_arc, mutation).await;
+        }
+    }
+
     // Phase 1: tick the world under brief write-lock; collect deltas + metadata.
     let (per_chunk, world_id, tick) = {
         let runtime_arc = state.runtime();
@@ -650,29 +727,37 @@ async fn handle_client_message(
                 .collect();
 
             if !added.is_empty() {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                if state
+                    .mutations
+                    .send(crate::runtime_view::Mutation::SubscriptionDiff {
+                        added: added.clone(),
+                        removed: Vec::new(),
+                        reply: reply_tx,
+                    })
+                    .is_err()
+                {
+                    return out;
+                }
+
+                // Set up per-chunk channel subscriptions while we wait for the reply.
                 let chunk_channels = state.chunk_channels();
-                let runtime_arc = state.runtime();
-                let mut runtime = runtime_arc.write().await;
-                runtime.apply_subscription_diff(&added, std::iter::empty());
-
-                let world_id = runtime.world_id_for_persist().clone();
-                let tick = runtime.mobility_tick();
-
                 for coord in &added {
-                    // Get-or-create broadcast channel for this chunk.
                     let sender = chunk_channels
                         .entry(*coord)
                         .or_insert_with(|| broadcast::channel(8).0)
                         .clone();
-                    // Subscribe and store receiver in chunk_streams.
                     let receiver = sender.subscribe();
                     connection
                         .chunk_streams
                         .insert(*coord, BroadcastStream::new(receiver));
-                    // Build current snapshot of this chunk and push as MobilityChunkSnapshot.
-                    let snapshot = runtime.mobility().build_chunk_snapshot(*coord);
-                    let dto = chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick);
-                    out.push(ServerMessageDto::MobilityChunkSnapshot(dto));
+                }
+
+                // Receive initial snapshots from the tick task.
+                if let Ok(snapshots) = reply_rx.await {
+                    for snap in snapshots {
+                        out.push(ServerMessageDto::MobilityChunkSnapshot(snap));
+                    }
                 }
             }
         }
@@ -686,16 +771,27 @@ async fn handle_client_message(
                 .collect();
 
             if !removed.is_empty() {
-                let chunk_channels = state.chunk_channels();
-                let runtime_arc = state.runtime();
-                let mut runtime = runtime_arc.write().await;
-                runtime.apply_subscription_diff(std::iter::empty(), &removed);
+                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+                let _ = state
+                    .mutations
+                    .send(crate::runtime_view::Mutation::SubscriptionDiff {
+                        added: Vec::new(),
+                        removed: removed.clone(),
+                        reply: reply_tx,
+                    });
 
+                let chunk_channels = state.chunk_channels();
                 for coord in &removed {
-                    // Drop this connection's receiver for the chunk.
                     connection.chunk_streams.remove(coord);
-                    // Reap the channel if no other client is subscribed to this chunk.
-                    if runtime.chunk_subscriber_count(*coord) == 0 {
+                    // Reap the channel if no other client is subscribed. We
+                    // probe via a brief read-lock for now; Task 6 moves
+                    // chunk_subscriber_counts into the view.
+                    let count = {
+                        let runtime = state.runtime();
+                        let runtime = runtime.read().await;
+                        runtime.chunk_subscriber_count(*coord)
+                    };
+                    if count == 0 {
                         chunk_channels.remove(coord);
                     }
                 }
@@ -760,12 +856,12 @@ async fn persist_snapshots_once(
         }
     }
 
-    // Phase 3: brief write-lock to mark chunk snapshots as persisted.
-    {
-        let runtime_arc = state.runtime();
-        let mut runtime = runtime_arc.write().await;
-        runtime.mark_chunk_snapshots_persisted(&coords);
-    }
+    // Phase 3: send a fire-and-forget Mutation to mark snapshots persisted.
+    let _ = state
+        .mutations
+        .send(crate::runtime_view::Mutation::MarkChunkSnapshotsPersisted {
+            coords: coords.clone(),
+        });
 
     Ok(written)
 }
@@ -976,6 +1072,45 @@ mod tests {
         ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
             Ok(None)
         }
+    }
+
+    #[tokio::test]
+    async fn subscription_diff_mutation_returns_snapshots_for_added_chunks() {
+        let state = AppState::new(SimulationRuntime::new());
+        // Tick once to populate the view.
+        tick_and_fan_out(&state).await;
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        state
+            .mutations
+            .send(crate::runtime_view::Mutation::SubscriptionDiff {
+                added: vec![sim_core::ids::ChunkCoord { x: 4, y: 4 }],
+                removed: Vec::new(),
+                reply: reply_tx,
+            })
+            .unwrap();
+        // Trigger drain.
+        tick_and_fan_out(&state).await;
+        let snapshots = reply_rx.await.unwrap();
+        assert_eq!(snapshots.len(), 1, "expected one snapshot for added chunk");
+        assert_eq!(snapshots[0].chunk.x, 4);
+        assert_eq!(snapshots[0].chunk.y, 4);
+    }
+
+    #[tokio::test]
+    async fn dropped_reply_channel_does_not_panic() {
+        let state = AppState::new(SimulationRuntime::new());
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        drop(reply_rx); // drop receiver before mutation is processed
+        state
+            .mutations
+            .send(crate::runtime_view::Mutation::SubscriptionDiff {
+                added: vec![sim_core::ids::ChunkCoord { x: 4, y: 4 }],
+                removed: Vec::new(),
+                reply: reply_tx,
+            })
+            .unwrap();
+        tick_and_fan_out(&state).await; // must not panic
     }
 
     #[tokio::test]
