@@ -828,6 +828,7 @@ fn world_event_dto_to_proto(e: &abutown_protocol::WorldEventDto) -> w::WorldEven
 // deleted in Task 6 when /health, /world, /mobility, /chunks/* migrate
 // to protobuf bodies as well.
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn direction_proto_to_dto(d: i32) -> abutown_protocol::DirectionDto {
     use abutown_protocol::DirectionDto as L;
     match w::Direction::try_from(d).unwrap_or(w::Direction::Unspecified) {
@@ -842,6 +843,7 @@ fn direction_proto_to_dto(d: i32) -> abutown_protocol::DirectionDto {
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn tile_kind_proto_to_dto(k: i32) -> abutown_protocol::TileKindDto {
     use abutown_protocol::TileKindDto as L;
     match w::TileKind::try_from(k).unwrap_or(w::TileKind::Unspecified) {
@@ -852,6 +854,7 @@ fn tile_kind_proto_to_dto(k: i32) -> abutown_protocol::TileKindDto {
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn chunk_state_proto_to_dto(s: i32) -> abutown_protocol::ChunkStateDto {
     use abutown_protocol::ChunkStateDto as L;
     match w::ChunkState::try_from(s).unwrap_or(w::ChunkState::Unspecified) {
@@ -862,6 +865,7 @@ fn chunk_state_proto_to_dto(s: i32) -> abutown_protocol::ChunkStateDto {
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn vehicle_kind_proto_to_dto(k: i32) -> abutown_protocol::VehicleKindDto {
     use abutown_protocol::VehicleKindDto as L;
     match w::VehicleKind::try_from(k).unwrap_or(w::VehicleKind::Unspecified) {
@@ -870,6 +874,7 @@ fn vehicle_kind_proto_to_dto(k: i32) -> abutown_protocol::VehicleKindDto {
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn agent_proto_to_dto(a: &w::AgentMobility) -> abutown_protocol::AgentMobilityDto {
     use abutown_protocol::AgentMobilityStateDto as State;
     let state = match a.state.as_ref().and_then(|s| s.state.as_ref()) {
@@ -910,6 +915,7 @@ fn agent_proto_to_dto(a: &w::AgentMobility) -> abutown_protocol::AgentMobilityDt
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn vehicle_proto_to_dto(v: &w::VehicleMobility) -> abutown_protocol::VehicleMobilityDto {
     let wc = v.world_coord.unwrap_or(w::WorldCoord { x: 0.0, y: 0.0 });
     abutown_protocol::VehicleMobilityDto {
@@ -931,6 +937,7 @@ fn vehicle_proto_to_dto(v: &w::VehicleMobility) -> abutown_protocol::VehicleMobi
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn stop_proto_to_dto(s: &w::Stop) -> abutown_protocol::StopMobilityDto {
     abutown_protocol::StopMobilityDto {
         id: s.id.clone(),
@@ -945,6 +952,7 @@ fn stop_proto_to_dto(s: &w::Stop) -> abutown_protocol::StopMobilityDto {
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn world_summary_proto_to_dto(s: &w::WorldSummary) -> abutown_protocol::WorldSummaryDto {
     abutown_protocol::WorldSummaryDto {
         protocol_version: s.protocol_version as u16,
@@ -959,6 +967,7 @@ fn world_summary_proto_to_dto(s: &w::WorldSummary) -> abutown_protocol::WorldSum
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn health_proto_to_dto(h: &w::HealthResponse) -> abutown_protocol::HealthResponse {
     abutown_protocol::HealthResponse {
         protocol_version: h.protocol_version as u16,
@@ -968,6 +977,7 @@ fn health_proto_to_dto(h: &w::HealthResponse) -> abutown_protocol::HealthRespons
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn chunk_snapshot_proto_to_dto(c: &w::ChunkSnapshot) -> abutown_protocol::ChunkSnapshotDto {
     abutown_protocol::ChunkSnapshotDto {
         protocol_version: c.protocol_version as u16,
@@ -995,6 +1005,7 @@ fn chunk_snapshot_proto_to_dto(c: &w::ChunkSnapshot) -> abutown_protocol::ChunkS
     }
 }
 
+// TODO(Task 6): delete this reverse helper once HTTP endpoints emit protobuf.
 fn mobility_snapshot_proto_to_dto(
     s: &w::MobilitySnapshot,
 ) -> abutown_protocol::MobilitySnapshotDto {
