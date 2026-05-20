@@ -115,7 +115,6 @@ impl AppState {
         Arc::clone(&self.runtime)
     }
 
-    #[allow(dead_code)] // Used by tests in Task 2; readers migrate to it in Task 3.
     pub(crate) fn view(&self) -> Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>> {
         Arc::clone(&self.view)
     }
@@ -313,21 +312,15 @@ fn build_router_from_state(state: AppState) -> Router {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    let runtime = state.runtime();
-    let runtime = runtime.read().await;
-    Json(runtime.health())
+    Json(state.view().load().health.clone())
 }
 
 async fn world(State(state): State<AppState>) -> Json<WorldSummaryDto> {
-    let runtime = state.runtime();
-    let runtime = runtime.read().await;
-    Json(runtime.world_summary())
+    Json(state.view().load().world_summary.clone())
 }
 
 async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
-    let runtime = state.runtime();
-    let runtime = runtime.read().await;
-    Json(runtime.mobility_snapshot())
+    Json(state.view().load().mobility_full_dto.clone())
 }
 
 async fn cards() -> Json<Vec<crate::card_hand::CardDefinition>> {
@@ -385,10 +378,13 @@ async fn chunk(
     State(state): State<AppState>,
     Path((x, y)): Path<(i32, i32)>,
 ) -> Result<Json<ChunkSnapshotDto>, StatusCode> {
-    let runtime = state.runtime();
-    let runtime = runtime.read().await;
-    runtime
-        .chunk_snapshot(ChunkCoord { x, y })
+    let coord = sim_core::ids::ChunkCoord { x, y };
+    state
+        .view()
+        .load()
+        .chunk_snapshots
+        .get(&coord)
+        .cloned()
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
 }
@@ -440,9 +436,12 @@ impl ConnectionState {
 async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     let mut deltas = state.subscribe_deltas();
     let hello = {
-        let runtime = state.runtime();
-        let runtime = runtime.read().await;
-        runtime.hello()
+        let view = state.view().load();
+        ServerMessageDto::Hello(abutown_protocol::ServerHelloDto {
+            protocol_version: abutown_protocol::PROTOCOL_VERSION,
+            world_id: view.world_id.clone(),
+            chunk_size: view.world_summary.chunk_size,
+        })
     };
     if send_server_message(&mut socket, hello).await.is_err() {
         return;
@@ -589,7 +588,7 @@ async fn tick_and_fan_out(state: &AppState) {
         }
     }
 
-    // Phase 3 — Phase 7c readers (HTTP / WS init) will switch to this in Task 3.
+    // Phase 3 — publish the new RuntimeReadView for lock-free HTTP/WS readers.
     let pulse_sequence = state.view.load().pulse_sequence;
     let view = build_read_view_from_runtime(&runtime, &per_chunk, pulse_sequence);
     state.view.store(Arc::new(view));
@@ -698,6 +697,8 @@ async fn handle_client_message(
 async fn persist_snapshots_once(
     state: &AppState,
 ) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
+    // TODO Phase 7c task 6: migrate to view.load() once MobilitySnapshotStore
+    // accepts MobilitySnapshotDto directly (via a new write_dto method).
     // Phase 1: collect everything under a brief read-lock — mobility snapshot
     // is cloned here so the lock can be released before any DB write.
     let (snapshots, coords, world_id, mobility_tick, mobility_snapshot) = {
@@ -773,6 +774,47 @@ mod tests {
     use abutown_protocol::ChunkSnapshotDto;
     use sim_core::ids::ChunkCoord;
     use sim_core::persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError};
+
+    #[tokio::test]
+    async fn http_reads_are_lock_free_while_commands_are_in_flight() {
+        use std::time::{Duration, Instant};
+
+        let state = AppState::new(SimulationRuntime::new());
+
+        // Spawn 50 background tasks that take the runtime write-lock.
+        let mut command_tasks = Vec::new();
+        for _ in 0..50 {
+            let state = state.clone();
+            command_tasks.push(tokio::spawn(async move {
+                let runtime = state.runtime();
+                let _w = runtime.write().await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }));
+        }
+
+        // 50 concurrent reads of /world via the view path — must not wait.
+        let start = Instant::now();
+        let mut read_tasks = Vec::new();
+        for _ in 0..50 {
+            let state = state.clone();
+            read_tasks.push(tokio::spawn(async move {
+                let _ = state.view().load().world_summary.clone();
+            }));
+        }
+        for t in read_tasks {
+            t.await.unwrap();
+        }
+        let read_elapsed = start.elapsed();
+
+        assert!(
+            read_elapsed < Duration::from_millis(50),
+            "lock-free reads took {read_elapsed:?}, expected < 50ms"
+        );
+
+        for t in command_tasks {
+            t.await.unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn runtime_read_view_updates_after_tick() {

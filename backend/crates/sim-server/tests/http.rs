@@ -324,6 +324,11 @@ async fn command_sets_tile_kind_and_returns_event() {
     assert_eq!(json["event"]["local_index"], 11);
     assert_eq!(json["event"]["kind"], "water");
 
+    // Phase 7c: /chunks/{x}/{y} reads from the RuntimeReadView which is
+    // published once per tick (100 ms). Wait one tick so the mutation
+    // applied by the command above becomes visible in the view.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
     let snapshot_response = app
         .oneshot(
             Request::builder()
