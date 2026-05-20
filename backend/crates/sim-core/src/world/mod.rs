@@ -5,3 +5,6 @@ pub mod plugin;
 pub mod resources;
 pub mod schedule;
 pub mod systems;
+
+pub use components::*;
+pub use events::*;
