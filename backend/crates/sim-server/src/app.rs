@@ -114,14 +114,42 @@ impl AppState {
             mutations: mutation_tx,
         };
 
-        tokio::spawn(tick_loop(
+        // Panic supervisor: if tick_loop panics, every reader is stuck on
+        // the last-published view forever and every Mutation::send fails.
+        // Log loudly and abort so an external supervisor (systemd, k8s,
+        // container restart policy) can recover us instead of running a
+        // zombie server that serves stale data with no recovery path.
+        let tick_fut = tick_loop(
             runtime,
             mutation_rx,
             view,
             deltas,
             chunk_channels,
             SIMULATION_TICK_INTERVAL,
-        ));
+        );
+        let supervised = tokio::spawn(tick_fut);
+        tokio::spawn(async move {
+            match supervised.await {
+                Ok(()) => {
+                    tracing::error!("tick_loop exited normally — should run forever");
+                    std::process::abort();
+                }
+                Err(join_err) => {
+                    if join_err.is_panic() {
+                        let panic = join_err.into_panic();
+                        let msg = panic
+                            .downcast_ref::<&'static str>()
+                            .copied()
+                            .or_else(|| panic.downcast_ref::<String>().map(|s| s.as_str()))
+                            .unwrap_or("<non-string panic>");
+                        tracing::error!(panic = %msg, "tick_loop panicked");
+                    } else {
+                        tracing::error!(?join_err, "tick_loop task cancelled");
+                    }
+                    std::process::abort();
+                }
+            }
+        });
 
         state
     }
