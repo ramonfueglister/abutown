@@ -16,6 +16,35 @@ use sim_server::{
 const TEST_USER_A: &str = "00000000-0000-0000-0000-000000000001";
 const TEST_USER_B: &str = "00000000-0000-0000-0000-000000000002";
 
+/// Poll a GET endpoint until `predicate(json)` returns true, or panic after
+/// ~1s. Phase 7c made HTTP reads eventually-consistent (view is published
+/// every 100 ms tick) — tests that do read-after-write should poll instead
+/// of sleeping for a fixed interval.
+async fn poll_chunk_until<F>(app: &axum::Router, uri: &str, predicate: F) -> Value
+where
+    F: Fn(&Value) -> bool,
+{
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
+    loop {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        if response.status() == StatusCode::OK {
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let json: Value = serde_json::from_slice(&body).unwrap();
+            if predicate(&json) {
+                return json;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("poll_chunk_until timed out after 1s waiting on {uri}");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 fn empty_test_network() -> sim_core::city_network::CityNetwork {
     sim_core::city_network::CityNetwork {
         version: 1,
@@ -325,27 +354,21 @@ async fn command_sets_tile_kind_and_returns_event() {
     assert_eq!(json["event"]["kind"], "water");
 
     // Phase 7c: /chunks/{x}/{y} reads from the RuntimeReadView which is
-    // published once per tick (100 ms). Wait one tick so the mutation
-    // applied by the command above becomes visible in the view.
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    // published once per tick (100 ms). Poll for the mutation to become
+    // visible instead of using a fixed sleep — faster + more robust on
+    // slow CI than `sleep(150ms)`.
+    let snapshot = poll_chunk_until(&app, "/chunks/4/4", |snap| {
+        snap["tiles"]
+            .as_array()
+            .map(|tiles| {
+                tiles
+                    .iter()
+                    .any(|tile| tile["local_index"] == 11 && tile["kind"] == "water")
+            })
+            .unwrap_or(false)
+    })
+    .await;
 
-    let snapshot_response = app
-        .oneshot(
-            Request::builder()
-                .uri("/chunks/4/4")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(snapshot_response.status(), StatusCode::OK);
-    let body = snapshot_response
-        .into_body()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes();
-    let snapshot: Value = serde_json::from_slice(&body).unwrap();
     assert!(
         snapshot["tiles"]
             .as_array()
