@@ -58,6 +58,7 @@ pub struct AppState {
     snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
+    view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
 }
 
 impl AppState {
@@ -93,6 +94,11 @@ impl AppState {
         auth: AuthVerifier,
     ) -> Self {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
+        let initial_view = build_read_view_from_runtime(
+            &runtime,
+            &std::collections::HashMap::new(),
+            0,
+        );
         Self {
             runtime: Arc::new(RwLock::new(runtime)),
             deltas,
@@ -101,11 +107,17 @@ impl AppState {
             snapshot_store: Arc::new(Mutex::new(snapshot_store)),
             mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
             chunk_channels: Arc::new(DashMap::new()),
+            view: Arc::new(arc_swap::ArcSwap::from_pointee(initial_view)),
         }
     }
 
     pub(crate) fn runtime(&self) -> Arc<RwLock<SimulationRuntime>> {
         Arc::clone(&self.runtime)
+    }
+
+    #[allow(dead_code)] // Used by tests in Task 2; readers migrate to it in Task 3.
+    pub(crate) fn view(&self) -> Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>> {
+        Arc::clone(&self.view)
     }
 
     fn snapshot_store(&self) -> Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>> {
@@ -170,6 +182,52 @@ impl AppState {
                 }
             }
         });
+    }
+}
+
+fn build_read_view_from_runtime(
+    runtime: &SimulationRuntime,
+    per_chunk: &std::collections::HashMap<
+        sim_core::ids::ChunkCoord,
+        sim_core::mobility::MobilityChunkDelta,
+    >,
+    pulse_sequence: u64,
+) -> crate::runtime_view::RuntimeReadView {
+    let world_id = runtime.world_id_for_persist().clone();
+    let mobility_tick = runtime.mobility_tick();
+    let mobility = runtime.mobility();
+
+    let per_chunk_deltas: Vec<abutown_protocol::MobilityChunkDeltaDto> = per_chunk
+        .values()
+        .map(|delta| chunk_delta_to_dto(delta, mobility, &world_id, mobility_tick))
+        .collect();
+
+    // Pre-materialize per-chunk tile snapshots for every loaded chunk so HTTP
+    // /chunks/{x}/{y} can read without a lock.
+    let mut chunk_snapshots: std::collections::HashMap<
+        sim_core::ids::ChunkCoord,
+        abutown_protocol::ChunkSnapshotDto,
+    > = std::collections::HashMap::new();
+    for coord_dto in runtime.world_summary().loaded_chunks.iter() {
+        let coord = sim_core::ids::ChunkCoord {
+            x: coord_dto.x,
+            y: coord_dto.y,
+        };
+        if let Some(snap) = runtime.chunk_snapshot(coord) {
+            chunk_snapshots.insert(coord, snap);
+        }
+    }
+
+    crate::runtime_view::RuntimeReadView {
+        tick: mobility_tick,
+        world_id: world_id.clone(),
+        mobility_tick,
+        health: runtime.health(),
+        world_summary: runtime.world_summary(),
+        chunk_snapshots,
+        mobility_full_dto: runtime.mobility_snapshot(),
+        per_chunk_deltas,
+        pulse_sequence,
     }
 }
 
@@ -513,21 +571,29 @@ async fn tick_and_fan_out(state: &AppState) {
         (per_chunk, world_id, tick)
     }; // write-lock dropped here
 
-    // Phase 2: publish per-chunk deltas into broadcast channels. No runtime lock.
+    // Phase 2: publish per-chunk deltas into broadcast channels.
     let chunk_channels = state.chunk_channels();
-    if per_chunk.is_empty() {
-        return;
+    if !per_chunk.is_empty() {
+        // Read-lock briefly to build DTOs (needs &MobilityWorld for record-DTO conversions).
+        let runtime_arc = state.runtime();
+        let runtime = runtime_arc.read().await;
+        let mobility = runtime.mobility();
+        for (chunk, delta) in &per_chunk {
+            let Some(sender) = chunk_channels.get(chunk).map(|e| e.clone()) else {
+                continue;
+            };
+            let dto = chunk_delta_to_dto(delta, mobility, &world_id, tick);
+            let _ = sender.send(dto); // best-effort; ignore receiver count
+        }
     }
-    // Read-lock briefly to build DTOs (needs &MobilityWorld for record-DTO conversions).
-    let runtime_arc = state.runtime();
-    let runtime = runtime_arc.read().await;
-    let mobility = runtime.mobility();
-    for (chunk, delta) in per_chunk {
-        let Some(sender) = chunk_channels.get(&chunk).map(|e| e.clone()) else {
-            continue;
-        };
-        let dto = chunk_delta_to_dto(&delta, mobility, &world_id, tick);
-        let _ = sender.send(dto); // best-effort; ignore receiver count
+
+    // Phase 3: publish the RuntimeReadView (Phase 7c — readers will switch to this in Task 3).
+    {
+        let runtime_arc = state.runtime();
+        let runtime = runtime_arc.read().await;
+        let pulse_sequence = state.view.load().pulse_sequence;
+        let view = build_read_view_from_runtime(&runtime, &per_chunk, pulse_sequence);
+        state.view.store(std::sync::Arc::new(view));
     }
 }
 
@@ -709,6 +775,23 @@ mod tests {
     use abutown_protocol::ChunkSnapshotDto;
     use sim_core::ids::ChunkCoord;
     use sim_core::persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError};
+
+    #[tokio::test]
+    async fn runtime_read_view_updates_after_tick() {
+        let state = AppState::new(SimulationRuntime::new());
+        let view0 = state.view().load();
+        let tick0 = view0.mobility_tick;
+        drop(view0);
+
+        tick_and_fan_out(&state).await;
+
+        let view1 = state.view().load();
+        assert_eq!(view1.mobility_tick, tick0 + 1, "tick should have advanced");
+        assert!(
+            !view1.chunk_snapshots.is_empty(),
+            "view should include chunk snapshots"
+        );
+    }
 
     #[tokio::test]
     async fn persist_snapshots_once_writes_runtime_snapshots() {
