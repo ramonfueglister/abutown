@@ -313,6 +313,32 @@ fn classify_target(
 /// per-entity `LodCooldown`, and writes `ChunkLodChanged` messages for
 /// every transition. Runs in `CoreSet::LodReclassify`.
 pub fn reclassify_chunk_lod_system(world: &mut World) {
+    // Compatibility shim: sync the legacy `ChunkSubscribers` resource map
+    // onto the per-entity `ChunkSubscriberCount` component for every known
+    // chunk entity. Iterating all entities (not just those in the map)
+    // handles the decrement-to-zero case where `apply_subscription_diff`
+    // removes the coord from the map.
+    //
+    // Skip the sync entirely when `ChunkSubscribers` is absent — in that
+    // mode (used by isolated reclassify unit tests) the per-entity
+    // component is the source of truth.
+    if let Some(subscribers) = world.get_resource::<crate::mobility::resources::ChunkSubscribers>()
+    {
+        let subscriber_map: std::collections::HashMap<ChunkCoord, u8> = subscribers.0.clone();
+        let entity_coords: Vec<(Entity, ChunkCoord)> = world
+            .resource::<ChunksByCoord>()
+            .0
+            .iter()
+            .map(|(c, e)| (*e, *c))
+            .collect();
+        for (entity, coord) in entity_coords {
+            let count = subscriber_map.get(&coord).copied().unwrap_or(0);
+            if let Some(mut sub) = world.entity_mut(entity).get_mut::<ChunkSubscriberCount>() {
+                sub.0 = count;
+            }
+        }
+    }
+
     // Phase 1: collect work (immutable read of components + populations).
     let mut transitions: Vec<(Entity, ChunkCoord, ChunkLod, ChunkLod)> = Vec::new();
     let mut cooldown_updates: Vec<(Entity, u8)> = Vec::new();
