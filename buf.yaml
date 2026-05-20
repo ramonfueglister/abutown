@@ -4,6 +4,10 @@ modules:
 lint:
   use:
     - STANDARD
+  except:
+    # Single-file schema; directory layout would force a needless move of
+    # the .proto and break the codegen paths in buf.gen.yaml / build.rs.
+    - PACKAGE_DIRECTORY_MATCH
 breaking:
   use:
     - WIRE_JSON

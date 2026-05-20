@@ -6,7 +6,12 @@ package abutown.v1;
 message ChunkCoord { sint32 x = 1; sint32 y = 2; }
 message WorldCoord { float x = 1; float y = 2; }
 
+// Convention for all messages/enums below: when removing a field or enum
+// variant, move its tag and name into `reserved` blocks. Never reuse a tag.
+// `buf breaking` (see `npm run lint:proto-breaking`) enforces this on PRs.
+
 enum Direction {
+  reserved 100 to max;
   DIRECTION_UNSPECIFIED = 0;
   DIRECTION_N = 1;
   DIRECTION_NE = 2;
@@ -19,6 +24,7 @@ enum Direction {
 }
 
 enum ChunkState {
+  reserved 100 to max;
   CHUNK_STATE_UNSPECIFIED = 0;
   CHUNK_STATE_ASLEEP = 1;
   CHUNK_STATE_WARM = 2;
@@ -27,6 +33,7 @@ enum ChunkState {
 }
 
 enum TileKind {
+  reserved 100 to max;
   TILE_KIND_UNSPECIFIED = 0;
   TILE_KIND_GRASS = 1;
   TILE_KIND_WATER = 2;
@@ -35,6 +42,7 @@ enum TileKind {
 }
 
 enum VehicleKind {
+  reserved 100 to max;
   VEHICLE_KIND_UNSPECIFIED = 0;
   VEHICLE_KIND_CAR = 1;
   VEHICLE_KIND_TRAM = 2;
@@ -43,6 +51,7 @@ enum VehicleKind {
 // === Server → Client envelope ===
 
 message ServerMessage {
+  reserved 100 to max;
   oneof body {
     Hello hello = 1;
     TilePulse tile_pulse = 2;
@@ -97,6 +106,7 @@ message MobilityChunkSnapshot {
 }
 
 message WorldEvent {
+  reserved 100 to max;
   oneof event {
     TileKindSetEvent tile_kind_set = 1;
   }
@@ -117,6 +127,7 @@ message TileKindSetEvent {
 // === Client → Server envelope ===
 
 message ClientMessage {
+  reserved 100 to max;
   oneof body {
     ChunkSubscribe chunk_subscribe = 1;
     ChunkUnsubscribe chunk_unsubscribe = 2;
@@ -136,6 +147,7 @@ message ChunkUnsubscribe {
 // === HTTP request/response bodies ===
 
 message ClientCommand {
+  reserved 100 to max;
   oneof command {
     SetTileKindCommand set_tile_kind = 1;
   }
@@ -151,6 +163,7 @@ message SetTileKindCommand {
 }
 
 message CommandResponse {
+  reserved 100 to max;
   oneof outcome {
     CommandAccepted accepted = 1;
     CommandRejected rejected = 2;
@@ -226,6 +239,7 @@ message AgentMobility {
 }
 
 message AgentState {
+  reserved 100 to max;
   oneof state {
     Walking walking = 1;
     WaitingAtStop waiting_at_stop = 2;
