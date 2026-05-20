@@ -1,5 +1,6 @@
 import {
-  parseServerMessage,
+  mobilityChunkDeltaFromProto,
+  mobilityChunkSnapshotFromProto,
   type AgentMobilityDto,
   type MobilityChunkDeltaDto,
   type MobilityChunkSnapshotDto,
@@ -7,6 +8,7 @@ import {
   type StopMobilityDto,
   type VehicleMobilityDto,
 } from './mobilityProtocol';
+import type { ServerMessage } from './proto/abutown_pb';
 
 const CHUNK_SIZE = 32;
 
@@ -163,18 +165,34 @@ export function applyMobilityChunkDelta(
 
 export function applyServerMessage(
   state: MobilityOverlayState,
-  value: unknown,
+  message: ServerMessage,
   now = Date.now(),
 ): MobilityOverlayState {
-  const message = parseServerMessage(value);
-  if (message?.type === 'mobility_chunk_snapshot') {
-    return applyMobilityChunkSnapshot(state, message, now);
+  switch (message.body.case) {
+    case 'mobilityChunkSnapshot':
+      return applyMobilityChunkSnapshot(state, mobilityChunkSnapshotFromProto(message.body.value), now);
+    case 'mobilityChunkDelta':
+      return applyMobilityChunkDelta(state, mobilityChunkDeltaFromProto(message.body.value), now);
+    case 'hello':
+      // The bridge marks the connection live via markMobilityConnected on the
+      // initial snapshot fetch; the wire Hello is informational for now.
+      return state;
+    case 'tilePulse':
+      // Consumed elsewhere (tile rendering); mobility overlay ignores it.
+      return state;
+    case 'worldEvent':
+      // No mobility-side reducer; tile-kind set events are handled by the
+      // tile/chunk layer.
+      return state;
+    case 'error':
+      // eslint-disable-next-line no-console
+      console.warn('mobility server error', message.body.value.code, message.body.value.message);
+      return state;
+    case undefined:
+      // Malformed envelope (no oneof set). Bump diagnostics so the UI can
+      // surface "something arrived but we couldn't route it".
+      return { ...state, invalidMessages: state.invalidMessages + 1, lastUpdatedAt: now };
   }
-  if (message?.type === 'mobility_chunk_delta') {
-    return applyMobilityChunkDelta(state, message, now);
-  }
-  if (message !== null) return state;
-  return { ...state, invalidMessages: state.invalidMessages + 1, lastUpdatedAt: now };
 }
 
 export function mobilityDiagnostics(state: MobilityOverlayState): MobilityDiagnostics {

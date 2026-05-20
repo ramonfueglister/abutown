@@ -1,12 +1,13 @@
+import { fromBinary } from '@bufbuild/protobuf';
 import { resolveBackendBaseUrl } from './backendGate';
 import { createSubscriptionClient } from './chunkSubscriptionClient';
 import {
   isMobilitySnapshotDto,
   isWorldSummaryDto,
-  parseServerMessage,
   type MobilitySnapshotDto,
   type WorldSummaryDto,
 } from './mobilityProtocol';
+import { ServerMessageSchema } from './proto/abutown_pb';
 import {
   applyMobilitySnapshot,
   applyServerMessage,
@@ -155,11 +156,20 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
     closeSocket();
     const url = websocketUrl(baseUrl, '/ws');
     socket = new WebSocketConstructor(url);
+    socket.binaryType = 'arraybuffer';
     let subscription: ReturnType<typeof createSubscriptionClient> | null = null;
 
     socket.onopen = () => {
       subscription = createSubscriptionClient({
-        send: (text) => socket?.send(text),
+        // WebSocket.send accepts Uint8Array but its TS overload demands
+        // a buffer view backed by ArrayBuffer (not SharedArrayBuffer); the
+        // codegen output uses ArrayBufferLike. Copy into a fresh ArrayBuffer
+        // slice so the type narrows correctly and avoid mutation aliasing.
+        send: (bytes) => {
+          const copy = new Uint8Array(bytes.byteLength);
+          copy.set(bytes);
+          socket?.send(copy.buffer);
+        },
       });
       const pollSubscription = () => {
         if (socket?.readyState !== WS_READY_STATE_OPEN) return;
@@ -174,11 +184,29 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
       subscriptionInterval = setIntervalFn(pollSubscription, SUBSCRIPTION_POLL_INTERVAL_MS);
     };
 
-    socket.onmessage = (event: MessageEvent<string>) => {
-      const parsed = parseJson(event.data);
-      const message = parseServerMessage(parsed);
-      currentState = applyServerMessage(currentState, message ?? parsed, now());
-      notify();
+    socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+      // Reject text/blob frames defensively — backend sends binary only.
+      if (!(event.data instanceof ArrayBuffer)) {
+        // eslint-disable-next-line no-console
+        console.warn('mobility ws: ignoring non-binary frame', typeof event.data);
+        return;
+      }
+      const bytes = new Uint8Array(event.data);
+      try {
+        const message = fromBinary(ServerMessageSchema, bytes);
+        currentState = applyServerMessage(currentState, message, now());
+        notify();
+      } catch (err) {
+        // Don't tear down the socket on one bad frame — surface via diagnostics.
+        // eslint-disable-next-line no-console
+        console.warn('failed to decode ServerMessage', err);
+        currentState = {
+          ...currentState,
+          invalidMessages: currentState.invalidMessages + 1,
+          lastUpdatedAt: now(),
+        };
+        notify();
+      }
     };
 
     socket.onerror = () => {
@@ -268,14 +296,6 @@ function websocketUrl(baseUrl: string, path: string): string {
   const url = new URL(path, baseUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 }
 
 function errorMessage(error: unknown): string {

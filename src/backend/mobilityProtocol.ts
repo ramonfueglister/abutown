@@ -122,9 +122,10 @@ export type ChunkUnsubscribeMessage = {
 
 export type ClientMessageDto = ChunkSubscribeMessage | ChunkUnsubscribeMessage;
 
-export function encodeClientMessage(message: ClientMessageDto): string {
-  return JSON.stringify(message);
-}
+// `encodeClientMessage` / `parseServerMessage` are gone with the binary wire
+// migration. Use `toBinary(ClientMessageSchema, ...)` / `fromBinary(
+// ServerMessageSchema, ...)` from `@bufbuild/protobuf` plus the converters
+// in this module to bridge proto types ↔ legacy DTOs.
 
 export type WorldSummaryDto = {
   protocol_version: number;
@@ -202,16 +203,10 @@ export function isMobilityChunkSnapshotDto(value: unknown): value is MobilityChu
   );
 }
 
-export function parseServerMessage(value: unknown): ServerMessageDto | null {
-  const parsed: unknown = isString(value) ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value;
-  if (!isObject(parsed) || !isString(parsed.type)) return null;
-  if (parsed.type === 'mobility_chunk_delta') return isMobilityChunkDeltaDto(parsed) ? parsed : null;
-  if (parsed.type === 'mobility_chunk_snapshot') return isMobilityChunkSnapshotDto(parsed) ? parsed : null;
-  if (parsed.type === 'hello') return isServerHelloDto(parsed) ? parsed : null;
-  if (parsed.type === 'tile_pulse') return isTilePulseDeltaDto(parsed) ? parsed : null;
-  if (parsed.type === 'error') return isServerErrorDto(parsed) ? parsed : null;
-  return null;
-}
+// `parseServerMessage` removed in the binary wire migration. Inbound frames
+// are now decoded by `fromBinary(ServerMessageSchema, bytes)` in
+// `mobilityClient.ts`, then handed to `applyServerMessage` in
+// `mobilityState.ts` which translates the proto envelope into reducer calls.
 
 function isAgentMobilityDto(value: unknown): value is AgentMobilityDto {
   if (!isObject(value)) return false;
@@ -328,4 +323,118 @@ export function isDirectionDto(value: unknown): value is DirectionDto {
 
 export function isWorldCoordDto(value: unknown): value is WorldCoordDto {
   return isObject(value) && isNumber(value.x) && isNumber(value.y);
+}
+
+// ---------------------------------------------------------------------------
+// proto → legacy DTO converters
+// ---------------------------------------------------------------------------
+//
+// The MobilityOverlayState reducer (mobilityState.ts) and downstream render
+// helpers still consume the snake_case DTO shape that predates the wire
+// migration. Rather than rewrite every consumer (cosmetic churn that risks
+// breaking the renderer), we keep the DTOs as the internal type and convert
+// at the WS boundary in `applyServerMessage`.
+
+import type {
+  AgentMobility as AgentMobilityProto,
+  AgentState as AgentStateProto,
+  MobilityChunkDelta as MobilityChunkDeltaProto,
+  MobilityChunkSnapshot as MobilityChunkSnapshotProto,
+  VehicleMobility as VehicleMobilityProto,
+} from './proto/abutown_pb';
+import { Direction as DirectionProto, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
+
+const DIRECTION_PROTO_TO_DTO: Record<number, DirectionDto> = {
+  [DirectionProto.N]: 'n',
+  [DirectionProto.NE]: 'ne',
+  [DirectionProto.E]: 'e',
+  [DirectionProto.SE]: 'se',
+  [DirectionProto.S]: 's',
+  [DirectionProto.SW]: 'sw',
+  [DirectionProto.W]: 'w',
+  [DirectionProto.NW]: 'nw',
+};
+
+export function directionFromProto(value: DirectionProto): DirectionDto {
+  return DIRECTION_PROTO_TO_DTO[value] ?? 'e';
+}
+
+function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
+  if (value === VehicleKindProto.TRAM) return 'tram';
+  return 'car';
+}
+
+function agentStateFromProto(state: AgentStateProto | undefined): AgentMobilityStateDto {
+  if (!state || state.state.case === undefined) {
+    // Backend should always send a populated AgentState; fall back to
+    // at_activity with empty id to keep the reducer alive on malformed frames.
+    return { type: 'at_activity', activity_id: '' };
+  }
+  switch (state.state.case) {
+    case 'walking':
+      return { type: 'walking', link_id: state.state.value.linkId, progress: state.state.value.progress };
+    case 'waitingAtStop':
+      return { type: 'waiting_at_stop', stop_id: state.state.value.stopId };
+    case 'inVehicle':
+      return { type: 'in_vehicle', vehicle_id: state.state.value.vehicleId, seat_index: state.state.value.seatIndex };
+    case 'boarding':
+      return { type: 'boarding', vehicle_id: state.state.value.vehicleId, stop_id: state.state.value.stopId };
+    case 'alighting':
+      return { type: 'alighting', vehicle_id: state.state.value.vehicleId, stop_id: state.state.value.stopId };
+    case 'atActivity':
+      return { type: 'at_activity', activity_id: state.state.value.activityId };
+  }
+}
+
+export function agentMobilityFromProto(p: AgentMobilityProto): AgentMobilityDto {
+  return {
+    id: p.id,
+    state: agentStateFromProto(p.state),
+    plan_cursor: p.planCursor,
+    world_coord: { x: p.worldCoord?.x ?? 0, y: p.worldCoord?.y ?? 0 },
+    direction: directionFromProto(p.direction),
+    sprite_key: p.spriteKey,
+  };
+}
+
+export function vehicleMobilityFromProto(p: VehicleMobilityProto): VehicleMobilityDto {
+  return {
+    id: p.id,
+    kind: vehicleKindFromProto(p.kind),
+    route_id: p.routeId,
+    link_index: p.linkIndex,
+    progress: p.progress,
+    capacity: p.capacity,
+    occupants: [...p.occupants],
+    dwell_ticks_remaining: p.dwellTicksRemaining,
+    world_coord: { x: p.worldCoord?.x ?? 0, y: p.worldCoord?.y ?? 0 },
+    direction: directionFromProto(p.direction),
+    sprite_key: p.spriteKey,
+  };
+}
+
+export function mobilityChunkDeltaFromProto(p: MobilityChunkDeltaProto): MobilityChunkDeltaDto {
+  return {
+    type: 'mobility_chunk_delta',
+    protocol_version: p.protocolVersion,
+    world_id: p.worldId,
+    tick: Number(p.tick),
+    chunk: { x: p.chunk?.x ?? 0, y: p.chunk?.y ?? 0 },
+    changed_agents: p.changedAgents.map(agentMobilityFromProto),
+    changed_vehicles: p.changedVehicles.map(vehicleMobilityFromProto),
+    left_agents: [...p.leftAgents],
+    left_vehicles: [...p.leftVehicles],
+  };
+}
+
+export function mobilityChunkSnapshotFromProto(p: MobilityChunkSnapshotProto): MobilityChunkSnapshotDto {
+  return {
+    type: 'mobility_chunk_snapshot',
+    protocol_version: p.protocolVersion,
+    world_id: p.worldId,
+    tick: Number(p.tick),
+    chunk: { x: p.chunk?.x ?? 0, y: p.chunk?.y ?? 0 },
+    agents: p.agents.map(agentMobilityFromProto),
+    vehicles: p.vehicles.map(vehicleMobilityFromProto),
+  };
 }

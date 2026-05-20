@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { fromBinary } from '@bufbuild/protobuf';
 import {
   connectMobilityBackend,
   requireMobilitySnapshot,
@@ -8,17 +9,19 @@ import {
 } from '../../src/backend/mobilityClient';
 import { mobilityDiagnostics } from '../../src/backend/mobilityState';
 import type { MobilitySnapshotDto, WorldSummaryDto } from '../../src/backend/mobilityProtocol';
+import { ClientMessageSchema } from '../../src/backend/proto/abutown_pb';
 type ScreenToTile = (screen: { x: number; y: number }) => { x: number; y: number };
 const identityScreenToTile: ScreenToTile = (s) => ({ x: s.x, y: s.y });
 const nullScreenToTile = null as unknown as ScreenToTile;
 
 type MockSocket = {
   readyState: number;
+  binaryType: BinaryType;
   onopen: (() => void) | null;
   onclose: ((event: { code?: number }) => void) | null;
   onerror: ((event: unknown) => void) | null;
-  onmessage: ((event: MessageEvent<string>) => void) | null;
-  sent: string[];
+  onmessage: ((event: MessageEvent<ArrayBuffer>) => void) | null;
+  sent: Uint8Array[];
   url: string;
   triggerOpen: () => void;
   triggerClose: () => void;
@@ -28,11 +31,12 @@ function mockWebSocketImpl(): { Impl: typeof WebSocket; sockets: MockSocket[] } 
   const sockets: MockSocket[] = [];
   const Impl = class {
     readyState = 0;
+    binaryType: BinaryType = 'blob';
     onopen: (() => void) | null = null;
     onclose: ((event: unknown) => void) | null = null;
     onerror: ((event: unknown) => void) | null = null;
-    onmessage: ((event: MessageEvent<string>) => void) | null = null;
-    sent: string[] = [];
+    onmessage: ((event: MessageEvent<ArrayBuffer>) => void) | null = null;
+    sent: Uint8Array[] = [];
     url: string;
     constructor(url: string) {
       this.url = url;
@@ -42,8 +46,17 @@ function mockWebSocketImpl(): { Impl: typeof WebSocket; sockets: MockSocket[] } 
       this.readyState = 3;
       this.onclose?.({ code: 1000 });
     }
-    send(text: string) {
-      this.sent.push(text);
+    send(data: ArrayBufferLike | ArrayBufferView | Blob | string) {
+      if (data instanceof Uint8Array) {
+        this.sent.push(data);
+      } else if (data instanceof ArrayBuffer) {
+        this.sent.push(new Uint8Array(data));
+      } else if (ArrayBuffer.isView(data)) {
+        this.sent.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+      } else {
+        // Tests should not be exercising the text path post-binary migration.
+        throw new Error(`mock socket received non-binary send: ${typeof data}`);
+      }
     }
     triggerOpen() {
       this.readyState = 1;
@@ -354,8 +367,9 @@ describe('mobility backend client', () => {
     pollFn?.();
 
     expect(sockets[0].sent.length).toBeGreaterThan(sendsBefore);
-    const lastMsg = JSON.parse(sockets[0].sent[sockets[0].sent.length - 1]);
-    expect(lastMsg.type).toBe('chunk_subscribe');
+    const lastBytes = sockets[0].sent[sockets[0].sent.length - 1];
+    const lastMsg = fromBinary(ClientMessageSchema, lastBytes);
+    expect(lastMsg.body.case).toBe('chunkSubscribe');
     bridge.stop();
   });
 
@@ -389,8 +403,8 @@ describe('mobility backend client', () => {
     // The fresh subscription has no cached set, so the first poll emits
     // chunk_subscribe with every currently-visible chunk again.
     expect(sockets[1].sent.length).toBeGreaterThan(0);
-    const firstMsg = JSON.parse(sockets[1].sent[0]);
-    expect(firstMsg.type).toBe('chunk_subscribe');
+    const firstMsg = fromBinary(ClientMessageSchema, sockets[1].sent[0]);
+    expect(firstMsg.body.case).toBe('chunkSubscribe');
 
     bridge.stop();
   });

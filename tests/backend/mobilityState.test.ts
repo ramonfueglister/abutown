@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { create } from '@bufbuild/protobuf';
 import {
   applyMobilityChunkDelta,
   applyMobilityChunkSnapshot,
@@ -9,6 +10,17 @@ import {
   mobilityDiagnostics,
 } from '../../src/backend/mobilityState';
 import type { AgentMobilityDto, MobilityChunkDeltaDto, MobilityChunkSnapshotDto, MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
+import {
+  ChunkCoordSchema,
+  Direction,
+  MobilityChunkDeltaSchema,
+  MobilityChunkSnapshotSchema,
+  ServerMessageSchema,
+  AgentMobilitySchema,
+  AgentStateSchema,
+  WalkingSchema,
+  WorldCoordSchema,
+} from '../../src/backend/proto/abutown_pb';
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
@@ -112,9 +124,64 @@ describe('mobility state reducer', () => {
 
   it('counts invalid messages without dropping known records', () => {
     const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
-    const next = applyServerMessage(state, { type: 'mobility_chunk_delta', tick: 3 }, 200);
+    // An empty ServerMessage envelope (no oneof body set) — represents a
+    // proto frame that decoded successfully but carries no recognized
+    // payload (e.g. backend added a new variant we haven't taught the
+    // client to handle yet).
+    const emptyEnvelope = create(ServerMessageSchema, {});
+    const next = applyServerMessage(state, emptyEnvelope, 200);
 
     expect(mobilityDiagnostics(next)).toMatchObject({ agents: 1, invalidMessages: 1 });
+  });
+
+  it('applyServerMessage routes proto MobilityChunkDelta into the reducer', () => {
+    const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
+    const delta = create(MobilityChunkDeltaSchema, {
+      protocolVersion: 16,
+      worldId: 'abutown-main',
+      tick: 3n,
+      chunk: create(ChunkCoordSchema, { x: 0, y: 0 }),
+      changedAgents: [
+        create(AgentMobilitySchema, {
+          id: 'agent:pedestrian:0',
+          state: create(AgentStateSchema, {
+            state: { case: 'walking', value: create(WalkingSchema, { linkId: 'link:next', progress: 0.1 }) },
+          }),
+          planCursor: 1,
+          worldCoord: create(WorldCoordSchema, { x: 5, y: 5 }),
+          direction: Direction.E,
+          spriteKey: 'pedestrian:0',
+        }),
+      ],
+      changedVehicles: [],
+      leftAgents: [],
+      leftVehicles: [],
+    });
+    const envelope = create(ServerMessageSchema, {
+      body: { case: 'mobilityChunkDelta', value: delta },
+    });
+    const next = applyServerMessage(state, envelope, 200);
+    expect(next.tick).toBe(3);
+    expect(next.agents.get('agent:pedestrian:0')?.current.world_coord).toEqual({ x: 5, y: 5 });
+  });
+
+  it('applyServerMessage routes proto MobilityChunkSnapshot into the reducer', () => {
+    const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
+    const snap = create(MobilityChunkSnapshotSchema, {
+      protocolVersion: 16,
+      worldId: 'abutown-main',
+      tick: 4n,
+      chunk: create(ChunkCoordSchema, { x: 0, y: 0 }),
+      agents: [],
+      vehicles: [],
+    });
+    const envelope = create(ServerMessageSchema, {
+      body: { case: 'mobilityChunkSnapshot', value: snap },
+    });
+    const next = applyServerMessage(state, envelope, 200);
+    expect(next.tick).toBe(4);
+    // Snapshot for chunk (0,0) wiped the agent originally there.
+    expect(next.agents.has('agent:pedestrian:0')).toBe(false);
   });
 
   it('applyMobilityChunkDelta drops entities listed in left_agents and left_vehicles', () => {

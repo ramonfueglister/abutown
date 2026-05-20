@@ -1,5 +1,12 @@
 // src/backend/chunkSubscriptionClient.ts
-import { encodeClientMessage, type ChunkCoordDto } from './mobilityProtocol';
+import { create, toBinary } from '@bufbuild/protobuf';
+import {
+  ChunkCoordSchema,
+  ChunkSubscribeSchema,
+  ChunkUnsubscribeSchema,
+  ClientMessageSchema,
+} from './proto/abutown_pb';
+import type { ChunkCoordDto } from './mobilityProtocol';
 
 export type SubscriptionClient = {
   update(visible: ChunkCoordDto[]): void;
@@ -10,8 +17,36 @@ function key(coord: ChunkCoordDto): string {
   return `${coord.x},${coord.y}`;
 }
 
+const PROTOCOL_VERSION = 16;
+
+function encodeSubscribe(coords: ChunkCoordDto[]): Uint8Array {
+  const msg = create(ClientMessageSchema, {
+    body: {
+      case: 'chunkSubscribe',
+      value: create(ChunkSubscribeSchema, {
+        protocolVersion: PROTOCOL_VERSION,
+        coords: coords.map((c) => create(ChunkCoordSchema, { x: c.x, y: c.y })),
+      }),
+    },
+  });
+  return toBinary(ClientMessageSchema, msg);
+}
+
+function encodeUnsubscribe(coords: ChunkCoordDto[]): Uint8Array {
+  const msg = create(ClientMessageSchema, {
+    body: {
+      case: 'chunkUnsubscribe',
+      value: create(ChunkUnsubscribeSchema, {
+        protocolVersion: PROTOCOL_VERSION,
+        coords: coords.map((c) => create(ChunkCoordSchema, { x: c.x, y: c.y })),
+      }),
+    },
+  });
+  return toBinary(ClientMessageSchema, msg);
+}
+
 export function createSubscriptionClient(opts: {
-  send: (text: string) => void;
+  send: (bytes: Uint8Array) => void;
 }): SubscriptionClient {
   let current = new Map<string, ChunkCoordDto>();
 
@@ -27,18 +62,10 @@ export function createSubscriptionClient(opts: {
         if (!next.has(k)) removed.push(coord);
       }
       if (added.length > 0) {
-        opts.send(encodeClientMessage({
-          type: 'chunk_subscribe',
-          protocol_version: 1,
-          coords: added,
-        }));
+        opts.send(encodeSubscribe(added));
       }
       if (removed.length > 0) {
-        opts.send(encodeClientMessage({
-          type: 'chunk_unsubscribe',
-          protocol_version: 1,
-          coords: removed,
-        }));
+        opts.send(encodeUnsubscribe(removed));
       }
       current = next;
     },
