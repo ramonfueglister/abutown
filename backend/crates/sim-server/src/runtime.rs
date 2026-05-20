@@ -83,6 +83,12 @@ impl SimulationRuntime {
 
     pub fn new_with_event_store(event_store: Box<dyn WorldEventStore + Send + Sync>) -> Self {
         let mut registry = ChunkRegistry::new(CHUNK_SIZE);
+
+        // Collect seed data before inserting into registry so we can dual-write
+        // chunk entities (ChunkRegistry + ECS) without needing a public accessor.
+        let mut seed_entries: Vec<(sim_core::ids::ChunkCoord, Vec<sim_core::tile::TileRecord>, u64, ChunkActivity)> =
+            Vec::with_capacity(SEEDED_CHUNKS.len());
+
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let mut chunk = Chunk::new(coord, CHUNK_SIZE);
             let seed_index = (offset as u16) * 17;
@@ -100,13 +106,34 @@ impl SimulationRuntime {
             } else {
                 ChunkActivity::Warm
             };
+
+            // Collect the tile Vec before moving the chunk into the registry.
+            let tiles: Vec<sim_core::tile::TileRecord> = (0..chunk.tile_count())
+                .filter_map(|i| chunk.tile_at(i))
+                .collect();
+            let version = chunk.version();
+            seed_entries.push((coord, tiles, version, activity));
+
             registry.insert_chunk(chunk, activity);
+        }
+
+        // Build mobility world and dual-write chunk entities into its ECS world.
+        let mut mobility = MobilityWorld::default();
+        for (coord, tiles, version, activity) in seed_entries {
+            sim_core::world::systems::spawn_chunk_entity(
+                mobility.profile_world_mut(),
+                coord,
+                CHUNK_SIZE,
+                tiles,
+                version,
+                activity,
+            );
         }
 
         Self {
             world_id: Self::default_world_id(),
             registry,
-            mobility: MobilityWorld::default(),
+            mobility,
             event_store,
             event_count: 0,
             tick: 0,
@@ -554,6 +581,22 @@ impl SimulationRuntime {
 mod tests {
     use super::*;
     use abutown_protocol::{ChunkStateDto, TileKindDto};
+
+    #[test]
+    fn hydration_spawns_chunk_entity_per_loaded_chunk() {
+        let runtime = SimulationRuntime::new();
+        let world = runtime.mobility.world_view();
+        let by_coord = world.resource::<sim_core::world::resources::ChunksByCoord>();
+        // 3 seeded chunks expected.
+        assert_eq!(by_coord.0.len(), 3);
+        for coord in [
+            sim_core::ids::ChunkCoord { x: 4, y: 4 },
+            sim_core::ids::ChunkCoord { x: 5, y: 4 },
+            sim_core::ids::ChunkCoord { x: 4, y: 5 },
+        ] {
+            assert!(by_coord.0.contains_key(&coord), "missing chunk entity for {coord:?}");
+        }
+    }
     use sim_core::persistence::{
         InMemoryChunkSnapshotStore, InMemoryMobilitySnapshotStore, build_chunk_snapshot,
     };

@@ -127,6 +127,14 @@ impl MobilityWorld {
         world.insert_resource(crate::mobility::resources::PendingPerChunkDeltas::default());
 
         let mut schedule = Schedule::default();
+
+        // 8a transition: install CorePlugin into the same World that mobility uses.
+        // When MobilityWorld dissolves in Task 9, this install moves to
+        // SimulationRuntime::new.
+        use crate::world::plugin::CorePlugin;
+        use crate::world::schedule::SimPlugin;
+        CorePlugin::default().install(&mut world, &mut schedule);
+
         crate::mobility::systems::install_systems(&mut schedule);
 
         Self {
@@ -151,6 +159,12 @@ impl MobilityWorld {
     #[doc(hidden)]
     pub fn profile_world_mut(&mut self) -> &mut bevy_ecs::world::World {
         &mut self.world
+    }
+
+    /// Read-only view of the inner bevy World. Used by tests + future
+    /// query sites once the wrapper struct dissolves in Task 9.
+    pub fn world_view(&self) -> &bevy_ecs::world::World {
+        &self.world
     }
 }
 
