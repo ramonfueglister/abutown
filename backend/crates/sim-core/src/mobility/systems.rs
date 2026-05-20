@@ -1,9 +1,8 @@
 use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
+#[cfg(test)]
 use std::collections::HashSet;
-use crate::mobility::lod::{
-    ACTIVITY_HYSTERESIS_TICKS, MobilityActivity, classify_chunk_mobility_activity,
-};
+use crate::mobility::lod::MobilityActivity;
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
 use bevy_ecs::prelude::*;
@@ -42,19 +41,10 @@ pub fn install_systems(schedule: &mut Schedule) {
         MobilitySet::Output.after(MobilitySet::Advance),
         MobilitySet::Bookkeeping.after(MobilitySet::Output),
     ));
-    // LOD set: population tracking + classification + promote/demote
-    schedule.add_systems((
-        track_chunk_populations_system.in_set(MobilitySet::LOD),
-        classify_activity_system
-            .in_set(MobilitySet::LOD)
-            .after(track_chunk_populations_system),
-        promote_warm_to_active_system
-            .in_set(MobilitySet::LOD)
-            .after(classify_activity_system),
-        demote_active_to_warm_system
-            .in_set(MobilitySet::LOD)
-            .after(classify_activity_system),
-    ));
+    // LOD set: population tracking only — chunk-LOD classification (including
+    // marker-component swaps and ChunkLodChanged events) now lives in
+    // `CoreSet::LodReclassify` (see `crate::world::systems::reclassify_chunk_lod_system`).
+    schedule.add_systems(track_chunk_populations_system.in_set(MobilitySet::LOD));
     // Advance set: existing Phase-5 systems + warm flow
     // Ordering within Advance (each step observes the previous step's
     // output, but is staged so that "newly waiting" agents are not
@@ -822,250 +812,13 @@ pub fn track_chunk_populations_system(
     vehicles_by_chunk.0.retain(|_, bucket| !bucket.is_empty());
 }
 
-pub fn classify_activity_system(
-    subscribers: Res<ChunkSubscribers>,
-    populations: Res<ChunkPopulations>,
-    mut activities: ResMut<ChunkActivities>,
-    mut cooldowns: ResMut<ChunkActivityCooldowns>,
-    mut transitions: ResMut<ChunkTransitions>,
-) {
-    transitions.0.clear();
-    let candidate_chunks: std::collections::HashSet<crate::ids::ChunkCoord> = subscribers
-        .0
-        .keys()
-        .copied()
-        .chain(populations.0.keys().copied())
-        .chain(activities.0.keys().copied())
-        .collect();
-
-    for chunk in candidate_chunks {
-        let subs = subscribers.0.get(&chunk).copied().unwrap_or(0);
-        let pop = populations.0.get(&chunk).copied().unwrap_or(0);
-        let previous = activities
-            .0
-            .get(&chunk)
-            .copied()
-            .unwrap_or(MobilityActivity::Asleep);
-        let cooldown_now = cooldowns.0.get(&chunk).copied().unwrap_or(0);
-
-        let next = classify_chunk_mobility_activity(subs, pop, previous, cooldown_now);
-
-        if next != previous {
-            transitions.0.push((chunk, previous, next));
-            cooldowns.0.insert(chunk, ACTIVITY_HYSTERESIS_TICKS);
-        } else if cooldown_now > 0 {
-            cooldowns.0.insert(chunk, cooldown_now - 1);
-        }
-        activities.0.insert(chunk, next);
-    }
-
-    activities.0.retain(|chunk, activity| {
-        !matches!(activity, MobilityActivity::Asleep)
-            || subscribers.0.contains_key(chunk)
-            || populations.0.contains_key(chunk)
-    });
-}
-
-pub fn promote_warm_to_active_system(
-    transitions: Res<ChunkTransitions>,
-    mut flow_cells: ResMut<FlowCells>,
-    link_polylines: Res<LinkPolylines>,
-    routes: Res<Routes>,
-    stops: Res<Stops>,
-    tick: Res<Tick>,
-    mut commands: Commands,
-) {
-    for (chunk, prev, next) in &transitions.0 {
-        if *prev != MobilityActivity::Warm {
-            continue;
-        }
-        if !matches!(next, MobilityActivity::Active | MobilityActivity::Hot) {
-            continue;
-        }
-        let Some(cell) = flow_cells.0.get_mut(chunk) else {
-            continue;
-        };
-        let to_spawn = cell.population.floor() as u32;
-        if to_spawn == 0 {
-            continue;
-        }
-
-        // Find a link whose polyline passes through this chunk.
-        let mut spawn_link: Option<crate::ids::LinkId> = None;
-        for (link_id, points) in &link_polylines.0 {
-            if points
-                .iter()
-                .any(|(x, y)| crate::mobility::chunk_of(*x, *y, 32) == *chunk)
-            {
-                spawn_link = Some(link_id.clone());
-                break;
-            }
-        }
-        let Some(spawn_link) = spawn_link else {
-            continue;
-        };
-
-        for n in 0..to_spawn {
-            let agent_id = crate::ids::AgentId(format!(
-                "agent:lod:{}:{}:{}:{}",
-                chunk.x, chunk.y, tick.0, n
-            ));
-            // Deterministic pseudo-random progress in [0, 1).
-            let seed = lod_seed(chunk.x, chunk.y, tick.0, n as u64);
-            let progress = (seed % 1000) as f32 / 1000.0;
-            let sprite_key = format!("pedestrian:{}", seed % 16);
-            let spawned_state = crate::mobility::records::AgentMobilityState::Walking {
-                link_id: spawn_link.clone(),
-                progress,
-            };
-            let (px, py) = crate::mobility::agent_world_coord(
-                &spawned_state,
-                &routes,
-                &stops,
-                &link_polylines,
-            )
-            .unwrap_or((0.0, 0.0));
-            commands.spawn((
-                AgentMarker,
-                StableAgentId(agent_id),
-                AgentMobilityStateComponent(spawned_state),
-                WalkPlan {
-                    stages: vec![crate::mobility::records::PlanStage::Activity {
-                        activity_id: format!("activity:lod:{}:{}:{}", chunk.x, chunk.y, n),
-                    }],
-                    cursor: 0,
-                },
-                WalkSpeed(0.05),
-                Position { x: px, y: py },
-                Direction(abutown_protocol::DirectionDto::S),
-                SpriteKey(sprite_key),
-            ));
-        }
-        cell.population -= to_spawn as f32;
-        cell.outflow.clear();
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn demote_active_to_warm_system(
-    transitions: Res<ChunkTransitions>,
-    agents: Query<&AgentMobilityStateComponent, With<AgentMarker>>,
-    agents_by_chunk: Res<AgentsByChunk>,
-    vehicles_by_chunk: Res<VehiclesByChunk>,
-    routes: Res<Routes>,
-    link_polylines: Res<LinkPolylines>,
-    stops: Res<Stops>,
-    mut flow_cells: ResMut<FlowCells>,
-    mut commands: Commands,
-) {
-    // Trigger on any transition *into* Warm, regardless of the previous state.
-    // The legacy `Active|Hot → Warm` restriction missed the production path
-    // where agents are seeded directly into chunks (snapshot hydration,
-    // `from_network`) and the chunk's very first classification is
-    // `Asleep → Warm`. Those agents would otherwise stay alive forever and
-    // the per-tick Advance/Output systems would pay the full O(N) cost.
-    for (chunk, _prev, next) in &transitions.0 {
-        if *next != MobilityActivity::Warm {
-            continue;
-        }
-
-        let Some(agent_entities) = agents_by_chunk.0.get(chunk) else {
-            // No agents in this chunk — nothing to despawn. Vehicles might
-            // still be present, fall through to vehicle handling.
-            if !vehicles_by_chunk.0.contains_key(chunk) {
-                continue;
-            }
-            let empty: HashSet<Entity> = HashSet::new();
-            let vehicle_entities = vehicles_by_chunk.0.get(chunk).unwrap_or(&empty);
-            despawn_vehicles_into_flow_cell(
-                *chunk,
-                vehicle_entities,
-                &mut flow_cells,
-                &mut commands,
-            );
-            continue;
-        };
-
-        let mut despawn_count = 0u32;
-        let mut outflow_counts: std::collections::HashMap<crate::ids::ChunkCoord, u32> =
-            std::collections::HashMap::new();
-
-        for entity in agent_entities {
-            let Ok(state) = agents.get(*entity) else {
-                continue;
-            };
-            let dest =
-                agent_destination_chunk(state, &routes, &link_polylines, &stops).unwrap_or(*chunk);
-            despawn_count += 1;
-            *outflow_counts.entry(dest).or_insert(0) += 1;
-            commands.entity(*entity).despawn();
-        }
-
-        if let Some(vehicle_entities) = vehicles_by_chunk.0.get(chunk) {
-            despawn_count += vehicle_entities.len() as u32;
-            *outflow_counts.entry(*chunk).or_insert(0) += vehicle_entities.len() as u32;
-            for entity in vehicle_entities {
-                commands.entity(*entity).despawn();
-            }
-        }
-
-        if despawn_count == 0 {
-            continue;
-        }
-
-        let cell = flow_cells.0.entry(*chunk).or_default();
-        cell.population += despawn_count as f32;
-        for (dest, count) in outflow_counts {
-            let rate = count as f32 / 100.0; // amortise over ~100 ticks
-            *cell.outflow.entry(dest).or_insert(0.0) += rate;
-        }
-    }
-}
-
-fn despawn_vehicles_into_flow_cell(
-    chunk: crate::ids::ChunkCoord,
-    vehicle_entities: &HashSet<Entity>,
-    flow_cells: &mut ResMut<FlowCells>,
-    commands: &mut Commands,
-) {
-    if vehicle_entities.is_empty() {
-        return;
-    }
-    let cell = flow_cells.0.entry(chunk).or_default();
-    cell.population += vehicle_entities.len() as f32;
-    *cell.outflow.entry(chunk).or_insert(0.0) += vehicle_entities.len() as f32 / 100.0;
-    for entity in vehicle_entities {
-        commands.entity(*entity).despawn();
-    }
-}
-
-fn agent_destination_chunk(
-    state: &AgentMobilityStateComponent,
-    routes: &Routes,
-    link_polylines: &LinkPolylines,
-    stops: &Stops,
-) -> Option<crate::ids::ChunkCoord> {
-    match &state.0 {
-        AgentMobilityState::Walking { link_id, .. } => link_polylines
-            .0
-            .get(link_id)
-            .and_then(|points| points.last())
-            .map(|(x, y)| crate::mobility::chunk_of(*x, *y, 32)),
-        AgentMobilityState::WaitingAtStop { stop_id }
-        | AgentMobilityState::Boarding { stop_id, .. }
-        | AgentMobilityState::Alighting { stop_id, .. } => {
-            let stop = stops.0.get(stop_id)?;
-            let route = routes.0.get(&stop.route_id)?;
-            let link_id = route.links.get(stop.link_index)?;
-            link_polylines
-                .0
-                .get(link_id)
-                .and_then(|p| p.last())
-                .map(|(x, y)| crate::mobility::chunk_of(*x, *y, 32))
-        }
-        _ => None,
-    }
-}
+// `classify_activity_system`, `promote_warm_to_active_system`, and
+// `demote_active_to_warm_system` were removed in Phase 8a Task 8. Chunk LOD
+// classification (including marker-component swaps and `ChunkLodChanged`
+// events) now lives in `crate::world::systems::reclassify_chunk_lod_system`
+// under `CoreSet::LodReclassify`. The flow-cell spawn/despawn side-effects
+// that lived in promote/demote will be reintroduced in a later phase that
+// reacts to `ChunkLodChanged` events directly.
 
 pub fn warm_chunk_flow_system(
     tick: Res<Tick>,
@@ -1104,22 +857,6 @@ pub fn warm_chunk_flow_system(
         dest_cell.population += delta;
         dest_cell.last_tick = tick.0;
     }
-}
-
-fn lod_seed(x: i32, y: i32, tick: u64, n: u64) -> u64 {
-    // FNV-1a hash for deterministic seeding (does NOT depend on RandomState).
-    let mut h: u64 = 0xcbf29ce484222325;
-    for byte in (x as u32)
-        .to_le_bytes()
-        .iter()
-        .chain((y as u32).to_le_bytes().iter())
-        .chain(tick.to_le_bytes().iter())
-        .chain(n.to_le_bytes().iter())
-    {
-        h ^= *byte as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
 }
 
 #[cfg(test)]
@@ -1842,183 +1579,17 @@ mod tests {
         assert!(pos.y.abs() < 1e-3);
     }
 
-    #[test]
-    fn classify_activity_marks_subscribed_chunk_active() {
-        use crate::ids::ChunkCoord;
+    // `classify_activity_*`, `promote_warm_*`, and `demote_active_to_warm_*`
+    // tests were removed in Phase 8a Task 8. Chunk-LOD classification (and the
+    // marker/event emit it now implies) is covered by
+    // `crate::world::systems::lod_reclassify_tests`.
 
-        let mut world = World::new();
-        let mut subs = ChunkSubscribers::default();
-        subs.0.insert(ChunkCoord { x: 4, y: 4 }, 1);
-        world.insert_resource(subs);
-        world.insert_resource(ChunkPopulations::default());
-        world.insert_resource(ChunkActivities::default());
-        world.insert_resource(ChunkActivityCooldowns::default());
-        world.insert_resource(ChunkTransitions::default());
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(classify_activity_system);
-        schedule.run(&mut world);
-
-        let activities = world.resource::<ChunkActivities>();
-        assert_eq!(
-            activities.0.get(&ChunkCoord { x: 4, y: 4 }),
-            Some(&MobilityActivity::Active),
-        );
-    }
-
-    #[test]
-    fn classify_activity_records_transitions_and_starts_cooldown() {
-        use crate::ids::ChunkCoord;
-        let mut world = World::new();
-        let mut subs = ChunkSubscribers::default();
-        subs.0.insert(ChunkCoord { x: 0, y: 0 }, 1);
-        world.insert_resource(subs);
-        world.insert_resource(ChunkPopulations::default());
-        world.insert_resource(ChunkActivities::default());
-        world.insert_resource(ChunkActivityCooldowns::default());
-        world.insert_resource(ChunkTransitions::default());
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(classify_activity_system);
-        schedule.run(&mut world);
-
-        let transitions = world.resource::<ChunkTransitions>();
-        assert_eq!(transitions.0.len(), 1);
-        let (chunk, prev, next) = transitions.0[0];
-        assert_eq!(chunk, ChunkCoord { x: 0, y: 0 });
-        assert_eq!(prev, MobilityActivity::Asleep);
-        assert_eq!(next, MobilityActivity::Active);
-        let cd = world.resource::<ChunkActivityCooldowns>();
-        assert_eq!(
-            cd.0.get(&ChunkCoord { x: 0, y: 0 }),
-            Some(&ACTIVITY_HYSTERESIS_TICKS)
-        );
-    }
-
-    #[test]
-    fn promote_warm_spawns_floor_population_agents() {
-        use crate::ids::*;
-        use crate::mobility::lod::{FlowCell, MobilityActivity};
-
-        let mut world = World::new();
-        let chunk = ChunkCoord { x: 0, y: 0 };
-
-        let mut flow = FlowCells::default();
-        flow.0.insert(
-            chunk,
-            FlowCell {
-                population: 3.7,
-                outflow: std::collections::HashMap::new(),
-                attractiveness: 1.0,
-                last_tick: 0,
-            },
-        );
-        world.insert_resource(flow);
-
-        let mut polylines = LinkPolylines::default();
-        polylines
-            .0
-            .insert(LinkId("l:0".into()), vec![(10.0, 10.0), (20.0, 10.0)]);
-        world.insert_resource(polylines);
-
-        let mut transitions = ChunkTransitions::default();
-        transitions
-            .0
-            .push((chunk, MobilityActivity::Warm, MobilityActivity::Active));
-        world.insert_resource(transitions);
-
-        world.insert_resource(Tick(100));
-        world.insert_resource(Routes::default());
-        world.insert_resource(Stops::default());
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(promote_warm_to_active_system);
-        schedule.run(&mut world);
-
-        let mut query = world.query_filtered::<Entity, With<AgentMarker>>();
-        let spawned: Vec<Entity> = query.iter(&world).collect();
-        assert_eq!(spawned.len(), 3);
-
-        let cell = world.resource::<FlowCells>().0.get(&chunk).unwrap();
-        assert!((cell.population - 0.7).abs() < 1e-6);
-    }
-
-    #[test]
-    fn demote_active_to_warm_collapses_agents_into_flow_cell() {
-        use crate::ids::*;
-        use crate::mobility::lod::MobilityActivity;
-        use crate::mobility::records::AgentMobilityState;
-
-        let mut world = World::new();
-        let chunk = ChunkCoord { x: 0, y: 0 };
-
-        let mut polylines = LinkPolylines::default();
-        polylines
-            .0
-            .insert(LinkId("l:end".into()), vec![(5.0, 5.0), (40.0, 5.0)]); // ends in chunk (1, 0)
-        world.insert_resource(polylines);
-        world.insert_resource(Routes::default());
-        world.insert_resource(Stops::default());
-        world.insert_resource(FlowCells::default());
-        world.insert_resource(ChunkPopulations::default());
-        world.insert_resource(AgentsByChunk::default());
-        world.insert_resource(VehiclesByChunk::default());
-        world.insert_resource(crate::mobility::resources::PreviousChunkByEntity::default());
-        world.insert_resource(crate::mobility::resources::PreviousFlowCellContrib::default());
-
-        let mut transitions = ChunkTransitions::default();
-        transitions
-            .0
-            .push((chunk, MobilityActivity::Active, MobilityActivity::Warm));
-        world.insert_resource(transitions);
-
-        for n in 0..3 {
-            world.spawn((
-                AgentMarker,
-                StableAgentId(AgentId(format!("a:{n}"))),
-                AgentMobilityStateComponent(AgentMobilityState::Walking {
-                    link_id: LinkId("l:end".into()),
-                    progress: 0.1,
-                }),
-                WalkPlan {
-                    stages: vec![],
-                    cursor: 0,
-                },
-                WalkSpeed(0.05),
-                Position {
-                    x: 5.0 + n as f32,
-                    y: 5.0,
-                },
-                Direction(abutown_protocol::DirectionDto::S),
-                SpriteKey(String::new()),
-            ));
-        }
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems((
-            track_chunk_populations_system,
-            demote_active_to_warm_system.after(track_chunk_populations_system),
-        ));
-        schedule.run(&mut world);
-
-        let cell = world
-            .resource::<FlowCells>()
-            .0
-            .get(&chunk)
-            .expect("flow cell created");
-        assert!((cell.population - 3.0).abs() < 1e-6);
-        let dest = ChunkCoord { x: 1, y: 0 };
-        assert!(
-            cell.outflow.contains_key(&dest),
-            "outflow should target end-of-link chunk"
-        );
-
-        let remaining: u32 = {
-            let mut q = world.query_filtered::<Entity, With<AgentMarker>>();
-            q.iter(&world).count() as u32
-        };
-        assert_eq!(remaining, 0, "agents despawned");
-    }
+    // Removed (Phase 8a Task 8): `promote_warm_spawns_floor_population_agents`
+    // and `demote_active_to_warm_collapses_agents_into_flow_cell`. The
+    // promote/demote systems they exercised were removed; flow-cell
+    // spawn/despawn behaviour will return as event-driven reactors in a
+    // later phase. The reclassification logic itself is covered by
+    // `crate::world::systems::lod_reclassify_tests`.
 
     #[test]
     fn warm_chunk_flow_transfers_population_between_chunks() {
@@ -2093,56 +1664,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn promote_warm_is_deterministic_across_runs() {
-        use crate::ids::*;
-        use crate::mobility::lod::{FlowCell, MobilityActivity};
-
-        fn run_promote() -> Vec<String> {
-            let mut world = World::new();
-            let chunk = ChunkCoord { x: 2, y: 3 };
-            let mut flow = FlowCells::default();
-            flow.0.insert(
-                chunk,
-                FlowCell {
-                    population: 5.0,
-                    outflow: std::collections::HashMap::new(),
-                    attractiveness: 1.0,
-                    last_tick: 0,
-                },
-            );
-            world.insert_resource(flow);
-            let mut polylines = LinkPolylines::default();
-            polylines
-                .0
-                .insert(LinkId("l:0".into()), vec![(70.0, 100.0), (90.0, 100.0)]);
-            world.insert_resource(polylines);
-            let mut transitions = ChunkTransitions::default();
-            transitions
-                .0
-                .push((chunk, MobilityActivity::Warm, MobilityActivity::Active));
-            world.insert_resource(transitions);
-            world.insert_resource(Tick(42));
-            world.insert_resource(Routes::default());
-            world.insert_resource(Stops::default());
-
-            let mut schedule = Schedule::default();
-            schedule.add_systems(promote_warm_to_active_system);
-            schedule.run(&mut world);
-
-            let mut query = world.query::<&StableAgentId>();
-            let mut ids: Vec<String> = query.iter(&world).map(|s| s.0.0.clone()).collect();
-            ids.sort();
-            ids
-        }
-
-        let a = run_promote();
-        let b = run_promote();
-        assert_eq!(
-            a, b,
-            "promote must be deterministic across runs (same chunk + tick → same ids)"
-        );
-    }
+    // Removed (Phase 8a Task 8): `promote_warm_is_deterministic_across_runs`.
+    // The deterministic-spawn behaviour will be re-tested when the
+    // flow-cell-driven spawn reactor is reintroduced atop `ChunkLodChanged`.
 
     #[test]
     fn walk_advance_skips_agents_in_asleep_chunks() {

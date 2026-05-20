@@ -5,7 +5,14 @@ use sim_core::mobility::{AgentMobilityState, AgentRecord, MobilityWorld, PlanSta
 // One classify pass past the hysteresis window so the new activity has settled.
 const SETTLE_TICKS: u32 = ACTIVITY_HYSTERESIS_TICKS as u32 + 10;
 
+// Ignored in Phase 8a Task 8: chunk-LOD classification moved out of
+// `MobilityWorld` into `CoreSet::LodReclassify` (which operates on chunk
+// entities owned by `CorePlugin`). The flow-cell spawn/despawn side-effects
+// of promote/demote will be reintroduced as event reactors atop
+// `ChunkLodChanged` in a later phase. Re-enable once `MobilityWorld` is
+// dissolved (Task 9) and the unified world drives this lifecycle.
 #[test]
+#[ignore = "Phase 8a Task 8: LOD lifecycle moved to CoreSet::LodReclassify; re-enable after Task 9 dissolves MobilityWorld"]
 fn chunk_cycles_through_hot_warm_active() {
     let mut world = MobilityWorld::empty();
     let chunk = ChunkCoord { x: 0, y: 0 };
@@ -80,6 +87,7 @@ fn chunk_cycles_through_hot_warm_active() {
 /// FlowCell — otherwise every Advance/Output system pays the full
 /// per-entity cost for the rest of the run.
 #[test]
+#[ignore = "Phase 8a Task 8: demote-into-flow-cell side-effect removed; will return as a ChunkLodChanged reactor in a later phase"]
 fn unsubscribed_populated_chunks_demote_on_first_classification() {
     let mut world = MobilityWorld::empty();
 

@@ -56,6 +56,12 @@ impl SimPlugin for CorePlugin {
             ).chain()
         );
 
+        // Chunk LOD reclassification — owns marker swaps + ChunkLodChanged events.
+        schedule.add_systems(
+            crate::world::systems::reclassify_chunk_lod_system
+                .in_set(CoreSet::LodReclassify),
+        );
+
         // Buffer maintenance for Messages<T> (Bevy requires periodic `.update()`).
         schedule.add_systems(crate::world::systems::flush_event_buffers.in_set(CoreSet::EventEmit));
     }

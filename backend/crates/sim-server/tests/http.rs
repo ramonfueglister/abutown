@@ -499,7 +499,17 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
         .unwrap()
         .to_bytes();
     let after = w::ChunkSnapshot::decode(after_body.as_ref()).unwrap();
-    assert_eq!(after, before);
+    // Compare only the fields that the failed command should preserve.
+    // `chunk_state` is excluded because the background tick loop's LOD
+    // reclassifier (Phase 8a Task 8) can legitimately demote an idle chunk
+    // (no subscribers, no population) from Active → Asleep between the two
+    // HTTP calls — that has nothing to do with command success or failure.
+    assert_eq!(after.protocol_version, before.protocol_version);
+    assert_eq!(after.world_id, before.world_id);
+    assert_eq!(after.coord, before.coord);
+    assert_eq!(after.chunk_version, before.chunk_version);
+    assert_eq!(after.tile_count, before.tile_count);
+    assert_eq!(after.tiles, before.tiles);
 }
 
 // ---------------------------------------------------------------------------

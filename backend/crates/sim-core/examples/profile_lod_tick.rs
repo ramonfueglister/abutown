@@ -120,14 +120,10 @@ fn main() {
     let mut s_track = {
         let mut s = Schedule::default(); s.add_systems(track_chunk_populations_system); s
     };
-    let mut s_classify = {
-        let mut s = Schedule::default(); s.add_systems(classify_activity_system); s
-    };
-    let mut s_promote = {
-        let mut s = Schedule::default(); s.add_systems(promote_warm_to_active_system); s
-    };
-    let mut s_demote = {
-        let mut s = Schedule::default(); s.add_systems(demote_active_to_warm_system); s
+    let mut s_reclassify = {
+        let mut s = Schedule::default();
+        s.add_systems(sim_core::world::systems::reclassify_chunk_lod_system);
+        s
     };
     let mut s_walk = {
         let mut s = Schedule::default(); s.add_systems(walk_advance_system); s
@@ -155,16 +151,16 @@ fn main() {
     };
 
     let labels = [
-        "track_pop", "classify", "promote", "demote",
+        "track_pop", "reclassify",
         "walk_adv", "boarding", "stop_arrive", "veh_adv", "warm_flow",
         "world_coord", "direction", "tick_inc",
     ];
-    let mut samples: [Vec<f64>; 12] = Default::default();
+    let mut samples: [Vec<f64>; 10] = Default::default();
     for v in samples.iter_mut() { v.reserve(N); }
     for _ in 0..N {
         let w = world.profile_world_mut();
         for (idx, sched) in [
-            &mut s_track, &mut s_classify, &mut s_promote, &mut s_demote,
+            &mut s_track, &mut s_reclassify,
             &mut s_walk, &mut s_board, &mut s_arrive, &mut s_vehadv, &mut s_warmflow,
             &mut s_coord, &mut s_dir, &mut s_book,
         ].into_iter().enumerate() {

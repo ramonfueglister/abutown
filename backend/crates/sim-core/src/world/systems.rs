@@ -267,6 +267,202 @@ mod ecs_mutation_tests {
     }
 }
 
+// === LOD reclassification (CoreSet::LodReclassify) ===================
+
+/// Hysteresis window: a chunk that just transitioned holds its new marker
+/// for this many ticks before the next transition can fire. Matches
+/// `mobility::lod::ACTIVITY_HYSTERESIS_TICKS`.
+const LOD_COOLDOWN_TICKS: u8 = 30;
+
+fn current_lod_marker(world: &World, entity: Entity) -> ChunkLod {
+    if world.get::<HotChunk>(entity).is_some() {
+        ChunkLod::Hot
+    } else if world.get::<ActiveChunk>(entity).is_some() {
+        ChunkLod::Active
+    } else if world.get::<WarmChunk>(entity).is_some() {
+        ChunkLod::Warm
+    } else {
+        ChunkLod::Asleep
+    }
+}
+
+fn classify_target(
+    subscribers: u8,
+    population: u32,
+    previous: ChunkLod,
+    cooldown_remaining: u8,
+) -> ChunkLod {
+    let target = if subscribers >= 2 {
+        ChunkLod::Hot
+    } else if subscribers == 1 {
+        ChunkLod::Active
+    } else if population > 0 {
+        ChunkLod::Warm
+    } else {
+        ChunkLod::Asleep
+    };
+    if target != previous && cooldown_remaining > 0 {
+        previous
+    } else {
+        target
+    }
+}
+
+/// Reclassify every chunk entity's LOD marker based on subscriber count
+/// and population. Swaps marker components atomically, decrements the
+/// per-entity `LodCooldown`, and writes `ChunkLodChanged` messages for
+/// every transition. Runs in `CoreSet::LodReclassify`.
+pub fn reclassify_chunk_lod_system(world: &mut World) {
+    // Phase 1: collect work (immutable read of components + populations).
+    let mut transitions: Vec<(Entity, ChunkCoord, ChunkLod, ChunkLod)> = Vec::new();
+    let mut cooldown_updates: Vec<(Entity, u8)> = Vec::new();
+    {
+        let chunk_populations = world
+            .get_resource::<crate::mobility::resources::ChunkPopulations>()
+            .map(|p| p.0.clone())
+            .unwrap_or_default();
+        let mut q = world.query::<(
+            Entity,
+            &ChunkCoordComp,
+            &ChunkSubscriberCount,
+            &LodCooldown,
+        )>();
+        for (entity, coord, sub, cooldown) in q.iter(world) {
+            let pop = chunk_populations.get(&coord.0).copied().unwrap_or(0);
+            let previous = current_lod_marker(world, entity);
+            let target = classify_target(sub.0, pop, previous, cooldown.0);
+            let new_cooldown = cooldown.0.saturating_sub(1);
+            cooldown_updates.push((entity, new_cooldown));
+            if target != previous {
+                transitions.push((entity, coord.0, previous, target));
+            }
+        }
+    }
+
+    // Phase 2: apply cooldown decrements (transitions will overwrite below).
+    for (entity, new_cd) in cooldown_updates {
+        if let Some(mut cd) = world.entity_mut(entity).get_mut::<LodCooldown>() {
+            cd.0 = new_cd;
+        }
+    }
+
+    // Phase 3: swap LOD marker components, reset cooldown, write events,
+    // and update the legacy `ChunkActivities` compat shim.
+    for (entity, coord, from, to) in transitions {
+        {
+            let mut e = world.entity_mut(entity);
+            match from {
+                ChunkLod::Asleep => {
+                    e.remove::<AsleepChunk>();
+                }
+                ChunkLod::Warm => {
+                    e.remove::<WarmChunk>();
+                }
+                ChunkLod::Active => {
+                    e.remove::<ActiveChunk>();
+                }
+                ChunkLod::Hot => {
+                    e.remove::<HotChunk>();
+                }
+            }
+            match to {
+                ChunkLod::Asleep => {
+                    e.insert(AsleepChunk);
+                }
+                ChunkLod::Warm => {
+                    e.insert(WarmChunk);
+                }
+                ChunkLod::Active => {
+                    e.insert(ActiveChunk);
+                }
+                ChunkLod::Hot => {
+                    e.insert(HotChunk);
+                }
+            }
+            e.insert(LodCooldown(LOD_COOLDOWN_TICKS));
+        }
+        // Compatibility shim — mobility advance gating still reads
+        // `ChunkActivities`. Will be removed in a later phase that migrates
+        // mobility to query LOD markers directly.
+        if let Some(mut activities) =
+            world.get_resource_mut::<crate::mobility::resources::ChunkActivities>()
+        {
+            activities.0.insert(
+                coord,
+                match to {
+                    ChunkLod::Asleep => crate::mobility::lod::MobilityActivity::Asleep,
+                    ChunkLod::Warm => crate::mobility::lod::MobilityActivity::Warm,
+                    ChunkLod::Active => crate::mobility::lod::MobilityActivity::Active,
+                    ChunkLod::Hot => crate::mobility::lod::MobilityActivity::Hot,
+                },
+            );
+        }
+        world
+            .resource_mut::<Messages<ChunkLodChanged>>()
+            .write(ChunkLodChanged {
+                entity,
+                coord,
+                from,
+                to,
+            });
+    }
+}
+
+#[cfg(test)]
+mod lod_reclassify_tests {
+    use super::*;
+    use crate::world::plugin::CorePlugin;
+    use crate::world::schedule::{CoreSet, SimPlugin};
+    use bevy_ecs::schedule::Schedule;
+
+    #[test]
+    fn warm_to_active_when_subscriber_arrives() {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        // The LOD reclassify system reads `ChunkPopulations` and writes a
+        // compatibility shim into `ChunkActivities` — both are mobility
+        // resources, so install them explicitly in this isolated test.
+        world.insert_resource(crate::mobility::resources::ChunkPopulations::default());
+        world.insert_resource(crate::mobility::resources::ChunkActivities::default());
+        CorePlugin::default().install(&mut world, &mut schedule);
+        schedule.add_systems(
+            reclassify_chunk_lod_system.in_set(CoreSet::LodReclassify),
+        );
+
+        let coord = ChunkCoord { x: 0, y: 0 };
+        let entity = spawn_chunk_entity(
+            &mut world,
+            coord,
+            4,
+            vec![TileRecord::default(); 16],
+            0,
+            ChunkActivity::Warm,
+        );
+        world
+            .entity_mut(entity)
+            .get_mut::<ChunkSubscriberCount>()
+            .unwrap()
+            .0 = 1;
+        // LodCooldown is 0 from spawn; the system will keep it at 0 until
+        // a transition fires, at which point it bumps to LOD_COOLDOWN_TICKS.
+        schedule.run(&mut world);
+        assert!(
+            world.get::<ActiveChunk>(entity).is_some(),
+            "should have transitioned to Active",
+        );
+        assert!(world.get::<WarmChunk>(entity).is_none());
+
+        let messages = world.resource::<Messages<ChunkLodChanged>>();
+        let mut cursor = messages.get_cursor();
+        let read: Vec<_> = cursor.read(messages).collect();
+        assert!(
+            read.iter()
+                .any(|e| e.entity == entity && e.to == ChunkLod::Active),
+            "ChunkLodChanged should be emitted for Warm -> Active",
+        );
+    }
+}
+
 #[cfg(test)]
 mod spawn_tests {
     use super::*;

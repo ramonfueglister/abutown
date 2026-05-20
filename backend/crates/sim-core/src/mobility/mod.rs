@@ -374,6 +374,7 @@ impl MobilityWorld {
             .insert(chunk, activity);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn seed_chunk_subscriber_count(&mut self, chunk: crate::ids::ChunkCoord, count: u8) {
         self.world
             .resource_mut::<ChunkSubscribers>()
@@ -1713,43 +1714,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn tick_mobility_indexes_lod_spawned_agents() {
-        use crate::ids::ChunkCoord;
-        use crate::mobility::lod::{FlowCell, MobilityActivity};
-
-        let mut world = MobilityWorld::empty();
-        world.set_link_polyline(LinkId("l:0".into()), vec![(10.0, 10.0), (20.0, 10.0)]);
-
-        let chunk = ChunkCoord { x: 0, y: 0 };
-
-        world.seed_flow_cell(
-            chunk,
-            FlowCell {
-                population: 2.0,
-                outflow: std::collections::HashMap::new(),
-                attractiveness: 1.0,
-                last_tick: 0,
-            },
-        );
-        // Warm + 1 subscriber: classify_activity_system promotes Warm → Active.
-        world.seed_chunk_activity(chunk, MobilityActivity::Warm);
-        world.seed_chunk_subscriber_count(chunk, 1);
-
-        world.tick_mobility();
-
-        // Find the spawned agent ids in by_agent_id.
-        let lod_agents: Vec<_> = world
-            .by_agent_id
-            .keys()
-            .filter(|id| id.0.starts_with("agent:lod:"))
-            .collect();
-        assert_eq!(
-            lod_agents.len(),
-            2,
-            "by_agent_id contains 2 LOD-spawned agents"
-        );
-    }
+    // Removed (Phase 8a Task 8): `tick_mobility_indexes_lod_spawned_agents`.
+    // The test exercised the flow-cell → agent spawn behaviour from
+    // `promote_warm_to_active_system`, which was removed together with the
+    // legacy LOD systems. The spawn reactor will be reintroduced atop
+    // `ChunkLodChanged` events in a later phase; this test will return then.
 
     #[test]
     fn snapshot_with_flow_cells_and_activities_round_trips() {
