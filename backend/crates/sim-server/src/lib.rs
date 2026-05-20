@@ -7,3 +7,4 @@ pub mod postgres_events;
 pub mod postgres_mobility;
 pub mod postgres_snapshots;
 pub mod runtime;
+pub mod runtime_view;

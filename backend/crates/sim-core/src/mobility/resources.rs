@@ -106,3 +106,10 @@ pub struct PreviousChunkByEntity(pub HashMap<Entity, ChunkCoord>);
 /// FlowCell contributions don't double-count across ticks.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct PreviousFlowCellContrib(pub HashMap<ChunkCoord, u32>);
+
+/// Per-tick scratchpad — filled by `tick_mobility` (via a temporary
+/// indirection during the Phase 7c migration) so the publish path can
+/// read the per-chunk deltas without re-running the tick. Drained at
+/// the end of each tick.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct PendingPerChunkDeltas(pub Vec<crate::mobility::MobilityChunkDelta>);

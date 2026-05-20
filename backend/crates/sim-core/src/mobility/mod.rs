@@ -124,6 +124,7 @@ impl MobilityWorld {
         world.insert_resource(crate::mobility::resources::VehicleIdIndex::default());
         world.insert_resource(crate::mobility::resources::PreviousChunkByEntity::default());
         world.insert_resource(crate::mobility::resources::PreviousFlowCellContrib::default());
+        world.insert_resource(crate::mobility::resources::PendingPerChunkDeltas::default());
 
         let mut schedule = Schedule::default();
         crate::mobility::systems::install_systems(&mut schedule);
