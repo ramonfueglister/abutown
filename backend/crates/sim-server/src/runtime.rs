@@ -100,6 +100,10 @@ impl SimulationRuntime {
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
         CorePlugin::default().install(&mut world, &mut schedule);
         install_mobility(&mut world, &mut schedule);
+        crate::persistence_plugin::PersistencePlugin {
+            world_id: WORLD_ID.to_string(),
+        }
+        .install(&mut world, &mut schedule);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let tiles =
@@ -204,6 +208,10 @@ impl SimulationRuntime {
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
         CorePlugin::default().install(&mut world, &mut schedule);
         install_mobility(&mut world, &mut schedule);
+        crate::persistence_plugin::PersistencePlugin {
+            world_id: world_id.0.clone(),
+        }
+        .install(&mut world, &mut schedule);
 
         // Hydrate mobility state from the snapshot store if present, else seed
         // from the network descriptor.

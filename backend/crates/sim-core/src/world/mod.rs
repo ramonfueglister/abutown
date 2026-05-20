@@ -4,6 +4,7 @@ pub mod persistence;
 pub mod plugin;
 pub mod resources;
 pub mod schedule;
+pub mod snapshot_provider;
 pub mod systems;
 pub mod tile_entity;
 
