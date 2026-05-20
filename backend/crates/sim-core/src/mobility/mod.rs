@@ -328,6 +328,15 @@ impl MobilityWorld {
             .copied()
             .unwrap_or(0)
     }
+
+    /// Clone the full ChunkSubscribers map for publication into RuntimeReadView.
+    /// Used by Phase 7c so WS chunk_unsubscribe can probe counts without
+    /// acquiring a runtime read-lock.
+    pub fn chunk_subscriber_counts_snapshot(
+        &self,
+    ) -> std::collections::HashMap<crate::ids::ChunkCoord, u8> {
+        self.world.resource::<ChunkSubscribers>().0.clone()
+    }
 }
 
 #[cfg(test)]

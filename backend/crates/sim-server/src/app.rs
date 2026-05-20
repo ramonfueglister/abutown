@@ -22,7 +22,7 @@ use sim_core::{
         InMemoryMobilitySnapshotStore, MobilitySnapshotStore,
     },
 };
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{Mutex, broadcast};
 use tokio_stream::StreamMap;
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
@@ -51,7 +51,6 @@ fn resolve_city_network_path() -> String {
 
 #[derive(Clone)]
 pub struct AppState {
-    runtime: Arc<RwLock<SimulationRuntime>>,
     deltas: broadcast::Sender<ServerMessageDto>,
     card_hands: CardHandStore,
     auth: AuthVerifier,
@@ -60,8 +59,6 @@ pub struct AppState {
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
-    mutation_rx:
-        Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>>>,
 }
 
 impl AppState {
@@ -103,22 +100,30 @@ impl AppState {
             0,
         );
         let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
-        Self {
-            runtime: Arc::new(RwLock::new(runtime)),
-            deltas,
+        let view = Arc::new(arc_swap::ArcSwap::from_pointee(initial_view));
+        let chunk_channels: Arc<DashMap<_, _>> = Arc::new(DashMap::new());
+
+        let state = Self {
+            deltas: deltas.clone(),
             card_hands,
             auth,
             snapshot_store: Arc::new(Mutex::new(snapshot_store)),
             mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
-            chunk_channels: Arc::new(DashMap::new()),
-            view: Arc::new(arc_swap::ArcSwap::from_pointee(initial_view)),
+            chunk_channels: Arc::clone(&chunk_channels),
+            view: Arc::clone(&view),
             mutations: mutation_tx,
-            mutation_rx: Arc::new(tokio::sync::Mutex::new(mutation_rx)),
-        }
-    }
+        };
 
-    pub(crate) fn runtime(&self) -> Arc<RwLock<SimulationRuntime>> {
-        Arc::clone(&self.runtime)
+        tokio::spawn(tick_loop(
+            runtime,
+            mutation_rx,
+            view,
+            deltas,
+            chunk_channels,
+            SIMULATION_TICK_INTERVAL,
+        ));
+
+        state
     }
 
     pub(crate) fn view(&self) -> Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>> {
@@ -152,27 +157,6 @@ impl AppState {
 
     fn subscribe_deltas(&self) -> broadcast::Receiver<ServerMessageDto> {
         self.deltas.subscribe()
-    }
-
-    fn spawn_delta_loop(&self, tick_interval: Duration) {
-        let state = self.clone();
-        let deltas = self.deltas.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tick_interval);
-            interval.tick().await;
-            loop {
-                interval.tick().await;
-                // Per-chunk fan-out: tick mobility and broadcast deltas to subscribed chunk channels.
-                tick_and_fan_out(&state).await;
-                // Broadcast tile pulse to all connected clients via the global broadcast channel.
-                let pulse = {
-                    let runtime_arc = state.runtime();
-                    let mut runtime = runtime_arc.write().await;
-                    runtime.next_pulse()
-                };
-                let _ = deltas.send(pulse);
-            }
-        });
     }
 
     fn spawn_snapshot_loop(&self, snapshot_interval: Duration) {
@@ -237,6 +221,8 @@ fn build_read_view_from_runtime(
         mobility_chunk_snapshots.insert(coord, mob_dto);
     }
 
+    let chunk_subscriber_counts = mobility.chunk_subscriber_counts_snapshot();
+
     crate::runtime_view::RuntimeReadView {
         tick: mobility_tick,
         world_id: world_id.clone(),
@@ -248,6 +234,7 @@ fn build_read_view_from_runtime(
         mobility_full_dto: runtime.mobility_snapshot(),
         per_chunk_deltas,
         pulse_sequence,
+        chunk_subscriber_counts,
     }
 }
 
@@ -316,7 +303,9 @@ pub fn build_app_with_runtime_and_card_hands(
 }
 
 fn build_router_from_state(state: AppState) -> Router {
-    state.spawn_delta_loop(SIMULATION_TICK_INTERVAL);
+    // tick_loop is already running (spawned in new_with_stores). Only the
+    // periodic persist loop needs to be spawned here, since it depends on the
+    // AppState clone (view + mutations).
     state.spawn_snapshot_loop(SNAPSHOT_INTERVAL);
 
     Router::new()
@@ -603,7 +592,7 @@ fn chunk_delta_to_dto(
     }
 }
 
-async fn apply_mutation(
+async fn apply_mutation_owned(
     runtime: &mut SimulationRuntime,
     mutation: crate::runtime_view::Mutation,
 ) {
@@ -633,58 +622,84 @@ async fn apply_mutation(
         Mutation::MarkChunkSnapshotsPersisted { coords } => {
             runtime.mark_chunk_snapshots_persisted(&coords);
         }
+        Mutation::CollectPersistData { reply } => {
+            let payload = crate::runtime_view::PersistPayload {
+                chunk_snapshots: runtime.collect_chunk_snapshots(),
+                world_id: runtime.world_id_for_persist().clone(),
+                mobility_tick: runtime.mobility_tick(),
+                mobility_world: runtime.mobility_world_clone_for_persist(),
+            };
+            let _ = reply.send(payload);
+        }
     }
 }
 
-async fn tick_and_fan_out(state: &AppState) {
-    // Phase 0: drain the entire mutation queue under one write-lock — avoids
-    // re-acquiring per mutation when several are pending in the same tick
-    // (e.g. a burst of unsubscribes after a client disconnect plus a
-    // snapshot-mark-persisted from the persist loop).
-    {
-        let mut rx = state.mutation_rx.lock().await;
-        if let Ok(first) = rx.try_recv() {
-            let runtime_arc = state.runtime();
-            let mut runtime = runtime_arc.write().await;
-            apply_mutation(&mut runtime, first).await;
-            while let Ok(mutation) = rx.try_recv() {
-                apply_mutation(&mut runtime, mutation).await;
-            }
-        }
+/// Sole owner of the SimulationRuntime. Drains pending mutations, ticks the
+/// world, fans out per-chunk deltas, publishes a new RuntimeReadView, and
+/// emits the legacy global tile pulse. All in one task so no lock is needed.
+async fn tick_loop(
+    mut runtime: SimulationRuntime,
+    mut mutation_rx: tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>,
+    view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
+    deltas: broadcast::Sender<ServerMessageDto>,
+    chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
+    interval: Duration,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    ticker.tick().await;
+    loop {
+        ticker.tick().await;
+        tick_once(
+            &mut runtime,
+            &mut mutation_rx,
+            &view,
+            &deltas,
+            &chunk_channels,
+        )
+        .await;
+    }
+}
+
+/// One iteration of the tick loop, extracted so tests can advance the world
+/// without waiting on the real-time scheduler.
+async fn tick_once(
+    runtime: &mut SimulationRuntime,
+    mutation_rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>,
+    view: &Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
+    deltas: &broadcast::Sender<ServerMessageDto>,
+    chunk_channels: &Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>,
+) {
+    // Phase 0: drain the entire mutation queue. We own the runtime exclusively
+    // — no lock acquisition between mutations.
+    while let Ok(mutation) = mutation_rx.try_recv() {
+        apply_mutation_owned(runtime, mutation).await;
     }
 
-    // Phase 1: tick the world under brief write-lock; collect deltas + metadata.
-    let (per_chunk, world_id, tick) = {
-        let runtime_arc = state.runtime();
-        let mut runtime = runtime_arc.write().await;
-        let per_chunk = runtime.tick_world_mobility();
-        let world_id = runtime.world_id_for_persist().clone();
-        let tick = runtime.mobility_tick();
-        (per_chunk, world_id, tick)
-    }; // write-lock dropped here
+    // Phase 1: tick mobility.
+    let per_chunk = runtime.tick_world_mobility();
+    let world_id = runtime.world_id_for_persist().clone();
+    let mobility_tick = runtime.mobility_tick();
 
-    // Phase 2 + 3 share one read-lock — Phase 2 broadcasts per-chunk delta DTOs
-    // (needs &MobilityWorld for record→DTO conversion), Phase 3 builds the
-    // RuntimeReadView for lock-free readers (also needs &MobilityWorld).
-    let chunk_channels = state.chunk_channels();
-    let runtime_arc = state.runtime();
-    let runtime = runtime_arc.read().await;
-
+    // Phase 2: broadcast per-chunk delta DTOs to subscribed chunk channels.
     if !per_chunk.is_empty() {
         let mobility = runtime.mobility();
         for (chunk, delta) in &per_chunk {
             let Some(sender) = chunk_channels.get(chunk).map(|e| e.clone()) else {
                 continue;
             };
-            let dto = chunk_delta_to_dto(delta, mobility, &world_id, tick);
-            let _ = sender.send(dto); // best-effort; ignore receiver count
+            let dto = chunk_delta_to_dto(delta, mobility, &world_id, mobility_tick);
+            let _ = sender.send(dto); // best-effort
         }
     }
 
-    // Phase 3 — publish the new RuntimeReadView for lock-free HTTP/WS readers.
-    let pulse_sequence = state.view.load().pulse_sequence;
-    let view = build_read_view_from_runtime(&runtime, &per_chunk, pulse_sequence);
-    state.view.store(Arc::new(view));
+    // Phase 3: publish the new RuntimeReadView for lock-free HTTP/WS readers.
+    let prev_pulse = view.load().pulse_sequence;
+    let new_view = build_read_view_from_runtime(runtime, &per_chunk, prev_pulse + 1);
+    view.store(Arc::new(new_view));
+
+    // Phase 4: legacy global tile pulse via the broadcast channel.
+    let pulse = runtime.next_pulse();
+    let _ = deltas.send(pulse);
 }
 
 fn chunk_snapshot_to_dto(
@@ -811,14 +826,16 @@ async fn handle_client_message(
                 let chunk_channels = state.chunk_channels();
                 for coord in &removed {
                     connection.chunk_streams.remove(coord);
-                    // Reap the channel if no other client is subscribed. We
-                    // probe via a brief read-lock for now; Task 6 moves
-                    // chunk_subscriber_counts into the view.
-                    let count = {
-                        let runtime = state.runtime();
-                        let runtime = runtime.read().await;
-                        runtime.chunk_subscriber_count(*coord)
-                    };
+                    // View was published last tick — counts reflect the previous
+                    // state. At worst we keep a chunk_channel for one extra tick
+                    // before reaping; correctness unaffected.
+                    let count = state
+                        .view()
+                        .load()
+                        .chunk_subscriber_counts
+                        .get(coord)
+                        .copied()
+                        .unwrap_or(0);
                     if count == 0 {
                         chunk_channels.remove(coord);
                     }
@@ -833,34 +850,41 @@ async fn handle_client_message(
 async fn persist_snapshots_once(
     state: &AppState,
 ) -> Result<usize, sim_core::persistence::ChunkSnapshotStoreError> {
-    // TODO Phase 7c task 6: migrate to view.load() once MobilitySnapshotStore
-    // accepts MobilitySnapshotDto directly (via a new write_dto method).
-    // Phase 1: collect everything under a brief read-lock — mobility snapshot
-    // is cloned here so the lock can be released before any DB write.
-    let (snapshots, coords, world_id, mobility_tick, mobility_snapshot) = {
-        let runtime_arc = state.runtime();
-        let runtime = runtime_arc.read().await;
-        let snapshots = runtime.collect_chunk_snapshots();
-        let coords: Vec<ChunkCoord> = snapshots
-            .iter()
-            .map(|s| ChunkCoord {
-                x: s.coord.x,
-                y: s.coord.y,
-            })
-            .collect();
-        let world_id = runtime.world_id_for_persist().clone();
-        let mobility_tick = runtime.mobility_tick();
-        let mobility_snapshot = runtime.mobility_world_clone_for_persist();
-        (
-            snapshots,
-            coords,
-            world_id,
-            mobility_tick,
-            mobility_snapshot,
-        )
-        // read-lock released here — no DB write has happened yet
+    // Phase 1: ask the tick task to collect everything we need. The reply
+    // arrives at the next mutation-drain (≤ one tick interval).
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    if state
+        .mutations
+        .send(crate::runtime_view::Mutation::CollectPersistData { reply: reply_tx })
+        .is_err()
+    {
+        return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
+            "tick task gone",
+        ));
+    }
+    let payload = match reply_rx.await {
+        Ok(p) => p,
+        Err(_) => {
+            return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
+                "collect-persist-data reply dropped",
+            ));
+        }
     };
 
+    let crate::runtime_view::PersistPayload {
+        chunk_snapshots: snapshots,
+        world_id,
+        mobility_tick,
+        mobility_world,
+    } = payload;
+
+    let coords: Vec<ChunkCoord> = snapshots
+        .iter()
+        .map(|s| ChunkCoord {
+            x: s.coord.x,
+            y: s.coord.y,
+        })
+        .collect();
     let written = coords.len();
 
     // Phase 2a: chunk DB writes — store-mutex only, no runtime lock held.
@@ -877,7 +901,7 @@ async fn persist_snapshots_once(
         let mob_store = state.mobility_snapshot_store();
         let mut mob_store = mob_store.lock().await;
         if let Err(error) = mob_store
-            .write(&world_id.0, mobility_tick, &mobility_snapshot)
+            .write(&world_id.0, mobility_tick, &mobility_world)
             .await
         {
             tracing::warn!(%error, "failed to persist mobility snapshot");
@@ -910,62 +934,66 @@ mod tests {
     use abutown_protocol::ChunkSnapshotDto;
     use sim_core::ids::ChunkCoord;
     use sim_core::persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError};
+    use std::time::Duration;
+
+    /// Wait long enough for the spawned tick_loop to advance the published
+    /// view at least once. SIMULATION_TICK_INTERVAL is 100 ms; we wait 2.5×
+    /// to absorb scheduler jitter on slow CI.
+    const TICK_WAIT: Duration = Duration::from_millis(250);
+
+    /// Wait until the published view's mobility_tick advances strictly past
+    /// `from`, or until the deadline passes. Returns the observed tick.
+    async fn wait_for_tick_past(state: &AppState, from: u64, deadline: Duration) -> u64 {
+        let start = std::time::Instant::now();
+        loop {
+            let t = state.view().load().mobility_tick;
+            if t > from {
+                return t;
+            }
+            if start.elapsed() >= deadline {
+                return t;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
 
     #[tokio::test]
-    async fn http_reads_are_lock_free_while_commands_are_in_flight() {
-        use std::time::{Duration, Instant};
-
+    async fn concurrent_view_reads_do_not_deadlock() {
+        // The new architecture's invariant is stronger than the old
+        // "lock-free reads under write contention" — there is no longer any
+        // lock at all. Verify many concurrent view.load() calls complete
+        // promptly.
+        use std::time::Instant;
         let state = AppState::new(SimulationRuntime::new());
 
-        // Spawn 50 background tasks that take the runtime write-lock.
-        let mut command_tasks = Vec::new();
-        for _ in 0..50 {
-            let state = state.clone();
-            command_tasks.push(tokio::spawn(async move {
-                let runtime = state.runtime();
-                let _w = runtime.write().await;
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }));
-        }
-
-        // 50 concurrent reads of /world via the view path — must not wait.
         let start = Instant::now();
-        let mut read_tasks = Vec::new();
-        for _ in 0..50 {
-            let state = state.clone();
-            read_tasks.push(tokio::spawn(async move {
-                let _ = state.view().load().world_summary.clone();
+        let mut tasks = Vec::new();
+        for _ in 0..100 {
+            let s = state.clone();
+            tasks.push(tokio::spawn(async move {
+                for _ in 0..50 {
+                    let _ = s.view().load().world_summary.clone();
+                }
             }));
         }
-        for t in read_tasks {
+        for t in tasks {
             t.await.unwrap();
         }
-        let read_elapsed = start.elapsed();
-
-        // Loose threshold: a single 10ms-blocked read already implies
-        // contention. 200ms tolerates slow CI runners while still failing
-        // decisively if any read actually waited on the write-lock.
+        let elapsed = start.elapsed();
         assert!(
-            read_elapsed < Duration::from_millis(200),
-            "lock-free reads took {read_elapsed:?}, expected < 200ms"
+            elapsed < Duration::from_millis(500),
+            "concurrent view reads took {elapsed:?}"
         );
-
-        for t in command_tasks {
-            t.await.unwrap();
-        }
     }
 
     #[tokio::test]
     async fn runtime_read_view_updates_after_tick() {
         let state = AppState::new(SimulationRuntime::new());
-        let view0 = state.view().load();
-        let tick0 = view0.mobility_tick;
-        drop(view0);
-
-        tick_and_fan_out(&state).await;
+        let tick0 = state.view().load().mobility_tick;
+        let observed = wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+        assert!(observed > tick0, "tick should have advanced past {tick0}");
 
         let view1 = state.view().load();
-        assert_eq!(view1.mobility_tick, tick0 + 1, "tick should have advanced");
         assert!(
             !view1.chunk_snapshots.is_empty(),
             "view should include chunk snapshots"
@@ -975,13 +1003,13 @@ mod tests {
     #[tokio::test]
     async fn view_holds_mobility_chunk_snapshots_for_loaded_chunks() {
         let state = AppState::new(SimulationRuntime::new());
-        tick_and_fan_out(&state).await;
+        let tick0 = state.view().load().mobility_tick;
+        wait_for_tick_past(&state, tick0, TICK_WAIT).await;
         let view = state.view().load();
         assert!(
             !view.mobility_chunk_snapshots.is_empty(),
             "view should hold mobility chunk snapshots for loaded chunks"
         );
-        // Every loaded chunk should have both a tile chunk snapshot and a mobility chunk snapshot.
         for coord in view.chunk_snapshots.keys() {
             assert!(
                 view.mobility_chunk_snapshots.contains_key(coord),
@@ -1032,7 +1060,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_reads_proceed_during_snapshot_persist() {
         use sim_core::persistence::InMemoryMobilitySnapshotStore;
-        use std::time::{Duration, Instant};
+        use std::time::Instant;
 
         // Build AppState with a slow snapshot store (100 ms per write, 3 chunks = 300 ms total).
         let state = AppState::new_with_stores(
@@ -1045,23 +1073,22 @@ mod tests {
             AuthVerifier::local_bearer_uuid(),
         );
 
-        // Spawn persist; it should release the runtime lock during the slow DB write.
+        // Spawn persist — its DB write holds only the snapshot_store mutex,
+        // independent of the runtime.
         let state_for_persist = state.clone();
         let persist = tokio::spawn(async move { persist_snapshots_once(&state_for_persist).await });
 
-        // Briefly wait so persist enters its DB-write phase (still inside the 100 ms sleep).
+        // Briefly wait so persist enters its DB-write phase.
         tokio::time::sleep(Duration::from_millis(20)).await;
 
-        // Now do concurrent reads. They MUST complete quickly because the
-        // runtime read-lock should NOT be held during the DB write.
+        // Concurrent reads via the lock-free view — these must complete
+        // quickly even while persist's DB write is in flight.
         let read_start = Instant::now();
         let mut handles = Vec::new();
         for _ in 0..10 {
             let s = state.clone();
             handles.push(tokio::spawn(async move {
-                let runtime_arc = s.runtime();
-                let runtime = runtime_arc.read().await;
-                let _health = runtime.health();
+                let _ = s.view().load().health.clone();
             }));
         }
         for h in handles {
@@ -1069,9 +1096,6 @@ mod tests {
         }
         let read_elapsed = read_start.elapsed();
 
-        // Before the fix: reads serialized behind persist's write lock → ~280 ms wait.
-        // After the fix: reads proceed in parallel → a few ms total.
-        // Use a generous threshold (50 ms) so the test is not flaky on slow CI.
         assert!(
             read_elapsed < Duration::from_millis(50),
             "reads blocked during persist: took {}ms (expected < 50ms)",
@@ -1105,8 +1129,9 @@ mod tests {
     #[tokio::test]
     async fn subscription_diff_mutation_returns_snapshots_for_added_chunks() {
         let state = AppState::new(SimulationRuntime::new());
-        // Tick once to populate the view.
-        tick_and_fan_out(&state).await;
+        // Wait one tick so the view is populated.
+        let tick0 = state.view().load().mobility_tick;
+        wait_for_tick_past(&state, tick0, TICK_WAIT).await;
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         state
@@ -1117,9 +1142,11 @@ mod tests {
                 reply: reply_tx,
             })
             .unwrap();
-        // Trigger drain.
-        tick_and_fan_out(&state).await;
-        let snapshots = reply_rx.await.unwrap();
+        // Drain happens at the next tick boundary — wait for the reply.
+        let snapshots = tokio::time::timeout(TICK_WAIT, reply_rx)
+            .await
+            .expect("reply within deadline")
+            .expect("reply not dropped");
         assert_eq!(snapshots.len(), 1, "expected one snapshot for added chunk");
         assert_eq!(snapshots[0].chunk.x, 4);
         assert_eq!(snapshots[0].chunk.y, 4);
@@ -1129,7 +1156,7 @@ mod tests {
     async fn dropped_reply_channel_does_not_panic() {
         let state = AppState::new(SimulationRuntime::new());
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        drop(reply_rx); // drop receiver before mutation is processed
+        drop(reply_rx); // drop receiver before the mutation is processed
         state
             .mutations
             .send(crate::runtime_view::Mutation::SubscriptionDiff {
@@ -1138,7 +1165,12 @@ mod tests {
                 reply: reply_tx,
             })
             .unwrap();
-        tick_and_fan_out(&state).await; // must not panic
+        // Wait long enough for the tick task to drain the queue. If a panic
+        // bubbled up, the spawned task would have died — exercise the view a
+        // couple of ticks later to detect that.
+        let t0 = state.view().load().mobility_tick;
+        let t1 = wait_for_tick_past(&state, t0, TICK_WAIT).await;
+        assert!(t1 > t0, "tick task must still be alive after dropped reply");
     }
 
     #[tokio::test]
@@ -1158,12 +1190,20 @@ mod tests {
         assert!(result.is_err(), "persist should propagate the store error");
 
         // The chunks must still be dirty — mark_chunk_snapshots_persisted must
-        // NOT have been called after a failed write.
-        let runtime_arc = state.runtime();
-        let runtime = runtime_arc.read().await;
-        let still_dirty = runtime.collect_chunk_snapshots();
+        // NOT have been called after a failed write. We verify by requesting a
+        // fresh CollectPersistData — the returned snapshot list must still
+        // include dirty chunks.
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        state
+            .mutations
+            .send(crate::runtime_view::Mutation::CollectPersistData { reply: reply_tx })
+            .unwrap();
+        let payload = tokio::time::timeout(TICK_WAIT, reply_rx)
+            .await
+            .expect("reply within deadline")
+            .expect("reply not dropped");
         assert!(
-            !still_dirty.is_empty(),
+            !payload.chunk_snapshots.is_empty(),
             "snapshot write failure must not mark chunks persisted (snapshots remain dirty)"
         );
     }
