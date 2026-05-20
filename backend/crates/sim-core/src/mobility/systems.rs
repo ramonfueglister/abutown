@@ -589,6 +589,11 @@ pub fn compute_world_coord_system(
     // Without this guard, `Changed<Position>` fires for every entity every
     // tick and the incremental `track_chunk_populations_system` degenerates
     // into a full rebuild — destroying Task 6's win.
+    //
+    // NaN guard: the != comparison silently misbehaves if x or y is NaN
+    // (NaN ≠ NaN is true → unconditional write every tick → Changed fires
+    // → incremental rebucketing degenerates). Debug builds assert finite;
+    // release builds skip non-finite values entirely.
     for (rp, mut pos, cached) in vehicles.iter_mut() {
         if !chunk_is_simulated(&pos, &activities) {
             continue;
@@ -603,6 +608,7 @@ pub fn compute_world_coord_system(
         if let Some((x, y)) = new_xy
             && (pos.x != x || pos.y != y)
         {
+            debug_assert!(x.is_finite() && y.is_finite(), "non-finite vehicle Position");
             pos.x = x;
             pos.y = y;
         }
@@ -623,6 +629,7 @@ pub fn compute_world_coord_system(
         if let Some((x, y)) = new_xy
             && (pos.x != x || pos.y != y)
         {
+            debug_assert!(x.is_finite() && y.is_finite(), "non-finite agent Position");
             pos.x = x;
             pos.y = y;
         }
