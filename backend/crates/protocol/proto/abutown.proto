@@ -1,7 +1,237 @@
 syntax = "proto3";
 package abutown.v1;
 
-// Placeholder message. The full schema is added in Task 2.
-message Ping {
+// === Primitives ===
+
+message ChunkCoord { sint32 x = 1; sint32 y = 2; }
+message WorldCoord { float x = 1; float y = 2; }
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_N = 1;
+  DIRECTION_NE = 2;
+  DIRECTION_E = 3;
+  DIRECTION_SE = 4;
+  DIRECTION_S = 5;
+  DIRECTION_SW = 6;
+  DIRECTION_W = 7;
+  DIRECTION_NW = 8;
+}
+
+enum ChunkState {
+  CHUNK_STATE_UNSPECIFIED = 0;
+  CHUNK_STATE_ASLEEP = 1;
+  CHUNK_STATE_WARM = 2;
+  CHUNK_STATE_ACTIVE = 3;
+  CHUNK_STATE_HOT = 4;
+}
+
+enum TileKind {
+  TILE_KIND_UNSPECIFIED = 0;
+  TILE_KIND_GRASS = 1;
+  TILE_KIND_WATER = 2;
+  TILE_KIND_ROAD = 3;
+  TILE_KIND_BUILDING_FOOTPRINT = 4;
+}
+
+enum VehicleKind {
+  VEHICLE_KIND_UNSPECIFIED = 0;
+  VEHICLE_KIND_CAR = 1;
+  VEHICLE_KIND_TRAM = 2;
+}
+
+// === Server → Client envelope ===
+
+message ServerMessage {
+  oneof body {
+    Hello hello = 1;
+    TilePulse tile_pulse = 2;
+    MobilityChunkDelta mobility_chunk_delta = 3;
+    MobilityChunkSnapshot mobility_chunk_snapshot = 4;
+    WorldEvent world_event = 5;
+  }
+}
+
+message Hello {
   uint32 protocol_version = 1;
+  string world_id = 2;
+  uint32 chunk_size = 3;
+}
+
+message TilePulse {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  uint64 tick = 3;
+  uint64 version = 4;
+  ChunkCoord coord = 5;
+  uint32 local_index = 6;
+}
+
+message MobilityChunkDelta {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  uint64 tick = 3;
+  ChunkCoord chunk = 4;
+  repeated AgentMobility changed_agents = 5;
+  repeated VehicleMobility changed_vehicles = 6;
+  repeated string left_agents = 7;
+  repeated string left_vehicles = 8;
+}
+
+message MobilityChunkSnapshot {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  uint64 tick = 3;
+  ChunkCoord chunk = 4;
+  repeated AgentMobility agents = 5;
+  repeated VehicleMobility vehicles = 6;
+}
+
+message WorldEvent {
+  oneof event {
+    TileKindSetEvent tile_kind_set = 1;
+  }
+}
+
+message TileKindSetEvent {
+  string command_id = 1;
+  ChunkCoord coord = 2;
+  uint32 local_index = 3;
+  TileKind kind = 4;
+}
+
+// === Client → Server envelope ===
+
+message ClientMessage {
+  oneof body {
+    ChunkSubscribe chunk_subscribe = 1;
+    ChunkUnsubscribe chunk_unsubscribe = 2;
+  }
+}
+
+message ChunkSubscribe {
+  uint32 protocol_version = 1;
+  repeated ChunkCoord coords = 2;
+}
+
+message ChunkUnsubscribe {
+  uint32 protocol_version = 1;
+  repeated ChunkCoord coords = 2;
+}
+
+// === HTTP request/response bodies ===
+
+message ClientCommand {
+  oneof command {
+    SetTileKindCommand set_tile_kind = 1;
+  }
+}
+
+message SetTileKindCommand {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  string command_id = 3;
+  ChunkCoord coord = 4;
+  uint32 local_index = 5;
+  TileKind kind = 6;
+}
+
+message CommandResponse {
+  oneof outcome {
+    CommandAccepted accepted = 1;
+    CommandRejected rejected = 2;
+  }
+}
+
+message CommandAccepted { WorldEvent event = 1; }
+message CommandRejected { string reason = 1; }
+
+message HealthResponse {
+  uint32 protocol_version = 1;
+  string service = 2;
+  string world_id = 3;
+  bool ok = 4;
+}
+
+message WorldSummary {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  uint32 chunk_size = 3;
+  repeated ChunkCoord loaded_chunks = 4;
+  uint32 tick_period_ms = 5;
+}
+
+message ChunkSnapshot {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  ChunkCoord coord = 3;
+  uint64 chunk_version = 4;
+  ChunkState chunk_state = 5;
+  uint32 tile_count = 6;
+  repeated TileMutation tiles = 7;
+}
+
+message TileMutation {
+  uint32 local_index = 1;
+  TileKind kind = 2;
+  uint64 version = 3;
+}
+
+message MobilitySnapshot {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  uint64 tick = 3;
+  repeated AgentMobility agents = 4;
+  repeated VehicleMobility vehicles = 5;
+  repeated Stop stops = 6;
+}
+
+// === Mobility entity types ===
+
+message AgentMobility {
+  string id = 1;
+  AgentState state = 2;
+  WorldCoord world_coord = 3;
+  Direction direction = 4;
+  string sprite_key = 5;
+  uint32 plan_cursor = 6;
+}
+
+message AgentState {
+  oneof state {
+    Walking walking = 1;
+    WaitingAtStop waiting_at_stop = 2;
+    InVehicle in_vehicle = 3;
+    Boarding boarding = 4;
+    Alighting alighting = 5;
+    AtActivity at_activity = 6;
+  }
+}
+
+message Walking { string link_id = 1; float progress = 2; }
+message WaitingAtStop { string stop_id = 1; }
+message InVehicle { string vehicle_id = 1; uint32 seat_index = 2; }
+message Boarding { string vehicle_id = 1; string stop_id = 2; }
+message Alighting { string vehicle_id = 1; string stop_id = 2; }
+message AtActivity { string activity_id = 1; }
+
+message VehicleMobility {
+  string id = 1;
+  VehicleKind kind = 2;
+  string route_id = 3;
+  uint32 link_index = 4;
+  float progress = 5;
+  uint32 capacity = 6;
+  repeated string occupants = 7;
+  WorldCoord world_coord = 8;
+  Direction direction = 9;
+  string sprite_key = 10;
+}
+
+message Stop {
+  string id = 1;
+  string route_id = 2;
+  uint32 link_index = 3;
+  float progress = 4;
+  repeated string waiting_agents = 5;
 }

@@ -661,16 +661,236 @@ mod tests {
 }
 
 #[cfg(test)]
-mod proto_scaffolding_tests {
-    use super::v1::Ping;
+mod proto_roundtrip_tests {
+    use super::v1::*;
     use prost::Message;
 
+    fn sample_chunk() -> ChunkCoord { ChunkCoord { x: 4, y: 4 } }
+    fn sample_world_coord() -> WorldCoord { WorldCoord { x: 100.0, y: 200.0 } }
+
+    fn assert_roundtrip<M: Message + Default + PartialEq + std::fmt::Debug>(msg: &M) {
+        let bytes = msg.encode_to_vec();
+        let back = M::decode(bytes.as_slice()).expect("decode");
+        assert_eq!(&back, msg);
+    }
+
     #[test]
-    fn ping_roundtrips() {
-        let ping = Ping { protocol_version: 16 };
-        let bytes = ping.encode_to_vec();
-        let back = Ping::decode(bytes.as_slice()).unwrap();
+    fn roundtrip_hello() {
+        let msg = ServerMessage {
+            body: Some(server_message::Body::Hello(Hello {
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                chunk_size: 32,
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_tile_pulse() {
+        let msg = ServerMessage {
+            body: Some(server_message::Body::TilePulse(TilePulse {
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                tick: 1234,
+                version: 5678,
+                coord: Some(sample_chunk()),
+                local_index: 11,
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_mobility_chunk_delta() {
+        let agent = AgentMobility {
+            id: "agent:a:1".into(),
+            state: Some(AgentState {
+                state: Some(agent_state::State::Walking(Walking {
+                    link_id: "link:a".into(),
+                    progress: 0.5,
+                })),
+            }),
+            world_coord: Some(sample_world_coord()),
+            direction: Direction::E as i32,
+            sprite_key: "pedestrian:5".into(),
+            plan_cursor: 0,
+        };
+        let msg = ServerMessage {
+            body: Some(server_message::Body::MobilityChunkDelta(MobilityChunkDelta {
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                tick: 100,
+                chunk: Some(sample_chunk()),
+                changed_agents: vec![agent],
+                changed_vehicles: vec![],
+                left_agents: vec!["agent:gone:1".into()],
+                left_vehicles: vec![],
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_mobility_chunk_snapshot() {
+        let msg = ServerMessage {
+            body: Some(server_message::Body::MobilityChunkSnapshot(MobilityChunkSnapshot {
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                tick: 100,
+                chunk: Some(sample_chunk()),
+                agents: vec![],
+                vehicles: vec![],
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_world_event() {
+        let msg = ServerMessage {
+            body: Some(server_message::Body::WorldEvent(WorldEvent {
+                event: Some(world_event::Event::TileKindSet(TileKindSetEvent {
+                    command_id: "cmd:1".into(),
+                    coord: Some(sample_chunk()),
+                    local_index: 11,
+                    kind: TileKind::Water as i32,
+                })),
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_chunk_subscribe() {
+        let msg = ClientMessage {
+            body: Some(client_message::Body::ChunkSubscribe(ChunkSubscribe {
+                protocol_version: 16,
+                coords: vec![sample_chunk(), ChunkCoord { x: 5, y: 4 }],
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_chunk_unsubscribe() {
+        let msg = ClientMessage {
+            body: Some(client_message::Body::ChunkUnsubscribe(ChunkUnsubscribe {
+                protocol_version: 16,
+                coords: vec![sample_chunk()],
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_set_tile_kind_command() {
+        let msg = ClientCommand {
+            command: Some(client_command::Command::SetTileKind(SetTileKindCommand {
+                protocol_version: 16,
+                world_id: "abutown-main".into(),
+                command_id: "cmd:1".into(),
+                coord: Some(sample_chunk()),
+                local_index: 11,
+                kind: TileKind::Water as i32,
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_command_response_accepted() {
+        let msg = CommandResponse {
+            outcome: Some(command_response::Outcome::Accepted(CommandAccepted {
+                event: Some(WorldEvent {
+                    event: Some(world_event::Event::TileKindSet(TileKindSetEvent {
+                        command_id: "cmd:1".into(),
+                        coord: Some(sample_chunk()),
+                        local_index: 11,
+                        kind: TileKind::Water as i32,
+                    })),
+                }),
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_command_response_rejected() {
+        let msg = CommandResponse {
+            outcome: Some(command_response::Outcome::Rejected(CommandRejected {
+                reason: "invalid coord".into(),
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_world_summary() {
+        let msg = WorldSummary {
+            protocol_version: 16,
+            world_id: "abutown-main".into(),
+            chunk_size: 32,
+            loaded_chunks: vec![sample_chunk(), ChunkCoord { x: 5, y: 4 }],
+            tick_period_ms: 100,
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_chunk_snapshot() {
+        let msg = ChunkSnapshot {
+            protocol_version: 16,
+            world_id: "abutown-main".into(),
+            coord: Some(sample_chunk()),
+            chunk_version: 5,
+            chunk_state: ChunkState::Active as i32,
+            tile_count: 1024,
+            tiles: vec![TileMutation { local_index: 0, kind: TileKind::Road as i32, version: 1 }],
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn roundtrip_health_response() {
+        let msg = HealthResponse {
+            protocol_version: 16,
+            service: "abutown-sim".into(),
+            world_id: "abutown-main".into(),
+            ok: true,
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
+    fn unknown_field_is_ignored() {
+        // Encode a MobilityChunkDelta with all fields populated, then attempt
+        // to decode as a Hello (different message type, same wire format
+        // tolerance). prost should skip unknown tags and return defaults
+        // for fields it does know but the data lacks.
+        let delta = MobilityChunkDelta {
+            protocol_version: 16,
+            world_id: "abutown-main".into(),
+            tick: 100,
+            chunk: Some(sample_chunk()),
+            changed_agents: vec![],
+            changed_vehicles: vec![],
+            left_agents: vec![],
+            left_vehicles: vec![],
+        };
+        let bytes = delta.encode_to_vec();
+        // Decode as Hello. Field 1 (protocol_version) is uint32 vs uint32
+        // — compatible. Field 2 (world_id) is string vs string — compatible.
+        // Field 3 (tick u64) vs (chunk_size u32) — wire format types differ
+        // (varint vs varint, both varint-encoded), prost decodes 100 as
+        // 100 for chunk_size. Other tags are unknown and ignored.
+        let back = Hello::decode(bytes.as_slice()).expect("decode tolerates unknown fields");
         assert_eq!(back.protocol_version, 16);
+        assert_eq!(back.world_id, "abutown-main");
+        // Fields beyond 1 and 2 in Hello are not set; tag 3 in MobilityChunkDelta
+        // is uint64 tick=100 which maps to varint and could read into
+        // chunk_size (uint32) as 100. Both are valid.
+        assert_eq!(back.chunk_size, 100);
     }
 }
 
