@@ -22,21 +22,13 @@ fn phase3_snapshot_round_trips_byte_for_byte() {
     let reserialized_value: serde_json::Value =
         serde_json::from_str(&reserialized).expect("our re-serialized output is valid JSON");
 
-    // Re-serialize may emit newer top-level keys (e.g. `flow_cells`,
-    // `chunk_activities`) that the frozen Phase-3 fixture predates. The
-    // legacy keys present in the fixture itself drive the comparison, so
-    // adding another legacy key to the fixture later automatically widens
-    // the assertion without touching this test.
-    let fixture_keys: Vec<&String> = fixture_value
-        .as_object()
-        .expect("fixture is a JSON object")
-        .keys()
-        .collect();
-    for key in fixture_keys {
-        assert_eq!(
-            fixture_value.get(key),
-            reserialized_value.get(key),
-            "round-trip diverged on legacy key `{key}`"
-        );
-    }
+    // Byte-identical round trip: every top-level key in the
+    // (serialized) round-tripped value must match the fixture, and vice
+    // versa. The fixture is the canonical persistence shape — if a new
+    // top-level field is added to `MobilityPersistSnapshot`, the fixture
+    // must be extended too, and this assertion catches the drift.
+    assert_eq!(
+        fixture_value, reserialized_value,
+        "round-trip diverged from fixture",
+    );
 }

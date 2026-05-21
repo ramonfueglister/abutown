@@ -812,5 +812,7 @@
       ]
     }
   },
-  "link_polylines": {}
+  "link_polylines": {},
+  "flow_cells": [],
+  "chunk_activities": []
 }
