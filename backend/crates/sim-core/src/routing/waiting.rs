@@ -25,11 +25,11 @@ impl WaitingAgents {
     }
 
     pub fn remove_agent(&mut self, node: NodeId, agent: &AgentId) -> bool {
-        if let Some(q) = self.0.get_mut(&node) {
-            if let Some(pos) = q.iter().position(|a| a == agent) {
-                q.remove(pos);
-                return true;
-            }
+        if let Some(q) = self.0.get_mut(&node)
+            && let Some(pos) = q.iter().position(|a| a == agent)
+        {
+            q.remove(pos);
+            return true;
         }
         false
     }

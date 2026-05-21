@@ -11,3 +11,4 @@ pub use graph::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
 pub use spatial_index::{IndexedNode, NodeSpatialIndex};
 pub use transit::{LineId, TransitLine, TransitLines};
 pub use waiting::WaitingAgents;
+pub use builder::{build_graph_from_city_network, SeededStop};
