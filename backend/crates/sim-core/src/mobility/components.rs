@@ -1,4 +1,4 @@
-use crate::ids::{AgentId, LinkId, RouteId, VehicleId};
+use crate::ids::{AgentId, LinkId, VehicleId};
 use crate::mobility::records::{AgentMobilityState, PlanStage, VehicleKind};
 use abutown_protocol::DirectionDto;
 use bevy_ecs::prelude::*;
@@ -55,11 +55,16 @@ pub struct WalkSpeed(pub f32);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VehicleKindComponent(pub VehicleKind);
 
-/// Vehicle position along its current route link. Written by `vehicle_advance_system`.
-#[derive(Component, Debug, Clone, PartialEq)]
+/// Vehicle position along its current transit line edge. Written by
+/// `vehicle_advance_system`. Phase 8b T10 migrated this from string-keyed
+/// `RouteId` + `link_index` to integer-keyed `LineId` + `edge_index`. The
+/// wire shape (`VehicleRecord`, `VehicleMobilityDto`) still uses the legacy
+/// `route_id: String` + `link_index: usize`; conversion happens at the
+/// emission boundary via `TransitLines::line(line_id).legacy_route_id`.
+#[derive(Component, Debug, Copy, Clone, PartialEq)]
 pub struct RoutePosition {
-    pub route_id: RouteId,
-    pub link_index: usize,
+    pub line_id: crate::routing::LineId,
+    pub edge_index: usize,
     pub progress: f32,
     pub speed: f32,
 }

@@ -112,9 +112,18 @@ pub fn walk_advance_system(
         With<AgentMarker>,
     >,
     simulated: Res<SimulatedChunks>,
+    _graph: Option<Res<crate::routing::Graph>>,
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
 ) {
+    // Phase 8b T10: `Res<Graph>` is wired here so this system can read graph
+    // geometry once the seed path (`from_network` / `tiny_world`) starts
+    // publishing links via the graph builder. Today the seed still uses
+    // string-keyed `LinkPolylines` whose ids (`link:walk:corridor:N`) do
+    // NOT match the builder's `link:walk:X_Y_to_X_Y` naming convention, so
+    // gating the advance on `graph.edge_by_legacy` would freeze every
+    // walker. We preserve today's behavior — pure progress integration —
+    // until T11/T12 collapse the two link-id spaces.
     for (entity, pos, mut state, speed) in query.iter_mut() {
         if !chunk_is_simulated(pos, &simulated) {
             continue;
@@ -150,8 +159,9 @@ pub fn update_link_polyline_cache_system(
         ),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
-    routes: Res<Routes>,
+    _routes: Res<Routes>,
     link_polylines: Res<LinkPolylines>,
+    shim: Option<Res<LegacyTransitShim>>,
     mut commands: Commands,
 ) {
     use std::sync::Arc;
@@ -191,13 +201,12 @@ pub fn update_link_polyline_cache_system(
         }
     }
 
-    // Vehicles: their link is routes[route_id].links[link_index]. Same
-    // reference-pass optimization as the agent loop.
+    // Vehicles: their link is resolved via the legacy shim
+    // (LineId, edge_index) → LinkId. Same reference-pass optimization as
+    // the agent loop.
     for (entity, rp, cached) in vehicles.iter_mut() {
-        let want_id: Option<&crate::ids::LinkId> = routes
-            .0
-            .get(&rp.route_id)
-            .and_then(|r| r.links.get(rp.link_index));
+        let want_id: Option<&crate::ids::LinkId> =
+            shim.as_deref().and_then(|s| s.link_for(rp.line_id, rp.edge_index));
         match (want_id, cached) {
             (Some(want_id), Some(mut c)) => {
                 if c.link_id != *want_id
@@ -234,7 +243,9 @@ pub fn vehicle_advance_system(
         With<VehicleMarker>,
     >,
     simulated: Res<SimulatedChunks>,
-    routes: Res<Routes>,
+    transit_lines: Option<Res<crate::routing::TransitLines>>,
+    shim: Option<Res<LegacyTransitShim>>,
+    routes: Option<Res<Routes>>,
     mut dirty: ResMut<DirtyVehicles>,
 ) {
     for (entity, world_pos, mut pos, mut dwell) in query.iter_mut() {
@@ -247,11 +258,32 @@ pub fn vehicle_advance_system(
             dirty.0.insert(entity);
             continue;
         }
-        // can only advance if route exists and progress < 1.0
-        let Some(route) = routes.0.get(&pos.route_id) else {
-            continue;
+        // The line is known if EITHER TransitLines (real graph-derived) OR
+        // the legacy shim has it. We treat them as equivalent for advance
+        // purposes — both tell us whether the route still exists. The
+        // legacy `Routes` resource is consulted as a final fallback for
+        // tests that don't populate the shim but do populate Routes.
+        let line_known = transit_lines
+            .as_ref()
+            .map(|tl| (pos.line_id.0 as usize) < tl.count() && !tl.line(pos.line_id).edges.is_empty())
+            .unwrap_or(false);
+        let shim_known = shim
+            .as_deref()
+            .and_then(|s| s.links_for(pos.line_id))
+            .map(|l| !l.is_empty())
+            .unwrap_or(false);
+        let routes_known = if let (Some(s), Some(r)) = (shim.as_deref(), routes.as_deref()) {
+            s.route_id_for_line(pos.line_id)
+                .and_then(|rid| r.0.get(rid))
+                .map(|rec| !rec.links.is_empty())
+                .unwrap_or(false)
+        } else {
+            false
         };
-        if route.links.is_empty() || pos.progress >= 1.0 {
+        if !line_known && !shim_known && !routes_known {
+            continue;
+        }
+        if pos.progress >= 1.0 {
             continue;
         }
         let next = (pos.progress + pos.speed).min(1.0);
@@ -354,10 +386,16 @@ pub fn boarding_alighting_system(
     )>,
     simulated: Res<SimulatedChunks>,
     agent_index: Res<crate::mobility::resources::AgentIdIndex>,
+    shim: Option<Res<LegacyTransitShim>>,
     mut stops: ResMut<Stops>,
     mut dirty_agents: ResMut<DirtyAgents>,
     mut dirty_vehicles: ResMut<DirtyVehicles>,
 ) {
+    // Without a LegacyTransitShim we can't translate stop.route_id ↔
+    // vehicle.line_id, so there's nothing for this system to do.
+    let Some(shim) = shim else {
+        return;
+    };
     // ----- PHASE A: BOARDING -----
 
     // A.1 — collect (stop_id, front agent, route/link/progress) for each stop
@@ -402,8 +440,9 @@ pub fn boarding_alighting_system(
                 if !chunk_is_simulated(v_pos_world, &simulated) {
                     continue;
                 }
-                if v_pos.route_id == route_id
-                    && v_pos.link_index == link_index
+                let candidate_line_id = shim.line_id_for_route(&route_id);
+                if Some(v_pos.line_id) == candidate_line_id
+                    && v_pos.edge_index == link_index
                     && (v_pos.progress - stop_progress).abs() < 1e-6
                     && v_occ.0.len() < v_cap.0 as usize
                 {
@@ -465,11 +504,14 @@ pub fn boarding_alighting_system(
     // Pre-index end-of-link stops by (RouteId, link_index) so each vehicle
     // does an O(1) lookup instead of scanning all stops. Original `find()`
     // pattern was the last O(N_vehicles × N_stops) in this system.
-    let end_of_link_stops: std::collections::HashMap<(&RouteId, usize), &crate::mobility::records::StopRecord> = stops
+    // Key on LineId so the vehicle-side lookup matches v_pos.line_id.
+    let end_of_link_stops: std::collections::HashMap<(crate::routing::LineId, usize), &crate::mobility::records::StopRecord> = stops
         .0
         .values()
         .filter(|s| (s.progress - 1.0).abs() < 1e-6)
-        .map(|s| ((&s.route_id, s.link_index), s))
+        .filter_map(|s| {
+            shim.line_id_for_route(&s.route_id).map(|lid| ((lid, s.link_index), s))
+        })
         .collect();
 
     let mut alighting_candidates: Vec<(Entity, VehicleId, StopId, Vec<AgentId>)> = Vec::new();
@@ -482,7 +524,7 @@ pub fn boarding_alighting_system(
             if (v_pos.progress - 1.0).abs() >= 1e-6 {
                 continue;
             }
-            if let Some(stop) = end_of_link_stops.get(&(&v_pos.route_id, v_pos.link_index)) {
+            if let Some(stop) = end_of_link_stops.get(&(v_pos.line_id, v_pos.edge_index)) {
                 alighting_candidates.push((
                     v_entity,
                     v_stable.0.clone(),
@@ -590,6 +632,7 @@ pub fn compute_world_coord_system(
     routes: Res<Routes>,
     stops: Res<Stops>,
     link_polylines: Res<LinkPolylines>,
+    shim: Option<Res<LegacyTransitShim>>,
 ) {
     // Equality-guarded writes: bevy's `Mut<T>` marks the component changed
     // on every deref_mut, even if the new value is the same as the old one.
@@ -610,7 +653,8 @@ pub fn compute_world_coord_system(
                 &c.points, rp.progress,
             ))
         } else {
-            crate::mobility::vehicle_world_coord(rp, &routes, &link_polylines)
+            shim.as_deref()
+                .and_then(|s| crate::mobility::vehicle_world_coord(rp, s, &link_polylines))
         };
         if let Some((x, y)) = new_xy
             && (pos.x != x || pos.y != y)
@@ -664,8 +708,9 @@ pub fn compute_direction_system(
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
     simulated: Res<SimulatedChunks>,
-    routes: Res<Routes>,
+    _routes: Res<Routes>,
     link_polylines: Res<LinkPolylines>,
+    shim: Option<Res<LegacyTransitShim>>,
 ) {
     for (pos, rp, mut dir, cached) in vehicles.iter_mut() {
         if !chunk_is_simulated(pos, &simulated) {
@@ -675,11 +720,8 @@ pub fn compute_direction_system(
             dir.0 = dir_at_progress(&c.points, rp.progress);
             continue;
         }
-        // Slow path: resolve link from route table.
-        let Some(route) = routes.0.get(&rp.route_id) else {
-            continue;
-        };
-        let Some(link_id) = route.links.get(rp.link_index) else {
+        // Slow path: resolve link from the legacy shim.
+        let Some(link_id) = shim.as_deref().and_then(|s| s.link_for(rp.line_id, rp.edge_index)) else {
             continue;
         };
         let Some(points) = link_polylines.0.get(link_id) else {
@@ -1243,6 +1285,9 @@ mod tests {
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
         world.insert_resource(all_active());
+        let mut shim = LegacyTransitShim::default();
+        let line_id = shim.register_route(&RouteId("r:1".into()), &[]);
+        world.insert_resource(shim);
 
         let mut stops = Stops::default();
         stops.0.insert(
@@ -1286,8 +1331,8 @@ mod tests {
                 StableVehicleId(VehicleId("v:1".into())),
                 VehicleKindComponent(VehicleKind::Tram),
                 RoutePosition {
-                    route_id: RouteId("r:1".into()),
-                    link_index: 0,
+                    line_id,
+                    edge_index: 0,
                     progress: 0.0,
                     speed: 0.1,
                 },
@@ -1344,6 +1389,9 @@ mod tests {
         world.insert_resource(DirtyAgents::default());
         world.insert_resource(DirtyVehicles::default());
         world.insert_resource(all_active());
+        let mut shim = LegacyTransitShim::default();
+        let line_id = shim.register_route(&RouteId("r:1".into()), &[LinkId("l:1".into())]);
+        world.insert_resource(shim);
 
         let mut stops = Stops::default();
         stops.0.insert(
@@ -1396,8 +1444,8 @@ mod tests {
                 StableVehicleId(VehicleId("v:1".into())),
                 VehicleKindComponent(VehicleKind::Tram),
                 RoutePosition {
-                    route_id: RouteId("r:1".into()),
-                    link_index: 0,
+                    line_id,
+                    edge_index: 0,
                     progress: 1.0,
                     speed: 0.1,
                 },
@@ -1530,13 +1578,17 @@ mod tests {
 
     #[test]
     fn vehicle_advance_decrements_dwell_when_positive() {
-        use crate::ids::{RouteId, VehicleId};
+        use crate::ids::{LinkId, RouteId, VehicleId};
         use crate::mobility::records::VehicleKind;
 
         let mut world = World::new();
         world.insert_resource(Routes::default());
         world.insert_resource(DirtyVehicles::default());
         world.insert_resource(all_active());
+        world.insert_resource(crate::routing::TransitLines::default());
+        let mut shim = LegacyTransitShim::default();
+        let line_id = shim.register_route(&RouteId("r:1".into()), &[LinkId("l:1".into())]);
+        world.insert_resource(shim);
 
         let entity = world
             .spawn((
@@ -1544,8 +1596,8 @@ mod tests {
                 StableVehicleId(VehicleId("v:1".into())),
                 VehicleKindComponent(VehicleKind::Tram),
                 RoutePosition {
-                    route_id: RouteId("r:1".into()),
-                    link_index: 0,
+                    line_id,
+                    edge_index: 0,
                     progress: 0.5,
                     speed: 0.1,
                 },
@@ -1589,6 +1641,10 @@ mod tests {
         );
         world.insert_resource(routes);
         world.insert_resource(DirtyVehicles::default());
+        world.insert_resource(crate::routing::TransitLines::default());
+        let mut shim = LegacyTransitShim::default();
+        let line_id = shim.register_route(&RouteId("r:1".into()), &[LinkId("l:1".into())]);
+        world.insert_resource(shim);
 
         let entity = world
             .spawn((
@@ -1596,8 +1652,8 @@ mod tests {
                 StableVehicleId(VehicleId("v:1".into())),
                 VehicleKindComponent(VehicleKind::Tram),
                 RoutePosition {
-                    route_id: RouteId("r:1".into()),
-                    link_index: 0,
+                    line_id,
+                    edge_index: 0,
                     progress: 0.4,
                     speed: 0.1,
                 },
@@ -1755,8 +1811,8 @@ mod tests {
             StableVehicleId(VehicleId("v:1".into())),
             VehicleKindComponent(VehicleKind::Tram),
             RoutePosition {
-                route_id: RouteId("r".into()),
-                link_index: 0,
+                line_id: crate::routing::LineId(0),
+                edge_index: 0,
                 progress: 0.0,
                 speed: 0.0,
             },
@@ -1800,6 +1856,9 @@ mod tests {
         );
         world.insert_resource(routes);
         world.insert_resource(Stops::default());
+        let mut shim = LegacyTransitShim::default();
+        let line_id = shim.register_route(&RouteId("r:1".into()), &[LinkId("l:1".into())]);
+        world.insert_resource(shim);
 
         let entity = world
             .spawn((
@@ -1807,8 +1866,8 @@ mod tests {
                 StableVehicleId(VehicleId("v:1".into())),
                 VehicleKindComponent(VehicleKind::Tram),
                 RoutePosition {
-                    route_id: RouteId("r:1".into()),
-                    link_index: 0,
+                    line_id,
+                    edge_index: 0,
                     progress: 0.25,
                     speed: 0.0,
                 },
@@ -2391,6 +2450,12 @@ mod tests {
         links.0.insert(LinkId("l:a".into()), vec![(0.0, 0.0), (10.0, 0.0)]);
         links.0.insert(LinkId("l:b".into()), vec![(0.0, 0.0), (0.0, 10.0)]);
         world.insert_resource(links);
+        let mut shim = LegacyTransitShim::default();
+        let line_id = shim.register_route(
+            &RouteId("r:1".into()),
+            &[LinkId("l:a".into()), LinkId("l:b".into())],
+        );
+        world.insert_resource(shim);
 
         let entity = world
             .spawn((
@@ -2398,8 +2463,8 @@ mod tests {
                 StableVehicleId(VehicleId("v:1".into())),
                 VehicleKindComponent(VehicleKind::Car),
                 RoutePosition {
-                    route_id: RouteId("r:1".into()),
-                    link_index: 0,
+                    line_id,
+                    edge_index: 0,
                     progress: 0.0,
                     speed: 0.1,
                 },
@@ -2420,7 +2485,7 @@ mod tests {
         schedule.add_systems(update_link_polyline_cache_system);
 
         if let Some(mut rp) = world.get_mut::<RoutePosition>(entity) {
-            rp.link_index = 1;
+            rp.edge_index = 1;
         }
         schedule.run(&mut world);
         assert_eq!(

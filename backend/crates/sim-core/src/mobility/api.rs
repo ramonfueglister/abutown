@@ -32,6 +32,17 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     world.insert_resource(Routes::default());
     world.insert_resource(Stops::default());
     world.insert_resource(LinkPolylines::default());
+    world.insert_resource(LegacyTransitShim::default());
+    // Phase 8b T10: ensure routing resources exist even when RoutingPlugin
+    // isn't installed (tests, in-memory seed worlds). The runtime installs
+    // RoutingPlugin BEFORE install_mobility and we don't want to clobber its
+    // populated resources — only insert defaults if absent.
+    if !world.contains_resource::<crate::routing::Graph>() {
+        world.insert_resource(crate::routing::Graph::default());
+    }
+    if !world.contains_resource::<crate::routing::TransitLines>() {
+        world.insert_resource(crate::routing::TransitLines::default());
+    }
     world.insert_resource(DirtyAgents::default());
     world.insert_resource(DirtyVehicles::default());
     world.insert_resource(FlowCells::default());
@@ -356,19 +367,32 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
 }
 
 /// Spawn a vehicle entity from a record. Updates `VehicleIdIndex`.
+///
+/// Phase 8b T10: `RoutePosition` is keyed by `LineId`. We resolve the
+/// caller-supplied legacy `record.route_id` via two sources, in order:
+/// (1) the runtime `TransitLines` (real graph-derived lines), then
+/// (2) the `LegacyTransitShim` (populated by `add_route` for the legacy
+/// seed/test path). If neither resolves, we lazily register the route in
+/// the shim with an empty link list — the caller will then need to call
+/// `add_route` before any system actually consumes the position. This
+/// matches the legacy behavior of allowing vehicles to be spawned
+/// independent of route registration order.
 pub fn spawn_vehicle_from_record(world: &mut World, record: VehicleRecord) -> Entity {
     let id = record.id.clone();
     let sprite_key = compute_vehicle_sprite_key(&id);
+    let line_id = resolve_or_register_line_id(world, &record.route_id);
+    let edge_index = record.link_index;
     let (px, py) = {
-        let routes = world.resource::<Routes>();
+        let shim = world.resource::<LegacyTransitShim>();
         let link_polylines = world.resource::<LinkPolylines>();
         let rp = RoutePosition {
-            route_id: record.route_id.clone(),
-            link_index: record.link_index,
+            line_id,
+            edge_index,
             progress: record.progress,
             speed: record.speed_per_tick,
         };
-        crate::mobility::vehicle_world_coord(&rp, routes, link_polylines).unwrap_or((0.0, 0.0))
+        crate::mobility::vehicle_world_coord(&rp, shim, link_polylines)
+            .unwrap_or((0.0, 0.0))
     };
     let entity = world
         .spawn((
@@ -376,8 +400,8 @@ pub fn spawn_vehicle_from_record(world: &mut World, record: VehicleRecord) -> En
             StableVehicleId(record.id),
             VehicleKindComponent(record.kind),
             RoutePosition {
-                route_id: record.route_id,
-                link_index: record.link_index,
+                line_id,
+                edge_index,
                 progress: record.progress,
                 speed: record.speed_per_tick,
             },
@@ -396,6 +420,47 @@ pub fn spawn_vehicle_from_record(world: &mut World, record: VehicleRecord) -> En
     entity
 }
 
+/// Resolve the `LineId` for a legacy `RouteId`. The shim is the source of
+/// truth during the 8b transition — we always return the LineId that
+/// `add_route` assigned. If the shim doesn't have it yet, we register it
+/// (backfilling links from `Routes` if available).
+///
+/// Note: this deliberately does NOT prefer `TransitLines::line_by_legacy`
+/// because the real graph-derived LineIds are unrelated to the order
+/// `add_route` ran. Mixing them would cause `pos.line_id` to disagree with
+/// `shim.line_id_for_route(stop.route_id)` in `boarding_alighting_system`.
+fn resolve_or_register_line_id(world: &mut World, route_id: &RouteId) -> crate::routing::LineId {
+    let shim_lookup = world
+        .resource::<LegacyTransitShim>()
+        .line_id_for_route(route_id);
+    let needs_backfill = match shim_lookup {
+        Some(id) => world
+            .resource::<LegacyTransitShim>()
+            .links_for(id)
+            .map(|l| l.is_empty())
+            .unwrap_or(true),
+        None => true,
+    };
+    if needs_backfill {
+        let links_from_routes: Option<Vec<LinkId>> = world
+            .resource::<Routes>()
+            .0
+            .get(route_id)
+            .map(|r| r.links.clone());
+        if let Some(links) = links_from_routes {
+            return world
+                .resource_mut::<LegacyTransitShim>()
+                .register_route(route_id, &links);
+        }
+    }
+    if let Some(id) = shim_lookup {
+        return id;
+    }
+    world
+        .resource_mut::<LegacyTransitShim>()
+        .register_route(route_id, &[])
+}
+
 pub fn add_stop(world: &mut World, stop: StopRecord) {
     world
         .resource_mut::<Stops>()
@@ -404,6 +469,12 @@ pub fn add_stop(world: &mut World, stop: StopRecord) {
 }
 
 pub fn add_route(world: &mut World, route: RouteRecord) {
+    // Phase 8b T10: also register in the legacy shim so RoutePosition's
+    // LineId can be translated back to (RouteId, LinkId) for the
+    // unmigrated legacy resources.
+    world
+        .resource_mut::<LegacyTransitShim>()
+        .register_route(&route.id, &route.links);
     world
         .resource_mut::<Routes>()
         .0
@@ -438,17 +509,40 @@ fn vehicle_record_from_entity(world: &World, entity: Entity) -> Option<VehicleRe
     let cap = world.get::<Capacity>(entity)?;
     let occ = world.get::<Occupants>(entity)?;
     let dwell = world.get::<DwellTicksRemaining>(entity)?;
+    let route_id = legacy_route_id_for(world, pos.line_id);
     Some(VehicleRecord {
         id: stable.0.clone(),
         kind: kind.0,
-        route_id: pos.route_id.clone(),
-        link_index: pos.link_index,
+        route_id,
+        link_index: pos.edge_index,
         progress: pos.progress,
         speed_per_tick: pos.speed,
         capacity: cap.0,
         occupants: occ.0.clone(),
         dwell_ticks_remaining: dwell.0,
     })
+}
+
+/// Resolve the legacy `RouteId` for a `LineId`. Checks the shim first
+/// (legacy seed path), then real TransitLines (runtime path). Returns
+/// an empty placeholder if neither has a mapping — callers downstream
+/// will see a route_id that doesn't exist in `Routes` and skip work.
+fn legacy_route_id_for(world: &World, line_id: crate::routing::LineId) -> RouteId {
+    if let Some(rid) = world
+        .resource::<LegacyTransitShim>()
+        .route_id_for_line(line_id)
+    {
+        return rid.clone();
+    }
+    let tl = world.resource::<crate::routing::TransitLines>();
+    if (line_id.0 as usize) < tl.count() {
+        let line = tl.line(line_id);
+        if let Some(legacy) = &line.legacy_route_id {
+            return RouteId(legacy.clone());
+        }
+        return RouteId(line.name.clone());
+    }
+    RouteId(String::new())
 }
 
 fn resolve_link_polyline(
@@ -503,9 +597,8 @@ pub fn direction_for_agent(
 pub fn world_coord_for_vehicle(world: &World, vehicle_id: &VehicleId) -> Option<(f32, f32)> {
     let entity = *world.resource::<VehicleIdIndex>().0.get(vehicle_id)?;
     let pos = world.get::<RoutePosition>(entity)?;
-    let routes = &world.resource::<Routes>().0;
-    let route = routes.get(&pos.route_id)?;
-    let link_id = route.links.get(pos.link_index)?;
+    let shim = world.resource::<LegacyTransitShim>();
+    let link_id = shim.link_for(pos.line_id, pos.edge_index)?;
     let geom = resolve_link_polyline(world, link_id)?;
     Some(geom.world_coord_at_progress(pos.progress))
 }
@@ -516,9 +609,8 @@ pub fn direction_for_vehicle(
 ) -> Option<abutown_protocol::DirectionDto> {
     let entity = *world.resource::<VehicleIdIndex>().0.get(vehicle_id)?;
     let pos = world.get::<RoutePosition>(entity)?;
-    let routes = &world.resource::<Routes>().0;
-    let route = routes.get(&pos.route_id)?;
-    let link_id = route.links.get(pos.link_index)?;
+    let shim = world.resource::<LegacyTransitShim>();
+    let link_id = shim.link_for(pos.line_id, pos.edge_index)?;
     let geom = resolve_link_polyline(world, link_id)?;
     Some(geom.direction_at_progress(pos.progress))
 }
@@ -572,11 +664,12 @@ pub fn vehicle_dto_for(
         direction_for_vehicle(world, vehicle_id).unwrap_or(abutown_protocol::DirectionDto::S);
     let sprite_key =
         sprite_key_for_vehicle(world, vehicle_id).unwrap_or_else(|| "tram:0".to_string());
+    let route_id_str = legacy_route_id_for(world, pos.line_id).0;
     Some(abutown_protocol::VehicleMobilityDto {
         id: abutown_protocol::EntityId(stable.0.0.clone()),
         kind: kind.0.into(),
-        route_id: pos.route_id.0.clone(),
-        link_index: pos.link_index,
+        route_id: route_id_str,
+        link_index: pos.edge_index,
         progress: pos.progress,
         capacity: cap.0,
         occupants: occ

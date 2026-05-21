@@ -180,9 +180,11 @@ pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
         }
     }
     {
-        let mut routes_res = world.resource_mut::<Routes>();
-        for (id, route) in snap.routes {
-            routes_res.0.insert(id, route);
+        // Phase 8b T10: route through add_route so LegacyTransitShim stays
+        // in sync — it assigns the LineId that spawn_vehicle_from_record
+        // expects to find when restoring vehicles below.
+        for (_id, route) in snap.routes {
+            crate::mobility::api::add_route(world, route);
         }
     }
     {

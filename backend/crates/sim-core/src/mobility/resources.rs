@@ -123,3 +123,59 @@ pub struct PreviousFlowCellContrib(pub HashMap<ChunkCoord, u32>);
 /// the end of each tick.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct PendingPerChunkDeltas(pub Vec<crate::mobility::MobilityChunkDelta>);
+
+/// Phase 8b transition shim. RoutePosition is now keyed by `LineId` +
+/// `edge_index`, but the legacy `Routes`/`Stops`/`LinkPolylines` resources
+/// remain wire/persistence sources. This shim assigns a stable `LineId` to
+/// each legacy `RouteId` it sees, and lets consumers recover the legacy
+/// `(RouteId, LinkId)` pair from a `(LineId, edge_index)` so they can
+/// continue to read the legacy resources unchanged.
+///
+/// Populated by `add_route` (legacy path) and by `seed::publish_runtime_lines`
+/// (runtime path). Deleted in T12 once consumers stop touching the legacy
+/// resources entirely.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct LegacyTransitShim {
+    by_route_id: HashMap<RouteId, crate::routing::LineId>,
+    by_line_id: HashMap<crate::routing::LineId, RouteId>,
+    /// (LineId.0 as usize) → list of legacy link ids in route order.
+    links_by_line: Vec<Vec<LinkId>>,
+}
+
+impl LegacyTransitShim {
+    pub fn line_id_for_route(&self, route_id: &RouteId) -> Option<crate::routing::LineId> {
+        self.by_route_id.get(route_id).copied()
+    }
+
+    pub fn route_id_for_line(&self, line_id: crate::routing::LineId) -> Option<&RouteId> {
+        self.by_line_id.get(&line_id)
+    }
+
+    pub fn link_for(&self, line_id: crate::routing::LineId, edge_index: usize) -> Option<&LinkId> {
+        self.links_by_line
+            .get(line_id.0 as usize)
+            .and_then(|v| v.get(edge_index))
+    }
+
+    pub fn links_for(&self, line_id: crate::routing::LineId) -> Option<&[LinkId]> {
+        self.links_by_line.get(line_id.0 as usize).map(|v| v.as_slice())
+    }
+
+    /// Register a legacy route → assign a fresh LineId if not already mapped.
+    /// Returns the assigned LineId. Used by `add_route` + `spawn_vehicle_from_record`.
+    pub fn register_route(&mut self, route_id: &RouteId, links: &[LinkId]) -> crate::routing::LineId {
+        if let Some(id) = self.by_route_id.get(route_id).copied() {
+            // Update the link list if the new one is longer/different.
+            let idx = id.0 as usize;
+            if idx < self.links_by_line.len() {
+                self.links_by_line[idx] = links.to_vec();
+            }
+            return id;
+        }
+        let id = crate::routing::LineId(self.links_by_line.len() as u32);
+        self.by_route_id.insert(route_id.clone(), id);
+        self.by_line_id.insert(id, route_id.clone());
+        self.links_by_line.push(links.to_vec());
+        id
+    }
+}

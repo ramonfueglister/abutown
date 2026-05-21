@@ -72,14 +72,17 @@ pub fn agent_world_coord(
 }
 
 /// World coord for a vehicle given its route position. Returns `None` if
-/// the route or link is not registered, or its polyline missing.
+/// the line or link is not registered, or its polyline missing.
+///
+/// Phase 8b T10: `RoutePosition` is `LineId`-keyed. We translate to the
+/// legacy `LinkId` via `LegacyTransitShim` (populated by `add_route`) so
+/// the existing `LinkPolylines`/`Routes` resources keep working.
 pub fn vehicle_world_coord(
     route_position: &components::RoutePosition,
-    routes: &resources::Routes,
+    shim: &resources::LegacyTransitShim,
     link_polylines: &resources::LinkPolylines,
 ) -> Option<(f32, f32)> {
-    let route = routes.0.get(&route_position.route_id)?;
-    let link_id = route.links.get(route_position.link_index)?;
+    let link_id = shim.link_for(route_position.line_id, route_position.edge_index)?;
     let points = link_polylines.0.get(link_id)?;
     Some(crate::mobility_geometry::world_coord_at_progress_slice(
         points,
