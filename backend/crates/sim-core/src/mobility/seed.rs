@@ -7,6 +7,44 @@ use super::*;
 use crate::city_network::CityNetwork;
 use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
 
+/// Hardcoded transit stops the world seeds today. Coords are tile-space.
+/// These get promoted to graph nodes via `RoutingPlugin.seeded_stops`.
+///
+/// During the 8b transition `seed.rs` ALSO inserts these stops into the
+/// legacy `Stops` resource for compatibility with the unmigrated mobility
+/// systems. T10-T12 migrate the consumers; T13 deletes the old resource.
+pub fn legacy_seeded_stops() -> Vec<crate::routing::SeededStop> {
+    // Tile-space centre coords for the seeded chunks:
+    //   c44 = (4 * 32 + 16, 4 * 32 + 16) = (144.0, 144.0)
+    //   c54 = (5 * 32 + 16, 4 * 32 + 16) = (176.0, 144.0)
+    //   c45 = (4 * 32 + 16, 5 * 32 + 16) = (144.0, 176.0)
+    //
+    // horizontal route: c44 → c54  (progress 0.0 → 1.0)
+    // vertical route:   c44 → c45  (progress 0.0 → 1.0)
+    vec![
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:horizontal:pickup".into(),
+            coord: (144.0, 144.0),
+            legacy_route_id: "route:horizontal".into(),
+        },
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:horizontal:dropoff".into(),
+            coord: (176.0, 144.0),
+            legacy_route_id: "route:horizontal".into(),
+        },
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:vertical:pickup".into(),
+            coord: (144.0, 144.0),
+            legacy_route_id: "route:vertical".into(),
+        },
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:vertical:dropoff".into(),
+            coord: (144.0, 176.0),
+            legacy_route_id: "route:vertical".into(),
+        },
+    ]
+}
+
 /// Backward-compatible wrapper — delegates to [`tiny_world`].
 pub fn initial_world() -> (World, Schedule) {
     tiny_world()

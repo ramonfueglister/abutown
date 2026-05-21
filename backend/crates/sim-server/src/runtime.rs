@@ -110,9 +110,7 @@ impl SimulationRuntime {
 
         CorePlugin::default().install(&mut world, &mut schedule);
 
-        // Seeded stops will be populated in T9 via mobility::seed::legacy_seeded_stops().
-        // T8 passes empty list — graph will have intersections only, no transit stops.
-        let seeded_stops: Vec<sim_core::routing::SeededStop> = Vec::new();
+        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
         sim_core::routing::RoutingPlugin { seeded_stops }
             .install(&mut world, &mut schedule);
 
@@ -229,9 +227,7 @@ impl SimulationRuntime {
 
         CorePlugin::default().install(&mut world, &mut schedule);
 
-        // Seeded stops will be populated in T9 via mobility::seed::legacy_seeded_stops().
-        // T8 passes empty list — graph will have intersections only, no transit stops.
-        let seeded_stops: Vec<sim_core::routing::SeededStop> = Vec::new();
+        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
         sim_core::routing::RoutingPlugin { seeded_stops }
             .install(&mut world, &mut schedule);
 
