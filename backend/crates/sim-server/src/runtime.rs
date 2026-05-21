@@ -363,9 +363,21 @@ impl SimulationRuntime {
 
     /// Deterministically sorted list (`(y, x)`) of loaded chunk coords from
     /// the ECS world.
+    ///
+    /// Excludes "stub" chunk entities — empty-tiles entities spawned solely
+    /// to track WS subscriptions or LOD activity for chunks that the
+    /// persistence layer hasn't loaded yet. Those chunks have no terrain
+    /// payload, so the world-summary + pulse rotation must skip them.
     fn loaded_coords(&self) -> Vec<ChunkCoord> {
         let by_coord = self.world.resource::<ChunksByCoord>();
-        let mut coords: Vec<ChunkCoord> = by_coord.0.keys().copied().collect();
+        let mut coords: Vec<ChunkCoord> = by_coord
+            .0
+            .iter()
+            .filter_map(|(coord, entity)| {
+                let tile_count = self.world.get::<Tiles>(*entity)?.0.len();
+                if tile_count > 0 { Some(*coord) } else { None }
+            })
+            .collect();
         coords.sort_by_key(|c| (c.y, c.x));
         coords
     }
