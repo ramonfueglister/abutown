@@ -933,11 +933,59 @@ async fn apply_mutation_owned(
             runtime.mark_chunk_snapshots_persisted(&coords);
         }
         Mutation::CollectPersistData { reply } => {
+            // Iterate registered SnapshotProviders and dispatch by
+            // `key.kind`. The provider path is the source of truth for
+            // persistence post-Phase-8a — `collect_chunk_snapshots()` /
+            // `mobility_persist_snapshot()` remain on the runtime as
+            // lower-level helpers (tests still use them) but are no longer
+            // the persist call site.
+            let items = runtime.collect_provider_items();
+            let mut chunk_snapshots: Vec<abutown_protocol::ChunkSnapshotDto> =
+                Vec::new();
+            let mut mobility_world: Option<
+                sim_core::mobility::MobilityPersistSnapshot,
+            > = None;
+            for item in items {
+                match item.key.kind {
+                    "chunk" => match serde_json::from_slice::<
+                        abutown_protocol::ChunkSnapshotDto,
+                    >(&item.payload)
+                    {
+                        Ok(dto) => chunk_snapshots.push(dto),
+                        Err(error) => tracing::warn!(
+                            %error,
+                            kind = item.key.kind,
+                            identifier = %item.key.identifier,
+                            "provider emitted chunk payload that failed to deserialize",
+                        ),
+                    },
+                    "mobility" => match serde_json::from_slice::<
+                        sim_core::mobility::MobilityPersistSnapshot,
+                    >(&item.payload)
+                    {
+                        Ok(snap) => mobility_world = Some(snap),
+                        Err(error) => tracing::warn!(
+                            %error,
+                            kind = item.key.kind,
+                            identifier = %item.key.identifier,
+                            "provider emitted mobility payload that failed to deserialize",
+                        ),
+                    },
+                    other => tracing::warn!(
+                        kind = other,
+                        "ignoring SnapshotItem with unknown kind",
+                    ),
+                }
+            }
+            // Stable ordering for chunk snapshots (matches the legacy
+            // `collect_chunk_snapshots()` (y, x) sort).
+            chunk_snapshots.sort_by_key(|s| (s.coord.y, s.coord.x));
             let payload = crate::runtime_view::PersistPayload {
-                chunk_snapshots: runtime.collect_chunk_snapshots(),
+                chunk_snapshots,
                 world_id: runtime.world_id_for_persist().clone(),
                 mobility_tick: runtime.mobility_tick(),
-                mobility_world: runtime.mobility_persist_snapshot(),
+                mobility_world: mobility_world
+                    .unwrap_or_else(|| runtime.mobility_persist_snapshot()),
             };
             let _ = reply.send(payload);
         }

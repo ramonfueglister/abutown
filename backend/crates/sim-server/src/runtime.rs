@@ -64,8 +64,8 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
 pub struct SimulationRuntime {
     world_id: WorldId,
     chunk_size: u16,
-    pub world: sim_core::bevy_ecs::world::World,
-    pub schedule: sim_core::bevy_ecs::schedule::Schedule,
+    pub(crate) world: sim_core::bevy_ecs::world::World,
+    pub(crate) schedule: sim_core::bevy_ecs::schedule::Schedule,
     event_store: Box<dyn WorldEventStore + Send + Sync>,
     event_count: usize,
     tick: u64,
@@ -469,6 +469,27 @@ impl SimulationRuntime {
         extract_from_world(&self.world)
     }
 
+    /// Collect snapshot items from every registered `SnapshotProvider`.
+    ///
+    /// This is the source-of-truth collection path post-Phase-8a: instead of
+    /// dual-purpose helpers like `collect_chunk_snapshots()` +
+    /// `mobility_persist_snapshot()`, the persist loop iterates the items
+    /// returned here and dispatches by `key.kind` to the matching store.
+    /// Items are already serialized — the storage layer deserializes only
+    /// when it needs to inspect the DTO shape.
+    pub fn collect_provider_items(
+        &self,
+    ) -> Vec<sim_core::world::persistence::SnapshotItem> {
+        let providers = self
+            .world
+            .resource::<sim_core::world::persistence::SnapshotProviders>();
+        let mut items = Vec::new();
+        for provider in &providers.0 {
+            items.extend(provider.collect(&self.world));
+        }
+        items
+    }
+
     /// Borrow the runtime's bevy world — for callers that want to issue
     /// `mobility::api` reads without paying the snapshot-extract cost.
     pub fn mobility(&self) -> &sim_core::bevy_ecs::world::World {
@@ -855,6 +876,71 @@ mod tests {
         assert_eq!(third.coord, ChunkCoordDto { x: 4, y: 5 });
         assert_eq!(fourth.tick, 4);
         assert_eq!(fourth.coord, ChunkCoordDto { x: 4, y: 4 });
+    }
+
+    #[tokio::test]
+    async fn collect_provider_items_routes_dirty_chunk_to_chunk_store() {
+        // Issue #1 acceptance: construct a runtime, mutate a tile (so a
+        // chunk becomes dirty), drive the persist path via SnapshotProviders
+        // (not the legacy `collect_chunk_snapshots()` shortcut), and verify
+        // a `ChunkSnapshotStore` receives the chunk snapshot.
+        use sim_core::persistence::InMemoryChunkSnapshotStore;
+
+        let mut runtime = SimulationRuntime::new();
+        // `SimulationRuntime::new()` already applies one tile mutation per
+        // seeded chunk, so all three chunks are dirty. Mutate one again to
+        // make sure the dirty path through SnapshotProviders is exercised.
+        runtime
+            .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
+                abutown_protocol::SetTileKindCommandDto {
+                    protocol_version: abutown_protocol::PROTOCOL_VERSION,
+                    world_id: abutown_protocol::WorldId("abutown-main".to_string()),
+                    command_id: "command:provider-path:1".to_string(),
+                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    local_index: 9,
+                    kind: abutown_protocol::TileKindDto::Water,
+                },
+            ))
+            .await
+            .expect("command applies cleanly");
+
+        let items = runtime.collect_provider_items();
+        // Expect at least one chunk item (for the dirty chunk) and exactly
+        // one mobility item.
+        let chunk_items: Vec<_> = items
+            .iter()
+            .filter(|i| i.key.kind == "chunk")
+            .collect();
+        let mobility_items: Vec<_> = items
+            .iter()
+            .filter(|i| i.key.kind == "mobility")
+            .collect();
+        assert!(
+            !chunk_items.is_empty(),
+            "expected at least one chunk SnapshotItem from provider path",
+        );
+        assert_eq!(
+            mobility_items.len(),
+            1,
+            "MobilitySnapshotProvider emits exactly one item per collect",
+        );
+
+        // Dispatch chunk items to the in-memory ChunkSnapshotStore via the
+        // same code path as the persist loop in `app.rs`.
+        let mut store = InMemoryChunkSnapshotStore::default();
+        for item in chunk_items {
+            let dto: abutown_protocol::ChunkSnapshotDto =
+                serde_json::from_slice(&item.payload)
+                    .expect("provider emits valid ChunkSnapshotDto JSON");
+            ChunkSnapshotStore::write_snapshot(&mut store, dto)
+                .await
+                .expect("in-memory store write");
+        }
+
+        let stored = store
+            .read_snapshot(ChunkCoord { x: 4, y: 4 })
+            .expect("snapshot for the mutated chunk landed in the store");
+        assert_eq!(stored.coord, abutown_protocol::ChunkCoordDto { x: 4, y: 4 });
     }
 
     #[tokio::test]
