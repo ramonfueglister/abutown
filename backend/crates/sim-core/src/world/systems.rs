@@ -312,30 +312,56 @@ fn classify_target(
 /// and population. Swaps marker components atomically, decrements the
 /// per-entity `LodCooldown`, and writes `ChunkLodChanged` messages for
 /// every transition. Runs in `CoreSet::LodReclassify`.
-pub fn reclassify_chunk_lod_system(world: &mut World) {
-    // Compatibility shim: sync the legacy `ChunkSubscribers` resource map
-    // onto the per-entity `ChunkSubscriberCount` component for every known
-    // chunk entity. Iterating all entities (not just those in the map)
-    // handles the decrement-to-zero case where `apply_subscription_diff`
-    // removes the coord from the map.
-    //
-    // Skip the sync entirely when `ChunkSubscribers` is absent — in that
-    // mode (used by isolated reclassify unit tests) the per-entity
-    // component is the source of truth.
-    if let Some(subscribers) = world.get_resource::<crate::mobility::resources::ChunkSubscribers>()
-    {
-        let subscriber_map: std::collections::HashMap<ChunkCoord, u8> = subscribers.0.clone();
-        let entity_coords: Vec<(Entity, ChunkCoord)> = world
-            .resource::<ChunksByCoord>()
-            .0
-            .iter()
-            .map(|(c, e)| (*e, *c))
-            .collect();
-        for (entity, coord) in entity_coords {
-            let count = subscriber_map.get(&coord).copied().unwrap_or(0);
-            if let Some(mut sub) = world.entity_mut(entity).get_mut::<ChunkSubscriberCount>() {
-                sub.0 = count;
-            }
+///
+/// Source of truth: per-entity `ChunkSubscriberCount` + the optional
+/// mobility-owned `ChunkPopulations` resource. There is no longer any
+/// compat-shim sync with a separate `ChunkSubscribers` / `ChunkActivities`
+/// resource — those were deleted in Phase 8a follow-ups.
+///
+/// Uses a cached `QueryState` in a `Local` so we don't pay the
+/// `world.query::<…>()` allocation each tick on the exclusive-system path.
+type ChunkClassifyQuery = bevy_ecs::query::QueryState<(
+    Entity,
+    &'static ChunkCoordComp,
+    &'static ChunkSubscriberCount,
+    &'static LodCooldown,
+)>;
+
+pub fn reclassify_chunk_lod_system(
+    world: &mut World,
+    mut query: Local<Option<ChunkClassifyQuery>>,
+) {
+    // Phase 0: any populated chunk that doesn't yet have a chunk entity gets
+    // an empty-tiles entity spawned for it — the classifier must see it to
+    // emit the Asleep→Warm transition that drives the mobility demote path.
+    // Subscriber-only spawns (from `apply_subscription_diff`) already happen
+    // upstream; this catches chunks with agent/vehicle population but no
+    // subscribers (e.g. seeded directly via `spawn_agent_from_record`).
+    let needed: Vec<ChunkCoord> = world
+        .get_resource::<crate::mobility::resources::ChunkPopulations>()
+        .map(|p| {
+            let by_coord = &world.resource::<ChunksByCoord>().0;
+            p.0.iter()
+                .filter(|(c, n)| **n > 0 && !by_coord.contains_key(*c))
+                .map(|(c, _)| *c)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !needed.is_empty() {
+        let chunk_size = world.resource::<crate::world::resources::ChunkSizeRes>().0;
+        for coord in needed {
+            // Invalidate the cached query: spawning new chunk entities adds
+            // archetypes the cached QueryState would otherwise miss. Drop it
+            // so the next `get_or_insert_with` recreates it.
+            *query = None;
+            spawn_chunk_entity(
+                world,
+                coord,
+                chunk_size,
+                Vec::new(),
+                0,
+                crate::scheduler::ChunkActivity::Asleep,
+            );
         }
     }
 
@@ -347,12 +373,14 @@ pub fn reclassify_chunk_lod_system(world: &mut World) {
             .get_resource::<crate::mobility::resources::ChunkPopulations>()
             .map(|p| p.0.clone())
             .unwrap_or_default();
-        let mut q = world.query::<(
-            Entity,
-            &ChunkCoordComp,
-            &ChunkSubscriberCount,
-            &LodCooldown,
-        )>();
+        let q = query.get_or_insert_with(|| {
+            world.query::<(
+                Entity,
+                &ChunkCoordComp,
+                &ChunkSubscriberCount,
+                &LodCooldown,
+            )>()
+        });
         for (entity, coord, sub, cooldown) in q.iter(world) {
             let pop = chunk_populations.get(&coord.0).copied().unwrap_or(0);
             let previous = current_lod_marker(world, entity);
@@ -372,8 +400,7 @@ pub fn reclassify_chunk_lod_system(world: &mut World) {
         }
     }
 
-    // Phase 3: swap LOD marker components, reset cooldown, write events,
-    // and update the legacy `ChunkActivities` compat shim.
+    // Phase 3: swap LOD marker components, reset cooldown, write events.
     for (entity, coord, from, to) in transitions {
         {
             let mut e = world.entity_mut(entity);
@@ -407,22 +434,6 @@ pub fn reclassify_chunk_lod_system(world: &mut World) {
             }
             e.insert(LodCooldown(LOD_COOLDOWN_TICKS));
         }
-        // Compatibility shim — mobility advance gating still reads
-        // `ChunkActivities`. Will be removed in a later phase that migrates
-        // mobility to query LOD markers directly.
-        if let Some(mut activities) =
-            world.get_resource_mut::<crate::mobility::resources::ChunkActivities>()
-        {
-            activities.0.insert(
-                coord,
-                match to {
-                    ChunkLod::Asleep => crate::mobility::lod::MobilityActivity::Asleep,
-                    ChunkLod::Warm => crate::mobility::lod::MobilityActivity::Warm,
-                    ChunkLod::Active => crate::mobility::lod::MobilityActivity::Active,
-                    ChunkLod::Hot => crate::mobility::lod::MobilityActivity::Hot,
-                },
-            );
-        }
         world
             .resource_mut::<Messages<ChunkLodChanged>>()
             .write(ChunkLodChanged {
@@ -445,11 +456,9 @@ mod lod_reclassify_tests {
     fn warm_to_active_when_subscriber_arrives() {
         let mut world = World::new();
         let mut schedule = Schedule::default();
-        // The LOD reclassify system reads `ChunkPopulations` and writes a
-        // compatibility shim into `ChunkActivities` — both are mobility
-        // resources, so install them explicitly in this isolated test.
+        // The LOD reclassify system reads `ChunkPopulations` (mobility
+        // resource). Post-Phase-8a it no longer writes any compat shim.
         world.insert_resource(crate::mobility::resources::ChunkPopulations::default());
-        world.insert_resource(crate::mobility::resources::ChunkActivities::default());
         CorePlugin::default().install(&mut world, &mut schedule);
         schedule.add_systems(
             reclassify_chunk_lod_system.in_set(CoreSet::LodReclassify),

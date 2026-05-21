@@ -1,10 +1,10 @@
 use crate::ids::{AgentId, RouteId, StopId, VehicleId};
 use crate::mobility::components::*;
-use crate::mobility::lod::{
-    ACTIVITY_HYSTERESIS_TICKS, MobilityActivity, classify_chunk_mobility_activity,
-};
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
+use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk, WarmChunk};
+use crate::world::events::{ChunkLod, ChunkLodChanged};
+use bevy_ecs::message::MessageCursor;
 use bevy_ecs::prelude::*;
 use std::collections::HashSet;
 
@@ -14,17 +14,12 @@ fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::Di
 
 /// Returns true if the chunk containing the entity is Active or Hot.
 /// Asleep/Warm chunks are skipped by the Advance/Output systems so only
-/// hot entities tick at full fidelity.
-fn chunk_is_simulated(pos: &Position, activities: &ChunkActivities) -> bool {
+/// hot entities tick at full fidelity. Source of truth: chunk-entity LOD
+/// markers; this lookup goes through the `SimulatedChunks` derived view
+/// refreshed each tick by `refresh_simulated_chunks_system`.
+fn chunk_is_simulated(pos: &Position, simulated: &SimulatedChunks) -> bool {
     let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
-    matches!(
-        activities
-            .0
-            .get(&chunk)
-            .copied()
-            .unwrap_or(MobilityActivity::Asleep),
-        MobilityActivity::Active | MobilityActivity::Hot,
-    )
+    simulated.0.contains(&chunk)
 }
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -36,29 +31,36 @@ pub enum MobilitySet {
 }
 
 pub fn install_systems(schedule: &mut Schedule) {
+    use crate::world::schedule::CoreSet;
     schedule.configure_sets((
         MobilitySet::LOD,
         MobilitySet::Advance.after(MobilitySet::LOD),
         MobilitySet::Output.after(MobilitySet::Advance),
         MobilitySet::Bookkeeping.after(MobilitySet::Output),
     ));
-    // LOD set: population tracking + classification (compat shim) +
-    // promote/demote side-effects. The *entity-side* chunk-LOD classification
-    // (marker components + `ChunkLodChanged` events) runs separately in
-    // `CoreSet::LodReclassify` on real chunk entities; `classify_activity_system`
-    // here is the resource-only compat shim that drives the legacy
-    // `ChunkTransitions` consumed by promote/demote.
+    // Mobility's LOD set drains the `ChunkLodChanged` event stream produced
+    // by `reclassify_chunk_lod_system` (in `CoreSet::LodReclassify`), so it
+    // must run after the reclassifier. The population tracker runs BEFORE
+    // the reclassifier so populated-but-unsubscribed chunks get classified
+    // (and demoted) in the same tick they were seeded.
+    schedule.configure_sets(MobilitySet::LOD.after(CoreSet::LodReclassify));
+    schedule.configure_sets(MobilitySet::Bookkeeping.before(CoreSet::EventEmit));
+    // Population tracking is intentionally NOT in MobilitySet::LOD: it must
+    // run BEFORE `CoreSet::LodReclassify` so reclassify sees same-tick
+    // populations and can emit the Asleep→Warm transition that drives
+    // demote within the same schedule run.
+    schedule.add_systems(
+        track_chunk_populations_system.before(CoreSet::LodReclassify),
+    );
     schedule.add_systems((
-        track_chunk_populations_system.in_set(MobilitySet::LOD),
-        classify_activity_system
-            .in_set(MobilitySet::LOD)
-            .after(track_chunk_populations_system),
+        refresh_simulated_chunks_system.in_set(MobilitySet::LOD),
+        consume_chunk_lod_transitions_system.in_set(MobilitySet::LOD),
         promote_warm_to_active_system
             .in_set(MobilitySet::LOD)
-            .after(classify_activity_system),
+            .after(consume_chunk_lod_transitions_system),
         demote_active_to_warm_system
             .in_set(MobilitySet::LOD)
-            .after(classify_activity_system),
+            .after(consume_chunk_lod_transitions_system),
     ));
     // Advance set: existing Phase-5 systems + warm flow
     // Ordering within Advance (each step observes the previous step's
@@ -109,12 +111,12 @@ pub fn walk_advance_system(
         ),
         With<AgentMarker>,
     >,
-    activities: Res<ChunkActivities>,
+    simulated: Res<SimulatedChunks>,
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
 ) {
     for (entity, pos, mut state, speed) in query.iter_mut() {
-        if !chunk_is_simulated(pos, &activities) {
+        if !chunk_is_simulated(pos, &simulated) {
             continue;
         }
         if let AgentMobilityState::Walking { progress, .. } = &mut state.0 {
@@ -231,12 +233,12 @@ pub fn vehicle_advance_system(
         ),
         With<VehicleMarker>,
     >,
-    activities: Res<ChunkActivities>,
+    simulated: Res<SimulatedChunks>,
     routes: Res<Routes>,
     mut dirty: ResMut<DirtyVehicles>,
 ) {
     for (entity, world_pos, mut pos, mut dwell) in query.iter_mut() {
-        if !chunk_is_simulated(world_pos, &activities) {
+        if !chunk_is_simulated(world_pos, &simulated) {
             continue;
         }
         // dwell counts down first
@@ -272,7 +274,7 @@ pub fn stop_arrival_system(
         ),
         (With<AgentMarker>, With<NearStop>),
     >,
-    activities: Res<ChunkActivities>,
+    simulated: Res<SimulatedChunks>,
     mut stops: ResMut<Stops>,
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
@@ -284,7 +286,7 @@ pub fn stop_arrival_system(
         // progress saturates (next != *progress); if we removed the marker
         // here on a non-simulated tick, the agent would be stuck at
         // progress=1.0 forever without ever transitioning state.
-        if !chunk_is_simulated(pos, &activities) {
+        if !chunk_is_simulated(pos, &simulated) {
             continue;
         }
 
@@ -350,7 +352,7 @@ pub fn boarding_alighting_system(
             With<VehicleMarker>,
         >,
     )>,
-    activities: Res<ChunkActivities>,
+    simulated: Res<SimulatedChunks>,
     agent_index: Res<crate::mobility::resources::AgentIdIndex>,
     mut stops: ResMut<Stops>,
     mut dirty_agents: ResMut<DirtyAgents>,
@@ -385,7 +387,7 @@ pub fn boarding_alighting_system(
         for (stop_id, agent_id, route_id, link_index, stop_progress) in boarding_candidates {
             let Some(agent_entity) = agent_index.0.get(&agent_id).copied() else { continue };
             let Ok((_, pos, _, _, _)) = agents.get(agent_entity) else { continue };
-            if !chunk_is_simulated(pos, &activities) {
+            if !chunk_is_simulated(pos, &simulated) {
                 continue;
             }
             candidates_with_pos.push((stop_id, agent_id, route_id, link_index, stop_progress));
@@ -397,7 +399,7 @@ pub fn boarding_alighting_system(
         let vehicles = sets.p1();
         for (stop_id, agent_id, route_id, link_index, stop_progress) in candidates_with_pos {
             for (v_entity, v_pos_world, v_stable, v_occ, v_cap, v_pos) in vehicles.iter() {
-                if !chunk_is_simulated(v_pos_world, &activities) {
+                if !chunk_is_simulated(v_pos_world, &simulated) {
                     continue;
                 }
                 if v_pos.route_id == route_id
@@ -474,7 +476,7 @@ pub fn boarding_alighting_system(
     {
         let vehicles = sets.p1();
         for (v_entity, v_pos_world, v_stable, v_occ, _cap, v_pos) in vehicles.iter() {
-            if !chunk_is_simulated(v_pos_world, &activities) {
+            if !chunk_is_simulated(v_pos_world, &simulated) {
                 continue;
             }
             if (v_pos.progress - 1.0).abs() >= 1e-6 {
@@ -503,7 +505,7 @@ pub fn boarding_alighting_system(
                 let Ok((_, a_pos, _, a_state, a_plan)) = agents.get(a_entity) else {
                     continue;
                 };
-                if !chunk_is_simulated(a_pos, &activities) {
+                if !chunk_is_simulated(a_pos, &simulated) {
                     continue;
                 }
                 let stage = a_plan.stages.get(a_plan.cursor);
@@ -584,7 +586,7 @@ pub fn compute_world_coord_system(
         ),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
-    activities: Res<ChunkActivities>,
+    simulated: Res<SimulatedChunks>,
     routes: Res<Routes>,
     stops: Res<Stops>,
     link_polylines: Res<LinkPolylines>,
@@ -600,7 +602,7 @@ pub fn compute_world_coord_system(
     // → incremental rebucketing degenerates). Debug builds assert finite;
     // release builds skip non-finite values entirely.
     for (rp, mut pos, cached) in vehicles.iter_mut() {
-        if !chunk_is_simulated(&pos, &activities) {
+        if !chunk_is_simulated(&pos, &simulated) {
             continue;
         }
         let new_xy = if let Some(c) = cached {
@@ -619,7 +621,7 @@ pub fn compute_world_coord_system(
         }
     }
     for (state, mut pos, cached) in agents.iter_mut() {
-        if !chunk_is_simulated(&pos, &activities) {
+        if !chunk_is_simulated(&pos, &simulated) {
             continue;
         }
         let new_xy = if let (AgentMobilityState::Walking { progress, .. }, Some(c)) =
@@ -661,12 +663,12 @@ pub fn compute_direction_system(
         ),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
-    activities: Res<ChunkActivities>,
+    simulated: Res<SimulatedChunks>,
     routes: Res<Routes>,
     link_polylines: Res<LinkPolylines>,
 ) {
     for (pos, rp, mut dir, cached) in vehicles.iter_mut() {
-        if !chunk_is_simulated(pos, &activities) {
+        if !chunk_is_simulated(pos, &simulated) {
             continue;
         }
         if let Some(c) = cached {
@@ -686,7 +688,7 @@ pub fn compute_direction_system(
         dir.0 = dir_at_progress(points, rp.progress);
     }
     for (pos, state, mut dir, cached) in agents.iter_mut() {
-        if !chunk_is_simulated(pos, &activities) {
+        if !chunk_is_simulated(pos, &simulated) {
             continue;
         }
         if let AgentMobilityState::Walking { link_id, progress } = &state.0 {
@@ -827,63 +829,55 @@ pub fn track_chunk_populations_system(
     vehicles_by_chunk.0.retain(|_, bucket| !bucket.is_empty());
 }
 
-// Phase 8a Task 8 moved the *entity-side* chunk-LOD classification (marker
-// component swaps + `ChunkLodChanged` events) to
+// Phase 8a follow-ups removed the resource-only compat shim
+// (`classify_activity_system` + `ChunkActivities` / `ChunkSubscribers`
+// resources). Chunk LOD is now classified once, on the chunk entity, by
 // `crate::world::systems::reclassify_chunk_lod_system` under
-// `CoreSet::LodReclassify`. The `classify_activity_system` below survives
-// as a compat shim: it produces `ChunkTransitions` purely from the
-// `ChunkSubscribers` / `ChunkPopulations` / `ChunkActivities` resource
-// maps, so `promote_warm_to_active_system` and
-// `demote_active_to_warm_system` keep working without depending on chunk
-// entities (which only exist for chunks loaded into the persistence layer).
-// Both classification paths will fuse once mobility migrates to consume
-// `ChunkLodChanged` events directly.
-pub fn classify_activity_system(
-    subscribers: Res<ChunkSubscribers>,
-    populations: Res<ChunkPopulations>,
-    mut activities: ResMut<ChunkActivities>,
-    mut cooldowns: ResMut<ChunkActivityCooldowns>,
-    mut transitions: ResMut<ChunkTransitions>,
+// `CoreSet::LodReclassify`. Mobility consumes the resulting
+// `ChunkLodChanged` event stream via
+// `consume_chunk_lod_transitions_system` (below), which fills the
+// `ChunkLodTransitions` scratchpad that promote/demote drain.
+
+/// Rebuild the `SimulatedChunks` + `WarmChunkCoords` derived views from the
+/// chunk-entity LOD markers. Runs at the head of `MobilitySet::LOD` each
+/// tick so all downstream systems see a consistent view of which chunks
+/// are simulated this tick.
+pub fn refresh_simulated_chunks_system(
+    hot: Query<&ChunkCoordComp, With<HotChunk>>,
+    active: Query<&ChunkCoordComp, With<ActiveChunk>>,
+    warm: Query<&ChunkCoordComp, With<WarmChunk>>,
+    mut simulated: ResMut<SimulatedChunks>,
+    mut warm_view: ResMut<WarmChunkCoords>,
 ) {
-    transitions.0.clear();
-    let candidate_chunks: std::collections::HashSet<crate::ids::ChunkCoord> = subscribers
-        .0
-        .keys()
-        .copied()
-        .chain(populations.0.keys().copied())
-        .chain(activities.0.keys().copied())
-        .collect();
-
-    for chunk in candidate_chunks {
-        let subs = subscribers.0.get(&chunk).copied().unwrap_or(0);
-        let pop = populations.0.get(&chunk).copied().unwrap_or(0);
-        let previous = activities
-            .0
-            .get(&chunk)
-            .copied()
-            .unwrap_or(MobilityActivity::Asleep);
-        let cooldown_now = cooldowns.0.get(&chunk).copied().unwrap_or(0);
-
-        let next = classify_chunk_mobility_activity(subs, pop, previous, cooldown_now);
-
-        if next != previous {
-            transitions.0.push((chunk, previous, next));
-            cooldowns.0.insert(chunk, ACTIVITY_HYSTERESIS_TICKS);
-        } else if cooldown_now > 0 {
-            cooldowns.0.insert(chunk, cooldown_now - 1);
-        }
-        activities.0.insert(chunk, next);
+    simulated.0.clear();
+    for c in hot.iter().chain(active.iter()) {
+        simulated.0.insert(c.0);
     }
+    warm_view.0.clear();
+    for c in warm.iter() {
+        warm_view.0.insert(c.0);
+    }
+}
 
-    activities.0.retain(|chunk, activity| {
-        !matches!(activity, MobilityActivity::Asleep)
-            || subscribers.0.contains_key(chunk)
-            || populations.0.contains_key(chunk)
-    });
+/// Drain `ChunkLodChanged` messages emitted by the foundation's
+/// `reclassify_chunk_lod_system` and stash them in the
+/// `ChunkLodTransitions` scratchpad for promote/demote to consume.
+///
+/// The `Local<MessageCursor<…>>` survives across ticks, so even if a tick
+/// is delayed the consumer never misses a transition.
+pub fn consume_chunk_lod_transitions_system(
+    mut cursor: Local<MessageCursor<ChunkLodChanged>>,
+    messages: Res<Messages<ChunkLodChanged>>,
+    mut out: ResMut<ChunkLodTransitions>,
+) {
+    out.0.clear();
+    for event in cursor.read(&messages) {
+        out.0.push((event.coord, event.from, event.to));
+    }
 }
 
 pub fn promote_warm_to_active_system(
-    transitions: Res<ChunkTransitions>,
+    transitions: Res<ChunkLodTransitions>,
     mut flow_cells: ResMut<FlowCells>,
     link_polylines: Res<LinkPolylines>,
     routes: Res<Routes>,
@@ -892,10 +886,10 @@ pub fn promote_warm_to_active_system(
     mut commands: Commands,
 ) {
     for (chunk, prev, next) in &transitions.0 {
-        if *prev != MobilityActivity::Warm {
+        if *prev != ChunkLod::Warm {
             continue;
         }
-        if !matches!(next, MobilityActivity::Active | MobilityActivity::Hot) {
+        if !matches!(next, ChunkLod::Active | ChunkLod::Hot) {
             continue;
         }
         let Some(cell) = flow_cells.0.get_mut(chunk) else {
@@ -964,7 +958,7 @@ pub fn promote_warm_to_active_system(
 
 #[allow(clippy::too_many_arguments)]
 pub fn demote_active_to_warm_system(
-    transitions: Res<ChunkTransitions>,
+    transitions: Res<ChunkLodTransitions>,
     agents: Query<&AgentMobilityStateComponent, With<AgentMarker>>,
     agents_by_chunk: Res<AgentsByChunk>,
     vehicles_by_chunk: Res<VehiclesByChunk>,
@@ -981,7 +975,7 @@ pub fn demote_active_to_warm_system(
     // `Asleep → Warm`. Those agents would otherwise stay alive forever and
     // the per-tick Advance/Output systems would pay the full O(N) cost.
     for (chunk, _prev, next) in &transitions.0 {
-        if *next != MobilityActivity::Warm {
+        if *next != ChunkLod::Warm {
             continue;
         }
 
@@ -1085,19 +1079,14 @@ fn agent_destination_chunk(
 
 pub fn warm_chunk_flow_system(
     tick: Res<Tick>,
-    activities: Res<ChunkActivities>,
+    warm: Res<WarmChunkCoords>,
     mut flow_cells: ResMut<FlowCells>,
 ) {
     if !tick.0.is_multiple_of(10) {
         return;
     }
 
-    let warm_chunks: Vec<crate::ids::ChunkCoord> = activities
-        .0
-        .iter()
-        .filter(|(_, a)| matches!(a, MobilityActivity::Warm))
-        .map(|(c, _)| *c)
-        .collect();
+    let warm_chunks: Vec<crate::ids::ChunkCoord> = warm.0.iter().copied().collect();
 
     let mut transfers: Vec<(crate::ids::ChunkCoord, crate::ids::ChunkCoord, f32)> = Vec::new();
     for chunk in &warm_chunks {
@@ -1142,15 +1131,15 @@ fn lod_seed(x: i32, y: i32, tick: u64, n: u64) -> u64 {
 mod tests {
     use super::*;
 
-    /// Returns a `ChunkActivities` resource pre-populated so that every chunk
-    /// in a generous range around the origin is `Active`. Tests that exercise
-    /// the LOD-filtered Advance/Output systems use this so the filter doesn't
-    /// skip their fixtures.
-    fn all_active() -> ChunkActivities {
-        let mut a = ChunkActivities::default();
+    /// Returns a `SimulatedChunks` resource pre-populated so that every
+    /// chunk in a generous range around the origin counts as simulated.
+    /// Tests that exercise the LOD-filtered Advance/Output systems use
+    /// this so the filter doesn't skip their fixtures.
+    fn all_active() -> SimulatedChunks {
+        let mut a = SimulatedChunks::default();
         for x in -10..=20 {
             for y in -10..=20 {
-                a.0.insert(crate::ids::ChunkCoord { x, y }, MobilityActivity::Active);
+                a.0.insert(crate::ids::ChunkCoord { x, y });
             }
         }
         a
@@ -1158,29 +1147,16 @@ mod tests {
 
     #[test]
     fn tick_increment_system_advances_tick_by_one_per_schedule_run() {
-        let mut world = World::new();
-        world.insert_resource(Tick(0));
-        world.insert_resource(Routes::default());
-        world.insert_resource(Stops::default());
-        world.insert_resource(LinkPolylines::default());
-        world.insert_resource(DirtyAgents::default());
-        world.insert_resource(DirtyVehicles::default());
-        world.insert_resource(all_active());
-        // Resources required by the new LOD set
-        world.insert_resource(ChunkSubscribers::default());
-        world.insert_resource(ChunkPopulations::default());
-        world.insert_resource(AgentsByChunk::default());
-        world.insert_resource(VehiclesByChunk::default());
-        world.insert_resource(ChunkActivityCooldowns::default());
-        world.insert_resource(FlowCells::default());
-        world.insert_resource(ChunkTransitions::default());
-        world.insert_resource(crate::mobility::resources::AgentIdIndex::default());
-        world.insert_resource(crate::mobility::resources::VehicleIdIndex::default());
-        world.insert_resource(crate::mobility::resources::PreviousChunkByEntity::default());
-        world.insert_resource(crate::mobility::resources::PreviousFlowCellContrib::default());
-
-        let mut schedule = Schedule::default();
-        install_systems(&mut schedule);
+        // Use the full plugin install path — the LOD set now depends on
+        // foundation-owned `Messages<ChunkLodChanged>` and a configured
+        // `CoreSet::LodReclassify`, so building the world by hand is brittle.
+        let (mut world, mut schedule) =
+            crate::mobility::api::empty_world_and_schedule();
+        // Replace the freshly-installed (empty) SimulatedChunks with one
+        // primed for the wide tile range any future seed could land in —
+        // we're only asserting on Tick(), but the install order keeps the
+        // gating systems happy.
+        *world.resource_mut::<SimulatedChunks>() = all_active();
         schedule.run(&mut world);
         assert_eq!(world.resource::<Tick>().0, 1);
         schedule.run(&mut world);
@@ -1859,62 +1835,58 @@ mod tests {
     }
 
     #[test]
-    fn classify_activity_marks_subscribed_chunk_active() {
+    fn subscribe_drives_chunk_active_via_entity_classifier() {
+        // End-to-end: apply_subscription_diff -> reclassify_chunk_lod_system
+        // -> ChunkLodChanged -> consume_chunk_lod_transitions_system. Activity
+        // for the subscribed chunk reaches Active after one schedule tick.
         use crate::ids::ChunkCoord;
-
-        let mut world = World::new();
-        let mut subs = ChunkSubscribers::default();
-        subs.0.insert(ChunkCoord { x: 4, y: 4 }, 1);
-        world.insert_resource(subs);
-        world.insert_resource(ChunkPopulations::default());
-        world.insert_resource(ChunkActivities::default());
-        world.insert_resource(ChunkActivityCooldowns::default());
-        world.insert_resource(ChunkTransitions::default());
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(classify_activity_system);
+        use crate::mobility::lod::MobilityActivity;
+        let (mut world, mut schedule) =
+            crate::mobility::api::empty_world_and_schedule();
+        let chunk = ChunkCoord { x: 4, y: 4 };
+        crate::mobility::api::apply_subscription_diff(
+            &mut world,
+            &[chunk],
+            std::iter::empty(),
+        );
         schedule.run(&mut world);
-
-        let activities = world.resource::<ChunkActivities>();
         assert_eq!(
-            activities.0.get(&ChunkCoord { x: 4, y: 4 }),
-            Some(&MobilityActivity::Active),
+            crate::mobility::api::activity_for_chunk(&world, chunk),
+            Some(MobilityActivity::Active),
+            "single subscriber → Active on first tick",
         );
     }
 
     #[test]
-    fn classify_activity_records_transitions_and_starts_cooldown() {
+    fn consume_chunk_lod_transitions_publishes_event_to_scratchpad() {
+        // Manually write a `ChunkLodChanged` event and assert it lands in
+        // `ChunkLodTransitions` after running the consumer system.
         use crate::ids::ChunkCoord;
-        let mut world = World::new();
-        let mut subs = ChunkSubscribers::default();
-        subs.0.insert(ChunkCoord { x: 0, y: 0 }, 1);
-        world.insert_resource(subs);
-        world.insert_resource(ChunkPopulations::default());
-        world.insert_resource(ChunkActivities::default());
-        world.insert_resource(ChunkActivityCooldowns::default());
-        world.insert_resource(ChunkTransitions::default());
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(classify_activity_system);
-        schedule.run(&mut world);
-
-        let transitions = world.resource::<ChunkTransitions>();
-        assert_eq!(transitions.0.len(), 1);
-        let (chunk, prev, next) = transitions.0[0];
-        assert_eq!(chunk, ChunkCoord { x: 0, y: 0 });
-        assert_eq!(prev, MobilityActivity::Asleep);
-        assert_eq!(next, MobilityActivity::Active);
-        let cd = world.resource::<ChunkActivityCooldowns>();
-        assert_eq!(
-            cd.0.get(&ChunkCoord { x: 0, y: 0 }),
-            Some(&ACTIVITY_HYSTERESIS_TICKS)
-        );
+        let (mut world, _schedule) =
+            crate::mobility::api::empty_world_and_schedule();
+        let chunk = ChunkCoord { x: 1, y: 2 };
+        world
+            .resource_mut::<Messages<ChunkLodChanged>>()
+            .write(ChunkLodChanged {
+                entity: Entity::PLACEHOLDER,
+                coord: chunk,
+                from: ChunkLod::Asleep,
+                to: ChunkLod::Active,
+            });
+        let mut sched = Schedule::default();
+        sched.add_systems(consume_chunk_lod_transitions_system);
+        sched.run(&mut world);
+        let scratch = world.resource::<ChunkLodTransitions>();
+        assert_eq!(scratch.0.len(), 1);
+        assert_eq!(scratch.0[0].0, chunk);
+        assert_eq!(scratch.0[0].1, ChunkLod::Asleep);
+        assert_eq!(scratch.0[0].2, ChunkLod::Active);
     }
 
     #[test]
     fn promote_warm_spawns_floor_population_agents() {
         use crate::ids::*;
-        use crate::mobility::lod::{FlowCell, MobilityActivity};
+        use crate::mobility::lod::FlowCell;
 
         let mut world = World::new();
         let chunk = ChunkCoord { x: 0, y: 0 };
@@ -1937,10 +1909,8 @@ mod tests {
             .insert(LinkId("l:0".into()), vec![(10.0, 10.0), (20.0, 10.0)]);
         world.insert_resource(polylines);
 
-        let mut transitions = ChunkTransitions::default();
-        transitions
-            .0
-            .push((chunk, MobilityActivity::Warm, MobilityActivity::Active));
+        let mut transitions = ChunkLodTransitions::default();
+        transitions.0.push((chunk, ChunkLod::Warm, ChunkLod::Active));
         world.insert_resource(transitions);
 
         world.insert_resource(Tick(100));
@@ -1962,7 +1932,6 @@ mod tests {
     #[test]
     fn demote_active_to_warm_collapses_agents_into_flow_cell() {
         use crate::ids::*;
-        use crate::mobility::lod::MobilityActivity;
         use crate::mobility::records::AgentMobilityState;
 
         let mut world = World::new();
@@ -1982,10 +1951,8 @@ mod tests {
         world.insert_resource(crate::mobility::resources::PreviousChunkByEntity::default());
         world.insert_resource(crate::mobility::resources::PreviousFlowCellContrib::default());
 
-        let mut transitions = ChunkTransitions::default();
-        transitions
-            .0
-            .push((chunk, MobilityActivity::Active, MobilityActivity::Warm));
+        let mut transitions = ChunkLodTransitions::default();
+        transitions.0.push((chunk, ChunkLod::Active, ChunkLod::Warm));
         world.insert_resource(transitions);
 
         for n in 0..3 {
@@ -2039,15 +2006,13 @@ mod tests {
     #[test]
     fn warm_chunk_flow_transfers_population_between_chunks() {
         use crate::ids::ChunkCoord;
-        use crate::mobility::lod::{FlowCell, MobilityActivity};
+        use crate::mobility::lod::FlowCell;
 
         let mut world = World::new();
         world.insert_resource(Tick(10));
-        let mut activities = ChunkActivities::default();
-        activities
-            .0
-            .insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
-        world.insert_resource(activities);
+        let mut warm = WarmChunkCoords::default();
+        warm.0.insert(ChunkCoord { x: 0, y: 0 });
+        world.insert_resource(warm);
 
         let mut flow = FlowCells::default();
         flow.0.insert(
@@ -2075,15 +2040,13 @@ mod tests {
     #[test]
     fn warm_chunk_flow_skips_non_multiple_of_10_ticks() {
         use crate::ids::ChunkCoord;
-        use crate::mobility::lod::{FlowCell, MobilityActivity};
+        use crate::mobility::lod::FlowCell;
 
         let mut world = World::new();
         world.insert_resource(Tick(5));
-        let mut activities = ChunkActivities::default();
-        activities
-            .0
-            .insert(ChunkCoord { x: 0, y: 0 }, MobilityActivity::Warm);
-        world.insert_resource(activities);
+        let mut warm = WarmChunkCoords::default();
+        warm.0.insert(ChunkCoord { x: 0, y: 0 });
+        world.insert_resource(warm);
 
         let mut flow = FlowCells::default();
         flow.0.insert(
@@ -2112,7 +2075,7 @@ mod tests {
     #[test]
     fn promote_warm_is_deterministic_across_runs() {
         use crate::ids::*;
-        use crate::mobility::lod::{FlowCell, MobilityActivity};
+        use crate::mobility::lod::FlowCell;
 
         fn run_promote() -> Vec<String> {
             let mut world = World::new();
@@ -2133,10 +2096,8 @@ mod tests {
                 .0
                 .insert(LinkId("l:0".into()), vec![(70.0, 100.0), (90.0, 100.0)]);
             world.insert_resource(polylines);
-            let mut transitions = ChunkTransitions::default();
-            transitions
-                .0
-                .push((chunk, MobilityActivity::Warm, MobilityActivity::Active));
+            let mut transitions = ChunkLodTransitions::default();
+            transitions.0.push((chunk, ChunkLod::Warm, ChunkLod::Active));
             world.insert_resource(transitions);
             world.insert_resource(Tick(42));
             world.insert_resource(Routes::default());
@@ -2166,7 +2127,7 @@ mod tests {
         use crate::mobility::records::AgentMobilityState;
 
         let mut world = World::new();
-        world.insert_resource(ChunkActivities::default()); // empty = all Asleep
+        world.insert_resource(SimulatedChunks::default()); // empty = none simulated
         world.insert_resource(DirtyAgents::default());
 
         let entity = world
@@ -2214,12 +2175,10 @@ mod tests {
         use crate::mobility::records::AgentMobilityState;
 
         let mut world = World::new();
-        let mut activities = ChunkActivities::default();
+        let mut simulated = SimulatedChunks::default();
         // Position (100, 100) → chunk (3, 3) for chunk_size = 32.
-        activities
-            .0
-            .insert(ChunkCoord { x: 3, y: 3 }, MobilityActivity::Active);
-        world.insert_resource(activities);
+        simulated.0.insert(ChunkCoord { x: 3, y: 3 });
+        world.insert_resource(simulated);
         world.insert_resource(DirtyAgents::default());
 
         let entity = world

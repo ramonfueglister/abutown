@@ -34,14 +34,13 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     world.insert_resource(LinkPolylines::default());
     world.insert_resource(DirtyAgents::default());
     world.insert_resource(DirtyVehicles::default());
-    world.insert_resource(ChunkActivities::default());
-    world.insert_resource(ChunkActivityCooldowns::default());
     world.insert_resource(FlowCells::default());
-    world.insert_resource(ChunkSubscribers::default());
     world.insert_resource(ChunkPopulations::default());
+    world.insert_resource(SimulatedChunks::default());
+    world.insert_resource(WarmChunkCoords::default());
+    world.insert_resource(ChunkLodTransitions::default());
     world.insert_resource(AgentsByChunk::default());
     world.insert_resource(VehiclesByChunk::default());
-    world.insert_resource(ChunkTransitions::default());
     world.insert_resource(PreviousAgentChunks::default());
     world.insert_resource(PreviousVehicleChunks::default());
     world.insert_resource(AgentIdIndex::default());
@@ -152,7 +151,12 @@ pub fn snapshot(world: &World) -> crate::mobility::MobilitySnapshot {
 }
 
 /// Collect agents + vehicles whose current position falls inside `chunk`.
-pub fn build_chunk_snapshot(
+///
+/// Distinct from `crate::persistence::build_chunk_snapshot` which emits a
+/// tile-payload `ChunkSnapshotDto` for persistence. This function emits a
+/// transient `MobilityChunkSnapshot` consumed by the WS fan-out — they're
+/// orthogonal despite the historical naming collision.
+pub fn build_mobility_chunk_snapshot(
     world: &World,
     chunk: crate::ids::ChunkCoord,
 ) -> crate::mobility::MobilityChunkSnapshot {
@@ -179,39 +183,99 @@ pub fn build_chunk_snapshot(
     }
 }
 
+/// Ensure a chunk entity exists at `coord`. If `ChunksByCoord` already maps
+/// the coord, return the existing entity. Otherwise spawn an empty-tiles
+/// `Asleep` chunk entity — terrain hydrates later if/when the chunk is
+/// loaded. Empty-tiles chunks are valid LOD/subscription targets: the LOD
+/// reclassifier only reads `ChunkSubscriberCount` + `ChunkPopulations`, and
+/// neither cares about tile contents.
+fn ensure_chunk_entity(world: &mut World, coord: crate::ids::ChunkCoord) -> Entity {
+    if let Some(entity) = world
+        .resource::<crate::world::resources::ChunksByCoord>()
+        .0
+        .get(&coord)
+        .copied()
+    {
+        return entity;
+    }
+    let chunk_size = world.resource::<crate::world::resources::ChunkSizeRes>().0;
+    crate::world::systems::spawn_chunk_entity(
+        world,
+        coord,
+        chunk_size,
+        Vec::new(),
+        0,
+        crate::scheduler::ChunkActivity::Asleep,
+    )
+}
+
 /// Apply a per-connection chunk-subscription delta: increment for each
-/// chunk in `added`, saturating-decrement (and drop on zero) for each
-/// chunk in `removed`.
+/// chunk in `added`, saturating-decrement for each chunk in `removed`.
+///
+/// The subscriber count lives on the chunk entity as `ChunkSubscriberCount`
+/// — chunk entities are the source of truth post-Phase-8a. If a coord in
+/// `added` doesn't yet have a chunk entity (the common case for WS clients
+/// subscribing to areas without terrain loaded), an empty-tiles chunk
+/// entity is spawned via `ensure_chunk_entity` so the LOD reclassifier sees
+/// the subscription.
 pub fn apply_subscription_diff<'a, A, R>(world: &mut World, added: A, removed: R)
 where
     A: IntoIterator<Item = &'a crate::ids::ChunkCoord>,
     R: IntoIterator<Item = &'a crate::ids::ChunkCoord>,
 {
-    let mut subs = world.resource_mut::<ChunkSubscribers>();
     for coord in added {
-        *subs.0.entry(*coord).or_insert(0) += 1;
+        let entity = ensure_chunk_entity(world, *coord);
+        if let Some(mut sub) = world
+            .entity_mut(entity)
+            .get_mut::<crate::world::components::ChunkSubscriberCount>()
+        {
+            sub.0 = sub.0.saturating_add(1);
+        }
     }
     for coord in removed {
-        if let Some(entry) = subs.0.get_mut(coord) {
-            *entry = entry.saturating_sub(1);
-            if *entry == 0 {
-                subs.0.remove(coord);
-            }
+        let Some(entity) = world
+            .resource::<crate::world::resources::ChunksByCoord>()
+            .0
+            .get(coord)
+            .copied()
+        else {
+            continue;
+        };
+        if let Some(mut sub) = world
+            .entity_mut(entity)
+            .get_mut::<crate::world::components::ChunkSubscriberCount>()
+        {
+            sub.0 = sub.0.saturating_sub(1);
         }
     }
 }
 
-/// Read-only accessor: current activity class of a chunk, or `None` if
-/// the chunk has no entry (treated as Asleep).
+/// Read-only accessor: current activity class of a chunk, or `None` if no
+/// chunk entity is loaded for that coord. Source: chunk-entity LOD marker
+/// components owned by the foundation (Phase 8a).
 pub fn activity_for_chunk(
     world: &World,
     chunk: crate::ids::ChunkCoord,
 ) -> Option<crate::mobility::lod::MobilityActivity> {
-    world
-        .resource::<ChunkActivities>()
+    let entity = *world
+        .resource::<crate::world::resources::ChunksByCoord>()
         .0
-        .get(&chunk)
-        .copied()
+        .get(&chunk)?;
+    use crate::mobility::lod::MobilityActivity;
+    use crate::world::components::{ActiveChunk, AsleepChunk, HotChunk, WarmChunk};
+    if world.get::<HotChunk>(entity).is_some() {
+        Some(MobilityActivity::Hot)
+    } else if world.get::<ActiveChunk>(entity).is_some() {
+        Some(MobilityActivity::Active)
+    } else if world.get::<WarmChunk>(entity).is_some() {
+        Some(MobilityActivity::Warm)
+    } else if world.get::<AsleepChunk>(entity).is_some() {
+        Some(MobilityActivity::Asleep)
+    } else {
+        // Chunk entity exists but has no LOD marker (in-between state during
+        // spawn) — caller treats as Asleep.
+        Some(MobilityActivity::Asleep)
+    }
 }
 
 /// Read-only accessor: aggregate flow-cell state for a chunk if present.
@@ -222,21 +286,40 @@ pub fn flow_cell_for_chunk(
     world.resource::<FlowCells>().0.get(&chunk)
 }
 
-/// Number of active WS subscribers for a chunk (0 if none).
+/// Number of active WS subscribers for a chunk (0 if no chunk entity loaded).
 pub fn chunk_subscriber_count(world: &World, chunk: crate::ids::ChunkCoord) -> u8 {
-    world
-        .resource::<ChunkSubscribers>()
+    let Some(entity) = world
+        .resource::<crate::world::resources::ChunksByCoord>()
         .0
         .get(&chunk)
         .copied()
+    else {
+        return 0;
+    };
+    world
+        .get::<crate::world::components::ChunkSubscriberCount>(entity)
+        .map(|s| s.0)
         .unwrap_or(0)
 }
 
-/// Clone the full ChunkSubscribers map for publication into RuntimeReadView.
+/// Snapshot of all chunk subscriber counts for publication into RuntimeReadView.
+/// Iterates `ChunksByCoord` and reads the `ChunkSubscriberCount` component on
+/// each chunk entity.
 pub fn chunk_subscriber_counts_snapshot(
     world: &World,
 ) -> HashMap<crate::ids::ChunkCoord, u8> {
-    world.resource::<ChunkSubscribers>().0.clone()
+    let by_coord = world.resource::<crate::world::resources::ChunksByCoord>();
+    let mut out = HashMap::with_capacity(by_coord.0.len());
+    for (coord, entity) in by_coord.0.iter() {
+        let count = world
+            .get::<crate::world::components::ChunkSubscriberCount>(*entity)
+            .map(|s| s.0)
+            .unwrap_or(0);
+        if count > 0 {
+            out.insert(*coord, count);
+        }
+    }
+    out
 }
 
 /// Spawn an agent entity from a record. Updates `AgentIdIndex`.
@@ -509,25 +592,35 @@ pub fn vehicle_dto_for(
 }
 
 /// Test-only helper: mark a wide range of chunks as `Active` so the LOD
-/// activity filter does not skip them.
+/// activity filter does not skip them. Spawns chunk entities (if not yet
+/// present) and forces their LOD marker to `ActiveChunk`. Also primes the
+/// `SimulatedChunks` resource so the very first tick (before
+/// `refresh_simulated_chunks_system` runs) already sees these as simulated.
 pub fn force_all_chunks_active_for_test(world: &mut World) {
     use crate::ids::ChunkCoord;
-    use crate::mobility::lod::MobilityActivity;
+    use crate::scheduler::ChunkActivity;
+    use crate::world::components::{
+        ActiveChunk, AsleepChunk, ChunkSubscriberCount, HotChunk, WarmChunk,
+    };
     let chunks: Vec<ChunkCoord> = (-16..=32)
         .flat_map(|x: i32| (-16..=32).map(move |y| ChunkCoord { x, y }))
         .collect();
-    {
-        let mut activities = world.resource_mut::<ChunkActivities>();
-        for chunk in &chunks {
-            activities.0.insert(*chunk, MobilityActivity::Active);
+    for coord in &chunks {
+        let entity = ensure_chunk_entity(world, *coord);
+        let mut e = world.entity_mut(entity);
+        e.remove::<AsleepChunk>();
+        e.remove::<WarmChunk>();
+        e.remove::<HotChunk>();
+        e.insert(ActiveChunk);
+        if let Some(mut sub) = e.get_mut::<ChunkSubscriberCount>() {
+            sub.0 = sub.0.max(1);
         }
+        // ChunkActivity tag the helper used was for the legacy resource
+        // map; we no longer write it. Suppress unused warning.
+        let _ = ChunkActivity::Active;
     }
-    {
-        let mut subscribers = world.resource_mut::<ChunkSubscribers>();
-        for chunk in &chunks {
-            subscribers.0.insert(*chunk, 1);
-        }
-    }
+    let mut sim = world.resource_mut::<SimulatedChunks>();
+    sim.0.extend(chunks);
 }
 
 /// Tick the mobility schedule once and return the per-chunk delta map.
@@ -764,10 +857,34 @@ pub fn seed_chunk_activity(
     chunk: crate::ids::ChunkCoord,
     activity: crate::mobility::lod::MobilityActivity,
 ) {
-    world
-        .resource_mut::<ChunkActivities>()
-        .0
-        .insert(chunk, activity);
+    use crate::mobility::lod::MobilityActivity;
+    use crate::world::components::{ActiveChunk, AsleepChunk, HotChunk, WarmChunk};
+    let entity = ensure_chunk_entity(world, chunk);
+    let mut e = world.entity_mut(entity);
+    e.remove::<AsleepChunk>();
+    e.remove::<WarmChunk>();
+    e.remove::<ActiveChunk>();
+    e.remove::<HotChunk>();
+    match activity {
+        MobilityActivity::Asleep => { e.insert(AsleepChunk); }
+        MobilityActivity::Warm => { e.insert(WarmChunk); }
+        MobilityActivity::Active => { e.insert(ActiveChunk); }
+        MobilityActivity::Hot => { e.insert(HotChunk); }
+    }
+    // Keep the derived `SimulatedChunks` / `WarmChunkCoords` in lockstep so
+    // tests that don't run the full schedule still observe the seed.
+    let is_sim = matches!(activity, MobilityActivity::Active | MobilityActivity::Hot);
+    let is_warm = matches!(activity, MobilityActivity::Warm);
+    if is_sim {
+        world.resource_mut::<SimulatedChunks>().0.insert(chunk);
+    } else {
+        world.resource_mut::<SimulatedChunks>().0.remove(&chunk);
+    }
+    if is_warm {
+        world.resource_mut::<WarmChunkCoords>().0.insert(chunk);
+    } else {
+        world.resource_mut::<WarmChunkCoords>().0.remove(&chunk);
+    }
 }
 
 pub fn seed_chunk_subscriber_count(
@@ -775,8 +892,11 @@ pub fn seed_chunk_subscriber_count(
     chunk: crate::ids::ChunkCoord,
     count: u8,
 ) {
-    world
-        .resource_mut::<ChunkSubscribers>()
-        .0
-        .insert(chunk, count);
+    let entity = ensure_chunk_entity(world, chunk);
+    if let Some(mut sub) = world
+        .entity_mut(entity)
+        .get_mut::<crate::world::components::ChunkSubscriberCount>()
+    {
+        sub.0 = count;
+    }
 }

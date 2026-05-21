@@ -24,9 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{AgentId, ChunkCoord, LinkId, RouteId, StopId, VehicleId};
 use crate::mobility::lod::{FlowCell, MobilityActivity};
 use crate::mobility::records::{AgentRecord, RouteRecord, StopRecord, VehicleRecord};
-use crate::mobility::resources::{
-    ChunkActivities, FlowCells, LinkPolylines, Routes, Stops, Tick,
-};
+use crate::mobility::resources::{FlowCells, LinkPolylines, Routes, Stops, Tick};
 
 /// Serializable snapshot of mobility-world state. The JSON shape matches the
 /// legacy `MobilityWorld` serde representation exactly.
@@ -110,8 +108,17 @@ impl<'de> Deserialize<'de> for MobilityPersistSnapshot {
 }
 
 /// Pull a persist snapshot out of a live mobility world. The world must have
-/// already had `install_mobility` called on it.
+/// already had `install_mobility` called on it (and `CorePlugin` for the
+/// chunk-entity store).
+///
+/// `chunk_activities` is derived from chunk-entity LOD markers — the
+/// foundation owns chunk entities, and per-chunk activity lives there
+/// post-Phase-8a. Asleep chunks are omitted to match the legacy resource
+/// retention semantics (the old `classify_activity_system` dropped Asleep
+/// chunks that had no subscribers + no population). Empty-tiles chunk
+/// entities spawned solely to track subscriptions count as Asleep here.
 pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
+    use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk, WarmChunk};
     let agents_map: HashMap<AgentId, AgentRecord> = crate::mobility::api::agents(world)
         .into_iter()
         .map(|rec| (rec.id.clone(), rec))
@@ -120,6 +127,32 @@ pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
         .into_iter()
         .map(|rec| (rec.id.clone(), rec))
         .collect();
+
+    let chunk_activities: HashMap<ChunkCoord, MobilityActivity> = {
+        let by_coord = world.resource::<crate::world::resources::ChunksByCoord>();
+        let mut out = HashMap::new();
+        for (coord, entity) in by_coord.0.iter() {
+            // Re-check coord matches the entity's component to defend against
+            // a stale `ChunksByCoord` entry (shouldn't happen but cheap to
+            // guard).
+            if let Some(c) = world.get::<ChunkCoordComp>(*entity)
+                && c.0 == *coord
+            {
+                let activity = if world.get::<HotChunk>(*entity).is_some() {
+                    MobilityActivity::Hot
+                } else if world.get::<ActiveChunk>(*entity).is_some() {
+                    MobilityActivity::Active
+                } else if world.get::<WarmChunk>(*entity).is_some() {
+                    MobilityActivity::Warm
+                } else {
+                    continue;
+                };
+                out.insert(*coord, activity);
+            }
+        }
+        out
+    };
+
     MobilityPersistSnapshot {
         tick: world.resource::<Tick>().0,
         agents: agents_map,
@@ -128,7 +161,7 @@ pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
         routes: world.resource::<Routes>().0.clone(),
         link_polylines: world.resource::<LinkPolylines>().0.clone(),
         flow_cells: world.resource::<FlowCells>().0.clone(),
-        chunk_activities: world.resource::<ChunkActivities>().0.clone(),
+        chunk_activities,
     }
 }
 
@@ -165,5 +198,12 @@ pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
         crate::mobility::api::spawn_vehicle_from_record(world, vehicle);
     }
     world.resource_mut::<FlowCells>().0 = snap.flow_cells;
-    world.resource_mut::<ChunkActivities>().0 = snap.chunk_activities;
+    // Re-apply chunk activities into chunk-entity LOD markers. If a coord
+    // has no chunk entity yet (round-trip test path: only mobility plugins
+    // installed, no chunks loaded by the persistence layer), spawn an
+    // empty-tiles chunk entity at that coord so the marker has somewhere
+    // to live. Production hydration always installs CorePlugin first.
+    for (coord, activity) in snap.chunk_activities {
+        crate::mobility::api::seed_chunk_activity(world, coord, activity);
+    }
 }

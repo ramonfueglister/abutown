@@ -936,7 +936,7 @@ mod tests {
         api::force_all_chunks_active_for_test(&mut world);
         api::tick_mobility(&mut world, &mut schedule);
 
-        let snapshot = api::build_chunk_snapshot(&world, ChunkCoord { x: 0, y: 0 });
+        let snapshot = api::build_mobility_chunk_snapshot(&world, ChunkCoord { x: 0, y: 0 });
         let agent_ids: Vec<String> = snapshot.agents.iter().map(|a| a.id.0.clone()).collect();
         assert_eq!(
             agent_ids,

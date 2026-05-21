@@ -245,7 +245,7 @@ fn build_read_view_from_runtime(
         if let Some(snap) = runtime.chunk_snapshot(coord) {
             chunk_snapshots.insert(coord, chunk_snapshot_dto_to_proto(&snap));
         }
-        let mob_snapshot = sim_core::mobility::api::build_chunk_snapshot(mobility, coord);
+        let mob_snapshot = sim_core::mobility::api::build_mobility_chunk_snapshot(mobility, coord);
         let mob_dto = chunk_snapshot_to_dto(&mob_snapshot, mobility, &world_id, mobility_tick);
         mobility_chunk_snapshots.insert(coord, mob_dto);
     }
@@ -923,7 +923,7 @@ async fn apply_mutation_owned(
                 .iter()
                 .map(|coord| {
                     let snapshot =
-                        sim_core::mobility::api::build_chunk_snapshot(runtime.mobility(), *coord);
+                        sim_core::mobility::api::build_mobility_chunk_snapshot(runtime.mobility(), *coord);
                     chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick)
                 })
                 .collect();
