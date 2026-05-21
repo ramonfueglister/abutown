@@ -5,3 +5,5 @@ pub mod plugin;
 pub mod spatial_index;
 pub mod transit;
 pub mod waiting;
+
+pub use graph::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
