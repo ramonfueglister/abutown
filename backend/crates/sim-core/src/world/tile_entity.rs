@@ -9,6 +9,10 @@ use crate::world::components::{BelongsToChunk, LocalIndex, Tile};
 /// helper only spawns a separate Entity carrying domain components (Home,
 /// Workplace, …) that future plugins attach via Bevy `Commands`. Foundation
 /// (Phase 8a) ships NO domain components — they come in later phases.
+// scaffold for 8g (domain tiles) — no production caller in 8a, but the
+// signature is the contract future plugins will hang off, so keep it
+// compiled + tested.
+#[allow(dead_code)]
 pub fn spawn_functional_tile(
     commands: &mut Commands,
     chunk: Entity,

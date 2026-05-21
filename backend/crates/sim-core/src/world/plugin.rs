@@ -25,6 +25,17 @@ impl SimPlugin for CorePlugin {
     fn name(&self) -> &'static str { "core" }
 
     fn install(&self, world: &mut World, schedule: &mut Schedule) {
+        // CorePlugin is single-install per World. Double-installing wipes
+        // `ChunksByCoord` (and other resources), losing any chunk entities
+        // already spawned. The double-install test below exists to document
+        // this contract; in debug builds, we panic loudly if a caller
+        // accidentally installs twice.
+        debug_assert!(
+            !world.contains_resource::<ChunksByCoord>(),
+            "CorePlugin::install called twice on the same World — \
+             this resets ChunksByCoord and loses spawned chunk entities. \
+             Install CorePlugin exactly once per World.",
+        );
         // Resources
         world.insert_resource(WorldIdRes(self.world_id.clone()));
         world.insert_resource(ChunkSizeRes(self.chunk_size));
@@ -86,9 +97,11 @@ mod tests {
     }
 
     #[test]
-    fn core_plugin_double_install_overwrites_resources() {
-        // Documents that double-install resets state (not idempotent).
-        // Production code must install exactly once per World.
+    #[should_panic(expected = "CorePlugin::install called twice")]
+    fn core_plugin_install_is_not_idempotent_callers_must_install_once() {
+        // Production code must install CorePlugin exactly once per World.
+        // The second install would silently reset `ChunksByCoord` etc.; we
+        // catch that misuse with a debug_assert at the top of `install`.
         let mut world = World::new();
         let mut schedule = Schedule::default();
         let plugin = CorePlugin::default();
@@ -99,6 +112,5 @@ mod tests {
             entity,
         );
         plugin.install(&mut world, &mut schedule);
-        assert!(world.resource::<ChunksByCoord>().0.is_empty());
     }
 }
