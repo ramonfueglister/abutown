@@ -9,38 +9,31 @@ use crate::mobility::MobilityPersistSnapshot;
 use crate::scheduler::ChunkActivity;
 use crate::tile::TileKind;
 
+/// Build a `ChunkSnapshotDto` from a `Chunk` value. Delegates to
+/// `build_chunk_snapshot_from_parts` after extracting the dense tile vector
+/// from the chunk — the canonical implementation lives there.
 pub fn build_chunk_snapshot(
     world_id: impl Into<String>,
     chunk: &Chunk,
     activity: ChunkActivity,
 ) -> ChunkSnapshotDto {
-    let mut tiles: Vec<TileMutationDto> = Vec::new();
-    for index in 0..chunk.tile_count() {
-        let tile = chunk.tile_at(index).expect("index within tile_count");
-        if tile.kind != TileKind::default() {
-            tiles.push(TileMutationDto {
-                local_index: index,
-                kind: tile.kind.into(),
-                version: tile.version,
-            });
-        }
-    }
-
-    ChunkSnapshotDto {
-        protocol_version: PROTOCOL_VERSION,
-        world_id: WorldId(world_id.into()),
-        coord: chunk.coord().into(),
-        chunk_state: activity.into(),
-        chunk_version: chunk.version(),
-        tile_count: chunk.tile_count(),
-        tiles,
-    }
+    let tiles: Vec<crate::tile::TileRecord> = (0..chunk.tile_count())
+        .filter_map(|i| chunk.tile_at(i))
+        .collect();
+    build_chunk_snapshot_from_parts(
+        world_id,
+        chunk.coord(),
+        &tiles,
+        chunk.version(),
+        activity,
+    )
 }
 
 /// Build a `ChunkSnapshotDto` from raw ECS data (tiles, version, coord,
-/// activity). Produces a payload byte-identical to `build_chunk_snapshot`,
-/// which is the wire-stability guarantee. Use this when the source of the
-/// chunk's state is the ECS World rather than a `Chunk` value.
+/// activity). Canonical builder — both the `Chunk`-based path
+/// (`build_chunk_snapshot`) and the ECS-world path
+/// (`ChunkSnapshotProvider::collect`) funnel through here, so the
+/// serialized JSONB payload is byte-identical regardless of source.
 pub fn build_chunk_snapshot_from_parts(
     world_id: impl Into<String>,
     coord: ChunkCoord,
