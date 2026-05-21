@@ -10,3 +10,4 @@ pub use cost_model::{CostModel, DistanceCost, ModeFilterCost, TimeCost};
 pub use graph::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
 pub use spatial_index::{IndexedNode, NodeSpatialIndex};
 pub use transit::{LineId, TransitLine, TransitLines};
+pub use waiting::WaitingAgents;
