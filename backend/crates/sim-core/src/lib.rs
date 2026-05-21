@@ -6,6 +6,7 @@ pub mod ids;
 pub mod mobility;
 pub mod mobility_geometry;
 pub mod persistence;
+pub mod routing;
 pub mod scheduler;
 pub mod tile;
 pub mod world;
