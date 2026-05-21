@@ -1,3 +1,4 @@
+use bevy_ecs::prelude::Resource;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -13,7 +14,7 @@ pub struct WorldTiles {
     pub height: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Resource, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CityNetwork {
     pub version: u32,
     pub world_id: String,
@@ -39,6 +40,25 @@ impl CityNetwork {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, CityNetworkError> {
         let contents = std::fs::read_to_string(path)?;
         Self::from_json(&contents)
+    }
+
+    /// Alias for [`from_path`] — preferred name for callers that distinguish
+    /// "load" (disk I/O) from constructors.
+    pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self, CityNetworkError> {
+        Self::from_path(path)
+    }
+
+    /// Return an empty network for the given world — used as a fallback when
+    /// the city-network JSON cannot be loaded at startup.
+    pub fn empty_for_world(world_id: &str) -> Self {
+        Self {
+            version: 1,
+            world_id: world_id.to_string(),
+            chunk_size: 32,
+            world_tiles: WorldTiles { width: 256, height: 256 },
+            arterial_paths: Vec::new(),
+            pedestrian_corridors: Vec::new(),
+        }
     }
 }
 

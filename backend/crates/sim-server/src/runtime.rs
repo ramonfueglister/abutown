@@ -98,7 +98,24 @@ impl SimulationRuntime {
         // SimulationRuntime now owns the shared `World` + `Schedule` directly.
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
+
+        // Load city network from disk and insert as resource before plugins run.
+        let network_path = std::env::var("ABUTOWN_CITY_NETWORK_PATH")
+            .unwrap_or_else(|_| "data/city/zurich-network.json".to_string());
+        let city_network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .unwrap_or_else(|_| {
+                sim_core::city_network::CityNetwork::empty_for_world("abutown-main")
+            });
+        world.insert_resource(city_network);
+
         CorePlugin::default().install(&mut world, &mut schedule);
+
+        // Seeded stops will be populated in T9 via mobility::seed::legacy_seeded_stops().
+        // T8 passes empty list — graph will have intersections only, no transit stops.
+        let seeded_stops: Vec<sim_core::routing::SeededStop> = Vec::new();
+        sim_core::routing::RoutingPlugin { seeded_stops }
+            .install(&mut world, &mut schedule);
+
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: WORLD_ID.to_string(),
@@ -206,7 +223,18 @@ impl SimulationRuntime {
         // Build a fresh World + Schedule and install both plugins.
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
+
+        // Insert city network as resource before plugins run.
+        world.insert_resource(network.clone());
+
         CorePlugin::default().install(&mut world, &mut schedule);
+
+        // Seeded stops will be populated in T9 via mobility::seed::legacy_seeded_stops().
+        // T8 passes empty list — graph will have intersections only, no transit stops.
+        let seeded_stops: Vec<sim_core::routing::SeededStop> = Vec::new();
+        sim_core::routing::RoutingPlugin { seeded_stops }
+            .install(&mut world, &mut schedule);
+
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: world_id.0.clone(),
