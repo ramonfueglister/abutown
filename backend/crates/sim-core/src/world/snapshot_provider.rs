@@ -63,8 +63,7 @@ impl SnapshotProvider for ChunkSnapshotProvider {
 
             let dto =
                 build_chunk_snapshot_from_parts(&self.world_id, coord, tiles, version, activity);
-            let payload =
-                serde_json::to_vec(&dto).expect("serde always encodes ChunkSnapshotDto");
+            let payload = serde_json::to_vec(&dto).expect("serde always encodes ChunkSnapshotDto");
 
             items.push(SnapshotItem {
                 key: SnapshotKey {

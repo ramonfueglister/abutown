@@ -42,10 +42,14 @@ impl Default for LastSnapshotAt {
 
 // === LOD markers (mutually exclusive zero-sized) ===
 
-#[derive(Component, Debug)] pub struct AsleepChunk;
-#[derive(Component, Debug)] pub struct WarmChunk;
-#[derive(Component, Debug)] pub struct ActiveChunk;
-#[derive(Component, Debug)] pub struct HotChunk;
+#[derive(Component, Debug)]
+pub struct AsleepChunk;
+#[derive(Component, Debug)]
+pub struct WarmChunk;
+#[derive(Component, Debug)]
+pub struct ActiveChunk;
+#[derive(Component, Debug)]
+pub struct HotChunk;
 
 #[derive(Component, Copy, Clone, Debug, Default)]
 pub struct LodCooldown(pub u8);
@@ -94,18 +98,20 @@ mod tests {
     #[test]
     fn chunk_components_can_be_inserted_and_queried() {
         let mut world = World::new();
-        let entity = world.spawn((
-            ChunkCoordComp(ChunkCoord { x: 4, y: 4 }),
-            ChunkSize(32),
-            Tiles(Vec::new()),
-            ChunkVersion(7),
-            DirtyTiles::default(),
-            LastPersistedVersion(5),
-            LastSnapshotAt::default(),
-            HotChunk,
-            LodCooldown(0),
-            ChunkSubscriberCount(2),
-        )).id();
+        let entity = world
+            .spawn((
+                ChunkCoordComp(ChunkCoord { x: 4, y: 4 }),
+                ChunkSize(32),
+                Tiles(Vec::new()),
+                ChunkVersion(7),
+                DirtyTiles::default(),
+                LastPersistedVersion(5),
+                LastSnapshotAt::default(),
+                HotChunk,
+                LodCooldown(0),
+                ChunkSubscriberCount(2),
+            ))
+            .id();
         let coord = world.get::<ChunkCoordComp>(entity).unwrap();
         assert_eq!(coord.0, ChunkCoord { x: 4, y: 4 });
         assert!(world.get::<HotChunk>(entity).is_some());
@@ -119,7 +125,10 @@ mod tests {
         let entity = world.spawn(WarmChunk).id();
         assert!(world.get::<WarmChunk>(entity).is_some());
         assert!(world.get::<ActiveChunk>(entity).is_none());
-        world.entity_mut(entity).remove::<WarmChunk>().insert(ActiveChunk);
+        world
+            .entity_mut(entity)
+            .remove::<WarmChunk>()
+            .insert(ActiveChunk);
         assert!(world.get::<WarmChunk>(entity).is_none());
         assert!(world.get::<ActiveChunk>(entity).is_some());
     }

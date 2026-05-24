@@ -453,8 +453,12 @@ mod proto_roundtrip_tests {
     use super::v1::*;
     use prost::Message;
 
-    fn sample_chunk() -> ChunkCoord { ChunkCoord { x: 4, y: 4 } }
-    fn sample_world_coord() -> WorldCoord { WorldCoord { x: 100.0, y: 200.0 } }
+    fn sample_chunk() -> ChunkCoord {
+        ChunkCoord { x: 4, y: 4 }
+    }
+    fn sample_world_coord() -> WorldCoord {
+        WorldCoord { x: 100.0, y: 200.0 }
+    }
 
     fn assert_roundtrip<M: Message + Default + PartialEq + std::fmt::Debug>(msg: &M) {
         let bytes = msg.encode_to_vec();
@@ -505,16 +509,18 @@ mod proto_roundtrip_tests {
             plan_cursor: 0,
         };
         let msg = ServerMessage {
-            body: Some(server_message::Body::MobilityChunkDelta(MobilityChunkDelta {
-                protocol_version: 16,
-                world_id: "abutown-main".into(),
-                tick: 100,
-                chunk: Some(sample_chunk()),
-                changed_agents: vec![agent],
-                changed_vehicles: vec![],
-                left_agents: vec!["agent:gone:1".into()],
-                left_vehicles: vec![],
-            })),
+            body: Some(server_message::Body::MobilityChunkDelta(
+                MobilityChunkDelta {
+                    protocol_version: 16,
+                    world_id: "abutown-main".into(),
+                    tick: 100,
+                    chunk: Some(sample_chunk()),
+                    changed_agents: vec![agent],
+                    changed_vehicles: vec![],
+                    left_agents: vec!["agent:gone:1".into()],
+                    left_vehicles: vec![],
+                },
+            )),
         };
         assert_roundtrip(&msg);
     }
@@ -522,14 +528,16 @@ mod proto_roundtrip_tests {
     #[test]
     fn roundtrip_mobility_chunk_snapshot() {
         let msg = ServerMessage {
-            body: Some(server_message::Body::MobilityChunkSnapshot(MobilityChunkSnapshot {
-                protocol_version: 16,
-                world_id: "abutown-main".into(),
-                tick: 100,
-                chunk: Some(sample_chunk()),
-                agents: vec![],
-                vehicles: vec![],
-            })),
+            body: Some(server_message::Body::MobilityChunkSnapshot(
+                MobilityChunkSnapshot {
+                    protocol_version: 16,
+                    world_id: "abutown-main".into(),
+                    tick: 100,
+                    chunk: Some(sample_chunk()),
+                    agents: vec![],
+                    vehicles: vec![],
+                },
+            )),
         };
         assert_roundtrip(&msg);
     }
@@ -664,7 +672,11 @@ mod proto_roundtrip_tests {
             chunk_version: 5,
             chunk_state: ChunkState::Active as i32,
             tile_count: 1024,
-            tiles: vec![TileMutation { local_index: 0, kind: TileKind::Road as i32, version: 1 }],
+            tiles: vec![TileMutation {
+                local_index: 0,
+                kind: TileKind::Road as i32,
+                version: 1,
+            }],
         };
         assert_roundtrip(&msg);
     }
@@ -703,4 +715,3 @@ mod proto_roundtrip_tests {
         assert_eq!(back.chunk_size, 100);
     }
 }
-

@@ -10,7 +10,10 @@ pub mod tile_entity;
 
 pub use components::*;
 pub use events::*;
-pub use persistence::{SnapshotProvider, SnapshotProviders, SnapshotItem, SnapshotKey, MigrationRegistry, MigrationError};
+pub use persistence::{
+    MigrationError, MigrationRegistry, SnapshotItem, SnapshotKey, SnapshotProvider,
+    SnapshotProviders,
+};
 pub use resources::*;
 pub use schedule::{CoreSet, SimPlugin};
 pub use tile_entity::spawn_functional_tile;

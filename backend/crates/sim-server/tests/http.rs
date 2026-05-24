@@ -50,10 +50,7 @@ where
 /// Encode a `ClientCommand` proto and POST it to /commands. Returns the
 /// raw HTTP response so tests can assert on status + decode the response
 /// proto themselves.
-async fn post_command(
-    app: &axum::Router,
-    command: w::ClientCommand,
-) -> axum::response::Response {
+async fn post_command(app: &axum::Router, command: w::ClientCommand) -> axum::response::Response {
     let body = command.encode_to_vec();
     app.clone()
         .oneshot(
@@ -470,8 +467,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
         .to_bytes();
     let before = w::ChunkSnapshot::decode(before_body.as_ref()).unwrap();
 
-    let command =
-        set_tile_kind_proto("command:http:store-failure", 4, 4, 11, w::TileKind::Water);
+    let command = set_tile_kind_proto("command:http:store-failure", 4, 4, 11, w::TileKind::Water);
     let response = post_command(&app, command).await;
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -663,13 +659,7 @@ async fn postgres_duplicate_command_returns_same_response() {
     // Pick a unique tile index per run so the first POST is unlikely to hit
     // `no_state_change` from prior pollution. Indices 0..=1023 are valid.
     let local_index: u32 = ((uuid::Uuid::now_v7().as_u128() % 1024) as u32).clamp(1, 1023);
-    let command = set_tile_kind_proto(
-        &unique_command_id,
-        4,
-        4,
-        local_index,
-        w::TileKind::Water,
-    );
+    let command = set_tile_kind_proto(&unique_command_id, 4, 4, local_index, w::TileKind::Water);
     let body = command.encode_to_vec();
 
     let first = app

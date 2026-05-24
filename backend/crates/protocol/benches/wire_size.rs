@@ -75,10 +75,7 @@ fn bench_wire_size(c: &mut Criterion) {
         "{:>8} | {:>10} | {:>10} | {:>8}",
         "N agents", "JSON bytes", "Proto bytes", "ratio"
     );
-    println!(
-        "{:->8} | {:->10} | {:->10} | {:->8}",
-        "", "", "", ""
-    );
+    println!("{:->8} | {:->10} | {:->10} | {:->8}", "", "", "", "");
     for &n in &[1usize, 10, 50, 100] {
         let proto = sample_delta_proto(n);
         let proto_bytes = proto.encode_to_vec();

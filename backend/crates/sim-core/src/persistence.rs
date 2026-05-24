@@ -20,13 +20,7 @@ pub fn build_chunk_snapshot(
     let tiles: Vec<crate::tile::TileRecord> = (0..chunk.tile_count())
         .filter_map(|i| chunk.tile_at(i))
         .collect();
-    build_chunk_snapshot_from_parts(
-        world_id,
-        chunk.coord(),
-        &tiles,
-        chunk.version(),
-        activity,
-    )
+    build_chunk_snapshot_from_parts(world_id, chunk.coord(), &tiles, chunk.version(), activity)
 }
 
 /// Build a `ChunkSnapshotDto` from raw ECS data (tiles, version, coord,

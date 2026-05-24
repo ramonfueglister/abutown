@@ -1,8 +1,6 @@
 use bevy_ecs::prelude::*;
 
-use crate::world::persistence::{
-    MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider,
-};
+use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
 
 /// A `SnapshotProvider` that emits the mobility persist snapshot as a
 /// single item. Today this returns the full mobility world serialized
@@ -14,14 +12,17 @@ pub struct MobilitySnapshotProvider {
 }
 
 impl SnapshotProvider for MobilitySnapshotProvider {
-    fn name(&self) -> &'static str { "mobility" }
-    fn schema_version(&self) -> u32 { 1 }
+    fn name(&self) -> &'static str {
+        "mobility"
+    }
+    fn schema_version(&self) -> u32 {
+        1
+    }
 
     fn collect(&self, world: &World) -> Vec<SnapshotItem> {
         // Reuse the existing MobilityPersistSnapshot extraction.
         let snapshot = crate::mobility::persist_snapshot::extract_from_world(world);
-        let payload = serde_json::to_vec(&snapshot)
-            .expect("serde encodes MobilityPersistSnapshot");
+        let payload = serde_json::to_vec(&snapshot).expect("serde encodes MobilityPersistSnapshot");
         vec![SnapshotItem {
             key: SnapshotKey {
                 world_id: self.world_id.clone(),
@@ -45,7 +46,9 @@ mod tests {
 
     #[test]
     fn name_and_schema_version() {
-        let p = MobilitySnapshotProvider { world_id: "test".to_string() };
+        let p = MobilitySnapshotProvider {
+            world_id: "test".to_string(),
+        };
         assert_eq!(p.name(), "mobility");
         assert_eq!(p.schema_version(), 1);
     }
@@ -58,7 +61,9 @@ mod tests {
         crate::world::plugin::CorePlugin::default().install(&mut world, &mut schedule);
         crate::mobility::api::install_mobility(&mut world, &mut schedule);
 
-        let provider = MobilitySnapshotProvider { world_id: "test".to_string() };
+        let provider = MobilitySnapshotProvider {
+            world_id: "test".to_string(),
+        };
         let items = provider.collect(&world);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].key.kind, "mobility");

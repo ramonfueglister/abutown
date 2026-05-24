@@ -1,11 +1,116 @@
-use std::collections::VecDeque;
-
 use bevy_ecs::schedule::Schedule;
 use bevy_ecs::world::World;
 
 use super::*;
-use crate::city_network::CityNetwork;
-use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
+use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+use crate::ids::{AgentId, VehicleId};
+
+/// Hardcoded transit stops the world seeds today. Coords are tile-space.
+/// These get promoted to graph nodes via `RoutingPlugin.seeded_stops`.
+/// Pedestrian walks the seed path procedurally generates, expressed as
+/// `SeededWalk` records so the routing builder can emit a Footway edge per
+/// walk. The legacy `link_id` strings here are byte-identical to the agent
+/// plan strings, so walking state resolves via `graph.edge_by_legacy(link_id)`.
+pub fn legacy_seeded_walks(
+    network: &crate::city_network::CityNetwork,
+) -> Vec<crate::routing::SeededWalk> {
+    use crate::city_network::NetworkCoord;
+    let mut out: Vec<crate::routing::SeededWalk> = Vec::new();
+
+    // Walks from `from_network`: one Footway per pedestrian corridor.
+    for (index, corridor) in network.pedestrian_corridors.iter().enumerate() {
+        let polyline: Vec<(f32, f32)> = corridor
+            .iter()
+            .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
+            .collect();
+        if polyline.len() < 2 {
+            continue;
+        }
+        out.push(crate::routing::SeededWalk {
+            legacy_link_id: format!("link:walk:corridor:{index}"),
+            polyline,
+        });
+    }
+
+    // Walks from `tiny_world` (used when the network is empty AND as the
+    // tram-flow re-seed inside `from_network`). The walking link
+    // `link:walk:default` is the link the 20 seeded pedestrians walk on.
+    // The seed path always registers this polyline, so we always publish
+    // a Footway edge for it.
+    let c44 = (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
+    let c54 = (5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
+    out.push(crate::routing::SeededWalk {
+        legacy_link_id: "link:walk:default".into(),
+        polyline: vec![c44, c54],
+    });
+
+    out
+}
+
+pub fn legacy_seeded_stops() -> Vec<crate::routing::SeededStop> {
+    // Tile-space centre coords for the seeded chunks:
+    //   c44 = (4 * 32 + 16, 4 * 32 + 16) = (144.0, 144.0)
+    //   c54 = (5 * 32 + 16, 4 * 32 + 16) = (176.0, 144.0)
+    //   c45 = (4 * 32 + 16, 5 * 32 + 16) = (144.0, 176.0)
+    //
+    // horizontal route: c44 → c54  (progress 0.0 → 1.0)
+    // vertical route:   c44 → c45  (progress 0.0 → 1.0)
+    vec![
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:horizontal:pickup".into(),
+            coord: (144.0, 144.0),
+            legacy_route_id: "route:horizontal".into(),
+        },
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:horizontal:dropoff".into(),
+            coord: (176.0, 144.0),
+            legacy_route_id: "route:horizontal".into(),
+        },
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:vertical:pickup".into(),
+            coord: (144.0, 144.0),
+            legacy_route_id: "route:vertical".into(),
+        },
+        crate::routing::SeededStop {
+            legacy_stop_id: "stop:vertical:dropoff".into(),
+            coord: (144.0, 176.0),
+            legacy_route_id: "route:vertical".into(),
+        },
+    ]
+}
+
+fn tiny_city_network() -> CityNetwork {
+    let c44 = NetworkCoord { x: 144, y: 144 };
+    let c54 = NetworkCoord { x: 176, y: 144 };
+    let c45 = NetworkCoord { x: 144, y: 176 };
+    CityNetwork {
+        version: 1,
+        world_id: "abutown-tiny".into(),
+        chunk_size: 32,
+        world_tiles: WorldTiles {
+            width: 256,
+            height: 256,
+        },
+        arterial_paths: vec![vec![c44, c54], vec![c44, c45]],
+        pedestrian_corridors: Vec::new(),
+    }
+}
+
+fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedule) {
+    let mut world = World::new();
+    let mut schedule = Schedule::default();
+    use crate::world::plugin::CorePlugin;
+    use crate::world::schedule::SimPlugin;
+    CorePlugin::default().install(&mut world, &mut schedule);
+    world.insert_resource(network.clone());
+    crate::routing::RoutingPlugin {
+        seeded_stops: legacy_seeded_stops(),
+        seeded_walks: legacy_seeded_walks(network),
+    }
+    .install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    (world, schedule)
+}
 
 /// Backward-compatible wrapper — delegates to [`tiny_world`].
 pub fn initial_world() -> (World, Schedule) {
@@ -18,61 +123,19 @@ pub fn initial_world() -> (World, Schedule) {
 /// 20 agents are spawned with cyclic plans. Calling this function twice
 /// returns equal worlds (by `extract_from_world`).
 pub fn tiny_world() -> (World, Schedule) {
-    let horizontal_route = RouteId("route:horizontal".to_string());
-    let vertical_route = RouteId("route:vertical".to_string());
-    let horizontal_link = LinkId("link:horizontal:main".to_string());
-    let vertical_link = LinkId("link:vertical:main".to_string());
+    let horizontal_route = "route:horizontal".to_string();
+    let vertical_route = "route:vertical".to_string();
 
-    let horizontal_pickup = StopId("stop:horizontal:pickup".to_string());
-    let horizontal_dropoff = StopId("stop:horizontal:dropoff".to_string());
-    let vertical_pickup = StopId("stop:vertical:pickup".to_string());
-    let vertical_dropoff = StopId("stop:vertical:dropoff".to_string());
+    let horizontal_pickup = "stop:horizontal:pickup".to_string();
+    let horizontal_dropoff = "stop:horizontal:dropoff".to_string();
+    let vertical_pickup = "stop:vertical:pickup".to_string();
+    let vertical_dropoff = "stop:vertical:dropoff".to_string();
 
-    let walk_link = LinkId("link:walk:default".to_string());
+    let walk_link = "link:walk:default".to_string();
     let work_activity = "activity:work".to_string();
 
-    let (mut world, schedule) = api::empty_world_and_schedule();
-
-    // Register the three seeded polylines.
-    let c44 = (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
-    let c54 = (5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
-    let c45 = (4.0 * 32.0 + 16.0, 5.0 * 32.0 + 16.0);
-    api::set_link_polyline(&mut world, horizontal_link.clone(), vec![c44, c54]);
-    api::set_link_polyline(&mut world, vertical_link.clone(), vec![c44, c45]);
-    api::set_link_polyline(&mut world, walk_link.clone(), vec![c44, c54]);
-
-    api::add_route(
-        &mut world,
-        RouteRecord {
-            id: horizontal_route.clone(),
-            links: vec![horizontal_link.clone()],
-        },
-    );
-    api::add_route(
-        &mut world,
-        RouteRecord {
-            id: vertical_route.clone(),
-            links: vec![vertical_link.clone()],
-        },
-    );
-
-    for (stop_id, route_id, progress) in [
-        (&horizontal_pickup, &horizontal_route, 0.0_f32),
-        (&horizontal_dropoff, &horizontal_route, 1.0_f32),
-        (&vertical_pickup, &vertical_route, 0.0_f32),
-        (&vertical_dropoff, &vertical_route, 1.0_f32),
-    ] {
-        api::add_stop(
-            &mut world,
-            StopRecord {
-                id: stop_id.clone(),
-                route_id: route_id.clone(),
-                link_index: 0,
-                progress,
-                waiting_agents: VecDeque::new(),
-            },
-        );
-    }
+    let network = tiny_city_network();
+    let (mut world, schedule) = empty_world_and_schedule_for_network(&network);
 
     for offset in 0..4u32 {
         let route_id = if offset % 2 == 0 {
@@ -156,58 +219,30 @@ impl Default for SeedDensity {
 }
 
 pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Schedule) {
-    use crate::city_network::NetworkCoord;
+    let (mut world, schedule) = empty_world_and_schedule_for_network(network);
 
-    let (mut world, schedule) = api::empty_world_and_schedule();
-
-    // Register pedestrian corridors as walking links.
-    for (index, corridor) in network.pedestrian_corridors.iter().enumerate() {
-        let link_id = LinkId(format!("link:walk:corridor:{index}"));
-        let points: Vec<(f32, f32)> = corridor
-            .iter()
-            .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
-            .collect();
-        api::set_link_polyline(&mut world, link_id, points);
-    }
-
-    // Register arterial paths as routes + polylines.
-    for (index, arterial) in network.arterial_paths.iter().enumerate() {
-        let route_id = RouteId(format!("route:arterial:{index}"));
-        let link_id = LinkId(format!("link:arterial:{index}"));
-        let points: Vec<(f32, f32)> = arterial
-            .iter()
-            .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
-            .collect();
-        api::set_link_polyline(&mut world, link_id.clone(), points);
-        api::add_route(
-            &mut world,
-            RouteRecord {
-                id: route_id.clone(),
-                links: vec![link_id],
-            },
-        );
-    }
-
-    // Trams: reuse the existing tiny_world tram polylines, routes, vehicles, and stops.
+    // Trams: seed the fixed tiny tram flow against graph route aliases.
     if density.trams_total > 0 {
-        let (tram_world, _tram_schedule) = tiny_world();
-        for (id, points) in tram_world.resource::<resources::LinkPolylines>().0.iter() {
-            api::set_link_polyline(&mut world, id.clone(), points.clone());
-        }
-        for (id, record) in tram_world.resource::<resources::Routes>().0.iter() {
-            api::add_route(
+        for offset in 0..density.trams_total {
+            let route_id = if offset % 2 == 0 {
+                "route:horizontal".to_string()
+            } else {
+                "route:vertical".to_string()
+            };
+            api::spawn_vehicle_from_record(
                 &mut world,
-                RouteRecord {
-                    id: id.clone(),
-                    links: record.links.clone(),
+                VehicleRecord {
+                    id: VehicleId(format!("vehicle:seed:{offset}")),
+                    kind: VehicleKind::Tram,
+                    route_id,
+                    link_index: 0,
+                    progress: (offset as f32) * 0.25,
+                    speed_per_tick: 0.1,
+                    capacity: 4,
+                    occupants: Vec::new(),
+                    dwell_ticks_remaining: 0,
                 },
             );
-        }
-        for stop in api::stops(&tram_world) {
-            api::add_stop(&mut world, stop);
-        }
-        for vehicle in api::vehicles(&tram_world) {
-            api::spawn_vehicle_from_record(&mut world, vehicle);
         }
     }
 
@@ -218,7 +253,7 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
         for n in 0..pedestrian_count {
             let corridor_index = (n as usize) % network.pedestrian_corridors.len();
             let agent_id = AgentId(format!("agent:walk:{n}"));
-            let link_id = LinkId(format!("link:walk:corridor:{corridor_index}"));
+            let link_id = format!("link:walk:corridor:{corridor_index}");
             let progress = ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
             api::spawn_agent_from_record(
                 &mut world,
@@ -239,7 +274,7 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
     for (arterial_index, _arterial) in network.arterial_paths.iter().enumerate() {
         for n in 0..density.cars_per_arterial {
             let vehicle_id = VehicleId(format!("vehicle:car:{arterial_index}:{n}"));
-            let route_id = RouteId(format!("route:arterial:{arterial_index}"));
+            let route_id = format!("route:arterial:{arterial_index}");
             let driver_id = AgentId(format!("agent:driver:{driver_index}"));
             driver_index += 1;
             api::spawn_vehicle_from_record(

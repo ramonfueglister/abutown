@@ -25,7 +25,9 @@ mod tests {
 
     struct NoOpPlugin;
     impl SimPlugin for NoOpPlugin {
-        fn name(&self) -> &'static str { "noop" }
+        fn name(&self) -> &'static str {
+            "noop"
+        }
         fn install(&self, _world: &mut World, _schedule: &mut Schedule) {}
     }
 

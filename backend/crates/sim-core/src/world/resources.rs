@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
-use std::collections::{HashMap, HashSet};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use std::collections::{HashMap, HashSet};
 
 use crate::ids::ChunkCoord;
 
@@ -22,7 +22,9 @@ pub struct EventCount(pub usize);
 pub struct ChunkSizeRes(pub u16);
 
 impl Default for ChunkSizeRes {
-    fn default() -> Self { Self(32) }
+    fn default() -> Self {
+        Self(32)
+    }
 }
 
 #[derive(Resource, Default, Debug, Copy, Clone)]
@@ -38,7 +40,9 @@ pub struct DirtyChunks(pub HashSet<Entity>);
 pub struct WorldIdRes(pub String);
 
 impl Default for WorldIdRes {
-    fn default() -> Self { Self("abutown-main".to_string()) }
+    fn default() -> Self {
+        Self("abutown-main".to_string())
+    }
 }
 
 #[derive(Resource)]

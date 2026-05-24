@@ -50,18 +50,31 @@ pub fn spawn_chunk_entity(
         ChunkSubscriberCount(0),
     ));
     match activity {
-        ChunkActivity::Asleep => { entity_commands.insert(AsleepChunk); }
-        ChunkActivity::Warm   => { entity_commands.insert(WarmChunk); }
-        ChunkActivity::Active => { entity_commands.insert(ActiveChunk); }
-        ChunkActivity::Hot    => { entity_commands.insert(HotChunk); }
+        ChunkActivity::Asleep => {
+            entity_commands.insert(AsleepChunk);
+        }
+        ChunkActivity::Warm => {
+            entity_commands.insert(WarmChunk);
+        }
+        ChunkActivity::Active => {
+            entity_commands.insert(ActiveChunk);
+        }
+        ChunkActivity::Hot => {
+            entity_commands.insert(HotChunk);
+        }
     }
     let entity = entity_commands.id();
-    world.resource_mut::<ChunksByCoord>().0.insert(coord, entity);
-    world.resource_mut::<Messages<ChunkLoaded>>().write(ChunkLoaded {
-        entity,
-        coord,
-        initial_version,
-    });
+    world
+        .resource_mut::<ChunksByCoord>()
+        .0
+        .insert(coord, entity);
+    world
+        .resource_mut::<Messages<ChunkLoaded>>()
+        .write(ChunkLoaded {
+            entity,
+            coord,
+            initial_version,
+        });
     entity
 }
 
@@ -81,11 +94,13 @@ mod tests {
         // Write an event; running the schedule should not panic and should
         // rotate the buffer.
         let entity = world.spawn_empty().id();
-        world.resource_mut::<Messages<ChunkLoaded>>().write(ChunkLoaded {
-            entity,
-            coord: ChunkCoord { x: 0, y: 0 },
-            initial_version: 0,
-        });
+        world
+            .resource_mut::<Messages<ChunkLoaded>>()
+            .write(ChunkLoaded {
+                entity,
+                coord: ChunkCoord { x: 0, y: 0 },
+                initial_version: 0,
+            });
         schedule.run(&mut world);
         // No panic = pass. Explicit assertions on buffer rotation are
         // brittle across bevy versions.
@@ -99,7 +114,11 @@ pub enum TileMutationError {
     #[error("tile index {index} out of bounds (tile_count={tile_count})")]
     TileOutOfBounds { index: u16, tile_count: u32 },
     #[error("no state change: tile {local_index} in chunk {coord:?} already has kind {kind:?}")]
-    NoStateChange { coord: ChunkCoord, local_index: u16, kind: TileKind },
+    NoStateChange {
+        coord: ChunkCoord,
+        local_index: u16,
+        kind: TileKind,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -374,12 +393,7 @@ pub fn reclassify_chunk_lod_system(
             .map(|p| p.0.clone())
             .unwrap_or_default();
         let q = query.get_or_insert_with(|| {
-            world.query::<(
-                Entity,
-                &ChunkCoordComp,
-                &ChunkSubscriberCount,
-                &LodCooldown,
-            )>()
+            world.query::<(Entity, &ChunkCoordComp, &ChunkSubscriberCount, &LodCooldown)>()
         });
         for (entity, coord, sub, cooldown) in q.iter(world) {
             let pop = chunk_populations.get(&coord.0).copied().unwrap_or(0);
@@ -460,9 +474,7 @@ mod lod_reclassify_tests {
         // resource). Post-Phase-8a it no longer writes any compat shim.
         world.insert_resource(crate::mobility::resources::ChunkPopulations::default());
         CorePlugin::default().install(&mut world, &mut schedule);
-        schedule.add_systems(
-            reclassify_chunk_lod_system.in_set(CoreSet::LodReclassify),
-        );
+        schedule.add_systems(reclassify_chunk_lod_system.in_set(CoreSet::LodReclassify));
 
         let coord = ChunkCoord { x: 0, y: 0 };
         let entity = spawn_chunk_entity(
@@ -515,8 +527,12 @@ mod spawn_tests {
 
         let coord = ChunkCoord { x: 7, y: 11 };
         let entity = spawn_chunk_entity(
-            &mut world, coord, 4,
-            vec![TileRecord::default(); 16], 3, ChunkActivity::Warm,
+            &mut world,
+            coord,
+            4,
+            vec![TileRecord::default(); 16],
+            3,
+            ChunkActivity::Warm,
         );
 
         // Indexed in ChunksByCoord
