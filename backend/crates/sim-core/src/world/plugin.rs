@@ -22,7 +22,9 @@ impl Default for CorePlugin {
 }
 
 impl SimPlugin for CorePlugin {
-    fn name(&self) -> &'static str { "core" }
+    fn name(&self) -> &'static str {
+        "core"
+    }
 
     fn install(&self, world: &mut World, schedule: &mut Schedule) {
         // CorePlugin is single-install per World. Double-installing wipes
@@ -64,13 +66,13 @@ impl SimPlugin for CorePlugin {
                 CoreSet::TileMutation,
                 CoreSet::LodReclassify,
                 CoreSet::EventEmit,
-            ).chain()
+            )
+                .chain(),
         );
 
         // Chunk LOD reclassification — owns marker swaps + ChunkLodChanged events.
         schedule.add_systems(
-            crate::world::systems::reclassify_chunk_lod_system
-                .in_set(CoreSet::LodReclassify),
+            crate::world::systems::reclassify_chunk_lod_system.in_set(CoreSet::LodReclassify),
         );
 
         // Buffer maintenance for Messages<T> (Bevy requires periodic `.update()`).
@@ -107,10 +109,10 @@ mod tests {
         let plugin = CorePlugin::default();
         plugin.install(&mut world, &mut schedule);
         let entity = world.spawn_empty().id();
-        world.resource_mut::<ChunksByCoord>().0.insert(
-            ChunkCoord { x: 0, y: 0 },
-            entity,
-        );
+        world
+            .resource_mut::<ChunksByCoord>()
+            .0
+            .insert(ChunkCoord { x: 0, y: 0 }, entity);
         plugin.install(&mut world, &mut schedule);
     }
 }

@@ -71,6 +71,7 @@ function scanFiles(paths: string[]): string[] {
     }
     for (const entry of readdirSync(absolutePath)) {
       if (entry === 'node_modules' || entry === '.git' || entry === 'dist') continue;
+      if (path === 'public' && entry === 'simutrans-assets') continue;
       result.push(...scanFiles([join(path, entry)]));
     }
   }

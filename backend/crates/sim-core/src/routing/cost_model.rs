@@ -70,7 +70,10 @@ mod tests {
     #[test]
     fn time_cost_clamps_zero_speed_to_finite() {
         let e = make_edge(EdgeKind::Road, 1.0, 0.0);
-        assert!(TimeCost.cost(&e).is_finite(), "zero-speed must not produce NaN/inf");
+        assert!(
+            TimeCost.cost(&e).is_finite(),
+            "zero-speed must not produce NaN/inf"
+        );
     }
 
     #[test]

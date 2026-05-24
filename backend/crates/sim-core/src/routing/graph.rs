@@ -53,22 +53,22 @@ pub struct Graph {
     outgoing: Vec<Vec<EdgeId>>,
     incoming: Vec<Vec<EdgeId>>,
     by_legacy_node_id: HashMap<String, NodeId>,
+    legacy_node_ids: Vec<Vec<String>>,
     by_legacy_edge_id: HashMap<String, EdgeId>,
 }
 
 impl Graph {
-    pub fn new(
-        nodes: Vec<Node>,
-        edges: Vec<Edge>,
-    ) -> Self {
+    pub fn new(nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
         let node_count = nodes.len();
         let mut outgoing: Vec<Vec<EdgeId>> = vec![Vec::new(); node_count];
         let mut incoming: Vec<Vec<EdgeId>> = vec![Vec::new(); node_count];
         let mut by_legacy_node_id: HashMap<String, NodeId> = HashMap::new();
         let mut by_legacy_edge_id: HashMap<String, EdgeId> = HashMap::new();
+        let mut legacy_node_ids: Vec<Vec<String>> = vec![Vec::new(); node_count];
         for n in &nodes {
             if let Some(legacy) = &n.legacy_id {
                 by_legacy_node_id.insert(legacy.clone(), n.id);
+                legacy_node_ids[n.id.0 as usize].push(legacy.clone());
             }
         }
         for e in &edges {
@@ -84,6 +84,7 @@ impl Graph {
             outgoing,
             incoming,
             by_legacy_node_id,
+            legacy_node_ids,
             by_legacy_edge_id,
         }
     }
@@ -122,6 +123,18 @@ impl Graph {
 
     pub fn node_by_legacy(&self, legacy_id: &str) -> Option<NodeId> {
         self.by_legacy_node_id.get(legacy_id).copied()
+    }
+
+    pub fn add_legacy_node_alias(&mut self, legacy_id: String, id: NodeId) {
+        self.by_legacy_node_id.insert(legacy_id.clone(), id);
+        let aliases = &mut self.legacy_node_ids[id.0 as usize];
+        if !aliases.contains(&legacy_id) {
+            aliases.push(legacy_id);
+        }
+    }
+
+    pub fn legacy_node_ids(&self, id: NodeId) -> &[String] {
+        &self.legacy_node_ids[id.0 as usize]
     }
 
     pub fn edge_by_legacy(&self, legacy_id: &str) -> Option<EdgeId> {

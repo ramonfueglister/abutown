@@ -4,7 +4,12 @@ use crate::ids::ChunkCoord;
 use crate::tile::TileKind;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum ChunkLod { Asleep, Warm, Active, Hot }
+pub enum ChunkLod {
+    Asleep,
+    Warm,
+    Active,
+    Hot,
+}
 
 #[derive(Message, Debug)]
 pub struct ChunkLoaded {
@@ -71,8 +76,15 @@ mod tests {
         let mut loaded = Messages::<ChunkLoaded>::default();
         let mut unloaded = Messages::<ChunkUnloaded>::default();
 
-        loaded.write(ChunkLoaded { entity: dummy_entity(), coord: ChunkCoord { x: 0, y: 0 }, initial_version: 1 });
-        unloaded.write(ChunkUnloaded { entity: dummy_entity(), coord: ChunkCoord { x: 5, y: 5 } });
+        loaded.write(ChunkLoaded {
+            entity: dummy_entity(),
+            coord: ChunkCoord { x: 0, y: 0 },
+            initial_version: 1,
+        });
+        unloaded.write(ChunkUnloaded {
+            entity: dummy_entity(),
+            coord: ChunkCoord { x: 5, y: 5 },
+        });
 
         let mut c1 = loaded.get_cursor();
         let mut c2 = unloaded.get_cursor();
@@ -102,6 +114,9 @@ mod tests {
         let second_count = cursor.read(&messages).count();
 
         assert_eq!(first_count, 1);
-        assert_eq!(second_count, 0, "cursor must not re-read already-consumed events");
+        assert_eq!(
+            second_count, 0,
+            "cursor must not re-read already-consumed events"
+        );
     }
 }

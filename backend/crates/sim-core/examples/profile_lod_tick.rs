@@ -34,7 +34,10 @@ fn very_big_network() -> CityNetwork {
             let x_start = (i / corridor_rows) as i32 * corridor_x_step;
             vec![
                 NetworkCoord { x: x_start, y },
-                NetworkCoord { x: x_start + corridor_len, y },
+                NetworkCoord {
+                    x: x_start + corridor_len,
+                    y,
+                },
             ]
         })
         .collect();
@@ -51,7 +54,10 @@ fn very_big_network() -> CityNetwork {
         version: 1,
         world_id: "lod-profile".to_string(),
         chunk_size: 32,
-        world_tiles: WorldTiles { width: world_w, height: world_h },
+        world_tiles: WorldTiles {
+            width: world_w,
+            height: world_h,
+        },
         arterial_paths: arterials,
         pedestrian_corridors: corridors,
     }
@@ -119,7 +125,9 @@ fn main() {
     // Fine-grained per-system schedules so we can see which individual
     // system inside Advance / Output / LOD dominates.
     let mut s_track = {
-        let mut s = Schedule::default(); s.add_systems(track_chunk_populations_system); s
+        let mut s = Schedule::default();
+        s.add_systems(track_chunk_populations_system);
+        s
     };
     let mut s_reclassify = {
         let mut s = Schedule::default();
@@ -127,44 +135,79 @@ fn main() {
         s
     };
     let mut s_walk = {
-        let mut s = Schedule::default(); s.add_systems(walk_advance_system); s
+        let mut s = Schedule::default();
+        s.add_systems(walk_advance_system);
+        s
     };
     let mut s_board = {
-        let mut s = Schedule::default(); s.add_systems(boarding_alighting_system); s
+        let mut s = Schedule::default();
+        s.add_systems(boarding_alighting_system);
+        s
     };
     let mut s_arrive = {
-        let mut s = Schedule::default(); s.add_systems(stop_arrival_system); s
+        let mut s = Schedule::default();
+        s.add_systems(stop_arrival_system);
+        s
     };
     let mut s_vehadv = {
-        let mut s = Schedule::default(); s.add_systems(vehicle_advance_system); s
+        let mut s = Schedule::default();
+        s.add_systems(vehicle_advance_system);
+        s
     };
     let mut s_warmflow = {
-        let mut s = Schedule::default(); s.add_systems(warm_chunk_flow_system); s
+        let mut s = Schedule::default();
+        s.add_systems(warm_chunk_flow_system);
+        s
     };
     let mut s_coord = {
-        let mut s = Schedule::default(); s.add_systems(compute_world_coord_system); s
+        let mut s = Schedule::default();
+        s.add_systems(compute_world_coord_system);
+        s
     };
     let mut s_dir = {
-        let mut s = Schedule::default(); s.add_systems(compute_direction_system); s
+        let mut s = Schedule::default();
+        s.add_systems(compute_direction_system);
+        s
     };
     let mut s_book = {
-        let mut s = Schedule::default(); s.add_systems(tick_increment_system); s
+        let mut s = Schedule::default();
+        s.add_systems(tick_increment_system);
+        s
     };
 
     let labels = [
-        "track_pop", "reclassify",
-        "walk_adv", "boarding", "stop_arrive", "veh_adv", "warm_flow",
-        "world_coord", "direction", "tick_inc",
+        "track_pop",
+        "reclassify",
+        "walk_adv",
+        "boarding",
+        "stop_arrive",
+        "veh_adv",
+        "warm_flow",
+        "world_coord",
+        "direction",
+        "tick_inc",
     ];
     let mut samples: [Vec<f64>; 10] = Default::default();
-    for v in samples.iter_mut() { v.reserve(N); }
+    for v in samples.iter_mut() {
+        v.reserve(N);
+    }
     for _ in 0..N {
         let w = &mut world;
         for (idx, sched) in [
-            &mut s_track, &mut s_reclassify,
-            &mut s_walk, &mut s_board, &mut s_arrive, &mut s_vehadv, &mut s_warmflow,
-            &mut s_coord, &mut s_dir, &mut s_book,
-        ].into_iter().enumerate() {
+            &mut s_track,
+            &mut s_reclassify,
+            &mut s_walk,
+            &mut s_board,
+            &mut s_arrive,
+            &mut s_vehadv,
+            &mut s_warmflow,
+            &mut s_coord,
+            &mut s_dir,
+            &mut s_book,
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let t = Instant::now();
             sched.run(w);
             samples[idx].push(t.elapsed().as_secs_f64() * 1000.0);
@@ -182,8 +225,14 @@ fn main() {
 
     // Entity count sanity-check.
     let w = &mut world;
-    let agent_count = w.query::<&sim_core::mobility::components::AgentMarker>().iter(w).count();
-    let vehicle_count = w.query::<&sim_core::mobility::components::VehicleMarker>().iter(w).count();
+    let agent_count = w
+        .query::<&sim_core::mobility::components::AgentMarker>()
+        .iter(w)
+        .count();
+    let vehicle_count = w
+        .query::<&sim_core::mobility::components::VehicleMarker>()
+        .iter(w)
+        .count();
     println!("\nfinal entity count: agents={agent_count} vehicles={vehicle_count}");
     let _ = &mut schedule; // silence unused warning when N=0
 }

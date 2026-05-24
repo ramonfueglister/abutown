@@ -18,7 +18,11 @@ pub struct SnapshotItem {
 #[derive(Debug, thiserror::Error)]
 pub enum MigrationError {
     #[error("no migration registered from version {from} to {to} for kind {kind}")]
-    NoMigration { kind: &'static str, from: u32, to: u32 },
+    NoMigration {
+        kind: &'static str,
+        from: u32,
+        to: u32,
+    },
     #[error("migration failure: {0}")]
     Other(String),
 }
@@ -27,7 +31,8 @@ pub trait SnapshotProvider: Send + Sync {
     fn name(&self) -> &'static str;
     fn schema_version(&self) -> u32;
     fn collect(&self, world: &World) -> Vec<SnapshotItem>;
-    fn migrate(&self, raw: SnapshotItem, from_version: u32) -> Result<SnapshotItem, MigrationError>;
+    fn migrate(&self, raw: SnapshotItem, from_version: u32)
+    -> Result<SnapshotItem, MigrationError>;
 }
 
 #[derive(Resource, Default)]
@@ -54,9 +59,15 @@ mod tests {
 
     struct DummyProvider;
     impl SnapshotProvider for DummyProvider {
-        fn name(&self) -> &'static str { "dummy" }
-        fn schema_version(&self) -> u32 { 1 }
-        fn collect(&self, _w: &World) -> Vec<SnapshotItem> { vec![] }
+        fn name(&self) -> &'static str {
+            "dummy"
+        }
+        fn schema_version(&self) -> u32 {
+            1
+        }
+        fn collect(&self, _w: &World) -> Vec<SnapshotItem> {
+            vec![]
+        }
         fn migrate(&self, raw: SnapshotItem, _from: u32) -> Result<SnapshotItem, MigrationError> {
             Ok(raw)
         }

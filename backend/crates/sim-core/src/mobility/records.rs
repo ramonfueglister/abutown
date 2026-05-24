@@ -1,8 +1,6 @@
-use std::collections::VecDeque;
-
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AgentId, LinkId, RouteId, StopId, VehicleId};
+use crate::ids::{AgentId, VehicleId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VehicleKind {
@@ -25,15 +23,15 @@ pub enum AgentMobilityState {
         activity_id: String,
     },
     Walking {
-        link_id: LinkId,
+        link_id: String,
         progress: f32,
     },
     WaitingAtStop {
-        stop_id: StopId,
+        stop_id: String,
     },
     Boarding {
         vehicle_id: VehicleId,
-        stop_id: StopId,
+        stop_id: String,
     },
     InVehicle {
         vehicle_id: VehicleId,
@@ -41,22 +39,22 @@ pub enum AgentMobilityState {
     },
     Alighting {
         vehicle_id: VehicleId,
-        stop_id: StopId,
+        stop_id: String,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlanStage {
     WalkToStop {
-        link_id: LinkId,
-        stop_id: StopId,
+        link_id: String,
+        stop_id: String,
     },
     RideToStop {
-        route_id: RouteId,
-        stop_id: StopId,
+        route_id: String,
+        stop_id: String,
     },
     WalkToActivity {
-        link_id: LinkId,
+        link_id: String,
         activity_id: String,
     },
     Activity {
@@ -97,7 +95,7 @@ impl AgentRecord {
 pub struct VehicleRecord {
     pub id: VehicleId,
     pub kind: VehicleKind,
-    pub route_id: RouteId,
+    pub route_id: String,
     pub link_index: usize,
     pub progress: f32,
     pub speed_per_tick: f32,
@@ -106,26 +104,20 @@ pub struct VehicleRecord {
     pub dwell_ticks_remaining: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StopRecord {
-    pub id: StopId,
-    pub route_id: RouteId,
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopMobilityRecord {
+    pub id: String,
+    pub route_id: String,
     pub link_index: usize,
     pub progress: f32,
-    pub waiting_agents: VecDeque<AgentId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RouteRecord {
-    pub id: RouteId,
-    pub links: Vec<LinkId>,
+    pub waiting_agents: Vec<AgentId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MobilitySnapshot {
     pub agents: Vec<AgentRecord>,
     pub vehicles: Vec<VehicleRecord>,
-    pub stops: Vec<StopRecord>,
+    pub stops: Vec<StopMobilityRecord>,
 }
 
 /// The per-chunk delta produced by `tick_mobility`. Mirrors

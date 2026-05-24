@@ -31,18 +31,18 @@ impl From<&AgentMobilityState> for AgentMobilityStateDto {
                 activity_id: activity_id.clone(),
             },
             AgentMobilityState::Walking { link_id, progress } => Self::Walking {
-                link_id: link_id.0.clone(),
+                link_id: link_id.clone(),
                 progress: *progress,
             },
             AgentMobilityState::WaitingAtStop { stop_id } => Self::WaitingAtStop {
-                stop_id: stop_id.0.clone(),
+                stop_id: stop_id.clone(),
             },
             AgentMobilityState::Boarding {
                 vehicle_id,
                 stop_id,
             } => Self::Boarding {
                 vehicle_id: EntityId(vehicle_id.0.clone()),
-                stop_id: stop_id.0.clone(),
+                stop_id: stop_id.clone(),
             },
             AgentMobilityState::InVehicle {
                 vehicle_id,
@@ -56,7 +56,7 @@ impl From<&AgentMobilityState> for AgentMobilityStateDto {
                 stop_id,
             } => Self::Alighting {
                 vehicle_id: EntityId(vehicle_id.0.clone()),
-                stop_id: stop_id.0.clone(),
+                stop_id: stop_id.clone(),
             },
         }
     }
@@ -69,7 +69,7 @@ impl From<&VehicleRecord> for VehicleMobilityDto {
         Self {
             id: EntityId(value.id.0.clone()),
             kind: value.kind.into(),
-            route_id: value.route_id.0.clone(),
+            route_id: value.route_id.clone(),
             link_index: value.link_index,
             progress: value.progress,
             capacity: value.capacity,
@@ -86,11 +86,11 @@ impl From<&VehicleRecord> for VehicleMobilityDto {
     }
 }
 
-impl From<&StopRecord> for StopMobilityDto {
-    fn from(value: &StopRecord) -> Self {
+impl From<&StopMobilityRecord> for StopMobilityDto {
+    fn from(value: &StopMobilityRecord) -> Self {
         Self {
-            id: value.id.0.clone(),
-            route_id: value.route_id.0.clone(),
+            id: value.id.clone(),
+            route_id: value.route_id.clone(),
             link_index: value.link_index,
             progress: value.progress,
             waiting_agents: value

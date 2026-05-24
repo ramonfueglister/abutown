@@ -1,4 +1,4 @@
-use sim_core::mobility::{MobilityPersistSnapshot, apply_into_world, api, extract_from_world};
+use sim_core::mobility::{MobilityPersistSnapshot, api, apply_into_world, extract_from_world};
 
 #[test]
 fn phase3_snapshot_round_trips_byte_for_byte() {

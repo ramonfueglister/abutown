@@ -1,27 +1,79 @@
-use sim_core::ids::{AgentId, ChunkCoord, LinkId};
+use bevy_ecs::world::World;
+use sim_core::ids::{AgentId, ChunkCoord};
 use sim_core::mobility::api;
 use sim_core::mobility::lod::{ACTIVITY_HYSTERESIS_TICKS, MobilityActivity};
 use sim_core::mobility::{AgentMobilityState, AgentRecord, PlanStage};
+use sim_core::routing::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
 
 // One classify pass past the hysteresis window so the new activity has settled.
 const SETTLE_TICKS: u32 = ACTIVITY_HYSTERESIS_TICKS as u32 + 10;
+
+fn install_footway_graph(world: &mut World, links: Vec<(String, Vec<(f32, f32)>)>) {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    for (link_id, polyline) in links {
+        assert!(
+            polyline.len() >= 2,
+            "test footway needs at least two points"
+        );
+        let from = NodeId(nodes.len() as u32);
+        nodes.push(Node {
+            id: from,
+            position: polyline[0],
+            kind: NodeKind::Intersection,
+            legacy_id: None,
+        });
+
+        let to = NodeId(nodes.len() as u32);
+        nodes.push(Node {
+            id: to,
+            position: *polyline.last().unwrap(),
+            kind: NodeKind::Intersection,
+            legacy_id: None,
+        });
+
+        let length = polyline
+            .windows(2)
+            .map(|pair| {
+                let dx = pair[1].0 - pair[0].0;
+                let dy = pair[1].1 - pair[0].1;
+                (dx * dx + dy * dy).sqrt()
+            })
+            .sum();
+
+        let edge_id = EdgeId(edges.len() as u32);
+        edges.push(Edge {
+            id: edge_id,
+            from,
+            to,
+            polyline,
+            length,
+            kind: EdgeKind::Footway,
+            speed_limit: 1.0,
+            capacity: 16,
+            legacy_id: Some(link_id),
+        });
+    }
+
+    world.insert_resource(Graph::new(nodes, edges));
+}
 
 #[test]
 fn chunk_cycles_through_hot_warm_active() {
     let (mut world, mut schedule) = api::empty_world_and_schedule();
     let chunk = ChunkCoord { x: 0, y: 0 };
 
-    api::set_link_polyline(
+    install_footway_graph(
         &mut world,
-        LinkId("l:0".into()),
-        vec![(5.0, 5.0), (15.0, 15.0)],
+        vec![("l:0".into(), vec![(5.0, 5.0), (15.0, 15.0)])],
     );
     api::spawn_agent_from_record(
         &mut world,
         AgentRecord::new(
             AgentId("a:1".into()),
             AgentMobilityState::Walking {
-                link_id: LinkId("l:0".into()),
+                link_id: "l:0".into(),
                 progress: 0.0,
             },
             vec![PlanStage::Activity {
@@ -77,14 +129,16 @@ fn chunk_cycles_through_hot_warm_active() {
 fn unsubscribed_populated_chunks_demote_on_first_classification() {
     let (mut world, mut schedule) = api::empty_world_and_schedule();
 
+    let links = (0..50_i32)
+        .map(|i| {
+            let x = i * 64 + 5;
+            (format!("l:{i}"), vec![(x as f32, 5.0), (x as f32, 25.0)])
+        })
+        .collect();
+    install_footway_graph(&mut world, links);
+
     for i in 0..50_i32 {
-        let link_id = LinkId(format!("l:{i}"));
-        let x = i * 64 + 5;
-        api::set_link_polyline(
-            &mut world,
-            link_id.clone(),
-            vec![(x as f32, 5.0), (x as f32, 25.0)],
-        );
+        let link_id = format!("l:{i}");
         api::spawn_agent_from_record(
             &mut world,
             AgentRecord::new(

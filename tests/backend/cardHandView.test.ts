@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(),
+}));
+
 import { resolveCardHandBaseUrl } from '../../src/cardHand/cardHandView';
 
 describe('card hand view backend URL', () => {

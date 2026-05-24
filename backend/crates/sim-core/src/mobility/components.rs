@@ -1,4 +1,4 @@
-use crate::ids::{AgentId, LinkId, VehicleId};
+use crate::ids::{AgentId, VehicleId};
 use crate::mobility::records::{AgentMobilityState, PlanStage, VehicleKind};
 use abutown_protocol::DirectionDto;
 use bevy_ecs::prelude::*;
@@ -57,7 +57,7 @@ pub struct VehicleKindComponent(pub VehicleKind);
 
 /// Vehicle position along its current transit line edge. Written by
 /// `vehicle_advance_system`. Phase 8b T10 migrated this from string-keyed
-/// `RouteId` + `link_index` to integer-keyed `LineId` + `edge_index`. The
+/// string route id + `link_index` to integer-keyed `LineId` + `edge_index`. The
 /// wire shape (`VehicleRecord`, `VehicleMobilityDto`) still uses the legacy
 /// `route_id: String` + `link_index: usize`; conversion happens at the
 /// emission boundary via `TransitLines::line(line_id).legacy_route_id`.
@@ -92,10 +92,9 @@ pub struct NearStop;
 /// Cached resolved polyline for the link this entity currently traverses.
 /// Refreshed by `update_link_polyline_cache_system` (runs first in Advance)
 /// when the entity's link changes. Eliminates the per-tick HashMap chain
-/// (RouteId → RouteRecord → LinkId → polyline) in compute_world_coord /
-/// compute_direction.
+/// route/link lookup in compute_world_coord / compute_direction.
 #[derive(Component, Debug, Clone)]
 pub struct CurrentLinkPolyline {
-    pub link_id: LinkId,
+    pub link_id: String,
     pub points: Arc<Vec<(f32, f32)>>,
 }

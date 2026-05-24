@@ -31,7 +31,10 @@ impl TransitLines {
                 by_legacy_route_id.insert(legacy.clone(), line.id);
             }
         }
-        Self { lines, by_legacy_route_id }
+        Self {
+            lines,
+            by_legacy_route_id,
+        }
     }
 
     pub fn line(&self, id: LineId) -> &TransitLine {
@@ -48,6 +51,10 @@ impl TransitLines {
 
     pub fn line_by_legacy(&self, legacy_id: &str) -> Option<LineId> {
         self.by_legacy_route_id.get(legacy_id).copied()
+    }
+
+    pub fn add_legacy_route_alias(&mut self, legacy_id: String, line_id: LineId) {
+        self.by_legacy_route_id.insert(legacy_id, line_id);
     }
 }
 

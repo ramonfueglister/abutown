@@ -8,7 +8,7 @@ use sim_core::{
     events::{InMemoryWorldEventStore, WorldEventStore, WorldEventStoreError},
     ids::ChunkCoord,
     mobility::{
-        MobilityPlugin, MobilityPersistSnapshot, api as mobility_api, apply_into_world,
+        MobilityPersistSnapshot, MobilityPlugin, api as mobility_api, apply_into_world,
         build_mobility_snapshot_dto, extract_from_world,
     },
     persistence::{
@@ -106,13 +106,17 @@ impl SimulationRuntime {
             .unwrap_or_else(|_| {
                 sim_core::city_network::CityNetwork::empty_for_world("abutown-main")
             });
+        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
+        let seeded_walks = sim_core::mobility::seed::legacy_seeded_walks(&city_network);
         world.insert_resource(city_network);
 
         CorePlugin::default().install(&mut world, &mut schedule);
 
-        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
-        sim_core::routing::RoutingPlugin { seeded_stops }
-            .install(&mut world, &mut schedule);
+        sim_core::routing::RoutingPlugin {
+            seeded_stops,
+            seeded_walks,
+        }
+        .install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -121,8 +125,7 @@ impl SimulationRuntime {
         .install(&mut world, &mut schedule);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
-            let tiles =
-                vec![sim_core::tile::TileRecord::default(); (CHUNK_SIZE as usize).pow(2)];
+            let tiles = vec![sim_core::tile::TileRecord::default(); (CHUNK_SIZE as usize).pow(2)];
             let seed_index = (offset as u16) * 17;
             let seed_kind = match offset {
                 0 => TileKind::Road,
@@ -136,12 +139,7 @@ impl SimulationRuntime {
             };
 
             sim_core::world::systems::spawn_chunk_entity(
-                &mut world,
-                coord,
-                CHUNK_SIZE,
-                tiles,
-                0,
-                activity,
+                &mut world, coord, CHUNK_SIZE, tiles, 0, activity,
             );
             apply_set_tile_kind_ecs(&mut world, coord, seed_index, seed_kind, 0)
                 .expect("seed mutation should apply for a freshly-spawned chunk entity");
@@ -174,7 +172,10 @@ impl SimulationRuntime {
     /// entities already in the runtime are preserved.
     pub fn set_mobility_for_test(
         &mut self,
-        seeded: (sim_core::bevy_ecs::world::World, sim_core::bevy_ecs::schedule::Schedule),
+        seeded: (
+            sim_core::bevy_ecs::world::World,
+            sim_core::bevy_ecs::schedule::Schedule,
+        ),
     ) {
         let (seeded_world, _schedule) = seeded;
         let snap = extract_from_world(&seeded_world);
@@ -222,14 +223,19 @@ impl SimulationRuntime {
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
 
+        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
+        let seeded_walks = sim_core::mobility::seed::legacy_seeded_walks(network);
+
         // Insert city network as resource before plugins run.
         world.insert_resource(network.clone());
 
         CorePlugin::default().install(&mut world, &mut schedule);
 
-        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
-        sim_core::routing::RoutingPlugin { seeded_stops }
-            .install(&mut world, &mut schedule);
+        sim_core::routing::RoutingPlugin {
+            seeded_stops,
+            seeded_walks,
+        }
+        .install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -246,13 +252,13 @@ impl SimulationRuntime {
         {
             Some((_tick, snap)) => snap,
             None => {
-                let (seeded_world, _) =
-                    if network.arterial_paths.is_empty() && network.pedestrian_corridors.is_empty()
-                    {
-                        sim_core::mobility::seed::tiny_world()
-                    } else {
-                        sim_core::mobility::seed::from_network(network, SEED_DENSITY)
-                    };
+                let (seeded_world, _) = if network.arterial_paths.is_empty()
+                    && network.pedestrian_corridors.is_empty()
+                {
+                    sim_core::mobility::seed::tiny_world()
+                } else {
+                    sim_core::mobility::seed::from_network(network, SEED_DENSITY)
+                };
                 extract_from_world(&seeded_world)
             }
         };
@@ -369,7 +375,11 @@ impl SimulationRuntime {
             protocol_version: PROTOCOL_VERSION,
             world_id: self.world_id.clone(),
             chunk_size: self.chunk_size,
-            loaded_chunks: self.loaded_coords().into_iter().map(ChunkCoordDto::from).collect(),
+            loaded_chunks: self
+                .loaded_coords()
+                .into_iter()
+                .map(ChunkCoordDto::from)
+                .collect(),
             tick_period_ms: TICK_PERIOD_MS,
         }
     }
@@ -501,9 +511,7 @@ impl SimulationRuntime {
     /// returned here and dispatches by `key.kind` to the matching store.
     /// Items are already serialized — the storage layer deserializes only
     /// when it needs to inspect the DTO shape.
-    pub fn collect_provider_items(
-        &self,
-    ) -> Vec<sim_core::world::persistence::SnapshotItem> {
+    pub fn collect_provider_items(&self) -> Vec<sim_core::world::persistence::SnapshotItem> {
         let providers = self
             .world
             .resource::<sim_core::world::persistence::SnapshotProviders>();
@@ -695,36 +703,33 @@ impl SimulationRuntime {
         }
 
         self.event_count += 1;
-        let mutation_result = apply_set_tile_kind_ecs(
-            &mut self.world,
-            coord,
-            command.local_index,
-            kind,
-            self.tick,
-        )
-        .map_err(|error| match error {
-            TileMutationError::ChunkNotLoaded { coord } => CommandRejection {
-                world_id: Some(self.world_id.clone()),
-                command_id: Some(command.command_id.clone()),
-                code: "chunk_not_loaded",
-                message: format!("chunk {}:{} is not loaded", coord.x, coord.y),
-            },
-            TileMutationError::TileOutOfBounds { index, tile_count } => CommandRejection {
-                world_id: Some(self.world_id.clone()),
-                command_id: Some(command.command_id.clone()),
-                code: "tile_out_of_bounds",
-                message: format!("tile index {index} is outside chunk tile count {tile_count}"),
-            },
-            TileMutationError::NoStateChange { coord, local_index, .. } => CommandRejection {
-                world_id: Some(self.world_id.clone()),
-                command_id: Some(command.command_id.clone()),
-                code: "no_state_change",
-                message: format!(
-                    "tile {local_index} in chunk {}:{} already has the requested kind",
-                    coord.x, coord.y
-                ),
-            },
-        })?;
+        let mutation_result =
+            apply_set_tile_kind_ecs(&mut self.world, coord, command.local_index, kind, self.tick)
+                .map_err(|error| match error {
+                TileMutationError::ChunkNotLoaded { coord } => CommandRejection {
+                    world_id: Some(self.world_id.clone()),
+                    command_id: Some(command.command_id.clone()),
+                    code: "chunk_not_loaded",
+                    message: format!("chunk {}:{} is not loaded", coord.x, coord.y),
+                },
+                TileMutationError::TileOutOfBounds { index, tile_count } => CommandRejection {
+                    world_id: Some(self.world_id.clone()),
+                    command_id: Some(command.command_id.clone()),
+                    code: "tile_out_of_bounds",
+                    message: format!("tile index {index} is outside chunk tile count {tile_count}"),
+                },
+                TileMutationError::NoStateChange {
+                    coord, local_index, ..
+                } => CommandRejection {
+                    world_id: Some(self.world_id.clone()),
+                    command_id: Some(command.command_id.clone()),
+                    code: "no_state_change",
+                    message: format!(
+                        "tile {local_index} in chunk {}:{} already has the requested kind",
+                        coord.x, coord.y
+                    ),
+                },
+            })?;
         debug_assert_eq!(mutation_result.new_version, preview_version);
 
         Ok(self.build_accepted(command.command_id, event))
@@ -756,7 +761,11 @@ impl SimulationRuntime {
                 .get(&coord)
                 .copied()
                 .expect("pulse chunk should be loaded");
-            world.get::<Tiles>(entity).expect("Tiles on chunk entity").0.len() as u64
+            world
+                .get::<Tiles>(entity)
+                .expect("Tiles on chunk entity")
+                .0
+                .len() as u64
         };
         let local_index = ((self.tick * PULSE_STRIDE) % tile_count) as u16;
 
@@ -805,6 +814,29 @@ mod tests {
     }
 
     #[test]
+    fn runtime_has_populated_routing_graph() {
+        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/city/zurich-network.json");
+        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .expect("zurich fixture network must load");
+        let runtime = SimulationRuntime::new_from_network(&network);
+        let world = &runtime.world;
+        let graph = world.resource::<sim_core::routing::Graph>();
+        assert!(
+            graph.node_count() > 0,
+            "graph must have nodes after hydration"
+        );
+        assert!(
+            graph.edge_count() > 0,
+            "graph must have edges after hydration"
+        );
+        let transit = world.resource::<sim_core::routing::TransitLines>();
+        assert!(transit.count() > 0, "must have at least one transit line");
+        let spatial = world.resource::<sim_core::routing::NodeSpatialIndex>();
+        assert_eq!(spatial.size(), graph.node_count());
+    }
+
+    #[test]
     fn hydration_spawns_chunk_entity_per_loaded_chunk() {
         let runtime = SimulationRuntime::new();
         let world = &runtime.world;
@@ -816,7 +848,10 @@ mod tests {
             sim_core::ids::ChunkCoord { x: 5, y: 4 },
             sim_core::ids::ChunkCoord { x: 4, y: 5 },
         ] {
-            assert!(by_coord.0.contains_key(&coord), "missing chunk entity for {coord:?}");
+            assert!(
+                by_coord.0.contains_key(&coord),
+                "missing chunk entity for {coord:?}"
+            );
         }
     }
     use sim_core::persistence::{
@@ -931,14 +966,8 @@ mod tests {
         let items = runtime.collect_provider_items();
         // Expect at least one chunk item (for the dirty chunk) and exactly
         // one mobility item.
-        let chunk_items: Vec<_> = items
-            .iter()
-            .filter(|i| i.key.kind == "chunk")
-            .collect();
-        let mobility_items: Vec<_> = items
-            .iter()
-            .filter(|i| i.key.kind == "mobility")
-            .collect();
+        let chunk_items: Vec<_> = items.iter().filter(|i| i.key.kind == "chunk").collect();
+        let mobility_items: Vec<_> = items.iter().filter(|i| i.key.kind == "mobility").collect();
         assert!(
             !chunk_items.is_empty(),
             "expected at least one chunk SnapshotItem from provider path",
@@ -953,9 +982,8 @@ mod tests {
         // same code path as the persist loop in `app.rs`.
         let mut store = InMemoryChunkSnapshotStore::default();
         for item in chunk_items {
-            let dto: abutown_protocol::ChunkSnapshotDto =
-                serde_json::from_slice(&item.payload)
-                    .expect("provider emits valid ChunkSnapshotDto JSON");
+            let dto: abutown_protocol::ChunkSnapshotDto = serde_json::from_slice(&item.payload)
+                .expect("provider emits valid ChunkSnapshotDto JSON");
             ChunkSnapshotStore::write_snapshot(&mut store, dto)
                 .await
                 .expect("in-memory store write");

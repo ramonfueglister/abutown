@@ -55,7 +55,10 @@ impl CityNetwork {
             version: 1,
             world_id: world_id.to_string(),
             chunk_size: 32,
-            world_tiles: WorldTiles { width: 256, height: 256 },
+            world_tiles: WorldTiles {
+                width: 256,
+                height: 256,
+            },
             arterial_paths: Vec::new(),
             pedestrian_corridors: Vec::new(),
         }

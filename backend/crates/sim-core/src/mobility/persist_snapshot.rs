@@ -16,15 +16,41 @@
 //!   flow_cells, chunk_activities }
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
+use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AgentId, ChunkCoord, LinkId, RouteId, StopId, VehicleId};
+use crate::ids::{AgentId, ChunkCoord, VehicleId};
 use crate::mobility::lod::{FlowCell, MobilityActivity};
-use crate::mobility::records::{AgentRecord, RouteRecord, StopRecord, VehicleRecord};
-use crate::mobility::resources::{FlowCells, LinkPolylines, Routes, Stops, Tick};
+use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage, VehicleRecord};
+use crate::mobility::resources::{FlowCells, Tick};
+use crate::routing::{
+    Edge, EdgeId, EdgeKind, Graph, LineId, Node, NodeId, NodeKind, NodeSpatialIndex, TransitLine,
+    TransitLines, WaitingAgents,
+};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PersistedStop {
+    pub id: String,
+    pub route_id: String,
+    pub link_index: usize,
+    pub progress: f32,
+    pub waiting_agents: VecDeque<AgentId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PersistedRoute {
+    pub id: String,
+    pub links: Vec<String>,
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+struct PersistedStopMetadata(HashMap<String, PersistedStop>);
+
+#[derive(Resource, Debug, Clone, Default)]
+struct PersistedLinkPolylineMetadata(HashMap<String, Vec<(f32, f32)>>);
 
 /// Serializable snapshot of mobility-world state. The JSON shape matches the
 /// legacy `MobilityWorld` serde representation exactly.
@@ -33,9 +59,9 @@ pub struct MobilityPersistSnapshot {
     pub tick: u64,
     pub agents: HashMap<AgentId, AgentRecord>,
     pub vehicles: HashMap<VehicleId, VehicleRecord>,
-    pub stops: HashMap<StopId, StopRecord>,
-    pub routes: HashMap<RouteId, RouteRecord>,
-    pub link_polylines: HashMap<LinkId, Vec<(f32, f32)>>,
+    pub stops: HashMap<String, PersistedStop>,
+    pub routes: HashMap<String, PersistedRoute>,
+    pub link_polylines: HashMap<String, Vec<(f32, f32)>>,
     pub flow_cells: HashMap<ChunkCoord, FlowCell>,
     pub chunk_activities: HashMap<ChunkCoord, MobilityActivity>,
 }
@@ -47,9 +73,9 @@ impl Serialize for MobilityPersistSnapshot {
             tick: u64,
             agents: &'a HashMap<AgentId, AgentRecord>,
             vehicles: &'a HashMap<VehicleId, VehicleRecord>,
-            stops: &'a HashMap<StopId, StopRecord>,
-            routes: &'a HashMap<RouteId, RouteRecord>,
-            link_polylines: &'a HashMap<LinkId, Vec<(f32, f32)>>,
+            stops: &'a HashMap<String, PersistedStop>,
+            routes: &'a HashMap<String, PersistedRoute>,
+            link_polylines: &'a HashMap<String, Vec<(f32, f32)>>,
             flow_cells: Vec<(ChunkCoord, &'a FlowCell)>,
             chunk_activities: Vec<(ChunkCoord, MobilityActivity)>,
         }
@@ -85,9 +111,9 @@ impl<'de> Deserialize<'de> for MobilityPersistSnapshot {
             tick: u64,
             agents: HashMap<AgentId, AgentRecord>,
             vehicles: HashMap<VehicleId, VehicleRecord>,
-            stops: HashMap<StopId, StopRecord>,
-            routes: HashMap<RouteId, RouteRecord>,
-            link_polylines: HashMap<LinkId, Vec<(f32, f32)>>,
+            stops: HashMap<String, PersistedStop>,
+            routes: HashMap<String, PersistedRoute>,
+            link_polylines: HashMap<String, Vec<(f32, f32)>>,
             #[serde(default)]
             flow_cells: Vec<(ChunkCoord, FlowCell)>,
             #[serde(default)]
@@ -127,6 +153,9 @@ pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
         .into_iter()
         .map(|rec| (rec.id.clone(), rec))
         .collect();
+    let routes = graph_routes_for_persist(world);
+    let stops = cached_or_graph_stops_for_persist(world);
+    let link_polylines = cached_or_graph_link_polylines_for_persist(world, &routes, &agents_map);
 
     let chunk_activities: HashMap<ChunkCoord, MobilityActivity> = {
         let by_coord = world.resource::<crate::world::resources::ChunksByCoord>();
@@ -157,55 +186,394 @@ pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
         tick: world.resource::<Tick>().0,
         agents: agents_map,
         vehicles: vehicles_map,
-        stops: world.resource::<Stops>().0.clone(),
-        routes: world.resource::<Routes>().0.clone(),
-        link_polylines: world.resource::<LinkPolylines>().0.clone(),
+        stops,
+        routes,
+        link_polylines,
         flow_cells: world.resource::<FlowCells>().0.clone(),
         chunk_activities,
     }
 }
 
+fn graph_routes_for_persist(world: &World) -> HashMap<String, PersistedRoute> {
+    let graph = world.resource::<Graph>();
+    let transit_lines = world.resource::<TransitLines>();
+    transit_lines
+        .iter()
+        .map(|line| {
+            let route_id = line
+                .legacy_route_id
+                .clone()
+                .unwrap_or_else(|| line.name.clone());
+            let links = line
+                .edges
+                .iter()
+                .map(|edge_id| {
+                    graph
+                        .edge(*edge_id)
+                        .legacy_id
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "extract_from_world: route {} edge {:?} has no legacy link id",
+                                route_id, edge_id
+                            )
+                        })
+                })
+                .collect();
+            (
+                route_id.clone(),
+                PersistedRoute {
+                    id: route_id,
+                    links,
+                },
+            )
+        })
+        .collect()
+}
+
+fn cached_or_graph_stops_for_persist(world: &World) -> HashMap<String, PersistedStop> {
+    if let Some(metadata) = world.get_resource::<PersistedStopMetadata>() {
+        let graph = world.resource::<Graph>();
+        let waiting = world.resource::<WaitingAgents>();
+        return metadata
+            .0
+            .iter()
+            .map(|(id, stop)| {
+                let mut persisted = stop.clone();
+                if let Some(node_id) = graph.node_by_legacy(id) {
+                    persisted.waiting_agents = waiting
+                        .queue(node_id)
+                        .map(|queue| queue.iter().cloned().collect())
+                        .unwrap_or_default();
+                }
+                (id.clone(), persisted)
+            })
+            .collect();
+    }
+
+    crate::mobility::api::stops(world)
+        .into_iter()
+        .map(|stop| {
+            let persisted = PersistedStop {
+                id: stop.id.clone(),
+                route_id: stop.route_id,
+                link_index: stop.link_index,
+                progress: stop.progress,
+                waiting_agents: stop.waiting_agents.into_iter().collect(),
+            };
+            (persisted.id.clone(), persisted)
+        })
+        .collect()
+}
+
+fn cached_or_graph_link_polylines_for_persist(
+    world: &World,
+    routes: &HashMap<String, PersistedRoute>,
+    agents: &HashMap<AgentId, AgentRecord>,
+) -> HashMap<String, Vec<(f32, f32)>> {
+    if let Some(metadata) = world.get_resource::<PersistedLinkPolylineMetadata>() {
+        return metadata.0.clone();
+    }
+
+    let graph = world.resource::<Graph>();
+    let mut link_ids = Vec::new();
+    for route in routes.values() {
+        link_ids.extend(route.links.iter().cloned());
+    }
+    for agent in agents.values() {
+        if let AgentMobilityState::Walking { link_id, .. } = &agent.state {
+            link_ids.push(link_id.clone());
+        }
+        for stage in &agent.plan {
+            match stage {
+                PlanStage::WalkToStop { link_id, .. }
+                | PlanStage::WalkToActivity { link_id, .. } => link_ids.push(link_id.clone()),
+                _ => {}
+            }
+        }
+    }
+    link_ids.sort();
+    link_ids.dedup();
+
+    link_ids
+        .into_iter()
+        .map(|link_id| {
+            let edge_id = graph.edge_by_legacy(&link_id).unwrap_or_else(|| {
+                panic!(
+                    "extract_from_world: referenced link {} is missing from routing graph",
+                    link_id
+                )
+            });
+            (link_id, graph.edge(edge_id).polyline.clone())
+        })
+        .collect()
+}
+
+fn existing_graph_polyline(world: &World, link_id: &str) -> Option<Vec<(f32, f32)>> {
+    let graph = world.resource::<Graph>();
+    graph
+        .edge_by_legacy(link_id)
+        .map(|edge_id| graph.edge(edge_id).polyline.clone())
+}
+
+fn polyline_length(polyline: &[(f32, f32)]) -> f32 {
+    polyline
+        .windows(2)
+        .map(|pair| {
+            let dx = pair[1].0 - pair[0].0;
+            let dy = pair[1].1 - pair[0].1;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .sum()
+}
+
+fn legacy_seed_polyline(link_id: &str) -> Option<Vec<(f32, f32)>> {
+    match link_id {
+        "link:horizontal:main" => Some(vec![(144.0, 144.0), (176.0, 144.0)]),
+        "link:vertical:main" => Some(vec![(144.0, 144.0), (144.0, 176.0)]),
+        "link:walk:default" => Some(vec![(144.0, 144.0), (176.0, 144.0)]),
+        _ => None,
+    }
+}
+
+fn resolve_snapshot_polyline(
+    world: &World,
+    link_id: &str,
+    polylines: &HashMap<String, Vec<(f32, f32)>>,
+) -> Vec<(f32, f32)> {
+    polylines
+        .get(link_id)
+        .cloned()
+        .or_else(|| existing_graph_polyline(world, link_id))
+        .or_else(|| legacy_seed_polyline(link_id))
+        .unwrap_or_else(|| {
+            panic!(
+                "apply_into_world: no graph polyline available for persisted link {}",
+                link_id
+            )
+        })
+}
+
+fn push_edge(
+    nodes: &mut Vec<Node>,
+    edges: &mut Vec<Edge>,
+    link_id: String,
+    polyline: Vec<(f32, f32)>,
+    kind: EdgeKind,
+) -> EdgeId {
+    assert!(
+        polyline.len() >= 2,
+        "apply_into_world: persisted link {} needs at least two points",
+        link_id
+    );
+
+    let from = NodeId(nodes.len() as u32);
+    nodes.push(Node {
+        id: from,
+        position: polyline[0],
+        kind: NodeKind::Intersection,
+        legacy_id: None,
+    });
+
+    let to = NodeId(nodes.len() as u32);
+    nodes.push(Node {
+        id: to,
+        position: *polyline.last().expect("polyline length checked"),
+        kind: NodeKind::Intersection,
+        legacy_id: None,
+    });
+
+    let edge_id = EdgeId(edges.len() as u32);
+    edges.push(Edge {
+        id: edge_id,
+        from,
+        to,
+        length: polyline_length(&polyline),
+        polyline,
+        kind,
+        speed_limit: 1.0,
+        capacity: 16,
+        legacy_id: Some(link_id),
+    });
+    edge_id
+}
+
+fn persisted_walking_links(snap: &MobilityPersistSnapshot) -> Vec<String> {
+    let mut links = Vec::new();
+    for agent in snap.agents.values() {
+        if let AgentMobilityState::Walking { link_id, .. } = &agent.state {
+            links.push(link_id.clone());
+        }
+        for stage in &agent.plan {
+            match stage {
+                PlanStage::WalkToStop { link_id, .. }
+                | PlanStage::WalkToActivity { link_id, .. } => links.push(link_id.clone()),
+                _ => {}
+            }
+        }
+    }
+    links.sort();
+    links.dedup();
+    links
+}
+
+fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut edge_by_link: HashMap<String, EdgeId> = HashMap::new();
+
+    let mut routes: Vec<_> = snap.routes.values().collect();
+    routes.sort_by(|a, b| a.id.cmp(&b.id));
+    for route in &routes {
+        for link_id in &route.links {
+            if edge_by_link.contains_key(link_id) {
+                continue;
+            }
+            let polyline = resolve_snapshot_polyline(world, link_id, &snap.link_polylines);
+            let edge_id = push_edge(
+                &mut nodes,
+                &mut edges,
+                link_id.clone(),
+                polyline,
+                EdgeKind::TramTrack,
+            );
+            edge_by_link.insert(link_id.clone(), edge_id);
+        }
+    }
+
+    for link_id in persisted_walking_links(snap) {
+        if edge_by_link.contains_key(&link_id) {
+            continue;
+        }
+        let polyline = resolve_snapshot_polyline(world, &link_id, &snap.link_polylines);
+        let edge_id = push_edge(
+            &mut nodes,
+            &mut edges,
+            link_id.clone(),
+            polyline,
+            EdgeKind::Footway,
+        );
+        edge_by_link.insert(link_id, edge_id);
+    }
+
+    let mut waiting = WaitingAgents::default();
+    let mut stop_aliases: Vec<(String, NodeId)> = Vec::new();
+    let mut stops_by_route: HashMap<String, Vec<NodeId>> = HashMap::new();
+    let mut stops: Vec<_> = snap.stops.values().collect();
+    stops.sort_by(|a, b| a.id.cmp(&b.id));
+    for stop in stops {
+        let route = snap.routes.get(&stop.route_id).unwrap_or_else(|| {
+            panic!(
+                "apply_into_world: persisted stop {} references unknown route {}",
+                stop.id, stop.route_id
+            )
+        });
+        let link_id = route.links.get(stop.link_index).unwrap_or_else(|| {
+            panic!(
+                "apply_into_world: persisted stop {} references missing link index {} on route {}",
+                stop.id, stop.link_index, stop.route_id
+            )
+        });
+        let edge_id = *edge_by_link.get(link_id).unwrap_or_else(|| {
+            panic!(
+                "apply_into_world: persisted stop {} references unbuilt link {}",
+                stop.id, link_id
+            )
+        });
+        let edge = &edges[edge_id.0 as usize];
+        let node_id = if stop.progress <= 0.0 {
+            edge.from
+        } else if stop.progress >= 1.0 {
+            edge.to
+        } else {
+            let position = crate::mobility_geometry::world_coord_at_progress_slice(
+                &edge.polyline,
+                stop.progress,
+            );
+            let id = NodeId(nodes.len() as u32);
+            nodes.push(Node {
+                id,
+                position,
+                kind: NodeKind::TransitStop,
+                legacy_id: None,
+            });
+            id
+        };
+
+        let node = &mut nodes[node_id.0 as usize];
+        node.kind = NodeKind::TransitStop;
+        if node.legacy_id.is_none() {
+            node.legacy_id = Some(stop.id.clone());
+        } else {
+            stop_aliases.push((stop.id.clone(), node_id));
+        }
+        stops_by_route
+            .entry(stop.route_id.clone())
+            .or_default()
+            .push(node_id);
+        for agent_id in &stop.waiting_agents {
+            waiting.enqueue(node_id, agent_id.clone());
+        }
+    }
+
+    let mut graph = Graph::new(nodes, edges);
+    for (legacy_id, node_id) in stop_aliases {
+        graph.add_legacy_node_alias(legacy_id, node_id);
+    }
+
+    let lines = routes
+        .into_iter()
+        .enumerate()
+        .map(|(index, route)| TransitLine {
+            id: LineId(index as u32),
+            name: route.id.clone(),
+            edges: route
+                .links
+                .iter()
+                .map(|link_id| {
+                    *edge_by_link.get(link_id).unwrap_or_else(|| {
+                        panic!(
+                            "apply_into_world: persisted route {} references unbuilt link {}",
+                            route.id, link_id
+                        )
+                    })
+                })
+                .collect(),
+            stops: stops_by_route.remove(&route.id).unwrap_or_default(),
+            legacy_route_id: Some(route.id.clone()),
+        })
+        .collect();
+
+    let spatial_index = NodeSpatialIndex::from_nodes(graph.nodes());
+    world.insert_resource(graph);
+    world.insert_resource(spatial_index);
+    world.insert_resource(TransitLines::new(lines));
+    world.insert_resource(waiting);
+}
+
 /// Hydrate a freshly-installed mobility World from a persist snapshot.
 ///
-/// Registers polylines + stops + routes BEFORE spawning agents/vehicles so
-/// the spawn helpers can resolve a real Position from the start (post-Phase
-/// 7b — see commit 49f2f25 "compute Position at spawn so LOD classifies into
-/// real chunk").
+/// Registers graph data before spawning agents/vehicles so the spawn helpers
+/// resolve real positions from the routing graph.
 pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
     world.resource_mut::<Tick>().0 = snap.tick;
-    {
-        let mut links_res = world.resource_mut::<LinkPolylines>();
-        for (id, points) in snap.link_polylines {
-            links_res.0.insert(id, points);
-        }
+    install_snapshot_routing(world, &snap);
+    world.insert_resource(PersistedStopMetadata(snap.stops.clone()));
+    world.insert_resource(PersistedLinkPolylineMetadata(snap.link_polylines.clone()));
+    for vehicle in snap.vehicles.values() {
+        crate::mobility::api::spawn_vehicle_from_record(world, vehicle.clone());
     }
-    {
-        // Phase 8b T10: route through add_route so LegacyTransitShim stays
-        // in sync — it assigns the LineId that spawn_vehicle_from_record
-        // expects to find when restoring vehicles below.
-        for (_id, route) in snap.routes {
-            crate::mobility::api::add_route(world, route);
-        }
+    for agent in snap.agents.values() {
+        crate::mobility::api::spawn_agent_from_record(world, agent.clone());
     }
-    {
-        let mut stops_res = world.resource_mut::<Stops>();
-        for (id, stop) in snap.stops {
-            stops_res.0.insert(id, stop);
-        }
-    }
-    for (_, agent) in snap.agents {
-        crate::mobility::api::spawn_agent_from_record(world, agent);
-    }
-    for (_, vehicle) in snap.vehicles {
-        crate::mobility::api::spawn_vehicle_from_record(world, vehicle);
-    }
-    world.resource_mut::<FlowCells>().0 = snap.flow_cells;
+    world.resource_mut::<FlowCells>().0 = snap.flow_cells.clone();
     // Re-apply chunk activities into chunk-entity LOD markers. If a coord
     // has no chunk entity yet (round-trip test path: only mobility plugins
     // installed, no chunks loaded by the persistence layer), spawn an
     // empty-tiles chunk entity at that coord so the marker has somewhere
     // to live. Production hydration always installs CorePlugin first.
-    for (coord, activity) in snap.chunk_activities {
-        crate::mobility::api::seed_chunk_activity(world, coord, activity);
+    for (coord, activity) in &snap.chunk_activities {
+        crate::mobility::api::seed_chunk_activity(world, *coord, *activity);
     }
 }

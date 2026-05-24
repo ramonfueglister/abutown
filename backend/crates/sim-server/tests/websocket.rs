@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use abutown_protocol::v1 as w;
 use abutown_protocol::PROTOCOL_VERSION;
+use abutown_protocol::v1 as w;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures_util::{SinkExt, StreamExt};

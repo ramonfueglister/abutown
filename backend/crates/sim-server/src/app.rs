@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use abutown_protocol::v1 as w;
 use abutown_protocol::ChunkSnapshotDto;
+use abutown_protocol::v1 as w;
 use axum::{
     Json, Router,
     extract::{
@@ -93,11 +93,8 @@ impl AppState {
         auth: AuthVerifier,
     ) -> Self {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
-        let initial_view = build_read_view_from_runtime(
-            &runtime,
-            &std::collections::HashMap::new(),
-            0,
-        );
+        let initial_view =
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0);
         let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
         let view = Arc::new(arc_swap::ArcSwap::from_pointee(initial_view));
         let chunk_channels: Arc<DashMap<_, _>> = Arc::new(DashMap::new());
@@ -396,8 +393,8 @@ where
         let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024)
             .await
             .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-        let msg = M::decode(bytes.as_ref())
-            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        let msg =
+            M::decode(bytes.as_ref()).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
         Ok(ProtoBody(msg))
     }
 }
@@ -453,10 +450,7 @@ fn card_hand_error(error: CardHandError) -> Response {
         .into_response()
 }
 
-async fn chunk(
-    State(state): State<AppState>,
-    Path((x, y)): Path<(i32, i32)>,
-) -> Response {
+async fn chunk(State(state): State<AppState>, Path((x, y)): Path<(i32, i32)>) -> Response {
     let coord = sim_core::ids::ChunkCoord { x, y };
     match state.view().load().chunk_snapshots.get(&coord).cloned() {
         Some(snap) => proto_response(snap),
@@ -683,10 +677,9 @@ fn chunk_state_to_proto(s: abutown_protocol::ChunkStateDto) -> w::ChunkState {
 fn agent_dto_to_proto(dto: abutown_protocol::AgentMobilityDto) -> w::AgentMobility {
     use abutown_protocol::AgentMobilityStateDto as Legacy;
     let state = match dto.state {
-        Legacy::Walking { link_id, progress } => w::agent_state::State::Walking(w::Walking {
-            link_id,
-            progress,
-        }),
+        Legacy::Walking { link_id, progress } => {
+            w::agent_state::State::Walking(w::Walking { link_id, progress })
+        }
         Legacy::WaitingAtStop { stop_id } => {
             w::agent_state::State::WaitingAtStop(w::WaitingAtStop { stop_id })
         }
@@ -808,7 +801,9 @@ fn chunk_snapshot_dto_to_proto(c: &abutown_protocol::ChunkSnapshotDto) -> w::Chu
     }
 }
 
-fn mobility_snapshot_dto_to_proto(s: &abutown_protocol::MobilitySnapshotDto) -> w::MobilitySnapshot {
+fn mobility_snapshot_dto_to_proto(
+    s: &abutown_protocol::MobilitySnapshotDto,
+) -> w::MobilitySnapshot {
     w::MobilitySnapshot {
         protocol_version: u32::from(s.protocol_version),
         world_id: s.world_id.0.clone(),
@@ -922,8 +917,10 @@ async fn apply_mutation_owned(
             let snapshots: Vec<w::MobilityChunkSnapshot> = added
                 .iter()
                 .map(|coord| {
-                    let snapshot =
-                        sim_core::mobility::api::build_mobility_chunk_snapshot(runtime.mobility(), *coord);
+                    let snapshot = sim_core::mobility::api::build_mobility_chunk_snapshot(
+                        runtime.mobility(),
+                        *coord,
+                    );
                     chunk_snapshot_to_dto(&snapshot, runtime.mobility(), &world_id, tick)
                 })
                 .collect();
@@ -940,17 +937,13 @@ async fn apply_mutation_owned(
             // lower-level helpers (tests still use them) but are no longer
             // the persist call site.
             let items = runtime.collect_provider_items();
-            let mut chunk_snapshots: Vec<abutown_protocol::ChunkSnapshotDto> =
-                Vec::new();
-            let mut mobility_world: Option<
-                sim_core::mobility::MobilityPersistSnapshot,
-            > = None;
+            let mut chunk_snapshots: Vec<abutown_protocol::ChunkSnapshotDto> = Vec::new();
+            let mut mobility_world: Option<sim_core::mobility::MobilityPersistSnapshot> = None;
             for item in items {
                 match item.key.kind {
-                    "chunk" => match serde_json::from_slice::<
-                        abutown_protocol::ChunkSnapshotDto,
-                    >(&item.payload)
-                    {
+                    "chunk" => match serde_json::from_slice::<abutown_protocol::ChunkSnapshotDto>(
+                        &item.payload,
+                    ) {
                         Ok(dto) => chunk_snapshots.push(dto),
                         Err(error) => tracing::warn!(
                             %error,
@@ -971,10 +964,9 @@ async fn apply_mutation_owned(
                             "provider emitted mobility payload that failed to deserialize",
                         ),
                     },
-                    other => tracing::warn!(
-                        kind = other,
-                        "ignoring SnapshotItem with unknown kind",
-                    ),
+                    other => {
+                        tracing::warn!(kind = other, "ignoring SnapshotItem with unknown kind",)
+                    }
                 }
             }
             // Stable ordering for chunk snapshots (matches the legacy
@@ -1168,11 +1160,9 @@ async fn handle_client_message(
                 // Receive initial snapshots from the tick task. Timeout at
                 // 5× tick interval protects against a stalled tick task
                 // hanging the WS handler indefinitely.
-                let reply = tokio::time::timeout(
-                    SIMULATION_TICK_INTERVAL.saturating_mul(5),
-                    reply_rx,
-                )
-                .await;
+                let reply =
+                    tokio::time::timeout(SIMULATION_TICK_INTERVAL.saturating_mul(5), reply_rx)
+                        .await;
                 match reply {
                     Ok(Ok(snapshots)) => {
                         for snap in snapshots {
@@ -1262,27 +1252,23 @@ async fn persist_snapshots_once(
     // protects against a stalled tick task hanging the persist loop
     // indefinitely. A real outage will return an error and let the snapshot
     // loop schedule a retry on its next interval.
-    let payload = match tokio::time::timeout(
-        SIMULATION_TICK_INTERVAL.saturating_mul(5),
-        reply_rx,
-    )
-    .await
-    {
-        Ok(Ok(p)) => p,
-        Ok(Err(_)) => {
-            return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
-                "collect-persist-data reply dropped",
-            ));
-        }
-        Err(_) => {
-            tracing::warn!(
-                "collect-persist-data timed out waiting for tick task; will retry next cycle"
-            );
-            return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
-                "collect-persist-data timed out",
-            ));
-        }
-    };
+    let payload =
+        match tokio::time::timeout(SIMULATION_TICK_INTERVAL.saturating_mul(5), reply_rx).await {
+            Ok(Ok(p)) => p,
+            Ok(Err(_)) => {
+                return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
+                    "collect-persist-data reply dropped",
+                ));
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "collect-persist-data timed out waiting for tick task; will retry next cycle"
+                );
+                return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
+                    "collect-persist-data timed out",
+                ));
+            }
+        };
 
     let crate::runtime_view::PersistPayload {
         chunk_snapshots: snapshots,

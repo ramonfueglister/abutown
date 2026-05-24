@@ -19,9 +19,19 @@ pub struct SeededStop {
     pub legacy_route_id: String,
 }
 
+/// Pre-seeded pedestrian walk. Today `seed.rs` generates one walk per
+/// procedural corridor with a stable id. Builder emits one Footway edge
+/// per SeededWalk (NOT split at intersections — walks own their geometry).
+#[derive(Debug, Clone)]
+pub struct SeededWalk {
+    pub legacy_link_id: String,
+    pub polyline: Vec<(f32, f32)>,
+}
+
 pub fn build_graph_from_city_network(
     network: &CityNetwork,
     seeded_stops: &[SeededStop],
+    seeded_walks: &[SeededWalk],
 ) -> (Graph, TransitLines, NodeSpatialIndex) {
     // Phase 1: collect polylines + coord occurrence count.
     let mut coord_use_count: HashMap<(i32, i32), u32> = HashMap::new();
@@ -31,33 +41,61 @@ pub fn build_graph_from_city_network(
 
     for (idx, path) in network.arterial_paths.iter().enumerate() {
         let coords = path.iter().map(|nc| (nc.x, nc.y)).collect::<Vec<_>>();
-        if coords.is_empty() { continue; }
+        if coords.is_empty() {
+            continue;
+        }
         endpoint_coords.push(coords[0]);
         endpoint_coords.push(*coords.last().unwrap());
-        for c in &coords { *coord_use_count.entry(*c).or_insert(0) += 1; }
+        for c in &coords {
+            *coord_use_count.entry(*c).or_insert(0) += 1;
+        }
         polyline_coords.push(coords);
         polyline_kinds.push(PolylineKind::Arterial { index: idx });
     }
 
-    for path in network.pedestrian_corridors.iter() {
-        let coords = path.iter().map(|nc| (nc.x, nc.y)).collect::<Vec<_>>();
-        if coords.is_empty() { continue; }
-        endpoint_coords.push(coords[0]);
-        endpoint_coords.push(*coords.last().unwrap());
-        for c in &coords { *coord_use_count.entry(*c).or_insert(0) += 1; }
-        polyline_coords.push(coords);
-        polyline_kinds.push(PolylineKind::PedestrianCorridor);
+    // Pedestrian corridors from the network JSON are intentionally NOT
+    // processed here. The seed path generates its own walks procedurally
+    // and publishes them via `seeded_walks`; that is the SOLE source of
+    // Footway edges in the graph. See `legacy_seeded_walks` in
+    // `mobility/seed.rs`.
+
+    // Collect seeded-walk endpoint coords so they become graph nodes
+    // alongside arterial endpoints + intersections + seeded stops. The
+    // walks themselves are emitted as Footway edges after arterial
+    // splitting (Phase 4b below) — they are NOT split at intersections.
+    let mut walk_coords: Vec<(i32, i32)> = Vec::new();
+    for walk in seeded_walks {
+        if walk.polyline.len() < 2 {
+            continue;
+        }
+        let from = (
+            walk.polyline.first().unwrap().0.round() as i32,
+            walk.polyline.first().unwrap().1.round() as i32,
+        );
+        let to = (
+            walk.polyline.last().unwrap().0.round() as i32,
+            walk.polyline.last().unwrap().1.round() as i32,
+        );
+        walk_coords.push(from);
+        walk_coords.push(to);
     }
 
     // Phase 2: identify which coords become nodes.
     let mut is_node: HashMap<(i32, i32), bool> = HashMap::new();
-    for c in &endpoint_coords { is_node.insert(*c, true); }
+    for c in &endpoint_coords {
+        is_node.insert(*c, true);
+    }
     for (c, count) in &coord_use_count {
-        if *count >= 2 { is_node.insert(*c, true); }
+        if *count >= 2 {
+            is_node.insert(*c, true);
+        }
     }
     for stop in seeded_stops {
         let coord = (stop.coord.0.round() as i32, stop.coord.1.round() as i32);
         is_node.insert(coord, true);
+    }
+    for coord in &walk_coords {
+        is_node.insert(*coord, true);
     }
 
     // Phase 3: assign NodeIds deterministically (sorted by coord).
@@ -79,7 +117,9 @@ pub fn build_graph_from_city_network(
     // Mark stop nodes.
     for stop in seeded_stops {
         let coord = (stop.coord.0.round() as i32, stop.coord.1.round() as i32);
-        let node_id = *node_id_by_coord.get(&coord).expect("seeded stop coord must be a node");
+        let node_id = *node_id_by_coord
+            .get(&coord)
+            .expect("seeded stop coord must be a node");
         let n = &mut nodes[node_id.0 as usize];
         n.kind = NodeKind::TransitStop;
         n.legacy_id = Some(stop.legacy_stop_id.clone());
@@ -92,7 +132,12 @@ pub fn build_graph_from_city_network(
     for (poly_idx, coords) in polyline_coords.iter().enumerate() {
         let kind = polyline_kinds[poly_idx];
         let mut split_indices: Vec<usize> = vec![0];
-        for (i, c) in coords.iter().enumerate().skip(1).take(coords.len().saturating_sub(2)) {
+        for (i, c) in coords
+            .iter()
+            .enumerate()
+            .skip(1)
+            .take(coords.len().saturating_sub(2))
+        {
             if node_id_by_coord.contains_key(c) {
                 split_indices.push(i);
             }
@@ -103,14 +148,19 @@ pub fn build_graph_from_city_network(
             let segment = &coords[a..=b];
             let from = node_id_by_coord[&segment[0]];
             let to = node_id_by_coord[segment.last().unwrap()];
-            let polyline: Vec<(f32, f32)> = segment.iter().map(|c| (c.0 as f32, c.1 as f32)).collect();
+            let polyline: Vec<(f32, f32)> =
+                segment.iter().map(|c| (c.0 as f32, c.1 as f32)).collect();
             let length = polyline_length(&polyline);
             match kind {
                 PolylineKind::Arterial { index } => {
-                    let tram_legacy_fwd = Some(format!("link:tram:{}:{}_{}", index, segment[0].0, segment[0].1));
+                    let tram_legacy_fwd = Some(format!(
+                        "link:tram:{}:{}_{}",
+                        index, segment[0].0, segment[0].1
+                    ));
                     let tram_fwd = Edge {
                         id: EdgeId(edges.len() as u32),
-                        from, to,
+                        from,
+                        to,
                         polyline: polyline.clone(),
                         length,
                         kind: EdgeKind::TramTrack,
@@ -118,11 +168,15 @@ pub fn build_graph_from_city_network(
                         capacity: 1,
                         legacy_id: tram_legacy_fwd,
                     };
-                    tram_edges_by_arterial.entry(index).or_default().push(tram_fwd.id);
+                    tram_edges_by_arterial
+                        .entry(index)
+                        .or_default()
+                        .push(tram_fwd.id);
                     edges.push(tram_fwd);
                     edges.push(Edge {
                         id: EdgeId(edges.len() as u32),
-                        from: to, to: from,
+                        from: to,
+                        to: from,
                         polyline: polyline.iter().rev().copied().collect(),
                         length,
                         kind: EdgeKind::TramTrack,
@@ -132,7 +186,8 @@ pub fn build_graph_from_city_network(
                     });
                     edges.push(Edge {
                         id: EdgeId(edges.len() as u32),
-                        from, to,
+                        from,
+                        to,
                         polyline: polyline.clone(),
                         length,
                         kind: EdgeKind::Road,
@@ -142,36 +197,12 @@ pub fn build_graph_from_city_network(
                     });
                     edges.push(Edge {
                         id: EdgeId(edges.len() as u32),
-                        from: to, to: from,
+                        from: to,
+                        to: from,
                         polyline: polyline.iter().rev().copied().collect(),
                         length,
                         kind: EdgeKind::Road,
                         speed_limit: SPEED_ROAD,
-                        capacity: 1,
-                        legacy_id: None,
-                    });
-                }
-                PolylineKind::PedestrianCorridor => {
-                    let foot_legacy_fwd = Some(format!("link:walk:{}_{}_to_{}_{}",
-                        segment[0].0, segment[0].1,
-                        segment.last().unwrap().0, segment.last().unwrap().1));
-                    edges.push(Edge {
-                        id: EdgeId(edges.len() as u32),
-                        from, to,
-                        polyline: polyline.clone(),
-                        length,
-                        kind: EdgeKind::Footway,
-                        speed_limit: SPEED_FOOT,
-                        capacity: 1,
-                        legacy_id: foot_legacy_fwd,
-                    });
-                    edges.push(Edge {
-                        id: EdgeId(edges.len() as u32),
-                        from: to, to: from,
-                        polyline: polyline.iter().rev().copied().collect(),
-                        length,
-                        kind: EdgeKind::Footway,
-                        speed_limit: SPEED_FOOT,
                         capacity: 1,
                         legacy_id: None,
                     });
@@ -180,7 +211,53 @@ pub fn build_graph_from_city_network(
         }
     }
 
-    let graph = Graph::new(nodes, edges);
+    // Phase 4b: emit one Footway edge per seeded walk (NOT split at
+    // intersections — pedestrian walks own their geometry end-to-end and
+    // don't share topology with the arterial network today). The seed path
+    // is the sole source of these legacy ids; `walk_advance_system`
+    // resolves the walker's `link_id` via `graph.edge_by_legacy`.
+    for walk in seeded_walks {
+        if walk.polyline.len() < 2 {
+            continue;
+        }
+        let first = walk.polyline.first().unwrap();
+        let last = walk.polyline.last().unwrap();
+        let from_coord = (first.0.round() as i32, first.1.round() as i32);
+        let to_coord = (last.0.round() as i32, last.1.round() as i32);
+        let from = node_id_by_coord[&from_coord];
+        let to = node_id_by_coord[&to_coord];
+        let length = polyline_length(&walk.polyline);
+        edges.push(Edge {
+            id: EdgeId(edges.len() as u32),
+            from,
+            to,
+            polyline: walk.polyline.clone(),
+            length,
+            kind: EdgeKind::Footway,
+            speed_limit: SPEED_FOOT,
+            capacity: 1,
+            legacy_id: Some(walk.legacy_link_id.clone()),
+        });
+        edges.push(Edge {
+            id: EdgeId(edges.len() as u32),
+            from: to,
+            to: from,
+            polyline: walk.polyline.iter().rev().copied().collect(),
+            length,
+            kind: EdgeKind::Footway,
+            speed_limit: SPEED_FOOT,
+            capacity: 1,
+            legacy_id: None,
+        });
+    }
+
+    let mut graph = Graph::new(nodes, edges);
+    for stop in seeded_stops {
+        let coord = (stop.coord.0.round() as i32, stop.coord.1.round() as i32);
+        if let Some(node_id) = node_id_by_coord.get(&coord).copied() {
+            graph.add_legacy_node_alias(stop.legacy_stop_id.clone(), node_id);
+        }
+    }
     let spatial_index = NodeSpatialIndex::from_nodes(graph.nodes());
 
     // Phase 5: transit lines — one per arterial.
@@ -197,7 +274,11 @@ pub fn build_graph_from_city_network(
             .filter(|n| {
                 let np = n.position;
                 edges_in_line.iter().any(|e| {
-                    graph.edge(*e).polyline.iter().any(|p| p.0 == np.0 && p.1 == np.1)
+                    graph
+                        .edge(*e)
+                        .polyline
+                        .iter()
+                        .any(|p| p.0 == np.0 && p.1 == np.1)
                 })
             })
             .map(|n| n.id)
@@ -217,7 +298,23 @@ pub fn build_graph_from_city_network(
             legacy_route_id,
         });
     }
-    let transit_lines = TransitLines::new(lines);
+    let mut transit_lines = TransitLines::new(lines);
+    for arterial_idx in 0..network.arterial_paths.len() {
+        if let Some(line_id) = transit_lines
+            .line_by_legacy("route:horizontal")
+            .filter(|_| arterial_idx == 0)
+            .or_else(|| {
+                transit_lines
+                    .line_by_legacy("route:vertical")
+                    .filter(|_| arterial_idx == 1)
+            })
+            .or_else(|| {
+                (arterial_idx < transit_lines.count()).then_some(LineId(arterial_idx as u32))
+            })
+        {
+            transit_lines.add_legacy_route_alias(format!("route:arterial:{arterial_idx}"), line_id);
+        }
+    }
 
     (graph, transit_lines, spatial_index)
 }
@@ -225,7 +322,6 @@ pub fn build_graph_from_city_network(
 #[derive(Debug, Clone, Copy)]
 enum PolylineKind {
     Arterial { index: usize },
-    PedestrianCorridor,
 }
 
 fn polyline_length(points: &[(f32, f32)]) -> f32 {
@@ -244,7 +340,9 @@ mod tests {
     use super::*;
     use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
 
-    fn nc(x: i32, y: i32) -> NetworkCoord { NetworkCoord { x, y } }
+    fn nc(x: i32, y: i32) -> NetworkCoord {
+        NetworkCoord { x, y }
+    }
 
     fn simple_network() -> CityNetwork {
         // Two arterials forming a T-junction at (5, 0).
@@ -254,7 +352,10 @@ mod tests {
             version: 1,
             world_id: "test".into(),
             chunk_size: 32,
-            world_tiles: WorldTiles { width: 32, height: 32 },
+            world_tiles: WorldTiles {
+                width: 32,
+                height: 32,
+            },
             arterial_paths: vec![
                 vec![nc(0, 0), nc(5, 0), nc(10, 0)],
                 vec![nc(5, 0), nc(5, 5)],
@@ -265,14 +366,14 @@ mod tests {
 
     #[test]
     fn builder_creates_nodes_at_intersections() {
-        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[]);
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
         // Expected nodes: endpoints (0,0), (10,0), (5,5) AND intersection (5,0).
         assert_eq!(graph.node_count(), 4);
     }
 
     #[test]
     fn builder_emits_bidirectional_tram_plus_road_per_arterial_segment() {
-        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[]);
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
         // Arterial 0 has 2 segments → 4 edges each = 8.
         // Arterial 1 has 1 segment → 4 edges.
         // Total = 12.
@@ -289,14 +390,40 @@ mod tests {
             coord: (5.0, 0.0),
             legacy_route_id: "route:horizontal".into(),
         }];
-        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &stops);
-        let node_id = graph.node_by_legacy("stop:on_arterial").expect("stop must resolve");
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &stops, &[]);
+        let node_id = graph
+            .node_by_legacy("stop:on_arterial")
+            .expect("stop must resolve");
         assert_eq!(graph.node(node_id).kind, NodeKind::TransitStop);
     }
 
     #[test]
+    fn seeded_walks_become_footway_edges() {
+        let walks = vec![SeededWalk {
+            legacy_link_id: "link:walk:corridor:7".into(),
+            polyline: vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+        }];
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &walks);
+        let edge_id = graph
+            .edge_by_legacy("link:walk:corridor:7")
+            .expect("walk edge must resolve");
+        let edge = graph.edge(edge_id);
+        assert_eq!(edge.kind, EdgeKind::Footway);
+        assert_eq!(edge.polyline.len(), 3);
+        // The reverse edge must also exist (no legacy id on the reverse).
+        assert!(
+            graph
+                .edges()
+                .iter()
+                .filter(|e| e.kind == EdgeKind::Footway)
+                .count()
+                >= 2
+        );
+    }
+
+    #[test]
     fn builder_creates_one_transit_line_per_arterial() {
-        let (_, lines, _) = build_graph_from_city_network(&simple_network(), &[]);
+        let (_, lines, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
         assert_eq!(lines.count(), 2);
     }
 
@@ -310,7 +437,7 @@ mod tests {
     fn empty_polyline_skipped() {
         let mut net = simple_network();
         net.arterial_paths.push(vec![]);
-        let (graph, _, _) = build_graph_from_city_network(&net, &[]);
+        let (graph, _, _) = build_graph_from_city_network(&net, &[], &[]);
         assert_eq!(graph.node_count(), 4);
         assert_eq!(graph.edge_count(), 12);
     }

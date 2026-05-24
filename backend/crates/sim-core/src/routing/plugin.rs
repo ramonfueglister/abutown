@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::Schedule;
 
 use crate::city_network::CityNetwork;
-use crate::routing::builder::{build_graph_from_city_network, SeededStop};
+use crate::routing::builder::{SeededStop, SeededWalk, build_graph_from_city_network};
 use crate::routing::graph::Graph;
 use crate::routing::spatial_index::NodeSpatialIndex;
 use crate::routing::transit::TransitLines;
@@ -12,15 +12,24 @@ use crate::world::schedule::SimPlugin;
 #[derive(Default)]
 pub struct RoutingPlugin {
     pub seeded_stops: Vec<SeededStop>,
+    pub seeded_walks: Vec<SeededWalk>,
 }
 
 impl SimPlugin for RoutingPlugin {
-    fn name(&self) -> &'static str { "routing" }
+    fn name(&self) -> &'static str {
+        "routing"
+    }
 
     fn install(&self, world: &mut World, _schedule: &mut Schedule) {
         let (graph, transit_lines, spatial_index) = match world.get_resource::<CityNetwork>() {
-            Some(network) => build_graph_from_city_network(network, &self.seeded_stops),
-            None => (Graph::default(), TransitLines::default(), NodeSpatialIndex::default()),
+            Some(network) => {
+                build_graph_from_city_network(network, &self.seeded_stops, &self.seeded_walks)
+            }
+            None => (
+                Graph::default(),
+                TransitLines::default(),
+                NodeSpatialIndex::default(),
+            ),
         };
         world.insert_resource(graph);
         world.insert_resource(transit_lines);

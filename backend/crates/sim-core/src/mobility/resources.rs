@@ -1,25 +1,11 @@
-use crate::ids::{AgentId, ChunkCoord, LinkId, RouteId, StopId, VehicleId};
+use crate::ids::{AgentId, ChunkCoord, VehicleId};
 use crate::mobility::lod::FlowCell;
-use crate::mobility::records::{RouteRecord, StopRecord};
 use bevy_ecs::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 /// Monotonic simulation tick counter. Incremented by `tick_increment_system`.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Tick(pub u64);
-
-/// Route table: keyed by RouteId, value is the full route definition.
-#[derive(Resource, Debug, Default, Clone)]
-pub struct Routes(pub HashMap<RouteId, RouteRecord>);
-
-/// Stop table: keyed by StopId, value is the full stop definition.
-#[derive(Resource, Debug, Default, Clone)]
-pub struct Stops(pub HashMap<StopId, StopRecord>);
-
-/// Per-link polyline geometry. Read by `compute_world_coord_system` and the
-/// advance systems to compute distances.
-#[derive(Resource, Debug, Default, Clone)]
-pub struct LinkPolylines(pub HashMap<LinkId, Vec<(f32, f32)>>);
 
 /// Entities marked dirty by advance systems this tick. Read & drained by
 /// `MobilityWorld::tick_mobility` to build the per-tick delta.
@@ -64,7 +50,11 @@ pub struct WarmChunkCoords(pub HashSet<ChunkCoord>);
 /// needing its own message cursor.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct ChunkLodTransitions(
-    pub Vec<(ChunkCoord, crate::world::events::ChunkLod, crate::world::events::ChunkLod)>,
+    pub  Vec<(
+        ChunkCoord,
+        crate::world::events::ChunkLod,
+        crate::world::events::ChunkLod,
+    )>,
 );
 
 /// Per-chunk reverse-index of agent entities, maintained incrementally by
@@ -123,59 +113,3 @@ pub struct PreviousFlowCellContrib(pub HashMap<ChunkCoord, u32>);
 /// the end of each tick.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct PendingPerChunkDeltas(pub Vec<crate::mobility::MobilityChunkDelta>);
-
-/// Phase 8b transition shim. RoutePosition is now keyed by `LineId` +
-/// `edge_index`, but the legacy `Routes`/`Stops`/`LinkPolylines` resources
-/// remain wire/persistence sources. This shim assigns a stable `LineId` to
-/// each legacy `RouteId` it sees, and lets consumers recover the legacy
-/// `(RouteId, LinkId)` pair from a `(LineId, edge_index)` so they can
-/// continue to read the legacy resources unchanged.
-///
-/// Populated by `add_route` (legacy path) and by `seed::publish_runtime_lines`
-/// (runtime path). Deleted in T12 once consumers stop touching the legacy
-/// resources entirely.
-#[derive(Resource, Debug, Default, Clone)]
-pub struct LegacyTransitShim {
-    by_route_id: HashMap<RouteId, crate::routing::LineId>,
-    by_line_id: HashMap<crate::routing::LineId, RouteId>,
-    /// (LineId.0 as usize) → list of legacy link ids in route order.
-    links_by_line: Vec<Vec<LinkId>>,
-}
-
-impl LegacyTransitShim {
-    pub fn line_id_for_route(&self, route_id: &RouteId) -> Option<crate::routing::LineId> {
-        self.by_route_id.get(route_id).copied()
-    }
-
-    pub fn route_id_for_line(&self, line_id: crate::routing::LineId) -> Option<&RouteId> {
-        self.by_line_id.get(&line_id)
-    }
-
-    pub fn link_for(&self, line_id: crate::routing::LineId, edge_index: usize) -> Option<&LinkId> {
-        self.links_by_line
-            .get(line_id.0 as usize)
-            .and_then(|v| v.get(edge_index))
-    }
-
-    pub fn links_for(&self, line_id: crate::routing::LineId) -> Option<&[LinkId]> {
-        self.links_by_line.get(line_id.0 as usize).map(|v| v.as_slice())
-    }
-
-    /// Register a legacy route → assign a fresh LineId if not already mapped.
-    /// Returns the assigned LineId. Used by `add_route` + `spawn_vehicle_from_record`.
-    pub fn register_route(&mut self, route_id: &RouteId, links: &[LinkId]) -> crate::routing::LineId {
-        if let Some(id) = self.by_route_id.get(route_id).copied() {
-            // Update the link list if the new one is longer/different.
-            let idx = id.0 as usize;
-            if idx < self.links_by_line.len() {
-                self.links_by_line[idx] = links.to_vec();
-            }
-            return id;
-        }
-        let id = crate::routing::LineId(self.links_by_line.len() as u32);
-        self.by_route_id.insert(route_id.clone(), id);
-        self.by_line_id.insert(id, route_id.clone());
-        self.links_by_line.push(links.to_vec());
-        id
-    }
-}
