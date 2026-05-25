@@ -23,6 +23,11 @@ export function mountCardHandView(options: CardHandViewOptions = {}): void {
   authRoot.innerHTML = `
     <span class="card-auth-user" data-card-auth-user></span>
     <button class="card-auth-button" type="button" data-card-auth-button>Login</button>
+    <form class="card-auth-form" data-card-auth-form hidden>
+      <input class="card-auth-input" type="email" autocomplete="email" placeholder="Email" aria-label="Email for login link" data-card-auth-email required />
+      <button class="card-auth-button" type="submit" data-card-auth-submit>Send</button>
+      <button class="card-auth-button card-auth-cancel" type="button" data-card-auth-cancel>Cancel</button>
+    </form>
   `;
   document.body.appendChild(authRoot);
 
@@ -39,11 +44,19 @@ export function mountCardHandView(options: CardHandViewOptions = {}): void {
   const statusEl = root.querySelector<HTMLElement>('[data-card-hand-status]');
   const authButton = authRoot.querySelector<HTMLButtonElement>('[data-card-auth-button]');
   const authUser = authRoot.querySelector<HTMLElement>('[data-card-auth-user]');
-  if (!handEl || !statusEl || !authButton || !authUser) return;
+  const authForm = authRoot.querySelector<HTMLFormElement>('[data-card-auth-form]');
+  const authEmail = authRoot.querySelector<HTMLInputElement>('[data-card-auth-email]');
+  const authSubmit = authRoot.querySelector<HTMLButtonElement>('[data-card-auth-submit]');
+  const authCancel = authRoot.querySelector<HTMLButtonElement>('[data-card-auth-cancel]');
+  if (!handEl || !statusEl || !authButton || !authUser || !authForm || !authEmail || !authSubmit || !authCancel) return;
   const hand = handEl;
   const status = statusEl;
   const button = authButton;
   const user = authUser;
+  const form = authForm;
+  const email = authEmail;
+  const submit = authSubmit;
+  const cancel = authCancel;
 
   let state = createCardHandState();
   let activeSession: Session | null = null;
@@ -59,7 +72,37 @@ export function mountCardHandView(options: CardHandViewOptions = {}): void {
   }
 
   button.addEventListener('click', () => {
-    void handleAuthClick(supabase, activeSession);
+    if (activeSession) {
+      button.disabled = true;
+      void supabase.auth.signOut()
+        .catch((error: unknown) => {
+          user.textContent = 'Logout failed';
+          user.title = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => {
+          button.disabled = false;
+        });
+      return;
+    }
+
+    showLoginForm(button, form, email);
+  });
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void submitInlineEmailLogin(supabase, {
+      button,
+      form,
+      email,
+      submit,
+      user,
+    });
+  });
+
+  cancel.addEventListener('click', () => {
+    hideLoginForm(button, form, email);
+    user.textContent = '';
+    user.title = '';
   });
 
   void supabase.auth.getSession().then(({ data }) => {
@@ -117,17 +160,22 @@ async function loadPersistedHand(token: string, options: CardHandViewOptions): P
 }
 
 function renderCardHand(handEl: HTMLElement, statusEl: HTMLElement, state: CardHandState): void {
-  statusEl.textContent = statusText(state);
+  statusEl.textContent = cardHandStatusText(state);
   statusEl.dataset.status = state.status;
   statusEl.title = state.error ?? '';
+  statusEl.hidden = !isCardHandStatusVisible(state);
   handEl.replaceChildren(...state.cards.map(renderCard));
 }
 
-function statusText(state: CardHandState): string {
+export function cardHandStatusText(state: CardHandState): string {
   if (state.status === 'ready') return 'Hand synced';
-  if (state.status === 'signed_out') return 'Login required';
+  if (state.status === 'signed_out') return '';
   if (state.status === 'error') return `Hand error: ${state.error ?? 'backend unavailable'}`;
   return 'Loading hand';
+}
+
+export function isCardHandStatusVisible(state: CardHandState): boolean {
+  return state.status !== 'signed_out';
 }
 
 function renderCard(card: VisibleHandCard): HTMLElement {
@@ -164,20 +212,64 @@ function createConfiguredSupabaseClient(): SupabaseClient | null {
   return createClient(url, anonKey);
 }
 
-async function handleAuthClick(supabase: SupabaseClient, session: Session | null): Promise<void> {
-  if (session) {
-    await supabase.auth.signOut();
+export function buildOtpLoginPayload(emailValue: string, redirectTo: string): {
+  email: string;
+  options: { emailRedirectTo: string };
+} | null {
+  const email = emailValue.trim();
+  if (!email) return null;
+  return {
+    email,
+    options: {
+      emailRedirectTo: redirectTo,
+    },
+  };
+}
+
+type InlineLoginControls = {
+  button: HTMLButtonElement;
+  form: HTMLFormElement;
+  email: HTMLInputElement;
+  submit: HTMLButtonElement;
+  user: HTMLElement;
+};
+
+async function submitInlineEmailLogin(supabase: SupabaseClient, controls: InlineLoginControls): Promise<void> {
+  const payload = buildOtpLoginPayload(controls.email.value, globalThis.location.href);
+  if (!payload) {
+    controls.email.focus();
     return;
   }
 
-  const email = globalThis.prompt('Email for login link');
-  if (!email) return;
-  await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: globalThis.location.href,
-    },
-  });
+  controls.email.disabled = true;
+  controls.submit.disabled = true;
+  controls.user.textContent = 'Sending link';
+  controls.user.title = '';
+
+  try {
+    await supabase.auth.signInWithOtp(payload);
+    controls.user.textContent = 'Check your email';
+    controls.email.value = '';
+    hideLoginForm(controls.button, controls.form, controls.email);
+  } catch (error) {
+    controls.user.textContent = 'Login failed';
+    controls.user.title = error instanceof Error ? error.message : String(error);
+  } finally {
+    controls.email.disabled = false;
+    controls.submit.disabled = false;
+  }
+}
+
+function showLoginForm(button: HTMLButtonElement, form: HTMLFormElement, email: HTMLInputElement): void {
+  button.hidden = true;
+  form.hidden = false;
+  email.focus();
+}
+
+function hideLoginForm(button: HTMLButtonElement, form: HTMLFormElement, email: HTMLInputElement): void {
+  form.hidden = true;
+  button.hidden = false;
+  email.disabled = false;
 }
 
 function renderAuth(button: HTMLButtonElement, userEl: HTMLElement, session: Session | null): void {
