@@ -118,6 +118,8 @@ impl SimulationRuntime {
         }
         .install(&mut world, &mut schedule);
 
+        sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
+
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: WORLD_ID.to_string(),
@@ -236,6 +238,8 @@ impl SimulationRuntime {
             seeded_walks,
         }
         .install(&mut world, &mut schedule);
+
+        sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
