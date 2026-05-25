@@ -119,6 +119,12 @@ mod tests {
 }
 ```
 
+Also add the module line to `backend/crates/sim-core/src/routing/mod.rs` so the new test file is compiled:
+
+```rust
+pub mod profile;
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run:
@@ -341,7 +347,6 @@ mod tests {
 Modify `backend/crates/sim-core/src/routing/mod.rs`:
 
 ```rust
-pub mod profile;
 pub use profile::{ModeState, RoutingProfile, RoutingProfileKey};
 ```
 
@@ -487,6 +492,12 @@ mod tests {
         );
     }
 }
+```
+
+Also add the module line to `backend/crates/sim-core/src/routing/mod.rs` so the new test file is compiled:
+
+```rust
+pub mod pathfinding;
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -745,7 +756,6 @@ fn reconstruct_path(
 Modify `backend/crates/sim-core/src/routing/mod.rs`:
 
 ```rust
-pub mod pathfinding;
 pub use pathfinding::{AStarRouter, PathEdge, PathRequest, PlannedPath, RoutingError};
 ```
 
@@ -1028,6 +1038,12 @@ mod tests {
 }
 ```
 
+Also add the module line to `backend/crates/sim-core/src/routing/mod.rs` so the new test file is compiled:
+
+```rust
+pub mod path_cache;
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run:
@@ -1152,7 +1168,6 @@ impl PathCache {
 Modify `backend/crates/sim-core/src/routing/mod.rs`:
 
 ```rust
-pub mod path_cache;
 pub use path_cache::{PathCache, PathCacheKey, PathCacheStats};
 ```
 
