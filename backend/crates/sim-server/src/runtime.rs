@@ -118,6 +118,8 @@ impl SimulationRuntime {
         }
         .install(&mut world, &mut schedule);
 
+        sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
+
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: WORLD_ID.to_string(),
@@ -236,6 +238,8 @@ impl SimulationRuntime {
             seeded_walks,
         }
         .install(&mut world, &mut schedule);
+
+        sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -834,6 +838,47 @@ mod tests {
         assert!(transit.count() > 0, "must have at least one transit line");
         let spatial = world.resource::<sim_core::routing::NodeSpatialIndex>();
         assert_eq!(spatial.size(), graph.node_count());
+    }
+
+    #[test]
+    fn runtime_has_pathfinding_resources() {
+        let runtime = SimulationRuntime::new();
+        assert!(
+            runtime
+                .world
+                .contains_resource::<sim_core::routing::PathCache>()
+        );
+    }
+
+    #[test]
+    fn runtime_can_find_seeded_tram_path() {
+        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/city/zurich-network.json");
+        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .expect("zurich fixture network must load");
+        let runtime = SimulationRuntime::new_from_network(&network);
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let transit_lines = runtime.world.resource::<sim_core::routing::TransitLines>();
+        let line = transit_lines
+            .iter()
+            .find(|line| !line.edges.is_empty())
+            .expect("seeded runtime should contain a non-empty transit line");
+        let tram_edge = graph.edge(*line.edges.first().expect("line has first edge"));
+        let path = sim_core::routing::AStarRouter::find_path(
+            graph,
+            sim_core::routing::PathRequest {
+                from: tram_edge.from,
+                to: tram_edge.to,
+                profile: sim_core::routing::RoutingProfileKey::Tram,
+            },
+            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Tram),
+        )
+        .expect("seeded tram edge endpoints should be connected by the routing graph");
+        assert!(!path.edges.is_empty());
+        assert!(path
+            .edges
+            .iter()
+            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::TramTrack));
     }
 
     #[test]
