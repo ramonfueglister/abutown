@@ -1,6 +1,7 @@
 pub mod builder;
 pub mod cost_model;
 pub mod graph;
+pub mod path_cache;
 pub mod pathfinding;
 pub mod plugin;
 pub mod profile;
@@ -11,6 +12,7 @@ pub mod waiting;
 pub use builder::{SeededStop, SeededWalk, build_graph_from_city_network};
 pub use cost_model::{CostModel, DistanceCost, ModeFilterCost, TimeCost};
 pub use graph::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
+pub use path_cache::{PathCache, PathCacheKey, PathCacheStats};
 pub use pathfinding::{
     AStarRouter, PathEdge, PathRequest, PlannedPath, RoutingError, request_between_points,
 };
