@@ -1322,27 +1322,30 @@ In the same test module, add:
 ```rust
 #[test]
 fn runtime_can_find_seeded_tram_path() {
-    let runtime = SimulationRuntime::new();
+    let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../data/city/zurich-network.json");
+    let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+        .expect("zurich fixture network must load");
+    let runtime = SimulationRuntime::new_from_network(&network);
     let graph = runtime.world.resource::<sim_core::routing::Graph>();
     let transit_lines = runtime.world.resource::<sim_core::routing::TransitLines>();
     let line = transit_lines
         .iter()
         .find(|line| !line.edges.is_empty())
         .expect("seeded runtime should contain a non-empty transit line");
-    let first_edge = graph.edge(*line.edges.first().expect("line has first edge"));
-    let last_edge = graph.edge(*line.edges.last().expect("line has last edge"));
+    let tram_edge = graph.edge(*line.edges.first().expect("line has first edge"));
     let path = sim_core::routing::AStarRouter::find_path(
         graph,
         sim_core::routing::PathRequest {
-            from: first_edge.from,
-            to: last_edge.to,
+            from: tram_edge.from,
+            to: tram_edge.to,
             profile: sim_core::routing::RoutingProfileKey::Tram,
         },
         sim_core::routing::RoutingProfile::for_key(
             sim_core::routing::RoutingProfileKey::Tram,
         ),
     )
-    .expect("seeded transit line endpoints should be connected by tram edges");
+    .expect("seeded tram edge endpoints should be connected by the routing graph");
     assert!(!path.edges.is_empty());
     assert!(path
         .edges
@@ -1366,7 +1369,7 @@ Expected: both runtime tests pass.
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
-git add backend/crates/sim-server/src/runtime.rs
+git add backend/crates/sim-server/src/runtime.rs docs/superpowers/plans/2026-05-24-routing-a-star-multimodal-cache.md
 git commit -m "test(8c): verify runtime pathfinding resources"
 ```
 
