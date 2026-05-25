@@ -1,7 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
-use crate::routing::{EdgeId, Graph, ModeState, NodeId, RoutingProfile, RoutingProfileKey};
+use crate::routing::{
+    EdgeId, Graph, ModeState, NodeId, NodeSpatialIndex, RoutingProfile, RoutingProfileKey,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PathRequest {
@@ -87,6 +89,25 @@ impl PartialOrd for QueueEntry {
 }
 
 pub struct AStarRouter;
+
+pub fn request_between_points(
+    index: &NodeSpatialIndex,
+    from: (f32, f32),
+    to: (f32, f32),
+    profile: RoutingProfileKey,
+) -> Result<PathRequest, RoutingError> {
+    let Some(from_node) = index.nearest(from) else {
+        return Err(RoutingError::NoNearestNode);
+    };
+    let Some(to_node) = index.nearest(to) else {
+        return Err(RoutingError::NoNearestNode);
+    };
+    Ok(PathRequest {
+        from: from_node,
+        to: to_node,
+        profile,
+    })
+}
 
 impl AStarRouter {
     pub fn find_path(
@@ -357,6 +378,94 @@ mod tests {
                 RoutingProfile::for_key(RoutingProfileKey::Walk),
             ),
             Err(RoutingError::MissingNode(NodeId(99)))
+        );
+    }
+
+    fn walk_transit_graph() -> Graph {
+        Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 10.0, 0.0, NodeKind::TransitStop),
+                node(2, 20.0, 0.0, NodeKind::TransitStop),
+                node(3, 30.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![
+                edge(0, 0, 1, EdgeKind::Footway, 10.0),
+                edge(1, 1, 2, EdgeKind::TramTrack, 10.0),
+                edge(2, 2, 3, EdgeKind::Footway, 10.0),
+            ],
+        )
+    }
+
+    #[test]
+    fn walk_transit_combines_walk_tram_walk() {
+        let graph = walk_transit_graph();
+        let path = AStarRouter::find_path(
+            &graph,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(3),
+                profile: RoutingProfileKey::WalkTransit,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
+        )
+        .expect("walk-transit route should exist");
+        assert_eq!(
+            path.edges.iter().map(|e| e.edge_id).collect::<Vec<_>>(),
+            vec![EdgeId(0), EdgeId(1), EdgeId(2)]
+        );
+        assert_eq!(
+            path.edges.iter().map(|e| e.mode).collect::<Vec<_>>(),
+            vec![ModeState::Walking, ModeState::OnTram, ModeState::Walking]
+        );
+    }
+
+    #[test]
+    fn walk_transit_cannot_board_at_intersection() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 10.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![edge(0, 0, 1, EdgeKind::TramTrack, 10.0)],
+        );
+        let err = AStarRouter::find_path(
+            &graph,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(1),
+                profile: RoutingProfileKey::WalkTransit,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
+        )
+        .expect_err("boarding at intersection must be illegal");
+        assert_eq!(
+            err,
+            RoutingError::NoPath {
+                from: NodeId(0),
+                to: NodeId(1),
+                profile: RoutingProfileKey::WalkTransit,
+            }
+        );
+    }
+
+    #[test]
+    fn request_between_points_resolves_nearest_nodes() {
+        let graph = graph_for_modes();
+        let index = crate::routing::NodeSpatialIndex::from_nodes(graph.nodes());
+        let request =
+            request_between_points(&index, (1.0, 0.0), (19.0, 0.0), RoutingProfileKey::Walk)
+                .expect("points should resolve to nearest graph nodes");
+        assert_eq!(request.from, NodeId(0));
+        assert_eq!(request.to, NodeId(2));
+    }
+
+    #[test]
+    fn request_between_points_errors_on_empty_index() {
+        let index = crate::routing::NodeSpatialIndex::default();
+        assert_eq!(
+            request_between_points(&index, (1.0, 0.0), (19.0, 0.0), RoutingProfileKey::Walk),
+            Err(RoutingError::NoNearestNode)
         );
     }
 }

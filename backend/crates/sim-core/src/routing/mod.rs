@@ -11,7 +11,9 @@ pub mod waiting;
 pub use builder::{SeededStop, SeededWalk, build_graph_from_city_network};
 pub use cost_model::{CostModel, DistanceCost, ModeFilterCost, TimeCost};
 pub use graph::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
-pub use pathfinding::{AStarRouter, PathEdge, PathRequest, PlannedPath, RoutingError};
+pub use pathfinding::{
+    AStarRouter, PathEdge, PathRequest, PlannedPath, RoutingError, request_between_points,
+};
 pub use plugin::RoutingPlugin;
 pub use profile::{ModeState, RoutingProfile, RoutingProfileKey};
 pub use spatial_index::{IndexedNode, NodeSpatialIndex};
