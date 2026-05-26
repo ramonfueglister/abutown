@@ -470,10 +470,11 @@ fn persisted_walking_links(snap: &MobilityPersistSnapshot) -> Vec<(String, EdgeK
             }
         }
         if let Some(active_route) = &agent.active_route {
-            for step in active_route.steps.iter().filter(|step| {
-                !step.canonical_edge_key.is_empty()
-                    && parse_edge_key(&step.canonical_edge_key).is_none()
-            }) {
+            for step in active_route
+                .steps
+                .iter()
+                .filter(|step| !step.canonical_edge_key.is_empty())
+            {
                 push_persisted_non_route_link(
                     &mut links,
                     step.canonical_edge_key.clone(),

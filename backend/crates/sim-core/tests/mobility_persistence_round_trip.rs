@@ -5,7 +5,9 @@ use sim_core::mobility::{
     AgentMobilityState, AgentRecord, MobilityPersistSnapshot, PersistedActiveRoute,
     PersistedRouteStep, PlanStage, api, apply_into_world, extract_from_world,
 };
-use sim_core::routing::{ModeState, RoutingProfileKey};
+use sim_core::routing::{
+    Edge, EdgeId, EdgeKind, Graph, ModeState, Node, NodeId, NodeKind, RoutingProfileKey,
+};
 
 #[test]
 fn phase3_snapshot_round_trips_byte_for_byte() {
@@ -117,8 +119,130 @@ fn active_route_round_trip_normalizes_rebuilt_graph_ids() {
     assert_eq!(extract_from_world(&reloaded_world), extracted);
 }
 
+fn graph_native_active_route_world() -> bevy_ecs::world::World {
+    let (mut world, _schedule) = api::empty_world_and_schedule();
+    world.insert_resource(Graph::new(
+        vec![
+            Node {
+                id: NodeId(0),
+                position: (0.0, 0.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(1),
+                position: (5.0, 0.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(2),
+                position: (13.0, 0.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+        ],
+        vec![
+            Edge {
+                id: EdgeId(0),
+                from: NodeId(0),
+                to: NodeId(1),
+                polyline: vec![(0.0, 0.0), (5.0, 0.0)],
+                length: 5.0,
+                kind: EdgeKind::Footway,
+                speed_limit: 1.0,
+                capacity: 16,
+                legacy_id: None,
+            },
+            Edge {
+                id: EdgeId(1),
+                from: NodeId(1),
+                to: NodeId(2),
+                polyline: vec![(5.0, 0.0), (13.0, 0.0)],
+                length: 8.0,
+                kind: EdgeKind::Footway,
+                speed_limit: 1.0,
+                capacity: 16,
+                legacy_id: None,
+            },
+        ],
+    ));
+    api::spawn_agent_from_record(
+        &mut world,
+        AgentRecord {
+            id: AgentId("agent:graph-native-active-route".to_string()),
+            state: AgentMobilityState::AtActivity {
+                activity_id: "activity:home".to_string(),
+            },
+            plan: vec![PlanStage::Activity {
+                activity_id: "activity:home".to_string(),
+            }],
+            plan_cursor: 0,
+            walk_speed_per_tick: 1.0,
+            active_route: Some(PersistedActiveRoute {
+                destination_node: 2,
+                profile: RoutingProfileKey::Walk,
+                cursor: 0,
+                steps: vec![PersistedRouteStep {
+                    edge_id: 1,
+                    mode: ModeState::Walking,
+                    canonical_edge_key: "edge:1".to_string(),
+                    length: 8.0,
+                }],
+            }),
+        },
+    );
+    world
+}
+
+fn edge_canonical_key(edge: &Edge) -> String {
+    edge.legacy_id
+        .clone()
+        .unwrap_or_else(|| format!("edge:{}", edge.id.0))
+}
+
 #[test]
-#[should_panic(expected = "persisted active_route canonical edge key edge:999 is missing")]
+fn graph_native_active_route_edge_key_round_trips_without_raw_id_authority() {
+    let world = graph_native_active_route_world();
+
+    let extracted = extract_from_world(&world);
+    let extracted_route = extracted
+        .agents
+        .get(&AgentId("agent:graph-native-active-route".to_string()))
+        .and_then(|agent| agent.active_route.as_ref())
+        .expect("active route persists from live graph");
+    assert_eq!(extracted_route.steps[0].edge_id, 1);
+    assert_eq!(extracted_route.steps[0].canonical_edge_key, "edge:1");
+    assert_eq!(
+        extracted
+            .link_polylines
+            .get("edge:1")
+            .expect("graph-native active-route polyline is persisted"),
+        &vec![(5.0, 0.0), (13.0, 0.0)]
+    );
+
+    let (mut reloaded_world, _schedule) = api::empty_world_and_schedule();
+    apply_into_world(&mut reloaded_world, extracted);
+    let reloaded = extract_from_world(&reloaded_world);
+    let reloaded_route = reloaded
+        .agents
+        .get(&AgentId("agent:graph-native-active-route".to_string()))
+        .and_then(|agent| agent.active_route.as_ref())
+        .expect("active route survives graph rebuild");
+    let reloaded_step = &reloaded_route.steps[0];
+    assert_eq!(reloaded_step.canonical_edge_key, "edge:1");
+    assert_ne!(
+        reloaded_step.edge_id, 1,
+        "the rebuilt route must not rely on the old raw graph edge id"
+    );
+
+    let graph = reloaded_world.resource::<Graph>();
+    let normalized_edge = graph.edge(EdgeId(reloaded_step.edge_id));
+    assert_eq!(edge_canonical_key(normalized_edge), "edge:1");
+}
+
+#[test]
+#[should_panic(expected = "no graph polyline available for persisted link edge:999")]
 fn active_route_hydration_rejects_missing_canonical_key() {
     let mut snap = active_route_snapshot();
     snap.agents
