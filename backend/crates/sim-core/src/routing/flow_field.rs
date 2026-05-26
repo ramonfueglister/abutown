@@ -108,23 +108,24 @@ impl FlowFieldRouter {
     {
         validate_node(graph, destination)?;
 
-        let destination_mode = profile.initial_mode();
         let mut open = BinaryHeap::new();
         let mut entries: HashMap<(NodeId, ModeState), FlowFieldEntry> = HashMap::new();
 
-        entries.insert(
-            (destination, destination_mode),
-            FlowFieldEntry {
-                next_edge: None,
-                next_mode: destination_mode,
-                cost_to_goal: 0.0,
-            },
-        );
-        open.push(QueueEntry {
-            node: destination,
-            mode: destination_mode,
-            cost: 0.0,
-        });
+        for destination_mode in terminal_destination_modes(profile.key).iter().copied() {
+            entries.insert(
+                (destination, destination_mode),
+                FlowFieldEntry {
+                    next_edge: None,
+                    next_mode: destination_mode,
+                    cost_to_goal: 0.0,
+                },
+            );
+            open.push(QueueEntry {
+                node: destination,
+                mode: destination_mode,
+                cost: 0.0,
+            });
+        }
 
         while let Some(entry) = open.pop() {
             let best = entries
@@ -207,6 +208,15 @@ impl FlowFieldRouter {
     }
 }
 
+fn terminal_destination_modes(profile: RoutingProfileKey) -> &'static [ModeState] {
+    match profile {
+        RoutingProfileKey::Walk => &[ModeState::Walking],
+        RoutingProfileKey::Car => &[ModeState::Driving],
+        RoutingProfileKey::Tram => &[ModeState::OnTram],
+        RoutingProfileKey::WalkTransit => &[ModeState::Walking, ModeState::OnTram],
+    }
+}
+
 fn validate_node(graph: &Graph, node: NodeId) -> Result<(), FlowFieldError> {
     if (node.0 as usize) < graph.node_count() {
         Ok(())
@@ -248,6 +258,15 @@ mod tests {
             id: NodeId(id),
             position: (x, y),
             kind: NodeKind::Intersection,
+            legacy_id: None,
+        }
+    }
+
+    fn typed_node(id: u32, x: f32, y: f32, kind: NodeKind) -> Node {
+        Node {
+            id: NodeId(id),
+            position: (x, y),
+            kind,
             legacy_id: None,
         }
     }
@@ -369,6 +388,33 @@ mod tests {
                 to: NodeId(2),
                 profile: RoutingProfileKey::Walk,
             })
+        );
+    }
+
+    #[test]
+    fn walk_transit_field_allows_tram_terminal_arrival() {
+        let graph = Graph::new(
+            vec![
+                typed_node(0, 0.0, 0.0, NodeKind::TransitStop),
+                typed_node(1, 1.0, 0.0, NodeKind::TransitStop),
+            ],
+            vec![edge(0, 0, 1, EdgeKind::TramTrack, "tram:0")],
+        );
+
+        let field = FlowFieldRouter::build(
+            &graph,
+            NodeId(1),
+            RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
+            FlowFieldScope::AllEdges,
+        )
+        .expect("walk-transit field should build");
+
+        assert_eq!(
+            field
+                .entry(NodeId(0), ModeState::Walking)
+                .unwrap()
+                .next_edge,
+            Some(EdgeId(0))
         );
     }
 }
