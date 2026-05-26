@@ -72,6 +72,14 @@ pub struct SimulationRuntime {
     version: u64,
 }
 
+fn refresh_flow_field_resources(world: &mut sim_core::bevy_ecs::world::World) {
+    if let Some(mut cache) = world.get_resource_mut::<sim_core::routing::FlowFieldCache>() {
+        cache.clear();
+    } else {
+        world.insert_resource(sim_core::routing::FlowFieldCache::default());
+    }
+}
+
 impl std::fmt::Debug for SimulationRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimulationRuntime")
@@ -120,6 +128,7 @@ impl SimulationRuntime {
 
         sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+        sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -169,6 +178,7 @@ impl SimulationRuntime {
         apply_into_world(&mut runtime.world, snap);
         sim_core::routing::HierarchicalRoutingPlugin::default()
             .install(&mut runtime.world, &mut runtime.schedule);
+        refresh_flow_field_resources(&mut runtime.world);
         runtime
     }
 
@@ -187,6 +197,7 @@ impl SimulationRuntime {
         apply_into_world(&mut self.world, snap);
         sim_core::routing::HierarchicalRoutingPlugin::default()
             .install(&mut self.world, &mut self.schedule);
+        refresh_flow_field_resources(&mut self.world);
     }
 
     pub fn override_world_id_for_test(&mut self, world_id: &str) {
@@ -246,6 +257,7 @@ impl SimulationRuntime {
 
         sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+        sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -274,6 +286,7 @@ impl SimulationRuntime {
         };
         apply_into_world(&mut world, mobility_snap);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+        refresh_flow_field_resources(&mut world);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let snap = snapshot_store
@@ -815,6 +828,65 @@ mod tests {
     use super::*;
     use abutown_protocol::{ChunkStateDto, TileKindDto};
 
+    fn populated_flow_field_cache() -> sim_core::routing::FlowFieldCache {
+        use sim_core::routing::{
+            Edge, EdgeId, EdgeKind, FlowFieldCache, FlowFieldCacheKey, FlowFieldScope, Graph, Node,
+            NodeId, NodeKind, RoutingProfile, RoutingProfileKey,
+        };
+
+        let graph = Graph::new(
+            vec![
+                Node {
+                    id: NodeId(0),
+                    position: (0.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(1),
+                    position: (1.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+            ],
+            vec![
+                Edge {
+                    id: EdgeId(0),
+                    from: NodeId(0),
+                    to: NodeId(1),
+                    polyline: vec![(0.0, 0.0), (1.0, 0.0)],
+                    length: 1.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: None,
+                },
+                Edge {
+                    id: EdgeId(1),
+                    from: NodeId(1),
+                    to: NodeId(0),
+                    polyline: vec![(1.0, 0.0), (0.0, 0.0)],
+                    length: 1.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: None,
+                },
+            ],
+        );
+        let mut cache = FlowFieldCache::with_capacity(2);
+        cache
+            .get_or_build(
+                &graph,
+                FlowFieldCacheKey::all_edges(NodeId(1), RoutingProfileKey::Walk, 0),
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::AllEdges,
+            )
+            .expect("test flow field should build");
+        assert_eq!(cache.len(), 1);
+        cache
+    }
+
     #[test]
     fn simulation_runtime_holds_world_directly() {
         let runtime = SimulationRuntime::new();
@@ -854,6 +926,23 @@ mod tests {
             runtime
                 .world
                 .contains_resource::<sim_core::routing::PathCache>()
+        );
+    }
+
+    #[test]
+    fn runtime_installs_flow_field_cache() {
+        let runtime = SimulationRuntime::new();
+        assert!(
+            runtime
+                .world
+                .contains_resource::<sim_core::routing::FlowFieldCache>()
+        );
+        assert_eq!(
+            runtime
+                .world
+                .resource::<sim_core::routing::FlowFieldCache>()
+                .len(),
+            0
         );
     }
 
@@ -963,6 +1052,31 @@ mod tests {
                 expected.cluster_of_node(node.id)
             );
         }
+    }
+
+    #[test]
+    fn set_mobility_for_test_refreshes_flow_field_cache() {
+        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/city/zurich-network.json");
+        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .expect("zurich fixture network must load");
+        let mut runtime = SimulationRuntime::new_from_network(&network);
+        runtime.world.insert_resource(populated_flow_field_cache());
+
+        runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
+
+        assert!(
+            runtime
+                .world
+                .contains_resource::<sim_core::routing::FlowFieldCache>()
+        );
+        assert_eq!(
+            runtime
+                .world
+                .resource::<sim_core::routing::FlowFieldCache>()
+                .len(),
+            0
+        );
     }
 
     #[test]
