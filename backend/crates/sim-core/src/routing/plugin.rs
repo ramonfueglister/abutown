@@ -3,6 +3,7 @@ use bevy_ecs::schedule::Schedule;
 
 use crate::city_network::CityNetwork;
 use crate::routing::builder::{SeededStop, SeededWalk, build_graph_from_city_network};
+use crate::routing::flow_field::FlowFieldCache;
 use crate::routing::graph::Graph;
 use crate::routing::hpa::{HpaConfig, HpaIndex};
 use crate::routing::path_cache::PathCache;
@@ -62,6 +63,28 @@ impl SimPlugin for PathfindingPlugin {
     }
 }
 
+pub struct FlowFieldPlugin {
+    pub cache_capacity: usize,
+}
+
+impl Default for FlowFieldPlugin {
+    fn default() -> Self {
+        Self {
+            cache_capacity: 4096,
+        }
+    }
+}
+
+impl SimPlugin for FlowFieldPlugin {
+    fn name(&self) -> &'static str {
+        "flow_field"
+    }
+
+    fn install(&self, world: &mut World, _schedule: &mut Schedule) {
+        world.insert_resource(FlowFieldCache::with_capacity(self.cache_capacity));
+    }
+}
+
 #[derive(Default)]
 pub struct HierarchicalRoutingPlugin {
     pub config: HpaConfig,
@@ -109,6 +132,17 @@ mod tests {
         PathfindingPlugin::default().install(&mut world, &mut schedule);
         assert!(world.contains_resource::<crate::routing::PathCache>());
         assert_eq!(world.resource::<crate::routing::PathCache>().len(), 0);
+    }
+
+    #[test]
+    fn flow_field_plugin_installs_cache() {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        CorePlugin::default().install(&mut world, &mut schedule);
+        FlowFieldPlugin::default().install(&mut world, &mut schedule);
+
+        assert!(world.contains_resource::<crate::routing::FlowFieldCache>());
+        assert_eq!(world.resource::<crate::routing::FlowFieldCache>().len(), 0);
     }
 
     #[test]

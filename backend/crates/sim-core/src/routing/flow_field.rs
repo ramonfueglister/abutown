@@ -1,5 +1,8 @@
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+
+use bevy_ecs::prelude::*;
 
 use crate::routing::{
     ClusterId, EdgeId, Graph, ModeState, NodeId, RoutingProfile, RoutingProfileKey,
@@ -54,6 +57,128 @@ impl FlowField {
 pub enum FlowFieldScope {
     AllEdges,
     Corridor(HashSet<ClusterId>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FlowFieldCacheKey {
+    pub destination: NodeId,
+    pub profile: RoutingProfileKey,
+    pub graph_generation: u64,
+    pub corridor_hash: u64,
+}
+
+impl FlowFieldCacheKey {
+    pub fn new(
+        destination: NodeId,
+        profile: RoutingProfileKey,
+        graph_generation: u64,
+        corridor: &[ClusterId],
+    ) -> Self {
+        let mut sorted = corridor.to_vec();
+        sorted.sort_unstable();
+
+        let mut hash = 1469598103934665603_u64;
+        for cluster in sorted {
+            hash ^= u64::from(cluster.0);
+            hash = hash.wrapping_mul(1099511628211);
+        }
+
+        Self {
+            destination,
+            profile,
+            graph_generation,
+            corridor_hash: hash,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FlowFieldCacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub inserts: u64,
+    pub evictions: u64,
+}
+
+#[derive(Resource)]
+pub struct FlowFieldCache {
+    capacity: usize,
+    entries: HashMap<FlowFieldCacheKey, Arc<FlowField>>,
+    order: VecDeque<FlowFieldCacheKey>,
+    stats: FlowFieldCacheStats,
+}
+
+impl Default for FlowFieldCache {
+    fn default() -> Self {
+        Self::with_capacity(4096)
+    }
+}
+
+impl FlowFieldCache {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            stats: FlowFieldCacheStats::default(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn stats(&self) -> FlowFieldCacheStats {
+        self.stats
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+
+    pub fn insert(&mut self, key: FlowFieldCacheKey, field: Arc<FlowField>) {
+        if !self.entries.contains_key(&key) {
+            self.order.push_back(key);
+        }
+        self.entries.insert(key, field);
+        self.stats.inserts += 1;
+
+        while self.entries.len() > self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                if self.entries.remove(&oldest).is_some() {
+                    self.stats.evictions += 1;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn get_or_build(
+        &mut self,
+        graph: &Graph,
+        key: FlowFieldCacheKey,
+        profile: RoutingProfile,
+        scope: FlowFieldScope,
+    ) -> Result<Arc<FlowField>, FlowFieldError> {
+        debug_assert_eq!(key.profile, profile.key);
+
+        if let Some(existing) = self.entries.get(&key) {
+            self.stats.hits += 1;
+            return Ok(Arc::clone(existing));
+        }
+
+        self.stats.misses += 1;
+        let field = Arc::new(FlowFieldRouter::build(
+            graph,
+            key.destination,
+            profile,
+            scope,
+        )?);
+        self.insert(key, Arc::clone(&field));
+        Ok(field)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -262,6 +387,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
     use crate::routing::{Edge, EdgeKind, Node, NodeKind};
 
     fn node(id: u32, x: f32, y: f32) -> Node {
@@ -447,5 +574,52 @@ mod tests {
                 .next_edge,
             Some(EdgeId(0))
         );
+    }
+
+    #[test]
+    fn cache_tracks_miss_hit_insert_and_eviction() {
+        let graph = walk_graph();
+        let mut cache = FlowFieldCache::with_capacity(1);
+        let key = FlowFieldCacheKey::new(NodeId(2), RoutingProfileKey::Walk, 0, &[ClusterId(0)]);
+
+        let first = cache
+            .get_or_build(
+                &graph,
+                key,
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::AllEdges,
+            )
+            .expect("first field should build");
+        let second = cache
+            .get_or_build(
+                &graph,
+                key,
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::AllEdges,
+            )
+            .expect("second field should hit");
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            cache.stats(),
+            FlowFieldCacheStats {
+                hits: 1,
+                misses: 1,
+                inserts: 1,
+                evictions: 0
+            }
+        );
+
+        let other = FlowFieldCacheKey::new(NodeId(1), RoutingProfileKey::Walk, 0, &[ClusterId(1)]);
+        let _ = cache
+            .get_or_build(
+                &graph,
+                other,
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::AllEdges,
+            )
+            .expect("other field should build");
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.stats().evictions, 1);
     }
 }
