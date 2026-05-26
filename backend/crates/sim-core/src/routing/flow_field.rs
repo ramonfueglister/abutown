@@ -12,6 +12,12 @@ use crate::routing::{
 pub enum FlowFieldError {
     MissingNode(NodeId),
     MissingCluster(NodeId),
+    CacheProfileMismatch {
+        key: RoutingProfileKey,
+        profile: RoutingProfileKey,
+    },
+    CacheScopeMismatch,
+    CacheRequiresClusterLookup,
     NoCorridor {
         from: NodeId,
         to: NodeId,
@@ -64,10 +70,31 @@ pub struct FlowFieldCacheKey {
     pub destination: NodeId,
     pub profile: RoutingProfileKey,
     pub graph_generation: u64,
+    pub scope_discriminator: u64,
     pub corridor_hash: u64,
 }
 
+const FLOW_FIELD_SCOPE_ALL_EDGES: u64 = 0x5fbd_63ea_13c9_1201;
+const FLOW_FIELD_SCOPE_CORRIDOR: u64 = 0xa419_2bd0_c7e5_94f3;
+const FLOW_FIELD_ALL_EDGES_HASH: u64 = 0;
+const FNV_OFFSET_BASIS: u64 = 1469598103934665603;
+const FNV_PRIME: u64 = 1099511628211;
+
 impl FlowFieldCacheKey {
+    pub fn all_edges(
+        destination: NodeId,
+        profile: RoutingProfileKey,
+        graph_generation: u64,
+    ) -> Self {
+        Self {
+            destination,
+            profile,
+            graph_generation,
+            scope_discriminator: FLOW_FIELD_SCOPE_ALL_EDGES,
+            corridor_hash: FLOW_FIELD_ALL_EDGES_HASH,
+        }
+    }
+
     pub fn new(
         destination: NodeId,
         profile: RoutingProfileKey,
@@ -77,17 +104,32 @@ impl FlowFieldCacheKey {
         let mut sorted = corridor.to_vec();
         sorted.sort_unstable();
 
-        let mut hash = 1469598103934665603_u64;
+        let mut hash = FNV_OFFSET_BASIS;
+        hash ^= FLOW_FIELD_SCOPE_CORRIDOR;
+        hash = hash.wrapping_mul(FNV_PRIME);
         for cluster in sorted {
             hash ^= u64::from(cluster.0);
-            hash = hash.wrapping_mul(1099511628211);
+            hash = hash.wrapping_mul(FNV_PRIME);
         }
 
         Self {
             destination,
             profile,
             graph_generation,
-            corridor_hash: hash,
+            scope_discriminator: FLOW_FIELD_SCOPE_CORRIDOR,
+            corridor_hash: (hash << 1) | 1,
+        }
+    }
+
+    pub fn matches_scope(&self, scope: &FlowFieldScope) -> bool {
+        match scope {
+            FlowFieldScope::AllEdges => {
+                self.scope_discriminator == FLOW_FIELD_SCOPE_ALL_EDGES
+                    && self.corridor_hash == FLOW_FIELD_ALL_EDGES_HASH
+            }
+            FlowFieldScope::Corridor(_) => {
+                self.scope_discriminator == FLOW_FIELD_SCOPE_CORRIDOR && self.corridor_hash & 1 == 1
+            }
         }
     }
 }
@@ -128,6 +170,10 @@ impl FlowFieldCache {
         self.entries.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     pub fn stats(&self) -> FlowFieldCacheStats {
         self.stats
     }
@@ -162,23 +208,60 @@ impl FlowFieldCache {
         profile: RoutingProfile,
         scope: FlowFieldScope,
     ) -> Result<Arc<FlowField>, FlowFieldError> {
-        debug_assert_eq!(key.profile, profile.key);
+        validate_cache_request(key, profile.key, &scope)?;
+        match scope {
+            FlowFieldScope::AllEdges => {
+                self.get_or_build_with_cluster_lookup(graph, key, profile, scope, |_| None)
+            }
+            FlowFieldScope::Corridor(_) => Err(FlowFieldError::CacheRequiresClusterLookup),
+        }
+    }
 
+    pub fn get_or_build_with_cluster_lookup<F>(
+        &mut self,
+        graph: &Graph,
+        key: FlowFieldCacheKey,
+        profile: RoutingProfile,
+        scope: FlowFieldScope,
+        cluster_of_node: F,
+    ) -> Result<Arc<FlowField>, FlowFieldError>
+    where
+        F: Fn(NodeId) -> Option<ClusterId>,
+    {
+        validate_cache_request(key, profile.key, &scope)?;
         if let Some(existing) = self.entries.get(&key) {
             self.stats.hits += 1;
             return Ok(Arc::clone(existing));
         }
 
         self.stats.misses += 1;
-        let field = Arc::new(FlowFieldRouter::build(
+        let field = Arc::new(FlowFieldRouter::build_with_cluster_lookup(
             graph,
             key.destination,
             profile,
             scope,
+            cluster_of_node,
         )?);
         self.insert(key, Arc::clone(&field));
         Ok(field)
     }
+}
+
+fn validate_cache_request(
+    key: FlowFieldCacheKey,
+    profile: RoutingProfileKey,
+    scope: &FlowFieldScope,
+) -> Result<(), FlowFieldError> {
+    if key.profile != profile {
+        return Err(FlowFieldError::CacheProfileMismatch {
+            key: key.profile,
+            profile,
+        });
+    }
+    if !key.matches_scope(scope) {
+        return Err(FlowFieldError::CacheScopeMismatch);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -580,7 +663,7 @@ mod tests {
     fn cache_tracks_miss_hit_insert_and_eviction() {
         let graph = walk_graph();
         let mut cache = FlowFieldCache::with_capacity(1);
-        let key = FlowFieldCacheKey::new(NodeId(2), RoutingProfileKey::Walk, 0, &[ClusterId(0)]);
+        let key = FlowFieldCacheKey::all_edges(NodeId(2), RoutingProfileKey::Walk, 0);
 
         let first = cache
             .get_or_build(
@@ -610,7 +693,7 @@ mod tests {
             }
         );
 
-        let other = FlowFieldCacheKey::new(NodeId(1), RoutingProfileKey::Walk, 0, &[ClusterId(1)]);
+        let other = FlowFieldCacheKey::all_edges(NodeId(1), RoutingProfileKey::Walk, 0);
         let _ = cache
             .get_or_build(
                 &graph,
@@ -621,5 +704,117 @@ mod tests {
             .expect("other field should build");
         assert_eq!(cache.len(), 1);
         assert_eq!(cache.stats().evictions, 1);
+    }
+
+    #[test]
+    fn cache_rejects_profile_mismatch_at_runtime() {
+        let graph = walk_graph();
+        let mut cache = FlowFieldCache::with_capacity(1);
+        let key = FlowFieldCacheKey::all_edges(NodeId(2), RoutingProfileKey::Walk, 0);
+
+        let result = cache.get_or_build(
+            &graph,
+            key,
+            RoutingProfile::for_key(RoutingProfileKey::Car),
+            FlowFieldScope::AllEdges,
+        );
+
+        assert_eq!(
+            result,
+            Err(FlowFieldError::CacheProfileMismatch {
+                key: RoutingProfileKey::Walk,
+                profile: RoutingProfileKey::Car,
+            })
+        );
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.stats().misses, 0);
+    }
+
+    #[test]
+    fn cache_rejects_scope_mismatch_at_runtime() {
+        let graph = walk_graph();
+        let mut cache = FlowFieldCache::with_capacity(2);
+        let all_edges_key = FlowFieldCacheKey::all_edges(NodeId(2), RoutingProfileKey::Walk, 0);
+        let corridor_key =
+            FlowFieldCacheKey::new(NodeId(2), RoutingProfileKey::Walk, 0, &[ClusterId(0)]);
+        let mut clusters = HashSet::new();
+        clusters.insert(ClusterId(0));
+
+        assert_eq!(
+            cache.get_or_build(
+                &graph,
+                all_edges_key,
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::Corridor(clusters),
+            ),
+            Err(FlowFieldError::CacheScopeMismatch)
+        );
+        assert_eq!(
+            cache.get_or_build(
+                &graph,
+                corridor_key,
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::AllEdges,
+            ),
+            Err(FlowFieldError::CacheScopeMismatch)
+        );
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.stats().misses, 0);
+    }
+
+    #[test]
+    fn simple_cache_api_rejects_corridor_scope_without_cluster_lookup() {
+        let graph = walk_graph();
+        let mut cache = FlowFieldCache::with_capacity(1);
+        let key = FlowFieldCacheKey::new(NodeId(2), RoutingProfileKey::Walk, 0, &[ClusterId(0)]);
+        let mut clusters = HashSet::new();
+        clusters.insert(ClusterId(0));
+
+        let result = cache.get_or_build(
+            &graph,
+            key,
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+            FlowFieldScope::Corridor(clusters),
+        );
+
+        assert_eq!(result, Err(FlowFieldError::CacheRequiresClusterLookup));
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.stats().misses, 0);
+    }
+
+    #[test]
+    fn corridor_cache_builds_with_cluster_lookup() {
+        let graph = walk_graph();
+        let mut cache = FlowFieldCache::with_capacity(1);
+        let key = FlowFieldCacheKey::new(NodeId(2), RoutingProfileKey::Walk, 0, &[ClusterId(0)]);
+        let mut clusters = HashSet::new();
+        clusters.insert(ClusterId(0));
+
+        let field = cache
+            .get_or_build_with_cluster_lookup(
+                &graph,
+                key,
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::Corridor(clusters),
+                |_| Some(ClusterId(0)),
+            )
+            .expect("corridor field should build with cluster lookup");
+
+        assert_eq!(
+            field
+                .entry(NodeId(0), ModeState::Walking)
+                .unwrap()
+                .next_edge,
+            Some(EdgeId(0))
+        );
+        assert_eq!(
+            cache.stats(),
+            FlowFieldCacheStats {
+                hits: 0,
+                misses: 1,
+                inserts: 1,
+                evictions: 0
+            }
+        );
     }
 }
