@@ -1,5 +1,6 @@
 pub mod builder;
 pub mod cost_model;
+pub mod flow_field;
 pub mod graph;
 pub mod hpa;
 pub mod path_cache;
@@ -12,6 +13,7 @@ pub mod waiting;
 
 pub use builder::{SeededStop, SeededWalk, build_graph_from_city_network};
 pub use cost_model::{CostModel, DistanceCost, ModeFilterCost, TimeCost};
+pub use flow_field::{FlowField, FlowFieldEntry, FlowFieldError, FlowFieldRouter, FlowFieldScope};
 pub use graph::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
 pub use hpa::{
     ClusterCoord, ClusterId, HierarchicalRoutingError, HpaConfig, HpaIndex, HpaRouteStats,
