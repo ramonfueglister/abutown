@@ -74,6 +74,17 @@ fn current_route_origin(
     }
 }
 
+fn is_at_route_endpoint(
+    graph: &crate::routing::Graph,
+    canonical_edge_key: &str,
+    progress: f32,
+    node_id: crate::routing::NodeId,
+) -> Option<bool> {
+    let edge_id = crate::mobility::api::edge_by_canonical_key(graph, canonical_edge_key)?;
+    let edge = graph.edge(edge_id);
+    Some((progress <= 0.0 && edge.from == node_id) || (progress >= 1.0 && edge.to == node_id))
+}
+
 fn destination_for_stage(
     graph: &crate::routing::Graph,
     stage: &PlanStage,
@@ -325,25 +336,27 @@ pub fn route_assignment_system(
             stats.failed += 1;
             continue;
         };
+        let profile_key = crate::routing::RoutingProfileKey::Walk;
         if origin == destination {
-            if complete_walk_stage_at_destination(
-                entity,
-                stable,
-                &mut state,
-                &mut plan,
-                stage,
-                destination,
-                &mut waiting,
-                &mut dirty,
-                &mut commands,
-            ) {
+            if is_at_route_endpoint(&graph, &link_id, progress, destination) == Some(true)
+                && complete_walk_stage_at_destination(
+                    entity,
+                    stable,
+                    &mut state,
+                    &mut plan,
+                    stage,
+                    destination,
+                    &mut waiting,
+                    &mut dirty,
+                    &mut commands,
+                )
+            {
                 stats.skipped += 1;
             } else {
                 stats.failed += 1;
             }
             continue;
         }
-        let profile_key = crate::routing::RoutingProfileKey::Walk;
         let Ok(corridor) = hpa.corridor_between(origin, destination, profile_key) else {
             stats.failed += 1;
             continue;
@@ -3204,6 +3217,72 @@ mod route_execution_tests {
         )
     }
 
+    fn outgoing_from_destination_graph() -> Graph {
+        Graph::new(
+            vec![
+                Node {
+                    id: NodeId(0),
+                    position: (0.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(1),
+                    position: (1.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(2),
+                    position: (2.0, 0.0),
+                    kind: NodeKind::ActivityLocation,
+                    legacy_id: Some("activity:work".into()),
+                },
+                Node {
+                    id: NodeId(3),
+                    position: (3.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+            ],
+            vec![
+                Edge {
+                    id: EdgeId(0),
+                    from: NodeId(0),
+                    to: NodeId(1),
+                    polyline: vec![(0.0, 0.0), (1.0, 0.0)],
+                    length: 1.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: Some("walk:a".into()),
+                },
+                Edge {
+                    id: EdgeId(1),
+                    from: NodeId(1),
+                    to: NodeId(2),
+                    polyline: vec![(1.0, 0.0), (2.0, 0.0)],
+                    length: 1.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: Some("walk:b".into()),
+                },
+                Edge {
+                    id: EdgeId(2),
+                    from: NodeId(2),
+                    to: NodeId(3),
+                    polyline: vec![(2.0, 0.0), (3.0, 0.0)],
+                    length: 1.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: Some("walk:out".into()),
+                },
+            ],
+        )
+    }
+
     fn world_schedule_and_agent() -> (World, Schedule, Entity) {
         world_schedule_and_agent_with_activity_legacy(Some("activity:work"))
     }
@@ -3423,6 +3502,35 @@ mod route_execution_tests {
         assert!(matches!(
             &state.0,
             AgentMobilityState::AtActivity { activity_id } if activity_id == "activity:work"
+        ));
+    }
+
+    #[test]
+    fn route_assignment_does_not_complete_mid_edge_from_destination() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent_with_graph(
+            outgoing_from_destination_graph(),
+            "walk:out",
+            "activity:work",
+            0.0,
+        );
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:out".into(),
+            progress: 0.5,
+        };
+
+        schedule.run(&mut world);
+
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 0);
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 1);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::Walking { link_id, progress }
+                if link_id == "walk:out" && *progress == 0.5
         ));
     }
 
