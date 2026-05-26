@@ -358,4 +358,79 @@ mod tests {
         assert_eq!(index.portals_in_cluster(ClusterId(1)), &[NodeId(2)]);
         assert_eq!(index.portals_in_cluster(ClusterId(2)), &[NodeId(3)]);
     }
+
+    #[test]
+    fn profile_adjacency_filters_edge_kinds() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 12.0, 0.0, NodeKind::Intersection),
+                node(2, 0.0, 20.0, NodeKind::Intersection),
+                node(3, 12.0, 20.0, NodeKind::TransitStop),
+                node(4, 25.0, 20.0, NodeKind::TransitStop),
+            ],
+            vec![
+                edge(0, 0, 1, EdgeKind::Footway, 12.0),
+                edge(1, 2, 3, EdgeKind::Road, 12.0),
+                edge(2, 3, 4, EdgeKind::TramTrack, 13.0),
+            ],
+        );
+        let index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+
+        let c0 = index.cluster_id(ClusterCoord { x: 0, y: 0 }).unwrap();
+        let c1 = index.cluster_id(ClusterCoord { x: 1, y: 0 }).unwrap();
+        let c2 = index.cluster_id(ClusterCoord { x: 0, y: 2 }).unwrap();
+        let c3 = index.cluster_id(ClusterCoord { x: 1, y: 2 }).unwrap();
+        let c4 = index.cluster_id(ClusterCoord { x: 2, y: 2 }).unwrap();
+
+        assert_eq!(index.adjacent_clusters(c0, RoutingProfileKey::Walk), &[c1]);
+        assert!(
+            index
+                .adjacent_clusters(c0, RoutingProfileKey::Car)
+                .is_empty()
+        );
+        assert_eq!(index.adjacent_clusters(c2, RoutingProfileKey::Car), &[c3]);
+        assert_eq!(index.adjacent_clusters(c3, RoutingProfileKey::Tram), &[c4]);
+        assert_eq!(
+            index.adjacent_clusters(c3, RoutingProfileKey::WalkTransit),
+            &[c4]
+        );
+    }
+
+    #[test]
+    fn walk_transit_tram_adjacency_requires_stop_endpoint() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 12.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![edge(0, 0, 1, EdgeKind::TramTrack, 12.0)],
+        );
+        let index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+
+        let c0 = index.cluster_id(ClusterCoord { x: 0, y: 0 }).unwrap();
+        assert_eq!(
+            index.adjacent_clusters(c0, RoutingProfileKey::Tram),
+            &[ClusterId(1)]
+        );
+        assert!(
+            index
+                .adjacent_clusters(c0, RoutingProfileKey::WalkTransit)
+                .is_empty()
+        );
+    }
 }
