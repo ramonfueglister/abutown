@@ -58,6 +58,7 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     world.insert_resource(PreviousChunkByEntity::default());
     world.insert_resource(PreviousFlowCellContrib::default());
     world.insert_resource(PendingPerChunkDeltas::default());
+    world.insert_resource(RouteAssignmentStats::default());
 
     crate::mobility::systems::install_systems(schedule);
 }
@@ -120,6 +121,34 @@ fn initial_agent_position(world: &World, state: &AgentMobilityState) -> (f32, f3
 /// Current monotonic mobility tick.
 pub fn tick(world: &World) -> u64 {
     world.resource::<Tick>().0
+}
+
+pub fn canonical_edge_key(
+    graph: &crate::routing::Graph,
+    edge_id: crate::routing::EdgeId,
+) -> String {
+    let edge = graph.edge(edge_id);
+    edge.legacy_id
+        .clone()
+        .unwrap_or_else(|| format!("edge:{}", edge.id.0))
+}
+
+pub fn edge_by_canonical_key(
+    graph: &crate::routing::Graph,
+    key: &str,
+) -> Option<crate::routing::EdgeId> {
+    if let Some(edge_id) = graph.edge_by_legacy(key)
+        && canonical_edge_key(graph, edge_id) == key
+    {
+        return Some(edge_id);
+    }
+
+    let raw_id = key.strip_prefix("edge:")?.parse::<u32>().ok()?;
+    if (raw_id as usize) >= graph.edge_count() {
+        return None;
+    }
+    let edge_id = crate::routing::EdgeId(raw_id);
+    (canonical_edge_key(graph, edge_id) == key).then_some(edge_id)
 }
 
 pub fn agent(world: &World, id: &AgentId) -> Option<AgentRecord> {
@@ -578,11 +607,9 @@ fn resolve_link_polyline(
     link_id: &str,
 ) -> Option<crate::mobility_geometry::LinkGeometry> {
     let graph = world.resource::<crate::routing::Graph>();
-    graph
-        .edge_by_legacy(link_id)
-        .map(|edge_id| crate::mobility_geometry::LinkGeometry {
-            points: graph.edge(edge_id).polyline.clone(),
-        })
+    edge_by_canonical_key(graph, link_id).map(|edge_id| crate::mobility_geometry::LinkGeometry {
+        points: graph.edge(edge_id).polyline.clone(),
+    })
 }
 
 pub fn world_coord_for_agent(world: &World, agent_id: &AgentId) -> Option<(f32, f32)> {

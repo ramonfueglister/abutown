@@ -113,3 +113,10 @@ pub struct PreviousFlowCellContrib(pub HashMap<ChunkCoord, u32>);
 /// the end of each tick.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct PendingPerChunkDeltas(pub Vec<crate::mobility::MobilityChunkDelta>);
+
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RouteAssignmentStats {
+    pub assigned: u64,
+    pub skipped: u64,
+    pub failed: u64,
+}
