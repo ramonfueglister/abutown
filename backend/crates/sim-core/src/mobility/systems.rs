@@ -126,6 +126,54 @@ fn materialize_route_steps(
     Some(steps)
 }
 
+fn complete_walk_stage_at_destination(
+    entity: Entity,
+    stable: &StableAgentId,
+    state: &mut AgentMobilityStateComponent,
+    plan: &mut WalkPlan,
+    stage: PlanStage,
+    destination: crate::routing::NodeId,
+    waiting: &mut crate::routing::WaitingAgents,
+    dirty: &mut DirtyAgents,
+    commands: &mut Commands,
+) -> bool {
+    match stage {
+        PlanStage::WalkToStop { stop_id, .. } => {
+            plan.cursor += 1;
+            state.0 = AgentMobilityState::WaitingAtStop { stop_id };
+            let already_waiting = waiting
+                .queue(destination)
+                .map(|queue| queue.contains(&stable.0))
+                .unwrap_or(false);
+            if !already_waiting {
+                waiting.enqueue(destination, stable.0.clone());
+            }
+            commands.entity(entity).remove::<(ActiveRoute, NearStop)>();
+            dirty.0.insert(entity);
+            true
+        }
+        PlanStage::WalkToActivity { activity_id, .. } => {
+            plan.cursor += 1;
+            state.0 = AgentMobilityState::AtActivity { activity_id };
+            commands.entity(entity).remove::<(ActiveRoute, NearStop)>();
+            dirty.0.insert(entity);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn invalidate_active_route(
+    entity: Entity,
+    stats: &mut RouteAssignmentStats,
+    dirty: &mut DirtyAgents,
+    commands: &mut Commands,
+) {
+    stats.failed += 1;
+    commands.entity(entity).remove::<ActiveRoute>();
+    dirty.0.insert(entity);
+}
+
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum MobilitySet {
     LOD,
@@ -215,7 +263,13 @@ pub fn install_systems(schedule: &mut Schedule) {
 #[allow(clippy::type_complexity)]
 pub fn route_assignment_system(
     mut query: Query<
-        (Entity, &Position, &mut AgentMobilityStateComponent, &WalkPlan),
+        (
+            Entity,
+            &Position,
+            &StableAgentId,
+            &mut AgentMobilityStateComponent,
+            &mut WalkPlan,
+        ),
         (With<AgentMarker>, Without<ActiveRoute>),
     >,
     simulated: Res<SimulatedChunks>,
@@ -224,11 +278,12 @@ pub fn route_assignment_system(
     spatial: Option<Res<crate::routing::NodeSpatialIndex>>,
     mut cache: Option<ResMut<crate::routing::FlowFieldCache>>,
     mut stats: ResMut<RouteAssignmentStats>,
+    mut waiting: ResMut<crate::routing::WaitingAgents>,
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
 ) {
     let Some(hpa) = hpa else {
-        for (_, pos, state, _) in query.iter() {
+        for (_, pos, _, state, _) in query.iter() {
             if chunk_is_simulated(pos, &simulated)
                 && matches!(state.0, AgentMobilityState::Walking { .. })
             {
@@ -238,7 +293,7 @@ pub fn route_assignment_system(
         return;
     };
     let Some(cache) = cache.as_deref_mut() else {
-        for (_, pos, state, _) in query.iter() {
+        for (_, pos, _, state, _) in query.iter() {
             if chunk_is_simulated(pos, &simulated)
                 && matches!(state.0, AgentMobilityState::Walking { .. })
             {
@@ -248,7 +303,7 @@ pub fn route_assignment_system(
         return;
     };
 
-    for (entity, pos, mut state, plan) in query.iter_mut() {
+    for (entity, pos, stable, mut state, mut plan) in query.iter_mut() {
         let AgentMobilityState::Walking { link_id, progress } = &state.0 else {
             continue;
         };
@@ -258,11 +313,11 @@ pub fn route_assignment_system(
             stats.skipped += 1;
             continue;
         }
-        let Some(stage) = plan.stages.get(plan.cursor) else {
+        let Some(stage) = plan.stages.get(plan.cursor).cloned() else {
             stats.skipped += 1;
             continue;
         };
-        let Some(destination) = destination_for_stage(&graph, stage, spatial.as_deref()) else {
+        let Some(destination) = destination_for_stage(&graph, &stage, spatial.as_deref()) else {
             stats.failed += 1;
             continue;
         };
@@ -270,6 +325,24 @@ pub fn route_assignment_system(
             stats.failed += 1;
             continue;
         };
+        if origin == destination {
+            if complete_walk_stage_at_destination(
+                entity,
+                stable,
+                &mut state,
+                &mut plan,
+                stage,
+                destination,
+                &mut waiting,
+                &mut dirty,
+                &mut commands,
+            ) {
+                stats.skipped += 1;
+            } else {
+                stats.failed += 1;
+            }
+            continue;
+        }
         let profile_key = crate::routing::RoutingProfileKey::Walk;
         let Ok(corridor) = hpa.corridor_between(origin, destination, profile_key) else {
             stats.failed += 1;
@@ -299,7 +372,7 @@ pub fn route_assignment_system(
             continue;
         };
         if steps.is_empty() {
-            stats.skipped += 1;
+            stats.failed += 1;
             continue;
         }
 
@@ -339,6 +412,7 @@ pub fn route_advance_system(
     graph: Res<crate::routing::Graph>,
     spatial: Option<Res<crate::routing::NodeSpatialIndex>>,
     mut waiting: ResMut<crate::routing::WaitingAgents>,
+    mut stats: ResMut<RouteAssignmentStats>,
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
 ) {
@@ -347,20 +421,25 @@ pub fn route_advance_system(
             continue;
         }
         let AgentMobilityState::Walking { link_id, progress } = &state.0 else {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         };
         let Some(current_step) = route.steps.get(route.cursor).cloned() else {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         };
         if link_id != &current_step.canonical_edge_key {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         }
         let Some(current_edge_id) =
             crate::mobility::api::edge_by_canonical_key(&graph, &current_step.canonical_edge_key)
         else {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         };
         if current_edge_id != current_step.edge_id {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         }
         if *progress < 1.0 {
@@ -369,6 +448,18 @@ pub fn route_advance_system(
 
         let next_cursor = route.cursor + 1;
         if let Some(next_step) = route.steps.get(next_cursor).cloned() {
+            let Some(next_edge_id) =
+                crate::mobility::api::edge_by_canonical_key(&graph, &next_step.canonical_edge_key)
+            else {
+                invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
+                continue;
+            };
+            if next_edge_id != next_step.edge_id
+                || graph.edge(current_edge_id).to != graph.edge(next_edge_id).from
+            {
+                invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
+                continue;
+            }
             route.cursor = next_cursor;
             state.0 = AgentMobilityState::Walking {
                 link_id: next_step.canonical_edge_key,
@@ -379,38 +470,30 @@ pub fn route_advance_system(
         }
 
         if graph.edge(current_edge_id).to != route.destination {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         }
 
         let Some(stage) = plan.stages.get(plan.cursor).cloned() else {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         };
         if destination_for_stage(&graph, &stage, spatial.as_deref()) != Some(route.destination) {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         }
-        match stage {
-            PlanStage::WalkToStop { stop_id, .. } => {
-                plan.cursor += 1;
-                state.0 = AgentMobilityState::WaitingAtStop {
-                    stop_id: stop_id.clone(),
-                };
-                let already_waiting = waiting
-                    .queue(route.destination)
-                    .map(|queue| queue.contains(&stable.0))
-                    .unwrap_or(false);
-                if !already_waiting {
-                    waiting.enqueue(route.destination, stable.0.clone());
-                }
-                commands.entity(entity).remove::<(ActiveRoute, NearStop)>();
-                dirty.0.insert(entity);
-            }
-            PlanStage::WalkToActivity { activity_id, .. } => {
-                plan.cursor += 1;
-                state.0 = AgentMobilityState::AtActivity { activity_id };
-                commands.entity(entity).remove::<(ActiveRoute, NearStop)>();
-                dirty.0.insert(entity);
-            }
-            _ => {}
+        if !complete_walk_stage_at_destination(
+            entity,
+            stable,
+            &mut state,
+            &mut plan,
+            stage,
+            route.destination,
+            &mut waiting,
+            &mut dirty,
+            &mut commands,
+        ) {
+            invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
         }
     }
 }
@@ -3321,6 +3404,29 @@ mod route_execution_tests {
     }
 
     #[test]
+    fn route_assignment_completes_when_origin_is_destination() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        world.get_mut::<WalkSpeed>(entity).unwrap().0 = 0.0;
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:b".into(),
+            progress: 1.0,
+        };
+
+        schedule.run(&mut world);
+
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 1);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::AtActivity { activity_id } if activity_id == "activity:work"
+        ));
+    }
+
+    #[test]
     fn route_assignment_resolves_activity_destination_through_spatial_fallback() {
         let (mut world, mut schedule, entity) = world_schedule_and_agent_without_activity_legacy();
 
@@ -3369,7 +3475,85 @@ mod route_execution_tests {
     }
 
     #[test]
-    fn route_advance_keeps_active_route_for_unexpected_current_stage() {
+    fn route_advance_completes_final_activity_route() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        world.get_mut::<WalkSpeed>(entity).unwrap().0 = 0.0;
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:b".into(),
+            progress: 1.0,
+        };
+        world.entity_mut(entity).insert(ActiveRoute {
+            destination: NodeId(2),
+            profile: crate::routing::RoutingProfileKey::Walk,
+            steps: vec![RouteStep {
+                edge_id: EdgeId(1),
+                mode: crate::routing::ModeState::Walking,
+                canonical_edge_key: "walk:b".into(),
+                length: 1.0,
+            }],
+            cursor: 0,
+        });
+
+        schedule.run(&mut world);
+
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 1);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::AtActivity { activity_id } if activity_id == "activity:work"
+        ));
+    }
+
+    #[test]
+    fn route_advance_completes_final_stop_route() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        world.get_mut::<WalkPlan>(entity).unwrap().stages = vec![PlanStage::WalkToStop {
+            link_id: "walk:b".into(),
+            stop_id: "activity:work".into(),
+        }];
+        world.get_mut::<WalkSpeed>(entity).unwrap().0 = 0.0;
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:b".into(),
+            progress: 1.0,
+        };
+        world.entity_mut(entity).insert(ActiveRoute {
+            destination: NodeId(2),
+            profile: crate::routing::RoutingProfileKey::Walk,
+            steps: vec![RouteStep {
+                edge_id: EdgeId(1),
+                mode: crate::routing::ModeState::Walking,
+                canonical_edge_key: "walk:b".into(),
+                length: 1.0,
+            }],
+            cursor: 0,
+        });
+
+        schedule.run(&mut world);
+
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 1);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::WaitingAtStop { stop_id } if stop_id == "activity:work"
+        ));
+        assert!(
+            world
+                .resource::<crate::routing::WaitingAgents>()
+                .queue(NodeId(2))
+                .is_some_and(|queue| queue.contains(&AgentId("agent:route".into())))
+        );
+    }
+
+    #[test]
+    fn route_advance_invalidates_unexpected_current_stage() {
         let (mut world, mut schedule, entity) = world_schedule_and_agent();
         world.get_mut::<WalkPlan>(entity).unwrap().stages = vec![PlanStage::Activity {
             activity_id: "activity:work".into(),
@@ -3395,10 +3579,8 @@ mod route_execution_tests {
 
         schedule.run(&mut world);
 
-        assert!(
-            world.get::<ActiveRoute>(entity).is_some(),
-            "unexpected current stages should not silently remove ActiveRoute"
-        );
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 1);
         assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 0);
         let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
         assert!(matches!(
@@ -3409,7 +3591,7 @@ mod route_execution_tests {
     }
 
     #[test]
-    fn route_advance_leaves_stale_current_link_intact() {
+    fn route_advance_invalidates_stale_current_link() {
         let (mut world, mut schedule, entity) = world_schedule_and_agent();
         schedule.run(&mut world);
         world.get_mut::<WalkSpeed>(entity).unwrap().0 = 0.0;
@@ -3423,10 +3605,8 @@ mod route_execution_tests {
 
         schedule.run(&mut world);
 
-        let route = world
-            .get::<ActiveRoute>(entity)
-            .expect("stale link should not remove ActiveRoute");
-        assert_eq!(route.cursor, 0);
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 1);
         let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
         assert!(matches!(
             &state.0,
@@ -3436,7 +3616,70 @@ mod route_execution_tests {
     }
 
     #[test]
-    fn route_advance_does_not_complete_when_final_edge_misses_destination() {
+    fn route_advance_invalidates_disconnected_next_step() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:a".into(),
+            progress: 1.0,
+        };
+        world.entity_mut(entity).insert(ActiveRoute {
+            destination: NodeId(2),
+            profile: crate::routing::RoutingProfileKey::Walk,
+            steps: vec![
+                RouteStep {
+                    edge_id: EdgeId(0),
+                    mode: crate::routing::ModeState::Walking,
+                    canonical_edge_key: "walk:a".into(),
+                    length: 1.0,
+                },
+                RouteStep {
+                    edge_id: EdgeId(0),
+                    mode: crate::routing::ModeState::Walking,
+                    canonical_edge_key: "walk:a".into(),
+                    length: 1.0,
+                },
+            ],
+            cursor: 0,
+        });
+
+        schedule.run(&mut world);
+
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 1);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::Walking { link_id, progress }
+                if link_id == "walk:a" && *progress >= 1.0
+        ));
+    }
+
+    #[test]
+    fn route_advance_invalidates_cursor_past_steps() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        world.entity_mut(entity).insert(ActiveRoute {
+            destination: NodeId(2),
+            profile: crate::routing::RoutingProfileKey::Walk,
+            steps: vec![RouteStep {
+                edge_id: EdgeId(0),
+                mode: crate::routing::ModeState::Walking,
+                canonical_edge_key: "walk:a".into(),
+                length: 1.0,
+            }],
+            cursor: 1,
+        });
+
+        schedule.run(&mut world);
+
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 1);
+    }
+
+    #[test]
+    fn route_advance_invalidates_when_final_edge_misses_destination() {
         let (mut world, mut schedule, entity) = world_schedule_and_agent();
         world
             .get_mut::<AgentMobilityStateComponent>(entity)
@@ -3459,10 +3702,8 @@ mod route_execution_tests {
 
         schedule.run(&mut world);
 
-        assert!(
-            world.get::<ActiveRoute>(entity).is_some(),
-            "route should not complete unless the final edge reaches the route destination"
-        );
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 1);
         let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
         assert!(matches!(
             &state.0,
@@ -3473,7 +3714,7 @@ mod route_execution_tests {
     }
 
     #[test]
-    fn route_advance_does_not_complete_when_stage_destination_mismatches_route() {
+    fn route_advance_invalidates_when_stage_destination_mismatches_route() {
         let (mut world, mut schedule, entity) = world_schedule_and_agent();
         world
             .get_mut::<AgentMobilityStateComponent>(entity)
@@ -3496,10 +3737,8 @@ mod route_execution_tests {
 
         schedule.run(&mut world);
 
-        assert!(
-            world.get::<ActiveRoute>(entity).is_some(),
-            "route should not complete when current plan stage resolves to a different destination"
-        );
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 1);
         let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
         assert!(matches!(
             &state.0,
