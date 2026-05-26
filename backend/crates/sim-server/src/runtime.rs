@@ -185,6 +185,8 @@ impl SimulationRuntime {
         let (seeded_world, _schedule) = seeded;
         let snap = extract_from_world(&seeded_world);
         apply_into_world(&mut self.world, snap);
+        sim_core::routing::HierarchicalRoutingPlugin::default()
+            .install(&mut self.world, &mut self.schedule);
     }
 
     pub fn override_world_id_for_test(&mut self, world_id: &str) {
@@ -935,6 +937,32 @@ mod tests {
             .edges
             .iter()
             .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::TramTrack));
+    }
+
+    #[test]
+    fn set_mobility_for_test_refreshes_hpa_index() {
+        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/city/zurich-network.json");
+        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .expect("zurich fixture network must load");
+        let mut runtime = SimulationRuntime::new_from_network(&network);
+
+        runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
+
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let hpa = runtime.world.resource::<sim_core::routing::HpaIndex>();
+        let expected =
+            sim_core::routing::HpaIndex::build(graph, sim_core::routing::HpaConfig::default())
+                .expect("current graph should build an HPA index");
+
+        assert_eq!(hpa.cluster_count(), expected.cluster_count());
+        assert_eq!(hpa.portal_count(), expected.portal_count());
+        for node in graph.nodes() {
+            assert_eq!(
+                hpa.cluster_of_node(node.id),
+                expected.cluster_of_node(node.id)
+            );
+        }
     }
 
     #[test]

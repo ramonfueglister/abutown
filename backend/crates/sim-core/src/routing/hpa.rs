@@ -228,6 +228,8 @@ impl HpaRouter {
                 "request profile must match routing profile",
             ));
         }
+        validate_request_node(graph, request.from)?;
+        validate_request_node(graph, request.to)?;
 
         let start_cluster = resolve_request_cluster(index, request.from)?;
         let goal_cluster = resolve_request_cluster(index, request.to)?;
@@ -262,6 +264,14 @@ impl HpaRouter {
                 used_base_case: false,
             },
         ))
+    }
+}
+
+fn validate_request_node(graph: &Graph, node: NodeId) -> Result<(), HierarchicalRoutingError> {
+    if (node.0 as usize) < graph.node_count() {
+        Ok(())
+    } else {
+        Err(HierarchicalRoutingError::MissingNode(node))
     }
 }
 
@@ -625,9 +635,11 @@ mod tests {
         let c4 = index.cluster_id(ClusterCoord { x: 2, y: 2 }).unwrap();
 
         assert_eq!(index.adjacent_clusters(c0, RoutingProfileKey::Walk), &[c1]);
-        assert!(index
-            .adjacent_clusters(c0, RoutingProfileKey::Car)
-            .is_empty());
+        assert!(
+            index
+                .adjacent_clusters(c0, RoutingProfileKey::Car)
+                .is_empty()
+        );
         assert_eq!(index.adjacent_clusters(c2, RoutingProfileKey::Car), &[c3]);
         assert_eq!(index.adjacent_clusters(c3, RoutingProfileKey::Tram), &[c4]);
         assert_eq!(
@@ -659,9 +671,11 @@ mod tests {
             index.adjacent_clusters(c0, RoutingProfileKey::Tram),
             &[ClusterId(1)]
         );
-        assert!(index
-            .adjacent_clusters(c0, RoutingProfileKey::WalkTransit)
-            .is_empty());
+        assert!(
+            index
+                .adjacent_clusters(c0, RoutingProfileKey::WalkTransit)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -727,6 +741,57 @@ mod tests {
         assert!(!stats.used_base_case);
         assert_eq!(stats.corridor_cluster_count, 3);
         assert!(stats.abstract_clusters_visited >= 3);
+    }
+
+    #[test]
+    fn missing_request_nodes_are_reported_before_cluster_resolution() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 5.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![edge(0, 0, 1, EdgeKind::Footway, 5.0)],
+        );
+        let index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+
+        let missing_from = HpaRouter::find_path(
+            &graph,
+            &index,
+            PathRequest {
+                from: NodeId(99),
+                to: NodeId(1),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+        )
+        .unwrap_err();
+        assert_eq!(
+            missing_from,
+            HierarchicalRoutingError::MissingNode(NodeId(99))
+        );
+
+        let missing_to = HpaRouter::find_path(
+            &graph,
+            &index,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(99),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+        )
+        .unwrap_err();
+        assert_eq!(
+            missing_to,
+            HierarchicalRoutingError::MissingNode(NodeId(99))
+        );
     }
 
     #[test]
