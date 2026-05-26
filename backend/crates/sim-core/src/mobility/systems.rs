@@ -267,21 +267,15 @@ pub fn route_assignment_system(
             stats.failed += 1;
             continue;
         };
-        let Some(origin_cluster) = hpa.cluster_of_node(origin) else {
-            stats.failed += 1;
-            continue;
-        };
-        let Some(destination_cluster) = hpa.cluster_of_node(destination) else {
+        let profile_key = crate::routing::RoutingProfileKey::Walk;
+        let Ok(corridor) = hpa.corridor_between(origin, destination, profile_key) else {
             stats.failed += 1;
             continue;
         };
 
-        let mut corridor = HashSet::from([origin_cluster]);
-        corridor.insert(destination_cluster);
         let mut corridor_key: Vec<_> = corridor.iter().copied().collect();
         corridor_key.sort_unstable();
 
-        let profile_key = crate::routing::RoutingProfileKey::Walk;
         let profile = crate::routing::RoutingProfile::for_key(profile_key);
         let key =
             crate::routing::FlowFieldCacheKey::new(destination, profile_key, 0, &corridor_key);
@@ -339,9 +333,23 @@ pub fn route_advance_system(
         if !chunk_is_simulated(pos, &simulated) {
             continue;
         }
-        let AgentMobilityState::Walking { progress, .. } = &state.0 else {
+        let AgentMobilityState::Walking { link_id, progress } = &state.0 else {
             continue;
         };
+        let Some(current_step) = route.steps.get(route.cursor).cloned() else {
+            continue;
+        };
+        if link_id != &current_step.canonical_edge_key {
+            continue;
+        }
+        let Some(current_edge_id) =
+            crate::mobility::api::edge_by_canonical_key(&graph, &current_step.canonical_edge_key)
+        else {
+            continue;
+        };
+        if current_edge_id != current_step.edge_id {
+            continue;
+        }
         if *progress < 1.0 {
             continue;
         }
@@ -354,6 +362,10 @@ pub fn route_advance_system(
                 progress: 0.0,
             };
             dirty.0.insert(entity);
+            continue;
+        }
+
+        if graph.edge(current_edge_id).to != route.destination {
             continue;
         }
 
@@ -2971,6 +2983,14 @@ mod route_execution_tests {
     };
 
     fn route_graph(activity_legacy_id: Option<&str>) -> Graph {
+        route_graph_with_edge_legacy(activity_legacy_id, true)
+    }
+
+    fn graph_native_route_graph(activity_legacy_id: Option<&str>) -> Graph {
+        route_graph_with_edge_legacy(activity_legacy_id, false)
+    }
+
+    fn route_graph_with_edge_legacy(activity_legacy_id: Option<&str>, edge_legacy: bool) -> Graph {
         Graph::new(
             vec![
                 Node {
@@ -3002,7 +3022,7 @@ mod route_execution_tests {
                     kind: EdgeKind::Footway,
                     speed_limit: 1.0,
                     capacity: 1,
-                    legacy_id: Some("walk:a".into()),
+                    legacy_id: edge_legacy.then(|| "walk:a".into()),
                 },
                 Edge {
                     id: EdgeId(1),
@@ -3013,7 +3033,73 @@ mod route_execution_tests {
                     kind: EdgeKind::Footway,
                     speed_limit: 1.0,
                     capacity: 1,
-                    legacy_id: Some("walk:b".into()),
+                    legacy_id: edge_legacy.then(|| "walk:b".into()),
+                },
+            ],
+        )
+    }
+
+    fn intermediate_cluster_route_graph() -> Graph {
+        Graph::new(
+            vec![
+                Node {
+                    id: NodeId(0),
+                    position: (0.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(1),
+                    position: (12.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(2),
+                    position: (25.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(3),
+                    position: (35.0, 0.0),
+                    kind: NodeKind::ActivityLocation,
+                    legacy_id: Some("activity:far".into()),
+                },
+            ],
+            vec![
+                Edge {
+                    id: EdgeId(0),
+                    from: NodeId(0),
+                    to: NodeId(1),
+                    polyline: vec![(0.0, 0.0), (12.0, 0.0)],
+                    length: 12.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: Some("walk:0".into()),
+                },
+                Edge {
+                    id: EdgeId(1),
+                    from: NodeId(1),
+                    to: NodeId(2),
+                    polyline: vec![(12.0, 0.0), (25.0, 0.0)],
+                    length: 13.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: Some("walk:1".into()),
+                },
+                Edge {
+                    id: EdgeId(2),
+                    from: NodeId(2),
+                    to: NodeId(3),
+                    polyline: vec![(25.0, 0.0), (35.0, 0.0)],
+                    length: 10.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: Some("walk:2".into()),
                 },
             ],
         )
@@ -3030,8 +3116,21 @@ mod route_execution_tests {
     fn world_schedule_and_agent_with_activity_legacy(
         activity_legacy_id: Option<&str>,
     ) -> (World, Schedule, Entity) {
+        world_schedule_and_agent_with_graph(
+            route_graph(activity_legacy_id),
+            "walk:a",
+            "activity:work",
+            1.0,
+        )
+    }
+
+    fn world_schedule_and_agent_with_graph(
+        graph: Graph,
+        initial_link_id: &str,
+        activity_id: &str,
+        walk_speed: f32,
+    ) -> (World, Schedule, Entity) {
         let (mut world, schedule) = crate::mobility::api::empty_world_and_schedule();
-        let graph = route_graph(activity_legacy_id);
         let hpa = HpaIndex::build(&graph, HpaConfig::default()).expect("HPA should build");
         let spatial = NodeSpatialIndex::from_nodes(graph.nodes());
         world.insert_resource(graph);
@@ -3057,14 +3156,63 @@ mod route_execution_tests {
             AgentRecord::new(
                 AgentId("agent:route".into()),
                 AgentMobilityState::Walking {
-                    link_id: "walk:a".into(),
+                    link_id: initial_link_id.into(),
                     progress: 0.0,
                 },
                 vec![PlanStage::WalkToActivity {
-                    link_id: "walk:a".into(),
-                    activity_id: "activity:work".into(),
+                    link_id: initial_link_id.into(),
+                    activity_id: activity_id.into(),
                 }],
-                1.0,
+                walk_speed,
+            ),
+        );
+
+        (world, schedule, entity)
+    }
+
+    fn world_schedule_and_agent_requiring_intermediate_corridor() -> (World, Schedule, Entity) {
+        let graph = intermediate_cluster_route_graph();
+        let (mut world, schedule) = crate::mobility::api::empty_world_and_schedule();
+        let hpa = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("HPA should build");
+        let spatial = NodeSpatialIndex::from_nodes(graph.nodes());
+        world.insert_resource(graph);
+        world.insert_resource(hpa);
+        world.insert_resource(spatial);
+        world.insert_resource(FlowFieldCache::default());
+        let active_coord = crate::ids::ChunkCoord { x: 0, y: 0 };
+        let chunk_entity = world
+            .spawn((
+                ChunkCoordComp(active_coord),
+                ActiveChunk,
+                crate::world::components::ChunkSubscriberCount(1),
+                crate::world::components::LodCooldown(0),
+            ))
+            .id();
+        world
+            .resource_mut::<crate::world::resources::ChunksByCoord>()
+            .0
+            .insert(active_coord, chunk_entity);
+
+        let entity = crate::mobility::api::spawn_agent_from_record(
+            &mut world,
+            AgentRecord::new(
+                AgentId("agent:route".into()),
+                AgentMobilityState::Walking {
+                    link_id: "walk:0".into(),
+                    progress: 0.0,
+                },
+                vec![PlanStage::WalkToActivity {
+                    link_id: "walk:0".into(),
+                    activity_id: "activity:far".into(),
+                }],
+                0.0,
             ),
         );
 
@@ -3085,6 +3233,47 @@ mod route_execution_tests {
         assert_eq!(route.steps[0].canonical_edge_key, "walk:a");
         assert_eq!(route.steps[1].canonical_edge_key, "walk:b");
         assert_eq!(world.resource::<RouteAssignmentStats>().assigned, 1);
+    }
+
+    #[test]
+    fn route_assignment_uses_full_hpa_corridor() {
+        let (mut world, mut schedule, entity) =
+            world_schedule_and_agent_requiring_intermediate_corridor();
+
+        schedule.run(&mut world);
+
+        let route = world
+            .get::<ActiveRoute>(entity)
+            .expect("route assignment should include intermediate corridor clusters");
+        assert_eq!(route.destination, NodeId(3));
+        assert_eq!(route.steps.len(), 3);
+        assert_eq!(world.resource::<RouteAssignmentStats>().assigned, 1);
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 0);
+    }
+
+    #[test]
+    fn route_assignment_and_advance_accept_graph_native_edge_keys() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent_with_graph(
+            graph_native_route_graph(Some("activity:work")),
+            "edge:0",
+            "activity:work",
+            1.0,
+        );
+
+        schedule.run(&mut world);
+        world.get_mut::<WalkSpeed>(entity).unwrap().0 = 0.0;
+        schedule.run(&mut world);
+
+        let route = world
+            .get::<ActiveRoute>(entity)
+            .expect("graph-native route should remain active on second edge");
+        assert_eq!(route.cursor, 1);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::Walking { link_id, progress }
+                if link_id == "edge:1" && *progress == 0.0
+        ));
     }
 
     #[test]
@@ -3173,5 +3362,69 @@ mod route_execution_tests {
             AgentMobilityState::Walking { link_id, progress }
                 if link_id == "walk:a" && *progress >= 1.0
         ));
+    }
+
+    #[test]
+    fn route_advance_leaves_stale_current_link_intact() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        schedule.run(&mut world);
+        world.get_mut::<WalkSpeed>(entity).unwrap().0 = 0.0;
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:b".into(),
+            progress: 1.0,
+        };
+
+        schedule.run(&mut world);
+
+        let route = world
+            .get::<ActiveRoute>(entity)
+            .expect("stale link should not remove ActiveRoute");
+        assert_eq!(route.cursor, 0);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::Walking { link_id, progress }
+                if link_id == "walk:b" && *progress >= 1.0
+        ));
+    }
+
+    #[test]
+    fn route_advance_does_not_complete_when_final_edge_misses_destination() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:a".into(),
+            progress: 1.0,
+        };
+        world.entity_mut(entity).insert(ActiveRoute {
+            destination: NodeId(2),
+            profile: crate::routing::RoutingProfileKey::Walk,
+            steps: vec![RouteStep {
+                edge_id: EdgeId(0),
+                mode: crate::routing::ModeState::Walking,
+                canonical_edge_key: "walk:a".into(),
+                length: 1.0,
+            }],
+            cursor: 0,
+        });
+
+        schedule.run(&mut world);
+
+        assert!(
+            world.get::<ActiveRoute>(entity).is_some(),
+            "route should not complete unless the final edge reaches the route destination"
+        );
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::Walking { link_id, progress }
+                if link_id == "walk:a" && *progress >= 1.0
+        ));
+        assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 0);
     }
 }

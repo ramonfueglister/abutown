@@ -281,7 +281,7 @@ fn cached_or_graph_link_polylines_for_persist(
         for link_id in active_route_canonical_keys_for_persist(agents) {
             out.entry(link_id.clone()).or_insert_with(|| {
                 graph
-                    .edge(resolve_canonical_edge_key(graph, &link_id))
+                    .edge(expect_canonical_edge_key(graph, &link_id))
                     .polyline
                     .clone()
             });
@@ -312,7 +312,7 @@ fn cached_or_graph_link_polylines_for_persist(
     let mut out: HashMap<String, Vec<(f32, f32)>> = link_ids
         .into_iter()
         .map(|link_id| {
-            let edge_id = graph.edge_by_legacy(&link_id).unwrap_or_else(|| {
+            let edge_id = resolve_canonical_edge_key(graph, &link_id).unwrap_or_else(|| {
                 panic!(
                     "extract_from_world: referenced link {} is missing from routing graph",
                     link_id
@@ -324,7 +324,7 @@ fn cached_or_graph_link_polylines_for_persist(
     for link_id in active_route_canonical_keys_for_persist(agents) {
         out.entry(link_id.clone()).or_insert_with(|| {
             graph
-                .edge(resolve_canonical_edge_key(graph, &link_id))
+                .edge(expect_canonical_edge_key(graph, &link_id))
                 .polyline
                 .clone()
         });
@@ -345,9 +345,7 @@ fn active_route_canonical_keys_for_persist(
 
 fn existing_graph_polyline(world: &World, link_id: &str) -> Option<Vec<(f32, f32)>> {
     let graph = world.resource::<Graph>();
-    graph
-        .edge_by_legacy(link_id)
-        .map(|edge_id| graph.edge(edge_id).polyline.clone())
+    resolve_canonical_edge_key(graph, link_id).map(|edge_id| graph.edge(edge_id).polyline.clone())
 }
 
 fn polyline_length(polyline: &[(f32, f32)]) -> f32 {
@@ -628,9 +626,9 @@ fn canonical_edge_key(edge: &Edge) -> String {
         .unwrap_or_else(|| format!("edge:{}", edge.id.0))
 }
 
-fn resolve_canonical_edge_key(graph: &Graph, key: &str) -> EdgeId {
+fn resolve_canonical_edge_key(graph: &Graph, key: &str) -> Option<EdgeId> {
     if let Some(edge_id) = graph.edge_by_legacy(key) {
-        return edge_id;
+        return Some(edge_id);
     }
 
     if let Some(edge_id) = parse_edge_key(key)
@@ -638,11 +636,16 @@ fn resolve_canonical_edge_key(graph: &Graph, key: &str) -> EdgeId {
     {
         let edge = graph.edge(edge_id);
         if canonical_edge_key(edge) == key {
-            return edge_id;
+            return Some(edge_id);
         }
     }
 
-    panic!("persisted active_route canonical edge key {key} is missing");
+    None
+}
+
+fn expect_canonical_edge_key(graph: &Graph, key: &str) -> EdgeId {
+    resolve_canonical_edge_key(graph, key)
+        .unwrap_or_else(|| panic!("persisted active_route canonical edge key {key} is missing"))
 }
 
 fn validate_active_route_mode(
@@ -684,7 +687,7 @@ fn normalize_active_route(graph: &Graph, route: &PersistedActiveRoute) -> Persis
                 step.edge_id, step.length
             );
         }
-        let edge_id = resolve_canonical_edge_key(graph, &step.canonical_edge_key);
+        let edge_id = expect_canonical_edge_key(graph, &step.canonical_edge_key);
         let edge = graph.edge(edge_id);
         validate_active_route_mode(
             route.profile,

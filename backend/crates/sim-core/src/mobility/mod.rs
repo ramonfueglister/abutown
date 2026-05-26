@@ -55,7 +55,7 @@ pub fn agent_world_coord(
 ) -> Option<(f32, f32)> {
     match state {
         AgentMobilityState::Walking { link_id, progress } => {
-            let edge_id = graph.edge_by_legacy(link_id)?;
+            let edge_id = crate::mobility::api::edge_by_canonical_key(graph, link_id)?;
             let edge = graph.edge(edge_id);
             Some(crate::mobility_geometry::world_coord_at_progress_slice(
                 &edge.polyline,
@@ -171,6 +171,18 @@ mod tests {
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
+            Node {
+                id: NodeId(10),
+                position: (60.0, 10.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(11),
+                position: (80.0, 10.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
         ];
         let edges = vec![
             Edge {
@@ -271,6 +283,17 @@ mod tests {
                 speed_limit: 1.0,
                 capacity: 1,
                 legacy_id: Some("l:cross".into()),
+            },
+            Edge {
+                id: EdgeId(9),
+                from: NodeId(10),
+                to: NodeId(11),
+                polyline: vec![(60.0, 10.0), (80.0, 10.0)],
+                length: 20.0,
+                kind: EdgeKind::Footway,
+                speed_limit: 1.0,
+                capacity: 1,
+                legacy_id: None,
             },
         ];
         let graph = Graph::new(nodes, edges);
@@ -599,6 +622,52 @@ mod tests {
         let coord = api::world_coord_for_agent(&world, &agent_id).expect("agent resolves to coord");
         assert!((coord.0 - expected.0).abs() < 0.01);
         assert!((coord.1 - expected.1).abs() < 0.01);
+    }
+
+    #[test]
+    fn world_coord_for_walking_agent_accepts_graph_native_edge_key() {
+        let (mut world, _) = empty_world();
+        let agent_id = AgentId("agent:graph-native".to_string());
+        api::spawn_agent_from_record(
+            &mut world,
+            AgentRecord::new(
+                agent_id.clone(),
+                AgentMobilityState::Walking {
+                    link_id: "edge:9".to_string(),
+                    progress: 0.5,
+                },
+                Vec::new(),
+                0.0,
+            ),
+        );
+
+        let coord = api::world_coord_for_agent(&world, &agent_id).expect("agent coord resolves");
+        assert!((coord.0 - 70.0).abs() < 0.01);
+        assert!((coord.1 - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn extract_snapshot_includes_graph_native_walking_polyline() {
+        let (mut world, _) = empty_world();
+        api::spawn_agent_from_record(
+            &mut world,
+            AgentRecord::new(
+                AgentId("agent:graph-native".to_string()),
+                AgentMobilityState::Walking {
+                    link_id: "edge:9".to_string(),
+                    progress: 0.5,
+                },
+                Vec::new(),
+                0.0,
+            ),
+        );
+
+        let snapshot = extract_from_world(&world);
+
+        assert_eq!(
+            snapshot.link_polylines.get("edge:9"),
+            Some(&vec![(60.0, 10.0), (80.0, 10.0)])
+        );
     }
 
     #[test]
