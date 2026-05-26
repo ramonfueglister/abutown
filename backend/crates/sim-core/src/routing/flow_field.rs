@@ -19,6 +19,10 @@ pub enum FlowFieldError {
         to: NodeId,
         profile: RoutingProfileKey,
     },
+    DestinationMismatch {
+        requested: NodeId,
+        actual: NodeId,
+    },
     InvalidGraph(&'static str),
 }
 
@@ -196,6 +200,13 @@ impl FlowFieldRouter {
         to: NodeId,
         mode: ModeState,
     ) -> Result<(), FlowFieldError> {
+        if to != field.destination {
+            return Err(FlowFieldError::DestinationMismatch {
+                requested: to,
+                actual: field.destination,
+            });
+        }
+
         if field.entry(from, mode).is_some() {
             Ok(())
         } else {
@@ -387,6 +398,26 @@ mod tests {
                 from: NodeId(0),
                 to: NodeId(2),
                 profile: RoutingProfileKey::Walk,
+            })
+        );
+    }
+
+    #[test]
+    fn require_reachable_rejects_mismatched_destination() {
+        let graph = walk_graph();
+        let field = FlowFieldRouter::build(
+            &graph,
+            NodeId(2),
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+            FlowFieldScope::AllEdges,
+        )
+        .expect("walk field should build");
+
+        assert_eq!(
+            FlowFieldRouter::require_reachable(&field, NodeId(0), NodeId(1), ModeState::Walking,),
+            Err(FlowFieldError::DestinationMismatch {
+                requested: NodeId(1),
+                actual: NodeId(2),
             })
         );
     }
