@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
 use crate::routing::{
-    EdgeId, Graph, ModeState, NodeId, NodeSpatialIndex, RoutingProfile, RoutingProfileKey,
+    Edge, EdgeId, Graph, ModeState, NodeId, NodeSpatialIndex, RoutingProfile, RoutingProfileKey,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,6 +90,19 @@ impl PartialOrd for QueueEntry {
 
 pub struct AStarRouter;
 
+pub trait EdgeConstraint {
+    fn allows(&self, graph: &Graph, edge: &Edge) -> bool;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AllEdges;
+
+impl EdgeConstraint for AllEdges {
+    fn allows(&self, _graph: &Graph, _edge: &Edge) -> bool {
+        true
+    }
+}
+
 pub fn request_between_points(
     index: &NodeSpatialIndex,
     from: (f32, f32),
@@ -114,6 +127,15 @@ impl AStarRouter {
         graph: &Graph,
         request: PathRequest,
         profile: RoutingProfile,
+    ) -> Result<PlannedPath, RoutingError> {
+        Self::find_path_with_constraint(graph, request, profile, &AllEdges)
+    }
+
+    pub fn find_path_with_constraint<C: EdgeConstraint>(
+        graph: &Graph,
+        request: PathRequest,
+        profile: RoutingProfile,
+        constraint: &C,
     ) -> Result<PlannedPath, RoutingError> {
         validate_node(graph, request.from)?;
         validate_node(graph, request.to)?;
@@ -156,6 +178,9 @@ impl AStarRouter {
             let current_node = graph.node(entry.state.node);
             for edge_id in graph.outgoing(entry.state.node) {
                 let edge = graph.edge(*edge_id);
+                if !constraint.allows(graph, edge) {
+                    continue;
+                }
                 let Some((next_mode, edge_cost)) =
                     profile.transition(entry.state.mode, current_node.kind, edge)
                 else {
@@ -296,6 +321,83 @@ mod tests {
                 edge(2, 0, 2, EdgeKind::Road, 30.0),
             ],
         )
+    }
+
+    struct RejectEdge(EdgeId);
+
+    impl EdgeConstraint for RejectEdge {
+        fn allows(&self, _graph: &Graph, edge: &Edge) -> bool {
+            edge.id != self.0
+        }
+    }
+
+    #[test]
+    fn edge_constraint_blocks_disallowed_edges() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 10.0, 0.0, NodeKind::Intersection),
+                node(2, 20.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![
+                edge(0, 0, 1, EdgeKind::Footway, 10.0),
+                edge(1, 1, 2, EdgeKind::Footway, 10.0),
+            ],
+        );
+
+        let result = AStarRouter::find_path_with_constraint(
+            &graph,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(2),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+            &RejectEdge(EdgeId(1)),
+        );
+
+        assert_eq!(
+            result,
+            Err(RoutingError::NoPath {
+                from: NodeId(0),
+                to: NodeId(2),
+                profile: RoutingProfileKey::Walk,
+            })
+        );
+    }
+
+    #[test]
+    fn unconstrained_find_path_keeps_existing_behavior() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 10.0, 0.0, NodeKind::Intersection),
+                node(2, 20.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![
+                edge(0, 0, 1, EdgeKind::Footway, 10.0),
+                edge(1, 1, 2, EdgeKind::Footway, 10.0),
+            ],
+        );
+
+        let path = AStarRouter::find_path(
+            &graph,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(2),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+        )
+        .expect("unconstrained route should still work");
+
+        assert_eq!(
+            path.edges
+                .iter()
+                .map(|edge| edge.edge_id)
+                .collect::<Vec<_>>(),
+            vec![EdgeId(0), EdgeId(1)]
+        );
     }
 
     #[test]
