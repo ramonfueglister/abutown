@@ -1,8 +1,13 @@
-use std::collections::{BTreeSet, HashMap};
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 
 use bevy_ecs::prelude::*;
 
-use crate::routing::{Edge, EdgeKind, Graph, NodeId, NodeKind, RoutingError, RoutingProfileKey};
+use crate::routing::pathfinding::EdgeConstraint;
+use crate::routing::{
+    AStarRouter, Edge, EdgeKind, Graph, NodeId, NodeKind, PathRequest, PlannedPath, RoutingError,
+    RoutingProfile, RoutingProfileKey,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HpaConfig {
@@ -199,6 +204,235 @@ impl HpaIndex {
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
+
+    #[cfg(test)]
+    fn force_cluster_adjacency_for_test(
+        &mut self,
+        from: ClusterId,
+        to: ClusterId,
+        profile: RoutingProfileKey,
+    ) {
+        self.adjacency.entry((from, profile)).or_default().push(to);
+    }
+}
+
+impl HpaRouter {
+    pub fn find_path(
+        graph: &Graph,
+        index: &HpaIndex,
+        request: PathRequest,
+        profile: RoutingProfile,
+    ) -> Result<(PlannedPath, HpaRouteStats), HierarchicalRoutingError> {
+        if request.profile != profile.key {
+            return Err(HierarchicalRoutingError::InvalidGraph(
+                "request profile must match routing profile",
+            ));
+        }
+
+        let start_cluster = resolve_request_cluster(index, request.from)?;
+        let goal_cluster = resolve_request_cluster(index, request.to)?;
+
+        if start_cluster == goal_cluster {
+            let corridor = HashSet::from([start_cluster]);
+            let path = constrained_exact(graph, index, request, profile, &corridor)?;
+            return Ok((
+                path,
+                HpaRouteStats {
+                    start_cluster,
+                    goal_cluster,
+                    abstract_clusters_visited: 1,
+                    corridor_cluster_count: 1,
+                    used_base_case: true,
+                },
+            ));
+        }
+
+        let (cluster_path, visited) =
+            abstract_cluster_path(index, start_cluster, goal_cluster, request.profile)?;
+        let corridor = expand_corridor(index, &cluster_path);
+        let path = constrained_exact(graph, index, request, profile, &corridor)?;
+
+        Ok((
+            path,
+            HpaRouteStats {
+                start_cluster,
+                goal_cluster,
+                abstract_clusters_visited: visited,
+                corridor_cluster_count: corridor.len(),
+                used_base_case: false,
+            },
+        ))
+    }
+}
+
+fn resolve_request_cluster(
+    index: &HpaIndex,
+    node: NodeId,
+) -> Result<ClusterId, HierarchicalRoutingError> {
+    index
+        .cluster_of_node(node)
+        .ok_or(HierarchicalRoutingError::MissingCluster(node))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ClusterQueueEntry {
+    cluster: ClusterId,
+    known_cost: u32,
+    estimated_total: u32,
+}
+
+impl PartialEq for ClusterQueueEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.estimated_total == other.estimated_total
+            && self.known_cost == other.known_cost
+            && self.cluster == other.cluster
+    }
+}
+
+impl Eq for ClusterQueueEntry {}
+
+impl Ord for ClusterQueueEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .estimated_total
+            .cmp(&self.estimated_total)
+            .then_with(|| other.known_cost.cmp(&self.known_cost))
+            .then_with(|| other.cluster.cmp(&self.cluster))
+    }
+}
+
+impl PartialOrd for ClusterQueueEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn abstract_cluster_path(
+    index: &HpaIndex,
+    start: ClusterId,
+    goal: ClusterId,
+    profile: RoutingProfileKey,
+) -> Result<(Vec<ClusterId>, usize), HierarchicalRoutingError> {
+    let mut open = BinaryHeap::new();
+    let mut best: HashMap<ClusterId, u32> = HashMap::new();
+    let mut came_from: HashMap<ClusterId, ClusterId> = HashMap::new();
+    let mut visited = 0usize;
+
+    best.insert(start, 0);
+    open.push(ClusterQueueEntry {
+        cluster: start,
+        known_cost: 0,
+        estimated_total: cluster_heuristic(index, start, goal),
+    });
+
+    while let Some(entry) = open.pop() {
+        visited += 1;
+        if entry.cluster == goal {
+            return Ok((reconstruct_cluster_path(start, goal, &came_from), visited));
+        }
+        if entry.known_cost > *best.get(&entry.cluster).unwrap_or(&u32::MAX) {
+            continue;
+        }
+
+        for next in index.adjacent_clusters(entry.cluster, profile) {
+            let next_cost = entry.known_cost + 1;
+            if next_cost < *best.get(next).unwrap_or(&u32::MAX) {
+                best.insert(*next, next_cost);
+                came_from.insert(*next, entry.cluster);
+                open.push(ClusterQueueEntry {
+                    cluster: *next,
+                    known_cost: next_cost,
+                    estimated_total: next_cost + cluster_heuristic(index, *next, goal),
+                });
+            }
+        }
+    }
+
+    Err(HierarchicalRoutingError::NoClusterPath {
+        from: start,
+        to: goal,
+        profile,
+    })
+}
+
+fn cluster_heuristic(index: &HpaIndex, from: ClusterId, to: ClusterId) -> u32 {
+    let a = index.cluster_coord(from);
+    let b = index.cluster_coord(to);
+    a.x.abs_diff(b.x) + a.y.abs_diff(b.y)
+}
+
+fn reconstruct_cluster_path(
+    start: ClusterId,
+    goal: ClusterId,
+    came_from: &HashMap<ClusterId, ClusterId>,
+) -> Vec<ClusterId> {
+    let mut current = goal;
+    let mut out = vec![current];
+    while current != start {
+        current = came_from[&current];
+        out.push(current);
+    }
+    out.reverse();
+    out
+}
+
+fn expand_corridor(index: &HpaIndex, cluster_path: &[ClusterId]) -> HashSet<ClusterId> {
+    let mut corridor: HashSet<ClusterId> = cluster_path.iter().copied().collect();
+    let margin = i32::from(index.config.corridor_margin_clusters);
+    if margin == 0 {
+        return corridor;
+    }
+
+    for cluster in cluster_path {
+        let center = index.cluster_coord(*cluster);
+        for dx in -margin..=margin {
+            for dy in -margin..=margin {
+                if let Some(id) = index.cluster_id(ClusterCoord {
+                    x: center.x + dx,
+                    y: center.y + dy,
+                }) {
+                    corridor.insert(id);
+                }
+            }
+        }
+    }
+    corridor
+}
+
+fn constrained_exact(
+    graph: &Graph,
+    index: &HpaIndex,
+    request: PathRequest,
+    profile: RoutingProfile,
+    corridor: &HashSet<ClusterId>,
+) -> Result<PlannedPath, HierarchicalRoutingError> {
+    let constraint = ClusterCorridorConstraint { index, corridor };
+    AStarRouter::find_path_with_constraint(graph, request, profile, &constraint).map_err(|error| {
+        match error {
+            RoutingError::NoPath { from, to, profile } => {
+                HierarchicalRoutingError::NoCorridorPath { from, to, profile }
+            }
+            RoutingError::MissingNode(node) => HierarchicalRoutingError::MissingNode(node),
+            other => HierarchicalRoutingError::Exact(other),
+        }
+    })
+}
+
+struct ClusterCorridorConstraint<'a> {
+    index: &'a HpaIndex,
+    corridor: &'a HashSet<ClusterId>,
+}
+
+impl EdgeConstraint for ClusterCorridorConstraint<'_> {
+    fn allows(&self, _graph: &Graph, edge: &Edge) -> bool {
+        let Some(from_cluster) = self.index.cluster_of_node(edge.from) else {
+            return false;
+        };
+        let Some(to_cluster) = self.index.cluster_of_node(edge.to) else {
+            return false;
+        };
+        self.corridor.contains(&from_cluster) && self.corridor.contains(&to_cluster)
+    }
 }
 
 fn cluster_for_node(
@@ -391,11 +625,9 @@ mod tests {
         let c4 = index.cluster_id(ClusterCoord { x: 2, y: 2 }).unwrap();
 
         assert_eq!(index.adjacent_clusters(c0, RoutingProfileKey::Walk), &[c1]);
-        assert!(
-            index
-                .adjacent_clusters(c0, RoutingProfileKey::Car)
-                .is_empty()
-        );
+        assert!(index
+            .adjacent_clusters(c0, RoutingProfileKey::Car)
+            .is_empty());
         assert_eq!(index.adjacent_clusters(c2, RoutingProfileKey::Car), &[c3]);
         assert_eq!(index.adjacent_clusters(c3, RoutingProfileKey::Tram), &[c4]);
         assert_eq!(
@@ -427,10 +659,155 @@ mod tests {
             index.adjacent_clusters(c0, RoutingProfileKey::Tram),
             &[ClusterId(1)]
         );
-        assert!(
-            index
-                .adjacent_clusters(c0, RoutingProfileKey::WalkTransit)
-                .is_empty()
+        assert!(index
+            .adjacent_clusters(c0, RoutingProfileKey::WalkTransit)
+            .is_empty());
+    }
+
+    #[test]
+    fn same_cluster_route_uses_base_case() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 5.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![edge(0, 0, 1, EdgeKind::Footway, 5.0)],
         );
+        let index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+
+        let (path, stats) = HpaRouter::find_path(
+            &graph,
+            &index,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(1),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+        )
+        .expect("same-cluster route should plan");
+
+        assert_eq!(path.edges.len(), 1);
+        assert!(stats.used_base_case);
+        assert_eq!(stats.corridor_cluster_count, 1);
+    }
+
+    #[test]
+    fn cross_cluster_route_uses_corridor() {
+        let graph = three_cluster_walk_graph();
+        let index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+
+        let (path, stats) = HpaRouter::find_path(
+            &graph,
+            &index,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(3),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+        )
+        .expect("cross-cluster route should plan");
+
+        assert_eq!(path.edges.len(), 3);
+        assert!(!stats.used_base_case);
+        assert_eq!(stats.corridor_cluster_count, 3);
+        assert!(stats.abstract_clusters_visited >= 3);
+    }
+
+    #[test]
+    fn no_cluster_path_is_not_replanned_globally() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 12.0, 0.0, NodeKind::Intersection),
+            ],
+            vec![edge(0, 0, 1, EdgeKind::Road, 12.0)],
+        );
+        let index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+
+        let error = HpaRouter::find_path(
+            &graph,
+            &index,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(1),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            HierarchicalRoutingError::NoClusterPath { .. }
+        ));
+    }
+
+    #[test]
+    fn no_corridor_path_is_not_replanned_globally() {
+        let graph = Graph::new(
+            vec![
+                node(0, 0.0, 0.0, NodeKind::Intersection),
+                node(1, 12.0, 0.0, NodeKind::Intersection),
+                node(2, 25.0, 0.0, NodeKind::Intersection),
+                node(3, 25.0, 12.0, NodeKind::Intersection),
+                node(4, 0.0, 12.0, NodeKind::Intersection),
+            ],
+            vec![
+                edge(0, 0, 1, EdgeKind::Footway, 12.0),
+                edge(1, 1, 2, EdgeKind::Footway, 13.0),
+                edge(2, 4, 3, EdgeKind::Footway, 25.0),
+            ],
+        );
+        let mut index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+        let start = index.cluster_of_node(NodeId(0)).unwrap();
+        let goal = index.cluster_of_node(NodeId(3)).unwrap();
+        index.force_cluster_adjacency_for_test(start, goal, RoutingProfileKey::Walk);
+
+        let error = HpaRouter::find_path(
+            &graph,
+            &index,
+            PathRequest {
+                from: NodeId(0),
+                to: NodeId(3),
+                profile: RoutingProfileKey::Walk,
+            },
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            HierarchicalRoutingError::NoCorridorPath { .. }
+        ));
     }
 }
