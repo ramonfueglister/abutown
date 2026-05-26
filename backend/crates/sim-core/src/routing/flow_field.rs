@@ -80,6 +80,30 @@ const FLOW_FIELD_ALL_EDGES_HASH: u64 = 0;
 const FNV_OFFSET_BASIS: u64 = 1469598103934665603;
 const FNV_PRIME: u64 = 1099511628211;
 
+fn corridor_hash(corridor: &[ClusterId]) -> u64 {
+    let mut sorted = corridor.to_vec();
+    sorted.sort_unstable();
+
+    let mut hash = FNV_OFFSET_BASIS;
+    hash ^= FLOW_FIELD_SCOPE_CORRIDOR;
+    hash = hash.wrapping_mul(FNV_PRIME);
+    for cluster in sorted {
+        hash ^= u64::from(cluster.0);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    (hash << 1) | 1
+}
+
+fn key_parts_for_scope(scope: &FlowFieldScope) -> (u64, u64) {
+    match scope {
+        FlowFieldScope::AllEdges => (FLOW_FIELD_SCOPE_ALL_EDGES, FLOW_FIELD_ALL_EDGES_HASH),
+        FlowFieldScope::Corridor(corridor) => {
+            let clusters: Vec<_> = corridor.iter().copied().collect();
+            (FLOW_FIELD_SCOPE_CORRIDOR, corridor_hash(&clusters))
+        }
+    }
+}
+
 impl FlowFieldCacheKey {
     pub fn all_edges(
         destination: NodeId,
@@ -101,36 +125,18 @@ impl FlowFieldCacheKey {
         graph_generation: u64,
         corridor: &[ClusterId],
     ) -> Self {
-        let mut sorted = corridor.to_vec();
-        sorted.sort_unstable();
-
-        let mut hash = FNV_OFFSET_BASIS;
-        hash ^= FLOW_FIELD_SCOPE_CORRIDOR;
-        hash = hash.wrapping_mul(FNV_PRIME);
-        for cluster in sorted {
-            hash ^= u64::from(cluster.0);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-
         Self {
             destination,
             profile,
             graph_generation,
             scope_discriminator: FLOW_FIELD_SCOPE_CORRIDOR,
-            corridor_hash: (hash << 1) | 1,
+            corridor_hash: corridor_hash(corridor),
         }
     }
 
     pub fn matches_scope(&self, scope: &FlowFieldScope) -> bool {
-        match scope {
-            FlowFieldScope::AllEdges => {
-                self.scope_discriminator == FLOW_FIELD_SCOPE_ALL_EDGES
-                    && self.corridor_hash == FLOW_FIELD_ALL_EDGES_HASH
-            }
-            FlowFieldScope::Corridor(_) => {
-                self.scope_discriminator == FLOW_FIELD_SCOPE_CORRIDOR && self.corridor_hash & 1 == 1
-            }
-        }
+        let (scope_discriminator, corridor_hash) = key_parts_for_scope(scope);
+        self.scope_discriminator == scope_discriminator && self.corridor_hash == corridor_hash
     }
 }
 
@@ -758,6 +764,25 @@ mod tests {
             ),
             Err(FlowFieldError::CacheScopeMismatch)
         );
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.stats().misses, 0);
+    }
+
+    #[test]
+    fn cache_rejects_corridor_scope_with_different_cluster_set() {
+        let graph = walk_graph();
+        let mut cache = FlowFieldCache::with_capacity(1);
+        let key = FlowFieldCacheKey::new(NodeId(2), RoutingProfileKey::Walk, 0, &[ClusterId(0)]);
+
+        let result = cache.get_or_build_with_cluster_lookup(
+            &graph,
+            key,
+            RoutingProfile::for_key(RoutingProfileKey::Walk),
+            FlowFieldScope::Corridor(HashSet::from([ClusterId(1)])),
+            |_| Some(ClusterId(1)),
+        );
+
+        assert_eq!(result, Err(FlowFieldError::CacheScopeMismatch));
         assert_eq!(cache.len(), 0);
         assert_eq!(cache.stats().misses, 0);
     }
