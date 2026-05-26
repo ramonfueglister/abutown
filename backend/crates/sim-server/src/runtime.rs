@@ -119,6 +119,7 @@ impl SimulationRuntime {
         .install(&mut world, &mut schedule);
 
         sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
+        sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -166,6 +167,8 @@ impl SimulationRuntime {
         let (seeded_world, _) = sim_core::mobility::seed::from_network(network, SEED_DENSITY);
         let snap = extract_from_world(&seeded_world);
         apply_into_world(&mut runtime.world, snap);
+        sim_core::routing::HierarchicalRoutingPlugin::default()
+            .install(&mut runtime.world, &mut runtime.schedule);
         runtime
     }
 
@@ -240,6 +243,7 @@ impl SimulationRuntime {
         .install(&mut world, &mut schedule);
 
         sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
+        sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -267,6 +271,7 @@ impl SimulationRuntime {
             }
         };
         apply_into_world(&mut world, mobility_snap);
+        sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let snap = snapshot_store
@@ -848,6 +853,57 @@ mod tests {
                 .world
                 .contains_resource::<sim_core::routing::PathCache>()
         );
+    }
+
+    #[test]
+    fn runtime_installs_hpa_index_for_seeded_graph() {
+        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/city/zurich-network.json");
+        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .expect("zurich fixture network must load");
+        let runtime = SimulationRuntime::new_from_network(&network);
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let hpa = runtime.world.resource::<sim_core::routing::HpaIndex>();
+
+        assert!(hpa.cluster_count() > 0);
+        assert!(hpa.portal_count() > 0);
+        assert!(hpa.cluster_count() <= graph.node_count());
+    }
+
+    #[test]
+    fn runtime_can_find_seeded_hierarchical_path() {
+        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/city/zurich-network.json");
+        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .expect("zurich fixture network must load");
+        let runtime = SimulationRuntime::new_from_network(&network);
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let hpa = runtime.world.resource::<sim_core::routing::HpaIndex>();
+        let transit_lines = runtime.world.resource::<sim_core::routing::TransitLines>();
+        let line = transit_lines
+            .iter()
+            .find(|line| !line.edges.is_empty())
+            .expect("seeded runtime should contain a non-empty transit line");
+        let tram_edge = graph.edge(*line.edges.first().expect("line has first edge"));
+
+        let (path, stats) = sim_core::routing::HpaRouter::find_path(
+            graph,
+            hpa,
+            sim_core::routing::PathRequest {
+                from: tram_edge.from,
+                to: tram_edge.to,
+                profile: sim_core::routing::RoutingProfileKey::Tram,
+            },
+            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Tram),
+        )
+        .expect("seeded tram edge endpoints should route through HPA");
+
+        assert!(!path.edges.is_empty());
+        assert!(stats.corridor_cluster_count >= 1);
+        assert!(path
+            .edges
+            .iter()
+            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::TramTrack));
     }
 
     #[test]

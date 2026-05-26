@@ -4,6 +4,7 @@ use bevy_ecs::schedule::Schedule;
 use crate::city_network::CityNetwork;
 use crate::routing::builder::{SeededStop, SeededWalk, build_graph_from_city_network};
 use crate::routing::graph::Graph;
+use crate::routing::hpa::{HpaConfig, HpaIndex};
 use crate::routing::path_cache::PathCache;
 use crate::routing::spatial_index::NodeSpatialIndex;
 use crate::routing::transit::TransitLines;
@@ -61,6 +62,33 @@ impl SimPlugin for PathfindingPlugin {
     }
 }
 
+pub struct HierarchicalRoutingPlugin {
+    pub config: HpaConfig,
+}
+
+impl Default for HierarchicalRoutingPlugin {
+    fn default() -> Self {
+        Self {
+            config: HpaConfig::default(),
+        }
+    }
+}
+
+impl SimPlugin for HierarchicalRoutingPlugin {
+    fn name(&self) -> &'static str {
+        "hierarchical_routing"
+    }
+
+    fn install(&self, world: &mut World, _schedule: &mut Schedule) {
+        let index = {
+            let graph = world.resource::<Graph>();
+            HpaIndex::build(graph, self.config)
+                .expect("hierarchical routing index must build from routing graph")
+        };
+        world.insert_resource(index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +116,44 @@ mod tests {
         PathfindingPlugin::default().install(&mut world, &mut schedule);
         assert!(world.contains_resource::<crate::routing::PathCache>());
         assert_eq!(world.resource::<crate::routing::PathCache>().len(), 0);
+    }
+
+    #[test]
+    fn hierarchical_routing_plugin_installs_hpa_index() {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        CorePlugin::default().install(&mut world, &mut schedule);
+        RoutingPlugin::default().install(&mut world, &mut schedule);
+        PathfindingPlugin::default().install(&mut world, &mut schedule);
+        HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+
+        assert!(world.contains_resource::<crate::routing::HpaIndex>());
+        assert_eq!(
+            world.resource::<crate::routing::HpaIndex>().cluster_count(),
+            0
+        );
+    }
+
+    #[test]
+    fn hierarchical_routing_plugin_uses_custom_config() {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        CorePlugin::default().install(&mut world, &mut schedule);
+        RoutingPlugin::default().install(&mut world, &mut schedule);
+        HierarchicalRoutingPlugin {
+            config: HpaConfig {
+                cluster_size_tiles: 16,
+                corridor_margin_clusters: 1,
+            },
+        }
+        .install(&mut world, &mut schedule);
+
+        assert_eq!(
+            world.resource::<crate::routing::HpaIndex>().config,
+            HpaConfig {
+                cluster_size_tiles: 16,
+                corridor_margin_clusters: 1,
+            }
+        );
     }
 }

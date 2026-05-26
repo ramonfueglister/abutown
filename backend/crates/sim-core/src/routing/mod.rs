@@ -21,7 +21,7 @@ pub use path_cache::{PathCache, PathCacheKey, PathCacheStats};
 pub use pathfinding::{
     AStarRouter, PathEdge, PathRequest, PlannedPath, RoutingError, request_between_points,
 };
-pub use plugin::{PathfindingPlugin, RoutingPlugin};
+pub use plugin::{HierarchicalRoutingPlugin, PathfindingPlugin, RoutingPlugin};
 pub use profile::{ModeState, RoutingProfile, RoutingProfileKey};
 pub use spatial_index::{IndexedNode, NodeSpatialIndex};
 pub use transit::{LineId, TransitLine, TransitLines};
