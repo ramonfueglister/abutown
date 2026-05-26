@@ -47,6 +47,22 @@ pub struct WalkPlan {
     pub cursor: usize,
 }
 
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ActiveRoute {
+    pub destination: crate::routing::NodeId,
+    pub profile: crate::routing::RoutingProfileKey,
+    pub steps: Vec<RouteStep>,
+    pub cursor: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RouteStep {
+    pub edge_id: crate::routing::EdgeId,
+    pub mode: crate::routing::ModeState,
+    pub canonical_edge_key: String,
+    pub length: f32,
+}
+
 /// Per-tick walking distance in tile units. Stored on agents only.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct WalkSpeed(pub f32);

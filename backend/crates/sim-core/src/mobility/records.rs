@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, VehicleId};
+use crate::routing::{ModeState, RoutingProfileKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VehicleKind {
@@ -63,12 +64,30 @@ pub enum PlanStage {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PersistedActiveRoute {
+    pub destination_node: u32,
+    pub profile: RoutingProfileKey,
+    pub cursor: usize,
+    pub steps: Vec<PersistedRouteStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PersistedRouteStep {
+    pub edge_id: u32,
+    pub mode: ModeState,
+    pub canonical_edge_key: String,
+    pub length: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentRecord {
     pub id: AgentId,
     pub state: AgentMobilityState,
     pub plan: Vec<PlanStage>,
     pub plan_cursor: usize,
     pub walk_speed_per_tick: f32,
+    #[serde(default)]
+    pub active_route: Option<PersistedActiveRoute>,
 }
 
 impl AgentRecord {
@@ -87,6 +106,7 @@ impl AgentRecord {
             plan,
             plan_cursor: 0,
             walk_speed_per_tick,
+            active_route: None,
         }
     }
 }
@@ -137,4 +157,66 @@ pub struct MobilityChunkSnapshot {
     pub chunk: crate::ids::ChunkCoord,
     pub agents: Vec<AgentRecord>,
     pub vehicles: Vec<VehicleRecord>,
+}
+
+#[cfg(test)]
+mod route_execution_tests {
+    use super::*;
+    use crate::routing::{ModeState, RoutingProfileKey};
+
+    #[test]
+    fn agent_record_round_trips_active_route() {
+        let mut record = AgentRecord::new(
+            AgentId("agent:route".to_string()),
+            AgentMobilityState::Walking {
+                link_id: "link:start".to_string(),
+                progress: 0.25,
+            },
+            vec![PlanStage::WalkToActivity {
+                link_id: "link:start".to_string(),
+                activity_id: "activity:work".to_string(),
+            }],
+            1.25,
+        );
+        record.active_route = Some(PersistedActiveRoute {
+            destination_node: 42,
+            profile: RoutingProfileKey::WalkTransit,
+            cursor: 1,
+            steps: vec![
+                PersistedRouteStep {
+                    edge_id: 7,
+                    mode: ModeState::Walking,
+                    canonical_edge_key: "footway:7".to_string(),
+                    length: 12.5,
+                },
+                PersistedRouteStep {
+                    edge_id: 8,
+                    mode: ModeState::OnTram,
+                    canonical_edge_key: "tram:8".to_string(),
+                    length: 32.0,
+                },
+            ],
+        });
+
+        let json = serde_json::to_string(&record).expect("agent record serializes");
+        let decoded: AgentRecord = serde_json::from_str(&json).expect("agent record deserializes");
+
+        assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn legacy_agent_record_defaults_active_route_to_none() {
+        let json = r#"{
+            "id":"agent:legacy",
+            "state":{"AtActivity":{"activity_id":"home"}},
+            "plan":[],
+            "plan_cursor":0,
+            "walk_speed_per_tick":1.0
+        }"#;
+
+        let decoded: AgentRecord =
+            serde_json::from_str(json).expect("legacy agent record deserializes");
+
+        assert_eq!(decoded.active_route, None);
+    }
 }

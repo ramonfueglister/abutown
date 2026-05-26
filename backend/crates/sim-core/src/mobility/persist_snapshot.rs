@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, ChunkCoord, VehicleId};
 use crate::mobility::lod::{FlowCell, MobilityActivity};
-use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage, VehicleRecord};
+use crate::mobility::records::{
+    AgentMobilityState, AgentRecord, PersistedActiveRoute, PlanStage, VehicleRecord,
+};
 use crate::mobility::resources::{FlowCells, Tick};
 use crate::routing::{
     Edge, EdgeId, EdgeKind, Graph, LineId, Node, NodeId, NodeKind, NodeSpatialIndex, TransitLine,
@@ -552,6 +554,47 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
     world.insert_resource(waiting);
 }
 
+fn validate_active_route(graph: &Graph, route: &PersistedActiveRoute) {
+    if (route.destination_node as usize) >= graph.node_count() {
+        panic!(
+            "apply_into_world: persisted active_route destination node {} is missing",
+            route.destination_node
+        );
+    }
+    if route.cursor > route.steps.len() {
+        panic!(
+            "apply_into_world: persisted active_route cursor {} exceeds {} steps",
+            route.cursor,
+            route.steps.len()
+        );
+    }
+    for step in &route.steps {
+        if (step.edge_id as usize) >= graph.edge_count() {
+            panic!(
+                "apply_into_world: persisted active_route edge {} is missing",
+                step.edge_id
+            );
+        }
+        let edge = graph.edge(EdgeId(step.edge_id));
+        let canonical = edge
+            .legacy_id
+            .clone()
+            .unwrap_or_else(|| format!("edge:{}", edge.id.0));
+        if canonical != step.canonical_edge_key {
+            panic!(
+                "apply_into_world: persisted active_route edge {} key mismatch: got {}, expected {}",
+                step.edge_id, step.canonical_edge_key, canonical
+            );
+        }
+        if step.length < 0.0 || !step.length.is_finite() {
+            panic!(
+                "apply_into_world: persisted active_route edge {} has invalid length {}",
+                step.edge_id, step.length
+            );
+        }
+    }
+}
+
 /// Hydrate a freshly-installed mobility World from a persist snapshot.
 ///
 /// Registers graph data before spawning agents/vehicles so the spawn helpers
@@ -559,6 +602,14 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
 pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
     world.resource_mut::<Tick>().0 = snap.tick;
     install_snapshot_routing(world, &snap);
+    {
+        let graph = world.resource::<Graph>();
+        for agent in snap.agents.values() {
+            if let Some(active_route) = &agent.active_route {
+                validate_active_route(graph, active_route);
+            }
+        }
+    }
     world.insert_resource(PersistedStopMetadata(snap.stops.clone()));
     world.insert_resource(PersistedLinkPolylineMetadata(snap.link_polylines.clone()));
     for vehicle in snap.vehicles.values() {

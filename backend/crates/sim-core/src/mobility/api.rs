@@ -412,24 +412,50 @@ pub fn chunk_subscriber_counts_snapshot(world: &World) -> HashMap<crate::ids::Ch
 
 /// Spawn an agent entity from a record. Updates `AgentIdIndex`.
 pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity {
-    let id = record.id.clone();
+    let AgentRecord {
+        id: record_id,
+        state,
+        plan,
+        plan_cursor,
+        walk_speed_per_tick,
+        active_route,
+    } = record;
+    let id = record_id.clone();
     let sprite_key = compute_agent_sprite_key(&id);
-    let (px, py) = initial_agent_position(world, &record.state);
+    let (px, py) = initial_agent_position(world, &state);
+    let active_route = active_route.map(|route| ActiveRoute {
+        destination: crate::routing::NodeId(route.destination_node),
+        profile: route.profile,
+        steps: route
+            .steps
+            .into_iter()
+            .map(|step| RouteStep {
+                edge_id: crate::routing::EdgeId(step.edge_id),
+                mode: step.mode,
+                canonical_edge_key: step.canonical_edge_key,
+                length: step.length,
+            })
+            .collect(),
+        cursor: route.cursor,
+    });
     let entity = world
         .spawn((
             AgentMarker,
-            StableAgentId(record.id),
-            AgentMobilityStateComponent(record.state),
+            StableAgentId(record_id),
+            AgentMobilityStateComponent(state),
             WalkPlan {
-                stages: record.plan,
-                cursor: record.plan_cursor,
+                stages: plan,
+                cursor: plan_cursor,
             },
-            WalkSpeed(record.walk_speed_per_tick),
+            WalkSpeed(walk_speed_per_tick),
             Position { x: px, y: py },
             Direction(abutown_protocol::DirectionDto::S),
             SpriteKey(sprite_key),
         ))
         .id();
+    if let Some(active_route) = active_route {
+        world.entity_mut(entity).insert(active_route);
+    }
     world.resource_mut::<AgentIdIndex>().0.insert(id, entity);
     entity
 }
@@ -487,12 +513,30 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
     let state = world.get::<AgentMobilityStateComponent>(entity)?;
     let plan = world.get::<WalkPlan>(entity)?;
     let speed = world.get::<WalkSpeed>(entity)?;
+    let active_route = world
+        .get::<ActiveRoute>(entity)
+        .map(|route| PersistedActiveRoute {
+            destination_node: route.destination.0,
+            profile: route.profile,
+            cursor: route.cursor,
+            steps: route
+                .steps
+                .iter()
+                .map(|step| PersistedRouteStep {
+                    edge_id: step.edge_id.0,
+                    mode: step.mode,
+                    canonical_edge_key: step.canonical_edge_key.clone(),
+                    length: step.length,
+                })
+                .collect(),
+        });
     Some(AgentRecord {
         id: stable.0.clone(),
         state: state.0.clone(),
         plan: plan.stages.clone(),
         plan_cursor: plan.cursor,
         walk_speed_per_tick: speed.0,
+        active_route,
     })
 }
 
