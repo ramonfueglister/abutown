@@ -77,10 +77,16 @@ fn current_route_origin(
 fn destination_for_stage(
     graph: &crate::routing::Graph,
     stage: &PlanStage,
+    spatial: Option<&crate::routing::NodeSpatialIndex>,
 ) -> Option<crate::routing::NodeId> {
     match stage {
         PlanStage::WalkToStop { stop_id, .. } => graph.node_by_legacy(stop_id),
-        PlanStage::WalkToActivity { activity_id, .. } => graph.node_by_legacy(activity_id),
+        PlanStage::WalkToActivity { activity_id, .. } => {
+            graph.node_by_legacy(activity_id).or_else(|| {
+                let coord = crate::mobility_geometry::activity_geometry(activity_id)?.coord;
+                spatial?.nearest(coord)
+            })
+        }
         _ => None,
     }
 }
@@ -215,6 +221,7 @@ pub fn route_assignment_system(
     simulated: Res<SimulatedChunks>,
     graph: Res<crate::routing::Graph>,
     hpa: Option<Res<crate::routing::HpaIndex>>,
+    spatial: Option<Res<crate::routing::NodeSpatialIndex>>,
     mut cache: Option<ResMut<crate::routing::FlowFieldCache>>,
     mut stats: ResMut<RouteAssignmentStats>,
     mut commands: Commands,
@@ -252,8 +259,8 @@ pub fn route_assignment_system(
             stats.skipped += 1;
             continue;
         };
-        let Some(destination) = destination_for_stage(&graph, stage) else {
-            stats.skipped += 1;
+        let Some(destination) = destination_for_stage(&graph, stage, spatial.as_deref()) else {
+            stats.failed += 1;
             continue;
         };
         let Some(origin) = current_route_origin(&graph, link_id, *progress) else {
@@ -375,9 +382,7 @@ pub fn route_advance_system(
                 commands.entity(entity).remove::<(ActiveRoute, NearStop)>();
                 dirty.0.insert(entity);
             }
-            _ => {
-                commands.entity(entity).remove::<ActiveRoute>();
-            }
+            _ => {}
         }
     }
 }
@@ -2962,9 +2967,10 @@ mod route_execution_tests {
     use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage};
     use crate::routing::{
         Edge, EdgeId, EdgeKind, FlowFieldCache, Graph, HpaConfig, HpaIndex, Node, NodeId, NodeKind,
+        NodeSpatialIndex,
     };
 
-    fn route_graph() -> Graph {
+    fn route_graph(activity_legacy_id: Option<&str>) -> Graph {
         Graph::new(
             vec![
                 Node {
@@ -2983,7 +2989,7 @@ mod route_execution_tests {
                     id: NodeId(2),
                     position: (2.0, 0.0),
                     kind: NodeKind::ActivityLocation,
-                    legacy_id: Some("activity:work".into()),
+                    legacy_id: activity_legacy_id.map(str::to_string),
                 },
             ],
             vec![
@@ -3014,11 +3020,23 @@ mod route_execution_tests {
     }
 
     fn world_schedule_and_agent() -> (World, Schedule, Entity) {
+        world_schedule_and_agent_with_activity_legacy(Some("activity:work"))
+    }
+
+    fn world_schedule_and_agent_without_activity_legacy() -> (World, Schedule, Entity) {
+        world_schedule_and_agent_with_activity_legacy(None)
+    }
+
+    fn world_schedule_and_agent_with_activity_legacy(
+        activity_legacy_id: Option<&str>,
+    ) -> (World, Schedule, Entity) {
         let (mut world, schedule) = crate::mobility::api::empty_world_and_schedule();
-        let graph = route_graph();
+        let graph = route_graph(activity_legacy_id);
         let hpa = HpaIndex::build(&graph, HpaConfig::default()).expect("HPA should build");
+        let spatial = NodeSpatialIndex::from_nodes(graph.nodes());
         world.insert_resource(graph);
         world.insert_resource(hpa);
+        world.insert_resource(spatial);
         world.insert_resource(FlowFieldCache::default());
         let active_coord = crate::ids::ChunkCoord { x: 0, y: 0 };
         let chunk_entity = world
@@ -3070,6 +3088,34 @@ mod route_execution_tests {
     }
 
     #[test]
+    fn route_assignment_resolves_activity_destination_through_spatial_fallback() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent_without_activity_legacy();
+
+        schedule.run(&mut world);
+
+        let route = world
+            .get::<ActiveRoute>(entity)
+            .expect("route assignment should use activity geometry and spatial fallback");
+        assert_eq!(route.destination, NodeId(2));
+        assert_eq!(world.resource::<RouteAssignmentStats>().assigned, 1);
+        assert_eq!(world.resource::<RouteAssignmentStats>().failed, 0);
+    }
+
+    #[test]
+    fn route_assignment_counts_unresolved_destination_as_failed() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent_without_activity_legacy();
+        world.remove_resource::<NodeSpatialIndex>();
+
+        schedule.run(&mut world);
+
+        assert!(world.get::<ActiveRoute>(entity).is_none());
+        let stats = world.resource::<RouteAssignmentStats>();
+        assert_eq!(stats.assigned, 0);
+        assert_eq!(stats.skipped, 0);
+        assert_eq!(stats.failed, 1);
+    }
+
+    #[test]
     fn route_advance_crosses_edges_before_finishing_plan() {
         let (mut world, mut schedule, entity) = world_schedule_and_agent();
 
@@ -3087,5 +3133,45 @@ mod route_execution_tests {
         }
         assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 0);
         assert_eq!(world.get::<ActiveRoute>(entity).unwrap().cursor, 1);
+    }
+
+    #[test]
+    fn route_advance_keeps_active_route_for_unexpected_current_stage() {
+        let (mut world, mut schedule, entity) = world_schedule_and_agent();
+        world.get_mut::<WalkPlan>(entity).unwrap().stages = vec![PlanStage::Activity {
+            activity_id: "activity:work".into(),
+        }];
+        world
+            .get_mut::<AgentMobilityStateComponent>(entity)
+            .unwrap()
+            .0 = AgentMobilityState::Walking {
+            link_id: "walk:a".into(),
+            progress: 1.0,
+        };
+        world.entity_mut(entity).insert(ActiveRoute {
+            destination: NodeId(2),
+            profile: crate::routing::RoutingProfileKey::Walk,
+            steps: vec![RouteStep {
+                edge_id: EdgeId(0),
+                mode: crate::routing::ModeState::Walking,
+                canonical_edge_key: "walk:a".into(),
+                length: 1.0,
+            }],
+            cursor: 0,
+        });
+
+        schedule.run(&mut world);
+
+        assert!(
+            world.get::<ActiveRoute>(entity).is_some(),
+            "unexpected current stages should not silently remove ActiveRoute"
+        );
+        assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 0);
+        let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+        assert!(matches!(
+            &state.0,
+            AgentMobilityState::Walking { link_id, progress }
+                if link_id == "walk:a" && *progress >= 1.0
+        ));
     }
 }
