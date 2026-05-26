@@ -62,16 +62,9 @@ impl SimPlugin for PathfindingPlugin {
     }
 }
 
+#[derive(Default)]
 pub struct HierarchicalRoutingPlugin {
     pub config: HpaConfig,
-}
-
-impl Default for HierarchicalRoutingPlugin {
-    fn default() -> Self {
-        Self {
-            config: HpaConfig::default(),
-        }
-    }
 }
 
 impl SimPlugin for HierarchicalRoutingPlugin {
