@@ -86,7 +86,7 @@ pub struct AgentRecord {
     pub plan: Vec<PlanStage>,
     pub plan_cursor: usize,
     pub walk_speed_per_tick: f32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_route: Option<PersistedActiveRoute>,
 }
 
