@@ -256,17 +256,25 @@ function initialCameraFocusCoord(): Coord {
   const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
   const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
   const vehicleCoords = cars.map((car) => car.path[0]).filter(isInWorld);
-  const coords = vehicleCoords.length > 0
-    ? vehicleCoords
-    : pedestrians.map((agent) => agent.path[0]).filter(isInWorld);
+  if (vehicleCoords.length > 0) return representativeCoord(vehicleCoords);
+  const coords = pedestrians.map((agent) => agent.path[0]).filter(isInWorld);
   if (coords.length === 0) return { x: Math.floor(WIDTH / 2), y: Math.floor(HEIGHT / 2) };
+  return representativeCoord(coords);
+}
+
+function representativeCoord(coords: Coord[]): Coord {
   const x = coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length;
   const y = coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length;
-  const center = { x: WIDTH / 2, y: HEIGHT / 2 };
-  return {
-    x: center.x * 0.35 + x * 0.65,
-    y: center.y * 0.35 + y * 0.65,
-  };
+  const centroid = { x, y };
+  return coords.reduce((best, coord) =>
+    squaredDistance(coord, centroid) < squaredDistance(best, centroid) ? coord : best,
+  );
+}
+
+function squaredDistance(a: Coord, b: Coord): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
 }
 
 function isInWorld(coord: Coord): boolean {

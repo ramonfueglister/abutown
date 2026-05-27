@@ -912,6 +912,9 @@ async fn apply_mutation_owned(
             reply,
         } => {
             runtime.apply_subscription_diff(added.iter(), removed.iter());
+            if reply.is_closed() {
+                return;
+            }
             let world_id = runtime.world_id_for_persist().clone();
             let tick = runtime.mobility_tick();
             let snapshots: Vec<w::MobilityChunkSnapshot> = added
@@ -1123,6 +1126,10 @@ async fn handle_client_message(
 
             if !added.is_empty() {
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                // WS init snapshots come from the published read view below.
+                // Dropping the receiver lets the tick loop apply subscriber
+                // counts without rebuilding snapshots no caller will read.
+                drop(reply_rx);
                 if state
                     .mutations
                     .send(crate::runtime_view::Mutation::SubscriptionDiff {
@@ -1142,9 +1149,8 @@ async fn handle_client_message(
                     return out;
                 }
 
-                // Set up per-chunk channel subscriptions while we wait for the
-                // reply — latency optimization, the channel setup is
-                // independent of the runtime mutation.
+                // Set up per-chunk channels immediately so the next tick can
+                // fan out deltas as soon as the mutation marks chunks active.
                 let chunk_channels = state.chunk_channels();
                 for coord in &added {
                     let sender = chunk_channels
@@ -1157,33 +1163,12 @@ async fn handle_client_message(
                         .insert(*coord, BroadcastStream::new(receiver));
                 }
 
-                // Receive initial snapshots from the tick task. Timeout at
-                // 5× tick interval protects against a stalled tick task
-                // hanging the WS handler indefinitely.
-                let reply =
-                    tokio::time::timeout(SIMULATION_TICK_INTERVAL.saturating_mul(5), reply_rx)
-                        .await;
-                match reply {
-                    Ok(Ok(snapshots)) => {
-                        for snap in snapshots {
-                            out.push(w::ServerMessage {
-                                body: Some(w::server_message::Body::MobilityChunkSnapshot(snap)),
-                            });
-                        }
-                    }
-                    Ok(Err(_)) | Err(_) => {
-                        // Reply channel dropped OR timed out — tick task
-                        // crashed mid-drain, oneshot was canceled, or the
-                        // task is stalled. Roll back so we don't have
-                        // streams pointing at chunks the runtime never
-                        // registered as ours.
-                        tracing::warn!(
-                            "chunk_subscribe reply unavailable; rolling back local state"
-                        );
-                        for coord in &added {
-                            connection.subscription.remove(coord);
-                            connection.chunk_streams.remove(coord);
-                        }
+                let view = state.view().load();
+                for coord in &added {
+                    if let Some(snap) = view.mobility_chunk_snapshots.get(coord).cloned() {
+                        out.push(w::ServerMessage {
+                            body: Some(w::server_message::Body::MobilityChunkSnapshot(snap)),
+                        });
                     }
                 }
             }
@@ -1248,27 +1233,14 @@ async fn persist_snapshots_once(
             "tick task gone",
         ));
     }
-    // Timeout at 5× tick interval — generous (500 ms at 100 ms tick) but
-    // protects against a stalled tick task hanging the persist loop
-    // indefinitely. A real outage will return an error and let the snapshot
-    // loop schedule a retry on its next interval.
-    let payload =
-        match tokio::time::timeout(SIMULATION_TICK_INTERVAL.saturating_mul(5), reply_rx).await {
-            Ok(Ok(p)) => p,
-            Ok(Err(_)) => {
-                return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
-                    "collect-persist-data reply dropped",
-                ));
-            }
-            Err(_) => {
-                tracing::warn!(
-                    "collect-persist-data timed out waiting for tick task; will retry next cycle"
-                );
-                return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
-                    "collect-persist-data timed out",
-                ));
-            }
-        };
+    let payload = match reply_rx.await {
+        Ok(p) => p,
+        Err(_) => {
+            return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(
+                "collect-persist-data reply dropped",
+            ));
+        }
+    };
 
     let crate::runtime_view::PersistPayload {
         chunk_snapshots: snapshots,
@@ -1549,6 +1521,92 @@ mod tests {
         let chunk = snapshots[0].chunk.as_ref().expect("chunk coord present");
         assert_eq!(chunk.x, 4);
         assert_eq!(chunk.y, 4);
+    }
+
+    #[tokio::test]
+    async fn chunk_subscribe_uses_published_view_snapshots_without_waiting_for_tick_reply() {
+        let state = state_with_delayed_subscription_reply(Duration::from_millis(650));
+        let coord = sim_core::ids::ChunkCoord { x: 4, y: 4 };
+        let message = w::ClientMessage {
+            body: Some(w::client_message::Body::ChunkSubscribe(
+                w::ChunkSubscribe {
+                    protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+                    coords: vec![w::ChunkCoord {
+                        x: coord.x,
+                        y: coord.y,
+                    }],
+                },
+            )),
+        };
+        let mut connection = ConnectionState::new();
+
+        let outgoing = tokio::time::timeout(
+            Duration::from_millis(200),
+            handle_client_message(&state, &message, &mut connection),
+        )
+        .await
+        .expect("subscribe should not wait for the tick mutation reply");
+
+        assert_eq!(outgoing.len(), 1, "subscribe must emit a published snapshot");
+        assert!(
+            connection.subscription.contains(&coord),
+            "slow tick replies must not roll back the subscription"
+        );
+        match outgoing[0].body.as_ref() {
+            Some(w::server_message::Body::MobilityChunkSnapshot(snapshot)) => {
+                let chunk = snapshot.chunk.as_ref().expect("snapshot chunk present");
+                assert_eq!((chunk.x, chunk.y), (coord.x, coord.y));
+            }
+            other => panic!("expected mobility chunk snapshot, got {other:?}"),
+        }
+    }
+
+    fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
+        use sim_core::persistence::InMemoryMobilitySnapshotStore;
+
+        let runtime = SimulationRuntime::new();
+        let initial_view =
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0);
+        let (deltas, _) = tokio::sync::broadcast::channel(DELTA_BROADCAST_CAPACITY);
+        let (mutation_tx, mut mutation_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(mutation) = mutation_rx.recv().await {
+                if let crate::runtime_view::Mutation::SubscriptionDiff { added, reply, .. } =
+                    mutation
+                {
+                    tokio::time::sleep(delay).await;
+                    let snapshots = added
+                        .into_iter()
+                        .map(|coord| w::MobilityChunkSnapshot {
+                            protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+                            world_id: "test-world".into(),
+                            tick: 1,
+                            chunk: Some(w::ChunkCoord {
+                                x: coord.x,
+                                y: coord.y,
+                            }),
+                            agents: Vec::new(),
+                            vehicles: Vec::new(),
+                        })
+                        .collect();
+                    let _ = reply.send(snapshots);
+                }
+            }
+        });
+
+        AppState {
+            deltas,
+            card_hands: CardHandStore::memory(),
+            auth: AuthVerifier::local_bearer_uuid(),
+            snapshot_store: Arc::new(Mutex::new(Box::new(InMemoryChunkSnapshotStore::default()))),
+            mobility_snapshot_store: Arc::new(Mutex::new(Box::new(
+                InMemoryMobilitySnapshotStore::default(),
+            ))),
+            chunk_channels: Arc::new(DashMap::new()),
+            view: Arc::new(arc_swap::ArcSwap::from_pointee(initial_view)),
+            mutations: mutation_tx,
+        }
     }
 
     #[tokio::test]
