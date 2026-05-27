@@ -239,6 +239,34 @@ describe('proto ↔ DTO converters', () => {
     expect(() => agentMobilityFromProto(proto)).toThrow(/missing world_coord/);
   });
 
+  it('rejects invalid walking states', () => {
+    const base = {
+      id: 'agent:bad',
+      worldCoord: create(WorldCoordSchema, { x: 1, y: 2 }),
+      direction: Direction.E,
+      spriteKey: 'pedestrian:0',
+      planCursor: 0,
+    };
+
+    expect(() =>
+      agentMobilityFromProto(create(AgentMobilitySchema, {
+        ...base,
+        state: create(AgentStateSchema, {
+          state: { case: 'walking', value: create(WalkingSchema, { linkId: '', progress: 0.5 }) },
+        }),
+      })),
+    ).toThrow(/invalid walking state/);
+
+    expect(() =>
+      agentMobilityFromProto(create(AgentMobilitySchema, {
+        ...base,
+        state: create(AgentStateSchema, {
+          state: { case: 'walking', value: create(WalkingSchema, { linkId: 'edge:7', progress: 1.5 }) },
+        }),
+      })),
+    ).toThrow(/invalid walking state/);
+  });
+
   it('rejects unspecified agent direction', () => {
     const proto = create(AgentMobilitySchema, {
       id: 'agent:bad',
@@ -339,6 +367,20 @@ describe('proto ↔ DTO converters', () => {
     expect(dto.left_agents).toEqual(['agent:gone']);
   });
 
+  it('mobilityChunkDeltaFromProto rejects missing chunk', () => {
+    const proto = create(MobilityChunkDeltaSchema, {
+      protocolVersion: 16,
+      worldId: 'abutown-main',
+      tick: 5n,
+      changedAgents: [],
+      changedVehicles: [],
+      leftAgents: [],
+      leftVehicles: [],
+    });
+
+    expect(() => mobilityChunkDeltaFromProto(proto)).toThrow(/missing chunk/);
+  });
+
   it('mobilityChunkSnapshotFromProto converts proto snapshot → snake_case DTO', () => {
     const proto = create(MobilityChunkSnapshotSchema, {
       protocolVersion: 16,
@@ -352,5 +394,17 @@ describe('proto ↔ DTO converters', () => {
     expect(dto.type).toBe('mobility_chunk_snapshot');
     expect(dto.tick).toBe(7);
     expect(dto.chunk).toEqual({ x: 1, y: 2 });
+  });
+
+  it('mobilityChunkSnapshotFromProto rejects missing chunk', () => {
+    const proto = create(MobilityChunkSnapshotSchema, {
+      protocolVersion: 16,
+      worldId: 'abutown-main',
+      tick: 7n,
+      agents: [],
+      vehicles: [],
+    });
+
+    expect(() => mobilityChunkSnapshotFromProto(proto)).toThrow(/missing chunk/);
   });
 });

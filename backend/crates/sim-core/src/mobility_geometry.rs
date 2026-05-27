@@ -23,8 +23,11 @@ pub struct ActivityGeometry {
 /// Computes the world coordinate at `progress` along the given polyline slice.
 /// Zero allocations — operates on the slice directly.
 pub fn world_coord_at_progress_slice(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
+    let first = *points
+        .first()
+        .expect("world_coord_at_progress_slice requires non-empty geometry");
     if points.len() < 2 {
-        return points.first().copied().unwrap_or((0.0, 0.0));
+        return first;
     }
     let t = progress.clamp(0.0, 1.0);
     let total = arc_length_slice(points);
@@ -137,7 +140,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn activity_geometry_falls_back_to_default_when_unknown() {
+    fn activity_geometry_uses_default_when_unknown() {
         let known = activity_geometry("activity:work").expect("work activity defined");
         assert!(known.coord.0 >= 0.0);
         assert!(

@@ -295,23 +295,9 @@ pub fn route_assignment_system(
     mut commands: Commands,
 ) {
     let Some(hpa) = hpa else {
-        for (_, pos, _, state, _) in query.iter() {
-            if chunk_is_simulated(pos, &simulated)
-                && matches!(state.0, AgentMobilityState::Walking { .. })
-            {
-                stats.skipped += 1;
-            }
-        }
         return;
     };
     let Some(cache) = cache.as_deref_mut() else {
-        for (_, pos, _, state, _) in query.iter() {
-            if chunk_is_simulated(pos, &simulated)
-                && matches!(state.0, AgentMobilityState::Walking { .. })
-            {
-                stats.skipped += 1;
-            }
-        }
         return;
     };
 
@@ -3536,14 +3522,14 @@ mod route_execution_tests {
     }
 
     #[test]
-    fn route_assignment_resolves_activity_destination_through_spatial_fallback() {
+    fn route_assignment_resolves_activity_destination_through_spatial_index() {
         let (mut world, mut schedule, entity) = world_schedule_and_agent_without_activity_legacy();
 
         schedule.run(&mut world);
 
         let route = world
             .get::<ActiveRoute>(entity)
-            .expect("route assignment should use activity geometry and spatial fallback");
+            .expect("route assignment should use activity geometry and spatial index");
         assert_eq!(route.destination, NodeId(2));
         assert_eq!(world.resource::<RouteAssignmentStats>().assigned, 1);
         assert_eq!(world.resource::<RouteAssignmentStats>().failed, 0);

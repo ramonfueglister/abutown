@@ -48,8 +48,7 @@ impl CityNetwork {
         Self::from_path(path)
     }
 
-    /// Return an empty network for the given world — used as a fallback when
-    /// the city-network JSON cannot be loaded at startup.
+    /// Return an empty network for the given world.
     pub fn empty_for_world(world_id: &str) -> Self {
         Self {
             version: 1,

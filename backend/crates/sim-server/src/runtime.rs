@@ -1466,7 +1466,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hydrate_from_stores_falls_back_to_seed_when_no_snapshot() {
+    async fn hydrate_from_stores_seeds_when_no_snapshot() {
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),

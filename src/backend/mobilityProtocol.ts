@@ -338,6 +338,7 @@ export function isWorldCoordDto(value: unknown): value is WorldCoordDto {
 import type {
   AgentMobility as AgentMobilityProto,
   AgentState as AgentStateProto,
+  ChunkCoord as ChunkCoordProto,
   HealthResponse as HealthResponseProto,
   MobilityChunkDelta as MobilityChunkDeltaProto,
   MobilityChunkSnapshot as MobilityChunkSnapshotProto,
@@ -372,13 +373,25 @@ function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
   return 'car';
 }
 
+function chunkCoordFromProto(chunk: ChunkCoordProto | undefined): ChunkCoordDto {
+  if (!chunk) {
+    throw new Error('missing chunk');
+  }
+  return { x: chunk.x, y: chunk.y };
+}
+
 function agentStateFromProto(state: AgentStateProto | undefined): AgentMobilityStateDto {
   if (!state || state.state.case === undefined) {
     throw new Error('missing AgentState');
   }
   switch (state.state.case) {
-    case 'walking':
-      return { type: 'walking', link_id: state.state.value.linkId, progress: state.state.value.progress };
+    case 'walking': {
+      const { linkId, progress } = state.state.value;
+      if (!isString(linkId) || linkId.length === 0 || !isFiniteProgress(progress)) {
+        throw new Error('invalid walking state');
+      }
+      return { type: 'walking', link_id: linkId, progress };
+    }
     case 'waitingAtStop':
       return { type: 'waiting_at_stop', stop_id: state.state.value.stopId };
     case 'inVehicle':
@@ -431,7 +444,7 @@ export function mobilityChunkDeltaFromProto(p: MobilityChunkDeltaProto): Mobilit
     protocol_version: p.protocolVersion,
     world_id: p.worldId,
     tick: Number(p.tick),
-    chunk: { x: p.chunk?.x ?? 0, y: p.chunk?.y ?? 0 },
+    chunk: chunkCoordFromProto(p.chunk),
     changed_agents: p.changedAgents.map(agentMobilityFromProto),
     changed_vehicles: p.changedVehicles.map(vehicleMobilityFromProto),
     left_agents: [...p.leftAgents],
@@ -445,7 +458,7 @@ export function mobilityChunkSnapshotFromProto(p: MobilityChunkSnapshotProto): M
     protocol_version: p.protocolVersion,
     world_id: p.worldId,
     tick: Number(p.tick),
-    chunk: { x: p.chunk?.x ?? 0, y: p.chunk?.y ?? 0 },
+    chunk: chunkCoordFromProto(p.chunk),
     agents: p.agents.map(agentMobilityFromProto),
     vehicles: p.vehicles.map(vehicleMobilityFromProto),
   };

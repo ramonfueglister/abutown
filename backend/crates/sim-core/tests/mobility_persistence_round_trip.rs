@@ -57,14 +57,14 @@ fn active_route_snapshot() -> MobilityPersistSnapshot {
             plan_cursor: 0,
             walk_speed_per_tick: 1.0,
             active_route: Some(PersistedActiveRoute {
-                destination_node: 999,
+                destination_node: 1,
                 profile: RoutingProfileKey::Walk,
-                cursor: 1,
+                cursor: 0,
                 steps: vec![PersistedRouteStep {
-                    edge_id: 999,
+                    edge_id: 0,
                     mode: ModeState::Walking,
                     canonical_edge_key: "link:future-only".to_string(),
-                    length: 1.0,
+                    length: 8.0,
                 }],
             }),
         },
@@ -86,7 +86,7 @@ fn active_route_snapshot() -> MobilityPersistSnapshot {
 }
 
 #[test]
-fn active_route_round_trip_normalizes_rebuilt_graph_ids() {
+fn active_route_round_trip_preserves_valid_graph_ids() {
     let snap = active_route_snapshot();
     let (mut world, _schedule) = api::empty_world_and_schedule();
 
@@ -99,7 +99,7 @@ fn active_route_round_trip_normalizes_rebuilt_graph_ids() {
         .expect("active route persists");
 
     assert_eq!(route.profile, RoutingProfileKey::Walk);
-    assert_eq!(route.cursor, 1);
+    assert_eq!(route.cursor, 0);
     assert_eq!(route.destination_node, 1);
     assert_eq!(route.steps.len(), 1);
     assert_eq!(route.steps[0].edge_id, 0);
@@ -117,6 +117,89 @@ fn active_route_round_trip_normalizes_rebuilt_graph_ids() {
     let (mut reloaded_world, _schedule) = api::empty_world_and_schedule();
     apply_into_world(&mut reloaded_world, extracted.clone());
     assert_eq!(extract_from_world(&reloaded_world), extracted);
+}
+
+fn multi_step_active_route_snapshot() -> MobilityPersistSnapshot {
+    let mut agents = HashMap::new();
+    agents.insert(
+        AgentId("agent:multi-step-active-route".to_string()),
+        AgentRecord {
+            id: AgentId("agent:multi-step-active-route".to_string()),
+            state: AgentMobilityState::Walking {
+                link_id: "link:active:a".to_string(),
+                progress: 0.25,
+            },
+            plan: vec![PlanStage::WalkToActivity {
+                link_id: "link:active:a".to_string(),
+                activity_id: "activity:home".to_string(),
+            }],
+            plan_cursor: 0,
+            walk_speed_per_tick: 1.0,
+            active_route: Some(PersistedActiveRoute {
+                destination_node: 2,
+                profile: RoutingProfileKey::Walk,
+                cursor: 0,
+                steps: vec![
+                    PersistedRouteStep {
+                        edge_id: 100,
+                        mode: ModeState::Walking,
+                        canonical_edge_key: "link:active:a".to_string(),
+                        length: 5.0,
+                    },
+                    PersistedRouteStep {
+                        edge_id: 101,
+                        mode: ModeState::Walking,
+                        canonical_edge_key: "link:active:b".to_string(),
+                        length: 8.0,
+                    },
+                ],
+            }),
+        },
+    );
+
+    MobilityPersistSnapshot {
+        tick: 9,
+        agents,
+        vehicles: HashMap::new(),
+        stops: HashMap::new(),
+        routes: HashMap::new(),
+        link_polylines: HashMap::from([
+            (
+                "link:active:a".to_string(),
+                vec![(0.0, 0.0), (5.0, 0.0)],
+            ),
+            (
+                "link:active:b".to_string(),
+                vec![(5.0, 0.0), (13.0, 0.0)],
+            ),
+        ]),
+        flow_cells: HashMap::new(),
+        chunk_activities: HashMap::new(),
+    }
+}
+
+#[test]
+fn multi_step_active_route_round_trips_through_shared_endpoints() {
+    let snap = multi_step_active_route_snapshot();
+    let (mut world, _schedule) = api::empty_world_and_schedule();
+
+    apply_into_world(&mut world, snap);
+    let extracted = extract_from_world(&world);
+    let route = extracted
+        .agents
+        .get(&AgentId("agent:multi-step-active-route".to_string()))
+        .and_then(|agent| agent.active_route.as_ref())
+        .expect("active route persists");
+
+    assert_eq!(route.destination_node, 2);
+    assert_eq!(route.steps.len(), 2);
+    assert_eq!(route.steps[0].edge_id, 0);
+    assert_eq!(route.steps[1].edge_id, 1);
+    assert_eq!(route.steps[0].canonical_edge_key, "link:active:a");
+    assert_eq!(route.steps[1].canonical_edge_key, "link:active:b");
+
+    let (mut reloaded_world, _schedule) = api::empty_world_and_schedule();
+    apply_into_world(&mut reloaded_world, extracted);
 }
 
 fn graph_native_active_route_world() -> bevy_ecs::world::World {
@@ -178,20 +261,20 @@ fn graph_native_active_route_world() -> bevy_ecs::world::World {
                 activity_id: "activity:home".to_string(),
             }],
             plan_cursor: 0,
-            walk_speed_per_tick: 1.0,
-            active_route: Some(PersistedActiveRoute {
-                destination_node: 2,
-                profile: RoutingProfileKey::Walk,
-                cursor: 0,
-                steps: vec![PersistedRouteStep {
-                    edge_id: 1,
-                    mode: ModeState::Walking,
-                    canonical_edge_key: "edge:1".to_string(),
-                    length: 8.0,
-                }],
-            }),
-        },
-    );
+                    walk_speed_per_tick: 1.0,
+                    active_route: Some(PersistedActiveRoute {
+                        destination_node: 1,
+                        profile: RoutingProfileKey::Walk,
+                        cursor: 0,
+                        steps: vec![PersistedRouteStep {
+                            edge_id: 0,
+                            mode: ModeState::Walking,
+                            canonical_edge_key: "edge:0".to_string(),
+                            length: 5.0,
+                        }],
+                    }),
+                },
+            );
     world
 }
 
@@ -202,7 +285,7 @@ fn edge_canonical_key(edge: &Edge) -> String {
 }
 
 #[test]
-fn graph_native_active_route_edge_key_round_trips_without_raw_id_authority() {
+fn graph_native_active_route_edge_key_round_trips_with_matching_raw_id() {
     let world = graph_native_active_route_world();
 
     let extracted = extract_from_world(&world);
@@ -211,14 +294,14 @@ fn graph_native_active_route_edge_key_round_trips_without_raw_id_authority() {
         .get(&AgentId("agent:graph-native-active-route".to_string()))
         .and_then(|agent| agent.active_route.as_ref())
         .expect("active route persists from live graph");
-    assert_eq!(extracted_route.steps[0].edge_id, 1);
-    assert_eq!(extracted_route.steps[0].canonical_edge_key, "edge:1");
+    assert_eq!(extracted_route.steps[0].edge_id, 0);
+    assert_eq!(extracted_route.steps[0].canonical_edge_key, "edge:0");
     assert_eq!(
         extracted
             .link_polylines
-            .get("edge:1")
-            .expect("graph-native active-route polyline is persisted"),
-        &vec![(5.0, 0.0), (13.0, 0.0)]
+            .get("edge:0")
+            .expect("first graph-native active-route polyline is persisted"),
+        &vec![(0.0, 0.0), (5.0, 0.0)]
     );
 
     let (mut reloaded_world, _schedule) = api::empty_world_and_schedule();
@@ -230,15 +313,12 @@ fn graph_native_active_route_edge_key_round_trips_without_raw_id_authority() {
         .and_then(|agent| agent.active_route.as_ref())
         .expect("active route survives graph rebuild");
     let reloaded_step = &reloaded_route.steps[0];
-    assert_eq!(reloaded_step.canonical_edge_key, "edge:1");
-    assert_ne!(
-        reloaded_step.edge_id, 1,
-        "the rebuilt route must not rely on the old raw graph edge id"
-    );
+    assert_eq!(reloaded_step.canonical_edge_key, "edge:0");
+    assert_eq!(reloaded_step.edge_id, 0);
 
     let graph = reloaded_world.resource::<Graph>();
     let normalized_edge = graph.edge(EdgeId(reloaded_step.edge_id));
-    assert_eq!(edge_canonical_key(normalized_edge), "edge:1");
+    assert_eq!(edge_canonical_key(normalized_edge), "edge:0");
 }
 
 #[test]
@@ -259,7 +339,45 @@ fn active_route_hydration_rejects_missing_canonical_key() {
 }
 
 #[test]
-#[should_panic(expected = "persisted active_route cursor 2 exceeds 1 steps")]
+fn active_route_hydration_normalizes_transient_destination_node() {
+    let mut snap = active_route_snapshot();
+    snap.agents
+        .get_mut(&AgentId("agent:active-route".to_string()))
+        .unwrap()
+        .active_route
+        .as_mut()
+        .unwrap()
+        .destination_node = 999;
+
+    let (mut world, _schedule) = api::empty_world_and_schedule();
+    apply_into_world(&mut world, snap);
+    let extracted = extract_from_world(&world);
+    let route = extracted
+        .agents
+        .get(&AgentId("agent:active-route".to_string()))
+        .and_then(|agent| agent.active_route.as_ref())
+        .expect("active route persists");
+    assert_eq!(route.destination_node, 1);
+}
+
+#[test]
+#[should_panic(expected = "cannot traverse TramTrack from Intersection with profile WalkTransit")]
+fn active_route_hydration_rejects_walk_transit_boarding_away_from_stop() {
+    let mut snap = active_route_snapshot();
+    let agent = snap
+        .agents
+        .get_mut(&AgentId("agent:active-route".to_string()))
+        .unwrap();
+    let route = agent.active_route.as_mut().unwrap();
+    route.profile = RoutingProfileKey::WalkTransit;
+    route.steps[0].mode = ModeState::OnTram;
+
+    let (mut world, _schedule) = api::empty_world_and_schedule();
+    apply_into_world(&mut world, snap);
+}
+
+#[test]
+#[should_panic(expected = "persisted active_route cursor 1 is outside 1 steps")]
 fn active_route_hydration_rejects_cursor_past_steps() {
     let mut snap = active_route_snapshot();
     snap.agents
@@ -268,7 +386,7 @@ fn active_route_hydration_rejects_cursor_past_steps() {
         .active_route
         .as_mut()
         .unwrap()
-        .cursor = 2;
+        .cursor = 1;
 
     let (mut world, _schedule) = api::empty_world_and_schedule();
     apply_into_world(&mut world, snap);

@@ -31,7 +31,7 @@ use crate::mobility::records::{
 use crate::mobility::resources::{FlowCells, Tick};
 use crate::routing::{
     Edge, EdgeId, EdgeKind, Graph, LineId, ModeState, Node, NodeId, NodeKind, NodeSpatialIndex,
-    RoutingProfileKey, TransitLine, TransitLines, WaitingAgents,
+    RoutingProfile, RoutingProfileKey, TransitLine, TransitLines, WaitingAgents,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -386,8 +386,32 @@ fn resolve_snapshot_polyline(
         })
 }
 
+fn point_key(point: (f32, f32)) -> (u32, u32) {
+    (point.0.to_bits(), point.1.to_bits())
+}
+
+fn node_for_polyline_point(
+    nodes: &mut Vec<Node>,
+    point_nodes: &mut HashMap<(u32, u32), NodeId>,
+    position: (f32, f32),
+) -> NodeId {
+    if let Some(id) = point_nodes.get(&point_key(position)).copied() {
+        return id;
+    }
+    let id = NodeId(nodes.len() as u32);
+    nodes.push(Node {
+        id,
+        position,
+        kind: NodeKind::Intersection,
+        legacy_id: None,
+    });
+    point_nodes.insert(point_key(position), id);
+    id
+}
+
 fn push_edge(
     nodes: &mut Vec<Node>,
+    point_nodes: &mut HashMap<(u32, u32), NodeId>,
     edges: &mut Vec<Edge>,
     link_id: String,
     polyline: Vec<(f32, f32)>,
@@ -399,21 +423,12 @@ fn push_edge(
         link_id
     );
 
-    let from = NodeId(nodes.len() as u32);
-    nodes.push(Node {
-        id: from,
-        position: polyline[0],
-        kind: NodeKind::Intersection,
-        legacy_id: None,
-    });
-
-    let to = NodeId(nodes.len() as u32);
-    nodes.push(Node {
-        id: to,
-        position: *polyline.last().expect("polyline length checked"),
-        kind: NodeKind::Intersection,
-        legacy_id: None,
-    });
+    let from = node_for_polyline_point(nodes, point_nodes, polyline[0]);
+    let to = node_for_polyline_point(
+        nodes,
+        point_nodes,
+        *polyline.last().expect("polyline length checked"),
+    );
 
     let edge_id = EdgeId(edges.len() as u32);
     edges.push(Edge {
@@ -488,6 +503,7 @@ fn persisted_walking_links(snap: &MobilityPersistSnapshot) -> Vec<(String, EdgeK
 
 fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
     let mut nodes = Vec::new();
+    let mut point_nodes = HashMap::new();
     let mut edges = Vec::new();
     let mut edge_by_link: HashMap<String, EdgeId> = HashMap::new();
 
@@ -501,6 +517,7 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
             let polyline = resolve_snapshot_polyline(world, link_id, &snap.link_polylines);
             let edge_id = push_edge(
                 &mut nodes,
+                &mut point_nodes,
                 &mut edges,
                 link_id.clone(),
                 polyline,
@@ -515,7 +532,14 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
             continue;
         }
         let polyline = resolve_snapshot_polyline(world, &link_id, &snap.link_polylines);
-        let edge_id = push_edge(&mut nodes, &mut edges, link_id.clone(), polyline, kind);
+        let edge_id = push_edge(
+            &mut nodes,
+            &mut point_nodes,
+            &mut edges,
+            link_id.clone(),
+            polyline,
+            kind,
+        );
         edge_by_link.insert(link_id, edge_id);
     }
 
@@ -650,36 +674,51 @@ fn expect_canonical_edge_key(graph: &Graph, key: &str) -> EdgeId {
 
 fn validate_active_route_mode(
     profile: RoutingProfileKey,
-    mode: ModeState,
-    edge_kind: EdgeKind,
+    from_mode: ModeState,
+    from_node_kind: NodeKind,
+    edge: &Edge,
+    expected_next_mode: ModeState,
     key: &str,
-) {
-    let valid = match profile {
-        RoutingProfileKey::Walk => mode == ModeState::Walking && edge_kind == EdgeKind::Footway,
-        RoutingProfileKey::Car => mode == ModeState::Driving && edge_kind == EdgeKind::Road,
-        RoutingProfileKey::Tram => mode == ModeState::OnTram && edge_kind == EdgeKind::TramTrack,
-        RoutingProfileKey::WalkTransit => {
-            (mode == ModeState::Walking && edge_kind == EdgeKind::Footway)
-                || (mode == ModeState::OnTram && edge_kind == EdgeKind::TramTrack)
-        }
+) -> ModeState {
+    let Some((next_mode, _cost)) =
+        RoutingProfile::for_key(profile).transition(from_mode, from_node_kind, edge)
+    else {
+        panic!(
+            "apply_into_world: persisted active_route step {} mode {:?} cannot traverse {:?} from {:?} with profile {:?}",
+            key, from_mode, edge.kind, from_node_kind, profile
+        );
     };
-    assert!(
-        valid,
-        "apply_into_world: persisted active_route step {} mode {:?} is invalid for profile {:?} and edge kind {:?}",
-        key, mode, profile, edge_kind
-    );
+    if next_mode != expected_next_mode {
+        panic!(
+            "apply_into_world: persisted active_route step {} expected mode {:?} but profile transition produced {:?}",
+            key, expected_next_mode, next_mode
+        );
+    }
+    next_mode
+}
+
+fn initial_mode_for_profile(profile: RoutingProfileKey) -> ModeState {
+    match profile {
+        RoutingProfileKey::Walk | RoutingProfileKey::WalkTransit => ModeState::Walking,
+        RoutingProfileKey::Car => ModeState::Driving,
+        RoutingProfileKey::Tram => ModeState::OnTram,
+    }
 }
 
 fn normalize_active_route(graph: &Graph, route: &PersistedActiveRoute) -> PersistedActiveRoute {
-    if route.cursor > route.steps.len() {
+    if route.steps.is_empty() {
+        panic!("apply_into_world: persisted active_route has no steps");
+    }
+    if route.cursor >= route.steps.len() {
         panic!(
-            "apply_into_world: persisted active_route cursor {} exceeds {} steps",
+            "apply_into_world: persisted active_route cursor {} is outside {} steps",
             route.cursor,
             route.steps.len()
         );
     }
-
     let mut normalized_steps = Vec::with_capacity(route.steps.len());
+    let mut previous_edge_id: Option<EdgeId> = None;
+    let mut mode = initial_mode_for_profile(route.profile);
     for step in &route.steps {
         if step.length < 0.0 || !step.length.is_finite() {
             panic!(
@@ -689,39 +728,49 @@ fn normalize_active_route(graph: &Graph, route: &PersistedActiveRoute) -> Persis
         }
         let edge_id = expect_canonical_edge_key(graph, &step.canonical_edge_key);
         let edge = graph.edge(edge_id);
-        validate_active_route_mode(
+        let expected_key = canonical_edge_key(edge);
+        if step.canonical_edge_key != expected_key {
+            panic!(
+                "apply_into_world: persisted active_route edge {} canonical key mismatch: got {}, expected {}",
+                step.edge_id, step.canonical_edge_key, expected_key
+            );
+        }
+        if let Some(previous) = previous_edge_id
+            && graph.edge(previous).to != edge.from
+        {
+            panic!(
+                "apply_into_world: persisted active_route edge {} is disconnected from previous step",
+                step.edge_id
+            );
+        }
+        mode = validate_active_route_mode(
             route.profile,
+            mode,
+            graph.node(edge.from).kind,
+            edge,
             step.mode,
-            edge.kind,
             &step.canonical_edge_key,
         );
 
-        // Persisted lengths are diagnostics from the old graph. Canonical keys
-        // identify the rebuilt edge; use its length so harmless graph
-        // recomputation does not make an otherwise valid active route fail.
         normalized_steps.push(PersistedRouteStep {
             edge_id: edge.id.0,
             mode: step.mode,
             canonical_edge_key: step.canonical_edge_key.clone(),
-            length: edge.length,
+            length: step.length,
         });
+        previous_edge_id = Some(edge_id);
     }
 
-    let destination_node = normalized_steps
-        .last()
-        .map(|step| graph.edge(EdgeId(step.edge_id)).to.0)
-        .unwrap_or_else(|| {
-            if (route.destination_node as usize) >= graph.node_count() {
-                panic!(
-                    "apply_into_world: persisted active_route destination node {} is missing",
-                    route.destination_node
-                );
-            }
-            route.destination_node
-        });
+    let final_edge_id = EdgeId(
+        normalized_steps
+            .last()
+            .expect("active route steps checked")
+            .edge_id,
+    );
+    let destination_node = graph.edge(final_edge_id).to;
 
     PersistedActiveRoute {
-        destination_node,
+        destination_node: destination_node.0,
         profile: route.profile,
         cursor: route.cursor,
         steps: normalized_steps,
