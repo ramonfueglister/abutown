@@ -14,12 +14,6 @@ pub struct SqlWorldEventRecord {
     pub payload: Value,
 }
 
-impl SqlWorldEventRecord {
-    pub fn from_event(event: &WorldEventDto) -> Result<Self, WorldEventStoreError> {
-        match event {}
-    }
-}
-
 #[derive(Debug)]
 pub struct PostgresWorldEventStore {
     _pool: PgPool,

@@ -11,12 +11,6 @@ pub struct WorldEventMetadata {
     pub version: u64,
 }
 
-impl WorldEventMetadata {
-    pub fn from_event(event: &WorldEventDto) -> Self {
-        match event {}
-    }
-}
-
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 #[error("{message}")]
 pub struct WorldEventStoreError {
