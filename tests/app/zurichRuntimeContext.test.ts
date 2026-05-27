@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createZurichRuntimeContext } from '../../src/app/zurichRuntimeContext';
+import {
+  buildStaticDiagnostics,
+  createZurichRuntimeContext,
+  type RuntimeBuilding,
+} from '../../src/app/zurichRuntimeContext';
 
 describe('zurichRuntimeContext', () => {
   it('builds the current minimal-motorways Zurich runtime context', () => {
@@ -36,5 +40,41 @@ describe('zurichRuntimeContext', () => {
     expect(diagnostics.railStationsOnBuildings).toBe(0);
     expect(diagnostics.railStationsOnRails).toBe(0);
     expect(diagnostics.railStationsOnTrees).toBe(0);
+    expect(diagnostics.buildingFramesOutsideFinishedRow).toBe(0);
+  });
+
+  it('counts building frames outside the finished first row by sheet', () => {
+    const context = createZurichRuntimeContext({ seed: 1848 });
+    const target = context.runtime.buildings[0];
+    const runtime = {
+      ...context.runtime,
+      buildings: context.runtime.buildings.map((building) =>
+        building === target ? { ...building, frame: finishedRowColumns(building.sheet) } : building,
+      ),
+    };
+
+    const diagnostics = buildStaticDiagnostics(context.world, runtime);
+
+    expect(diagnostics.buildingFramesOutsideFinishedRow).toBe(1);
   });
 });
+
+function finishedRowColumns(sheet: RuntimeBuilding['sheet']): number {
+  switch (sheet) {
+    case 'houses':
+    case 'oldhouses':
+    case 'office':
+    case 'tower':
+      return 4;
+    case 'cottages':
+    case 'church':
+      return 1;
+    case 'townhouses':
+    case 'modern':
+      return 2;
+    case 'shops':
+      return 6;
+    case 'flats':
+      return 3;
+  }
+}

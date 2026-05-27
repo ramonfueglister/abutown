@@ -32,6 +32,19 @@ export type RuntimeRailTile = { coord: Coord; mask: number };
 export type RuntimeRailStation = { coord: Coord; frame: number };
 export type RuntimeBuilding = { coord: Coord; sheet: ZurichBuilding['sheet']; frame: number; district: string };
 
+const finishedRowColumns = {
+  houses: 4,
+  oldhouses: 4,
+  cottages: 1,
+  townhouses: 2,
+  shops: 6,
+  flats: 3,
+  office: 4,
+  modern: 2,
+  tower: 4,
+  church: 1,
+} satisfies Record<RuntimeBuilding['sheet'], number>;
+
 export type ZurichRuntimeContext = {
   world: ZurichWorld;
   transport: ZurichTransport;
@@ -122,7 +135,7 @@ export function buildStaticDiagnostics(
   let buildingsWithoutAnyStreetAdjacency = 0;
   let buildingsWithoutStreetFrontage = 0;
   let buildingsTouchingRail = 0;
-  let buildingFramesOutsideFinishedRow = 0;
+  const buildingFramesOutsideFinishedRow = countBuildingFramesOutsideFinishedRow(buildings);
   const streetFrontages = buildStreetFrontages(world, terrain, roads);
   for (const building of buildings) {
     const tileKey = key(building.coord);
@@ -179,6 +192,15 @@ export function buildStaticDiagnostics(
     invalidRoadDeadEnds: countInvalidRoadDeadEnds(roads, { width: world.width, height: world.height }),
     parallelRoadPairs,
   };
+}
+
+function countBuildingFramesOutsideFinishedRow(buildings: readonly RuntimeBuilding[]): number {
+  let count = 0;
+  for (const building of buildings) {
+    const limit = finishedRowColumns[building.sheet];
+    if (building.frame < 0 || building.frame >= limit) count += 1;
+  }
+  return count;
 }
 
 function buildStreetFrontages(
