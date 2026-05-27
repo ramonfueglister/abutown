@@ -57,7 +57,7 @@ export function buildLayeredTerrainSeed(input: {
         base: baseFor(terrain.kind),
         surface,
         cover,
-        display: displayFor({ building, detail }),
+        display: displayFor({ building, detail, cover }),
         zone_id: terrain.zoneId ?? null,
         road_mask: road ? road.mask : null,
         rail_mask: rail ? rail.mask : null,
@@ -92,6 +92,8 @@ export function validateLayeredTerrainSeed(seed: LayeredTerrainSeed): string[] {
     if ((tile.cover === 'Building' || tile.cover === 'Tree') && tile.surface !== 'None') errors.push(`tile:${tileKey}:cover_on_transport_surface`);
     if (tile.road_mask !== null && tile.surface !== 'Street' && tile.surface !== 'Bridge' && tile.surface !== 'RailCrossing') errors.push(`tile:${tileKey}:road_mask_without_road_surface`);
     if (tile.rail_mask !== null && tile.surface !== 'Rail' && tile.surface !== 'RailCrossing') errors.push(`tile:${tileKey}:rail_mask_without_rail_surface`);
+    if ((tile.surface === 'Street' || tile.surface === 'Bridge' || tile.surface === 'RailCrossing') && tile.road_mask === null) errors.push(`tile:${tileKey}:road_surface_without_road_mask`);
+    if ((tile.surface === 'Rail' || tile.surface === 'RailCrossing') && tile.rail_mask === null) errors.push(`tile:${tileKey}:rail_surface_without_rail_mask`);
   }
 
   return errors;
@@ -131,8 +133,8 @@ function coverFor(input: {
   return 'None';
 }
 
-function displayFor(input: { building?: ZurichBuilding; detail?: ZurichDetail }): string | null {
-  if (input.building) return input.building.sheet;
-  if (input.detail) return input.detail.assetCategory;
+function displayFor(input: { building?: ZurichBuilding; detail?: ZurichDetail; cover: LayeredCoverKind }): string | null {
+  if (input.cover === 'Building' && input.building) return input.building.sheet;
+  if (input.cover === 'Detail' && input.detail) return input.detail.assetCategory;
   return null;
 }
