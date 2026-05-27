@@ -51,15 +51,23 @@ pub fn load_zurich_layered_terrain_seed() -> Result<LayeredTerrainSeed, serde_js
 
 pub fn validate_seed(seed: &LayeredTerrainSeed) -> Vec<String> {
     let mut errors = Vec::new();
-    let expected_tile_count = usize::try_from(u64::from(seed.width) * u64::from(seed.height));
+
+    if seed.width == 0 {
+        errors.push("dimensions:width_zero".to_string());
+    }
+    if seed.height == 0 {
+        errors.push("dimensions:height_zero".to_string());
+    }
+
+    let expected_tile_count = usize::try_from(u64::from(seed.width) * u64::from(seed.height)).ok();
 
     match expected_tile_count {
-        Ok(expected) if seed.tiles.len() == expected => {}
-        Ok(expected) => errors.push(format!(
+        Some(expected) if seed.tiles.len() == expected => {}
+        Some(expected) => errors.push(format!(
             "tile_count:expected:{expected}:actual:{}",
             seed.tiles.len()
         )),
-        Err(_) => errors.push("tile_count:overflow".to_string()),
+        None => errors.push("tile_count:overflow".to_string()),
     }
 
     if seed.chunk_size == 0 {
@@ -77,6 +85,19 @@ pub fn validate_seed(seed: &LayeredTerrainSeed) -> Vec<String> {
                 "chunk_partitioning:height:{}:chunk_size:{}",
                 seed.height, seed.chunk_size
             ));
+        }
+    }
+
+    if let Some(width) = usize::try_from(seed.width).ok().filter(|width| *width != 0) {
+        for (index, tile) in seed.tiles.iter().enumerate() {
+            let expected_x = u32::try_from(index % width).unwrap_or(u32::MAX);
+            let expected_y = u32::try_from(index / width).unwrap_or(u32::MAX);
+            if tile.x != expected_x || tile.y != expected_y {
+                errors.push(format!(
+                    "tile:{}:{}:expected:{}:{}",
+                    tile.x, tile.y, expected_x, expected_y
+                ));
+            }
         }
     }
 
@@ -113,8 +134,10 @@ pub fn chunk_tiles_from_seed(
 
     for y in start_y..end_y {
         for x in start_x..end_x {
-            let index = usize::try_from(y).ok()?.checked_mul(width)?
-                + usize::try_from(x).ok()?;
+            let index = usize::try_from(y)
+                .ok()?
+                .checked_mul(width)?
+                .checked_add(usize::try_from(x).ok()?)?;
             let tile = seed.tiles.get(index)?;
             if tile.x != x || tile.y != y {
                 return None;
@@ -130,6 +153,7 @@ pub fn chunk_tiles_from_seed(
 mod tests {
     use super::*;
     use crate::ids::ChunkCoord;
+    use crate::tile::{TileBase, TileCover, TileSurface};
 
     #[test]
     fn loads_zurich_layered_seed_from_repo_data() {
@@ -152,5 +176,76 @@ mod tests {
             .expect("origin chunk exists");
 
         assert_eq!(tiles.len(), 32 * 32);
+    }
+
+    #[test]
+    fn validate_seed_rejects_shuffled_coordinates() {
+        let mut seed = test_seed(2, 2, 2);
+        seed.tiles.swap(0, 1);
+
+        let errors = validate_seed(&seed);
+
+        assert!(errors.contains(&"tile:1:0:expected:0:0".to_string()));
+        assert!(errors.contains(&"tile:0:0:expected:1:0".to_string()));
+    }
+
+    #[test]
+    fn validate_seed_rejects_invalid_physical_layer_combinations() {
+        let mut seed = test_seed(1, 1, 1);
+        seed.tiles[0].base = TileBase::Water;
+        seed.tiles[0].surface = TileSurface::Street;
+        seed.tiles[0].cover = TileCover::Building;
+        seed.tiles[0].road_mask = None;
+
+        let errors = validate_seed(&seed);
+
+        assert!(errors.contains(&"tile:0:0:BuildingOnWater".to_string()));
+        assert!(errors.contains(&"tile:0:0:CoverOnTransportSurface".to_string()));
+        assert!(errors.contains(&"tile:0:0:RoadSurfaceWithoutRoadMask".to_string()));
+    }
+
+    #[test]
+    fn chunk_tiles_from_seed_rejects_invalid_chunk_requests() {
+        let seed = test_seed(2, 2, 2);
+
+        assert!(chunk_tiles_from_seed(&seed, ChunkCoord { x: -1, y: 0 }).is_none());
+        assert!(chunk_tiles_from_seed(&seed, ChunkCoord { x: 1, y: 0 }).is_none());
+
+        let mut misaligned = seed.clone();
+        misaligned.tiles[0].x = 1;
+        assert!(chunk_tiles_from_seed(&misaligned, ChunkCoord { x: 0, y: 0 }).is_none());
+
+        let mut missing = seed;
+        missing.tiles.pop();
+        assert!(chunk_tiles_from_seed(&missing, ChunkCoord { x: 0, y: 0 }).is_none());
+    }
+
+    fn test_seed(width: u32, height: u32, chunk_size: u16) -> LayeredTerrainSeed {
+        let mut tiles = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                tiles.push(SeedTile {
+                    x,
+                    y,
+                    base: TileBase::Grass,
+                    surface: TileSurface::None,
+                    cover: TileCover::None,
+                    display: None,
+                    zone_id: None,
+                    road_mask: None,
+                    rail_mask: None,
+                    version: 0,
+                });
+            }
+        }
+
+        LayeredTerrainSeed {
+            version: 1,
+            world_id: "test".to_string(),
+            width,
+            height,
+            chunk_size,
+            tiles,
+        }
     }
 }
