@@ -8,34 +8,20 @@ import { renderBackendRequired as renderBackendRequiredView } from './app/backen
 import { createEntitySelection } from './app/entitySelection';
 import { attachMapInteraction } from './app/interaction';
 import { installRuntimeDiagnostics, type StaticRuntimeDiagnostics } from './app/runtimeDiagnostics';
-import {
-  createZurichRuntimeContext,
-  type RuntimeBuilding,
-  type RuntimeRailStation,
-  type RuntimeRailTile,
-  type RuntimeRoadTile,
-  type RuntimeTerrain,
-} from './app/zurichRuntimeContext';
+import { createZurichRuntimeContext } from './app/zurichRuntimeContext';
 import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, type MobilityOverlayState } from './backend/mobilityState';
-import type { ZurichDetail } from './city/worldTypes';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
   dampCamera,
 } from './cameraController';
-import { shouldRenderDetail } from './render/detailRenderPolicy';
-import {
-  candidateVehicleSprites,
-  screenRightLaneOffset,
-  type VehicleSprite,
-} from './render/vehicleSprites';
+import { candidateVehicleSprites, type VehicleSprite } from './render/vehicleSprites';
 import {
   candidateMinimalPedestrianSprites,
   type MinimalPedestrianSprite,
 } from './render/minimalPedestrianSprites';
-import { compareDrawableOrder } from './render/drawOrder';
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
@@ -43,8 +29,15 @@ import {
   type BackendPedestrian,
 } from './render/backendMobilityDrawables';
 import { MINIMAL_MAP_TILE_SIZE, mapProject, mapUnproject } from './render/minimalMapProjection';
-import { screenStableWorldSize } from './render/minimalGlyphScale';
-import { minimalBuildingPlotOffset, minimalBuildingSize } from './render/minimalBuildingLayout';
+import {
+  buildBackendCarInspector,
+  buildBackendPedestrianInspector,
+  carVisualWorldPoint,
+  EDGE_EXIT_TILES,
+  MAP_BACKGROUND,
+  OUTSKIRTS_TILES,
+  renderMinimalMap,
+} from './render/minimalMapRenderer';
 import {
   buildNorthboundTrainPath,
   trainFadeAlpha,
@@ -53,11 +46,6 @@ import {
 } from './render/trainMotion';
 
 type Coord = { x: number; y: number };
-type Terrain = RuntimeTerrain;
-type RailTile = RuntimeRailTile;
-type RoadTile = RuntimeRoadTile;
-type Building = RuntimeBuilding;
-type RailStation = RuntimeRailStation;
 
 type Train = {
   path: Coord[];
@@ -67,26 +55,6 @@ type Train = {
   carSpacing: number;
 };
 
-type GridRect = {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-};
-
-type StaticDrawable =
-  | { type: 'rail'; coord: Coord; rail: RailTile }
-  | { type: 'road'; coord: Coord; road: RoadTile }
-  | { type: 'railStation'; coord: Coord; station: RailStation }
-  | { type: 'detail'; coord: Coord; detail: ZurichDetail }
-  | { type: 'tree'; coord: Coord }
-  | { type: 'building'; coord: Coord; building: Building };
-
-type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: string };
-type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
-type TrainDrawable = { type: 'train'; coord: Coord; train: Train };
-type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
-
 const VISUAL_STYLE_ID = 'minimal-motorways';
 const TILE_W = MINIMAL_MAP_TILE_SIZE.width;
 const TILE_H = MINIMAL_MAP_TILE_SIZE.height;
@@ -95,36 +63,8 @@ const CAMERA_EDGE_MARGIN = 8;
 const CAMERA_EDGE_SOFTNESS = 4;
 const CAMERA_MIN_SCALE = 0.18;
 const CAMERA_MAX_SCALE = 2.8;
-const VIEWPORT_GRID_PADDING = 9;
-const OUTSKIRTS_TILES = 12;
-const EDGE_EXIT_TILES = 7;
-const NORTH = 1;
-const EAST = 2;
-const SOUTH = 4;
-const WEST = 8;
 const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
-const MAP_BACKGROUND = '#f6f0e3';
-const MAP_OUTSKIRTS = '#eee7d7';
-const MAP_WATER = '#92d8e9';
-const MAP_RIVERBANK = '#bde8df';
-const MAP_PARK = '#cfe5bf';
-const MAP_PLAZA = '#eadbbd';
-const ROAD_CASING = '#c7d1cf';
-const ROAD_CORE = '#fffdf7';
-const ROAD_BRIDGE_CASING = '#8fc9d7';
-const ROAD_BRIDGE_CORE = '#fff9e9';
-const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
-const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
-const TRAIN_CORE = '#5f6f75';
-const TREE_COLOR = '#84ad78';
-const DETAIL_COLOR = 'rgba(92, 97, 92, 0.34)';
-const BUILDING_RESIDENTIAL = '#d8cfbf';
-const BUILDING_COMMERCIAL = '#c9d8dc';
-const BUILDING_CIVIC = '#dccb9a';
-const BUILDING_INDUSTRIAL = '#cabed6';
-const AGENT_COLOR = '#343b43';
-const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '#ef7f5a', '#28a6b0'];
 
 const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
 const zurichContext = createZurichRuntimeContext({ seed: 1848 });
@@ -159,7 +99,6 @@ const railStations = zurichContext.runtime.railStations;
 const buildings = zurichContext.runtime.buildings;
 const trees = zurichContext.runtime.trees;
 const details = zurichContext.runtime.details;
-const staticDrawables = buildStaticDrawables();
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: MinimalPedestrianSprite[] = [];
 let trains: Train[] = buildTrains();
@@ -173,7 +112,7 @@ const entitySelection = createEntitySelection<BackendPedestrian, BackendCar>({
   getVehicles: () => carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs),
   screenToWorld,
   projectPedestrian: (agent) => iso(agent.path[0]),
-  projectVehicle: carVisualWorldPoint,
+  projectVehicle: (car) => carVisualWorldPoint(car, camera.scale, tileSize),
   pedestrianRadius: () => Math.max(8, 20 / camera.scale),
   vehicleRadius: () => Math.max(10, 24 / camera.scale),
 });
@@ -271,537 +210,34 @@ function frame(now: number): void {
 }
 
 function render(): void {
-  ctx.save();
-  ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.fillStyle = MAP_BACKGROUND;
-  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-  ctx.translate(camera.x, camera.y);
-  ctx.scale(camera.scale, camera.scale);
-
-  drawScene({ x: 0, y: 0 });
-  ctx.restore();
-  drawAgentInspectorPanel(buildBackendPedestrianInspector(selectedBackendPedestrian()));
-  drawCarInspectorPanel(buildBackendCarInspector(selectedBackendCar()));
-}
-
-function drawScene(offset: Coord): void {
-  ctx.save();
-  const sceneOffset = iso(offset);
-  ctx.translate(sceneOffset.x, sceneOffset.y);
-  const visibleGrid = visibleGridRect();
-
-  drawOutskirtsTerrain(visibleGrid);
-  const visibleTerrainTiles: Coord[] = [];
-  for (let y = Math.max(0, visibleGrid.minY); y <= Math.min(HEIGHT - 1, visibleGrid.maxY); y += 1) {
-    for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(WIDTH - 1, visibleGrid.maxX); x += 1) visibleTerrainTiles.push({ x, y });
-  }
-  visibleTerrainTiles.sort((a, b) => iso(a).y - iso(b).y || a.x - b.x);
-  for (const coord of visibleTerrainTiles) drawTerrainBase(coord);
-  for (const coord of visibleTerrainTiles) drawRiverSurface(coord);
-
-  const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
-  const cars: BackendCar[] = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const carDrawables = cars
-    .map((car) => ({ type: 'car' as const, coord: car.path[0], car, vehicleId: car.id }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort(compareDrawables);
-  const pedestrianDrawables = pedestrians
-    .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort(compareDrawables);
-  const trainDrawables = trains
-    .map((train) => ({ type: 'train' as const, coord: trainPosition(train), train }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort(compareDrawables);
-
-  for (const road of roads.values()) if (isCoordVisible(road.coord, visibleGrid)) drawRoad(road);
-  for (const path of railPaths) drawRailPath(path);
-  drawEdgeConnections(visibleGrid);
-  for (const station of railStations) if (isCoordVisible(station.coord, visibleGrid)) drawRailStation(station);
-  for (const detail of details) if (isCoordVisible(detail.coord, visibleGrid)) drawDetail(detail);
-  for (const building of buildings) if (isCoordVisible(building.coord, visibleGrid)) drawBuilding(building);
-  for (const coord of trees) if (isCoordVisible(coord, visibleGrid)) drawTree(coord);
-  for (const item of trainDrawables) drawTrain(item.train);
-  for (const item of carDrawables) drawCar(item.car, item.vehicleId === entitySelection.selectedVehicleId());
-  for (const item of pedestrianDrawables) drawPedestrian(item.pedestrian, item.agentId === entitySelection.selectedAgentId());
-
-  drawPerimeterMist();
-  ctx.restore();
-}
-
-type AssetDrawOptions = {
-  offsetX?: number;
-  offsetY?: number;
-  scale?: number;
-  alpha?: number;
-};
-
-function drawTerrainBase(coord: Coord): void {
-  const kind = zurichWorld.terrain.get(key(coord))?.kind;
-  if (kind === 'park' || kind === 'forest' || kind === 'reserve') {
-    drawTileFill(coord, MAP_PARK, 0.82);
-  } else if (kind === 'plaza') {
-    drawTileFill(coord, MAP_PLAZA, 0.72);
-  }
-}
-
-function drawRiverSurface(coord: Coord): void {
-  if (!isWaterSurface(coord)) return;
-  const kind = zurichWorld.terrain.get(key(coord))?.kind;
-  drawTileFill(coord, kind === 'riverbank' ? MAP_RIVERBANK : MAP_WATER, 0.96);
-}
-
-function drawOutskirtsTerrain(visibleGrid: GridRect): void {
-  for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(HEIGHT - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
-    for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(WIDTH - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
-      const coord = { x, y };
-      if (isInsidePlayableMap(coord)) continue;
-      const edgeDistance = distanceOutsidePlayableMap(coord);
-      if (edgeDistance > OUTSKIRTS_TILES) continue;
-
-      const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
-      ctx.save();
-      drawTileFill(coord, MAP_OUTSKIRTS, 0.05 + fade * 0.16);
-      if (hash(`outskirts-shadow:${x}:${y}`) % 11 === 0) {
-        const point = iso(coord);
-        ctx.fillStyle = `rgba(151, 133, 103, ${0.025 + (1 - fade) * 0.035})`;
-        drawIsoTile(point);
-      }
-      ctx.restore();
-    }
-  }
-}
-
-function drawRoad(road: RoadTile): void {
-  drawMaskLine(road.coord, road.mask, {
-    casing: road.kind === 'bridge' ? ROAD_BRIDGE_CASING : ROAD_CASING,
-    core: road.kind === 'bridge' ? ROAD_BRIDGE_CORE : ROAD_CORE,
-    casingWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(5.5, camera.scale, { minWorld: 10.5, maxWorld: 17 })
-      : screenStableWorldSize(4.8, camera.scale, { minWorld: 9.2, maxWorld: 16 }),
-    coreWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(3.8, camera.scale, { minWorld: 7, maxWorld: 12 })
-      : screenStableWorldSize(3.4, camera.scale, { minWorld: 6.4, maxWorld: 10.5 }),
+  renderMinimalMap({
+    ctx,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    },
+    camera,
+    world: { width: WIDTH, height: HEIGHT },
+    tileSize,
+    terrain,
+    terrainKinds: zurichWorld.terrain,
+    roads,
+    rails,
+    railPaths,
+    railStations,
+    buildings,
+    trees,
+    details,
+    trains,
+    mobilityState,
+    mobilityTickPeriodMs,
+    vehicleSprites,
+    pedestrianSprites,
+    selectedAgentId: entitySelection.selectedAgentId(),
+    selectedVehicleId: entitySelection.selectedVehicleId(),
+    now: Date.now,
   });
-}
-
-function drawRail(_rail: RailTile): void {
-  drawMaskLine(_rail.coord, _rail.mask, {
-    casing: RAIL_CASING,
-    core: RAIL_CORE,
-    casingWidth: screenStableWorldSize(2.8, camera.scale, { minWorld: 4.8, maxWorld: 9 }),
-    coreWidth: screenStableWorldSize(1.2, camera.scale, { minWorld: 1.8, maxWorld: 4 }),
-  });
-}
-
-function drawRailPath(path: Coord[]): void {
-  if (path.length < 2) return;
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  drawPolyline(path, RAIL_CASING, screenStableWorldSize(2.8, camera.scale, { minWorld: 4.8, maxWorld: 9 }));
-  drawPolyline(path, RAIL_CORE, screenStableWorldSize(1.2, camera.scale, { minWorld: 1.8, maxWorld: 4 }));
-  ctx.restore();
-}
-
-function drawPolyline(path: Coord[], color: string, width: number): void {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  path.forEach((coord, index) => {
-    const point = iso(coord);
-    if (index === 0) ctx.moveTo(point.x, point.y);
-    else ctx.lineTo(point.x, point.y);
-  });
-  ctx.stroke();
-}
-
-function drawRailStation(station: RailStation): void {
-  const point = iso(station.coord);
-  ctx.save();
-  ctx.fillStyle = 'rgba(255, 250, 240, 0.74)';
-  ctx.strokeStyle = RAIL_CORE;
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.arc(point.x, point.y, 5.5 + (station.frame % 2) * 0.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawDetail(detail: ZurichDetail): void {
-  if (!shouldRenderDetail(detail)) return;
-  if (detail.category !== 'industry' && detail.category !== 'dock' && detail.category !== 'station') return;
-  const point = iso(detail.coord);
-  ctx.save();
-  ctx.fillStyle = DETAIL_COLOR;
-  ctx.fillRect(point.x - 2, point.y - 2, 4, 4);
-  ctx.restore();
-}
-
-function drawBuilding(building: Building): void {
-  const point = iso(building.coord);
-  const offset = minimalBuildingPlotOffset(building.coord, roads);
-  const { width, height } = minimalBuildingSize(building);
-  const jitter = buildingJitter(building);
-  const x = point.x - width / 2 + offset.x + jitter.x;
-  const y = point.y - height / 2 + offset.y + jitter.y;
-  ctx.save();
-  ctx.fillStyle = 'rgba(108, 97, 77, 0.07)';
-  roundedRect(x + 1.5, y + 1.5, width, height, 1.4);
-  ctx.fill();
-  ctx.globalAlpha = 0.66;
-  ctx.fillStyle = buildingVectorColor(building);
-  roundedRect(x, y, width, height, 1.4);
-  ctx.fill();
-  ctx.restore();
-}
-
-function buildingJitter(building: Building): Coord {
-  return {
-    x: ((hash(`building-jitter-x:${building.district}:${key(building.coord)}`) % 5) - 2) * 0.26,
-    y: ((hash(`building-jitter-y:${building.district}:${key(building.coord)}`) % 5) - 2) * 0.26,
-  };
-}
-
-function drawTree(coord: Coord): void {
-  if (camera.scale < 0.32 && hash(`tree-lod:${key(coord)}`) % 3 !== 0) return;
-  const point = iso(coord);
-  const jitterX = ((hash(`tree-x:${key(coord)}`) % 9) - 4) * 0.38;
-  const jitterY = ((hash(`tree-y:${key(coord)}`) % 9) - 4) * 0.38;
-  ctx.save();
-  ctx.fillStyle = TREE_COLOR;
-  ctx.globalAlpha = zurichWorld.terrain.get(key(coord))?.kind === 'forest' ? 0.72 : 0.54;
-  ctx.beginPath();
-  ctx.arc(point.x + jitterX, point.y + jitterY, 2.4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawTileFill(coord: Coord, color: string, alpha = 1): void {
-  const point = iso(coord);
-  ctx.save();
-  ctx.globalAlpha *= alpha;
-  ctx.fillStyle = color;
-  ctx.fillRect(point.x - TILE_W / 2 - 0.6, point.y - TILE_H / 2 - 0.6, TILE_W + 1.2, TILE_H + 1.2);
-  ctx.restore();
-}
-
-function drawMaskLine(
-  coord: Coord,
-  mask: number,
-  style: { casing: string; core: string; casingWidth: number; coreWidth: number },
-): void {
-  const point = iso(coord);
-  const segments = maskSegments(mask);
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  drawRoadPass(point, segments, style.casing, style.casingWidth);
-  drawRoadPass(point, segments, style.core, style.coreWidth);
-  ctx.restore();
-}
-
-function drawRoadPass(point: Coord, segments: Coord[], color: string, width: number): void {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  if (segments.length === 0) {
-    ctx.arc(point.x, point.y, width / 2, 0, Math.PI * 2);
-  } else {
-    for (const segment of segments) {
-      ctx.moveTo(point.x, point.y);
-      ctx.lineTo(point.x + segment.x, point.y + segment.y);
-    }
-  }
-  ctx.stroke();
-}
-
-function maskSegments(mask: number): Coord[] {
-  const result: Coord[] = [];
-  if ((mask & NORTH) !== 0) result.push({ x: 0, y: -TILE_H / 2 });
-  if ((mask & EAST) !== 0) result.push({ x: TILE_W / 2, y: 0 });
-  if ((mask & SOUTH) !== 0) result.push({ x: 0, y: TILE_H / 2 });
-  if ((mask & WEST) !== 0) result.push({ x: -TILE_W / 2, y: 0 });
-  return result;
-}
-
-function buildingVectorColor(building: Building): string {
-  if (building.sheet === 'church') return BUILDING_CIVIC;
-  if (building.sheet === 'office' || building.sheet === 'modern' || building.sheet === 'tower') return BUILDING_COMMERCIAL;
-  if (building.district === 'mill-yard') return BUILDING_INDUSTRIAL;
-  return BUILDING_RESIDENTIAL;
-}
-
-function drawCar(car: BackendCar, selected: boolean): void {
-  const point = carVisualWorldPoint(car);
-  const currentPoint = iso(car.path[0]);
-  const nextPoint = iso(car.path[1] ?? car.path[0]);
-  const angle = movementAngle(currentPoint, nextPoint);
-  const selectX = screenStableWorldSize(14, camera.scale, { minWorld: 8.5, maxWorld: 36 });
-  const selectY = screenStableWorldSize(10, camera.scale, { minWorld: 6.5, maxWorld: 28 });
-  const length = screenStableWorldSize(16, camera.scale, { minWorld: 12.5, maxWorld: 44 });
-  const width = screenStableWorldSize(6.4, camera.scale, { minWorld: 5.2, maxWorld: 19 });
-  ctx.save();
-  ctx.translate(point.x, point.y);
-  if (selected) {
-    ctx.globalAlpha = 0.94;
-    ctx.strokeStyle = '#166c83';
-    ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, selectX, selectY, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  drawCapsule({ x: 0, y: 0 }, angle, length, width, vehicleVectorColor(car.id));
-  ctx.restore();
-}
-
-function carVisualWorldPoint(car: BackendCar): Coord {
-  const current = car.path[0];
-  const next = car.path[1] ?? current;
-  const currentPoint = iso(current);
-  const nextPoint = iso(next);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, screenStableWorldSize(6.8, camera.scale, { minWorld: 6.8, maxWorld: 20 }));
-  const spreadIndex = (hash(car.id) % 9) - 4;
-  const spreadMagnitude = screenStableWorldSize(Math.abs(spreadIndex) * 4.2, camera.scale, { minWorld: 0, maxWorld: 42 });
-  const along = screenForwardOffset(currentPoint, nextPoint, Math.sign(spreadIndex) * spreadMagnitude);
-  return {
-    x: currentPoint.x + lane.x + along.x,
-    y: currentPoint.y + lane.y + along.y,
-  };
-}
-
-function screenForwardOffset(from: Coord, to: Coord, distance: number): Coord {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy);
-  if (length === 0 || distance === 0) return { x: 0, y: 0 };
-  return {
-    x: (dx / length) * distance,
-    y: (dy / length) * distance,
-  };
-}
-
-function drawTrain(train: Train): void {
-  const segments = [
-    { offset: train.offset, length: 13.5 },
-    { offset: train.offset - train.carSpacing, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 2, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 3, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 4, length: 10.5 },
-  ];
-
-  for (const segment of segments) {
-    const pos = movingTrainPosition(train.path, segment.offset);
-    const alpha = trainFadeAlpha(pos, { height: HEIGHT, fadeTiles: train.fadeTiles });
-    if (alpha <= 0) continue;
-    const point = iso(pos);
-    const nextPoint = iso(movingTrainPosition(train.path, segment.offset + 0.2));
-    ctx.save();
-    ctx.globalAlpha *= alpha;
-    drawCapsule(point, movementAngle(point, nextPoint), segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
-    ctx.restore();
-  }
-}
-
-function drawCapsule(point: Coord, angle: number, length: number, width: number, color: string, casing?: string): void {
-  ctx.save();
-  ctx.translate(point.x, point.y);
-  ctx.rotate(angle);
-  ctx.lineCap = 'round';
-  if (casing) {
-    ctx.strokeStyle = casing;
-    ctx.lineWidth = width + 2.6;
-    ctx.beginPath();
-    ctx.moveTo(-length / 2, 0);
-    ctx.lineTo(length / 2, 0);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(-length / 2, 0);
-  ctx.lineTo(length / 2, 0);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function movementAngle(currentPoint: Coord, nextPoint: Coord): number {
-  const dx = nextPoint.x - currentPoint.x;
-  const dy = nextPoint.y - currentPoint.y;
-  if (Math.abs(dx) + Math.abs(dy) < 0.001) return 0;
-  return Math.atan2(dy, dx);
-}
-
-function vehicleVectorColor(id: string): string {
-  return VEHICLE_COLORS[hash(`vehicle-color:${id}`) % VEHICLE_COLORS.length];
-}
-
-function drawPedestrian(pedestrian: BackendPedestrian, selected: boolean): void {
-  const current = pedestrian.path[0];
-  const next = pedestrian.path[1] ?? current;
-  const pos = current;
-  const point = iso(pos);
-  const currentPoint = iso(current);
-  const nextPoint = iso(next);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, screenStableWorldSize(4 + pedestrian.laneOffset, camera.scale, { minWorld: 4, maxWorld: 14 }));
-  const selectedRadius = screenStableWorldSize(8, camera.scale, { minWorld: 6.2, maxWorld: 22 });
-  const radius = screenStableWorldSize(3.6, camera.scale, { minWorld: 2.9, maxWorld: 10 });
-  ctx.save();
-  ctx.translate(point.x + lane.x, point.y + lane.y);
-  if (selected) {
-    ctx.globalAlpha = 0.92;
-    ctx.strokeStyle = '#a87309';
-    ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, selectedRadius, selectedRadius, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.fillStyle = AGENT_COLOR;
-  ctx.globalAlpha *= 0.78;
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-type EntityInspectorRow = { label: string; value: string };
-type EntityInspector = { title: string; rows: EntityInspectorRow[] } | null;
-
-function formatBackendCoord(coord: { x: number; y: number }): string {
-  return `${coord.x.toFixed(1)}, ${coord.y.toFixed(1)}`;
-}
-
-function buildBackendPedestrianInspector(agent: BackendPedestrian | null): EntityInspector {
-  if (!agent) return null;
-  return {
-    title: agent.id,
-    rows: [
-      { label: 'State', value: 'walking' },
-      { label: 'Tile', value: formatBackendCoord(agent.path[0]) },
-      { label: 'Next', value: formatBackendCoord(agent.path[1] ?? agent.path[0]) },
-      { label: 'Direction', value: agent.direction },
-      { label: 'Sprite', value: agent.sprite.sheet },
-    ],
-  };
-}
-
-function buildBackendCarInspector(vehicle: BackendCar | null): EntityInspector {
-  if (!vehicle) return null;
-  return {
-    title: vehicle.id,
-    rows: [
-      { label: 'State', value: 'driving' },
-      { label: 'Tile', value: formatBackendCoord(vehicle.path[0]) },
-      { label: 'Next', value: formatBackendCoord(vehicle.path[1] ?? vehicle.path[0]) },
-      { label: 'Direction', value: vehicle.direction },
-      { label: 'Sprite', value: vehicle.sprite.role },
-    ],
-  };
-}
-
-function drawAgentInspectorPanel(inspector: EntityInspector): void {
-  if (!inspector) return;
-  drawInspectorPanel(inspector, { x: 12, y: 12, accent: '#f7d76a', stroke: 'rgba(247, 215, 106, 0.8)' });
-}
-
-function drawCarInspectorPanel(inspector: EntityInspector): void {
-  if (!inspector) return;
-  drawInspectorPanel(inspector, { x: 12, y: 128, accent: '#75d7ff', stroke: 'rgba(117, 215, 255, 0.8)' });
-}
-
-function drawInspectorPanel(
-  inspector: { title: string; rows: { label: string; value: string }[] },
-  options: { x: number; y: number; accent: string; stroke: string },
-): void {
-  const ratio = window.devicePixelRatio || 1;
-  const { x, y } = options;
-  const width = 232;
-  const padding = 10;
-  const rowHeight = 17;
-  const titleHeight = 20;
-  const height = padding * 2 + titleHeight + inspector.rows.length * rowHeight;
-
-  ctx.save();
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.fillStyle = 'rgba(7, 10, 9, 0.82)';
-  ctx.strokeStyle = options.stroke;
-  ctx.lineWidth = 1;
-  roundedRect(x, y, width, height, 6);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.font = '600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-  ctx.fillStyle = options.accent;
-  ctx.textBaseline = 'top';
-  ctx.fillText(inspector.title, x + padding, y + padding);
-
-  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-  inspector.rows.forEach((row, index) => {
-    const rowY = y + padding + titleHeight + index * rowHeight;
-    ctx.fillStyle = 'rgba(231, 236, 224, 0.72)';
-    ctx.fillText(row.label, x + padding, rowY);
-    ctx.fillStyle = '#f7f7e8';
-    ctx.fillText(row.value, x + 70, rowY);
-  });
-  ctx.restore();
-}
-
-function roundedRect(x: number, y: number, width: number, height: number, radius: number): void {
-  const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
-
-function drawEdgeConnections(visibleGrid: GridRect): void {
-  for (const road of roads.values()) {
-    for (const exit of outwardExits(road.coord, road.mask)) {
-      for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
-        const coord = { x: road.coord.x + exit.dx * step, y: road.coord.y + exit.dy * step };
-        if (!isCoordVisible(coord, visibleGrid)) continue;
-        drawFadingEdgeTile(step, () => drawRoad({
-          coord,
-          kind: 'street',
-          mask: exit.mask,
-        }));
-      }
-    }
-  }
-
-  for (const rail of rails.values()) {
-    for (const exit of outwardExits(rail.coord, rail.mask)) {
-      for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
-        const coord = { x: rail.coord.x + exit.dx * step, y: rail.coord.y + exit.dy * step };
-        if (!isCoordVisible(coord, visibleGrid)) continue;
-        drawFadingEdgeTile(step, () => drawRail({
-          coord,
-          mask: exit.mask,
-        }));
-      }
-    }
-  }
-}
-
-function drawPerimeterMist(): void {
-  const minX = 0;
-  const minY = 0;
-  const maxX = WIDTH * TILE_W;
-  const maxY = HEIGHT * TILE_H;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(139, 129, 108, 0.18)';
-  ctx.lineWidth = 1.4;
-  ctx.strokeRect(minX, minY, maxX, maxY);
-  ctx.restore();
 }
 
 function buildTrains(): Train[] {
@@ -868,17 +304,6 @@ function worldToGrid(point: Coord): Coord {
   return mapUnproject(point, tileSize);
 }
 
-function buildStaticDrawables(): StaticDrawable[] {
-  return [
-    ...[...rails.values()].map((rail) => ({ type: 'rail' as const, coord: rail.coord, rail })),
-    ...[...roads.values()].map((road) => ({ type: 'road' as const, coord: road.coord, road })),
-    ...railStations.map((station) => ({ type: 'railStation' as const, coord: station.coord, station })),
-    ...details.map((detail) => ({ type: 'detail' as const, coord: detail.coord, detail })),
-    ...trees.map((coord) => ({ type: 'tree' as const, coord })),
-    ...buildings.map((building) => ({ type: 'building' as const, coord: building.coord, building })),
-  ].sort(compareDrawables);
-}
-
 function constrainCamera(allowOverscroll: boolean): void {
   constrainCameraTargetToGrid(
     camera,
@@ -896,108 +321,8 @@ function constrainCamera(allowOverscroll: boolean): void {
   );
 }
 
-function visibleGridRect(): GridRect {
-  const inverseScale = 1 / camera.scale;
-  const corners = [
-    worldToGrid({ x: -camera.x * inverseScale, y: -camera.y * inverseScale }),
-    worldToGrid({ x: (window.innerWidth - camera.x) * inverseScale, y: -camera.y * inverseScale }),
-    worldToGrid({ x: -camera.x * inverseScale, y: (window.innerHeight - camera.y) * inverseScale }),
-    worldToGrid({ x: (window.innerWidth - camera.x) * inverseScale, y: (window.innerHeight - camera.y) * inverseScale }),
-  ];
-  return {
-    minX: Math.floor(Math.min(...corners.map((coord) => coord.x))) - VIEWPORT_GRID_PADDING,
-    maxX: Math.ceil(Math.max(...corners.map((coord) => coord.x))) + VIEWPORT_GRID_PADDING,
-    minY: Math.floor(Math.min(...corners.map((coord) => coord.y))) - VIEWPORT_GRID_PADDING,
-    maxY: Math.ceil(Math.max(...corners.map((coord) => coord.y))) + VIEWPORT_GRID_PADDING,
-  };
-}
-
-function isCoordVisible(coord: Coord, rect: GridRect): boolean {
-  return coord.x >= rect.minX && coord.x <= rect.maxX && coord.y >= rect.minY && coord.y <= rect.maxY;
-}
-
-function isInsidePlayableMap(coord: Coord): boolean {
-  return coord.x >= 0 && coord.y >= 0 && coord.x < WIDTH && coord.y < HEIGHT;
-}
-
-function isWaterSurface(coord: Coord): boolean {
-  const kind = terrain.get(key(coord));
-  return kind === 'water' || kind === 'riverbank';
-}
-
-function distanceOutsidePlayableMap(coord: Coord): number {
-  return Math.max(0, -coord.x, coord.x - (WIDTH - 1), -coord.y, coord.y - (HEIGHT - 1));
-}
-
-function drawIsoTile(point: Coord): void {
-  ctx.beginPath();
-  ctx.rect(point.x - TILE_W / 2, point.y - TILE_H / 2, TILE_W, TILE_H);
-  ctx.fill();
-}
-
-function drawFadingEdgeTile(step: number, draw: () => void): void {
-  ctx.save();
-  ctx.globalAlpha = 0.68 * (1 - step / (EDGE_EXIT_TILES + 1));
-  draw();
-  ctx.restore();
-}
-
-function outwardExits(coord: Coord, mask: number): { dx: number; dy: number; mask: number }[] {
-  const exits: { dx: number; dy: number; mask: number }[] = [];
-  if (coord.y === 0 && (mask & NORTH) !== 0) exits.push({ dx: 0, dy: -1, mask: NORTH | SOUTH });
-  if (coord.x === WIDTH - 1 && (mask & EAST) !== 0) exits.push({ dx: 1, dy: 0, mask: EAST | WEST });
-  if (coord.y === HEIGHT - 1 && (mask & SOUTH) !== 0) exits.push({ dx: 0, dy: 1, mask: NORTH | SOUTH });
-  if (coord.x === 0 && (mask & WEST) !== 0) exits.push({ dx: -1, dy: 0, mask: EAST | WEST });
-  return exits;
-}
-
-function depthSort(a: { coord: Coord }, b: { coord: Coord }): number {
-  return iso(a.coord).y - iso(b.coord).y || a.coord.x - b.coord.x;
-}
-
-function compareDrawables(a: Drawable, b: Drawable): number {
-  return compareDrawableOrder(
-    { type: a.type, isoY: iso(a.coord).y, x: a.coord.x },
-    { type: b.type, isoY: iso(b.coord).y, x: b.coord.x },
-  );
-}
-
-function mergeSortedDrawables(staticItems: StaticDrawable[], dynamicItems: Array<TrainDrawable | CarDrawable | PedestrianDrawable>): Drawable[] {
-  const result: Drawable[] = [];
-  let staticIndex = 0;
-  let dynamicIndex = 0;
-  while (staticIndex < staticItems.length || dynamicIndex < dynamicItems.length) {
-    const staticItem = staticItems[staticIndex];
-    const dynamicItem = dynamicItems[dynamicIndex];
-    if (!staticItem) {
-      result.push(dynamicItem);
-      dynamicIndex += 1;
-    } else if (!dynamicItem || compareDrawables(staticItem, dynamicItem) <= 0) {
-      result.push(staticItem);
-      staticIndex += 1;
-    } else {
-      result.push(dynamicItem);
-      dynamicIndex += 1;
-    }
-  }
-  return result;
-}
-
 function cityDiagnostics(): StaticRuntimeDiagnostics {
   return zurichContext.staticDiagnostics();
-}
-
-function key(coord: Coord): string {
-  return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
-}
-
-function hash(value: string): number {
-  let result = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    result ^= value.charCodeAt(i);
-    result = Math.imul(result, 16777619);
-  }
-  return result >>> 0;
 }
 
 declare global {
@@ -1062,7 +387,7 @@ installRuntimeDiagnostics(window, {
     x: camera.x + iso(coord).x * camera.scale,
     y: camera.y + iso(coord).y * camera.scale,
   }),
-  carVisualWorldPoint: (vehicle) => worldToGrid(carVisualWorldPoint(vehicle)),
+  carVisualWorldPoint: (vehicle) => worldToGrid(carVisualWorldPoint(vehicle, camera.scale, tileSize)),
   getTrain: () => trains[0]
     ? {
         position: trainPosition(trains[0]),
