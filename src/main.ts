@@ -1,9 +1,13 @@
 import './style.css';
+import {
+  defaultAppRuntimeDependencies,
+  startAppRuntime,
+  type AppRuntimeInitialState,
+} from './app/appRuntime';
 import { renderBackendRequired as renderBackendRequiredView } from './app/backendRequiredView';
-import { requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
-import { connectMobilityBackend, requireMobilitySnapshot, type MobilityBackendBridge } from './backend/mobilityClient';
+import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
+import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
-import { mountCardHandView } from './cardHand/cardHandView';
 import {
   countBuildingsWithoutDirectStreetAdjacency,
   hasDirectStreetAdjacency,
@@ -232,35 +236,32 @@ let mobilityBackendBridge: MobilityBackendBridge | null = null;
 void startRuntime();
 
 async function startRuntime(): Promise<void> {
-  try {
-    backendStatus = await requireBackend({ baseUrl: backendBaseUrl });
-    const required = await requireMobilitySnapshot({ baseUrl: backendBaseUrl });
-    mobilityState = required.state;
-    mobilityTickPeriodMs = required.tickPeriodMs;
-    mountCardHandView({ baseUrl: backendBaseUrl });
-    await boot();
-    mobilityBackendBridge = connectMobilityBackend({
-      baseUrl: backendBaseUrl,
-      initialState: mobilityState,
-      onState: (state) => {
-        mobilityState = state;
-      },
-      viewport: {
-        // Compose screen → render-world → tile so visibleChunks gets coords
-        // in the same space the backend's `chunk_of` math operates on.
-        getScreenToTile: () => (screen) => worldToGrid(screenToWorld(screen)),
-        getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
-        getWorldDims: () => ({
-          widthTiles: zurichWorld.width,
-          heightTiles: zurichWorld.height,
-          chunkSize: zurichWorld.chunkSize,
-        }),
-      },
-    });
-    window.addEventListener('beforeunload', () => mobilityBackendBridge?.stop(), { once: true });
-  } catch (error) {
-    renderBackendRequired(error);
-  }
+  const handle = await startAppRuntime({
+    backendBaseUrl,
+    onInitialState: applyInitialRuntimeState,
+    onMobilityState: (state) => {
+      mobilityState = state;
+    },
+    viewport: {
+      // Compose screen → render-world → tile so visibleChunks gets coords
+      // in the same space the backend's `chunk_of` math operates on.
+      getScreenToTile: () => (screen) => worldToGrid(screenToWorld(screen)),
+      getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+      getWorldDims: () => ({
+        widthTiles: zurichWorld.width,
+        heightTiles: zurichWorld.height,
+        chunkSize: zurichWorld.chunkSize,
+      }),
+    },
+    dependencies: defaultAppRuntimeDependencies(boot, renderBackendRequired),
+  });
+  mobilityBackendBridge = handle.mobilityBackendBridge;
+}
+
+function applyInitialRuntimeState(initial: AppRuntimeInitialState): void {
+  backendStatus = initial.backendStatus;
+  mobilityState = initial.mobilityState;
+  mobilityTickPeriodMs = initial.mobilityTickPeriodMs;
 }
 
 async function boot(): Promise<void> {

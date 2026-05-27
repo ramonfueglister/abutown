@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -44,14 +43,5 @@ describe('card hand view login state', () => {
 
   it('does not require a DOM when Supabase login is not configured', () => {
     expect(() => mountCardHandView()).not.toThrow();
-  });
-});
-
-describe('card hand view runtime integration', () => {
-  it('mounts the login view from the main runtime', () => {
-    const mainSource = readFileSync(new URL('../../src/main.ts', import.meta.url), 'utf8');
-
-    expect(mainSource).toContain("from './cardHand/cardHandView'");
-    expect(mainSource).toContain('mountCardHandView({ baseUrl: backendBaseUrl })');
   });
 });
