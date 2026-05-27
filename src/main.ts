@@ -5,6 +5,7 @@ import {
   type AppRuntimeInitialState,
 } from './app/appRuntime';
 import { renderBackendRequired as renderBackendRequiredView } from './app/backendRequiredView';
+import { createEntitySelection } from './app/entitySelection';
 import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
@@ -225,13 +226,20 @@ const staticDrawables = buildStaticDrawables();
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: MinimalPedestrianSprite[] = [];
 let trains: Train[] = buildTrains();
-let selectedAgentId: string | null = null;
-let selectedVehicleId: string | null = null;
 let previousTime = performance.now();
 let backendStatus: BackendHealthDto | null = null;
 let mobilityState: MobilityOverlayState = createMobilityOverlayState();
 let mobilityTickPeriodMs = 100;
 let mobilityBackendBridge: MobilityBackendBridge | null = null;
+const entitySelection = createEntitySelection<BackendPedestrian, BackendCar>({
+  getPedestrians: () => pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs),
+  getVehicles: () => carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs),
+  screenToWorld,
+  projectPedestrian: (agent) => iso(agent.path[0]),
+  projectVehicle: carVisualWorldPoint,
+  pedestrianRadius: () => Math.max(8, 20 / camera.scale),
+  vehicleRadius: () => Math.max(10, 24 / camera.scale),
+});
 
 void startRuntime();
 
@@ -405,8 +413,8 @@ function drawScene(offset: Coord): void {
   for (const building of buildings) if (isCoordVisible(building.coord, visibleGrid)) drawBuilding(building);
   for (const coord of trees) if (isCoordVisible(coord, visibleGrid)) drawTree(coord);
   for (const item of trainDrawables) drawTrain(item.train);
-  for (const item of carDrawables) drawCar(item.car, item.vehicleId === selectedVehicleId);
-  for (const item of pedestrianDrawables) drawPedestrian(item.pedestrian, item.agentId === selectedAgentId);
+  for (const item of carDrawables) drawCar(item.car, item.vehicleId === entitySelection.selectedVehicleId());
+  for (const item of pedestrianDrawables) drawPedestrian(item.pedestrian, item.agentId === entitySelection.selectedAgentId());
 
   drawPerimeterMist();
   ctx.restore();
@@ -1195,46 +1203,15 @@ function isInWorld(coord: Coord): boolean {
 }
 
 function selectedBackendPedestrian(): BackendPedestrian | null {
-  if (!selectedAgentId) return null;
-  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
-  return pedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
+  return entitySelection.selectedPedestrian();
 }
 
 function selectedBackendCar(): BackendCar | null {
-  if (!selectedVehicleId) return null;
-  const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  return cars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  return entitySelection.selectedVehicle();
 }
 
 function selectMobilityEntityAtScreenPoint(point: Coord): void {
-  const worldPoint = screenToWorld(point);
-  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
-  const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const vehicleHit = findNearestProjectedEntity(cars, worldPoint, Math.max(10, 24 / camera.scale), carVisualWorldPoint);
-  if (vehicleHit) {
-    selectedVehicleId = vehicleHit.id;
-    selectedAgentId = null;
-    return;
-  }
-  const agentHit = findNearestProjectedEntity(pedestrians, worldPoint, Math.max(8, 20 / camera.scale));
-  selectedAgentId = agentHit?.id ?? null;
-  selectedVehicleId = null;
-}
-
-function findNearestProjectedEntity<T extends { id: string; path: Coord[] }>(
-  entities: readonly T[],
-  worldPoint: Coord,
-  radius: number,
-  projectedPoint: (entity: T) => Coord = (entity) => iso(entity.path[0]),
-): T | null {
-  let nearest: { entity: T; distance: number } | null = null;
-  for (const entity of entities) {
-    const projected = projectedPoint(entity);
-    const distance = Math.hypot(projected.x - worldPoint.x, projected.y - worldPoint.y);
-    if (distance > radius) continue;
-    if (!nearest || distance < nearest.distance) nearest = { entity, distance };
-  }
-  return nearest?.entity ?? null;
+  entitySelection.selectAtScreenPoint(point);
 }
 
 function screenToWorld(point: Coord): Coord {
@@ -1596,8 +1573,8 @@ window.render_game_to_text = () => {
   const backendMobility = mobilityDiagnostics(mobilityState);
   const projectedPedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
   const projectedCars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const selectedAgent = projectedPedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
-  const selectedVehicle = projectedCars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  const selectedAgent = entitySelection.selectedPedestrian();
+  const selectedVehicle = entitySelection.selectedVehicle();
   const projectedScreenPosition = (projected: Coord): Coord => ({
     x: camera.x + projected.x * camera.scale,
     y: camera.y + projected.y * camera.scale,
@@ -1681,13 +1658,13 @@ window.render_game_to_text = () => {
       },
       mobilityAgents: {
         count: mobilityAgentEntries.length,
-        selectedId: selectedAgentId,
+        selectedId: entitySelection.selectedAgentId(),
         selected: selectedMobilityAgentEntry,
         agents: mobilityAgentEntries,
       },
       mobilityVehicles: {
         count: mobilityVehicleEntries.length,
-        selectedId: selectedVehicleId,
+        selectedId: entitySelection.selectedVehicleId(),
         selected: selectedMobilityVehicleEntry,
         vehicles: mobilityVehicleEntries,
       },
