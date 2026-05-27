@@ -36,6 +36,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Generate protobuf TypeScript
+        run: npm run generate:proto
+
       - name: Run frontend tests
         run: npm test
 
