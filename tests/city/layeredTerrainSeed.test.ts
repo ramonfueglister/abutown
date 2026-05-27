@@ -56,14 +56,17 @@ describe('layered terrain seed', () => {
     const seed = buildLayeredTerrainSeed({ world, transport, placement });
     const invalid = {
       ...seed,
-      tiles: seed.tiles.map((tile, index) =>
-        index === 0 ? { ...tile, base: 'Water' as const, surface: 'Street' as const, cover: 'Building' as const } : tile,
-      ),
+      tiles: seed.tiles.map((tile, index) => {
+        if (index === 0) return { ...tile, base: 'Water' as const, surface: 'Street' as const, cover: 'Building' as const };
+        if (index === 1) return { ...tile, surface: 'Street' as const, cover: 'Detail' as const, road_mask: 1, rail_mask: null };
+        return tile;
+      }),
     };
 
     expect(validateLayeredTerrainSeed(seed)).toEqual([]);
     expect(validateLayeredTerrainSeed(invalid)).toContain('tile:0:0:building_on_water');
     expect(validateLayeredTerrainSeed(invalid)).toContain('tile:0:0:cover_on_transport_surface');
+    expect(validateLayeredTerrainSeed(invalid)).toContain('tile:1:0:cover_on_transport_surface');
   });
 
   it('rejects invalid seed shape and coordinate invariants', () => {
