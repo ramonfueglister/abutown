@@ -7,7 +7,7 @@ import {
 import { renderBackendRequired as renderBackendRequiredView } from './app/backendRequiredView';
 import { createEntitySelection } from './app/entitySelection';
 import { attachMapInteraction } from './app/interaction';
-import { installRuntimeDiagnostics, type StaticRuntimeDiagnostics } from './app/runtimeDiagnostics';
+import { installRuntimeDiagnostics } from './app/runtimeDiagnostics';
 import { createZurichRuntimeContext } from './app/zurichRuntimeContext';
 import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
@@ -321,10 +321,6 @@ function constrainCamera(allowOverscroll: boolean): void {
   );
 }
 
-function cityDiagnostics(): StaticRuntimeDiagnostics {
-  return zurichContext.staticDiagnostics();
-}
-
 declare global {
   interface Window {
     render_game_to_text?: () => string;
@@ -368,7 +364,7 @@ installRuntimeDiagnostics(window, {
     railYardTracks: Math.max(0, railPaths.length - 2),
     reserveTiles: zurichPlacement.reserveTiles.size,
   }),
-  getDiagnostics: () => cityDiagnostics(),
+  getDiagnostics: () => zurichContext.staticDiagnostics(),
   getDetails: () => detailCountsByCategory(),
   getValidation: () => ({
     validationErrors: zurichValidation.errors.length,
