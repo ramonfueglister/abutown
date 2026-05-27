@@ -188,6 +188,11 @@ describe('proto ↔ DTO converters', () => {
     expect(directionFromProto(Direction.NW)).toBe('nw');
   });
 
+  it('rejects missing direction', () => {
+    expect(() => directionFromProto(Direction.UNSPECIFIED)).toThrow(/missing direction/);
+    expect(() => directionFromProto(999 as Direction)).toThrow(/missing direction/);
+  });
+
   it('agentMobilityFromProto converts proto AgentMobility → snake_case DTO', () => {
     const proto = create(AgentMobilitySchema, {
       id: 'agent:proto:0',
@@ -206,6 +211,66 @@ describe('proto ↔ DTO converters', () => {
     expect(dto.sprite_key).toBe('pedestrian:0');
     expect(dto.plan_cursor).toBe(2);
     expect(dto.state).toEqual({ type: 'walking', link_id: 'link:A', progress: 0.5 });
+  });
+
+  it('rejects missing agent state', () => {
+    const proto = create(AgentMobilitySchema, {
+      id: 'agent:bad',
+      worldCoord: { x: 1, y: 2 },
+      direction: Direction.E,
+      spriteKey: 'pedestrian:0',
+      planCursor: 0,
+    });
+
+    expect(() => agentMobilityFromProto(proto)).toThrow(/missing AgentState/);
+  });
+
+  it('rejects missing world coord', () => {
+    const proto = create(AgentMobilitySchema, {
+      id: 'agent:bad',
+      state: create(AgentStateSchema, {
+        state: { case: 'walking', value: create(WalkingSchema, { linkId: 'edge:7', progress: 0.5 }) },
+      }),
+      direction: Direction.E,
+      spriteKey: 'pedestrian:0',
+      planCursor: 0,
+    });
+
+    expect(() => agentMobilityFromProto(proto)).toThrow(/missing world_coord/);
+  });
+
+  it('rejects unspecified agent direction', () => {
+    const proto = create(AgentMobilitySchema, {
+      id: 'agent:bad',
+      state: create(AgentStateSchema, {
+        state: { case: 'walking', value: create(WalkingSchema, { linkId: 'edge:7', progress: 0.5 }) },
+      }),
+      worldCoord: { x: 1, y: 2 },
+      direction: Direction.UNSPECIFIED,
+      spriteKey: 'pedestrian:0',
+      planCursor: 0,
+    });
+
+    expect(() => agentMobilityFromProto(proto)).toThrow(/missing direction/);
+  });
+
+  it('accepts graph-native walking edge ids', () => {
+    const proto = create(AgentMobilitySchema, {
+      id: 'agent:ok',
+      state: create(AgentStateSchema, {
+        state: { case: 'walking', value: create(WalkingSchema, { linkId: 'edge:7', progress: 0.5 }) },
+      }),
+      worldCoord: { x: 7, y: 8 },
+      direction: Direction.E,
+      spriteKey: 'pedestrian:0',
+      planCursor: 0,
+    });
+
+    expect(agentMobilityFromProto(proto).state).toEqual({
+      type: 'walking',
+      link_id: 'edge:7',
+      progress: 0.5,
+    });
   });
 
   it('vehicleMobilityFromProto converts proto VehicleMobility → snake_case DTO', () => {
@@ -236,6 +301,23 @@ describe('proto ↔ DTO converters', () => {
       direction: 's',
       sprite_key: 'tram:0',
     });
+  });
+
+  it('rejects missing vehicle world coord', () => {
+    const proto = create(VehicleMobilitySchema, {
+      id: 'vehicle:bad',
+      kind: VehicleKind.TRAM,
+      routeId: 'route:0',
+      linkIndex: 1,
+      progress: 0.25,
+      capacity: 4,
+      occupants: [],
+      dwellTicksRemaining: 3,
+      direction: Direction.S,
+      spriteKey: 'tram:0',
+    });
+
+    expect(() => vehicleMobilityFromProto(proto)).toThrow(/missing world_coord/);
   });
 
   it('mobilityChunkDeltaFromProto converts proto delta → snake_case DTO with bigint→number tick', () => {

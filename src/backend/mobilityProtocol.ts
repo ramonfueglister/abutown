@@ -360,7 +360,11 @@ const DIRECTION_PROTO_TO_DTO: Record<number, DirectionDto> = {
 };
 
 export function directionFromProto(value: DirectionProto): DirectionDto {
-  return DIRECTION_PROTO_TO_DTO[value] ?? 'e';
+  const direction = DIRECTION_PROTO_TO_DTO[value];
+  if (!direction) {
+    throw new Error('missing direction');
+  }
+  return direction;
 }
 
 function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
@@ -370,9 +374,7 @@ function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
 
 function agentStateFromProto(state: AgentStateProto | undefined): AgentMobilityStateDto {
   if (!state || state.state.case === undefined) {
-    // Backend should always send a populated AgentState; fall back to
-    // at_activity with empty id to keep the reducer alive on malformed frames.
-    return { type: 'at_activity', activity_id: '' };
+    throw new Error('missing AgentState');
   }
   switch (state.state.case) {
     case 'walking':
@@ -391,17 +393,23 @@ function agentStateFromProto(state: AgentStateProto | undefined): AgentMobilityS
 }
 
 export function agentMobilityFromProto(p: AgentMobilityProto): AgentMobilityDto {
+  if (!p.worldCoord) {
+    throw new Error('missing world_coord');
+  }
   return {
     id: p.id,
     state: agentStateFromProto(p.state),
     plan_cursor: p.planCursor,
-    world_coord: { x: p.worldCoord?.x ?? 0, y: p.worldCoord?.y ?? 0 },
+    world_coord: { x: p.worldCoord.x, y: p.worldCoord.y },
     direction: directionFromProto(p.direction),
     sprite_key: p.spriteKey,
   };
 }
 
 export function vehicleMobilityFromProto(p: VehicleMobilityProto): VehicleMobilityDto {
+  if (!p.worldCoord) {
+    throw new Error('missing world_coord');
+  }
   return {
     id: p.id,
     kind: vehicleKindFromProto(p.kind),
@@ -411,7 +419,7 @@ export function vehicleMobilityFromProto(p: VehicleMobilityProto): VehicleMobili
     capacity: p.capacity,
     occupants: [...p.occupants],
     dwell_ticks_remaining: p.dwellTicksRemaining,
-    world_coord: { x: p.worldCoord?.x ?? 0, y: p.worldCoord?.y ?? 0 },
+    world_coord: { x: p.worldCoord.x, y: p.worldCoord.y },
     direction: directionFromProto(p.direction),
     sprite_key: p.spriteKey,
   };
