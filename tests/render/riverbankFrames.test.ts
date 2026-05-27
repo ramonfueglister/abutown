@@ -9,7 +9,7 @@ import {
 } from '../../src/render/riverbankFrames';
 
 describe('riverbank frame mapping', () => {
-  it('maps full water adjacency to the pak128 river_30 interior frame', () => {
+  it('maps full water adjacency to the interior frame', () => {
     expect(riverbankSourceFromMask(RIVERBANK_NORTH | RIVERBANK_EAST | RIVERBANK_SOUTH | RIVERBANK_WEST)).toEqual({
       x: 384,
       y: 3200,
@@ -27,7 +27,7 @@ describe('riverbank frame mapping', () => {
     });
   });
 
-  it('maps exposed shore edges to pak128 river_30 side frames', () => {
+  it('maps exposed shore edges to side frames', () => {
     expect(riverbankSourceFromMask(RIVERBANK_NORTH | RIVERBANK_EAST | RIVERBANK_SOUTH)).toEqual({
       x: 0,
       y: 3328,
@@ -42,7 +42,7 @@ describe('riverbank frame mapping', () => {
     });
   });
 
-  it('maps corner shore edges to pak128 river_30 corner frames', () => {
+  it('maps corner shore edges to corner frames', () => {
     expect(riverbankSourceFromMask(RIVERBANK_NORTH | RIVERBANK_EAST)).toEqual({
       x: 0,
       y: 3456,

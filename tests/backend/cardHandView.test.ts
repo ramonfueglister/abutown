@@ -8,6 +8,7 @@ import {
   buildOtpLoginPayload,
   cardHandStatusText,
   isCardHandStatusVisible,
+  mountCardHandView,
   resolveCardHandBaseUrl,
 } from '../../src/cardHand/cardHandView';
 
@@ -38,5 +39,9 @@ describe('card hand view login state', () => {
     });
 
     expect(buildOtpLoginPayload('   ', 'http://127.0.0.1:5175/')).toBeNull();
+  });
+
+  it('does not require a DOM when Supabase login is not configured', () => {
+    expect(() => mountCardHandView()).not.toThrow();
   });
 });

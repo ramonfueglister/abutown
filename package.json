@@ -9,7 +9,6 @@
     "preview": "vite preview --host 127.0.0.1",
     "preview:stack": "node scripts/run-dev-stack.mjs preview",
     "build": "npm run generate:proto && node scripts/build.mjs",
-    "assets:pak128": "node scripts/import-pak128-assets.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && playwright test",
     "generate:city-network": "node --import tsx/esm scripts/generate-city-network.mjs",

@@ -8,30 +8,30 @@ describe('sprite cleanup', () => {
       80, 70, 60, 255, 255, 255, 255, 255,
     ]);
 
-    cleanupSpritePixels({ data, width: 2, height: 2, path: '/simutrans-assets/pak128/cityhouses/res/res_08_47.png' });
+    cleanupSpritePixels({ data, width: 2, height: 2, path: '/test/vector-shape.png' });
 
     expect([...data.slice(0, 8)]).toEqual([220, 10, 10, 255, 0, 0, 0, 0]);
     expect([...data.slice(8, 16)]).toEqual([80, 70, 60, 255, 0, 0, 0, 0]);
   });
 
-  it('does not clear opaque first-row pixels for pak128 atlases', () => {
+  it('does not clear ordinary opaque pixels', () => {
     const data = new Uint8ClampedArray([
       220, 10, 10, 255,
       80, 70, 60, 255,
     ]);
 
-    cleanupSpritePixels({ data, width: 1, height: 2, path: '/simutrans-assets/pak128/infrastructure/roads/road_090.png' });
+    cleanupSpritePixels({ data, width: 1, height: 2, path: '/test/vector-road.png' });
 
     expect([...data]).toEqual([220, 10, 10, 255, 80, 70, 60, 255]);
   });
 
-  it('removes Simutrans pak128 cyan sprite backgrounds', () => {
+  it('removes cyan sprite backgrounds', () => {
     const data = new Uint8ClampedArray([
       231, 255, 255, 255,
       40, 32, 24, 255,
     ]);
 
-    cleanupSpritePixels({ data, width: 2, height: 1, path: '/simutrans-assets/pak128/base/pedestrians/privat-pedestrians-128.png' });
+    cleanupSpritePixels({ data, width: 2, height: 1, path: '/test/legacy-cyan-background.png' });
 
     expect([...data]).toEqual([0, 0, 0, 0, 40, 32, 24, 255]);
   });

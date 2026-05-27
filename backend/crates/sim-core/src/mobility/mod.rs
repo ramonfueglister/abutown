@@ -480,6 +480,58 @@ mod tests {
     }
 
     #[test]
+    fn vehicle_restarts_route_after_reaching_link_end() {
+        let (mut world, mut schedule) = sample_world();
+        api::force_all_chunks_active_for_test(&mut world);
+        let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
+
+        for _ in 0..4 {
+            api::tick_mobility(&mut world, &mut schedule);
+        }
+
+        let at_end = api::vehicle(&world, &vehicle_id).expect("vehicle exists");
+        assert_eq!(at_end.progress, 1.0);
+
+        api::tick_mobility(&mut world, &mut schedule);
+
+        let restarted = api::vehicle(&world, &vehicle_id).expect("vehicle exists");
+        assert_eq!(restarted.link_index, 0);
+        assert_eq!(restarted.progress, 0.0);
+    }
+
+    #[test]
+    fn activity_only_walker_restarts_after_reaching_link_end() {
+        let (mut world, mut schedule) = empty_world();
+        api::force_all_chunks_active_for_test(&mut world);
+        let agent_id = AgentId("agent:ambient".to_string());
+        api::spawn_agent_from_record(
+            &mut world,
+            AgentRecord::new(
+                agent_id.clone(),
+                AgentMobilityState::Walking {
+                    link_id: "l".to_string(),
+                    progress: 1.0,
+                },
+                vec![PlanStage::Activity {
+                    activity_id: "activity:wander".to_string(),
+                }],
+                0.05,
+            ),
+        );
+
+        api::tick_mobility(&mut world, &mut schedule);
+
+        let agent = api::agent(&world, &agent_id).expect("agent exists");
+        assert_eq!(
+            agent.state,
+            AgentMobilityState::Walking {
+                link_id: "l".to_string(),
+                progress: 0.05
+            }
+        );
+    }
+
+    #[test]
     fn agent_boards_rides_alights_and_walks_to_activity() {
         let (mut world, mut schedule) = sample_world();
         api::force_all_chunks_active_for_test(&mut world);

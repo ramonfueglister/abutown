@@ -164,14 +164,8 @@ fn multi_step_active_route_snapshot() -> MobilityPersistSnapshot {
         stops: HashMap::new(),
         routes: HashMap::new(),
         link_polylines: HashMap::from([
-            (
-                "link:active:a".to_string(),
-                vec![(0.0, 0.0), (5.0, 0.0)],
-            ),
-            (
-                "link:active:b".to_string(),
-                vec![(5.0, 0.0), (13.0, 0.0)],
-            ),
+            ("link:active:a".to_string(), vec![(0.0, 0.0), (5.0, 0.0)]),
+            ("link:active:b".to_string(), vec![(5.0, 0.0), (13.0, 0.0)]),
         ]),
         flow_cells: HashMap::new(),
         chunk_activities: HashMap::new(),
@@ -261,20 +255,20 @@ fn graph_native_active_route_world() -> bevy_ecs::world::World {
                 activity_id: "activity:home".to_string(),
             }],
             plan_cursor: 0,
-                    walk_speed_per_tick: 1.0,
-                    active_route: Some(PersistedActiveRoute {
-                        destination_node: 1,
-                        profile: RoutingProfileKey::Walk,
-                        cursor: 0,
-                        steps: vec![PersistedRouteStep {
-                            edge_id: 0,
-                            mode: ModeState::Walking,
-                            canonical_edge_key: "edge:0".to_string(),
-                            length: 5.0,
-                        }],
-                    }),
-                },
-            );
+            walk_speed_per_tick: 1.0,
+            active_route: Some(PersistedActiveRoute {
+                destination_node: 1,
+                profile: RoutingProfileKey::Walk,
+                cursor: 0,
+                steps: vec![PersistedRouteStep {
+                    edge_id: 0,
+                    mode: ModeState::Walking,
+                    canonical_edge_key: "edge:0".to_string(),
+                    length: 5.0,
+                }],
+            }),
+        },
+    );
     world
 }
 

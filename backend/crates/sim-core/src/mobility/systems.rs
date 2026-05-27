@@ -294,13 +294,6 @@ pub fn route_assignment_system(
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
 ) {
-    let Some(hpa) = hpa else {
-        return;
-    };
-    let Some(cache) = cache.as_deref_mut() else {
-        return;
-    };
-
     for (entity, pos, stable, mut state, mut plan) in query.iter_mut() {
         let AgentMobilityState::Walking { link_id, progress } = &state.0 else {
             continue;
@@ -312,6 +305,25 @@ pub fn route_assignment_system(
             continue;
         }
         let Some(stage) = plan.stages.get(plan.cursor).cloned() else {
+            stats.skipped += 1;
+            continue;
+        };
+        if matches!(stage, PlanStage::Activity { .. }) {
+            if progress >= 1.0 {
+                state.0 = AgentMobilityState::Walking {
+                    link_id,
+                    progress: 0.0,
+                };
+                dirty.0.insert(entity);
+            }
+            stats.skipped += 1;
+            continue;
+        }
+        let Some(hpa) = hpa.as_deref() else {
+            stats.skipped += 1;
+            continue;
+        };
+        let Some(cache) = cache.as_deref_mut() else {
             stats.skipped += 1;
             continue;
         };
@@ -662,6 +674,10 @@ pub fn vehicle_advance_system(
             continue;
         }
         if pos.progress >= 1.0 {
+            let line = transit_lines.line(pos.line_id);
+            pos.edge_index = (pos.edge_index + 1) % line.edges.len();
+            pos.progress = 0.0;
+            dirty.0.insert(entity);
             continue;
         }
         let next = (pos.progress + pos.speed).min(1.0);
@@ -1424,7 +1440,6 @@ pub fn demote_active_to_warm_system(
     transitions: Res<ChunkLodTransitions>,
     agents: Query<&AgentMobilityStateComponent, With<AgentMarker>>,
     agents_by_chunk: Res<AgentsByChunk>,
-    vehicles_by_chunk: Res<VehiclesByChunk>,
     graph: Res<crate::routing::Graph>,
     transit_lines: Res<crate::routing::TransitLines>,
     mut flow_cells: ResMut<FlowCells>,
@@ -1442,19 +1457,6 @@ pub fn demote_active_to_warm_system(
         }
 
         let Some(agent_entities) = agents_by_chunk.0.get(chunk) else {
-            // No agents in this chunk — nothing to despawn. Vehicles might
-            // still be present, fall through to vehicle handling.
-            if !vehicles_by_chunk.0.contains_key(chunk) {
-                continue;
-            }
-            let empty: HashSet<Entity> = HashSet::new();
-            let vehicle_entities = vehicles_by_chunk.0.get(chunk).unwrap_or(&empty);
-            despawn_vehicles_into_flow_cell(
-                *chunk,
-                vehicle_entities,
-                &mut flow_cells,
-                &mut commands,
-            );
             continue;
         };
 
@@ -1472,14 +1474,6 @@ pub fn demote_active_to_warm_system(
             commands.entity(*entity).despawn();
         }
 
-        if let Some(vehicle_entities) = vehicles_by_chunk.0.get(chunk) {
-            despawn_count += vehicle_entities.len() as u32;
-            *outflow_counts.entry(*chunk).or_insert(0) += vehicle_entities.len() as u32;
-            for entity in vehicle_entities {
-                commands.entity(*entity).despawn();
-            }
-        }
-
         if despawn_count == 0 {
             continue;
         }
@@ -1490,23 +1484,6 @@ pub fn demote_active_to_warm_system(
             let rate = count as f32 / 100.0; // amortise over ~100 ticks
             *cell.outflow.entry(dest).or_insert(0.0) += rate;
         }
-    }
-}
-
-fn despawn_vehicles_into_flow_cell(
-    chunk: crate::ids::ChunkCoord,
-    vehicle_entities: &HashSet<Entity>,
-    flow_cells: &mut ResMut<FlowCells>,
-    commands: &mut Commands,
-) {
-    if vehicle_entities.is_empty() {
-        return;
-    }
-    let cell = flow_cells.0.entry(chunk).or_default();
-    cell.population += vehicle_entities.len() as f32;
-    *cell.outflow.entry(chunk).or_insert(0.0) += vehicle_entities.len() as f32 / 100.0;
-    for entity in vehicle_entities {
-        commands.entity(*entity).despawn();
     }
 }
 
@@ -2575,6 +2552,65 @@ mod tests {
             q.iter(&world).count() as u32
         };
         assert_eq!(remaining, 0, "agents despawned");
+    }
+
+    #[test]
+    fn demote_active_to_warm_keeps_vehicles_concrete() {
+        use crate::ids::*;
+        use crate::mobility::records::VehicleKind;
+
+        let mut world = World::new();
+        let line_id = insert_test_routing(&mut world);
+        let chunk = ChunkCoord { x: 0, y: 0 };
+
+        world.insert_resource(FlowCells::default());
+        world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(AgentsByChunk::default());
+        world.insert_resource(VehiclesByChunk::default());
+        world.insert_resource(crate::mobility::resources::PreviousChunkByEntity::default());
+        world.insert_resource(crate::mobility::resources::PreviousFlowCellContrib::default());
+
+        let vehicle = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:street-car".into())),
+                VehicleKindComponent(VehicleKind::Car),
+                RoutePosition {
+                    line_id,
+                    edge_index: 0,
+                    progress: 0.1,
+                    speed: 0.02,
+                },
+                Capacity(4),
+                Occupants(vec![]),
+                DwellTicksRemaining(0),
+                Position { x: 5.0, y: 5.0 },
+                Direction(abutown_protocol::DirectionDto::E),
+                SpriteKey(String::new()),
+            ))
+            .id();
+
+        let mut transitions = ChunkLodTransitions::default();
+        transitions
+            .0
+            .push((chunk, ChunkLod::Active, ChunkLod::Warm));
+        world.insert_resource(transitions);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            track_chunk_populations_system,
+            demote_active_to_warm_system.after(track_chunk_populations_system),
+        ));
+        schedule.run(&mut world);
+
+        assert!(
+            world.get::<VehicleMarker>(vehicle).is_some(),
+            "street vehicles stay as concrete entities instead of being folded into flow cells"
+        );
+        assert!(
+            world.resource::<FlowCells>().0.get(&chunk).is_none(),
+            "vehicle-only demotion must not create anonymous population"
+        );
     }
 
     #[test]

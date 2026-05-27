@@ -61,6 +61,34 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
         trams_total: 4,
     };
 
+fn network_expects_seeded_cars(network: &sim_core::city_network::CityNetwork) -> bool {
+    !network.arterial_paths.is_empty() && SEED_DENSITY.cars_per_arterial > 0
+}
+
+fn mobility_snapshot_missing_expected_cars(
+    snapshot: &MobilityPersistSnapshot,
+    network: &sim_core::city_network::CityNetwork,
+) -> bool {
+    network_expects_seeded_cars(network)
+        && !snapshot
+            .vehicles
+            .values()
+            .any(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Car)
+}
+
+fn seeded_mobility_snapshot_for_network(
+    network: &sim_core::city_network::CityNetwork,
+) -> MobilityPersistSnapshot {
+    let (seeded_world, _) = if network.arterial_paths.is_empty()
+        && network.pedestrian_corridors.is_empty()
+    {
+        sim_core::mobility::seed::tiny_world()
+    } else {
+        sim_core::mobility::seed::from_network(network, SEED_DENSITY)
+    };
+    extract_from_world(&seeded_world)
+}
+
 pub struct SimulationRuntime {
     world_id: WorldId,
     chunk_size: u16,
@@ -272,17 +300,17 @@ impl SimulationRuntime {
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, snap)) => snap,
-            None => {
-                let (seeded_world, _) = if network.arterial_paths.is_empty()
-                    && network.pedestrian_corridors.is_empty()
-                {
-                    sim_core::mobility::seed::tiny_world()
-                } else {
-                    sim_core::mobility::seed::from_network(network, SEED_DENSITY)
-                };
-                extract_from_world(&seeded_world)
+            Some((_tick, snap)) if !mobility_snapshot_missing_expected_cars(&snap, network) => snap,
+            Some((_tick, snap)) => {
+                tracing::warn!(
+                    agents = snap.agents.len(),
+                    vehicles = snap.vehicles.len(),
+                    arterials = network.arterial_paths.len(),
+                    "discarding persisted mobility snapshot without expected seeded cars"
+                );
+                seeded_mobility_snapshot_for_network(network)
             }
+            None => seeded_mobility_snapshot_for_network(network),
         };
         apply_into_world(&mut world, mobility_snap);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
@@ -1122,6 +1150,29 @@ mod tests {
         }
     }
 
+    fn road_test_network() -> sim_core::city_network::CityNetwork {
+        sim_core::city_network::CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: sim_core::city_network::WorldTiles {
+                width: 256,
+                height: 256,
+            },
+            arterial_paths: vec![
+                vec![
+                    sim_core::city_network::NetworkCoord { x: 0, y: 64 },
+                    sim_core::city_network::NetworkCoord { x: 64, y: 64 },
+                ],
+                vec![
+                    sim_core::city_network::NetworkCoord { x: 32, y: 0 },
+                    sim_core::city_network::NetworkCoord { x: 32, y: 64 },
+                ],
+            ],
+            pedestrian_corridors: vec![],
+        }
+    }
+
     #[test]
     fn runtime_summarizes_multiple_loaded_chunks() {
         let runtime = SimulationRuntime::new();
@@ -1694,5 +1745,42 @@ mod tests {
         .unwrap();
 
         assert_eq!(runtime.mobility_tick_for_test(), persisted_tick);
+    }
+
+    #[tokio::test]
+    async fn hydrate_reseeds_vehicleless_snapshot_when_network_expects_cars() {
+        use sim_core::mobility::{extract_from_world, seed};
+
+        let network = road_test_network();
+        let (authored, _) = seed::from_network(
+            &network,
+            sim_core::mobility::seed::SeedDensity {
+                pedestrians_per_corridor: 0,
+                cars_per_arterial: 0,
+                trams_total: 0,
+            },
+        );
+        let authored_snap = extract_from_world(&authored);
+        assert!(
+            authored_snap.vehicles.is_empty(),
+            "test fixture should mimic the stale persisted vehicleless snapshot"
+        );
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(&mut mobility_store, "abutown-main", 99, &authored_snap)
+            .await
+            .unwrap();
+
+        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+            &network,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 38);
     }
 }

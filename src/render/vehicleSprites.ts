@@ -1,11 +1,7 @@
-import { PAK128_ROAD_VEHICLES } from './pak128RoadVehicleManifest';
-import type { AssetRole } from '../assets/assetPack';
-
 export type ScreenPoint = { x: number; y: number };
 export type VehicleSheetName = string;
 export type SimutransVehicleDirection = 'W' | 'NW' | 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW';
-export type VehicleSpriteRole = Extract<
-  AssetRole,
+export type VehicleSpriteRole =
   | 'vehicle.bus'
   | 'vehicle.truck'
   | 'vehicle.delivery.van'
@@ -13,58 +9,26 @@ export type VehicleSpriteRole = Extract<
   | 'vehicle.tanker'
   | 'vehicle.concrete.mixer'
   | 'vehicle.bulk.truck'
-  | 'vehicle.car.transporter'
->;
+  | 'vehicle.car.transporter';
 
 export type VehicleSprite = {
   sheet: VehicleSheetName;
   name: string;
-  datPath: string;
   role: VehicleSpriteRole;
-  path: string;
-  row: number;
   scale: number;
 };
 
-export type VehicleFrameRect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-const TILE_SIZE = 128;
-
-const DIRECTION_COLUMNS: Record<SimutransVehicleDirection, number> = {
-  W: 0,
-  NW: 1,
-  N: 2,
-  NE: 3,
-  E: 4,
-  SE: 5,
-  S: 6,
-  SW: 7,
-};
-
 export function candidateVehicleSprites(): VehicleSprite[] {
-  return PAK128_ROAD_VEHICLES.map((vehicle) => ({
-    sheet: vehicle.id,
-    name: vehicle.name,
-    datPath: vehicle.datPath,
-    role: vehicleRoleForManifestEntry(vehicle),
-    path: vehicle.path,
-    row: vehicle.row,
-    scale: vehicle.scale,
-  }));
-}
-
-export function vehicleFrameRect(sprite: VehicleSprite, direction: SimutransVehicleDirection): VehicleFrameRect {
-  return {
-    x: DIRECTION_COLUMNS[direction] * TILE_SIZE,
-    y: sprite.row * TILE_SIZE,
-    width: TILE_SIZE,
-    height: TILE_SIZE,
-  };
+  return [
+    { sheet: 'city-bus', name: 'City bus', role: 'vehicle.bus' as const, scale: 1.15 },
+    { sheet: 'delivery-van', name: 'Delivery van', role: 'vehicle.delivery.van' as const, scale: 0.82 },
+    { sheet: 'box-truck', name: 'Box truck', role: 'vehicle.truck' as const, scale: 1 },
+    { sheet: 'cooling-truck', name: 'Cooling truck', role: 'vehicle.cooling.truck' as const, scale: 1 },
+    { sheet: 'tanker', name: 'Tanker', role: 'vehicle.tanker' as const, scale: 1.05 },
+    { sheet: 'concrete-mixer', name: 'Concrete mixer', role: 'vehicle.concrete.mixer' as const, scale: 1.04 },
+    { sheet: 'bulk-truck', name: 'Bulk truck', role: 'vehicle.bulk.truck' as const, scale: 1.02 },
+    { sheet: 'car-transporter', name: 'Car transporter', role: 'vehicle.car.transporter' as const, scale: 1.08 },
+  ];
 }
 
 export function vehicleSpriteForTrafficIndex(sprites: readonly VehicleSprite[], index: number): VehicleSprite {
@@ -101,20 +65,6 @@ export function screenRightLaneOffset(from: ScreenPoint, to: ScreenPoint, pixels
     x: normalizeZero((-dy / length) * pixels),
     y: normalizeZero((dx / length) * pixels),
   };
-}
-
-function vehicleRoleForManifestEntry(vehicle: { id: string; name: string; datPath: string }): VehicleSpriteRole {
-  const value = `${vehicle.id} ${vehicle.name} ${vehicle.datPath}`.toLowerCase();
-  if (value.includes('road-psg+mail') || /bus|coach|interliner|shuttle|ikarus|citaro|cruiser/u.test(value)) {
-    return 'vehicle.bus';
-  }
-  if (/car[_-]?trans|transporter/u.test(value)) return 'vehicle.car.transporter';
-  if (/cool|refriger/u.test(value)) return 'vehicle.cooling.truck';
-  if (/concrete|cement|mixer/u.test(value)) return 'vehicle.concrete.mixer';
-  if (/bulk|grain/u.test(value)) return 'vehicle.bulk.truck';
-  if (/fluid|oil|milk|cistern|tanker/u.test(value)) return 'vehicle.tanker';
-  if (/mail|post|sprinter|van|goods/u.test(value)) return 'vehicle.delivery.van';
-  return 'vehicle.truck';
 }
 
 function normalizeZero(value: number): number {
