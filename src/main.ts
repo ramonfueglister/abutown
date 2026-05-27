@@ -1,5 +1,6 @@
 import './style.css';
-import { backendErrorMessage, requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
+import { renderBackendRequired as renderBackendRequiredView } from './app/backendRequiredView';
+import { requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { connectMobilityBackend, requireMobilitySnapshot, type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
 import { mountCardHandView } from './cardHand/cardHandView';
@@ -273,37 +274,13 @@ async function boot(): Promise<void> {
 }
 
 function renderBackendRequired(error: unknown): void {
-  const message = backendErrorMessage(error);
-  canvas.dataset.ready = 'false';
-  canvas.dataset.backendRequired = 'true';
-  ctx.save();
-  ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
-  ctx.fillStyle = MAP_BACKGROUND;
-  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-  ctx.restore();
-
-  document.querySelector<HTMLElement>('[data-backend-required]')?.remove();
-  const panel = document.createElement('section');
-  panel.className = 'backend-required-panel';
-  panel.dataset.backendRequired = 'true';
-  panel.innerHTML = `
-    <h1>Backend required</h1>
-    <p>Start Abutown backend at ${escapeHtml(backendBaseUrl)} and reload.</p>
-    <pre>cargo run --manifest-path backend/Cargo.toml -p sim-server</pre>
-    <small>${escapeHtml(message)}</small>
-  `;
-  document.body.appendChild(panel);
-  console.error(`Abutown backend required: ${message}`);
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  })[char] ?? char);
+  renderBackendRequiredView({
+    canvas,
+    ctx,
+    baseUrl: backendBaseUrl,
+    background: MAP_BACKGROUND,
+    error,
+  });
 }
 
 function resize(): void {
