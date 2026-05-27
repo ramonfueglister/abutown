@@ -32,13 +32,35 @@ enum ChunkState {
   CHUNK_STATE_HOT = 4;
 }
 
-enum TileKind {
+enum TileBase {
   reserved 100 to max;
-  TILE_KIND_UNSPECIFIED = 0;
-  TILE_KIND_GRASS = 1;
-  TILE_KIND_WATER = 2;
-  TILE_KIND_ROAD = 3;
-  TILE_KIND_BUILDING_FOOTPRINT = 4;
+  TILE_BASE_UNSPECIFIED = 0;
+  TILE_BASE_GRASS = 1;
+  TILE_BASE_WATER = 2;
+  TILE_BASE_RIVERBANK = 3;
+  TILE_BASE_FOREST = 4;
+  TILE_BASE_PARK = 5;
+  TILE_BASE_RESERVE = 6;
+  TILE_BASE_PLAZA = 7;
+}
+
+enum TileSurface {
+  reserved 100 to max;
+  TILE_SURFACE_UNSPECIFIED = 0;
+  TILE_SURFACE_NONE = 1;
+  TILE_SURFACE_STREET = 2;
+  TILE_SURFACE_BRIDGE = 3;
+  TILE_SURFACE_RAIL = 4;
+  TILE_SURFACE_RAIL_CROSSING = 5;
+}
+
+enum TileCover {
+  reserved 100 to max;
+  TILE_COVER_UNSPECIFIED = 0;
+  TILE_COVER_NONE = 1;
+  TILE_COVER_BUILDING = 2;
+  TILE_COVER_TREE = 3;
+  TILE_COVER_DETAIL = 4;
 }
 
 enum VehicleKind {
@@ -106,22 +128,9 @@ message MobilityChunkSnapshot {
 }
 
 message WorldEvent {
+  reserved 1;
+  reserved "tile_kind_set";
   reserved 100 to max;
-  oneof event {
-    TileKindSetEvent tile_kind_set = 1;
-  }
-}
-
-message TileKindSetEvent {
-  uint32 protocol_version = 1;
-  string event_id = 2;
-  string command_id = 3;
-  string world_id = 4;
-  uint64 tick = 5;
-  uint64 version = 6;
-  ChunkCoord coord = 7;
-  uint32 local_index = 8;
-  TileKind kind = 9;
 }
 
 // === Client → Server envelope ===
@@ -147,19 +156,9 @@ message ChunkUnsubscribe {
 // === HTTP request/response bodies ===
 
 message ClientCommand {
+  reserved 1;
+  reserved "set_tile_kind";
   reserved 100 to max;
-  oneof command {
-    SetTileKindCommand set_tile_kind = 1;
-  }
-}
-
-message SetTileKindCommand {
-  uint32 protocol_version = 1;
-  string world_id = 2;
-  string command_id = 3;
-  ChunkCoord coord = 4;
-  uint32 local_index = 5;
-  TileKind kind = 6;
 }
 
 message CommandResponse {
@@ -209,13 +208,19 @@ message ChunkSnapshot {
   uint64 chunk_version = 4;
   ChunkState chunk_state = 5;
   uint32 tile_count = 6;
-  repeated TileMutation tiles = 7;
+  repeated LayeredTile tiles = 7;
 }
 
-message TileMutation {
+message LayeredTile {
   uint32 local_index = 1;
-  TileKind kind = 2;
-  uint64 version = 3;
+  TileBase base = 2;
+  TileSurface surface = 3;
+  TileCover cover = 4;
+  optional string display = 5;
+  optional string zone_id = 6;
+  optional uint32 road_mask = 7;
+  optional uint32 rail_mask = 8;
+  uint64 version = 9;
 }
 
 message MobilitySnapshot {

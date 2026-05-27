@@ -32,15 +32,6 @@ pub enum ChunkStateDto {
     Hot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TileKindDto {
-    Grass,
-    Water,
-    Road,
-    BuildingFootprint,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct HealthResponse {
     pub service: String,
@@ -58,10 +49,47 @@ pub struct WorldSummaryDto {
     pub tick_period_ms: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TileBaseDto {
+    Grass,
+    Water,
+    Riverbank,
+    Forest,
+    Park,
+    Reserve,
+    Plaza,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TileSurfaceDto {
+    None,
+    Street,
+    Bridge,
+    Rail,
+    RailCrossing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TileCoverDto {
+    None,
+    Building,
+    Tree,
+    Detail,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TileMutationDto {
+pub struct LayeredTileDto {
     pub local_index: u16,
-    pub kind: TileKindDto,
+    pub base: TileBaseDto,
+    pub surface: TileSurfaceDto,
+    pub cover: TileCoverDto,
+    pub display: Option<String>,
+    pub zone_id: Option<String>,
+    pub road_mask: Option<u8>,
+    pub rail_mask: Option<u8>,
     pub version: u64,
 }
 
@@ -73,23 +101,7 @@ pub struct ChunkSnapshotDto {
     pub chunk_state: ChunkStateDto,
     pub chunk_version: u64,
     pub tile_count: u16,
-    pub tiles: Vec<TileMutationDto>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClientCommandDto {
-    SetTileKind(SetTileKindCommandDto),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetTileKindCommandDto {
-    pub protocol_version: u16,
-    pub world_id: WorldId,
-    pub command_id: String,
-    pub coord: ChunkCoordDto,
-    pub local_index: u16,
-    pub kind: TileKindDto,
+    pub tiles: Vec<LayeredTileDto>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,23 +128,7 @@ pub struct CommandRejectedDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum WorldEventDto {
-    TileKindSet(TileKindSetEventDto),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TileKindSetEventDto {
-    pub protocol_version: u16,
-    pub event_id: String,
-    pub command_id: String,
-    pub world_id: WorldId,
-    pub tick: u64,
-    pub version: u64,
-    pub coord: ChunkCoordDto,
-    pub local_index: u16,
-    pub kind: TileKindDto,
-}
+pub enum WorldEventDto {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientMessageDto {
@@ -305,27 +301,154 @@ pub struct ServerErrorDto {
 
 // === proto → DTO conversions at the HTTP/WS inbound boundary ===
 //
-// Inbound commands arrive as proto (`v1::ClientCommand`); the runtime still
-// operates on the storage-bound `ClientCommandDto`. These `TryFrom` impls
-// are the single conversion site. Errors are `(code, message)` so callers
-// can lift them into their own rejection types without depending on us.
+// Inbound protobuf values are converted at the crate boundary. Errors are
+// `(code, message)` so callers can lift them into their own rejection types
+// without depending on us.
 
 pub type ProtoConversionError = (&'static str, &'static str);
 
-impl TryFrom<v1::TileKind> for TileKindDto {
+impl TryFrom<v1::TileBase> for TileBaseDto {
     type Error = ProtoConversionError;
 
-    fn try_from(k: v1::TileKind) -> Result<Self, Self::Error> {
-        match k {
-            v1::TileKind::Unspecified => Err((
+    fn try_from(value: v1::TileBase) -> Result<Self, Self::Error> {
+        match value {
+            v1::TileBase::Unspecified => Err((
                 "invalid_enum",
-                "TileKind is UNSPECIFIED — client must send a concrete variant",
+                "TileBase is UNSPECIFIED; sender must provide a concrete variant",
             )),
-            v1::TileKind::Grass => Ok(TileKindDto::Grass),
-            v1::TileKind::Water => Ok(TileKindDto::Water),
-            v1::TileKind::Road => Ok(TileKindDto::Road),
-            v1::TileKind::BuildingFootprint => Ok(TileKindDto::BuildingFootprint),
+            v1::TileBase::Grass => Ok(Self::Grass),
+            v1::TileBase::Water => Ok(Self::Water),
+            v1::TileBase::Riverbank => Ok(Self::Riverbank),
+            v1::TileBase::Forest => Ok(Self::Forest),
+            v1::TileBase::Park => Ok(Self::Park),
+            v1::TileBase::Reserve => Ok(Self::Reserve),
+            v1::TileBase::Plaza => Ok(Self::Plaza),
         }
+    }
+}
+
+impl From<TileBaseDto> for v1::TileBase {
+    fn from(value: TileBaseDto) -> Self {
+        match value {
+            TileBaseDto::Grass => Self::Grass,
+            TileBaseDto::Water => Self::Water,
+            TileBaseDto::Riverbank => Self::Riverbank,
+            TileBaseDto::Forest => Self::Forest,
+            TileBaseDto::Park => Self::Park,
+            TileBaseDto::Reserve => Self::Reserve,
+            TileBaseDto::Plaza => Self::Plaza,
+        }
+    }
+}
+
+impl TryFrom<v1::TileSurface> for TileSurfaceDto {
+    type Error = ProtoConversionError;
+
+    fn try_from(value: v1::TileSurface) -> Result<Self, Self::Error> {
+        match value {
+            v1::TileSurface::Unspecified => Err((
+                "invalid_enum",
+                "TileSurface is UNSPECIFIED; sender must provide a concrete variant",
+            )),
+            v1::TileSurface::None => Ok(Self::None),
+            v1::TileSurface::Street => Ok(Self::Street),
+            v1::TileSurface::Bridge => Ok(Self::Bridge),
+            v1::TileSurface::Rail => Ok(Self::Rail),
+            v1::TileSurface::RailCrossing => Ok(Self::RailCrossing),
+        }
+    }
+}
+
+impl From<TileSurfaceDto> for v1::TileSurface {
+    fn from(value: TileSurfaceDto) -> Self {
+        match value {
+            TileSurfaceDto::None => Self::None,
+            TileSurfaceDto::Street => Self::Street,
+            TileSurfaceDto::Bridge => Self::Bridge,
+            TileSurfaceDto::Rail => Self::Rail,
+            TileSurfaceDto::RailCrossing => Self::RailCrossing,
+        }
+    }
+}
+
+impl TryFrom<v1::TileCover> for TileCoverDto {
+    type Error = ProtoConversionError;
+
+    fn try_from(value: v1::TileCover) -> Result<Self, Self::Error> {
+        match value {
+            v1::TileCover::Unspecified => Err((
+                "invalid_enum",
+                "TileCover is UNSPECIFIED; sender must provide a concrete variant",
+            )),
+            v1::TileCover::None => Ok(Self::None),
+            v1::TileCover::Building => Ok(Self::Building),
+            v1::TileCover::Tree => Ok(Self::Tree),
+            v1::TileCover::Detail => Ok(Self::Detail),
+        }
+    }
+}
+
+impl From<TileCoverDto> for v1::TileCover {
+    fn from(value: TileCoverDto) -> Self {
+        match value {
+            TileCoverDto::None => Self::None,
+            TileCoverDto::Building => Self::Building,
+            TileCoverDto::Tree => Self::Tree,
+            TileCoverDto::Detail => Self::Detail,
+        }
+    }
+}
+
+impl From<LayeredTileDto> for v1::LayeredTile {
+    fn from(value: LayeredTileDto) -> Self {
+        Self {
+            local_index: u32::from(value.local_index),
+            base: v1::TileBase::from(value.base) as i32,
+            surface: v1::TileSurface::from(value.surface) as i32,
+            cover: v1::TileCover::from(value.cover) as i32,
+            display: value.display,
+            zone_id: value.zone_id,
+            road_mask: value.road_mask.map(u32::from),
+            rail_mask: value.rail_mask.map(u32::from),
+            version: value.version,
+        }
+    }
+}
+
+impl TryFrom<v1::LayeredTile> for LayeredTileDto {
+    type Error = ProtoConversionError;
+
+    fn try_from(value: v1::LayeredTile) -> Result<Self, Self::Error> {
+        let base = v1::TileBase::try_from(value.base)
+            .map_err(|_| ("invalid_enum", "LayeredTile.base out of range"))?;
+        let surface = v1::TileSurface::try_from(value.surface)
+            .map_err(|_| ("invalid_enum", "LayeredTile.surface out of range"))?;
+        let cover = v1::TileCover::try_from(value.cover)
+            .map_err(|_| ("invalid_enum", "LayeredTile.cover out of range"))?;
+        let local_index = u16::try_from(value.local_index)
+            .map_err(|_| ("invalid_field", "LayeredTile.local_index exceeds u16"))?;
+        let road_mask = value
+            .road_mask
+            .map(u8::try_from)
+            .transpose()
+            .map_err(|_| ("invalid_field", "LayeredTile.road_mask exceeds u8"))?;
+        let rail_mask = value
+            .rail_mask
+            .map(u8::try_from)
+            .transpose()
+            .map_err(|_| ("invalid_field", "LayeredTile.rail_mask exceeds u8"))?;
+
+        Ok(Self {
+            local_index,
+            base: base.try_into()?,
+            surface: surface.try_into()?,
+            cover: cover.try_into()?,
+            display: value.display,
+            zone_id: value.zone_id,
+            road_mask,
+            rail_mask,
+            version: value.version,
+        })
     }
 }
 
@@ -335,96 +458,14 @@ impl From<v1::ChunkCoord> for ChunkCoordDto {
     }
 }
 
-impl TryFrom<v1::SetTileKindCommand> for SetTileKindCommandDto {
-    type Error = ProtoConversionError;
-
-    fn try_from(c: v1::SetTileKindCommand) -> Result<Self, Self::Error> {
-        let coord = c
-            .coord
-            .ok_or(("missing_field", "SetTileKindCommand.coord is required"))?;
-        let kind_proto = v1::TileKind::try_from(c.kind)
-            .map_err(|_| ("invalid_enum", "SetTileKindCommand.kind out of range"))?;
-        let protocol_version = u16::try_from(c.protocol_version)
-            .map_err(|_| ("invalid_field", "protocol_version exceeds u16"))?;
-        let local_index = u16::try_from(c.local_index)
-            .map_err(|_| ("invalid_field", "local_index exceeds u16"))?;
-        Ok(SetTileKindCommandDto {
-            protocol_version,
-            world_id: WorldId(c.world_id),
-            command_id: c.command_id,
-            coord: coord.into(),
-            local_index,
-            kind: kind_proto.try_into()?,
-        })
-    }
-}
-
-impl TryFrom<v1::ClientCommand> for ClientCommandDto {
-    type Error = ProtoConversionError;
-
-    fn try_from(c: v1::ClientCommand) -> Result<Self, Self::Error> {
-        use v1::client_command::Command;
-        match c.command {
-            Some(Command::SetTileKind(s)) => Ok(ClientCommandDto::SetTileKind(s.try_into()?)),
-            None => Err((
-                "missing_command",
-                "ClientCommand body missing inner command",
-            )),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // Most serde-based DTOs were stripped in Task 7 (binary protobuf wire).
     // Wire-format correctness is now covered by the `proto_roundtrip_tests`
-    // module below. The remaining JSON-shape tests cover types still on
-    // the JSONB persistence path (ChunkSnapshotDto, WorldEventDto) or the
-    // transitional command pipeline (ClientCommandDto).
-
-    #[test]
-    fn client_set_tile_kind_command_serializes_with_type_tag() {
-        let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
-            command_id: "command:test:1".to_string(),
-            coord: ChunkCoordDto { x: 4, y: 4 },
-            local_index: 11,
-            kind: TileKindDto::Water,
-        });
-
-        let json = serde_json::to_string(&command).expect("command serializes");
-
-        assert_eq!(
-            json,
-            r#"{"type":"set_tile_kind","protocol_version":1,"world_id":"abutown-main","command_id":"command:test:1","coord":{"x":4,"y":4},"local_index":11,"kind":"water"}"#
-        );
-    }
-
-    #[test]
-    fn world_event_round_trips_through_jsonb_shape() {
-        // WorldEventDto is persisted as JSONB in the events table; serde
-        // must keep working for this type even though it no longer crosses
-        // the wire.
-        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
-            protocol_version: PROTOCOL_VERSION,
-            event_id: "event:1".to_string(),
-            command_id: "command:test:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 0,
-            version: 1,
-            coord: ChunkCoordDto { x: 4, y: 4 },
-            local_index: 11,
-            kind: TileKindDto::Water,
-        });
-        let json = serde_json::to_value(&event).expect("world event serializes");
-        assert_eq!(json["type"], "tile_kind_set");
-        assert_eq!(json["event_id"], "event:1");
-        let back: WorldEventDto = serde_json::from_value(json).expect("world event deserializes");
-        assert_eq!(back, event);
-    }
+    // module below. The remaining JSON-shape test covers ChunkSnapshotDto,
+    // which is still on the JSONB persistence path.
 
     #[test]
     fn chunk_snapshot_round_trips_through_jsonb_shape() {
@@ -436,15 +477,66 @@ mod tests {
             chunk_state: ChunkStateDto::Active,
             chunk_version: 7,
             tile_count: 1,
-            tiles: vec![TileMutationDto {
+            tiles: vec![LayeredTileDto {
                 local_index: 11,
-                kind: TileKindDto::Road,
+                base: TileBaseDto::Grass,
+                surface: TileSurfaceDto::Street,
+                cover: TileCoverDto::None,
+                display: None,
+                zone_id: None,
+                road_mask: Some(5),
+                rail_mask: None,
                 version: 7,
             }],
         };
         let json = serde_json::to_string(&dto).unwrap();
         let back: ChunkSnapshotDto = serde_json::from_str(&json).unwrap();
         assert_eq!(dto, back);
+    }
+
+    #[test]
+    fn layered_tile_proto_round_trips() {
+        let tile = LayeredTileDto {
+            local_index: 7,
+            base: TileBaseDto::Riverbank,
+            surface: TileSurfaceDto::Bridge,
+            cover: TileCoverDto::None,
+            display: None,
+            zone_id: Some("zone:limmat-river".to_string()),
+            road_mask: Some(10),
+            rail_mask: None,
+            version: 3,
+        };
+
+        let proto: v1::LayeredTile = tile.clone().into();
+        let back = LayeredTileDto::try_from(proto).expect("valid layered tile");
+
+        assert_eq!(back, tile);
+    }
+
+    #[test]
+    fn chunk_snapshot_uses_layered_tiles() {
+        let snapshot = ChunkSnapshotDto {
+            protocol_version: PROTOCOL_VERSION,
+            world_id: WorldId("abutown-main".to_string()),
+            coord: ChunkCoordDto { x: 1, y: 2 },
+            chunk_state: ChunkStateDto::Active,
+            chunk_version: 5,
+            tile_count: 1024,
+            tiles: vec![LayeredTileDto {
+                local_index: 0,
+                base: TileBaseDto::Grass,
+                surface: TileSurfaceDto::Street,
+                cover: TileCoverDto::None,
+                display: None,
+                zone_id: None,
+                road_mask: Some(5),
+                rail_mask: None,
+                version: 1,
+            }],
+        };
+
+        assert_eq!(snapshot.tiles[0].surface, TileSurfaceDto::Street);
     }
 }
 
@@ -543,26 +635,6 @@ mod proto_roundtrip_tests {
     }
 
     #[test]
-    fn roundtrip_world_event() {
-        let msg = ServerMessage {
-            body: Some(server_message::Body::WorldEvent(WorldEvent {
-                event: Some(world_event::Event::TileKindSet(TileKindSetEvent {
-                    protocol_version: 16,
-                    event_id: "evt:1".into(),
-                    command_id: "cmd:1".into(),
-                    world_id: "abutown-main".into(),
-                    tick: 100,
-                    version: 1,
-                    coord: Some(sample_chunk()),
-                    local_index: 11,
-                    kind: TileKind::Water as i32,
-                })),
-            })),
-        };
-        assert_roundtrip(&msg);
-    }
-
-    #[test]
     fn roundtrip_chunk_subscribe() {
         let msg = ClientMessage {
             body: Some(client_message::Body::ChunkSubscribe(ChunkSubscribe {
@@ -585,40 +657,13 @@ mod proto_roundtrip_tests {
     }
 
     #[test]
-    fn roundtrip_set_tile_kind_command() {
-        let msg = ClientCommand {
-            command: Some(client_command::Command::SetTileKind(SetTileKindCommand {
-                protocol_version: 16,
-                world_id: "abutown-main".into(),
-                command_id: "cmd:1".into(),
-                coord: Some(sample_chunk()),
-                local_index: 11,
-                kind: TileKind::Water as i32,
-            })),
-        };
-        assert_roundtrip(&msg);
-    }
-
-    #[test]
     fn roundtrip_command_response_accepted() {
         let msg = CommandResponse {
             outcome: Some(command_response::Outcome::Accepted(CommandAccepted {
                 protocol_version: 16,
                 world_id: "abutown-main".into(),
                 command_id: "cmd:1".into(),
-                event: Some(WorldEvent {
-                    event: Some(world_event::Event::TileKindSet(TileKindSetEvent {
-                        protocol_version: 16,
-                        event_id: "evt:1".into(),
-                        command_id: "cmd:1".into(),
-                        world_id: "abutown-main".into(),
-                        tick: 100,
-                        version: 1,
-                        coord: Some(sample_chunk()),
-                        local_index: 11,
-                        kind: TileKind::Water as i32,
-                    })),
-                }),
+                event: Some(WorldEvent {}),
             })),
         };
         assert_roundtrip(&msg);
@@ -672,9 +717,15 @@ mod proto_roundtrip_tests {
             chunk_version: 5,
             chunk_state: ChunkState::Active as i32,
             tile_count: 1024,
-            tiles: vec![TileMutation {
+            tiles: vec![LayeredTile {
                 local_index: 0,
-                kind: TileKind::Road as i32,
+                base: TileBase::Grass as i32,
+                surface: TileSurface::Street as i32,
+                cover: TileCover::None as i32,
+                display: None,
+                zone_id: None,
+                road_mask: Some(5),
+                rail_mask: None,
                 version: 1,
             }],
         };
