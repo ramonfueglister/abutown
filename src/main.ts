@@ -6,6 +6,7 @@ import {
 } from './app/appRuntime';
 import { renderBackendRequired as renderBackendRequiredView } from './app/backendRequiredView';
 import { createEntitySelection } from './app/entitySelection';
+import { attachMapInteraction } from './app/interaction';
 import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
@@ -25,8 +26,6 @@ import {
   constrainCameraTargetToGrid,
   createCameraState,
   dampCamera,
-  panCameraTarget,
-  zoomCameraAt,
 } from './cameraController';
 import { shouldRenderDetail } from './render/detailRenderPolicy';
 import {
@@ -313,41 +312,14 @@ function resize(): void {
 }
 
 function attachCamera(): void {
-  let pointerDown: Coord | null = null;
-  canvas.addEventListener('pointerdown', (event) => {
-    camera.dragging = true;
-    pointerDown = { x: event.clientX, y: event.clientY };
-    camera.lastX = event.clientX;
-    camera.lastY = event.clientY;
-    canvas.setPointerCapture(event.pointerId);
+  attachMapInteraction({
+    canvas,
+    camera,
+    constrainCamera,
+    selectAtScreenPoint: selectMobilityEntityAtScreenPoint,
+    minScale: CAMERA_MIN_SCALE,
+    maxScale: CAMERA_MAX_SCALE,
   });
-  canvas.addEventListener('pointermove', (event) => {
-    if (!camera.dragging) return;
-    panCameraTarget(camera, event.clientX - camera.lastX, event.clientY - camera.lastY);
-    constrainCamera(true);
-    camera.lastX = event.clientX;
-    camera.lastY = event.clientY;
-  });
-  canvas.addEventListener('pointerup', (event) => {
-    const clickDistance = pointerDown ? Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) : Infinity;
-    camera.dragging = false;
-    if (clickDistance < 4) selectMobilityEntityAtScreenPoint({ x: event.clientX, y: event.clientY });
-    pointerDown = null;
-    constrainCamera(false);
-  });
-  canvas.addEventListener('pointercancel', () => {
-    camera.dragging = false;
-    pointerDown = null;
-    constrainCamera(false);
-  });
-  canvas.addEventListener('wheel', (event) => {
-    event.preventDefault();
-    zoomCameraAt(camera, { x: event.clientX, y: event.clientY }, event.deltaY, event.deltaMode, {
-      minScale: CAMERA_MIN_SCALE,
-      maxScale: CAMERA_MAX_SCALE,
-    });
-    constrainCamera(false);
-  }, { passive: false });
 }
 
 function frame(now: number): void {
