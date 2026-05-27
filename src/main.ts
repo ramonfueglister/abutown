@@ -2,6 +2,7 @@ import './style.css';
 import { backendErrorMessage, requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { connectMobilityBackend, requireMobilitySnapshot, type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
+import { mountCardHandView } from './cardHand/cardHandView';
 import {
   countBuildingsWithoutDirectStreetAdjacency,
   hasDirectStreetAdjacency,
@@ -235,6 +236,7 @@ async function startRuntime(): Promise<void> {
     const required = await requireMobilitySnapshot({ baseUrl: backendBaseUrl });
     mobilityState = required.state;
     mobilityTickPeriodMs = required.tickPeriodMs;
+    mountCardHandView({ baseUrl: backendBaseUrl });
     await boot();
     mobilityBackendBridge = connectMobilityBackend({
       baseUrl: backendBaseUrl,
