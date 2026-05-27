@@ -87,7 +87,7 @@ export type RuntimeDiagnosticsOptions = {
   carVisualWorldPoint: (vehicle: BackendCar) => Coord;
   getTrain: () => RuntimeTrainDiagnostics | null;
   now: () => number;
-  advanceTime?: (ms: number) => void;
+  advanceTime: (ms: number) => void;
 };
 
 export type DiagnosticsWindow = {
@@ -97,7 +97,7 @@ export type DiagnosticsWindow = {
 
 export function installRuntimeDiagnostics(target: DiagnosticsWindow, options: RuntimeDiagnosticsOptions): void {
   target.render_game_to_text = () => JSON.stringify(buildRuntimeDiagnosticsPayload(options));
-  target.advanceTime = (ms) => options.advanceTime?.(ms);
+  target.advanceTime = (ms) => options.advanceTime(ms);
 }
 
 export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOptions) {

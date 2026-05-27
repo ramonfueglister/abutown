@@ -72,6 +72,7 @@ function baseOptions(): RuntimeDiagnosticsOptions {
     carVisualWorldPoint: (vehicle) => vehicle.path[0],
     getTrain: () => null,
     now: () => 1234,
+    advanceTime: () => {},
   };
 }
 
