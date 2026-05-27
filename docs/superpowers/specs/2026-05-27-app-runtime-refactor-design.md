@@ -138,7 +138,7 @@ Builds the static world context:
 - Runtime maps for terrain, roads, rails, buildings, trees, details, stations, and train paths.
 - Static diagnostics helpers.
 
-This module absorbs map-building helper functions that are still required at runtime. Functions that are no longer used after extraction are deleted rather than preserved as alternate-path code.
+This module absorbs map-building helper functions that are still required at runtime. Functions that are no longer used after extraction are deleted rather than preserved as second-path code.
 
 ### `src/app/runtimeDiagnostics.ts`
 
@@ -199,7 +199,7 @@ window.render_game_to_text()
 - Backend startup failure still renders the backend-required panel and marks the canvas with `data-ready="false"` and `data-backend-required="true"`.
 - Missing canvas or 2D context remains a hard startup error.
 - Card-hand login mounting returns before DOM mutation when Supabase env vars are missing.
-- Runtime modules fail loudly for missing required dependencies. They must not invent default coordinates, fake entities, fake snapshots, substitute render state, or alternate data paths.
+- Runtime modules fail loudly for missing required dependencies. They must not invent coordinates, entities, snapshots, render state, or second data paths.
 
 ## Testing
 
@@ -229,7 +229,7 @@ npm run test:e2e
 rg -n "fallback|fall back|unwrap_or\\(\\(0\\.0, 0\\.0\\)\\)|at_activity with empty|synthetic link|global A\\*" backend/crates/sim-core/src backend/crates/sim-server/src src tests -g '!src/backend/proto/**' -g '!backend/target/**'
 ```
 
-The forbidden-path grep must return no production behavior that degrades into substitute state, substitute coordinates, substitute entities, substitute snapshots, or alternate routing/rendering paths. Touched code must not add comments that describe rejected substitute behavior.
+The forbidden-path grep must return no production behavior that degrades into invented state, invented coordinates, invented entities, invented snapshots, or second routing/rendering paths. Touched code must not add comments that describe rejected invented behavior.
 
 ## Migration Strategy
 
@@ -256,7 +256,7 @@ After each extraction, the app must compile and the focused tests for that bound
 - Entity selection still works for pedestrians and vehicles.
 - Backend-required startup failure still produces the existing panel.
 - No retired Pak128/Simutrans/OpenGFX asset references return in runtime or tests.
-- No substitute or alternate behavior is introduced.
+- No invented or second-path behavior is introduced.
 - Full test and build gates pass.
 
 ## Risks
