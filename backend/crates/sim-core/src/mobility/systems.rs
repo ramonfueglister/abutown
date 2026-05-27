@@ -6,7 +6,6 @@ use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk, WarmChunk}
 use crate::world::events::{ChunkLod, ChunkLodChanged};
 use bevy_ecs::message::MessageCursor;
 use bevy_ecs::prelude::*;
-use std::collections::HashSet;
 
 fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::DirectionDto {
     crate::mobility_geometry::direction_at_progress_slice(points, progress)
@@ -1054,7 +1053,6 @@ pub fn demote_active_to_warm_system(
     transitions: Res<ChunkLodTransitions>,
     agents: Query<&AgentMobilityStateComponent, With<AgentMarker>>,
     agents_by_chunk: Res<AgentsByChunk>,
-    vehicles_by_chunk: Res<VehiclesByChunk>,
     graph: Res<crate::routing::Graph>,
     transit_lines: Res<crate::routing::TransitLines>,
     mut flow_cells: ResMut<FlowCells>,
@@ -1072,19 +1070,9 @@ pub fn demote_active_to_warm_system(
         }
 
         let Some(agent_entities) = agents_by_chunk.0.get(chunk) else {
-            // No agents in this chunk — nothing to despawn. Vehicles might
-            // still be present, fall through to vehicle handling.
-            if !vehicles_by_chunk.0.contains_key(chunk) {
-                continue;
-            }
-            let empty: HashSet<Entity> = HashSet::new();
-            let vehicle_entities = vehicles_by_chunk.0.get(chunk).unwrap_or(&empty);
-            despawn_vehicles_into_flow_cell(
-                *chunk,
-                vehicle_entities,
-                &mut flow_cells,
-                &mut commands,
-            );
+            // Vehicles stay discrete in Warm chunks. They are skipped by
+            // Advance/Output while warm and resume as vehicles when the
+            // chunk returns to Active/Hot.
             continue;
         };
 
@@ -1102,14 +1090,6 @@ pub fn demote_active_to_warm_system(
             commands.entity(*entity).despawn();
         }
 
-        if let Some(vehicle_entities) = vehicles_by_chunk.0.get(chunk) {
-            despawn_count += vehicle_entities.len() as u32;
-            *outflow_counts.entry(*chunk).or_insert(0) += vehicle_entities.len() as u32;
-            for entity in vehicle_entities {
-                commands.entity(*entity).despawn();
-            }
-        }
-
         if despawn_count == 0 {
             continue;
         }
@@ -1120,23 +1100,6 @@ pub fn demote_active_to_warm_system(
             let rate = count as f32 / 100.0; // amortise over ~100 ticks
             *cell.outflow.entry(dest).or_insert(0.0) += rate;
         }
-    }
-}
-
-fn despawn_vehicles_into_flow_cell(
-    chunk: crate::ids::ChunkCoord,
-    vehicle_entities: &HashSet<Entity>,
-    flow_cells: &mut ResMut<FlowCells>,
-    commands: &mut Commands,
-) {
-    if vehicle_entities.is_empty() {
-        return;
-    }
-    let cell = flow_cells.0.entry(chunk).or_default();
-    cell.population += vehicle_entities.len() as f32;
-    *cell.outflow.entry(chunk).or_insert(0.0) += vehicle_entities.len() as f32 / 100.0;
-    for entity in vehicle_entities {
-        commands.entity(*entity).despawn();
     }
 }
 
@@ -1208,6 +1171,7 @@ fn lod_seed(x: i32, y: i32, tick: u64, n: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     /// Returns a `SimulatedChunks` resource pre-populated so that every
     /// chunk in a generous range around the origin counts as simulated.
@@ -2206,6 +2170,65 @@ mod tests {
             q.iter(&world).count() as u32
         };
         assert_eq!(remaining, 0, "agents despawned");
+    }
+
+    #[test]
+    fn demote_active_to_warm_preserves_vehicle_entities() {
+        use crate::ids::*;
+        use crate::mobility::records::VehicleKind;
+
+        let mut world = World::new();
+        let line_id = insert_test_routing(&mut world);
+        let chunk = ChunkCoord { x: 0, y: 0 };
+
+        world.insert_resource(FlowCells::default());
+        world.insert_resource(ChunkPopulations::default());
+        world.insert_resource(AgentsByChunk::default());
+        world.insert_resource(VehiclesByChunk::default());
+        world.insert_resource(crate::mobility::resources::PreviousChunkByEntity::default());
+        world.insert_resource(crate::mobility::resources::PreviousFlowCellContrib::default());
+
+        let mut transitions = ChunkLodTransitions::default();
+        transitions
+            .0
+            .push((chunk, ChunkLod::Active, ChunkLod::Warm));
+        world.insert_resource(transitions);
+
+        let vehicle = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("vehicle:car:test".into())),
+                VehicleKindComponent(VehicleKind::Car),
+                RoutePosition {
+                    line_id,
+                    edge_index: 0,
+                    progress: 0.1,
+                    speed: 0.1,
+                },
+                Capacity(1),
+                Occupants(Vec::new()),
+                DwellTicksRemaining(0),
+                Position { x: 5.0, y: 5.0 },
+                Direction(abutown_protocol::DirectionDto::E),
+                SpriteKey("vehicle:0".into()),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            track_chunk_populations_system,
+            demote_active_to_warm_system.after(track_chunk_populations_system),
+        ));
+        schedule.run(&mut world);
+
+        assert!(
+            world.get::<VehicleMarker>(vehicle).is_some(),
+            "warm LOD should keep vehicles discrete so they can resume as cars"
+        );
+        assert!(
+            world.resource::<FlowCells>().0.get(&chunk).is_none(),
+            "vehicle-only chunks should not be collapsed into generic pedestrian flow"
+        );
     }
 
     #[test]
