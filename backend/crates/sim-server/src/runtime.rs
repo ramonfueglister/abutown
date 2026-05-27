@@ -4,7 +4,6 @@ use abutown_protocol::{
 };
 use sim_core::{
     chunk::{Chunk, SnapshotDecodeError},
-    events::{InMemoryWorldEventStore, WorldEventStore},
     ids::ChunkCoord,
     mobility::{
         MobilityPersistSnapshot, MobilityPlugin, api as mobility_api, apply_into_world,
@@ -109,14 +108,6 @@ impl std::fmt::Debug for SimulationRuntime {
 
 impl SimulationRuntime {
     pub fn new() -> Self {
-        Self::new_with_event_store(Box::new(InMemoryWorldEventStore::default()))
-    }
-
-    pub fn default_world_id() -> WorldId {
-        WorldId(WORLD_ID.to_string())
-    }
-
-    pub fn new_with_event_store(_event_store: Box<dyn WorldEventStore + Send + Sync>) -> Self {
         // Build a fresh World + Schedule with CorePlugin + mobility installed
         // directly. Phase 8a Task 9 dissolved the `MobilityWorld` wrapper —
         // SimulationRuntime now owns the shared `World` + `Schedule` directly.
@@ -163,6 +154,10 @@ impl SimulationRuntime {
             tick: 0,
             version: 0,
         }
+    }
+
+    pub fn default_world_id() -> WorldId {
+        WorldId(WORLD_ID.to_string())
     }
 
     /// Build an in-memory runtime whose mobility world is seeded from the
@@ -217,7 +212,6 @@ impl SimulationRuntime {
     /// Returns `(runtime, snapshot_store, mobility_snapshot_store)` so the
     /// caller (AppState) can place the stores under its own `Arc<Mutex<…>>`.
     pub async fn hydrate_from_stores(
-        _event_store: Box<dyn WorldEventStore + Send + Sync>,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
         network: &sim_core::city_network::CityNetwork,
@@ -975,7 +969,6 @@ mod tests {
             .unwrap();
 
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
-            Box::new(InMemoryWorldEventStore::default()),
             Box::new(snapshot_store),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             &empty_test_network(),
@@ -998,7 +991,6 @@ mod tests {
     #[tokio::test]
     async fn hydrate_from_stores_falls_back_to_seed_when_no_snapshot() {
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
-            Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             &empty_test_network(),
@@ -1020,7 +1012,6 @@ mod tests {
     #[tokio::test]
     async fn hydrate_seeds_fresh_mobility_when_store_is_empty() {
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
-            Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             &empty_test_network(),
@@ -1055,7 +1046,6 @@ mod tests {
         .unwrap();
 
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
-            Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(mobility_store),
             &empty_test_network(),

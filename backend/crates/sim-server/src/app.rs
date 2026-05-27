@@ -5,12 +5,12 @@ use abutown_protocol::v1 as w;
 use axum::{
     Json, Router,
     extract::{
-        FromRequest, Path, State,
+        Path, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{self, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::get,
 };
 use dashmap::DashMap;
 use prost::Message as _;
@@ -32,7 +32,6 @@ use crate::{
         card_definitions,
     },
     config::ServerConfig,
-    postgres_events::PostgresWorldEventStore,
     postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
@@ -286,7 +285,6 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
     let network = sim_core::city_network::CityNetwork::from_path(resolve_city_network_path())?;
-    let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
     let snapshot_store = PostgresChunkSnapshotStore::connect(
         &config.database_url,
         SimulationRuntime::default_world_id(),
@@ -299,7 +297,6 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
 
     let (runtime, snapshot_store, mobility_snapshot_store) =
         SimulationRuntime::hydrate_from_stores(
-            Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
             &network,
@@ -345,7 +342,6 @@ fn build_router_from_state(state: AppState) -> Router {
         .route("/card-hand", get(card_hand).put(save_card_hand))
         .route("/world", get(world))
         .route("/chunks/{x}/{y}", get(chunk))
-        .route("/commands", post(command))
         .route("/mobility", get(mobility))
         .route("/ws", get(websocket))
         .with_state(state)
@@ -372,31 +368,6 @@ fn proto_response<M: prost::Message>(message: M) -> Response {
         bytes,
     )
         .into_response()
-}
-
-/// Extractor that decodes the request body as a prost message. Mirrors the
-/// shape of `axum::Json` but for `application/x-protobuf` bodies. Used by
-/// `POST /commands` after Task 6.
-pub struct ProtoBody<M>(pub M);
-
-impl<S, M> FromRequest<S> for ProtoBody<M>
-where
-    S: Send + Sync,
-    M: prost::Message + Default,
-{
-    type Rejection = (StatusCode, String);
-
-    async fn from_request(
-        req: http::Request<axum::body::Body>,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024)
-            .await
-            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-        let msg =
-            M::decode(bytes.as_ref()).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-        Ok(ProtoBody(msg))
-    }
 }
 
 async fn cards() -> Json<Vec<crate::card_hand::CardDefinition>> {
@@ -455,67 +426,6 @@ async fn chunk(State(state): State<AppState>, Path((x, y)): Path<(i32, i32)>) ->
     match state.view().load().chunk_snapshots.get(&coord).cloned() {
         Some(snap) => proto_response(snap),
         None => StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
-async fn command(
-    State(state): State<AppState>,
-    ProtoBody(command): ProtoBody<w::ClientCommand>,
-) -> Response {
-    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-    if state
-        .mutations
-        .send(crate::runtime_view::Mutation::ApplyCommand {
-            command,
-            reply: reply_tx,
-        })
-        .is_err()
-    {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    }
-
-    let result = match reply_rx.await {
-        Ok(r) => r,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    match result {
-        Ok(applied) => {
-            let event_proto = world_event_dto_to_proto(&applied.event);
-            let msg = w::ServerMessage {
-                body: Some(w::server_message::Body::WorldEvent(event_proto.clone())),
-            };
-            let _ = state.deltas.send(msg);
-            (
-                StatusCode::OK,
-                proto_response(w::CommandResponse {
-                    outcome: Some(w::command_response::Outcome::Accepted(w::CommandAccepted {
-                        protocol_version: u32::from(applied.response.protocol_version),
-                        world_id: applied.response.world_id.0.clone(),
-                        command_id: applied.response.command_id.clone(),
-                        event: Some(event_proto),
-                    })),
-                }),
-            )
-                .into_response()
-        }
-        Err(rejection) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            proto_response(w::CommandResponse {
-                outcome: Some(w::command_response::Outcome::Rejected(w::CommandRejected {
-                    protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
-                    world_id: rejection
-                        .world_id
-                        .as_ref()
-                        .map(|w| w.0.clone())
-                        .unwrap_or_default(),
-                    command_id: rejection.command_id.clone().unwrap_or_default(),
-                    code: rejection.code.to_string(),
-                    message: rejection.message.clone(),
-                })),
-            }),
-        )
-            .into_response(),
     }
 }
 
@@ -633,12 +543,10 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     }
 }
 
-// ===== legacy serde DTO → proto wire helpers =====
+// ===== serde DTO → proto wire helpers =====
 //
-// These convert the runtime's existing serde-DTO API surface into the
-// protobuf wire types now used on the WS hot path. They are internal
-// to sim-server; the legacy DTOs in `abutown_protocol::*` survive
-// until Task 7 because HTTP / DB persistence still consume them.
+// These convert the runtime/storage DTO surface into protobuf wire types.
+// They are internal to sim-server; DB persistence still stores serde DTOs.
 
 fn direction_to_proto(d: abutown_protocol::DirectionDto) -> w::Direction {
     use abutown_protocol::DirectionDto as L;
@@ -654,13 +562,48 @@ fn direction_to_proto(d: abutown_protocol::DirectionDto) -> w::Direction {
     }
 }
 
-fn tile_kind_to_proto(k: abutown_protocol::TileKindDto) -> w::TileKind {
-    use abutown_protocol::TileKindDto as L;
-    match k {
-        L::Grass => w::TileKind::Grass,
-        L::Water => w::TileKind::Water,
-        L::Road => w::TileKind::Road,
-        L::BuildingFootprint => w::TileKind::BuildingFootprint,
+fn tile_base_to_proto(value: abutown_protocol::TileBaseDto) -> w::TileBase {
+    match value {
+        abutown_protocol::TileBaseDto::Grass => w::TileBase::Grass,
+        abutown_protocol::TileBaseDto::Water => w::TileBase::Water,
+        abutown_protocol::TileBaseDto::Riverbank => w::TileBase::Riverbank,
+        abutown_protocol::TileBaseDto::Forest => w::TileBase::Forest,
+        abutown_protocol::TileBaseDto::Park => w::TileBase::Park,
+        abutown_protocol::TileBaseDto::Reserve => w::TileBase::Reserve,
+        abutown_protocol::TileBaseDto::Plaza => w::TileBase::Plaza,
+    }
+}
+
+fn tile_surface_to_proto(value: abutown_protocol::TileSurfaceDto) -> w::TileSurface {
+    match value {
+        abutown_protocol::TileSurfaceDto::None => w::TileSurface::None,
+        abutown_protocol::TileSurfaceDto::Street => w::TileSurface::Street,
+        abutown_protocol::TileSurfaceDto::Bridge => w::TileSurface::Bridge,
+        abutown_protocol::TileSurfaceDto::Rail => w::TileSurface::Rail,
+        abutown_protocol::TileSurfaceDto::RailCrossing => w::TileSurface::RailCrossing,
+    }
+}
+
+fn tile_cover_to_proto(value: abutown_protocol::TileCoverDto) -> w::TileCover {
+    match value {
+        abutown_protocol::TileCoverDto::None => w::TileCover::None,
+        abutown_protocol::TileCoverDto::Building => w::TileCover::Building,
+        abutown_protocol::TileCoverDto::Tree => w::TileCover::Tree,
+        abutown_protocol::TileCoverDto::Detail => w::TileCover::Detail,
+    }
+}
+
+fn layered_tile_to_proto(tile: &abutown_protocol::LayeredTileDto) -> w::LayeredTile {
+    w::LayeredTile {
+        local_index: u32::from(tile.local_index),
+        base: tile_base_to_proto(tile.base) as i32,
+        surface: tile_surface_to_proto(tile.surface) as i32,
+        cover: tile_cover_to_proto(tile.cover) as i32,
+        display: tile.display.clone(),
+        zone_id: tile.zone_id.clone(),
+        road_mask: tile.road_mask.map(u32::from),
+        rail_mask: tile.rail_mask.map(u32::from),
+        version: tile.version,
     }
 }
 
@@ -789,15 +732,7 @@ fn chunk_snapshot_dto_to_proto(c: &abutown_protocol::ChunkSnapshotDto) -> w::Chu
         chunk_version: c.chunk_version,
         chunk_state: chunk_state_to_proto(c.chunk_state) as i32,
         tile_count: u32::from(c.tile_count),
-        tiles: c
-            .tiles
-            .iter()
-            .map(|t| w::TileMutation {
-                local_index: u32::from(t.local_index),
-                kind: tile_kind_to_proto(t.kind) as i32,
-                version: t.version,
-            })
-            .collect(),
+        tiles: c.tiles.iter().map(layered_tile_to_proto).collect(),
     }
 }
 
@@ -830,28 +765,6 @@ fn tile_pulse_dto_to_proto(p: &abutown_protocol::TilePulseDeltaDto) -> w::TilePu
             y: p.coord.y,
         }),
         local_index: u32::from(p.local_index),
-    }
-}
-
-fn world_event_dto_to_proto(e: &abutown_protocol::WorldEventDto) -> w::WorldEvent {
-    use abutown_protocol::WorldEventDto as L;
-    match e {
-        L::TileKindSet(tk) => w::WorldEvent {
-            event: Some(w::world_event::Event::TileKindSet(w::TileKindSetEvent {
-                protocol_version: u32::from(tk.protocol_version),
-                event_id: tk.event_id.clone(),
-                command_id: tk.command_id.clone(),
-                world_id: tk.world_id.0.clone(),
-                tick: tk.tick,
-                version: tk.version,
-                coord: Some(w::ChunkCoord {
-                    x: tk.coord.x,
-                    y: tk.coord.y,
-                }),
-                local_index: u32::from(tk.local_index),
-                kind: tile_kind_to_proto(tk.kind) as i32,
-            })),
-        },
     }
 }
 
@@ -894,18 +807,6 @@ async fn apply_mutation_owned(
 ) {
     use crate::runtime_view::Mutation;
     match mutation {
-        Mutation::ApplyCommand { command, reply } => {
-            let result = match abutown_protocol::ClientCommandDto::try_from(command) {
-                Ok(dto) => runtime.apply_client_command(dto).await,
-                Err((code, message)) => Err(crate::commands::CommandRejection {
-                    world_id: None,
-                    command_id: None,
-                    code,
-                    message: message.to_string(),
-                }),
-            };
-            let _ = reply.send(result);
-        }
         Mutation::SubscriptionDiff {
             added,
             removed,
@@ -1339,6 +1240,26 @@ mod tests {
     /// to absorb scheduler jitter on slow CI.
     const TICK_WAIT: Duration = Duration::from_millis(250);
 
+    fn runtime_with_dirty_layered_tile() -> SimulationRuntime {
+        use sim_core::tile::{TileBase, TileRecord};
+        use sim_core::world::components::{ChunkVersion, Tiles};
+        use sim_core::world::resources::ChunksByCoord;
+
+        let mut runtime = SimulationRuntime::new();
+        let coord = ChunkCoord { x: 4, y: 4 };
+        let entity = runtime.world.resource::<ChunksByCoord>().0[&coord];
+        {
+            let mut ent = runtime.world.entity_mut(entity);
+            ent.get_mut::<Tiles>().unwrap().0[11] = TileRecord {
+                base: TileBase::Water,
+                version: 1,
+                ..TileRecord::default()
+            };
+            ent.get_mut::<ChunkVersion>().unwrap().0 = 1;
+        }
+        runtime
+    }
+
     /// Wait until the published view's mobility_tick advances strictly past
     /// `from`, or until the deadline passes. Returns the observed tick.
     async fn wait_for_tick_past(state: &AppState, from: u64, deadline: Duration) -> u64 {
@@ -1418,9 +1339,9 @@ mod tests {
 
     #[tokio::test]
     async fn persist_snapshots_once_writes_runtime_snapshots() {
-        let state = AppState::new(SimulationRuntime::new());
+        let state = AppState::new(runtime_with_dirty_layered_tile());
 
-        assert_eq!(persist_snapshots_once(&state).await.unwrap(), 3);
+        assert_eq!(persist_snapshots_once(&state).await.unwrap(), 1);
 
         let snapshot = state
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
@@ -1429,6 +1350,7 @@ mod tests {
             .expect("visible snapshot stored");
         assert_eq!(snapshot.coord.x, 4);
         assert_eq!(snapshot.coord.y, 4);
+        assert!(snapshot.tiles.iter().any(|tile| tile.local_index == 11));
     }
 
     /// A snapshot store that sleeps during writes to simulate slow DB I/O.
@@ -1460,9 +1382,9 @@ mod tests {
         use sim_core::persistence::InMemoryMobilitySnapshotStore;
         use std::time::Instant;
 
-        // Build AppState with a slow snapshot store (100 ms per write, 3 chunks = 300 ms total).
+        // Build AppState with a slow snapshot store and one dirty chunk.
         let state = AppState::new_with_stores(
-            SimulationRuntime::new(),
+            runtime_with_dirty_layered_tile(),
             Box::new(SlowSnapshotStore {
                 write_delay_ms: 100,
             }),
@@ -1577,7 +1499,7 @@ mod tests {
         use sim_core::persistence::InMemoryMobilitySnapshotStore;
 
         let state = AppState::new_with_stores(
-            SimulationRuntime::new(),
+            runtime_with_dirty_layered_tile(),
             Box::new(FailingSnapshotStore),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             CardHandStore::memory(),

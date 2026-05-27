@@ -10,15 +10,10 @@ use sim_core::ids::ChunkCoord;
 use sim_core::mobility::MobilityPersistSnapshot;
 use std::collections::HashMap;
 
-use crate::commands::{AppliedCommand, CommandRejection};
 use tokio::sync::oneshot;
 
 /// All mutations to the runtime flow through one channel.
 pub enum Mutation {
-    ApplyCommand {
-        command: w::ClientCommand,
-        reply: oneshot::Sender<Result<AppliedCommand, CommandRejection>>,
-    },
     SubscriptionDiff {
         added: Vec<ChunkCoord>,
         removed: Vec<ChunkCoord>,

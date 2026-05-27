@@ -1,6 +1,5 @@
 pub mod app;
 pub mod card_hand;
-pub mod commands;
 pub mod config;
 pub mod persistence_plugin;
 pub mod postgres_events;
