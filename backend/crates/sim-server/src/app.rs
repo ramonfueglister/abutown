@@ -31,7 +31,7 @@ use crate::{
         AuthVerifier, CardHandError, CardHandResponse, CardHandStore, SaveCardHandRequest,
         card_definitions,
     },
-    config::ServerConfig,
+    config::{ServerConfig, ServerMode},
     postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
     runtime::SimulationRuntime,
@@ -39,6 +39,7 @@ use crate::{
 
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
+const MUTATION_REPLY_TIMEOUT: Duration = Duration::from_secs(2);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
 const CITY_NETWORK_DEFAULT_PATH: &str = "data/city/zurich-network.json";
 
@@ -279,8 +280,14 @@ pub fn build_app() -> Router {
 
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
     let _ = dotenvy::dotenv();
-    let config = ServerConfig::from_env()?;
-    build_app_from_config(&config).await
+    build_app_from_mode(ServerMode::from_env()?).await
+}
+
+pub async fn build_app_from_mode(mode: ServerMode) -> anyhow::Result<Router> {
+    match mode {
+        ServerMode::Persistent(config) => build_app_from_config(&config).await,
+        ServerMode::InMemory => Ok(build_app()),
+    }
 }
 
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
@@ -1058,12 +1065,11 @@ async fn handle_client_message(
                         .insert(*coord, BroadcastStream::new(receiver));
                 }
 
-                // Receive initial snapshots from the tick task. Timeout at
-                // 5× tick interval protects against a stalled tick task
-                // hanging the WS handler indefinitely.
-                let reply =
-                    tokio::time::timeout(SIMULATION_TICK_INTERVAL.saturating_mul(5), reply_rx)
-                        .await;
+                // Receive initial snapshots from the tick task. The timeout
+                // is intentionally above a few ticks because debug builds can
+                // spend hundreds of milliseconds assembling many subscribed
+                // chunk snapshots.
+                let reply = tokio::time::timeout(MUTATION_REPLY_TIMEOUT, reply_rx).await;
                 match reply {
                     Ok(Ok(snapshots)) => {
                         for snap in snapshots {
@@ -1149,12 +1155,11 @@ async fn persist_snapshots_once(
             "tick task gone",
         ));
     }
-    // Timeout at 5× tick interval — generous (500 ms at 100 ms tick) but
-    // protects against a stalled tick task hanging the persist loop
+    // Timeout protects against a stalled tick task hanging the persist loop
     // indefinitely. A real outage will return an error and let the snapshot
     // loop schedule a retry on its next interval.
     let payload =
-        match tokio::time::timeout(SIMULATION_TICK_INTERVAL.saturating_mul(5), reply_rx).await {
+        match tokio::time::timeout(MUTATION_REPLY_TIMEOUT, reply_rx).await {
             Ok(Ok(p)) => p,
             Ok(Err(_)) => {
                 return Err(sim_core::persistence::ChunkSnapshotStoreError::unavailable(

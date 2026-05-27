@@ -4,6 +4,40 @@ pub struct ServerConfig {
     pub supabase_url: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerMode {
+    Persistent(ServerConfig),
+    InMemory,
+}
+
+impl ServerMode {
+    pub fn from_env() -> Result<Self, ServerConfigError> {
+        Self::from_pairs(std::env::vars())
+    }
+
+    pub fn from_pairs<I, K, V>(pairs: I) -> Result<Self, ServerConfigError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: Into<String>,
+    {
+        let pairs: Vec<(String, String)> = pairs
+            .into_iter()
+            .map(|(key, value)| (key.as_ref().to_string(), value.into()))
+            .collect();
+        let mode = pairs
+            .iter()
+            .find_map(|(key, value)| (key == "ABUTOWN_SERVER_MODE").then_some(value.as_str()))
+            .unwrap_or("persistent");
+
+        match mode {
+            "persistent" | "postgres" => Ok(Self::Persistent(ServerConfig::from_pairs(pairs)?)),
+            "memory" | "in-memory" | "in_memory" => Ok(Self::InMemory),
+            other => Err(ServerConfigError::UnknownServerMode(other.to_string())),
+        }
+    }
+}
+
 impl ServerConfig {
     pub fn from_env() -> Result<Self, ServerConfigError> {
         Self::from_pairs(std::env::vars())
@@ -39,6 +73,8 @@ pub enum ServerConfigError {
     MissingDatabaseUrl,
     #[error("SUPABASE_URL is required")]
     MissingSupabaseUrl,
+    #[error("ABUTOWN_SERVER_MODE must be persistent or memory, got {0}")]
+    UnknownServerMode(String),
 }
 
 #[cfg(test)]
@@ -70,5 +106,39 @@ mod tests {
         let error = ServerConfig::from_pairs([("DATABASE_URL", "postgres://primary")]).unwrap_err();
 
         assert_eq!(error, ServerConfigError::MissingSupabaseUrl);
+    }
+
+    #[test]
+    fn server_mode_memory_does_not_require_database_values() {
+        let mode = ServerMode::from_pairs([("ABUTOWN_SERVER_MODE", "memory")]).unwrap();
+
+        assert_eq!(mode, ServerMode::InMemory);
+    }
+
+    #[test]
+    fn server_mode_defaults_to_persistent_config() {
+        let mode = ServerMode::from_pairs([
+            ("DATABASE_URL", "postgres://primary"),
+            ("SUPABASE_URL", "https://project.supabase.co"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            mode,
+            ServerMode::Persistent(ServerConfig {
+                database_url: "postgres://primary".to_string(),
+                supabase_url: "https://project.supabase.co".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn server_mode_rejects_unknown_value() {
+        let error = ServerMode::from_pairs([("ABUTOWN_SERVER_MODE", "sqlite")]).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServerConfigError::UnknownServerMode("sqlite".to_string())
+        );
     }
 }
