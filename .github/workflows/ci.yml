@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: "24"
+
+jobs:
+  frontend:
+    name: Frontend unit and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Generate protobuf TypeScript
+        run: npm run generate:proto
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Run production build
+        run: npm run build
+
+      - name: Check retired asset guard
+        run: npx vitest run tests/render/noRetiredAssets.test.ts --passWithNoTests
+
+  rust:
+    name: Rust sim-server tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protobuf compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            backend/target
+          key: rust-${{ runner.os }}-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: Run sim-server tests
+        run: cargo test --manifest-path backend/Cargo.toml -p sim-server
+
+  e2e:
+    name: Browser smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: abutown
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d abutown"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/abutown
+      SUPABASE_URL: http://127.0.0.1:9999
+      TEST_MODE_ACCEPT_ALL_JWTS: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client protobuf-compiler
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            backend/target
+          key: rust-${{ runner.os }}-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Build backend server
+        run: cargo build --manifest-path backend/Cargo.toml -p sim-server
+
+      - name: Prepare test database schema
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          CREATE SCHEMA IF NOT EXISTS auth;
+          CREATE TABLE IF NOT EXISTS auth.users (
+            id uuid PRIMARY KEY
+          );
+          DO $$
+          BEGIN
+            CREATE ROLE authenticated;
+          EXCEPTION
+            WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          CREATE OR REPLACE FUNCTION auth.uid()
+          RETURNS uuid
+          LANGUAGE sql
+          STABLE
+          AS $$ SELECT NULL::uuid $$;
+          SQL
+
+      - name: Run browser smoke test
+        run: npm run test:e2e

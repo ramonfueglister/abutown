@@ -12,15 +12,15 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'cargo run --manifest-path backend/Cargo.toml -p sim-server',
+      command: 'cargo build --manifest-path backend/Cargo.toml -p sim-server && exec backend/target/debug/sim-server',
       url: 'http://127.0.0.1:8080/health',
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: 'npm run preview -- --port 5173',
+      command: 'node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5173',
       url: 'http://127.0.0.1:5173',
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 60_000,
     },
   ],
