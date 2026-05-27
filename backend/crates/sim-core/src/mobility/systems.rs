@@ -137,6 +137,7 @@ fn materialize_route_steps(
     Some(steps)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn complete_walk_stage_at_destination(
     entity: Entity,
     stable: &StableAgentId,
@@ -271,7 +272,7 @@ pub fn install_systems(schedule: &mut Schedule) {
     ));
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn route_assignment_system(
     mut query: Query<
         (
@@ -408,7 +409,7 @@ pub fn route_assignment_system(
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn route_advance_system(
     mut query: Query<
         (
