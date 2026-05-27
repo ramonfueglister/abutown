@@ -63,25 +63,33 @@ describe('backendRequiredView', () => {
   it('renders a fail-closed backend-required panel and marks the canvas not ready', () => {
     const dom = installFakeDom();
     const canvas = createCanvas();
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+    const logError = vi.fn();
 
     renderBackendRequired({
       canvas,
-      ctx: ctx as CanvasRenderingContext2D,
+      ctx,
       baseUrl: 'http://127.0.0.1:8080',
       background: '#f6f0e3',
       error: new Error('network <down>'),
       viewport: { width: 800, height: 600, devicePixelRatio: 2 },
-      logError: vi.fn(),
+      logError,
     });
 
     const panel = dom.currentPanel();
     expect(canvas.dataset.ready).toBe('false');
     expect(canvas.dataset.backendRequired).toBe('true');
+    expect(ctx.save).toHaveBeenCalled();
+    expect(ctx.setTransform).toHaveBeenCalledWith(2, 0, 0, 2, 0, 0);
+    expect(ctx.fillStyle).toBe('#f6f0e3');
+    expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 800, 600);
+    expect(ctx.restore).toHaveBeenCalled();
     expect(panel).not.toBeNull();
     expect(panel?.innerHTML).toContain('Backend required');
     expect(panel?.innerHTML).toContain('network &lt;down&gt;');
     expect(panel?.innerHTML).toContain('http://127.0.0.1:8080');
+    expect(panel?.innerHTML).toContain('cargo run --manifest-path backend/Cargo.toml -p sim-server');
+    expect(logError).toHaveBeenCalledWith('Abutown backend required: network <down>');
   });
 
   it('replaces any existing backend-required panel instead of stacking panels', () => {
