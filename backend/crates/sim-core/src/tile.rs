@@ -145,9 +145,7 @@ impl LayeredTileRecord {
             errors.push(TileValidationError::BuildingOnWater);
         }
 
-        if matches!(self.cover, TileCover::Building | TileCover::Tree)
-            && self.surface != TileSurface::None
-        {
+        if self.cover != TileCover::None && self.surface != TileSurface::None {
             errors.push(TileValidationError::CoverOnTransportSurface);
         }
 
@@ -238,7 +236,7 @@ mod tests {
             base: TileBase::Water,
             surface: TileSurface::Street,
             cover: TileCover::Building,
-            display: Some("houses".to_string()),
+            display: Some("building-sheet".to_string()),
             zone_id: Some("zone:test".to_string()),
             road_mask: Some(1),
             rail_mask: None,
@@ -248,6 +246,17 @@ mod tests {
         let errors = invalid.validate();
         assert!(errors.contains(&TileValidationError::BuildingOnWater));
         assert!(errors.contains(&TileValidationError::CoverOnTransportSurface));
+
+        let detail_on_street = LayeredTileRecord {
+            surface: TileSurface::Street,
+            cover: TileCover::Detail,
+            road_mask: Some(1),
+            ..LayeredTileRecord::default()
+        };
+
+        assert!(detail_on_street
+            .validate()
+            .contains(&TileValidationError::CoverOnTransportSurface));
     }
 
     #[test]
