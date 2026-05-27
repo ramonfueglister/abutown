@@ -127,6 +127,10 @@ pub struct CommandRejectedDto {
     pub message: String,
 }
 
+// Transitional Task 3 state: terrain mutation commands/events were removed
+// from the protocol target model, so there are currently no DTO world-event
+// variants. Later runtime/server migration tasks remove or reshape accepted
+// command paths that still carry a world-event payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum WorldEventDto {}
 
@@ -537,6 +541,61 @@ mod tests {
         };
 
         assert_eq!(snapshot.tiles[0].surface, TileSurfaceDto::Street);
+    }
+
+    #[test]
+    fn layered_tile_rejects_invalid_proto_values() {
+        fn valid_proto_tile() -> v1::LayeredTile {
+            v1::LayeredTile {
+                local_index: 7,
+                base: v1::TileBase::Grass as i32,
+                surface: v1::TileSurface::Street as i32,
+                cover: v1::TileCover::None as i32,
+                display: None,
+                zone_id: None,
+                road_mask: Some(10),
+                rail_mask: Some(12),
+                version: 3,
+            }
+        }
+
+        let mut unspecified_base = valid_proto_tile();
+        unspecified_base.base = v1::TileBase::Unspecified as i32;
+        assert_eq!(
+            LayeredTileDto::try_from(unspecified_base).unwrap_err(),
+            (
+                "invalid_enum",
+                "TileBase is UNSPECIFIED; sender must provide a concrete variant"
+            )
+        );
+
+        let mut out_of_range_surface = valid_proto_tile();
+        out_of_range_surface.surface = 999;
+        assert_eq!(
+            LayeredTileDto::try_from(out_of_range_surface).unwrap_err(),
+            ("invalid_enum", "LayeredTile.surface out of range")
+        );
+
+        let mut out_of_range_local_index = valid_proto_tile();
+        out_of_range_local_index.local_index = u32::from(u16::MAX) + 1;
+        assert_eq!(
+            LayeredTileDto::try_from(out_of_range_local_index).unwrap_err(),
+            ("invalid_field", "LayeredTile.local_index exceeds u16")
+        );
+
+        let mut out_of_range_road_mask = valid_proto_tile();
+        out_of_range_road_mask.road_mask = Some(u32::from(u8::MAX) + 1);
+        assert_eq!(
+            LayeredTileDto::try_from(out_of_range_road_mask).unwrap_err(),
+            ("invalid_field", "LayeredTile.road_mask exceeds u8")
+        );
+
+        let mut out_of_range_rail_mask = valid_proto_tile();
+        out_of_range_rail_mask.rail_mask = Some(u32::from(u8::MAX) + 1);
+        assert_eq!(
+            LayeredTileDto::try_from(out_of_range_rail_mask).unwrap_err(),
+            ("invalid_field", "LayeredTile.rail_mask exceeds u8")
+        );
     }
 }
 
