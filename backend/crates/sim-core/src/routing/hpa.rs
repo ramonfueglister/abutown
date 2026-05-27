@@ -205,6 +205,23 @@ impl HpaIndex {
             .unwrap_or(&[])
     }
 
+    pub fn corridor_between(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        profile: RoutingProfileKey,
+    ) -> Result<HashSet<ClusterId>, HierarchicalRoutingError> {
+        let start_cluster = resolve_request_cluster(self, from)?;
+        let goal_cluster = resolve_request_cluster(self, to)?;
+
+        if start_cluster == goal_cluster {
+            return Ok(HashSet::from([start_cluster]));
+        }
+
+        let (cluster_path, _) = abstract_cluster_path(self, start_cluster, goal_cluster, profile)?;
+        Ok(expand_corridor(self, &cluster_path))
+    }
+
     #[cfg(test)]
     fn force_cluster_adjacency_for_test(
         &mut self,
@@ -741,6 +758,28 @@ mod tests {
         assert!(!stats.used_base_case);
         assert_eq!(stats.corridor_cluster_count, 3);
         assert!(stats.abstract_clusters_visited >= 3);
+    }
+
+    #[test]
+    fn corridor_between_cross_cluster_includes_intermediate_clusters() {
+        let graph = three_cluster_walk_graph();
+        let index = HpaIndex::build(
+            &graph,
+            HpaConfig {
+                cluster_size_tiles: 10,
+                corridor_margin_clusters: 0,
+            },
+        )
+        .expect("index builds");
+
+        let corridor = index
+            .corridor_between(NodeId(0), NodeId(3), RoutingProfileKey::Walk)
+            .expect("corridor should resolve through abstract cluster path");
+
+        assert_eq!(
+            corridor,
+            HashSet::from([ClusterId(0), ClusterId(1), ClusterId(2)])
+        );
     }
 
     #[test]

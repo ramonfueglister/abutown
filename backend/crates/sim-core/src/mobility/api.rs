@@ -58,6 +58,7 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     world.insert_resource(PreviousChunkByEntity::default());
     world.insert_resource(PreviousFlowCellContrib::default());
     world.insert_resource(PendingPerChunkDeltas::default());
+    world.insert_resource(RouteAssignmentStats::default());
 
     crate::mobility::systems::install_systems(schedule);
 }
@@ -120,6 +121,34 @@ fn initial_agent_position(world: &World, state: &AgentMobilityState) -> (f32, f3
 /// Current monotonic mobility tick.
 pub fn tick(world: &World) -> u64 {
     world.resource::<Tick>().0
+}
+
+pub fn canonical_edge_key(
+    graph: &crate::routing::Graph,
+    edge_id: crate::routing::EdgeId,
+) -> String {
+    let edge = graph.edge(edge_id);
+    edge.legacy_id
+        .clone()
+        .unwrap_or_else(|| format!("edge:{}", edge.id.0))
+}
+
+pub fn edge_by_canonical_key(
+    graph: &crate::routing::Graph,
+    key: &str,
+) -> Option<crate::routing::EdgeId> {
+    if let Some(edge_id) = graph.edge_by_legacy(key)
+        && canonical_edge_key(graph, edge_id) == key
+    {
+        return Some(edge_id);
+    }
+
+    let raw_id = key.strip_prefix("edge:")?.parse::<u32>().ok()?;
+    if (raw_id as usize) >= graph.edge_count() {
+        return None;
+    }
+    let edge_id = crate::routing::EdgeId(raw_id);
+    (canonical_edge_key(graph, edge_id) == key).then_some(edge_id)
 }
 
 pub fn agent(world: &World, id: &AgentId) -> Option<AgentRecord> {
@@ -412,24 +441,50 @@ pub fn chunk_subscriber_counts_snapshot(world: &World) -> HashMap<crate::ids::Ch
 
 /// Spawn an agent entity from a record. Updates `AgentIdIndex`.
 pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity {
-    let id = record.id.clone();
+    let AgentRecord {
+        id: record_id,
+        state,
+        plan,
+        plan_cursor,
+        walk_speed_per_tick,
+        active_route,
+    } = record;
+    let id = record_id.clone();
     let sprite_key = compute_agent_sprite_key(&id);
-    let (px, py) = initial_agent_position(world, &record.state);
+    let (px, py) = initial_agent_position(world, &state);
+    let active_route = active_route.map(|route| ActiveRoute {
+        destination: crate::routing::NodeId(route.destination_node),
+        profile: route.profile,
+        steps: route
+            .steps
+            .into_iter()
+            .map(|step| RouteStep {
+                edge_id: crate::routing::EdgeId(step.edge_id),
+                mode: step.mode,
+                canonical_edge_key: step.canonical_edge_key,
+                length: step.length,
+            })
+            .collect(),
+        cursor: route.cursor,
+    });
     let entity = world
         .spawn((
             AgentMarker,
-            StableAgentId(record.id),
-            AgentMobilityStateComponent(record.state),
+            StableAgentId(record_id),
+            AgentMobilityStateComponent(state),
             WalkPlan {
-                stages: record.plan,
-                cursor: record.plan_cursor,
+                stages: plan,
+                cursor: plan_cursor,
             },
-            WalkSpeed(record.walk_speed_per_tick),
+            WalkSpeed(walk_speed_per_tick),
             Position { x: px, y: py },
             Direction(abutown_protocol::DirectionDto::S),
             SpriteKey(sprite_key),
         ))
         .id();
+    if let Some(active_route) = active_route {
+        world.entity_mut(entity).insert(active_route);
+    }
     world.resource_mut::<AgentIdIndex>().0.insert(id, entity);
     entity
 }
@@ -487,12 +542,30 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
     let state = world.get::<AgentMobilityStateComponent>(entity)?;
     let plan = world.get::<WalkPlan>(entity)?;
     let speed = world.get::<WalkSpeed>(entity)?;
+    let active_route = world
+        .get::<ActiveRoute>(entity)
+        .map(|route| PersistedActiveRoute {
+            destination_node: route.destination.0,
+            profile: route.profile,
+            cursor: route.cursor,
+            steps: route
+                .steps
+                .iter()
+                .map(|step| PersistedRouteStep {
+                    edge_id: step.edge_id.0,
+                    mode: step.mode,
+                    canonical_edge_key: step.canonical_edge_key.clone(),
+                    length: step.length,
+                })
+                .collect(),
+        });
     Some(AgentRecord {
         id: stable.0.clone(),
         state: state.0.clone(),
         plan: plan.stages.clone(),
         plan_cursor: plan.cursor,
         walk_speed_per_tick: speed.0,
+        active_route,
     })
 }
 
@@ -534,11 +607,9 @@ fn resolve_link_polyline(
     link_id: &str,
 ) -> Option<crate::mobility_geometry::LinkGeometry> {
     let graph = world.resource::<crate::routing::Graph>();
-    graph
-        .edge_by_legacy(link_id)
-        .map(|edge_id| crate::mobility_geometry::LinkGeometry {
-            points: graph.edge(edge_id).polyline.clone(),
-        })
+    edge_by_canonical_key(graph, link_id).map(|edge_id| crate::mobility_geometry::LinkGeometry {
+        points: graph.edge(edge_id).polyline.clone(),
+    })
 }
 
 pub fn world_coord_for_agent(world: &World, agent_id: &AgentId) -> Option<(f32, f32)> {

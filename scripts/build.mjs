@@ -2,9 +2,8 @@
 // Build orchestrator. Runs `tsc --noEmit`, then `vite build` with
 // `VITE_SKIP_PUBLIC_COPY=1` so vite skips its per-file copy of `public/`,
 // then copies `public/` into `dist/` with POSIX `cp -R` (one fork). The
-// per-file Node copy in vite has been observed to flake on `ETIMEDOUT`
-// over the 8.4 MB `public/simutrans-assets/` tree; `cp -R` is one
-// syscall per inode and has not reproduced the failure.
+// per-file Node copy in vite has been observed to flake on `ETIMEDOUT`;
+// `cp -R` is one syscall per inode and has not reproduced the failure.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';

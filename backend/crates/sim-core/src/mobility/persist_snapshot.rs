@@ -24,11 +24,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, ChunkCoord, VehicleId};
 use crate::mobility::lod::{FlowCell, MobilityActivity};
-use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage, VehicleRecord};
+use crate::mobility::records::{
+    AgentMobilityState, AgentRecord, PersistedActiveRoute, PersistedRouteStep, PlanStage,
+    VehicleRecord,
+};
 use crate::mobility::resources::{FlowCells, Tick};
 use crate::routing::{
-    Edge, EdgeId, EdgeKind, Graph, LineId, Node, NodeId, NodeKind, NodeSpatialIndex, TransitLine,
-    TransitLines, WaitingAgents,
+    Edge, EdgeId, EdgeKind, Graph, LineId, ModeState, Node, NodeId, NodeKind, NodeSpatialIndex,
+    RoutingProfile, RoutingProfileKey, TransitLine, TransitLines, WaitingAgents,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -273,7 +276,17 @@ fn cached_or_graph_link_polylines_for_persist(
     agents: &HashMap<AgentId, AgentRecord>,
 ) -> HashMap<String, Vec<(f32, f32)>> {
     if let Some(metadata) = world.get_resource::<PersistedLinkPolylineMetadata>() {
-        return metadata.0.clone();
+        let graph = world.resource::<Graph>();
+        let mut out = metadata.0.clone();
+        for link_id in active_route_canonical_keys_for_persist(agents) {
+            out.entry(link_id.clone()).or_insert_with(|| {
+                graph
+                    .edge(expect_canonical_edge_key(graph, &link_id))
+                    .polyline
+                    .clone()
+            });
+        }
+        return out;
     }
 
     let graph = world.resource::<Graph>();
@@ -296,10 +309,10 @@ fn cached_or_graph_link_polylines_for_persist(
     link_ids.sort();
     link_ids.dedup();
 
-    link_ids
+    let mut out: HashMap<String, Vec<(f32, f32)>> = link_ids
         .into_iter()
         .map(|link_id| {
-            let edge_id = graph.edge_by_legacy(&link_id).unwrap_or_else(|| {
+            let edge_id = resolve_canonical_edge_key(graph, &link_id).unwrap_or_else(|| {
                 panic!(
                     "extract_from_world: referenced link {} is missing from routing graph",
                     link_id
@@ -307,14 +320,32 @@ fn cached_or_graph_link_polylines_for_persist(
             });
             (link_id, graph.edge(edge_id).polyline.clone())
         })
-        .collect()
+        .collect();
+    for link_id in active_route_canonical_keys_for_persist(agents) {
+        out.entry(link_id.clone()).or_insert_with(|| {
+            graph
+                .edge(expect_canonical_edge_key(graph, &link_id))
+                .polyline
+                .clone()
+        });
+    }
+    out
+}
+
+fn active_route_canonical_keys_for_persist(
+    agents: &HashMap<AgentId, AgentRecord>,
+) -> impl Iterator<Item = String> + '_ {
+    agents
+        .values()
+        .filter_map(|agent| agent.active_route.as_ref())
+        .flat_map(|route| route.steps.iter())
+        .filter(|step| !step.canonical_edge_key.is_empty())
+        .map(|step| step.canonical_edge_key.clone())
 }
 
 fn existing_graph_polyline(world: &World, link_id: &str) -> Option<Vec<(f32, f32)>> {
     let graph = world.resource::<Graph>();
-    graph
-        .edge_by_legacy(link_id)
-        .map(|edge_id| graph.edge(edge_id).polyline.clone())
+    resolve_canonical_edge_key(graph, link_id).map(|edge_id| graph.edge(edge_id).polyline.clone())
 }
 
 fn polyline_length(polyline: &[(f32, f32)]) -> f32 {
@@ -355,8 +386,32 @@ fn resolve_snapshot_polyline(
         })
 }
 
+fn point_key(point: (f32, f32)) -> (u32, u32) {
+    (point.0.to_bits(), point.1.to_bits())
+}
+
+fn node_for_polyline_point(
+    nodes: &mut Vec<Node>,
+    point_nodes: &mut HashMap<(u32, u32), NodeId>,
+    position: (f32, f32),
+) -> NodeId {
+    if let Some(id) = point_nodes.get(&point_key(position)).copied() {
+        return id;
+    }
+    let id = NodeId(nodes.len() as u32);
+    nodes.push(Node {
+        id,
+        position,
+        kind: NodeKind::Intersection,
+        legacy_id: None,
+    });
+    point_nodes.insert(point_key(position), id);
+    id
+}
+
 fn push_edge(
     nodes: &mut Vec<Node>,
+    point_nodes: &mut HashMap<(u32, u32), NodeId>,
     edges: &mut Vec<Edge>,
     link_id: String,
     polyline: Vec<(f32, f32)>,
@@ -368,21 +423,12 @@ fn push_edge(
         link_id
     );
 
-    let from = NodeId(nodes.len() as u32);
-    nodes.push(Node {
-        id: from,
-        position: polyline[0],
-        kind: NodeKind::Intersection,
-        legacy_id: None,
-    });
-
-    let to = NodeId(nodes.len() as u32);
-    nodes.push(Node {
-        id: to,
-        position: *polyline.last().expect("polyline length checked"),
-        kind: NodeKind::Intersection,
-        legacy_id: None,
-    });
+    let from = node_for_polyline_point(nodes, point_nodes, polyline[0]);
+    let to = node_for_polyline_point(
+        nodes,
+        point_nodes,
+        *polyline.last().expect("polyline length checked"),
+    );
 
     let edge_id = EdgeId(edges.len() as u32);
     edges.push(Edge {
@@ -399,27 +445,65 @@ fn push_edge(
     edge_id
 }
 
-fn persisted_walking_links(snap: &MobilityPersistSnapshot) -> Vec<String> {
-    let mut links = Vec::new();
+fn edge_kind_for_mode(mode: ModeState) -> EdgeKind {
+    match mode {
+        ModeState::Walking => EdgeKind::Footway,
+        ModeState::Driving => EdgeKind::Road,
+        ModeState::OnTram => EdgeKind::TramTrack,
+    }
+}
+
+fn push_persisted_non_route_link(
+    links: &mut HashMap<String, EdgeKind>,
+    link_id: String,
+    kind: EdgeKind,
+) {
+    if let Some(existing) = links.insert(link_id.clone(), kind) {
+        assert_eq!(
+            existing, kind,
+            "apply_into_world: persisted link {} has conflicting edge kinds {:?} and {:?}",
+            link_id, existing, kind
+        );
+    }
+}
+
+fn persisted_walking_links(snap: &MobilityPersistSnapshot) -> Vec<(String, EdgeKind)> {
+    let mut links = HashMap::new();
     for agent in snap.agents.values() {
         if let AgentMobilityState::Walking { link_id, .. } = &agent.state {
-            links.push(link_id.clone());
+            push_persisted_non_route_link(&mut links, link_id.clone(), EdgeKind::Footway);
         }
         for stage in &agent.plan {
             match stage {
                 PlanStage::WalkToStop { link_id, .. }
-                | PlanStage::WalkToActivity { link_id, .. } => links.push(link_id.clone()),
+                | PlanStage::WalkToActivity { link_id, .. } => {
+                    push_persisted_non_route_link(&mut links, link_id.clone(), EdgeKind::Footway);
+                }
                 _ => {}
             }
         }
+        if let Some(active_route) = &agent.active_route {
+            for step in active_route
+                .steps
+                .iter()
+                .filter(|step| !step.canonical_edge_key.is_empty())
+            {
+                push_persisted_non_route_link(
+                    &mut links,
+                    step.canonical_edge_key.clone(),
+                    edge_kind_for_mode(step.mode),
+                );
+            }
+        }
     }
-    links.sort();
-    links.dedup();
+    let mut links: Vec<_> = links.into_iter().collect();
+    links.sort_by(|a, b| a.0.cmp(&b.0));
     links
 }
 
 fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
     let mut nodes = Vec::new();
+    let mut point_nodes = HashMap::new();
     let mut edges = Vec::new();
     let mut edge_by_link: HashMap<String, EdgeId> = HashMap::new();
 
@@ -433,6 +517,7 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
             let polyline = resolve_snapshot_polyline(world, link_id, &snap.link_polylines);
             let edge_id = push_edge(
                 &mut nodes,
+                &mut point_nodes,
                 &mut edges,
                 link_id.clone(),
                 polyline,
@@ -442,17 +527,18 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
         }
     }
 
-    for link_id in persisted_walking_links(snap) {
+    for (link_id, kind) in persisted_walking_links(snap) {
         if edge_by_link.contains_key(&link_id) {
             continue;
         }
         let polyline = resolve_snapshot_polyline(world, &link_id, &snap.link_polylines);
         let edge_id = push_edge(
             &mut nodes,
+            &mut point_nodes,
             &mut edges,
             link_id.clone(),
             polyline,
-            EdgeKind::Footway,
+            kind,
         );
         edge_by_link.insert(link_id, edge_id);
     }
@@ -552,6 +638,161 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
     world.insert_resource(waiting);
 }
 
+fn parse_edge_key(key: &str) -> Option<EdgeId> {
+    key.strip_prefix("edge:")
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .map(EdgeId)
+}
+
+fn canonical_edge_key(edge: &Edge) -> String {
+    edge.legacy_id
+        .clone()
+        .unwrap_or_else(|| format!("edge:{}", edge.id.0))
+}
+
+fn resolve_canonical_edge_key(graph: &Graph, key: &str) -> Option<EdgeId> {
+    if let Some(edge_id) = graph.edge_by_legacy(key) {
+        return Some(edge_id);
+    }
+
+    if let Some(edge_id) = parse_edge_key(key)
+        && (edge_id.0 as usize) < graph.edge_count()
+    {
+        let edge = graph.edge(edge_id);
+        if canonical_edge_key(edge) == key {
+            return Some(edge_id);
+        }
+    }
+
+    None
+}
+
+fn expect_canonical_edge_key(graph: &Graph, key: &str) -> EdgeId {
+    resolve_canonical_edge_key(graph, key)
+        .unwrap_or_else(|| panic!("persisted active_route canonical edge key {key} is missing"))
+}
+
+fn validate_active_route_mode(
+    profile: RoutingProfileKey,
+    from_mode: ModeState,
+    from_node_kind: NodeKind,
+    edge: &Edge,
+    expected_next_mode: ModeState,
+    key: &str,
+) -> ModeState {
+    let Some((next_mode, _cost)) =
+        RoutingProfile::for_key(profile).transition(from_mode, from_node_kind, edge)
+    else {
+        panic!(
+            "apply_into_world: persisted active_route step {} mode {:?} cannot traverse {:?} from {:?} with profile {:?}",
+            key, from_mode, edge.kind, from_node_kind, profile
+        );
+    };
+    if next_mode != expected_next_mode {
+        panic!(
+            "apply_into_world: persisted active_route step {} expected mode {:?} but profile transition produced {:?}",
+            key, expected_next_mode, next_mode
+        );
+    }
+    next_mode
+}
+
+fn initial_mode_for_profile(profile: RoutingProfileKey) -> ModeState {
+    match profile {
+        RoutingProfileKey::Walk | RoutingProfileKey::WalkTransit => ModeState::Walking,
+        RoutingProfileKey::Car => ModeState::Driving,
+        RoutingProfileKey::Tram => ModeState::OnTram,
+    }
+}
+
+fn normalize_active_route(graph: &Graph, route: &PersistedActiveRoute) -> PersistedActiveRoute {
+    if route.steps.is_empty() {
+        panic!("apply_into_world: persisted active_route has no steps");
+    }
+    if route.cursor >= route.steps.len() {
+        panic!(
+            "apply_into_world: persisted active_route cursor {} is outside {} steps",
+            route.cursor,
+            route.steps.len()
+        );
+    }
+    let mut normalized_steps = Vec::with_capacity(route.steps.len());
+    let mut previous_edge_id: Option<EdgeId> = None;
+    let mut mode = initial_mode_for_profile(route.profile);
+    for step in &route.steps {
+        if step.length < 0.0 || !step.length.is_finite() {
+            panic!(
+                "apply_into_world: persisted active_route edge {} has invalid length {}",
+                step.edge_id, step.length
+            );
+        }
+        let edge_id = expect_canonical_edge_key(graph, &step.canonical_edge_key);
+        let edge = graph.edge(edge_id);
+        let expected_key = canonical_edge_key(edge);
+        if step.canonical_edge_key != expected_key {
+            panic!(
+                "apply_into_world: persisted active_route edge {} canonical key mismatch: got {}, expected {}",
+                step.edge_id, step.canonical_edge_key, expected_key
+            );
+        }
+        if let Some(previous) = previous_edge_id
+            && graph.edge(previous).to != edge.from
+        {
+            panic!(
+                "apply_into_world: persisted active_route edge {} is disconnected from previous step",
+                step.edge_id
+            );
+        }
+        mode = validate_active_route_mode(
+            route.profile,
+            mode,
+            graph.node(edge.from).kind,
+            edge,
+            step.mode,
+            &step.canonical_edge_key,
+        );
+
+        normalized_steps.push(PersistedRouteStep {
+            edge_id: edge.id.0,
+            mode: step.mode,
+            canonical_edge_key: step.canonical_edge_key.clone(),
+            length: step.length,
+        });
+        previous_edge_id = Some(edge_id);
+    }
+
+    let final_edge_id = EdgeId(
+        normalized_steps
+            .last()
+            .expect("active route steps checked")
+            .edge_id,
+    );
+    let destination_node = graph.edge(final_edge_id).to;
+
+    PersistedActiveRoute {
+        destination_node: destination_node.0,
+        profile: route.profile,
+        cursor: route.cursor,
+        steps: normalized_steps,
+    }
+}
+
+fn normalize_persisted_active_routes(
+    graph: &Graph,
+    agents: &HashMap<AgentId, AgentRecord>,
+) -> HashMap<AgentId, AgentRecord> {
+    agents
+        .iter()
+        .map(|(id, agent)| {
+            let mut normalized = agent.clone();
+            if let Some(active_route) = &agent.active_route {
+                normalized.active_route = Some(normalize_active_route(graph, active_route));
+            }
+            (id.clone(), normalized)
+        })
+        .collect()
+}
+
 /// Hydrate a freshly-installed mobility World from a persist snapshot.
 ///
 /// Registers graph data before spawning agents/vehicles so the spawn helpers
@@ -559,12 +800,16 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
 pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
     world.resource_mut::<Tick>().0 = snap.tick;
     install_snapshot_routing(world, &snap);
+    let agents = {
+        let graph = world.resource::<Graph>();
+        normalize_persisted_active_routes(graph, &snap.agents)
+    };
     world.insert_resource(PersistedStopMetadata(snap.stops.clone()));
     world.insert_resource(PersistedLinkPolylineMetadata(snap.link_polylines.clone()));
     for vehicle in snap.vehicles.values() {
         crate::mobility::api::spawn_vehicle_from_record(world, vehicle.clone());
     }
-    for agent in snap.agents.values() {
+    for agent in agents.values() {
         crate::mobility::api::spawn_agent_from_record(world, agent.clone());
     }
     world.resource_mut::<FlowCells>().0 = snap.flow_cells.clone();

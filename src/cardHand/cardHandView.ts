@@ -18,6 +18,9 @@ export type CardHandViewOptions = {
 };
 
 export function mountCardHandView(options: CardHandViewOptions = {}): void {
+  const supabase = options.supabaseClient ?? createConfiguredSupabaseClient();
+  if (!supabase) return;
+
   const authRoot = document.createElement('div');
   authRoot.className = 'card-auth-shell';
   authRoot.innerHTML = `
@@ -60,16 +63,7 @@ export function mountCardHandView(options: CardHandViewOptions = {}): void {
 
   let state = createCardHandState();
   let activeSession: Session | null = null;
-  const supabase = options.supabaseClient ?? createConfiguredSupabaseClient();
   renderCardHand(hand, status, state);
-
-  if (!supabase) {
-    button.disabled = true;
-    button.textContent = 'Login unavailable';
-    state = { status: 'error', cards: [], error: 'Supabase env missing' };
-    renderCardHand(hand, status, state);
-    return;
-  }
 
   button.addEventListener('click', () => {
     if (activeSession) {

@@ -11,12 +11,12 @@ import type {
 } from '../../src/backend/mobilityProtocol';
 
 const pedestrianSprites = [
-  { sheet: 'pak128/peds.0', frameWidth: 16, frameHeight: 32 },
-  { sheet: 'pak128/peds.1', frameWidth: 16, frameHeight: 32 },
+  { sheet: 'minimal-pedestrian.0', frameWidth: 16, frameHeight: 32 },
+  { sheet: 'minimal-pedestrian.1', frameWidth: 16, frameHeight: 32 },
 ];
 const vehicleSprites = [
-  { sheet: 'pak128/cars.0', frameWidth: 32, frameHeight: 32, scale: 1, role: 'vehicle.0' },
-  { sheet: 'pak128/cars.1', frameWidth: 32, frameHeight: 32, scale: 1, role: 'vehicle.1' },
+  { sheet: 'minimal-car.0', frameWidth: 32, frameHeight: 32, scale: 1, role: 'vehicle.0' },
+  { sheet: 'minimal-car.1', frameWidth: 32, frameHeight: 32, scale: 1, role: 'vehicle.1' },
 ];
 
 function makeStateWith(agents: AgentMobilityDto[], vehicles: VehicleMobilityDto[]) {

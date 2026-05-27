@@ -61,6 +61,34 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
         trams_total: 4,
     };
 
+fn network_expects_seeded_cars(network: &sim_core::city_network::CityNetwork) -> bool {
+    !network.arterial_paths.is_empty() && SEED_DENSITY.cars_per_arterial > 0
+}
+
+fn mobility_snapshot_missing_expected_cars(
+    snapshot: &MobilityPersistSnapshot,
+    network: &sim_core::city_network::CityNetwork,
+) -> bool {
+    network_expects_seeded_cars(network)
+        && !snapshot
+            .vehicles
+            .values()
+            .any(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Car)
+}
+
+fn seeded_mobility_snapshot_for_network(
+    network: &sim_core::city_network::CityNetwork,
+) -> MobilityPersistSnapshot {
+    let (seeded_world, _) = if network.arterial_paths.is_empty()
+        && network.pedestrian_corridors.is_empty()
+    {
+        sim_core::mobility::seed::tiny_world()
+    } else {
+        sim_core::mobility::seed::from_network(network, SEED_DENSITY)
+    };
+    extract_from_world(&seeded_world)
+}
+
 pub struct SimulationRuntime {
     world_id: WorldId,
     chunk_size: u16,
@@ -70,6 +98,14 @@ pub struct SimulationRuntime {
     event_count: usize,
     tick: u64,
     version: u64,
+}
+
+fn refresh_flow_field_resources(world: &mut sim_core::bevy_ecs::world::World) {
+    if let Some(mut cache) = world.get_resource_mut::<sim_core::routing::FlowFieldCache>() {
+        cache.clear();
+    } else {
+        world.insert_resource(sim_core::routing::FlowFieldCache::default());
+    }
 }
 
 impl std::fmt::Debug for SimulationRuntime {
@@ -120,6 +156,7 @@ impl SimulationRuntime {
 
         sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+        sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -169,6 +206,7 @@ impl SimulationRuntime {
         apply_into_world(&mut runtime.world, snap);
         sim_core::routing::HierarchicalRoutingPlugin::default()
             .install(&mut runtime.world, &mut runtime.schedule);
+        refresh_flow_field_resources(&mut runtime.world);
         runtime
     }
 
@@ -187,6 +225,7 @@ impl SimulationRuntime {
         apply_into_world(&mut self.world, snap);
         sim_core::routing::HierarchicalRoutingPlugin::default()
             .install(&mut self.world, &mut self.schedule);
+        refresh_flow_field_resources(&mut self.world);
     }
 
     pub fn override_world_id_for_test(&mut self, world_id: &str) {
@@ -246,6 +285,7 @@ impl SimulationRuntime {
 
         sim_core::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+        sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -260,20 +300,21 @@ impl SimulationRuntime {
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, snap)) => snap,
-            None => {
-                let (seeded_world, _) = if network.arterial_paths.is_empty()
-                    && network.pedestrian_corridors.is_empty()
-                {
-                    sim_core::mobility::seed::tiny_world()
-                } else {
-                    sim_core::mobility::seed::from_network(network, SEED_DENSITY)
-                };
-                extract_from_world(&seeded_world)
+            Some((_tick, snap)) if !mobility_snapshot_missing_expected_cars(&snap, network) => snap,
+            Some((_tick, snap)) => {
+                tracing::warn!(
+                    agents = snap.agents.len(),
+                    vehicles = snap.vehicles.len(),
+                    arterials = network.arterial_paths.len(),
+                    "discarding persisted mobility snapshot without expected seeded cars"
+                );
+                seeded_mobility_snapshot_for_network(network)
             }
+            None => seeded_mobility_snapshot_for_network(network),
         };
         apply_into_world(&mut world, mobility_snap);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+        refresh_flow_field_resources(&mut world);
 
         for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
             let snap = snapshot_store
@@ -815,6 +856,65 @@ mod tests {
     use super::*;
     use abutown_protocol::{ChunkStateDto, TileKindDto};
 
+    fn populated_flow_field_cache() -> sim_core::routing::FlowFieldCache {
+        use sim_core::routing::{
+            Edge, EdgeId, EdgeKind, FlowFieldCache, FlowFieldCacheKey, FlowFieldScope, Graph, Node,
+            NodeId, NodeKind, RoutingProfile, RoutingProfileKey,
+        };
+
+        let graph = Graph::new(
+            vec![
+                Node {
+                    id: NodeId(0),
+                    position: (0.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(1),
+                    position: (1.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+            ],
+            vec![
+                Edge {
+                    id: EdgeId(0),
+                    from: NodeId(0),
+                    to: NodeId(1),
+                    polyline: vec![(0.0, 0.0), (1.0, 0.0)],
+                    length: 1.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: None,
+                },
+                Edge {
+                    id: EdgeId(1),
+                    from: NodeId(1),
+                    to: NodeId(0),
+                    polyline: vec![(1.0, 0.0), (0.0, 0.0)],
+                    length: 1.0,
+                    kind: EdgeKind::Footway,
+                    speed_limit: 1.0,
+                    capacity: 1,
+                    legacy_id: None,
+                },
+            ],
+        );
+        let mut cache = FlowFieldCache::with_capacity(2);
+        cache
+            .get_or_build(
+                &graph,
+                FlowFieldCacheKey::all_edges(NodeId(1), RoutingProfileKey::Walk, 0),
+                RoutingProfile::for_key(RoutingProfileKey::Walk),
+                FlowFieldScope::AllEdges,
+            )
+            .expect("test flow field should build");
+        assert_eq!(cache.len(), 1);
+        cache
+    }
+
     #[test]
     fn simulation_runtime_holds_world_directly() {
         let runtime = SimulationRuntime::new();
@@ -854,6 +954,23 @@ mod tests {
             runtime
                 .world
                 .contains_resource::<sim_core::routing::PathCache>()
+        );
+    }
+
+    #[test]
+    fn runtime_installs_flow_field_cache() {
+        let runtime = SimulationRuntime::new();
+        assert!(
+            runtime
+                .world
+                .contains_resource::<sim_core::routing::FlowFieldCache>()
+        );
+        assert_eq!(
+            runtime
+                .world
+                .resource::<sim_core::routing::FlowFieldCache>()
+                .len(),
+            0
         );
     }
 
@@ -966,6 +1083,31 @@ mod tests {
     }
 
     #[test]
+    fn set_mobility_for_test_refreshes_flow_field_cache() {
+        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/city/zurich-network.json");
+        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
+            .expect("zurich fixture network must load");
+        let mut runtime = SimulationRuntime::new_from_network(&network);
+        runtime.world.insert_resource(populated_flow_field_cache());
+
+        runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
+
+        assert!(
+            runtime
+                .world
+                .contains_resource::<sim_core::routing::FlowFieldCache>()
+        );
+        assert_eq!(
+            runtime
+                .world
+                .resource::<sim_core::routing::FlowFieldCache>()
+                .len(),
+            0
+        );
+    }
+
+    #[test]
     fn hydration_spawns_chunk_entity_per_loaded_chunk() {
         let runtime = SimulationRuntime::new();
         let world = &runtime.world;
@@ -1004,6 +1146,29 @@ mod tests {
                 height: 256,
             },
             arterial_paths: vec![],
+            pedestrian_corridors: vec![],
+        }
+    }
+
+    fn road_test_network() -> sim_core::city_network::CityNetwork {
+        sim_core::city_network::CityNetwork {
+            version: 1,
+            world_id: "test".to_string(),
+            chunk_size: 32,
+            world_tiles: sim_core::city_network::WorldTiles {
+                width: 256,
+                height: 256,
+            },
+            arterial_paths: vec![
+                vec![
+                    sim_core::city_network::NetworkCoord { x: 0, y: 64 },
+                    sim_core::city_network::NetworkCoord { x: 64, y: 64 },
+                ],
+                vec![
+                    sim_core::city_network::NetworkCoord { x: 32, y: 0 },
+                    sim_core::city_network::NetworkCoord { x: 32, y: 64 },
+                ],
+            ],
             pedestrian_corridors: vec![],
         }
     }
@@ -1352,7 +1517,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hydrate_from_stores_falls_back_to_seed_when_no_snapshot() {
+    async fn hydrate_from_stores_seeds_when_no_snapshot() {
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(InMemoryWorldEventStore::default()),
             Box::new(InMemoryChunkSnapshotStore::default()),
@@ -1580,5 +1745,42 @@ mod tests {
         .unwrap();
 
         assert_eq!(runtime.mobility_tick_for_test(), persisted_tick);
+    }
+
+    #[tokio::test]
+    async fn hydrate_reseeds_vehicleless_snapshot_when_network_expects_cars() {
+        use sim_core::mobility::{extract_from_world, seed};
+
+        let network = road_test_network();
+        let (authored, _) = seed::from_network(
+            &network,
+            sim_core::mobility::seed::SeedDensity {
+                pedestrians_per_corridor: 0,
+                cars_per_arterial: 0,
+                trams_total: 0,
+            },
+        );
+        let authored_snap = extract_from_world(&authored);
+        assert!(
+            authored_snap.vehicles.is_empty(),
+            "test fixture should mimic the stale persisted vehicleless snapshot"
+        );
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(&mut mobility_store, "abutown-main", 99, &authored_snap)
+            .await
+            .unwrap();
+
+        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+            &network,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 38);
     }
 }

@@ -338,6 +338,7 @@ export function isWorldCoordDto(value: unknown): value is WorldCoordDto {
 import type {
   AgentMobility as AgentMobilityProto,
   AgentState as AgentStateProto,
+  ChunkCoord as ChunkCoordProto,
   HealthResponse as HealthResponseProto,
   MobilityChunkDelta as MobilityChunkDeltaProto,
   MobilityChunkSnapshot as MobilityChunkSnapshotProto,
@@ -360,7 +361,11 @@ const DIRECTION_PROTO_TO_DTO: Record<number, DirectionDto> = {
 };
 
 export function directionFromProto(value: DirectionProto): DirectionDto {
-  return DIRECTION_PROTO_TO_DTO[value] ?? 'e';
+  const direction = DIRECTION_PROTO_TO_DTO[value];
+  if (!direction) {
+    throw new Error('missing direction');
+  }
+  return direction;
 }
 
 function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
@@ -368,15 +373,25 @@ function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
   return 'car';
 }
 
+function chunkCoordFromProto(chunk: ChunkCoordProto | undefined): ChunkCoordDto {
+  if (!chunk) {
+    throw new Error('missing chunk');
+  }
+  return { x: chunk.x, y: chunk.y };
+}
+
 function agentStateFromProto(state: AgentStateProto | undefined): AgentMobilityStateDto {
   if (!state || state.state.case === undefined) {
-    // Backend should always send a populated AgentState; fall back to
-    // at_activity with empty id to keep the reducer alive on malformed frames.
-    return { type: 'at_activity', activity_id: '' };
+    throw new Error('missing AgentState');
   }
   switch (state.state.case) {
-    case 'walking':
-      return { type: 'walking', link_id: state.state.value.linkId, progress: state.state.value.progress };
+    case 'walking': {
+      const { linkId, progress } = state.state.value;
+      if (!isString(linkId) || linkId.length === 0 || !isFiniteProgress(progress)) {
+        throw new Error('invalid walking state');
+      }
+      return { type: 'walking', link_id: linkId, progress };
+    }
     case 'waitingAtStop':
       return { type: 'waiting_at_stop', stop_id: state.state.value.stopId };
     case 'inVehicle':
@@ -391,17 +406,23 @@ function agentStateFromProto(state: AgentStateProto | undefined): AgentMobilityS
 }
 
 export function agentMobilityFromProto(p: AgentMobilityProto): AgentMobilityDto {
+  if (!p.worldCoord) {
+    throw new Error('missing world_coord');
+  }
   return {
     id: p.id,
     state: agentStateFromProto(p.state),
     plan_cursor: p.planCursor,
-    world_coord: { x: p.worldCoord?.x ?? 0, y: p.worldCoord?.y ?? 0 },
+    world_coord: { x: p.worldCoord.x, y: p.worldCoord.y },
     direction: directionFromProto(p.direction),
     sprite_key: p.spriteKey,
   };
 }
 
 export function vehicleMobilityFromProto(p: VehicleMobilityProto): VehicleMobilityDto {
+  if (!p.worldCoord) {
+    throw new Error('missing world_coord');
+  }
   return {
     id: p.id,
     kind: vehicleKindFromProto(p.kind),
@@ -411,7 +432,7 @@ export function vehicleMobilityFromProto(p: VehicleMobilityProto): VehicleMobili
     capacity: p.capacity,
     occupants: [...p.occupants],
     dwell_ticks_remaining: p.dwellTicksRemaining,
-    world_coord: { x: p.worldCoord?.x ?? 0, y: p.worldCoord?.y ?? 0 },
+    world_coord: { x: p.worldCoord.x, y: p.worldCoord.y },
     direction: directionFromProto(p.direction),
     sprite_key: p.spriteKey,
   };
@@ -423,7 +444,7 @@ export function mobilityChunkDeltaFromProto(p: MobilityChunkDeltaProto): Mobilit
     protocol_version: p.protocolVersion,
     world_id: p.worldId,
     tick: Number(p.tick),
-    chunk: { x: p.chunk?.x ?? 0, y: p.chunk?.y ?? 0 },
+    chunk: chunkCoordFromProto(p.chunk),
     changed_agents: p.changedAgents.map(agentMobilityFromProto),
     changed_vehicles: p.changedVehicles.map(vehicleMobilityFromProto),
     left_agents: [...p.leftAgents],
@@ -437,7 +458,7 @@ export function mobilityChunkSnapshotFromProto(p: MobilityChunkSnapshotProto): M
     protocol_version: p.protocolVersion,
     world_id: p.worldId,
     tick: Number(p.tick),
-    chunk: { x: p.chunk?.x ?? 0, y: p.chunk?.y ?? 0 },
+    chunk: chunkCoordFromProto(p.chunk),
     agents: p.agents.map(agentMobilityFromProto),
     vehicles: p.vehicles.map(vehicleMobilityFromProto),
   };
