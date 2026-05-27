@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use abutown_protocol::{ChunkSnapshotDto, PROTOCOL_VERSION, TileMutationDto, WorldId};
+use abutown_protocol::{ChunkSnapshotDto, LayeredTileDto, PROTOCOL_VERSION, WorldId};
 use async_trait::async_trait;
 
 use crate::chunk::Chunk;
 use crate::ids::ChunkCoord;
 use crate::mobility::MobilityPersistSnapshot;
 use crate::scheduler::ChunkActivity;
-use crate::tile::TileKind;
 
 /// Build a `ChunkSnapshotDto` from a `Chunk` value. Delegates to
 /// `build_chunk_snapshot_from_parts` after extracting the dense tile vector
@@ -36,14 +35,12 @@ pub fn build_chunk_snapshot_from_parts(
     activity: ChunkActivity,
 ) -> ChunkSnapshotDto {
     let tile_count = tiles.len() as u16;
-    let mut emitted: Vec<TileMutationDto> = Vec::new();
+    let mut emitted: Vec<LayeredTileDto> = Vec::new();
     for (index, tile) in tiles.iter().enumerate() {
-        if tile.kind != TileKind::default() {
-            emitted.push(TileMutationDto {
-                local_index: index as u16,
-                kind: tile.kind.into(),
-                version: tile.version,
-            });
+        let mut physical_tile = tile.clone();
+        physical_tile.version = 0;
+        if physical_tile != crate::tile::LayeredTileRecord::default() {
+            emitted.push(tile.to_dto(index as u16));
         }
     }
     ChunkSnapshotDto {
@@ -194,15 +191,30 @@ mod tests {
     use crate::chunk::Chunk;
     use crate::ids::ChunkCoord;
     use crate::scheduler::ChunkActivity;
-    use crate::tile::TileKind;
+    use crate::tile::{TileBase, TileRecord, TileSurface};
 
     #[test]
     fn snapshot_contains_initial_tiles_then_clears_dirty_state() {
         let mut chunk = Chunk::new(ChunkCoord { x: 1, y: 2 }, 32);
         chunk
-            .set_tile_kind(3, TileKind::Water)
+            .set_tile_record(
+                3,
+                TileRecord {
+                    base: TileBase::Water,
+                    ..TileRecord::default()
+                },
+            )
             .expect("tile exists");
-        chunk.set_tile_kind(9, TileKind::Road).expect("tile exists");
+        chunk
+            .set_tile_record(
+                9,
+                TileRecord {
+                    surface: TileSurface::Street,
+                    road_mask: Some(5),
+                    ..TileRecord::default()
+                },
+            )
+            .expect("tile exists");
 
         let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
 
@@ -217,11 +229,34 @@ mod tests {
     #[test]
     fn build_chunk_snapshot_emits_all_non_default_tiles_after_clear_dirty() {
         let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        chunk.set_tile_kind(0, TileKind::Road).unwrap();
-        chunk.set_tile_kind(17, TileKind::Water).unwrap();
+        chunk
+            .set_tile_record(
+                0,
+                TileRecord {
+                    surface: TileSurface::Street,
+                    road_mask: Some(5),
+                    ..TileRecord::default()
+                },
+            )
+            .unwrap();
+        chunk
+            .set_tile_record(
+                17,
+                TileRecord {
+                    base: TileBase::Water,
+                    ..TileRecord::default()
+                },
+            )
+            .unwrap();
         chunk.clear_dirty();
         chunk
-            .set_tile_kind(42, TileKind::BuildingFootprint)
+            .set_tile_record(
+                42,
+                TileRecord {
+                    base: TileBase::Park,
+                    ..TileRecord::default()
+                },
+            )
             .unwrap();
 
         let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
@@ -240,10 +275,24 @@ mod tests {
         let mut store = InMemoryChunkSnapshotStore::default();
 
         let mut east = Chunk::new(ChunkCoord { x: 5, y: 4 }, 32);
-        east.set_tile_kind(0, TileKind::Water).expect("tile exists");
+        east.set_tile_record(
+            0,
+            TileRecord {
+                base: TileBase::Water,
+                ..TileRecord::default()
+            },
+        )
+        .expect("tile exists");
         let mut visible = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
         visible
-            .set_tile_kind(0, TileKind::Road)
+            .set_tile_record(
+                0,
+                TileRecord {
+                    surface: TileSurface::Street,
+                    road_mask: Some(5),
+                    ..TileRecord::default()
+                },
+            )
             .expect("tile exists");
 
         store.write_snapshot(build_chunk_snapshot(
@@ -268,7 +317,16 @@ mod tests {
     async fn chunk_snapshot_store_writes_and_reads_snapshot() {
         let mut store = InMemoryChunkSnapshotStore::default();
         let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        chunk.set_tile_kind(0, TileKind::Road).expect("tile exists");
+        chunk
+            .set_tile_record(
+                0,
+                TileRecord {
+                    surface: TileSurface::Street,
+                    road_mask: Some(5),
+                    ..TileRecord::default()
+                },
+            )
+            .expect("tile exists");
         let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
 
         ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone())

@@ -56,14 +56,12 @@ impl SimPlugin for CorePlugin {
         // Messages (Bevy 0.18 — buffered events live as `Messages<T>` resources)
         world.insert_resource(Messages::<ChunkLoaded>::default());
         world.insert_resource(Messages::<ChunkUnloaded>::default());
-        world.insert_resource(Messages::<TileChanged>::default());
         world.insert_resource(Messages::<ChunkLodChanged>::default());
 
         // System sets (ordering chain)
         schedule.configure_sets(
             (
                 CoreSet::ChunkLifecycle,
-                CoreSet::TileMutation,
                 CoreSet::LodReclassify,
                 CoreSet::EventEmit,
             )
@@ -94,7 +92,6 @@ mod tests {
         assert!(world.contains_resource::<TickClock>());
         assert!(world.contains_resource::<DeterministicRng>());
         assert!(world.contains_resource::<Messages<ChunkLoaded>>());
-        assert!(world.contains_resource::<Messages<TileChanged>>());
         assert_eq!(world.resource::<ChunkSizeRes>().0, 32);
     }
 

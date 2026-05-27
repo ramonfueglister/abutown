@@ -92,7 +92,7 @@ impl SnapshotProvider for ChunkSnapshotProvider {
 mod tests {
     use super::*;
     use crate::ids::ChunkCoord;
-    use crate::tile::{TileKind, TileRecord};
+    use crate::tile::{TileRecord, TileSurface};
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     use crate::world::systems::spawn_chunk_entity;
@@ -105,7 +105,8 @@ mod tests {
 
         let coord = ChunkCoord { x: 1, y: 2 };
         let mut tiles = vec![TileRecord::default(); 4];
-        tiles[0].kind = TileKind::Road;
+        tiles[0].surface = TileSurface::Street;
+        tiles[0].road_mask = Some(5);
         tiles[0].version = 1;
 
         let entity = spawn_chunk_entity(&mut world, coord, 2, tiles, 0, ChunkActivity::Active);

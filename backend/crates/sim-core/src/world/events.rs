@@ -1,7 +1,6 @@
 use bevy_ecs::prelude::*;
 
 use crate::ids::ChunkCoord;
-use crate::tile::TileKind;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ChunkLod {
@@ -22,17 +21,6 @@ pub struct ChunkLoaded {
 pub struct ChunkUnloaded {
     pub entity: Entity,
     pub coord: ChunkCoord,
-}
-
-#[derive(Message, Debug)]
-pub struct TileChanged {
-    pub chunk: Entity,
-    pub coord: ChunkCoord,
-    pub local_index: u16,
-    pub old_kind: TileKind,
-    pub new_kind: TileKind,
-    pub new_version: u64,
-    pub tick: u64,
 }
 
 #[derive(Message, Debug)]

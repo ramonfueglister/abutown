@@ -1,23 +1,17 @@
 use bevy_ecs::prelude::*;
 
-use crate::tile::TileKind;
 use crate::world::components::{BelongsToChunk, LocalIndex, Tile};
 
 /// Spawn a functional tile entity attached to a chunk.
 ///
 /// The chunk's dense `Tiles` array is the canonical terrain payload; this
-/// helper only spawns a separate Entity carrying domain components (Home,
-/// Workplace, …) that future plugins attach via Bevy `Commands`. Foundation
-/// (Phase 8a) ships NO domain components — they come in later phases.
-// scaffold for 8g (domain tiles) — no production caller in 8a, but the
-// signature is the contract future plugins will hang off, so keep it
-// compiled + tested.
+/// helper only spawns a separate entity for systems that need per-tile ECS
+/// identity in later terrain phases.
 #[allow(dead_code)]
 pub fn spawn_functional_tile(
     commands: &mut Commands,
     chunk: Entity,
     local_index: u16,
-    _kind: TileKind,
 ) -> Entity {
     commands
         .spawn((Tile, LocalIndex(local_index), BelongsToChunk(chunk)))
@@ -53,7 +47,7 @@ mod tests {
         let chunk = spawn_chunk(&mut world);
         let tile = world
             .run_system_once(move |mut commands: Commands| {
-                spawn_functional_tile(&mut commands, chunk, 5, TileKind::Road)
+                spawn_functional_tile(&mut commands, chunk, 5)
             })
             .unwrap();
 
@@ -68,12 +62,12 @@ mod tests {
         let chunk = spawn_chunk(&mut world);
         let _tile_a = world
             .run_system_once(move |mut commands: Commands| {
-                spawn_functional_tile(&mut commands, chunk, 1, TileKind::Road)
+                spawn_functional_tile(&mut commands, chunk, 1)
             })
             .unwrap();
         let _tile_b = world
             .run_system_once(move |mut commands: Commands| {
-                spawn_functional_tile(&mut commands, chunk, 2, TileKind::Water)
+                spawn_functional_tile(&mut commands, chunk, 2)
             })
             .unwrap();
 

@@ -4,7 +4,7 @@ use abutown_protocol::ChunkSnapshotDto;
 use thiserror::Error;
 
 use crate::ids::ChunkCoord;
-use crate::tile::{TileKind, TileRecord};
+use crate::tile::TileRecord;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ChunkError {
@@ -28,31 +28,6 @@ pub enum SnapshotDecodeError {
     IndexOutOfBounds { index: u16, tile_count: u16 },
     #[error("chunk construction failed: {0}")]
     Chunk(ChunkError),
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum EventApplyError {
-    #[error("event coord ({event_x},{event_y}) does not match chunk coord ({chunk_x},{chunk_y})")]
-    WrongChunkCoord {
-        event_x: i32,
-        event_y: i32,
-        chunk_x: i32,
-        chunk_y: i32,
-    },
-    #[error(
-        "event chunk_version {event_version} is older than current chunk version {chunk_version}"
-    )]
-    StaleEvent {
-        event_version: u64,
-        chunk_version: u64,
-    },
-    #[error("event chunk_version {event_version} skips past current chunk version {chunk_version}")]
-    GapEvent {
-        event_version: u64,
-        chunk_version: u64,
-    },
-    #[error("tile index {index} is outside chunk tile count {tile_count}")]
-    IndexOutOfBounds { index: u16, tile_count: u16 },
 }
 
 #[derive(Debug, Clone)]
@@ -104,12 +79,8 @@ impl Chunk {
         self.tiles.len() as u16
     }
 
-    pub fn kind_at(&self, index: u16) -> Option<TileKind> {
-        self.tiles.get(usize::from(index)).map(|tile| tile.kind)
-    }
-
     pub fn tile_at(&self, index: u16) -> Option<TileRecord> {
-        self.tiles.get(usize::from(index)).copied()
+        self.tiles.get(usize::from(index)).cloned()
     }
 
     pub fn dirty_indices(&self) -> Vec<u16> {
@@ -136,94 +107,35 @@ impl Chunk {
         )
         .map_err(SnapshotDecodeError::Chunk)?;
 
-        for mutation in &snapshot.tiles {
+        for tile in &snapshot.tiles {
             let slot = chunk
                 .tiles
-                .get_mut(usize::from(mutation.local_index))
+                .get_mut(usize::from(tile.local_index))
                 .ok_or(SnapshotDecodeError::IndexOutOfBounds {
-                    index: mutation.local_index,
+                    index: tile.local_index,
                     tile_count,
                 })?;
-            slot.kind = mutation.kind.into();
-            slot.version = mutation.version;
-            // Mark restored non-default tiles as modified so subsequent snapshots include them.
-            slot.flags.modified = true;
+            *slot = tile.clone().into();
         }
         chunk.version = snapshot.chunk_version;
         Ok(chunk)
     }
 
-    pub fn apply_event(
-        &mut self,
-        event: &abutown_protocol::WorldEventDto,
-        event_chunk_version: u64,
-    ) -> Result<(), EventApplyError> {
-        use abutown_protocol::WorldEventDto;
-
-        // Coord check first — applies to all variants and runs even on idempotent re-delivery.
-        match event {
-            WorldEventDto::TileKindSet(payload) => {
-                if payload.coord.x != self.coord.x || payload.coord.y != self.coord.y {
-                    return Err(EventApplyError::WrongChunkCoord {
-                        event_x: payload.coord.x,
-                        event_y: payload.coord.y,
-                        chunk_x: self.coord.x,
-                        chunk_y: self.coord.y,
-                    });
-                }
-            }
-        }
-
-        // Version checks.
-        if event_chunk_version == self.version {
-            return Ok(());
-        }
-        if event_chunk_version < self.version {
-            return Err(EventApplyError::StaleEvent {
-                event_version: event_chunk_version,
-                chunk_version: self.version,
-            });
-        }
-        if event_chunk_version != self.version + 1 {
-            return Err(EventApplyError::GapEvent {
-                event_version: event_chunk_version,
-                chunk_version: self.version,
-            });
-        }
-
-        // Apply mutation.
-        match event {
-            WorldEventDto::TileKindSet(payload) => {
-                let tile_count = self.tile_count();
-                let slot = self.tiles.get_mut(usize::from(payload.local_index)).ok_or(
-                    EventApplyError::IndexOutOfBounds {
-                        index: payload.local_index,
-                        tile_count,
-                    },
-                )?;
-                self.version = event_chunk_version;
-                slot.kind = payload.kind.into();
-                slot.version = self.version;
-                slot.flags.modified = true;
-                self.dirty.insert(payload.local_index);
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn set_tile_kind(&mut self, index: u16, kind: TileKind) -> Result<(), ChunkError> {
+    pub fn set_tile_record(&mut self, index: u16, mut record: TileRecord) -> Result<(), ChunkError> {
         let tile_count = self.tile_count();
         let tile = self
             .tiles
             .get_mut(usize::from(index))
             .ok_or(ChunkError::IndexOutOfBounds { index, tile_count })?;
 
-        if tile.kind != kind {
+        let mut current_physical = tile.clone();
+        current_physical.version = 0;
+        record.version = 0;
+
+        if current_physical != record {
             self.version += 1;
-            tile.kind = kind;
-            tile.version = self.version;
-            tile.flags.modified = true;
+            record.version = self.version;
+            *tile = record;
             self.dirty.insert(index);
         }
 
@@ -235,7 +147,7 @@ impl Chunk {
 mod tests {
     use super::*;
     use crate::ids::ChunkCoord;
-    use crate::tile::TileKind;
+    use crate::tile::{TileBase, TileSurface};
 
     #[test]
     fn chunk_uses_dense_tiles_and_tracks_dirty_indices() {
@@ -245,14 +157,27 @@ mod tests {
         assert_eq!(chunk.dirty_indices(), Vec::<u16>::new());
 
         chunk
-            .set_tile_kind(0, TileKind::Water)
+            .set_tile_record(
+                0,
+                TileRecord {
+                    base: TileBase::Water,
+                    ..TileRecord::default()
+                },
+            )
             .expect("index 0 exists");
         chunk
-            .set_tile_kind(17, TileKind::Road)
+            .set_tile_record(
+                17,
+                TileRecord {
+                    surface: TileSurface::Street,
+                    road_mask: Some(5),
+                    ..TileRecord::default()
+                },
+            )
             .expect("index 17 exists");
 
-        assert_eq!(chunk.kind_at(0), Some(TileKind::Water));
-        assert_eq!(chunk.kind_at(17), Some(TileKind::Road));
+        assert_eq!(chunk.tile_at(0).unwrap().base, TileBase::Water);
+        assert_eq!(chunk.tile_at(17).unwrap().surface, TileSurface::Street);
         assert_eq!(chunk.version(), 2);
         assert_eq!(chunk.dirty_indices(), vec![0, 17]);
     }
@@ -263,10 +188,33 @@ mod tests {
         use crate::scheduler::ChunkActivity;
 
         let mut original = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        original.set_tile_kind(0, TileKind::Road).unwrap();
-        original.set_tile_kind(17, TileKind::Water).unwrap();
         original
-            .set_tile_kind(42, TileKind::BuildingFootprint)
+            .set_tile_record(
+                0,
+                TileRecord {
+                    surface: TileSurface::Street,
+                    road_mask: Some(5),
+                    ..TileRecord::default()
+                },
+            )
+            .unwrap();
+        original
+            .set_tile_record(
+                17,
+                TileRecord {
+                    base: TileBase::Water,
+                    ..TileRecord::default()
+                },
+            )
+            .unwrap();
+        original
+            .set_tile_record(
+                42,
+                TileRecord {
+                    base: TileBase::Park,
+                    ..TileRecord::default()
+                },
+            )
             .unwrap();
 
         let snapshot = build_chunk_snapshot("abutown-main", &original, ChunkActivity::Active);
@@ -275,10 +223,13 @@ mod tests {
         assert_eq!(restored.coord(), original.coord());
         assert_eq!(restored.chunk_size(), original.chunk_size());
         assert_eq!(restored.version(), original.version());
-        assert_eq!(restored.kind_at(0), Some(TileKind::Road));
-        assert_eq!(restored.kind_at(17), Some(TileKind::Water));
-        assert_eq!(restored.kind_at(42), Some(TileKind::BuildingFootprint));
-        assert_eq!(restored.kind_at(1), Some(TileKind::default()));
+        assert_eq!(restored.tile_at(0).unwrap().surface, TileSurface::Street);
+        assert_eq!(restored.tile_at(0).unwrap().version, 1);
+        assert_eq!(restored.tile_at(17).unwrap().base, TileBase::Water);
+        assert_eq!(restored.tile_at(17).unwrap().version, 2);
+        assert_eq!(restored.tile_at(42).unwrap().base, TileBase::Park);
+        assert_eq!(restored.tile_at(42).unwrap().version, 3);
+        assert_eq!(restored.tile_at(1), Some(TileRecord::default()));
         assert_eq!(restored.dirty_indices(), Vec::<u16>::new());
     }
 
@@ -286,8 +237,8 @@ mod tests {
     fn chunk_from_snapshot_rejects_oversized_local_index() {
         use crate::scheduler::ChunkActivity;
         use abutown_protocol::{
-            ChunkCoordDto, ChunkSnapshotDto, PROTOCOL_VERSION, TileKindDto, TileMutationDto,
-            WorldId,
+            ChunkCoordDto, ChunkSnapshotDto, LayeredTileDto, PROTOCOL_VERSION, TileBaseDto,
+            TileCoverDto, TileSurfaceDto, WorldId,
         };
 
         let snapshot = ChunkSnapshotDto {
@@ -297,9 +248,15 @@ mod tests {
             chunk_state: ChunkActivity::Active.into(),
             chunk_version: 1,
             tile_count: 1024,
-            tiles: vec![TileMutationDto {
+            tiles: vec![LayeredTileDto {
                 local_index: 9999,
-                kind: TileKindDto::Road,
+                base: TileBaseDto::Grass,
+                surface: TileSurfaceDto::Street,
+                cover: TileCoverDto::None,
+                display: None,
+                zone_id: None,
+                road_mask: Some(5),
+                rail_mask: None,
                 version: 1,
             }],
         };
@@ -331,192 +288,6 @@ mod tests {
             err,
             SnapshotDecodeError::NonSquareTileCount { tile_count: 1000 }
         ));
-    }
-
-    #[test]
-    fn chunk_apply_event_advances_version_and_mutates_tile() {
-        use abutown_protocol::{
-            ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto,
-            WorldId,
-        };
-
-        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
-            protocol_version: PROTOCOL_VERSION,
-            event_id: "event:1".to_string(),
-            command_id: "command:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 1,
-            version: 1,
-            coord: ChunkCoordDto { x: 4, y: 4 },
-            local_index: 7,
-            kind: TileKindDto::Road,
-        });
-
-        chunk.apply_event(&event, 1).unwrap();
-
-        assert_eq!(chunk.version(), 1);
-        assert_eq!(chunk.kind_at(7), Some(TileKind::Road));
-    }
-
-    #[test]
-    fn chunk_apply_event_rejects_event_for_wrong_coord() {
-        use abutown_protocol::{
-            ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto,
-            WorldId,
-        };
-
-        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
-            protocol_version: PROTOCOL_VERSION,
-            event_id: "event:1".to_string(),
-            command_id: "command:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 1,
-            version: 1,
-            coord: ChunkCoordDto { x: 9, y: 9 },
-            local_index: 7,
-            kind: TileKindDto::Road,
-        });
-
-        let err = chunk.apply_event(&event, 1).unwrap_err();
-        assert!(matches!(err, EventApplyError::WrongChunkCoord { .. }));
-    }
-
-    #[test]
-    fn chunk_apply_event_idempotent_for_same_chunk_version() {
-        use abutown_protocol::{
-            ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto,
-            WorldId,
-        };
-
-        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
-            protocol_version: PROTOCOL_VERSION,
-            event_id: "event:1".to_string(),
-            command_id: "command:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 1,
-            version: 1,
-            coord: ChunkCoordDto { x: 4, y: 4 },
-            local_index: 7,
-            kind: TileKindDto::Road,
-        });
-
-        chunk.apply_event(&event, 1).unwrap();
-        chunk.apply_event(&event, 1).unwrap();
-
-        assert_eq!(
-            chunk.version(),
-            1,
-            "re-applying the same chunk_version must not bump version"
-        );
-        assert_eq!(chunk.kind_at(7), Some(TileKind::Road));
-    }
-
-    #[test]
-    fn chunk_apply_event_rejects_stale_chunk_version() {
-        use abutown_protocol::{
-            ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto,
-            WorldId,
-        };
-
-        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        let mk_event = |chunk_version: u64| {
-            WorldEventDto::TileKindSet(TileKindSetEventDto {
-                protocol_version: PROTOCOL_VERSION,
-                event_id: format!("event:{chunk_version}"),
-                command_id: format!("command:{chunk_version}"),
-                world_id: WorldId("abutown-main".to_string()),
-                tick: chunk_version,
-                version: chunk_version,
-                coord: ChunkCoordDto { x: 4, y: 4 },
-                local_index: 0,
-                kind: TileKindDto::Road,
-            })
-        };
-
-        chunk.apply_event(&mk_event(1), 1).unwrap();
-        chunk.apply_event(&mk_event(2), 2).unwrap();
-
-        let err = chunk.apply_event(&mk_event(1), 1).unwrap_err();
-        // chunk is now at version 2; replaying at version 1 is stale.
-        assert!(
-            matches!(
-                err,
-                EventApplyError::StaleEvent {
-                    event_version: 1,
-                    chunk_version: 2
-                }
-            ),
-            "expected StaleEvent {{ event: 1, chunk: 2 }}, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn chunk_apply_event_rejects_gap_in_chunk_version() {
-        use abutown_protocol::{
-            ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto,
-            WorldId,
-        };
-
-        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
-            protocol_version: PROTOCOL_VERSION,
-            event_id: "event:5".to_string(),
-            command_id: "command:5".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 5,
-            version: 5,
-            coord: ChunkCoordDto { x: 4, y: 4 },
-            local_index: 3,
-            kind: TileKindDto::Water,
-        });
-
-        let err = chunk.apply_event(&event, 5).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                EventApplyError::GapEvent {
-                    event_version: 5,
-                    chunk_version: 0
-                }
-            ),
-            "expected GapEvent {{ event: 5, chunk: 0 }}, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn chunk_apply_event_rejects_index_out_of_bounds() {
-        use abutown_protocol::{
-            ChunkCoordDto, PROTOCOL_VERSION, TileKindDto, TileKindSetEventDto, WorldEventDto,
-            WorldId,
-        };
-
-        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
-        let event = WorldEventDto::TileKindSet(TileKindSetEventDto {
-            protocol_version: PROTOCOL_VERSION,
-            event_id: "event:oob".to_string(),
-            command_id: "command:oob".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
-            tick: 1,
-            version: 1,
-            coord: ChunkCoordDto { x: 4, y: 4 },
-            local_index: 9999,
-            kind: TileKindDto::Road,
-        });
-
-        let err = chunk.apply_event(&event, 1).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                EventApplyError::IndexOutOfBounds {
-                    index: 9999,
-                    tile_count: 1024
-                }
-            ),
-            "expected IndexOutOfBounds {{ index: 9999, tile_count: 1024 }}, got {err:?}"
-        );
     }
 
     #[test]

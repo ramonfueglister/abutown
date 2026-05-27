@@ -4,7 +4,6 @@ use bevy_ecs::schedule::Schedule;
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum CoreSet {
     ChunkLifecycle,
-    TileMutation,
     LodReclassify,
     EventEmit,
 }

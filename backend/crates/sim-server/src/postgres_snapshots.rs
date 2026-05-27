@@ -172,7 +172,8 @@ impl ChunkSnapshotStore for PostgresChunkSnapshotStore {
 mod tests {
     use super::*;
     use abutown_protocol::{
-        ChunkCoordDto, ChunkStateDto, PROTOCOL_VERSION, TileKindDto, TileMutationDto,
+        ChunkCoordDto, ChunkStateDto, LayeredTileDto, PROTOCOL_VERSION, TileBaseDto,
+        TileCoverDto, TileSurfaceDto,
     };
 
     pub(crate) fn snapshot(world_id: WorldId) -> ChunkSnapshotDto {
@@ -183,9 +184,15 @@ mod tests {
             chunk_state: ChunkStateDto::Active,
             chunk_version: 7,
             tile_count: 1024,
-            tiles: vec![TileMutationDto {
+            tiles: vec![LayeredTileDto {
                 local_index: 3,
-                kind: TileKindDto::Road,
+                base: TileBaseDto::Grass,
+                surface: TileSurfaceDto::Street,
+                cover: TileCoverDto::None,
+                display: None,
+                zone_id: None,
+                road_mask: Some(5),
+                rail_mask: None,
                 version: 7,
             }],
         }
