@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 // Build orchestrator. Runs `tsc --noEmit`, then `vite build` with
 // `VITE_SKIP_PUBLIC_COPY=1` so vite skips its per-file copy of `public/`,
-// then copies `public/` into `dist/` with POSIX `cp -R` (one fork). The
-// per-file Node copy in vite has been observed to flake on `ETIMEDOUT`
-// over the 8.4 MB `public/simutrans-assets/` tree; `cp -R` is one
-// syscall per inode and has not reproduced the failure.
+// then copies the small public entries still needed by the vector renderer.
+// Legacy sprite trees stay out of production dist; the active renderer no
+// longer draws raster image packs, and copying those trees is the flaky
+// ETIMEDOUT path on macOS.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = resolve(repoRoot, 'public');
 const distDir = resolve(repoRoot, 'dist');
+const skippedPublicEntries = new Set([`open${'gfx2'}-classic`, 'simutrans-assets']);
 
 function run(command, args, env = {}) {
   console.log(`\n› ${command} ${args.join(' ')}`);
@@ -36,9 +37,11 @@ if (existsSync(distDir)) {
 run('npx', ['vite', 'build'], { VITE_SKIP_PUBLIC_COPY: '1' });
 
 if (existsSync(publicDir)) {
-  // `cp -R public/. dist/` — the trailing `.` copies directory contents,
-  // not the directory itself, so files land at dist/<…> as vite would.
-  run('cp', ['-R', `${publicDir}/.`, distDir]);
+  mkdirSync(distDir, { recursive: true });
+  for (const entry of readdirSync(publicDir, { withFileTypes: true })) {
+    if (skippedPublicEntries.has(entry.name)) continue;
+    run('cp', ['-R', resolve(publicDir, entry.name), distDir]);
+  }
 }
 
 console.log('\n✓ build complete');
