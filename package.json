@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && playwright test",
     "generate:city-network": "node --import tsx/esm scripts/generate-city-network.mjs",
+    "generate:base-world": "node --import tsx/esm scripts/generate-base-world.mjs",
     "generate:proto": "node scripts/generate-proto-ts.mjs",
     "lint:proto": "buf lint",
     "lint:proto-breaking": "buf breaking --against '.git#branch=origin/main,subdir=.'"

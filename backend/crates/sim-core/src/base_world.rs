@@ -1,0 +1,472 @@
+use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+use crate::ids::ChunkCoord;
+use crate::scheduler::ChunkActivity;
+use crate::tile::{TileKind, TileRecord};
+use crate::world::systems::spawn_chunk_entity;
+use bevy_ecs::world::World;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, thiserror::Error)]
+pub enum BaseWorldError {
+    #[error("base world manifest missing at {0}")]
+    MissingManifest(PathBuf),
+    #[error("failed to read base world file {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse base world file {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("unsupported base world schema version {0}")]
+    UnsupportedSchema(u32),
+    #[error("base world id mismatch: manifest has {manifest}, layer has {layer}")]
+    WorldIdMismatch { manifest: String, layer: String },
+    #[error("base world layer {0} is empty")]
+    EmptyLayer(&'static str),
+    #[error("base world coordinate {x},{y} is outside {width}x{height}")]
+    OutOfBounds {
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BaseWorldManifest {
+    pub schema_version: u32,
+    pub world_id: String,
+    pub display_name: String,
+    pub chunk_size: u16,
+    pub world_tiles: WorldTiles,
+    pub layers: BaseWorldLayerFiles,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BaseWorldLayerFiles {
+    pub terrain: String,
+    pub transport: String,
+    pub buildings: String,
+    pub decorations: String,
+    pub spawns: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TerrainLayer {
+    pub schema_version: u32,
+    pub world_id: String,
+    pub tiles: Vec<TerrainTile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TerrainTile {
+    pub x: i32,
+    pub y: i32,
+    pub kind: TerrainKind,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TerrainKind {
+    Grass,
+    Water,
+    Riverbank,
+    Park,
+    Forest,
+    Reserve,
+    Plaza,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TransportLayer {
+    pub schema_version: u32,
+    pub world_id: String,
+    pub roads: Vec<RoadTile>,
+    pub rails: Vec<RailTile>,
+    pub arterial_paths: Vec<TransportPath>,
+    pub rail_paths: Vec<TransportPath>,
+    pub pedestrian_corridors: Vec<TransportPath>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RoadTile {
+    pub x: i32,
+    pub y: i32,
+    pub kind: String,
+    pub mask: u8,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RailTile {
+    pub x: i32,
+    pub y: i32,
+    pub mask: u8,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TransportPath {
+    pub id: String,
+    pub points: Vec<NetworkCoord>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BuildingLayer {
+    pub schema_version: u32,
+    pub world_id: String,
+    pub footprints: Vec<BuildingFootprint>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BuildingFootprint {
+    pub id: String,
+    pub tiles: Vec<NetworkCoord>,
+    #[serde(default)]
+    pub sheet: Option<String>,
+    #[serde(default)]
+    pub frame: Option<u32>,
+    #[serde(default)]
+    pub district: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SpawnLayer {
+    pub schema_version: u32,
+    pub world_id: String,
+    pub pedestrian_groups: Vec<PedestrianSpawnGroup>,
+    pub car_groups: Vec<CarSpawnGroup>,
+    pub tram_lines: Vec<TramLineSpawn>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DecorationLayer {
+    pub schema_version: u32,
+    pub world_id: String,
+    pub trees: Vec<NetworkCoord>,
+    pub details: Vec<DecorationDetail>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DecorationDetail {
+    pub x: i32,
+    pub y: i32,
+    pub category: String,
+    pub asset_category: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PedestrianSpawnGroup {
+    pub id: String,
+    pub corridor_id: String,
+    pub agents_per_corridor: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CarSpawnGroup {
+    pub id: String,
+    pub arterial_id: String,
+    pub cars_per_arterial: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TramLineSpawn {
+    pub id: String,
+    pub rail_path_ids: Vec<String>,
+    pub trams: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseWorldBundle {
+    pub manifest: BaseWorldManifest,
+    pub terrain: TerrainLayer,
+    pub transport: TransportLayer,
+    pub buildings: BuildingLayer,
+    pub decorations: DecorationLayer,
+    pub spawns: SpawnLayer,
+}
+
+impl BaseWorldBundle {
+    pub fn load_from_dir(root: impl AsRef<Path>) -> Result<Self, BaseWorldError> {
+        let root = root.as_ref();
+        let manifest_path = root.join("manifest.json");
+        if !manifest_path.exists() {
+            return Err(BaseWorldError::MissingManifest(manifest_path));
+        }
+
+        let manifest: BaseWorldManifest = read_json(&manifest_path)?;
+        let terrain: TerrainLayer = read_json(&root.join(&manifest.layers.terrain))?;
+        let transport: TransportLayer = read_json(&root.join(&manifest.layers.transport))?;
+        let buildings: BuildingLayer = read_json(&root.join(&manifest.layers.buildings))?;
+        let decorations: DecorationLayer = read_json(&root.join(&manifest.layers.decorations))?;
+        let spawns: SpawnLayer = read_json(&root.join(&manifest.layers.spawns))?;
+
+        let bundle = Self {
+            manifest,
+            terrain,
+            transport,
+            buildings,
+            decorations,
+            spawns,
+        };
+        bundle.validate()?;
+        Ok(bundle)
+    }
+
+    pub fn validate(&self) -> Result<(), BaseWorldError> {
+        validate_schema(self.manifest.schema_version)?;
+        validate_schema(self.terrain.schema_version)?;
+        validate_schema(self.transport.schema_version)?;
+        validate_schema(self.buildings.schema_version)?;
+        validate_schema(self.decorations.schema_version)?;
+        validate_schema(self.spawns.schema_version)?;
+        self.validate_world_id(&self.terrain.world_id)?;
+        self.validate_world_id(&self.transport.world_id)?;
+        self.validate_world_id(&self.buildings.world_id)?;
+        self.validate_world_id(&self.decorations.world_id)?;
+        self.validate_world_id(&self.spawns.world_id)?;
+
+        if self.terrain.tiles.is_empty() {
+            return Err(BaseWorldError::EmptyLayer("terrain.tiles"));
+        }
+        if self.transport.roads.is_empty() {
+            return Err(BaseWorldError::EmptyLayer("transport.roads"));
+        }
+        if self.transport.arterial_paths.is_empty() {
+            return Err(BaseWorldError::EmptyLayer("transport.arterial_paths"));
+        }
+        if self.transport.pedestrian_corridors.is_empty() {
+            return Err(BaseWorldError::EmptyLayer("transport.pedestrian_corridors"));
+        }
+        if self.buildings.footprints.is_empty() {
+            return Err(BaseWorldError::EmptyLayer("buildings.footprints"));
+        }
+        if self.decorations.trees.is_empty() {
+            return Err(BaseWorldError::EmptyLayer("decorations.trees"));
+        }
+
+        for tile in &self.terrain.tiles {
+            self.require_in_bounds(tile.x, tile.y)?;
+        }
+        for road in &self.transport.roads {
+            self.require_in_bounds(road.x, road.y)?;
+        }
+        for rail in &self.transport.rails {
+            self.require_in_bounds(rail.x, rail.y)?;
+        }
+        for path in self.transport_paths() {
+            if path.points.is_empty() {
+                return Err(BaseWorldError::EmptyLayer("transport.path.points"));
+            }
+            for point in &path.points {
+                self.require_in_bounds(point.x, point.y)?;
+            }
+        }
+        for footprint in &self.buildings.footprints {
+            if footprint.tiles.is_empty() {
+                return Err(BaseWorldError::EmptyLayer("buildings.footprint.tiles"));
+            }
+            for point in &footprint.tiles {
+                self.require_in_bounds(point.x, point.y)?;
+            }
+        }
+        for tree in &self.decorations.trees {
+            self.require_in_bounds(tree.x, tree.y)?;
+        }
+        for detail in &self.decorations.details {
+            self.require_in_bounds(detail.x, detail.y)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn world_id(&self) -> &str {
+        &self.manifest.world_id
+    }
+
+    pub fn chunk_size(&self) -> u16 {
+        self.manifest.chunk_size
+    }
+
+    pub fn world_tiles(&self) -> WorldTiles {
+        self.manifest.world_tiles
+    }
+
+    pub fn chunk_coords(&self) -> Vec<ChunkCoord> {
+        let chunk_size = u32::from(self.manifest.chunk_size);
+        let chunks_x = self.manifest.world_tiles.width.div_ceil(chunk_size);
+        let chunks_y = self.manifest.world_tiles.height.div_ceil(chunk_size);
+
+        (0..chunks_y)
+            .flat_map(|y| {
+                (0..chunks_x).map(move |x| ChunkCoord {
+                    x: i32::try_from(x).expect("chunk x fits i32"),
+                    y: i32::try_from(y).expect("chunk y fits i32"),
+                })
+            })
+            .collect()
+    }
+
+    pub fn spawn_all_chunks(&self, world: &mut World, initial_version: u64) {
+        for coord in self.chunk_coords() {
+            let tiles = self.tiles_for_chunk(coord, initial_version);
+            spawn_chunk_entity(
+                world,
+                coord,
+                self.manifest.chunk_size,
+                tiles,
+                initial_version,
+                ChunkActivity::Warm,
+            );
+        }
+    }
+
+    pub fn tiles_for_chunk(&self, coord: ChunkCoord, version: u64) -> Vec<TileRecord> {
+        let chunk_size = u32::from(self.manifest.chunk_size);
+        let mut tiles = Vec::with_capacity((chunk_size * chunk_size) as usize);
+
+        for local_y in 0..chunk_size {
+            for local_x in 0..chunk_size {
+                let x = coord.x * i32::from(self.manifest.chunk_size)
+                    + i32::try_from(local_x).expect("local x fits i32");
+                let y = coord.y * i32::from(self.manifest.chunk_size)
+                    + i32::try_from(local_y).expect("local y fits i32");
+                tiles.push(TileRecord {
+                    kind: self.tile_kind_at(x, y),
+                    version,
+                    ..TileRecord::default()
+                });
+            }
+        }
+
+        tiles
+    }
+
+    pub fn tile_kind_at(&self, x: i32, y: i32) -> TileKind {
+        if !self.point_in_bounds(x, y) {
+            return TileKind::Grass;
+        }
+
+        if self
+            .terrain
+            .tiles
+            .iter()
+            .any(|tile| tile.x == x && tile.y == y && water_like(tile.kind))
+        {
+            return TileKind::Water;
+        }
+
+        if self
+            .transport
+            .roads
+            .iter()
+            .any(|path| path.x == x && path.y == y)
+        {
+            return TileKind::Road;
+        }
+
+        if self.buildings.footprints.iter().any(|footprint| {
+            footprint
+                .tiles
+                .iter()
+                .any(|point| point.x == x && point.y == y)
+        }) {
+            return TileKind::BuildingFootprint;
+        }
+
+        TileKind::Grass
+    }
+
+    pub fn to_city_network(&self) -> CityNetwork {
+        CityNetwork {
+            version: self.manifest.schema_version,
+            world_id: self.manifest.world_id.clone(),
+            chunk_size: self.manifest.chunk_size,
+            world_tiles: self.manifest.world_tiles,
+            arterial_paths: self
+                .transport
+                .arterial_paths
+                .iter()
+                .map(|path| path.points.clone())
+                .collect(),
+            pedestrian_corridors: self
+                .transport
+                .pedestrian_corridors
+                .iter()
+                .map(|path| path.points.clone())
+                .collect(),
+        }
+    }
+
+    fn validate_world_id(&self, layer_world_id: &str) -> Result<(), BaseWorldError> {
+        if layer_world_id == self.manifest.world_id {
+            Ok(())
+        } else {
+            Err(BaseWorldError::WorldIdMismatch {
+                manifest: self.manifest.world_id.clone(),
+                layer: layer_world_id.to_owned(),
+            })
+        }
+    }
+
+    fn require_in_bounds(&self, x: i32, y: i32) -> Result<(), BaseWorldError> {
+        if self.point_in_bounds(x, y) {
+            Ok(())
+        } else {
+            Err(BaseWorldError::OutOfBounds {
+                x,
+                y,
+                width: self.manifest.world_tiles.width,
+                height: self.manifest.world_tiles.height,
+            })
+        }
+    }
+
+    fn point_in_bounds(&self, x: i32, y: i32) -> bool {
+        let Ok(width) = i32::try_from(self.manifest.world_tiles.width) else {
+            return false;
+        };
+        let Ok(height) = i32::try_from(self.manifest.world_tiles.height) else {
+            return false;
+        };
+        x >= 0 && y >= 0 && x < width && y < height
+    }
+
+    fn transport_paths(&self) -> impl Iterator<Item = &TransportPath> {
+        self.transport
+            .arterial_paths
+            .iter()
+            .chain(self.transport.rail_paths.iter())
+            .chain(self.transport.pedestrian_corridors.iter())
+    }
+}
+
+fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, BaseWorldError> {
+    let bytes = fs::read(path).map_err(|source| BaseWorldError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    serde_json::from_slice(&bytes).map_err(|source| BaseWorldError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn validate_schema(version: u32) -> Result<(), BaseWorldError> {
+    if version == SUPPORTED_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(BaseWorldError::UnsupportedSchema(version))
+    }
+}
+
+fn water_like(kind: TerrainKind) -> bool {
+    matches!(kind, TerrainKind::Water | TerrainKind::Riverbank)
+}

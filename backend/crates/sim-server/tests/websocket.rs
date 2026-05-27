@@ -17,9 +17,7 @@ use sim_server::{
 };
 
 fn runtime_with_seeded_mobility() -> SimulationRuntime {
-    let mut runtime = SimulationRuntime::new();
-    runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
-    runtime
+    SimulationRuntime::new()
 }
 
 #[tokio::test]
@@ -54,10 +52,10 @@ async fn websocket_sends_hello_and_tile_pulse() {
     )
     .await
     .expect("first tile pulse must arrive within one tick window");
-    assert_eq!(first_pulse.world_id, "abutown-main");
+    assert_eq!(first_pulse.world_id, "zurich-river-city-v1");
     let coord = first_pulse.coord.as_ref().expect("coord");
-    assert_eq!(coord.x, 4);
-    assert_eq!(coord.y, 4);
+    assert_eq!(coord.x, 0);
+    assert_eq!(coord.y, 0);
     assert_eq!(first_pulse.tick, 1);
     assert_eq!(first_pulse.version, 1);
     assert!(first_pulse.local_index < 1024);
@@ -95,9 +93,9 @@ async fn websocket_pulses_rotate_loaded_chunks() {
     let second_delta = read_next_tile_pulse(&mut stream).await;
     let third_delta = read_next_tile_pulse(&mut stream).await;
 
-    assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
-    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 5, y: 4 }));
-    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 4, y: 5 }));
+    assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
+    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 1, y: 0 }));
+    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 2, y: 0 }));
 
     server.abort();
 }
@@ -164,7 +162,7 @@ async fn websocket_sends_mobility_snapshots_after_subscribe() {
     while snapshots.len() < 3 {
         let msg = read_server_message(&mut stream).await;
         if let Some(w::server_message::Body::MobilityChunkSnapshot(snap)) = msg.body {
-            assert_eq!(snap.world_id, "abutown-main");
+            assert_eq!(snap.world_id, "zurich-river-city-v1");
             snapshots.push(snap);
         }
     }
@@ -201,7 +199,7 @@ async fn websocket_broadcasts_accepted_command_event() {
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "abutown-main".to_string(),
+                world_id: "zurich-river-city-v1".to_string(),
                 command_id: "command:ws:1".to_string(),
                 coord: Some(w::ChunkCoord { x: 4, y: 4 }),
                 local_index: 12,
@@ -259,7 +257,7 @@ async fn websocket_does_not_broadcast_failed_command_append() {
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "abutown-main".to_string(),
+                world_id: "zurich-river-city-v1".to_string(),
                 command_id: "command:ws:store-failure".to_string(),
                 coord: Some(w::ChunkCoord { x: 4, y: 4 }),
                 local_index: 11,

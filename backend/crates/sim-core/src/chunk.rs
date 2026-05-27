@@ -88,6 +88,37 @@ impl Chunk {
         })
     }
 
+    pub fn from_records(
+        coord: ChunkCoord,
+        chunk_size: u16,
+        tiles: Vec<TileRecord>,
+        version: u64,
+    ) -> Result<Self, ChunkError> {
+        let expected_tile_count = usize::from(chunk_size) * usize::from(chunk_size);
+        if expected_tile_count > usize::from(u16::MAX) {
+            return Err(ChunkError::InvalidChunkSize {
+                chunk_size,
+                tile_count: expected_tile_count,
+                max_tile_count: usize::from(u16::MAX),
+            });
+        }
+        if tiles.len() != expected_tile_count {
+            return Err(ChunkError::InvalidChunkSize {
+                chunk_size,
+                tile_count: tiles.len(),
+                max_tile_count: expected_tile_count,
+            });
+        }
+
+        Ok(Self {
+            coord,
+            chunk_size,
+            version,
+            tiles,
+            dirty: BTreeSet::new(),
+        })
+    }
+
     pub fn coord(&self) -> ChunkCoord {
         self.coord
     }

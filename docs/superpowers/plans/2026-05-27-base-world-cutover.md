@@ -12,15 +12,15 @@
 
 ## Progress
 
-- [ ] Task 1: Add failing cutover guards
-- [ ] Task 2: Add Base World Bundle schema and loader in `sim-core`
-- [ ] Task 3: Generate the canonical `zurich-river-city-v1` bundle
-- [ ] Task 4: Materialize backend chunks from the bundle
-- [ ] Task 5: Route and seed mobility from bundle data only
-- [ ] Task 6: Serve bundle-derived render layers to the frontend
-- [ ] Task 7: Remove retired/demo production paths
+- [x] Task 1: Add failing cutover guards
+- [x] Task 2: Add Base World Bundle schema and loader in `sim-core`
+- [x] Task 3: Generate the canonical `zurich-river-city-v1` bundle
+- [x] Task 4: Materialize backend chunks from the bundle
+- [x] Task 5: Route and seed mobility from bundle data only
+- [x] Task 6: Serve bundle-derived render layers to the frontend
+- [x] Task 7: Remove retired/demo production paths
 - [ ] Task 8: Add snapshot compatibility metadata
-- [ ] Task 9: Run full verification and commit in reviewable slices
+- [x] Task 9: Run full verification and commit in reviewable slices
 
 ---
 

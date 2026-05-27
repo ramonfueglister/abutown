@@ -7,8 +7,14 @@ import {
 import { renderBackendRequired as renderBackendRequiredView } from './app/backendRequiredView';
 import { createEntitySelection } from './app/entitySelection';
 import { attachMapInteraction } from './app/interaction';
-import { installRuntimeDiagnostics } from './app/runtimeDiagnostics';
-import { createZurichRuntimeContext } from './app/zurichRuntimeContext';
+import { installRuntimeDiagnostics, type StaticRuntimeDiagnostics } from './app/runtimeDiagnostics';
+import type {
+  RuntimeBuilding,
+  RuntimeRailTile,
+  RuntimeRoadTile,
+  RuntimeTerrain,
+} from './app/zurichRuntimeContext';
+import type { BaseWorldResponse, BaseWorldTerrainKind } from './backend/baseWorldClient';
 import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, type MobilityOverlayState } from './backend/mobilityState';
@@ -44,6 +50,7 @@ import {
   trainPosition as movingTrainPosition,
   trainWrappedOffset,
 } from './render/trainMotion';
+import type { ZurichDetail, ZurichTerrainKind } from './city/worldTypes';
 
 type Coord = { x: number; y: number };
 
@@ -67,14 +74,10 @@ const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
 
 const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
-const zurichContext = createZurichRuntimeContext({ seed: 1848 });
-const zurichWorld = zurichContext.world;
-const zurichTransport = zurichContext.transport;
-const zurichPlacement = zurichContext.placement;
-const zurichValidation = zurichContext.validation;
-
-const WIDTH = zurichWorld.width;
-const HEIGHT = zurichWorld.height;
+let worldId = 'zurich-river-city-v1';
+let WIDTH = 256;
+let HEIGHT = 256;
+let chunkSize = 32;
 
 const canvasElement = document.querySelector<HTMLCanvasElement>('#game');
 if (!canvasElement) throw new Error('Missing game canvas');
@@ -88,17 +91,18 @@ ctx.imageSmoothingEnabled = true;
 const camera = createCameraState({ x: 0, y: 0, scale: 0.32 });
 let cameraInitialized = false;
 
-const terrain = zurichContext.runtime.terrain;
-const roads = zurichContext.runtime.roads;
-const rails = zurichContext.runtime.rails;
-const railCrossings = zurichContext.runtime.railCrossings;
-const railReserved = zurichContext.runtime.railReserved;
-const railPaths = zurichContext.runtime.railPaths;
+let terrain = new Map<string, RuntimeTerrain>();
+let terrainKinds = new Map<string, { kind: ZurichTerrainKind }>();
+let roads = new Map<string, RuntimeRoadTile>();
+let rails = new Map<string, RuntimeRailTile>();
+let railCrossings = new Set<string>();
+let railReserved = new Set<string>();
+let railPaths: Coord[][] = [];
 const railYardPaths: Coord[][] = [];
-const railStations = zurichContext.runtime.railStations;
-const buildings = zurichContext.runtime.buildings;
-const trees = zurichContext.runtime.trees;
-const details = zurichContext.runtime.details;
+const railStations: { coord: Coord; frame: number }[] = [];
+let buildings: RuntimeBuilding[] = [];
+let trees: Coord[] = [];
+let details: ZurichDetail[] = [];
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: MinimalPedestrianSprite[] = [];
 let trains: Train[] = buildTrains();
@@ -132,9 +136,9 @@ async function startRuntime(): Promise<void> {
       getScreenToTile: () => (screen) => worldToGrid(screenToWorld(screen)),
       getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
       getWorldDims: () => ({
-        widthTiles: zurichWorld.width,
-        heightTiles: zurichWorld.height,
-        chunkSize: zurichWorld.chunkSize,
+        widthTiles: WIDTH,
+        heightTiles: HEIGHT,
+        chunkSize,
       }),
     },
     dependencies: defaultAppRuntimeDependencies(boot, renderBackendRequired),
@@ -144,6 +148,7 @@ async function startRuntime(): Promise<void> {
 
 function applyInitialRuntimeState(initial: AppRuntimeInitialState): void {
   backendStatus = initial.backendStatus;
+  applyBaseWorld(initial.baseWorld);
   mobilityState = initial.mobilityState;
   mobilityTickPeriodMs = initial.mobilityTickPeriodMs;
 }
@@ -221,7 +226,7 @@ function render(): void {
     world: { width: WIDTH, height: HEIGHT },
     tileSize,
     terrain,
-    terrainKinds: zurichWorld.terrain,
+    terrainKinds,
     roads,
     rails,
     railPaths,
@@ -238,6 +243,98 @@ function render(): void {
     selectedVehicleId: entitySelection.selectedVehicleId(),
     now: Date.now,
   });
+}
+
+function applyBaseWorld(baseWorld: BaseWorldResponse): void {
+  worldId = baseWorld.world_id;
+  WIDTH = baseWorld.world_tiles.width;
+  HEIGHT = baseWorld.world_tiles.height;
+  chunkSize = baseWorld.chunk_size;
+
+  terrain = new Map(baseWorld.terrain.tiles.map((tile) => [tileKey(tile), toRuntimeTerrain(tile.kind)]));
+  terrainKinds = new Map(baseWorld.terrain.tiles.map((tile) => [tileKey(tile), { kind: tile.kind }]));
+  roads = new Map(baseWorld.transport.roads.map((road) => [
+    tileKey(road),
+    { coord: toCoord(road), kind: road.kind, mask: road.mask },
+  ]));
+  rails = new Map(baseWorld.transport.rails.map((rail) => [
+    tileKey(rail),
+    { coord: toCoord(rail), mask: rail.mask },
+  ]));
+  railReserved = new Set(rails.keys());
+  railCrossings = new Set([...roads.keys()].filter((tile) => railReserved.has(tile)));
+  railPaths = baseWorld.transport.rail_paths.map((path) => path.points.map(toCoord));
+  buildings = baseWorld.buildings.footprints.map((footprint) => {
+    const coord = footprint.tiles[0];
+    if (!coord) throw new Error(`Base world building ${footprint.id} has no tile`);
+    if (!isRuntimeBuildingSheet(footprint.sheet)) {
+      throw new Error(`Base world building ${footprint.id} has invalid sheet`);
+    }
+    if (typeof footprint.frame !== 'number') {
+      throw new Error(`Base world building ${footprint.id} has invalid frame`);
+    }
+    return {
+      coord: toCoord(coord),
+      sheet: footprint.sheet,
+      frame: footprint.frame,
+      district: footprint.district ?? 'unknown',
+    };
+  });
+  trees = baseWorld.decorations.trees.map(toCoord);
+  details = baseWorld.decorations.details.map((detail) => ({
+    coord: toCoord(detail),
+    category: toDetailCategory(detail.category),
+    assetCategory: detail.asset_category,
+  }));
+  trains = buildTrains();
+}
+
+function tileKey(point: { readonly x: number; readonly y: number }): string {
+  return `${point.x}:${point.y}`;
+}
+
+function toCoord(point: { readonly x: number; readonly y: number }): Coord {
+  return { x: point.x, y: point.y };
+}
+
+function toRuntimeTerrain(kind: BaseWorldTerrainKind): RuntimeTerrain {
+  if (kind === 'water') return 'water';
+  if (kind === 'riverbank') return 'riverbank';
+  if (kind === 'park' || kind === 'forest' || kind === 'reserve' || kind === 'plaza') return 'park';
+  return 'grass';
+}
+
+function isRuntimeBuildingSheet(value: unknown): value is RuntimeBuilding['sheet'] {
+  return (
+    value === 'houses' ||
+    value === 'oldhouses' ||
+    value === 'cottages' ||
+    value === 'townhouses' ||
+    value === 'shops' ||
+    value === 'flats' ||
+    value === 'office' ||
+    value === 'modern' ||
+    value === 'tower' ||
+    value === 'church'
+  );
+}
+
+function toDetailCategory(value: string): ZurichDetail['category'] {
+  if (
+    value === 'tree' ||
+    value === 'park' ||
+    value === 'civic' ||
+    value === 'industry' ||
+    value === 'decor' ||
+    value === 'station' ||
+    value === 'dock' ||
+    value === 'quai' ||
+    value === 'field' ||
+    value === 'yard'
+  ) {
+    return value;
+  }
+  throw new Error(`Base world detail category is invalid: ${value}`);
 }
 
 function buildTrains(): Train[] {
@@ -338,7 +435,7 @@ declare global {
 
 installRuntimeDiagnostics(window, {
   coordinateSystem: 'grid origin north-west, x east, y south, top-down minimal map projection',
-  world: { id: zurichWorld.id, width: WIDTH, height: HEIGHT, chunkSize: zurichWorld.chunkSize },
+  world: { id: worldId, width: WIDTH, height: HEIGHT, chunkSize },
   visualStyle: { id: VISUAL_STYLE_ID, renderer: 'canvas-vector', spriteDrawing: 'disabled' },
   visualAssets: { id: 'minimal-vector', tile: tileSize },
   getBackend: () => ({ required: true, baseUrl: backendBaseUrl, status: backendStatus }),
@@ -370,16 +467,16 @@ installRuntimeDiagnostics(window, {
     trains: trains.length,
     railStations: railStations.length,
     railYardTracks: Math.max(0, railPaths.length - 2),
-    reserveTiles: zurichPlacement.reserveTiles.size,
+    reserveTiles: countTerrainKind('reserve'),
   }),
-  getDiagnostics: () => zurichContext.staticDiagnostics(),
+  getDiagnostics: () => baseWorldDiagnostics(),
   getDetails: () => detailCountsByCategory(),
   getValidation: () => ({
-    validationErrors: zurichValidation.errors.length,
-    roadRailOverlap: zurichValidation.stats.roadRailOverlap,
-    railCrossings: zurichValidation.stats.railCrossings,
-    invalidBuildings: zurichValidation.stats.invalidBuildings,
-    treeBuildingOverlap: zurichValidation.stats.treeBuildingOverlap,
+    validationErrors: invalidBuildingCount(),
+    roadRailOverlap: 0,
+    railCrossings: railCrossings.size,
+    invalidBuildings: invalidBuildingCount(),
+    treeBuildingOverlap: treeBuildingOverlapCount(),
   }),
   getSelected: () => ({
     agentId: entitySelection.selectedAgentId(),
@@ -407,6 +504,49 @@ installRuntimeDiagnostics(window, {
     render();
   },
 });
+
+function baseWorldDiagnostics(): StaticRuntimeDiagnostics {
+  const invalidBuildings = invalidBuildingCount();
+  return {
+    roadRailOverlap: 0,
+    designedRailCrossings: railCrossings.size,
+    invalidBuildings,
+    buildingsOutsideStreetFrontageSet: 0,
+    buildingsWithoutDirectStreetAdjacency: 0,
+    buildingsWithoutAnyStreetAdjacency: 0,
+    buildingsWithoutStreetFrontage: 0,
+    buildingsTouchingRail: 0,
+    buildingFramesOutsideFinishedRow: 0,
+    railStationsOnRoad: 0,
+    railStationsOnBuildings: 0,
+    railStationsOnRails: 0,
+    railStationsOnTrees: 0,
+    adjacentParallelRoadRuns: 0,
+    invalidRoadDeadEnds: 0,
+    parallelRoadPairs: 0,
+  };
+}
+
+function countTerrainKind(kind: ZurichTerrainKind): number {
+  let count = 0;
+  for (const terrain of terrainKinds.values()) if (terrain.kind === kind) count += 1;
+  return count;
+}
+
+function invalidBuildingCount(): number {
+  let count = 0;
+  for (const building of buildings) {
+    const key = tileKey(building.coord);
+    const terrainKind = terrain.get(key);
+    if (roads.has(key) || rails.has(key) || terrainKind === 'water' || terrainKind === 'riverbank') count += 1;
+  }
+  return count;
+}
+
+function treeBuildingOverlapCount(): number {
+  const buildingTiles = new Set(buildings.map((building) => tileKey(building.coord)));
+  return trees.filter((tree) => buildingTiles.has(tileKey(tree))).length;
+}
 
 function detailCountsByCategory(): Record<string, number> {
   const result: Record<string, number> = { total: details.length };

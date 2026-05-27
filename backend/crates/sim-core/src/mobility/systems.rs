@@ -2608,7 +2608,7 @@ mod tests {
             "street vehicles stay as concrete entities instead of being folded into flow cells"
         );
         assert!(
-            world.resource::<FlowCells>().0.get(&chunk).is_none(),
+            !world.resource::<FlowCells>().0.contains_key(&chunk),
             "vehicle-only demotion must not create anonymous population"
         );
     }

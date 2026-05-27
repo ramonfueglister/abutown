@@ -115,8 +115,6 @@ mod tests {
 
     #[tokio::test]
     async fn postgres_mobility_store_round_trip_when_database_url_is_set() {
-        use sim_core::mobility::{extract_from_world, seed};
-
         let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
             eprintln!("skipping; ABUTOWN_TEST_DATABASE_URL not set");
             return;
@@ -125,8 +123,7 @@ mod tests {
         let mut store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .unwrap();
-        let (world, _) = seed::initial_world();
-        let snap = extract_from_world(&world);
+        let snap = crate::runtime::SimulationRuntime::new().mobility_persist_snapshot();
         let world_id = format!("test:mobility:{}", uuid::Uuid::now_v7());
 
         store.write(&world_id, 7, &snap).await.unwrap();

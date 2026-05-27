@@ -76,7 +76,7 @@ fn set_tile_kind_proto(
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "abutown-main".to_string(),
+                world_id: "zurich-river-city-v1".to_string(),
                 command_id: command_id.to_string(),
                 coord: Some(w::ChunkCoord { x, y }),
                 local_index,
@@ -86,18 +86,12 @@ fn set_tile_kind_proto(
     }
 }
 
-fn empty_test_network() -> sim_core::city_network::CityNetwork {
-    sim_core::city_network::CityNetwork {
-        version: 1,
-        world_id: "test".to_string(),
-        chunk_size: 32,
-        world_tiles: sim_core::city_network::WorldTiles {
-            width: 256,
-            height: 256,
-        },
-        arterial_paths: vec![],
-        pedestrian_corridors: vec![],
-    }
+fn base_world_fixture() -> sim_core::base_world::BaseWorldBundle {
+    sim_core::base_world::BaseWorldBundle::load_from_dir(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/worlds/zurich-river-city-v1"),
+    )
+    .expect("base world fixture loads")
 }
 
 #[tokio::test]
@@ -123,7 +117,7 @@ async fn health_and_world_summary_are_available() {
         .to_bytes();
     let health = w::HealthResponse::decode(health_body.as_ref()).unwrap();
     assert_eq!(health.protocol_version, u32::from(PROTOCOL_VERSION));
-    assert_eq!(health.world_id, "abutown-main");
+    assert_eq!(health.world_id, "zurich-river-city-v1");
     assert!(health.ok);
 
     let world_response = app
@@ -145,12 +139,11 @@ async fn health_and_world_summary_are_available() {
         .to_bytes();
     let world = w::WorldSummary::decode(body.as_ref()).unwrap();
     assert_eq!(world.protocol_version, u32::from(PROTOCOL_VERSION));
-    assert_eq!(world.world_id, "abutown-main");
+    assert_eq!(world.world_id, "zurich-river-city-v1");
     assert_eq!(world.chunk_size, 32);
-    assert_eq!(world.loaded_chunks.len(), 3);
-    assert_eq!(world.loaded_chunks[0], w::ChunkCoord { x: 4, y: 4 });
-    assert_eq!(world.loaded_chunks[1], w::ChunkCoord { x: 5, y: 4 });
-    assert_eq!(world.loaded_chunks[2], w::ChunkCoord { x: 4, y: 5 });
+    assert_eq!(world.loaded_chunks.len(), 64);
+    assert_eq!(world.loaded_chunks[0], w::ChunkCoord { x: 0, y: 0 });
+    assert!(world.loaded_chunks.contains(&w::ChunkCoord { x: 4, y: 4 }));
     assert_eq!(world.tick_period_ms, 100);
 }
 
@@ -287,14 +280,17 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let snap = w::ChunkSnapshot::decode(body.as_ref()).unwrap();
 
-    assert_eq!(snap.world_id, "abutown-main");
+    assert_eq!(snap.world_id, "zurich-river-city-v1");
     assert_eq!(snap.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
     assert_eq!(snap.tile_count, 1024);
-    assert_eq!(snap.chunk_state, w::ChunkState::Active as i32);
+    assert_eq!(snap.chunk_state, w::ChunkState::Warm as i32);
 
-    assert_eq!(snap.tiles.len(), 1);
-    assert_eq!(snap.tiles[0].local_index, 0);
-    assert_eq!(snap.tiles[0].kind, w::TileKind::Road as i32);
+    assert!(!snap.tiles.is_empty());
+    assert!(
+        snap.tiles
+            .iter()
+            .any(|tile| tile.kind == w::TileKind::Road as i32)
+    );
 }
 
 #[tokio::test]
@@ -328,7 +324,7 @@ async fn unloaded_chunk_returns_not_found() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/chunks/0/0")
+                .uri("/chunks/8/8")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -357,11 +353,10 @@ async fn mobility_snapshot_is_available() {
     let mobility = w::MobilitySnapshot::decode(body.as_ref()).unwrap();
 
     assert_eq!(mobility.protocol_version, u32::from(PROTOCOL_VERSION));
-    assert_eq!(mobility.world_id, "abutown-main");
+    assert_eq!(mobility.world_id, "zurich-river-city-v1");
     assert_eq!(mobility.tick, 0);
-    assert!(mobility.agents.is_empty());
-    assert!(mobility.vehicles.is_empty());
-    assert!(mobility.stops.is_empty());
+    assert!(mobility.agents.len() >= 50);
+    assert!(!mobility.vehicles.is_empty());
 }
 
 #[tokio::test]
@@ -552,18 +547,19 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store");
+        let base_world = base_world_fixture();
         let (mut runtime, mut snapshot_store_box, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
-            &empty_test_network(),
+            &base_world,
         )
         .await
         .expect("hydrate first runtime");
 
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("zurich-river-city-v1".to_string()),
             command_id: command_id.clone(),
             coord: ChunkCoordDto { x: 4, y: 4 },
             local_index,
@@ -610,11 +606,12 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store (restart)");
+        let base_world = base_world_fixture();
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
-            &empty_test_network(),
+            &base_world,
         )
         .await
         .expect("hydrate restarted runtime");
@@ -711,7 +708,6 @@ async fn postgres_duplicate_command_returns_same_response() {
 
 #[tokio::test]
 async fn postgres_mobility_state_survives_runtime_restart() {
-    use sim_core::mobility::seed;
     use sim_core::persistence::MobilitySnapshotStore;
     use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
     use sim_server::runtime::SimulationRuntime;
@@ -735,7 +731,6 @@ async fn postgres_mobility_state_survives_runtime_restart() {
         let mut runtime = SimulationRuntime::new();
 
         runtime.override_world_id_for_test(&world_id);
-        runtime.set_mobility_for_test(seed::initial_world());
 
         for _ in 0..5 {
             runtime.advance_mobility_tick_for_test();

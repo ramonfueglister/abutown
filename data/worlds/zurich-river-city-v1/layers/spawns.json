@@ -1,0 +1,832 @@
+{
+  "schema_version": 1,
+  "world_id": "zurich-river-city-v1",
+  "pedestrian_groups": [
+    {
+      "id": "spawn:ped:pedestrian:0",
+      "corridor_id": "pedestrian:0",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:1",
+      "corridor_id": "pedestrian:1",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:2",
+      "corridor_id": "pedestrian:2",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:3",
+      "corridor_id": "pedestrian:3",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:4",
+      "corridor_id": "pedestrian:4",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:5",
+      "corridor_id": "pedestrian:5",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:6",
+      "corridor_id": "pedestrian:6",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:7",
+      "corridor_id": "pedestrian:7",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:8",
+      "corridor_id": "pedestrian:8",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:9",
+      "corridor_id": "pedestrian:9",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:10",
+      "corridor_id": "pedestrian:10",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:11",
+      "corridor_id": "pedestrian:11",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:12",
+      "corridor_id": "pedestrian:12",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:13",
+      "corridor_id": "pedestrian:13",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:14",
+      "corridor_id": "pedestrian:14",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:15",
+      "corridor_id": "pedestrian:15",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:16",
+      "corridor_id": "pedestrian:16",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:17",
+      "corridor_id": "pedestrian:17",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:18",
+      "corridor_id": "pedestrian:18",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:19",
+      "corridor_id": "pedestrian:19",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:20",
+      "corridor_id": "pedestrian:20",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:21",
+      "corridor_id": "pedestrian:21",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:22",
+      "corridor_id": "pedestrian:22",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:23",
+      "corridor_id": "pedestrian:23",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:24",
+      "corridor_id": "pedestrian:24",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:25",
+      "corridor_id": "pedestrian:25",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:26",
+      "corridor_id": "pedestrian:26",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:27",
+      "corridor_id": "pedestrian:27",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:28",
+      "corridor_id": "pedestrian:28",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:29",
+      "corridor_id": "pedestrian:29",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:30",
+      "corridor_id": "pedestrian:30",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:31",
+      "corridor_id": "pedestrian:31",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:32",
+      "corridor_id": "pedestrian:32",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:33",
+      "corridor_id": "pedestrian:33",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:34",
+      "corridor_id": "pedestrian:34",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:35",
+      "corridor_id": "pedestrian:35",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:36",
+      "corridor_id": "pedestrian:36",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:37",
+      "corridor_id": "pedestrian:37",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:38",
+      "corridor_id": "pedestrian:38",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:39",
+      "corridor_id": "pedestrian:39",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:40",
+      "corridor_id": "pedestrian:40",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:41",
+      "corridor_id": "pedestrian:41",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:42",
+      "corridor_id": "pedestrian:42",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:43",
+      "corridor_id": "pedestrian:43",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:44",
+      "corridor_id": "pedestrian:44",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:45",
+      "corridor_id": "pedestrian:45",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:46",
+      "corridor_id": "pedestrian:46",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:47",
+      "corridor_id": "pedestrian:47",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:48",
+      "corridor_id": "pedestrian:48",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:49",
+      "corridor_id": "pedestrian:49",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:50",
+      "corridor_id": "pedestrian:50",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:51",
+      "corridor_id": "pedestrian:51",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:52",
+      "corridor_id": "pedestrian:52",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:53",
+      "corridor_id": "pedestrian:53",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:54",
+      "corridor_id": "pedestrian:54",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:55",
+      "corridor_id": "pedestrian:55",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:56",
+      "corridor_id": "pedestrian:56",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:57",
+      "corridor_id": "pedestrian:57",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:58",
+      "corridor_id": "pedestrian:58",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:59",
+      "corridor_id": "pedestrian:59",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:60",
+      "corridor_id": "pedestrian:60",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:61",
+      "corridor_id": "pedestrian:61",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:62",
+      "corridor_id": "pedestrian:62",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:63",
+      "corridor_id": "pedestrian:63",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:64",
+      "corridor_id": "pedestrian:64",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:65",
+      "corridor_id": "pedestrian:65",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:66",
+      "corridor_id": "pedestrian:66",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:67",
+      "corridor_id": "pedestrian:67",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:68",
+      "corridor_id": "pedestrian:68",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:69",
+      "corridor_id": "pedestrian:69",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:70",
+      "corridor_id": "pedestrian:70",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:71",
+      "corridor_id": "pedestrian:71",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:72",
+      "corridor_id": "pedestrian:72",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:73",
+      "corridor_id": "pedestrian:73",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:74",
+      "corridor_id": "pedestrian:74",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:75",
+      "corridor_id": "pedestrian:75",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:76",
+      "corridor_id": "pedestrian:76",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:77",
+      "corridor_id": "pedestrian:77",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:78",
+      "corridor_id": "pedestrian:78",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:79",
+      "corridor_id": "pedestrian:79",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:80",
+      "corridor_id": "pedestrian:80",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:81",
+      "corridor_id": "pedestrian:81",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:82",
+      "corridor_id": "pedestrian:82",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:83",
+      "corridor_id": "pedestrian:83",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:84",
+      "corridor_id": "pedestrian:84",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:85",
+      "corridor_id": "pedestrian:85",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:86",
+      "corridor_id": "pedestrian:86",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:87",
+      "corridor_id": "pedestrian:87",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:88",
+      "corridor_id": "pedestrian:88",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:89",
+      "corridor_id": "pedestrian:89",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:90",
+      "corridor_id": "pedestrian:90",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:91",
+      "corridor_id": "pedestrian:91",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:92",
+      "corridor_id": "pedestrian:92",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:93",
+      "corridor_id": "pedestrian:93",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:94",
+      "corridor_id": "pedestrian:94",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:95",
+      "corridor_id": "pedestrian:95",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:96",
+      "corridor_id": "pedestrian:96",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:97",
+      "corridor_id": "pedestrian:97",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:98",
+      "corridor_id": "pedestrian:98",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:99",
+      "corridor_id": "pedestrian:99",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:100",
+      "corridor_id": "pedestrian:100",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:101",
+      "corridor_id": "pedestrian:101",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:102",
+      "corridor_id": "pedestrian:102",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:103",
+      "corridor_id": "pedestrian:103",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:104",
+      "corridor_id": "pedestrian:104",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:105",
+      "corridor_id": "pedestrian:105",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:106",
+      "corridor_id": "pedestrian:106",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:107",
+      "corridor_id": "pedestrian:107",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:108",
+      "corridor_id": "pedestrian:108",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:109",
+      "corridor_id": "pedestrian:109",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:110",
+      "corridor_id": "pedestrian:110",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:111",
+      "corridor_id": "pedestrian:111",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:112",
+      "corridor_id": "pedestrian:112",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:113",
+      "corridor_id": "pedestrian:113",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:114",
+      "corridor_id": "pedestrian:114",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:115",
+      "corridor_id": "pedestrian:115",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:116",
+      "corridor_id": "pedestrian:116",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:117",
+      "corridor_id": "pedestrian:117",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:118",
+      "corridor_id": "pedestrian:118",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:119",
+      "corridor_id": "pedestrian:119",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:120",
+      "corridor_id": "pedestrian:120",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:121",
+      "corridor_id": "pedestrian:121",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:122",
+      "corridor_id": "pedestrian:122",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:123",
+      "corridor_id": "pedestrian:123",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:124",
+      "corridor_id": "pedestrian:124",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:125",
+      "corridor_id": "pedestrian:125",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:126",
+      "corridor_id": "pedestrian:126",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:127",
+      "corridor_id": "pedestrian:127",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:128",
+      "corridor_id": "pedestrian:128",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:129",
+      "corridor_id": "pedestrian:129",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:130",
+      "corridor_id": "pedestrian:130",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:131",
+      "corridor_id": "pedestrian:131",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:132",
+      "corridor_id": "pedestrian:132",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:133",
+      "corridor_id": "pedestrian:133",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:134",
+      "corridor_id": "pedestrian:134",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:135",
+      "corridor_id": "pedestrian:135",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:136",
+      "corridor_id": "pedestrian:136",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:137",
+      "corridor_id": "pedestrian:137",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:138",
+      "corridor_id": "pedestrian:138",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:139",
+      "corridor_id": "pedestrian:139",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:140",
+      "corridor_id": "pedestrian:140",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:141",
+      "corridor_id": "pedestrian:141",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:142",
+      "corridor_id": "pedestrian:142",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:143",
+      "corridor_id": "pedestrian:143",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:144",
+      "corridor_id": "pedestrian:144",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:145",
+      "corridor_id": "pedestrian:145",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:146",
+      "corridor_id": "pedestrian:146",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:147",
+      "corridor_id": "pedestrian:147",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:148",
+      "corridor_id": "pedestrian:148",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:149",
+      "corridor_id": "pedestrian:149",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:150",
+      "corridor_id": "pedestrian:150",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:151",
+      "corridor_id": "pedestrian:151",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:152",
+      "corridor_id": "pedestrian:152",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:153",
+      "corridor_id": "pedestrian:153",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:154",
+      "corridor_id": "pedestrian:154",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:155",
+      "corridor_id": "pedestrian:155",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:156",
+      "corridor_id": "pedestrian:156",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:157",
+      "corridor_id": "pedestrian:157",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:158",
+      "corridor_id": "pedestrian:158",
+      "agents_per_corridor": 6
+    },
+    {
+      "id": "spawn:ped:pedestrian:159",
+      "corridor_id": "pedestrian:159",
+      "agents_per_corridor": 6
+    }
+  ],
+  "car_groups": [
+    {
+      "id": "spawn:car:arterial:0",
+      "arterial_id": "arterial:0",
+      "cars_per_arterial": 17
+    },
+    {
+      "id": "spawn:car:arterial:1",
+      "arterial_id": "arterial:1",
+      "cars_per_arterial": 17
+    },
+    {
+      "id": "spawn:car:arterial:2",
+      "arterial_id": "arterial:2",
+      "cars_per_arterial": 17
+    }
+  ],
+  "tram_lines": [
+    {
+      "id": "tram:rail:0",
+      "rail_path_ids": [
+        "rail:0"
+      ],
+      "trams": 4
+    }
+  ]
+}

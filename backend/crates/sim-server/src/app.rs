@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use abutown_protocol::ChunkSnapshotDto;
 use abutown_protocol::v1 as w;
@@ -14,7 +14,9 @@ use axum::{
 };
 use dashmap::DashMap;
 use prost::Message as _;
+use serde::Serialize;
 use sim_core::{
+    base_world::BaseWorldBundle,
     ids::ChunkCoord,
     persistence::{
         ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore,
@@ -41,11 +43,97 @@ use crate::{
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
-const CITY_NETWORK_DEFAULT_PATH: &str = "data/city/zurich-network.json";
+const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/zurich-river-city-v1";
 
-fn resolve_city_network_path() -> String {
-    std::env::var("ABUTOWN_CITY_NETWORK_PATH")
-        .unwrap_or_else(|_| CITY_NETWORK_DEFAULT_PATH.to_string())
+fn resolve_base_world_path() -> PathBuf {
+    std::env::var("ABUTOWN_BASE_WORLD_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(3)
+                .expect("sim-server crate lives under backend/crates/sim-server")
+                .join(BASE_WORLD_DEFAULT_PATH)
+        })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseWorldResponse {
+    pub world_id: String,
+    pub chunk_size: u16,
+    pub world_tiles: sim_core::city_network::WorldTiles,
+    pub terrain: BaseWorldTerrainResponse,
+    pub transport: BaseWorldTransportResponse,
+    pub buildings: BaseWorldBuildingResponse,
+    pub decorations: BaseWorldDecorationResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseWorldTerrainResponse {
+    pub tiles: Vec<BaseWorldTerrainTileResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseWorldTerrainTileResponse {
+    pub x: i32,
+    pub y: i32,
+    pub kind: sim_core::base_world::TerrainKind,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseWorldTransportResponse {
+    pub roads: Vec<sim_core::base_world::RoadTile>,
+    pub rails: Vec<sim_core::base_world::RailTile>,
+    pub arterial_paths: Vec<sim_core::base_world::TransportPath>,
+    pub rail_paths: Vec<sim_core::base_world::TransportPath>,
+    pub pedestrian_corridors: Vec<sim_core::base_world::TransportPath>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseWorldBuildingResponse {
+    pub footprints: Vec<sim_core::base_world::BuildingFootprint>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseWorldDecorationResponse {
+    pub trees: Vec<sim_core::city_network::NetworkCoord>,
+    pub details: Vec<sim_core::base_world::DecorationDetail>,
+}
+
+impl From<&BaseWorldBundle> for BaseWorldResponse {
+    fn from(bundle: &BaseWorldBundle) -> Self {
+        Self {
+            world_id: bundle.world_id().to_owned(),
+            chunk_size: bundle.chunk_size(),
+            world_tiles: bundle.world_tiles(),
+            terrain: BaseWorldTerrainResponse {
+                tiles: bundle
+                    .terrain
+                    .tiles
+                    .iter()
+                    .map(|tile| BaseWorldTerrainTileResponse {
+                        x: tile.x,
+                        y: tile.y,
+                        kind: tile.kind,
+                    })
+                    .collect(),
+            },
+            transport: BaseWorldTransportResponse {
+                roads: bundle.transport.roads.clone(),
+                rails: bundle.transport.rails.clone(),
+                arterial_paths: bundle.transport.arterial_paths.clone(),
+                rail_paths: bundle.transport.rail_paths.clone(),
+                pedestrian_corridors: bundle.transport.pedestrian_corridors.clone(),
+            },
+            buildings: BaseWorldBuildingResponse {
+                footprints: bundle.buildings.footprints.clone(),
+            },
+            decorations: BaseWorldDecorationResponse {
+                trees: bundle.decorations.trees.clone(),
+                details: bundle.decorations.details.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -58,6 +146,7 @@ pub struct AppState {
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
+    base_world: Arc<BaseWorldResponse>,
 }
 
 impl AppState {
@@ -95,6 +184,8 @@ impl AppState {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         let initial_view =
             build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0);
+        let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+            .expect("base world bundle is required for app state");
         let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
         let view = Arc::new(arc_swap::ArcSwap::from_pointee(initial_view));
         let chunk_channels: Arc<DashMap<_, _>> = Arc::new(DashMap::new());
@@ -108,6 +199,7 @@ impl AppState {
             chunk_channels: Arc::clone(&chunk_channels),
             view: Arc::clone(&view),
             mutations: mutation_tx,
+            base_world: Arc::new(BaseWorldResponse::from(&base_world)),
         };
 
         // Panic supervisor: if tick_loop panics, every reader is stuck on
@@ -160,6 +252,10 @@ impl AppState {
 
     fn mobility_snapshot_store(&self) -> Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>> {
         Arc::clone(&self.mobility_snapshot_store)
+    }
+
+    fn base_world(&self) -> Arc<BaseWorldResponse> {
+        Arc::clone(&self.base_world)
     }
 
     pub(crate) fn chunk_channels(
@@ -270,11 +366,8 @@ fn build_read_view_from_runtime(
 }
 
 pub fn build_app() -> Router {
-    let runtime = match sim_core::city_network::CityNetwork::from_path(resolve_city_network_path())
-    {
-        Ok(network) => SimulationRuntime::new_from_network(&network),
-        Err(_) => SimulationRuntime::new(),
-    };
+    let runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())
+        .expect("base world bundle is required for app startup");
     build_app_with_runtime(runtime)
 }
 
@@ -285,11 +378,11 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 }
 
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
-    let network = sim_core::city_network::CityNetwork::from_path(resolve_city_network_path())?;
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())?;
     let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
     let snapshot_store = PostgresChunkSnapshotStore::connect(
         &config.database_url,
-        SimulationRuntime::default_world_id(),
+        abutown_protocol::WorldId(base_world.world_id().to_owned()),
     )
     .await?;
     let mobility_snapshot_store =
@@ -302,7 +395,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
-            &network,
+            &base_world,
         )
         .await?;
 
@@ -344,6 +437,7 @@ fn build_router_from_state(state: AppState) -> Router {
         .route("/cards", get(cards))
         .route("/card-hand", get(card_hand).put(save_card_hand))
         .route("/world", get(world))
+        .route("/base-world", get(base_world))
         .route("/chunks/{x}/{y}", get(chunk))
         .route("/commands", post(command))
         .route("/mobility", get(mobility))
@@ -362,6 +456,10 @@ async fn world(State(state): State<AppState>) -> Response {
 
 async fn mobility(State(state): State<AppState>) -> Response {
     proto_response(state.view().load().mobility_full_dto.clone())
+}
+
+async fn base_world(State(state): State<AppState>) -> Json<BaseWorldResponse> {
+    Json((*state.base_world()).clone())
 }
 
 /// Encode any prost message as an `application/x-protobuf` HTTP response.
@@ -1327,6 +1425,22 @@ mod tests {
         }
     }
 
+    async fn mutate_runtime_tile(runtime: &mut SimulationRuntime, command_id: &str) {
+        runtime
+            .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
+                abutown_protocol::SetTileKindCommandDto {
+                    protocol_version: abutown_protocol::PROTOCOL_VERSION,
+                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    command_id: command_id.to_string(),
+                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    local_index: 11,
+                    kind: abutown_protocol::TileKindDto::Water,
+                },
+            ))
+            .await
+            .expect("test mutation applies");
+    }
+
     #[tokio::test]
     async fn concurrent_view_reads_do_not_deadlock() {
         // The new architecture's invariant is stronger than the old
@@ -1390,9 +1504,11 @@ mod tests {
 
     #[tokio::test]
     async fn persist_snapshots_once_writes_runtime_snapshots() {
-        let state = AppState::new(SimulationRuntime::new());
+        let mut runtime = SimulationRuntime::new();
+        mutate_runtime_tile(&mut runtime, "command:app-persist:1").await;
+        let state = AppState::new(runtime);
 
-        assert_eq!(persist_snapshots_once(&state).await.unwrap(), 3);
+        assert_eq!(persist_snapshots_once(&state).await.unwrap(), 1);
 
         let snapshot = state
             .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
@@ -1433,8 +1549,10 @@ mod tests {
         use std::time::Instant;
 
         // Build AppState with a slow snapshot store (100 ms per write, 3 chunks = 300 ms total).
+        let mut runtime = SimulationRuntime::new();
+        mutate_runtime_tile(&mut runtime, "command:app-persist-fail:1").await;
         let state = AppState::new_with_stores(
-            SimulationRuntime::new(),
+            runtime,
             Box::new(SlowSnapshotStore {
                 write_delay_ms: 100,
             }),
@@ -1528,15 +1646,13 @@ mod tests {
         let state = state_with_delayed_subscription_reply(Duration::from_millis(650));
         let coord = sim_core::ids::ChunkCoord { x: 4, y: 4 };
         let message = w::ClientMessage {
-            body: Some(w::client_message::Body::ChunkSubscribe(
-                w::ChunkSubscribe {
-                    protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
-                    coords: vec![w::ChunkCoord {
-                        x: coord.x,
-                        y: coord.y,
-                    }],
-                },
-            )),
+            body: Some(w::client_message::Body::ChunkSubscribe(w::ChunkSubscribe {
+                protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+                coords: vec![w::ChunkCoord {
+                    x: coord.x,
+                    y: coord.y,
+                }],
+            })),
         };
         let mut connection = ConnectionState::new();
 
@@ -1547,7 +1663,11 @@ mod tests {
         .await
         .expect("subscribe should not wait for the tick mutation reply");
 
-        assert_eq!(outgoing.len(), 1, "subscribe must emit a published snapshot");
+        assert_eq!(
+            outgoing.len(),
+            1,
+            "subscribe must emit a published snapshot"
+        );
         assert!(
             connection.subscription.contains(&coord),
             "slow tick replies must not roll back the subscription"
@@ -1606,6 +1726,10 @@ mod tests {
             chunk_channels: Arc::new(DashMap::new()),
             view: Arc::new(arc_swap::ArcSwap::from_pointee(initial_view)),
             mutations: mutation_tx,
+            base_world: Arc::new(BaseWorldResponse::from(
+                &BaseWorldBundle::load_from_dir(resolve_base_world_path())
+                    .expect("base world fixture loads"),
+            )),
         }
     }
 
@@ -1634,8 +1758,10 @@ mod tests {
     async fn snapshot_write_failure_preserves_dirty_state() {
         use sim_core::persistence::InMemoryMobilitySnapshotStore;
 
+        let mut runtime = SimulationRuntime::new();
+        mutate_runtime_tile(&mut runtime, "command:app-persist-failure:1").await;
         let state = AppState::new_with_stores(
-            SimulationRuntime::new(),
+            runtime,
             Box::new(FailingSnapshotStore),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             CardHandStore::memory(),

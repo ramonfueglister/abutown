@@ -2,7 +2,7 @@ use bevy_ecs::schedule::Schedule;
 use bevy_ecs::world::World;
 
 use super::*;
-use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+use crate::city_network::CityNetwork;
 use crate::ids::{AgentId, VehicleId};
 
 /// Hardcoded transit stops the world seeds today. Coords are tile-space.
@@ -79,7 +79,9 @@ pub fn legacy_seeded_stops() -> Vec<crate::routing::SeededStop> {
     ]
 }
 
+#[cfg(test)]
 fn tiny_city_network() -> CityNetwork {
+    use crate::city_network::{NetworkCoord, WorldTiles};
     let c44 = NetworkCoord { x: 144, y: 144 };
     let c54 = NetworkCoord { x: 176, y: 144 };
     let c45 = NetworkCoord { x: 144, y: 176 };
@@ -113,6 +115,7 @@ fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedu
 }
 
 /// Backward-compatible wrapper — delegates to [`tiny_world`].
+#[cfg(test)]
 pub fn initial_world() -> (World, Schedule) {
     tiny_world()
 }
@@ -122,6 +125,7 @@ pub fn initial_world() -> (World, Schedule) {
 /// Two routes traverse the seeded chunk neighbourhood; 4 vehicles and
 /// 20 agents are spawned with cyclic plans. Calling this function twice
 /// returns equal worlds (by `extract_from_world`).
+#[cfg(test)]
 pub fn tiny_world() -> (World, Schedule) {
     let horizontal_route = "route:horizontal".to_string();
     let vertical_route = "route:vertical".to_string();
