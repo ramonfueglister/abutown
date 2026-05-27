@@ -1,4 +1,4 @@
-import { inside, key, type ZurichValidationResult, type ZurichWorld } from './worldTypes';
+import { inside, key, type ZurichTerrainKind, type ZurichValidationResult, type ZurichWorld } from './worldTypes';
 import type { ZurichPlacement } from './zurichPlacement';
 import type { ZurichTransport } from './zurichTransport';
 
@@ -21,7 +21,7 @@ export function validateZurichCity(world: ZurichWorld, transport: ZurichTranspor
   for (const building of placement.buildings) {
     const tileKey = key(building.coord);
     const terrain = world.terrain.get(tileKey);
-    if (!inside(building.coord, world.width, world.height) || !terrain || terrain.kind === 'water' || transport.roads.has(tileKey) || transport.rails.has(tileKey)) {
+    if (!inside(building.coord, world.width, world.height) || !terrain || !buildingBaseAllowsCover(terrain.kind) || transport.roads.has(tileKey) || transport.rails.has(tileKey)) {
       invalidBuildings += 1;
     }
   }
@@ -54,4 +54,8 @@ export function validateZurichCity(world: ZurichWorld, transport: ZurichTranspor
       treeBuildingOverlap,
     },
   };
+}
+
+function buildingBaseAllowsCover(kind: ZurichTerrainKind): boolean {
+  return kind === 'grass' || kind === 'park' || kind === 'reserve';
 }

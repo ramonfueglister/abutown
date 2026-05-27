@@ -89,6 +89,7 @@ export function validateLayeredTerrainSeed(seed: LayeredTerrainSeed): string[] {
     seen.add(tileKey);
     if (tile.surface === 'Bridge' && tile.base !== 'Water' && tile.base !== 'Riverbank') errors.push(`tile:${tileKey}:bridge_without_water`);
     if (tile.cover === 'Building' && tile.base === 'Water') errors.push(`tile:${tileKey}:building_on_water`);
+    if (tile.cover === 'Building' && !buildingBaseAllowsCover(tile.base)) errors.push(`tile:${tileKey}:building_on_unbuildable_base`);
     if (tile.cover !== 'None' && tile.surface !== 'None') errors.push(`tile:${tileKey}:cover_on_transport_surface`);
     if (tile.road_mask !== null && tile.surface !== 'Street' && tile.surface !== 'Bridge' && tile.surface !== 'RailCrossing') errors.push(`tile:${tileKey}:road_mask_without_road_surface`);
     if (tile.rail_mask !== null && tile.surface !== 'Rail' && tile.surface !== 'RailCrossing') errors.push(`tile:${tileKey}:rail_mask_without_rail_surface`);
@@ -97,6 +98,10 @@ export function validateLayeredTerrainSeed(seed: LayeredTerrainSeed): string[] {
   }
 
   return errors;
+}
+
+function buildingBaseAllowsCover(base: LayeredBaseKind): boolean {
+  return base === 'Grass' || base === 'Park' || base === 'Reserve';
 }
 
 function baseFor(kind: ZurichTerrainKind): LayeredBaseKind {

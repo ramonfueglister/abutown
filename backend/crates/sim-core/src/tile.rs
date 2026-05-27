@@ -124,6 +124,7 @@ pub type TileRecord = LayeredTileRecord;
 pub enum TileValidationError {
     BridgeWithoutWater,
     BuildingOnWater,
+    BuildingOnUnbuildableBase,
     CoverOnTransportSurface,
     RoadMaskWithoutRoadSurface,
     RailMaskWithoutRailSurface,
@@ -143,6 +144,10 @@ impl LayeredTileRecord {
 
         if self.cover == TileCover::Building && self.base == TileBase::Water {
             errors.push(TileValidationError::BuildingOnWater);
+        }
+
+        if self.cover == TileCover::Building && !self.base_accepts_building_cover() {
+            errors.push(TileValidationError::BuildingOnUnbuildableBase);
         }
 
         if self.cover != TileCover::None && self.surface != TileSurface::None {
@@ -199,6 +204,13 @@ impl LayeredTileRecord {
 
     fn surface_requires_rail_mask(&self) -> bool {
         self.surface_accepts_rail_mask()
+    }
+
+    fn base_accepts_building_cover(&self) -> bool {
+        matches!(
+            self.base,
+            TileBase::Grass | TileBase::Park | TileBase::Reserve
+        )
     }
 }
 
@@ -257,6 +269,20 @@ mod tests {
         assert!(detail_on_street
             .validate()
             .contains(&TileValidationError::CoverOnTransportSurface));
+    }
+
+    #[test]
+    fn layered_tile_validation_rejects_buildings_on_plaza() {
+        let plaza_building = LayeredTileRecord {
+            base: TileBase::Plaza,
+            cover: TileCover::Building,
+            display: Some("shops".to_string()),
+            ..LayeredTileRecord::default()
+        };
+
+        assert!(plaza_building
+            .validate()
+            .contains(&TileValidationError::BuildingOnUnbuildableBase));
     }
 
     #[test]

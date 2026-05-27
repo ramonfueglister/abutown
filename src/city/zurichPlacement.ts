@@ -1,4 +1,4 @@
-import { distance, inside, key, type Coord, type ZurichBuilding, type ZurichBuildingSheet, type ZurichDetail, type ZurichWorld, type ZurichZone } from './worldTypes';
+import { distance, inside, key, type Coord, type ZurichBuilding, type ZurichBuildingSheet, type ZurichDetail, type ZurichTerrainKind, type ZurichWorld, type ZurichZone } from './worldTypes';
 import type { ZurichTransport } from './zurichTransport';
 
 export type ZurichPlacement = {
@@ -20,6 +20,16 @@ const sheetPools: Record<ZurichZone['kind'], ZurichBuildingSheet[]> = {
   civic: ['church', 'office', 'shops'],
   waterfront: ['townhouses', 'shops', 'flats'],
 };
+
+const PRIMARY_FRONTAGE_OFFSETS: Coord[] = [
+  { x: -1, y: 0 },
+  { x: 0, y: -1 },
+];
+const BACKFILL_FRONTAGE_OFFSETS: Coord[] = [
+  { x: -1, y: 0 },
+  { x: 0, y: -1 },
+];
+const MIN_BUILDING_FOOTPRINTS = 2260;
 
 export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransport): ZurichPlacement {
   const blocked = new Set<string>([...transport.roads.keys(), ...transport.rails.keys()]);
@@ -51,10 +61,7 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
         if (hash(`reserve-building:${key(coord)}`) % 5 !== 0) continue;
       } else if (hash(`building-density:${zone.id}:${key(coord)}`) % 100 > Math.floor(effectiveBuildingDensity(zone) * 100)) continue;
       if (zone.kind === 'residential' && distance(coord, zone.center) > zone.radius * 0.72 && hash(`residential-edge:${zone.id}:${key(coord)}`) % 100 < 35) continue;
-      const sheets = sheetPools[zone.kind];
-      const sheet = sheets[hash(`sheet:${zone.id}:${key(coord)}`) % sheets.length];
-      buildings.push({ coord, sheet, frame: hash(`frame:${sheet}:${key(coord)}`) % frameCount(sheet), zoneId: zone.id });
-      blocked.add(key(coord));
+      pushBuilding(buildings, blocked, coord, zone);
     }
   }
 
@@ -79,6 +86,8 @@ export function buildZurichPlacement(world: ZurichWorld, transport: ZurichTransp
       }
     }
   }
+
+  backfillBuildings(world, transport, buildings, blocked);
 
   return { buildings, trees, details, reserveTiles };
 }
@@ -141,13 +150,15 @@ function pushDetail(
   if (!allowBlocked) blocked.add(tileKey);
 }
 
-function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, blocked: ReadonlySet<string>, zone: ZurichZone): Coord[] {
+function frontageCandidates(
+  world: ZurichWorld,
+  transport: ZurichTransport,
+  blocked: ReadonlySet<string>,
+  zone: ZurichZone,
+  offsets: readonly Coord[] = PRIMARY_FRONTAGE_OFFSETS,
+): Coord[] {
   const candidates: Coord[] = [];
   const seen = new Set<string>();
-  const offsets = [
-    { x: -1, y: 0 },
-    { x: 0, y: -1 },
-  ];
 
   for (const road of transport.roads.values()) {
     if (road.kind !== 'street') continue;
@@ -156,7 +167,7 @@ function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, bloc
       const tileKey = key(coord);
       const terrain = world.terrain.get(tileKey)?.kind;
       if (!inside(coord, world.width, world.height) || blocked.has(tileKey) || seen.has(tileKey)) continue;
-      if (terrain === 'water' || terrain === 'riverbank' || terrain === 'forest') continue;
+      if (!terrain || !isBuildingBaseTerrain(terrain)) continue;
       if (zone.kind !== 'old-town' && zone.kind !== 'waterfront' && distanceToWater(world, coord, 2) <= 2) continue;
       if (distance(coord, zone.center) <= zone.radius) {
         candidates.push(coord);
@@ -171,6 +182,53 @@ function frontageCandidates(world: ZurichWorld, transport: ZurichTransport, bloc
 function detailFrontageCandidates(world: ZurichWorld, transport: ZurichTransport, blocked: ReadonlySet<string>, zone: ZurichZone): Coord[] {
   return frontageCandidates(world, transport, blocked, zone)
     .sort((a, b) => hash(`detail-order:${zone.id}:${key(a)}`) - hash(`detail-order:${zone.id}:${key(b)}`));
+}
+
+function backfillBuildings(
+  world: ZurichWorld,
+  transport: ZurichTransport,
+  buildings: ZurichBuilding[],
+  blocked: Set<string>,
+): void {
+  if (buildings.length >= MIN_BUILDING_FOOTPRINTS) return;
+
+  const candidates: Array<{ coord: Coord; zone: ZurichZone }> = [];
+  for (const zone of world.zones) {
+    if (zone.kind === 'forest' || zone.kind === 'river' || zone.kind === 'reserve') continue;
+    for (const coord of frontageCandidates(world, transport, blocked, zone, BACKFILL_FRONTAGE_OFFSETS)) {
+      candidates.push({ coord, zone });
+    }
+  }
+
+  candidates.sort((a, b) =>
+    hash(`building-backfill:${a.zone.id}:${key(a.coord)}`) -
+      hash(`building-backfill:${b.zone.id}:${key(b.coord)}`) ||
+    distance(a.coord, a.zone.center) - distance(b.coord, b.zone.center) ||
+    a.coord.y - b.coord.y ||
+    a.coord.x - b.coord.x
+  );
+
+  for (const { coord, zone } of candidates) {
+    if (buildings.length >= MIN_BUILDING_FOOTPRINTS) break;
+    if (blocked.has(key(coord))) continue;
+    pushBuilding(buildings, blocked, coord, zone);
+  }
+}
+
+function pushBuilding(
+  buildings: ZurichBuilding[],
+  blocked: Set<string>,
+  coord: Coord,
+  zone: ZurichZone,
+): void {
+  const sheets = sheetPools[zone.kind];
+  const sheet = sheets[hash(`sheet:${zone.id}:${key(coord)}`) % sheets.length];
+  buildings.push({ coord, sheet, frame: hash(`frame:${sheet}:${key(coord)}`) % frameCount(sheet), zoneId: zone.id });
+  blocked.add(key(coord));
+}
+
+function isBuildingBaseTerrain(kind: ZurichTerrainKind): boolean {
+  return kind === 'grass' || kind === 'park' || kind === 'reserve';
 }
 
 function isForestTreeTile(coord: Coord): boolean {

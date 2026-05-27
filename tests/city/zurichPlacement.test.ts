@@ -103,6 +103,15 @@ describe('buildZurichPlacement', () => {
     }
   });
 
+  it('keeps buildings off plaza terrain', () => {
+    const { world, placement } = placementFixture();
+    const plazaBuildings = placement.buildings.filter((building) =>
+      world.terrain.get(key(building.coord))?.kind === 'plaza'
+    );
+
+    expect(plazaBuildings).toEqual([]);
+  });
+
   it('keeps trees and buildings on separate tiles', () => {
     const { placement } = placementFixture();
     const treeTiles = new Set(placement.trees.map(key));

@@ -69,6 +69,23 @@ describe('layered terrain seed', () => {
     expect(validateLayeredTerrainSeed(invalid)).toContain('tile:1:0:cover_on_transport_surface');
   });
 
+  it('rejects buildings on plaza base terrain', () => {
+    const seed = buildSeed();
+    const grassTile = seed.tiles.find((tile) => tile.base === 'Grass' && tile.surface === 'None' && tile.cover === 'None');
+    expect(grassTile).toBeDefined();
+
+    const invalid = {
+      ...seed,
+      tiles: seed.tiles.map((tile) =>
+        sameCoord(tile, grassTile!)
+          ? { ...tile, base: 'Plaza' as const, cover: 'Building' as const, display: 'shops', zone_id: 'zone:test' }
+          : tile,
+      ),
+    };
+
+    expect(validateLayeredTerrainSeed(invalid)).toContain(`tile:${grassTile!.x}:${grassTile!.y}:building_on_unbuildable_base`);
+  });
+
   it('rejects invalid seed shape and coordinate invariants', () => {
     const seed = buildSeed();
     const duplicate = { ...seed.tiles[1], x: seed.tiles[0].x, y: seed.tiles[0].y };
