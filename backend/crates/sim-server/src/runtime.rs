@@ -60,6 +60,71 @@ fn load_validated_layered_seed() -> Result<LayeredTerrainSeed, HydrationError> {
     Ok(seed)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TerrainSeedBootstrapReport {
+    written_chunks: usize,
+    existing_chunks: usize,
+}
+
+fn seed_chunk_snapshot(
+    seed: &LayeredTerrainSeed,
+    world_id: &WorldId,
+    coord: ChunkCoord,
+) -> Result<ChunkSnapshotDto, HydrationError> {
+    let tiles = sim_core::terrain_seed::chunk_tiles_from_seed(seed, coord).ok_or_else(|| {
+        HydrationError::Seed(format!(
+            "seed missing chunk tiles for {}:{}",
+            coord.x, coord.y
+        ))
+    })?;
+    Ok(build_chunk_snapshot_from_parts(
+        &world_id.0,
+        coord,
+        &tiles,
+        0,
+        ChunkActivity::Active,
+    ))
+}
+
+async fn bootstrap_missing_seed_chunk_snapshots(
+    snapshot_store: &mut dyn ChunkSnapshotStore,
+    seed: &LayeredTerrainSeed,
+    world_id: &WorldId,
+) -> Result<TerrainSeedBootstrapReport, HydrationError> {
+    let chunk_size = u32::from(seed.chunk_size);
+    let mut report = TerrainSeedBootstrapReport {
+        written_chunks: 0,
+        existing_chunks: 0,
+    };
+
+    for chunk_y in 0..(seed.height / chunk_size) {
+        for chunk_x in 0..(seed.width / chunk_size) {
+            let coord = ChunkCoord {
+                x: chunk_x as i32,
+                y: chunk_y as i32,
+            };
+            if snapshot_store
+                .read_snapshot(coord)
+                .await
+                .map_err(HydrationError::Snapshot)?
+                .is_some()
+            {
+                report.existing_chunks += 1;
+                continue;
+            }
+
+            let snapshot = seed_chunk_snapshot(seed, world_id, coord)?;
+            snapshot_store
+                .write_snapshot(snapshot)
+                .await
+                .map_err(HydrationError::Snapshot)?;
+            report.written_chunks += 1;
+        }
+    }
+
+    Ok(report)
+}
+
 fn spawn_all_seed_chunks(
     world: &mut sim_core::bevy_ecs::world::World,
     seed: &LayeredTerrainSeed,
@@ -71,15 +136,21 @@ fn spawn_all_seed_chunks(
                 x: chunk_x as i32,
                 y: chunk_y as i32,
             };
-            let tiles = sim_core::terrain_seed::chunk_tiles_from_seed(seed, coord).ok_or_else(
-                || {
+            let tiles =
+                sim_core::terrain_seed::chunk_tiles_from_seed(seed, coord).ok_or_else(|| {
                     HydrationError::Seed(format!(
                         "seed missing chunk tiles for {}:{}",
                         coord.x, coord.y
                     ))
-                },
-            )?;
-            spawn_chunk_entity(world, coord, seed.chunk_size, tiles, 0, ChunkActivity::Active);
+                })?;
+            spawn_chunk_entity(
+                world,
+                coord,
+                seed.chunk_size,
+                tiles,
+                0,
+                ChunkActivity::Active,
+            );
         }
     }
     Ok(())
@@ -224,6 +295,7 @@ impl SimulationRuntime {
         HydrationError,
     > {
         let world_id = Self::default_world_id();
+        let mut snapshot_store = snapshot_store;
 
         // Build a fresh World + Schedule and install both plugins.
         let mut world = sim_core::bevy_ecs::world::World::new();
@@ -275,6 +347,8 @@ impl SimulationRuntime {
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
 
         let seed = load_validated_layered_seed()?;
+        let _bootstrap_report =
+            bootstrap_missing_seed_chunk_snapshots(&mut *snapshot_store, &seed, &world_id).await?;
         let seed_chunk_size = u32::from(seed.chunk_size);
         for chunk_y in 0..(seed.height / seed_chunk_size) {
             for chunk_x in 0..(seed.width / seed_chunk_size) {
@@ -739,7 +813,11 @@ mod tests {
         let world = &runtime.world;
         let by_coord = world.resource::<sim_core::world::resources::ChunksByCoord>();
         assert_eq!(by_coord.0.len(), 64);
-        assert!(by_coord.0.contains_key(&sim_core::ids::ChunkCoord { x: 4, y: 4 }));
+        assert!(
+            by_coord
+                .0
+                .contains_key(&sim_core::ids::ChunkCoord { x: 4, y: 4 })
+        );
     }
     use sim_core::persistence::{
         InMemoryChunkSnapshotStore, InMemoryMobilitySnapshotStore, build_chunk_snapshot,
@@ -774,8 +852,14 @@ mod tests {
 
         assert_eq!(summary.chunk_size, 32);
         assert_eq!(summary.loaded_chunks.len(), 64);
-        assert_eq!(summary.loaded_chunks.first(), Some(&ChunkCoordDto { x: 0, y: 0 }));
-        assert_eq!(summary.loaded_chunks.last(), Some(&ChunkCoordDto { x: 7, y: 7 }));
+        assert_eq!(
+            summary.loaded_chunks.first(),
+            Some(&ChunkCoordDto { x: 0, y: 0 })
+        );
+        assert_eq!(
+            summary.loaded_chunks.last(),
+            Some(&ChunkCoordDto { x: 7, y: 7 })
+        );
     }
 
     #[test]
@@ -985,7 +1069,10 @@ mod tests {
             .collect();
         assert_eq!(tiles.get(&0).unwrap().surface, TileSurfaceDto::Street);
         assert_eq!(tiles.get(&7).unwrap().base, TileBaseDto::Water);
-        assert_eq!(restored.chunk_state, abutown_protocol::ChunkStateDto::Active);
+        assert_eq!(
+            restored.chunk_state,
+            abutown_protocol::ChunkStateDto::Active
+        );
     }
 
     #[tokio::test]
@@ -1001,12 +1088,107 @@ mod tests {
         let snap = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
         assert_eq!(snap.chunk_version, 0);
         assert_eq!(snap.tile_count, 1024);
-        assert!(snap.tiles.iter().any(|tile| tile.base == TileBaseDto::Water));
+        assert!(
+            snap.tiles
+                .iter()
+                .any(|tile| tile.base == TileBaseDto::Water)
+        );
         assert!(
             snap.tiles
                 .iter()
                 .any(|tile| tile.surface == TileSurfaceDto::Street)
         );
+    }
+
+    #[tokio::test]
+    async fn terrain_seed_bootstrap_writes_missing_chunks_to_empty_snapshot_store() {
+        let seed = load_validated_layered_seed().expect("seed loads");
+        let mut store = InMemoryChunkSnapshotStore::default();
+
+        let report = bootstrap_missing_seed_chunk_snapshots(
+            &mut store,
+            &seed,
+            &SimulationRuntime::default_world_id(),
+        )
+        .await
+        .expect("bootstrap seed chunks");
+
+        assert_eq!(report.written_chunks, 64);
+        assert_eq!(report.existing_chunks, 0);
+        assert_eq!(store.snapshot_count(), 64);
+
+        let stored = ChunkSnapshotStore::read_snapshot(&store, ChunkCoord { x: 4, y: 4 })
+            .await
+            .unwrap()
+            .expect("seeded chunk exists");
+        assert_eq!(stored.world_id, SimulationRuntime::default_world_id());
+        assert_eq!(stored.chunk_version, 0);
+        assert_eq!(stored.tile_count, 1024);
+        assert!(
+            stored
+                .tiles
+                .iter()
+                .any(|tile| tile.base == TileBaseDto::Water)
+        );
+        assert!(
+            stored
+                .tiles
+                .iter()
+                .any(|tile| tile.surface == TileSurfaceDto::Street)
+        );
+    }
+
+    #[tokio::test]
+    async fn terrain_seed_bootstrap_preserves_existing_chunk_snapshots() {
+        use sim_core::tile::{TileBase, TileRecord};
+
+        let seed = load_validated_layered_seed().expect("seed loads");
+        let mut store = InMemoryChunkSnapshotStore::default();
+        let coord = ChunkCoord { x: 4, y: 4 };
+        let mut custom_chunk = Chunk::new(coord, 32);
+        custom_chunk
+            .set_tile_record(
+                0,
+                TileRecord {
+                    base: TileBase::Park,
+                    version: 99,
+                    ..TileRecord::default()
+                },
+            )
+            .unwrap();
+        let mut custom_snapshot =
+            build_chunk_snapshot("abutown-main", &custom_chunk, ChunkActivity::Warm);
+        custom_snapshot.chunk_version = 99;
+        ChunkSnapshotStore::write_snapshot(&mut store, custom_snapshot.clone())
+            .await
+            .unwrap();
+
+        let report = bootstrap_missing_seed_chunk_snapshots(
+            &mut store,
+            &seed,
+            &SimulationRuntime::default_world_id(),
+        )
+        .await
+        .expect("bootstrap missing seed chunks");
+
+        assert_eq!(report.written_chunks, 63);
+        assert_eq!(report.existing_chunks, 1);
+        assert_eq!(store.snapshot_count(), 64);
+
+        let preserved = ChunkSnapshotStore::read_snapshot(&store, coord)
+            .await
+            .unwrap()
+            .expect("custom chunk still exists");
+        assert_eq!(preserved.chunk_version, 99);
+        assert_eq!(preserved.chunk_state, abutown_protocol::ChunkStateDto::Warm);
+        assert_eq!(preserved.tiles[0].base, TileBaseDto::Park);
+
+        let filled = ChunkSnapshotStore::read_snapshot(&store, ChunkCoord { x: 0, y: 0 })
+            .await
+            .unwrap()
+            .expect("missing seed chunk was written");
+        assert_eq!(filled.chunk_version, 0);
+        assert_eq!(filled.tile_count, 1024);
     }
 
     #[tokio::test]
