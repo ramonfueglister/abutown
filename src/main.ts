@@ -13,13 +13,6 @@ import {
 import { mountCardHandView } from './cardHand/cardHandView';
 import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
-  countBuildingsWithoutDirectStreetAdjacency,
-  hasDirectStreetAdjacency,
-  hasVisibleStreetFrontage,
-} from './city/buildingFrontage';
-import { countAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
-import { countInvalidRoadDeadEnds } from './city/roadTopology';
-import {
   constrainCameraTargetToGrid,
   createCameraState,
   dampCamera,
@@ -80,6 +73,8 @@ import {
   buildBackendPedestrianInspector,
   type EntityInspector,
 } from './render/entityInspector';
+import { createCityDiagnostics } from './render/cityDiagnostics';
+import { buildRenderGameText, nonPak128AssetPaths } from './render/renderGameText';
 
 type Coord = { x: number; y: number };
 
@@ -919,22 +914,6 @@ function terrainBaseAt(coord: Coord): TerrainBaseKind {
   return terrainTileAt(terrainState, coord)?.base ?? 'Grass';
 }
 
-function buildStreetFrontages(): Set<string> {
-  const result = new Set<string>();
-  for (const road of roads.values()) {
-    if (road.kind !== 'street') continue;
-    for (const coord of cardinal(road.coord)) {
-      const terrainKind = terrainAt(coord);
-      if (isInsidePlayableMap(coord) && (terrainKind === 'grass' || terrainKind === 'park')) result.add(key(coord));
-    }
-  }
-  return result;
-}
-
-function touchesRail(coord: Coord): boolean {
-  return [coord, ...cardinal(coord)].some((neighbor) => railReserved.has(key(neighbor)));
-}
-
 function buildTrains(): Train[] {
   const path = buildNorthboundTrainPath(railPaths[0] ?? [], { fadeTiles: TRAIN_FADE_TILES });
   if (path.length === 0) return [];
@@ -1195,91 +1174,6 @@ function mergeSortedDrawables(staticItems: StaticDrawable[], dynamicItems: Array
   return result;
 }
 
-function cardinal(coord: Coord): Coord[] {
-  return [
-    { x: coord.x, y: coord.y - 1 },
-    { x: coord.x + 1, y: coord.y },
-    { x: coord.x, y: coord.y + 1 },
-    { x: coord.x - 1, y: coord.y },
-  ];
-}
-
-function cityDiagnostics(): Record<string, number> {
-  let roadRailOverlap = 0;
-  let designedRailCrossings = 0;
-  for (const tileKey of roads.keys()) {
-    if (!rails.has(tileKey)) continue;
-    if (railCrossings.has(tileKey)) designedRailCrossings += 1;
-    else roadRailOverlap += 1;
-  }
-
-  let invalidBuildings = 0;
-  let buildingsOutsideStreetFrontageSet = 0;
-  let buildingsWithoutAnyStreetAdjacency = 0;
-  let buildingsWithoutStreetFrontage = 0;
-  let buildingsTouchingRail = 0;
-  let buildingFramesOutsideFinishedRow = 0;
-  const streetFrontages = buildStreetFrontages();
-  for (const building of buildings) {
-    const tileKey = key(building.coord);
-    const terrainKind = terrainAt(building.coord);
-    if (roads.has(tileKey) || rails.has(tileKey) || !(terrainKind === 'grass' || terrainKind === 'park')) invalidBuildings += 1;
-    if (!streetFrontages.has(tileKey)) buildingsOutsideStreetFrontageSet += 1;
-    if (!hasDirectStreetAdjacency(building.coord, roads)) buildingsWithoutAnyStreetAdjacency += 1;
-    if (!hasVisibleStreetFrontage(building.coord, roads)) buildingsWithoutStreetFrontage += 1;
-    if (touchesRail(building.coord)) buildingsTouchingRail += 1;
-  }
-
-  const buildingTiles = new Set(buildings.map((building) => key(building.coord)));
-  const treeTiles = new Set(trees.map(key));
-  let treeBuildingOverlap = 0;
-  for (const tileKey of treeTiles) if (buildingTiles.has(tileKey)) treeBuildingOverlap += 1;
-  let railStationsOnRoad = 0;
-  let railStationsOnBuildings = 0;
-  let railStationsOnRails = 0;
-  let railStationsOnTrees = 0;
-  for (const station of railStations) {
-    const stationKey = key(station.coord);
-    if (roads.has(stationKey)) railStationsOnRoad += 1;
-    if (buildingTiles.has(stationKey)) railStationsOnBuildings += 1;
-    if (rails.has(stationKey)) railStationsOnRails += 1;
-    if (treeTiles.has(stationKey)) railStationsOnTrees += 1;
-  }
-
-  let parallelRoadPairs = 0;
-  for (const road of roads.values()) {
-    const mask = road.mask;
-    if (isStraightEastWest(mask)) {
-      const south = roads.get(key({ x: road.coord.x, y: road.coord.y + 1 }));
-      if (south && isStraightEastWest(south.mask)) parallelRoadPairs += 1;
-    }
-    if (isStraightNorthSouth(mask)) {
-      const east = roads.get(key({ x: road.coord.x + 1, y: road.coord.y }));
-      if (east && isStraightNorthSouth(east.mask)) parallelRoadPairs += 1;
-    }
-  }
-
-  return {
-    roadRailOverlap,
-    designedRailCrossings,
-    invalidBuildings,
-    buildingsOutsideStreetFrontageSet,
-    buildingsWithoutDirectStreetAdjacency: countBuildingsWithoutDirectStreetAdjacency(buildings, roads),
-    buildingsWithoutAnyStreetAdjacency,
-    buildingsWithoutStreetFrontage,
-    buildingsTouchingRail,
-    buildingFramesOutsideFinishedRow,
-    treeBuildingOverlap,
-    railStationsOnRoad,
-    railStationsOnBuildings,
-    railStationsOnRails,
-    railStationsOnTrees,
-    adjacentParallelRoadRuns: countAdjacentParallelRoadRuns(roads),
-    invalidRoadDeadEnds: countInvalidRoadDeadEnds(roads, { width: WIDTH, height: HEIGHT }),
-    parallelRoadPairs,
-  };
-}
-
 function key(coord: Coord): string {
   return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
 }
@@ -1369,13 +1263,23 @@ declare global {
 }
 
 window.render_game_to_text = () => {
-  const diagnostics = cityDiagnostics();
-  const detailCounts = detailCountsByCategory();
   const backendMobility = mobilityDiagnostics(mobilityState);
   const projectedPedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
   const projectedCars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const selectedAgent = projectedPedestrians.find((agent) => agent.id === selectedAgentId) ?? null;
-  const selectedVehicle = projectedCars.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  const diagnostics = createCityDiagnostics({
+    width: WIDTH,
+    height: HEIGHT,
+    terrainAt,
+    roads,
+    rails,
+    railCrossings,
+    railReserved,
+    railStations,
+    buildings,
+    trees,
+  });
+  const train = trains[0] ?? null;
+  const trainPositionSnapshot = train ? trainPosition(train) : null;
   const entityScreenPosition = (coord: Coord): Coord => {
     const projected = iso(coord);
     return {
@@ -1383,154 +1287,60 @@ window.render_game_to_text = () => {
       y: camera.y + projected.y * camera.scale,
     };
   };
-  const mobilityAgentEntries = projectedPedestrians.map((agent) => ({
-    id: agent.id,
-    kind: 'pedestrian' as const,
-    state: 'walking' as const,
-    coord: agent.path[0],
-    screen: entityScreenPosition(agent.path[0]),
-    direction: agent.direction,
-    spriteSheet: agent.sprite.sheet,
-  }));
-  const mobilityVehicleEntries = projectedCars.map((vehicle) => ({
-    id: vehicle.id,
-    kind: 'car' as const,
-    state: 'driving' as const,
-    coord: vehicle.path[0],
-    screen: entityScreenPosition(vehicle.path[0]),
-    direction: vehicle.direction,
-    spriteSheet: vehicle.sprite.sheet,
-  }));
-  const selectedMobilityAgentEntry = selectedAgent
-    ? mobilityAgentEntries.find((entry) => entry.id === selectedAgent.id) ?? null
-    : null;
-  const selectedMobilityVehicleEntry = selectedVehicle
-    ? mobilityVehicleEntries.find((entry) => entry.id === selectedVehicle.id) ?? null
-    : null;
-  return JSON.stringify({
-    coordinateSystem: 'grid origin north-west, x east, y south, top-down minimal map projection',
-    city: {
-      worldId: TERRAIN_SEED_WORLD_ID,
-      terrainSource: 'backend-layered',
-      layeredTerrain: {
-        loadedTiles: terrainState.tiles.size,
-        loadedChunks: terrainState.loadedChunks.size,
+  return buildRenderGameText({
+    worldId: TERRAIN_SEED_WORLD_ID,
+    visualStyleId: VISUAL_STYLE_ID,
+    tileSize,
+    nonPak128AssetPaths: nonPak128AssetPaths(images.keys()),
+    width: WIDTH,
+    height: HEIGHT,
+    terrainState,
+    roads,
+    rails,
+    railCrossings,
+    railPaths,
+    railStations,
+    buildings,
+    trees,
+    details,
+    trains,
+    projectedPedestrians,
+    projectedCars,
+    pedestrianSprites,
+    vehicleSprites,
+    selectedAgentId,
+    selectedVehicleId,
+    backendBaseUrl,
+    backendStatus,
+    backendMobility,
+    diagnostics,
+    camera: {
+      current: { x: camera.x, y: camera.y, scale: camera.scale },
+      target: { x: camera.targetX, y: camera.targetY, scale: camera.targetScale },
+      dragging: camera.dragging,
+      bounds: {
+        minX: -CAMERA_EDGE_MARGIN,
+        maxX: WIDTH - 1 + CAMERA_EDGE_MARGIN,
+        minY: -CAMERA_EDGE_MARGIN,
+        maxY: HEIGHT - 1 + CAMERA_EDGE_MARGIN,
       },
-      visualStyle: {
-        id: VISUAL_STYLE_ID,
-        renderer: 'canvas-vector',
-        spriteDrawing: 'disabled',
-      },
-      assetPack: {
-        id: 'minimal-vector',
-        tile: tileSize,
-      },
-      nonPak128AssetPaths: nonPak128AssetPaths(),
-      width: WIDTH,
-      height: HEIGHT,
-      roadTiles: roads.size,
-      railTiles: rails.size,
-      bridges: [...roads.values()].filter((road) => road.kind === 'bridge').length,
-      buildings: buildings.length,
-      trees: trees.length,
-      cars: projectedCars.length,
-      trains: trains.length,
-      train: trains[0]
-        ? {
-            position: trainPosition(trains[0]),
-            alpha: trainFadeAlpha(trainPosition(trains[0]), { height: HEIGHT, fadeTiles: trains[0].fadeTiles }),
-            speed: trains[0].speed,
-            fadeTiles: trains[0].fadeTiles,
-            direction: 'northbound',
-          }
-        : null,
-      pedestrians: projectedPedestrians.length,
-      pedestrianSprites: pedestrianSprites.length,
-      pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
-      vehicleSprites: vehicleSprites.length,
-      vehicleSheets: [...new Set(vehicleSprites.map((sprite) => sprite.sheet))],
-      backend: {
-        required: true,
-        baseUrl: backendBaseUrl,
-        status: backendStatus,
-      },
-      mobility: {
-        source: 'backend',
-        status: backendMobility.status,
-        tick: backendMobility.tick,
-        agents: backendMobility.agents,
-        vehicles: backendMobility.vehicles,
-        stops: backendMobility.stops,
-        invalidMessages: backendMobility.invalidMessages,
-        lastError: backendMobility.lastError,
-      },
-      mobilityAgents: {
-        count: mobilityAgentEntries.length,
-        selectedId: selectedAgentId,
-        selected: selectedMobilityAgentEntry,
-        agents: mobilityAgentEntries,
-      },
-      mobilityVehicles: {
-        count: mobilityVehicleEntries.length,
-        selectedId: selectedVehicleId,
-        selected: selectedMobilityVehicleEntry,
-        vehicles: mobilityVehicleEntries,
-      },
-      agentInspector: buildBackendPedestrianInspector(selectedAgent),
-      vehicleInspector: buildBackendCarInspector(selectedVehicle),
-      railStations: railStations.length,
-      railYardTracks: Math.max(0, railPaths.length - 2),
-      details: detailCounts,
-      reserveTiles: countTerrainBase('Reserve'),
-      validationErrors: 0,
-      roadRailOverlap: diagnostics.roadRailOverlap,
-      railCrossings: railCrossings.size,
-      invalidBuildings: diagnostics.invalidBuildings,
-      treeBuildingOverlap: diagnostics.treeBuildingOverlap,
-      railStationsOnRoad: diagnostics.railStationsOnRoad,
-      railStationsOnBuildings: diagnostics.railStationsOnBuildings,
-      railStationsOnRails: diagnostics.railStationsOnRails,
-      railStationsOnTrees: diagnostics.railStationsOnTrees,
-      diagnostics,
-      camera: {
-        mode: 'bounded-fixed-map',
-        current: { x: camera.x, y: camera.y, scale: camera.scale },
-        target: { x: camera.targetX, y: camera.targetY, scale: camera.targetScale },
-        dragging: camera.dragging,
-        bounds: {
-          minX: -CAMERA_EDGE_MARGIN,
-          maxX: WIDTH - 1 + CAMERA_EDGE_MARGIN,
-          minY: -CAMERA_EDGE_MARGIN,
-          maxY: HEIGHT - 1 + CAMERA_EDGE_MARGIN,
-        },
-        edgeTreatment: {
-          outskirtsTiles: OUTSKIRTS_TILES,
-          exitTiles: EDGE_EXIT_TILES,
-        },
+      edgeTreatment: {
+        outskirtsTiles: OUTSKIRTS_TILES,
+        exitTiles: EDGE_EXIT_TILES,
       },
     },
+    entityScreenPosition,
+    trainSummary: train && trainPositionSnapshot
+      ? {
+          position: trainPositionSnapshot,
+          alpha: trainFadeAlpha(trainPositionSnapshot, { height: HEIGHT, fadeTiles: train.fadeTiles }),
+          speed: train.speed,
+          fadeTiles: train.fadeTiles,
+          direction: 'northbound',
+        }
+      : null,
   });
 };
-
-function detailCountsByCategory(): Record<string, number> {
-  const result: Record<string, number> = { total: details.length };
-  for (const detail of details) {
-    result[detail.category] = (result[detail.category] ?? 0) + 1;
-  }
-  return result;
-}
-
-function countTerrainBase(base: TerrainBaseKind): number {
-  let count = 0;
-  for (const tile of terrainState.tiles.values()) {
-    if (tile.base === base) count += 1;
-  }
-  return count;
-}
-
-function nonPak128AssetPaths(): string[] {
-  return [...images.keys()].filter((path) => !path.startsWith('/simutrans-assets/pak128/')).sort();
-}
 
 window.advanceTime = (ms: number) => {
   for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * (ms / 1000), train.path);
