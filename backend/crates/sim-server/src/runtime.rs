@@ -41,6 +41,8 @@ pub enum HydrationError {
     Chunk(ChunkError),
     #[error("mobility store error: {0}")]
     Mobility(sim_core::persistence::MobilitySnapshotStoreError),
+    #[error("mobility seed error: {0}")]
+    Seed(sim_core::mobility::seed::SeedError),
 }
 
 use crate::commands::{AppliedCommand, CommandRejection};
@@ -56,28 +58,62 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
         cars_per_arterial: 17,
     };
 
-fn seed_density_from_base_world(bundle: &BaseWorldBundle) -> sim_core::mobility::seed::SeedDensity {
-    sim_core::mobility::seed::SeedDensity {
-        pedestrians_per_corridor: bundle
-            .spawns
-            .pedestrian_groups
-            .first()
-            .map(|group| group.agents_per_corridor)
-            .unwrap_or(0),
-        cars_per_arterial: bundle
-            .spawns
-            .car_groups
-            .first()
-            .map(|group| group.cars_per_arterial)
-            .unwrap_or(0),
-    }
+fn initial_mobility_snapshot_for_base_world(
+    bundle: &BaseWorldBundle,
+) -> Result<MobilityPersistSnapshot, sim_core::mobility::seed::SeedError> {
+    let (seeded_world, _) = sim_core::mobility::seed::from_base_world_bundle(bundle)?;
+    Ok(extract_from_world(&seeded_world))
 }
 
-fn initial_mobility_snapshot_for_base_world(bundle: &BaseWorldBundle) -> MobilityPersistSnapshot {
-    let network = bundle.to_city_network();
-    let (seeded_world, _) =
-        sim_core::mobility::seed::from_network(&network, seed_density_from_base_world(bundle));
-    extract_from_world(&seeded_world)
+fn mobility_snapshot_matches_base_world(
+    snapshot: &MobilityPersistSnapshot,
+    base_world: &BaseWorldBundle,
+) -> bool {
+    let expected_tram_ids = expected_base_world_tram_ids(base_world);
+    if expected_tram_ids.is_empty() {
+        return true;
+    }
+    let trams = snapshot
+        .vehicles
+        .values()
+        .filter(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Tram)
+        .collect::<Vec<_>>();
+    if trams.len() != expected_tram_ids.len() {
+        return false;
+    }
+    if !trams
+        .iter()
+        .all(|vehicle| expected_tram_ids.contains(&vehicle.id.0))
+    {
+        return false;
+    }
+    if expected_tram_ids.len() > 1 {
+        let unique_route_positions = trams
+            .iter()
+            .map(|vehicle| {
+                format!(
+                    "{}:{}:{:.3}",
+                    vehicle.route_id, vehicle.link_index, vehicle.progress
+                )
+            })
+            .collect::<std::collections::HashSet<_>>();
+        if unique_route_positions.len() <= 1 {
+            return false;
+        }
+    }
+    true
+}
+
+fn expected_base_world_tram_ids(base_world: &BaseWorldBundle) -> std::collections::HashSet<String> {
+    base_world
+        .spawns
+        .tram_lines
+        .iter()
+        .enumerate()
+        .flat_map(|(line_index, line)| {
+            (0..line.trams).map(move |n| format!("vehicle:tram:{line_index}:{n}"))
+        })
+        .collect()
 }
 
 pub fn default_base_world_path() -> std::path::PathBuf {
@@ -174,6 +210,9 @@ impl SimulationRuntime {
         sim_core::routing::RoutingPlugin {
             seeded_stops,
             seeded_walks,
+            seeded_transit_lines: sim_core::mobility::seed::seeded_transit_lines_from_base_world(
+                &bundle,
+            )?,
         }
         .install(&mut world, &mut schedule);
 
@@ -188,7 +227,7 @@ impl SimulationRuntime {
         .install(&mut world, &mut schedule);
 
         bundle.spawn_all_chunks(&mut world, 0);
-        let mobility_snap = initial_mobility_snapshot_for_base_world(&bundle);
+        let mobility_snap = initial_mobility_snapshot_for_base_world(&bundle)?;
         apply_into_world(&mut world, mobility_snap);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
         refresh_flow_field_resources(&mut world);
@@ -290,6 +329,10 @@ impl SimulationRuntime {
         sim_core::routing::RoutingPlugin {
             seeded_stops,
             seeded_walks,
+            seeded_transit_lines: sim_core::mobility::seed::seeded_transit_lines_from_base_world(
+                base_world,
+            )
+            .map_err(HydrationError::Seed)?,
         }
         .install(&mut world, &mut schedule);
 
@@ -310,8 +353,11 @@ impl SimulationRuntime {
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, snap)) => snap,
-            None => initial_mobility_snapshot_for_base_world(base_world),
+            Some((_tick, snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => snap,
+            None => initial_mobility_snapshot_for_base_world(base_world)
+                .map_err(HydrationError::Seed)?,
+            Some((_tick, _snap)) => initial_mobility_snapshot_for_base_world(base_world)
+                .map_err(HydrationError::Seed)?,
         };
         apply_into_world(&mut world, mobility_snap);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
@@ -935,6 +981,32 @@ mod tests {
                 .iter()
                 .any(|coord| coord.x == 4 && coord.y == 4),
             "central Zurich chunk remains available"
+        );
+    }
+
+    #[test]
+    fn runtime_seeds_backend_trams_from_base_world() {
+        let fixture_root = workspace_root().join("data/worlds/zurich-river-city-v1");
+        let runtime = SimulationRuntime::new_from_base_world_dir(&fixture_root)
+            .expect("base world fixture must load");
+        let snapshot = runtime.mobility_snapshot();
+
+        let trams = snapshot
+            .vehicles
+            .iter()
+            .filter(|vehicle| vehicle.kind == abutown_protocol::VehicleKindDto::Tram)
+            .collect::<Vec<_>>();
+
+        assert_eq!(trams.len(), 4);
+        assert!(
+            trams
+                .iter()
+                .all(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
+        );
+        assert!(
+            trams
+                .iter()
+                .all(|vehicle| vehicle.sprite_key.starts_with("tram:"))
         );
     }
 
@@ -1729,7 +1801,7 @@ mod tests {
 
         assert_eq!(runtime.mobility_tick_for_test(), 0);
         assert_eq!(runtime.mobility_agent_count_for_test(), 1011);
-        assert_eq!(runtime.mobility_vehicle_count_for_test(), 51);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
     }
 
     #[tokio::test]
@@ -1738,10 +1810,8 @@ mod tests {
         use sim_core::mobility::{extract_from_world, seed};
 
         let base_world = base_world_fixture();
-        let (mut authored, mut sched) = seed::from_network(
-            &base_world.to_city_network(),
-            seed_density_from_base_world(&base_world),
-        );
+        let (mut authored, mut sched) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
         // Advance one tick so the persisted state differs from a fresh seed.
         let _ = api_tick(&mut authored, &mut sched);
         let persisted_tick = sim_core::mobility::api::tick(&authored);
@@ -1771,7 +1841,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hydrate_restores_compatible_vehicleless_snapshot_without_reseeding() {
+    async fn hydrate_ignores_snapshot_missing_declared_trams() {
         use sim_core::mobility::{extract_from_world, seed};
 
         let network = road_test_network();
@@ -1809,6 +1879,63 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(runtime.mobility_vehicle_count_for_test(), 0);
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
+    }
+
+    #[tokio::test]
+    async fn hydrate_ignores_stacked_declared_tram_snapshot() {
+        use sim_core::mobility::{VehicleKind, seed};
+
+        let base_world = base_world_fixture();
+        let (authored, _) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+        let mut authored_snap = extract_from_world(&authored);
+        for vehicle in authored_snap
+            .vehicles
+            .values_mut()
+            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+        {
+            vehicle.link_index = 0;
+            vehicle.progress = 0.0;
+        }
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(
+            &mut mobility_store,
+            "zurich-river-city-v1",
+            99,
+            &authored_snap,
+            &base_world.snapshot_compatibility(),
+        )
+        .await
+        .unwrap();
+
+        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+            &base_world,
+        )
+        .await
+        .unwrap();
+
+        let hydrated_snap = runtime.mobility_persist_snapshot();
+        let unique_tram_positions = hydrated_snap
+            .vehicles
+            .values()
+            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .map(|vehicle| {
+                format!(
+                    "{}:{}:{:.3}",
+                    vehicle.route_id, vehicle.link_index, vehicle.progress
+                )
+            })
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        assert!(
+            unique_tram_positions.len() > 1,
+            "stacked persisted trams should be replaced by base-world seed positions"
+        );
     }
 }

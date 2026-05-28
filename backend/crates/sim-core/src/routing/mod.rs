@@ -11,7 +11,7 @@ pub mod spatial_index;
 pub mod transit;
 pub mod waiting;
 
-pub use builder::{SeededStop, SeededWalk, build_graph_from_city_network};
+pub use builder::{SeededStop, SeededTransitLine, SeededWalk, build_graph_from_city_network};
 pub use cost_model::{CostModel, DistanceCost, ModeFilterCost, TimeCost};
 pub use flow_field::{
     FlowField, FlowFieldCache, FlowFieldCacheKey, FlowFieldCacheStats, FlowFieldEntry,

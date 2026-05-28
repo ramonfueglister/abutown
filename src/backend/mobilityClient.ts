@@ -4,6 +4,7 @@ import { createSubscriptionClient } from './chunkSubscriptionClient';
 import {
   isMobilitySnapshotDto,
   isWorldSummaryDto,
+  type ChunkCoordDto,
   mobilitySnapshotFromProto,
   worldSummaryFromProto,
   type MobilitySnapshotDto,
@@ -40,6 +41,8 @@ export type MobilityViewportGetters = {
   getViewport: () => { width: number; height: number } | null;
   getWorldDims: () => { widthTiles: number; heightTiles: number; chunkSize: number };
 };
+
+type WorldDims = { widthTiles: number; heightTiles: number; chunkSize: number };
 
 export type MobilityBackendBridgeOptions = {
   baseUrl?: string;
@@ -184,7 +187,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
         if (!screenToTile || !view) return;
         const world = options.viewport.getWorldDims();
         const visible = visibleChunks(screenToTile, view, world, world.chunkSize, 1);
-        subscription?.update(visible);
+        subscription?.update(withTransitInterestChunks(visible, currentState, world));
       };
       pollSubscription(); // Initial subscribe immediately so the client doesn't wait the poll interval for entities.
       subscriptionInterval = setIntervalFn(pollSubscription, SUBSCRIPTION_POLL_INTERVAL_MS);
@@ -292,6 +295,44 @@ async function requestMobilitySnapshot(baseUrl: string, fetchImpl: typeof fetch)
   const payload = mobilitySnapshotFromProto(fromBinary(MobilitySnapshotSchema, bytes));
   if (!isMobilitySnapshotDto(payload)) throw new Error('Invalid mobility snapshot payload');
   return payload;
+}
+
+function withTransitInterestChunks(
+  base: ChunkCoordDto[],
+  state: MobilityOverlayState,
+  world: WorldDims,
+): ChunkCoordDto[] {
+  if (world.chunkSize <= 0) return base;
+
+  const maxX = Math.ceil(world.widthTiles / world.chunkSize) - 1;
+  const maxY = Math.ceil(world.heightTiles / world.chunkSize) - 1;
+  if (maxX < 0 || maxY < 0) return base;
+
+  const out = new Map<string, ChunkCoordDto>();
+  for (const coord of base) out.set(chunkKey(coord), coord);
+
+  for (const entry of state.vehicles.values()) {
+    if (entry.current.kind !== 'tram') continue;
+    const coord = entry.current.world_coord;
+    if (!Number.isFinite(coord.x) || !Number.isFinite(coord.y)) continue;
+    const center = {
+      x: Math.floor(coord.x / world.chunkSize),
+      y: Math.floor(coord.y / world.chunkSize),
+    };
+    for (let y = center.y - 1; y <= center.y + 1; y += 1) {
+      for (let x = center.x - 1; x <= center.x + 1; x += 1) {
+        if (x < 0 || y < 0 || x > maxX || y > maxY) continue;
+        const interest = { x, y };
+        out.set(chunkKey(interest), interest);
+      }
+    }
+  }
+
+  return [...out.values()];
+}
+
+function chunkKey(coord: ChunkCoordDto): string {
+  return `${coord.x},${coord.y}`;
 }
 
 function resolveFetch(options: { fetchImpl?: typeof fetch }): typeof fetch | undefined {

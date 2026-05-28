@@ -2,7 +2,9 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::Schedule;
 
 use crate::city_network::CityNetwork;
-use crate::routing::builder::{SeededStop, SeededWalk, build_graph_from_city_network};
+use crate::routing::builder::{
+    SeededStop, SeededTransitLine, SeededWalk, build_graph_from_city_network,
+};
 use crate::routing::flow_field::FlowFieldCache;
 use crate::routing::graph::Graph;
 use crate::routing::hpa::{HpaConfig, HpaIndex};
@@ -16,6 +18,7 @@ use crate::world::schedule::SimPlugin;
 pub struct RoutingPlugin {
     pub seeded_stops: Vec<SeededStop>,
     pub seeded_walks: Vec<SeededWalk>,
+    pub seeded_transit_lines: Vec<SeededTransitLine>,
 }
 
 impl SimPlugin for RoutingPlugin {
@@ -25,9 +28,12 @@ impl SimPlugin for RoutingPlugin {
 
     fn install(&self, world: &mut World, _schedule: &mut Schedule) {
         let (graph, transit_lines, spatial_index) = match world.get_resource::<CityNetwork>() {
-            Some(network) => {
-                build_graph_from_city_network(network, &self.seeded_stops, &self.seeded_walks)
-            }
+            Some(network) => build_graph_from_city_network(
+                network,
+                &self.seeded_stops,
+                &self.seeded_walks,
+                &self.seeded_transit_lines,
+            ),
             None => (
                 Graph::default(),
                 TransitLines::default(),

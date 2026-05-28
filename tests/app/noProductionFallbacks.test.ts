@@ -26,6 +26,9 @@ const checks = [
     patterns: [
       'createZurichRuntimeContext',
       'zurichContext.runtime',
+      'buildNorthboundTrainPath(',
+      'trainWrappedOffset(',
+      'for (const train of trains)',
     ],
   },
 ];

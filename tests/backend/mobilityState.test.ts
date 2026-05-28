@@ -234,6 +234,47 @@ describe('mobility state reducer', () => {
     expect(after.vehicles.size).toBe(0);
   });
 
+  it('keeps backend trams when they leave a subscribed chunk', () => {
+    const state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'w',
+        tick: 0,
+        agents: [],
+        vehicles: [{
+          id: 'vehicle:tram:0:0',
+          kind: 'tram',
+          route_id: 'tram:rail:0',
+          link_index: 0,
+          progress: 0,
+          capacity: 80,
+          occupants: [],
+          dwell_ticks_remaining: 0,
+          world_coord: { x: 150, y: 224 },
+          direction: 's',
+          sprite_key: 'tram:0',
+        }],
+        stops: [],
+      },
+      0,
+    );
+
+    const after = applyMobilityChunkDelta(state, {
+      type: 'mobility_chunk_delta',
+      protocol_version: 1,
+      world_id: 'w',
+      tick: 1,
+      chunk: { x: 4, y: 7 },
+      changed_agents: [],
+      changed_vehicles: [],
+      left_agents: [],
+      left_vehicles: ['vehicle:tram:0:0'],
+    }, 100);
+
+    expect(after.vehicles.has('vehicle:tram:0:0')).toBe(true);
+  });
+
   it('applyMobilityChunkSnapshot replaces entities for that chunk only', () => {
     // agent in chunk (0,0): world_coord x in [0,31], y in [0,31]
     // agent in chunk (1,0): world_coord x in [32,63], y in [0,31]
@@ -293,6 +334,59 @@ describe('mobility state reducer', () => {
     // chunk (1,0) agent untouched
     expect(after.agents.has('agent:chunk10')).toBe(true);
     expect(after.agents.size).toBe(2);
+  });
+
+  it('ignores stale chunk snapshots and deltas', () => {
+    const seedState = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'w',
+        tick: 10,
+        agents: [],
+        vehicles: [{
+          id: 'vehicle:tram:0',
+          kind: 'tram',
+          route_id: 'tram:rail:0',
+          link_index: 0,
+          progress: 0.25,
+          capacity: 80,
+          occupants: [],
+          dwell_ticks_remaining: 0,
+          world_coord: { x: 150, y: 224 },
+          direction: 's',
+          sprite_key: 'tram:0',
+        }],
+        stops: [],
+      },
+      0,
+    );
+
+    const staleSnapshot = applyMobilityChunkSnapshot(seedState, {
+      type: 'mobility_chunk_snapshot',
+      protocol_version: 1,
+      world_id: 'w',
+      tick: 9,
+      chunk: { x: 4, y: 7 },
+      agents: [],
+      vehicles: [],
+    }, 100);
+    expect(staleSnapshot).toBe(seedState);
+    expect(staleSnapshot.vehicles.has('vehicle:tram:0')).toBe(true);
+
+    const staleDelta = applyMobilityChunkDelta(seedState, {
+      type: 'mobility_chunk_delta',
+      protocol_version: 1,
+      world_id: 'w',
+      tick: 9,
+      chunk: { x: 4, y: 7 },
+      changed_agents: [],
+      changed_vehicles: [],
+      left_agents: [],
+      left_vehicles: ['vehicle:tram:0'],
+    }, 100);
+    expect(staleDelta).toBe(seedState);
+    expect(staleDelta.vehicles.has('vehicle:tram:0')).toBe(true);
   });
 
 });

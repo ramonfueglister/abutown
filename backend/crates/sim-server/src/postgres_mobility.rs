@@ -11,7 +11,7 @@ const MOBILITY_SNAPSHOTS_MIGRATION: &str =
 const DROP_ROAD_VEHICLE_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605160005_drop_road_vehicle_snapshots.sql");
 const SNAPSHOT_COMPATIBILITY_MIGRATION: &str =
-    include_str!("../migrations/202605280001_snapshot_base_world_metadata.sql");
+    include_str!("../migrations/202605280002_mobility_snapshot_base_world_metadata.sql");
 
 #[derive(Debug)]
 pub struct PostgresMobilitySnapshotStore {
@@ -146,6 +146,11 @@ impl MobilitySnapshotStore for PostgresMobilitySnapshotStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mobility_snapshot_schema_migrations_do_not_touch_chunk_snapshots() {
+        assert!(!SNAPSHOT_COMPATIBILITY_MIGRATION.contains("chunk_snapshots"));
+    }
 
     #[tokio::test]
     async fn postgres_mobility_store_round_trip_when_database_url_is_set() {

@@ -10,7 +10,7 @@ use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 const CHUNK_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605150003_chunk_snapshots.sql");
 const SNAPSHOT_COMPATIBILITY_MIGRATION: &str =
-    include_str!("../migrations/202605280001_snapshot_base_world_metadata.sql");
+    include_str!("../migrations/202605280001_chunk_snapshot_base_world_metadata.sql");
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SqlChunkSnapshotRecord {
@@ -230,6 +230,11 @@ mod tests {
         assert_eq!(record.payload["world_id"], "abutown-main");
         assert_eq!(record.payload["coord"]["x"], 4);
         assert_eq!(record.payload["chunk_state"], "active");
+    }
+
+    #[test]
+    fn chunk_snapshot_schema_migrations_do_not_touch_mobility_snapshots() {
+        assert!(!SNAPSHOT_COMPATIBILITY_MIGRATION.contains("mobility_snapshots"));
     }
 }
 
