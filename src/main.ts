@@ -13,10 +13,10 @@ import {
 import { mountCardHandView } from './cardHand/cardHandView';
 import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
-  constrainCameraTargetToGrid,
   createCameraState,
   dampCamera,
   panCameraTarget,
+  screenToWorld as cameraScreenToWorld,
   zoomCameraAt,
 } from './cameraController';
 import { cleanupSpritePixels } from './render/spriteCleanup';
@@ -43,7 +43,7 @@ import {
   RIVERBANK_WEST,
   riverSurfaceSourceFromMask,
 } from './render/riverbankFrames';
-import { compareDrawableOrder } from './render/drawOrder';
+import { compareDrawableOrder, type DrawableType } from './render/drawOrder';
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
@@ -73,6 +73,15 @@ import {
   buildBackendPedestrianInspector,
   type EntityInspector,
 } from './render/entityInspector';
+import { selectMobilityEntityAtWorldPoint } from './render/mobilityEntitySelection';
+import {
+  chooseInitialCameraFocus,
+  constrainCameraToMap,
+  initializeCameraForGridFocus,
+  isCoordVisibleInGridRect,
+  visibleGridRectForCamera,
+  type GridRect,
+} from './render/cameraViewport';
 import { createCityDiagnostics } from './render/cityDiagnostics';
 import { buildRenderGameText, nonPak128AssetPaths } from './render/renderGameText';
 
@@ -86,13 +95,6 @@ type Train = {
   carSpacing: number;
 };
 
-type GridRect = {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-};
-
 type StaticDrawable =
   | { type: 'rail'; coord: Coord; rail: RailTile }
   | { type: 'road'; coord: Coord; road: RoadTile }
@@ -101,10 +103,7 @@ type StaticDrawable =
   | { type: 'tree'; coord: Coord }
   | { type: 'building'; coord: Coord; building: Building };
 
-type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: string };
-type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
-type TrainDrawable = { type: 'train'; coord: Coord; train: Train };
-type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
+type DrawableForOrder = { type: DrawableType; coord: Coord };
 
 const activeAssetPack = pak128AssetPack;
 const VISUAL_STYLE_ID = 'minimal-motorways';
@@ -212,7 +211,7 @@ async function startRuntime(): Promise<void> {
       viewport: {
         // Compose screen → render-world → tile so visibleChunks gets coords
         // in the same space the backend's `chunk_of` math operates on.
-        getScreenToTile: () => (screen) => worldToGrid(screenToWorld(screen)),
+        getScreenToTile: () => (screen) => worldToGrid(cameraScreenToWorld(camera, screen)),
         getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
         getWorldDims: () => ({
           widthTiles: terrainState.width,
@@ -305,12 +304,13 @@ function resize(): void {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.imageSmoothingEnabled = true;
   if (!cameraInitialized) {
-    const focus = iso(initialCameraFocusCoord());
-    camera.targetX = window.innerWidth / 2 - focus.x * camera.targetScale;
-    camera.targetY = window.innerHeight * 0.52 - focus.y * camera.targetScale;
-    camera.x = camera.targetX;
-    camera.y = camera.targetY;
-    camera.scale = camera.targetScale;
+    initializeCameraForGridFocus(
+      camera,
+      initialCameraFocusCoord(),
+      { width: window.innerWidth, height: window.innerHeight },
+      iso,
+      { verticalAnchor: 0.52 },
+    );
     cameraInitialized = true;
   }
   constrainCamera(false);
@@ -929,16 +929,8 @@ function buildTrains(): Train[] {
 function initialCameraFocusCoord(): Coord {
   const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
   const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const coords = [...pedestrians.map((agent) => agent.path[0]), ...cars.map((car) => car.path[0])]
-    .filter((coord) => coord.x >= 0 && coord.y >= 0 && coord.x < WIDTH && coord.y < HEIGHT);
-  if (coords.length === 0) return { x: Math.floor(WIDTH / 2), y: Math.floor(HEIGHT / 2) };
-  const x = coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length;
-  const y = coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length;
-  const center = { x: WIDTH / 2, y: HEIGHT / 2 };
-  return {
-    x: center.x * 0.35 + x * 0.65,
-    y: center.y * 0.35 + y * 0.65,
-  };
+  const coords = [...pedestrians.map((agent) => agent.path[0]), ...cars.map((car) => car.path[0])];
+  return chooseInitialCameraFocus(coords, { width: WIDTH, height: HEIGHT });
 }
 
 function selectedBackendPedestrian(): BackendPedestrian | null {
@@ -954,40 +946,18 @@ function selectedBackendCar(): BackendCar | null {
 }
 
 function selectMobilityEntityAtScreenPoint(point: Coord): void {
-  const worldPoint = screenToWorld(point);
+  const worldPoint = cameraScreenToWorld(camera, point);
   const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
   const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const vehicleHit = findNearestProjectedEntity(cars, worldPoint, Math.max(10, 24 / camera.scale));
-  if (vehicleHit) {
-    selectedVehicleId = vehicleHit.id;
-    selectedAgentId = null;
-    return;
-  }
-  const agentHit = findNearestProjectedEntity(pedestrians, worldPoint, Math.max(8, 20 / camera.scale));
-  selectedAgentId = agentHit?.id ?? null;
-  selectedVehicleId = null;
-}
-
-function findNearestProjectedEntity<T extends { id: string; path: Coord[] }>(
-  entities: readonly T[],
-  worldPoint: Coord,
-  radius: number,
-): T | null {
-  let nearest: { entity: T; distance: number } | null = null;
-  for (const entity of entities) {
-    const projected = iso(entity.path[0]);
-    const distance = Math.hypot(projected.x - worldPoint.x, projected.y - worldPoint.y);
-    if (distance > radius) continue;
-    if (!nearest || distance < nearest.distance) nearest = { entity, distance };
-  }
-  return nearest?.entity ?? null;
-}
-
-function screenToWorld(point: Coord): Coord {
-  return {
-    x: (point.x - camera.x) / camera.scale,
-    y: (point.y - camera.y) / camera.scale,
-  };
+  const selection = selectMobilityEntityAtWorldPoint({
+    pedestrians,
+    cars,
+    worldPoint,
+    cameraScale: camera.scale,
+    gridToWorld: iso,
+  });
+  selectedAgentId = selection.selectedAgentId;
+  selectedVehicleId = selection.selectedVehicleId;
 }
 
 function trainPosition(train: Train): Coord {
@@ -1022,40 +992,27 @@ function buildStaticDrawables(): StaticDrawable[] {
 }
 
 function constrainCamera(allowOverscroll: boolean): void {
-  constrainCameraTargetToGrid(
+  constrainCameraToMap(
     camera,
     { width: window.innerWidth, height: window.innerHeight },
     worldToGrid,
     iso,
-    {
-      minX: -CAMERA_EDGE_MARGIN,
-      maxX: WIDTH - 1 + CAMERA_EDGE_MARGIN,
-      minY: -CAMERA_EDGE_MARGIN,
-      maxY: HEIGHT - 1 + CAMERA_EDGE_MARGIN,
-      softness: CAMERA_EDGE_SOFTNESS,
-      allowOverscroll,
-    }
+    { width: WIDTH, height: HEIGHT },
+    { edgeMargin: CAMERA_EDGE_MARGIN, edgeSoftness: CAMERA_EDGE_SOFTNESS, allowOverscroll },
   );
 }
 
 function visibleGridRect(): GridRect {
-  const inverseScale = 1 / camera.scale;
-  const corners = [
-    worldToGrid({ x: -camera.x * inverseScale, y: -camera.y * inverseScale }),
-    worldToGrid({ x: (window.innerWidth - camera.x) * inverseScale, y: -camera.y * inverseScale }),
-    worldToGrid({ x: -camera.x * inverseScale, y: (window.innerHeight - camera.y) * inverseScale }),
-    worldToGrid({ x: (window.innerWidth - camera.x) * inverseScale, y: (window.innerHeight - camera.y) * inverseScale }),
-  ];
-  return {
-    minX: Math.floor(Math.min(...corners.map((coord) => coord.x))) - VIEWPORT_GRID_PADDING,
-    maxX: Math.ceil(Math.max(...corners.map((coord) => coord.x))) + VIEWPORT_GRID_PADDING,
-    minY: Math.floor(Math.min(...corners.map((coord) => coord.y))) - VIEWPORT_GRID_PADDING,
-    maxY: Math.ceil(Math.max(...corners.map((coord) => coord.y))) + VIEWPORT_GRID_PADDING,
-  };
+  return visibleGridRectForCamera(
+    camera,
+    { width: window.innerWidth, height: window.innerHeight },
+    worldToGrid,
+    VIEWPORT_GRID_PADDING,
+  );
 }
 
 function isCoordVisible(coord: Coord, rect: GridRect): boolean {
-  return coord.x >= rect.minX && coord.x <= rect.maxX && coord.y >= rect.minY && coord.y <= rect.maxY;
+  return isCoordVisibleInGridRect(coord, rect);
 }
 
 function isInsidePlayableMap(coord: Coord): boolean {
@@ -1142,36 +1099,11 @@ function outwardExits(coord: Coord, mask: number): { dx: number; dy: number; mas
   return exits;
 }
 
-function depthSort(a: { coord: Coord }, b: { coord: Coord }): number {
-  return iso(a.coord).y - iso(b.coord).y || a.coord.x - b.coord.x;
-}
-
-function compareDrawables(a: Drawable, b: Drawable): number {
+function compareDrawables(a: DrawableForOrder, b: DrawableForOrder): number {
   return compareDrawableOrder(
     { type: a.type, isoY: iso(a.coord).y, x: a.coord.x },
     { type: b.type, isoY: iso(b.coord).y, x: b.coord.x },
   );
-}
-
-function mergeSortedDrawables(staticItems: StaticDrawable[], dynamicItems: Array<TrainDrawable | CarDrawable | PedestrianDrawable>): Drawable[] {
-  const result: Drawable[] = [];
-  let staticIndex = 0;
-  let dynamicIndex = 0;
-  while (staticIndex < staticItems.length || dynamicIndex < dynamicItems.length) {
-    const staticItem = staticItems[staticIndex];
-    const dynamicItem = dynamicItems[dynamicIndex];
-    if (!staticItem) {
-      result.push(dynamicItem);
-      dynamicIndex += 1;
-    } else if (!dynamicItem || compareDrawables(staticItem, dynamicItem) <= 0) {
-      result.push(staticItem);
-      staticIndex += 1;
-    } else {
-      result.push(dynamicItem);
-      dynamicIndex += 1;
-    }
-  }
-  return result;
 }
 
 function key(coord: Coord): string {
