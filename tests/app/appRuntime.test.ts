@@ -13,6 +13,7 @@ function createBackendStatus() {
 
 function createBaseWorld() {
   return {
+    schema_version: 1,
     world_id: 'zurich-river-city-v1',
     chunk_size: 32,
     world_tiles: { width: 256, height: 256 },

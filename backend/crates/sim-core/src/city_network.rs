@@ -47,21 +47,6 @@ impl CityNetwork {
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self, CityNetworkError> {
         Self::from_path(path)
     }
-
-    /// Return an empty network for the given world.
-    pub fn empty_for_world(world_id: &str) -> Self {
-        Self {
-            version: 1,
-            world_id: world_id.to_string(),
-            chunk_size: 32,
-            world_tiles: WorldTiles {
-                width: 256,
-                height: 256,
-            },
-            arterial_paths: Vec::new(),
-            pedestrian_corridors: Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]

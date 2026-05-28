@@ -17,6 +17,7 @@ export type BaseWorldTerrainKind =
 export type BaseWorldRoadKind = 'street' | 'bridge';
 
 export type BaseWorldResponse = {
+  readonly schema_version: number;
   readonly world_id: string;
   readonly chunk_size: number;
   readonly world_tiles: { readonly width: number; readonly height: number };
@@ -73,6 +74,7 @@ function validateBaseWorld(payload: BaseWorldResponse): void {
   if (payload.world_id !== 'zurich-river-city-v1') {
     throw new Error(`Unexpected base world id: ${payload.world_id}`);
   }
+  if (payload.schema_version !== 1) throw new Error(`Unexpected base world schema: ${payload.schema_version}`);
   if (payload.chunk_size !== 32) throw new Error(`Unexpected base world chunk size: ${payload.chunk_size}`);
   if (payload.world_tiles.width !== 256 || payload.world_tiles.height !== 256) {
     throw new Error('Unexpected base world dimensions');

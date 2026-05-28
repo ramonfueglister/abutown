@@ -30,7 +30,6 @@ fn tick_100k_with_5_subscribed(c: &mut Criterion) {
             SeedDensity {
                 pedestrians_per_corridor: 50,
                 cars_per_arterial: 10,
-                trams_total: 0,
             },
         );
 
@@ -55,7 +54,6 @@ fn tick_100k_all_active(c: &mut Criterion) {
             SeedDensity {
                 pedestrians_per_corridor: 50,
                 cars_per_arterial: 10,
-                trams_total: 0,
             },
         );
 

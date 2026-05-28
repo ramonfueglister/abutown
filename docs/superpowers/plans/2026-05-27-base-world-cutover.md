@@ -19,7 +19,7 @@
 - [x] Task 5: Route and seed mobility from bundle data only
 - [x] Task 6: Serve bundle-derived render layers to the frontend
 - [x] Task 7: Remove retired/demo production paths
-- [ ] Task 8: Add snapshot compatibility metadata
+- [x] Task 8: Add snapshot compatibility metadata
 - [x] Task 9: Run full verification and commit in reviewable slices
 
 ---
@@ -1773,6 +1773,8 @@ git commit -m "Remove retired demo world paths"
 
 **Purpose:** Prevent old demo snapshots from being hydrated into the new base world.
 
+**Implementation note:** Completed as a store-level compatibility key instead of mutating the JSON payload shape. `SnapshotCompatibility { base_world_id, base_world_schema_version }` is required by all chunk and mobility snapshot store reads/writes; Postgres stores the metadata in indexed columns and current reads filter on those columns, so old rows with null metadata are invisible. In-memory stores use the same compatibility tuple as part of their key. Hydration no longer has a vehicleless-snapshot reseed heuristic: a compatible snapshot is restored exactly, and a missing/incompatible row initializes from the validated base world.
+
 ### 8.1 Add base world metadata to persisted snapshot structs
 
 Find `MobilityPersistSnapshot` and chunk snapshot persistence structs:
@@ -1829,7 +1831,7 @@ fn require_compatible_snapshot(
 }
 ```
 
-The replacement behavior after rejection is a fresh seed from the validated base world. It is not a demo fallback.
+The replacement behavior after a missing/incompatible row is a fresh seed from the validated base world. It is not a demo fallback.
 
 ### 8.2 Add chunk snapshot base-world key
 

@@ -9,6 +9,21 @@ use crate::mobility::MobilityPersistSnapshot;
 use crate::scheduler::ChunkActivity;
 use crate::tile::TileKind;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SnapshotCompatibility {
+    pub base_world_id: String,
+    pub base_world_schema_version: u32,
+}
+
+impl SnapshotCompatibility {
+    pub fn new(base_world_id: impl Into<String>, base_world_schema_version: u32) -> Self {
+        Self {
+            base_world_id: base_world_id.into(),
+            base_world_schema_version,
+        }
+    }
+}
+
 /// Build a `ChunkSnapshotDto` from a `Chunk` value. Delegates to
 /// `build_chunk_snapshot_from_parts` after extracting the dense tile vector
 /// from the chunk — the canonical implementation lives there.
@@ -76,17 +91,19 @@ pub trait ChunkSnapshotStore: std::fmt::Debug + Send + Sync {
     async fn write_snapshot(
         &mut self,
         snapshot: ChunkSnapshotDto,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<(), ChunkSnapshotStoreError>;
 
     async fn read_snapshot(
         &self,
         coord: ChunkCoord,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError>;
 }
 
 #[derive(Debug, Default)]
 pub struct InMemoryChunkSnapshotStore {
-    snapshots: HashMap<ChunkCoord, ChunkSnapshotDto>,
+    snapshots: HashMap<(ChunkCoord, SnapshotCompatibility), ChunkSnapshotDto>,
 }
 
 #[async_trait]
@@ -94,32 +111,45 @@ impl ChunkSnapshotStore for InMemoryChunkSnapshotStore {
     async fn write_snapshot(
         &mut self,
         snapshot: ChunkSnapshotDto,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<(), ChunkSnapshotStoreError> {
-        InMemoryChunkSnapshotStore::write_snapshot(self, snapshot);
+        InMemoryChunkSnapshotStore::write_snapshot(self, snapshot, compatibility);
         Ok(())
     }
 
     async fn read_snapshot(
         &self,
         coord: ChunkCoord,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
-        Ok(InMemoryChunkSnapshotStore::read_snapshot(self, coord).cloned())
+        Ok(InMemoryChunkSnapshotStore::read_snapshot(self, coord, compatibility).cloned())
     }
 }
 
 impl InMemoryChunkSnapshotStore {
-    pub fn write_snapshot(&mut self, snapshot: ChunkSnapshotDto) {
+    pub fn write_snapshot(
+        &mut self,
+        snapshot: ChunkSnapshotDto,
+        compatibility: &SnapshotCompatibility,
+    ) {
         self.snapshots.insert(
-            ChunkCoord {
-                x: snapshot.coord.x,
-                y: snapshot.coord.y,
-            },
+            (
+                ChunkCoord {
+                    x: snapshot.coord.x,
+                    y: snapshot.coord.y,
+                },
+                compatibility.clone(),
+            ),
             snapshot,
         );
     }
 
-    pub fn read_snapshot(&self, coord: ChunkCoord) -> Option<&ChunkSnapshotDto> {
-        self.snapshots.get(&coord)
+    pub fn read_snapshot(
+        &self,
+        coord: ChunkCoord,
+        compatibility: &SnapshotCompatibility,
+    ) -> Option<&ChunkSnapshotDto> {
+        self.snapshots.get(&(coord, compatibility.clone()))
     }
 
     pub fn snapshot_count(&self) -> usize {
@@ -127,8 +157,13 @@ impl InMemoryChunkSnapshotStore {
     }
 
     pub fn snapshot_coords(&self) -> Vec<ChunkCoord> {
-        let mut coords: Vec<ChunkCoord> = self.snapshots.keys().copied().collect();
+        let mut coords: Vec<ChunkCoord> = self
+            .snapshots
+            .keys()
+            .map(|(coord, _compatibility)| *coord)
+            .collect();
         coords.sort_unstable();
+        coords.dedup();
         coords
     }
 }
@@ -154,17 +189,19 @@ pub trait MobilitySnapshotStore: std::fmt::Debug + Send + Sync {
         world_id: &str,
         tick: u64,
         snapshot: &MobilityPersistSnapshot,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<(), MobilitySnapshotStoreError>;
 
     async fn read(
         &self,
         world_id: &str,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<Option<(u64, MobilityPersistSnapshot)>, MobilitySnapshotStoreError>;
 }
 
 #[derive(Debug, Default)]
 pub struct InMemoryMobilitySnapshotStore {
-    snapshots: HashMap<String, (u64, MobilityPersistSnapshot)>,
+    snapshots: HashMap<(String, SnapshotCompatibility), (u64, MobilityPersistSnapshot)>,
 }
 
 #[async_trait]
@@ -174,17 +211,24 @@ impl MobilitySnapshotStore for InMemoryMobilitySnapshotStore {
         world_id: &str,
         tick: u64,
         snapshot: &MobilityPersistSnapshot,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<(), MobilitySnapshotStoreError> {
-        self.snapshots
-            .insert(world_id.to_string(), (tick, snapshot.clone()));
+        self.snapshots.insert(
+            (world_id.to_string(), compatibility.clone()),
+            (tick, snapshot.clone()),
+        );
         Ok(())
     }
 
     async fn read(
         &self,
         world_id: &str,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<Option<(u64, MobilityPersistSnapshot)>, MobilitySnapshotStoreError> {
-        Ok(self.snapshots.get(world_id).cloned())
+        Ok(self
+            .snapshots
+            .get(&(world_id.to_string(), compatibility.clone()))
+            .cloned())
     }
 }
 
@@ -238,6 +282,7 @@ mod tests {
     #[test]
     fn snapshot_store_reports_count_and_sorted_coords() {
         let mut store = InMemoryChunkSnapshotStore::default();
+        let compatibility = SnapshotCompatibility::new("zurich-river-city-v1", 1);
 
         let mut east = Chunk::new(ChunkCoord { x: 5, y: 4 }, 32);
         east.set_tile_kind(0, TileKind::Water).expect("tile exists");
@@ -246,16 +291,14 @@ mod tests {
             .set_tile_kind(0, TileKind::Road)
             .expect("tile exists");
 
-        store.write_snapshot(build_chunk_snapshot(
-            "abutown-main",
-            &east,
-            ChunkActivity::Warm,
-        ));
-        store.write_snapshot(build_chunk_snapshot(
-            "abutown-main",
-            &visible,
-            ChunkActivity::Active,
-        ));
+        store.write_snapshot(
+            build_chunk_snapshot("abutown-main", &east, ChunkActivity::Warm),
+            &compatibility,
+        );
+        store.write_snapshot(
+            build_chunk_snapshot("abutown-main", &visible, ChunkActivity::Active),
+            &compatibility,
+        );
 
         assert_eq!(store.snapshot_count(), 2);
         assert_eq!(
@@ -270,16 +313,40 @@ mod tests {
         let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
         chunk.set_tile_kind(0, TileKind::Road).expect("tile exists");
         let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
+        let compatibility = SnapshotCompatibility::new("zurich-river-city-v1", 1);
 
-        ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone())
+        ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone(), &compatibility)
             .await
             .unwrap();
 
-        let stored = ChunkSnapshotStore::read_snapshot(&store, ChunkCoord { x: 4, y: 4 })
-            .await
-            .unwrap()
-            .expect("snapshot exists");
+        let stored =
+            ChunkSnapshotStore::read_snapshot(&store, ChunkCoord { x: 4, y: 4 }, &compatibility)
+                .await
+                .unwrap()
+                .expect("snapshot exists");
         assert_eq!(stored, snapshot);
+    }
+
+    #[tokio::test]
+    async fn chunk_snapshot_store_filters_by_base_world_metadata() {
+        let mut store = InMemoryChunkSnapshotStore::default();
+        let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        chunk.set_tile_kind(0, TileKind::Road).unwrap();
+        let snapshot = build_chunk_snapshot("zurich-river-city-v1", &chunk, ChunkActivity::Active);
+        let current = SnapshotCompatibility::new("zurich-river-city-v1", 1);
+        let stale = SnapshotCompatibility::new("zurich-river-city-v1", 0);
+
+        ChunkSnapshotStore::write_snapshot(&mut store, snapshot, &stale)
+            .await
+            .unwrap();
+
+        assert!(
+            ChunkSnapshotStore::read_snapshot(&store, ChunkCoord { x: 4, y: 4 }, &current)
+                .await
+                .unwrap()
+                .is_none(),
+            "chunk snapshots from another base-world schema must not hydrate current chunks"
+        );
     }
 
     #[tokio::test]
@@ -287,14 +354,15 @@ mod tests {
         use crate::mobility::{extract_from_world, seed};
 
         let mut store = InMemoryMobilitySnapshotStore::default();
-        let (world, _) = seed::initial_world();
+        let (world, _) = seed::test_seed_world();
         let snap = extract_from_world(&world);
+        let compatibility = SnapshotCompatibility::new("zurich-river-city-v1", 1);
 
-        MobilitySnapshotStore::write(&mut store, "abutown-main", 42, &snap)
+        MobilitySnapshotStore::write(&mut store, "abutown-main", 42, &snap, &compatibility)
             .await
             .unwrap();
 
-        let (tick, restored) = MobilitySnapshotStore::read(&store, "abutown-main")
+        let (tick, restored) = MobilitySnapshotStore::read(&store, "abutown-main", &compatibility)
             .await
             .unwrap()
             .expect("snapshot exists");
@@ -304,11 +372,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mobility_snapshot_store_read_returns_none_for_unknown_world() {
-        let store = InMemoryMobilitySnapshotStore::default();
-        let result = MobilitySnapshotStore::read(&store, "missing-world")
+    async fn mobility_snapshot_store_filters_by_base_world_metadata() {
+        use crate::mobility::{extract_from_world, seed};
+
+        let mut store = InMemoryMobilitySnapshotStore::default();
+        let (world, _) = seed::test_seed_world();
+        let snap = extract_from_world(&world);
+        let current = SnapshotCompatibility::new("zurich-river-city-v1", 1);
+        let stale = SnapshotCompatibility::new("abutown-main", 1);
+
+        MobilitySnapshotStore::write(&mut store, "zurich-river-city-v1", 42, &snap, &stale)
             .await
             .unwrap();
+
+        assert!(
+            MobilitySnapshotStore::read(&store, "zurich-river-city-v1", &current)
+                .await
+                .unwrap()
+                .is_none(),
+            "snapshots without current base-world metadata must be invisible to hydration"
+        );
+    }
+
+    #[tokio::test]
+    async fn mobility_snapshot_store_read_returns_none_for_unknown_world() {
+        let store = InMemoryMobilitySnapshotStore::default();
+        let result = MobilitySnapshotStore::read(
+            &store,
+            "missing-world",
+            &SnapshotCompatibility::new("zurich-river-city-v1", 1),
+        )
+        .await
+        .unwrap();
         assert!(result.is_none());
     }
 }

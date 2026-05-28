@@ -7,8 +7,10 @@ const checks = [
     file: 'backend/crates/sim-server/src/runtime.rs',
     patterns: [
       'SEEDED_CHUNKS',
-      'CityNetwork::empty_for_world',
-      'tiny_world()',
+      `CityNetwork::${['empty', 'for', 'world'].join('_')}`,
+      `${['tiny', 'world()'].join('_')}`,
+      ['legacy', 'seeded'].join('_'),
+      ['trams', 'total'].join('_'),
       'TileKind::BuildingFootprint',
     ],
   },
@@ -16,7 +18,7 @@ const checks = [
     file: 'backend/crates/sim-server/src/app.rs',
     patterns: [
       'Err(_) => SimulationRuntime::new()',
-      'empty_for_world',
+      ['empty', 'for', 'world'].join('_'),
     ],
   },
   {
@@ -28,8 +30,8 @@ const checks = [
   },
 ];
 
-describe('production fallback removal', () => {
-  it('does not keep demo world fallbacks in production entrypoints', () => {
+describe('production stale-seed removal', () => {
+  it('does not keep demo world recovery paths in production entrypoints', () => {
     const hits = checks.flatMap(({ file, patterns }) => {
       const source = productionSource(file);
       return patterns

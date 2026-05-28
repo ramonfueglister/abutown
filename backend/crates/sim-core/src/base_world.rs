@@ -1,5 +1,6 @@
 use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
 use crate::ids::ChunkCoord;
+use crate::persistence::SnapshotCompatibility;
 use crate::scheduler::ChunkActivity;
 use crate::tile::{TileKind, TileRecord};
 use crate::world::systems::spawn_chunk_entity;
@@ -297,6 +298,10 @@ impl BaseWorldBundle {
 
     pub fn world_tiles(&self) -> WorldTiles {
         self.manifest.world_tiles
+    }
+
+    pub fn snapshot_compatibility(&self) -> SnapshotCompatibility {
+        SnapshotCompatibility::new(self.world_id(), self.manifest.schema_version)
     }
 
     pub fn chunk_coords(&self) -> Vec<ChunkCoord> {

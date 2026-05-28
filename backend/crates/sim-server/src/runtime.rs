@@ -54,7 +54,6 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
     sim_core::mobility::seed::SeedDensity {
         pedestrians_per_corridor: 6,
         cars_per_arterial: 17,
-        trams_total: 4,
     };
 
 fn seed_density_from_base_world(bundle: &BaseWorldBundle) -> sim_core::mobility::seed::SeedDensity {
@@ -71,27 +70,14 @@ fn seed_density_from_base_world(bundle: &BaseWorldBundle) -> sim_core::mobility:
             .first()
             .map(|group| group.cars_per_arterial)
             .unwrap_or(0),
-        trams_total: bundle.spawns.tram_lines.iter().map(|line| line.trams).sum(),
     }
 }
 
-fn seeded_mobility_snapshot_for_base_world(bundle: &BaseWorldBundle) -> MobilityPersistSnapshot {
+fn initial_mobility_snapshot_for_base_world(bundle: &BaseWorldBundle) -> MobilityPersistSnapshot {
     let network = bundle.to_city_network();
     let (seeded_world, _) =
         sim_core::mobility::seed::from_network(&network, seed_density_from_base_world(bundle));
     extract_from_world(&seeded_world)
-}
-
-fn mobility_snapshot_missing_expected_cars(
-    snapshot: &MobilityPersistSnapshot,
-    bundle: &BaseWorldBundle,
-) -> bool {
-    !bundle.transport.arterial_paths.is_empty()
-        && seed_density_from_base_world(bundle).cars_per_arterial > 0
-        && !snapshot
-            .vehicles
-            .values()
-            .any(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Car)
 }
 
 pub fn default_base_world_path() -> std::path::PathBuf {
@@ -179,8 +165,8 @@ impl SimulationRuntime {
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
         let city_network = bundle.to_city_network();
-        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
-        let seeded_walks = sim_core::mobility::seed::legacy_seeded_walks(&city_network);
+        let seeded_stops = Vec::new();
+        let seeded_walks = sim_core::mobility::seed::seeded_walks_from_network(&city_network);
         world.insert_resource(city_network);
 
         CorePlugin::default().install(&mut world, &mut schedule);
@@ -202,7 +188,7 @@ impl SimulationRuntime {
         .install(&mut world, &mut schedule);
 
         bundle.spawn_all_chunks(&mut world, 0);
-        let mobility_snap = seeded_mobility_snapshot_for_base_world(&bundle);
+        let mobility_snap = initial_mobility_snapshot_for_base_world(&bundle);
         apply_into_world(&mut world, mobility_snap);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
         refresh_flow_field_resources(&mut world);
@@ -287,13 +273,14 @@ impl SimulationRuntime {
     > {
         let world_id = WorldId(base_world.world_id().to_owned());
         let network = base_world.to_city_network();
+        let snapshot_compatibility = base_world.snapshot_compatibility();
 
         // Build a fresh World + Schedule and install both plugins.
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
 
-        let seeded_stops = sim_core::mobility::seed::legacy_seeded_stops();
-        let seeded_walks = sim_core::mobility::seed::legacy_seeded_walks(&network);
+        let seeded_stops = Vec::new();
+        let seeded_walks = sim_core::mobility::seed::seeded_walks_from_network(&network);
 
         // Insert city network as resource before plugins run.
         world.insert_resource(network);
@@ -316,25 +303,15 @@ impl SimulationRuntime {
         }
         .install(&mut world, &mut schedule);
 
-        // Hydrate mobility state from the snapshot store if present, else seed
-        // from the canonical base world.
+        // Hydrate mobility state from a current base-world snapshot if present;
+        // otherwise initialize from the canonical base world.
         let mobility_snap = match mobility_snapshot_store
-            .read(&world_id.0)
+            .read(&world_id.0, &snapshot_compatibility)
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, snap)) if !mobility_snapshot_missing_expected_cars(&snap, base_world) => {
-                snap
-            }
-            Some((_tick, snap)) => {
-                tracing::warn!(
-                    agents = snap.agents.len(),
-                    vehicles = snap.vehicles.len(),
-                    "discarding persisted mobility snapshot without expected base-world cars"
-                );
-                seeded_mobility_snapshot_for_base_world(base_world)
-            }
-            None => seeded_mobility_snapshot_for_base_world(base_world),
+            Some((_tick, snap)) => snap,
+            None => initial_mobility_snapshot_for_base_world(base_world),
         };
         apply_into_world(&mut world, mobility_snap);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
@@ -342,7 +319,7 @@ impl SimulationRuntime {
 
         for coord in base_world.chunk_coords() {
             let snap = snapshot_store
-                .read_snapshot(coord)
+                .read_snapshot(coord, &snapshot_compatibility)
                 .await
                 .map_err(HydrationError::Snapshot)?;
 
@@ -1322,16 +1299,17 @@ mod tests {
         // Dispatch chunk items to the in-memory ChunkSnapshotStore via the
         // same code path as the persist loop in `app.rs`.
         let mut store = InMemoryChunkSnapshotStore::default();
+        let compatibility = base_world_fixture().snapshot_compatibility();
         for item in chunk_items {
             let dto: abutown_protocol::ChunkSnapshotDto = serde_json::from_slice(&item.payload)
                 .expect("provider emits valid ChunkSnapshotDto JSON");
-            ChunkSnapshotStore::write_snapshot(&mut store, dto)
+            ChunkSnapshotStore::write_snapshot(&mut store, dto, &compatibility)
                 .await
                 .expect("in-memory store write");
         }
 
         let stored = store
-            .read_snapshot(ChunkCoord { x: 4, y: 4 })
+            .read_snapshot(ChunkCoord { x: 4, y: 4 }, &compatibility)
             .expect("snapshot for the mutated chunk landed in the store");
         assert_eq!(stored.coord, abutown_protocol::ChunkCoordDto { x: 4, y: 4 });
     }
@@ -1342,6 +1320,7 @@ mod tests {
 
         let mut runtime = SimulationRuntime::new();
         let mut store = InMemoryChunkSnapshotStore::default();
+        let compatibility = base_world_fixture().snapshot_compatibility();
 
         let snapshots = runtime.collect_chunk_snapshots();
         assert_eq!(snapshots.len(), 0);
@@ -1368,7 +1347,7 @@ mod tests {
         let next_snapshots = runtime.collect_chunk_snapshots();
         assert_eq!(next_snapshots.len(), 1);
         for snapshot in &next_snapshots {
-            store.write_snapshot(snapshot.clone());
+            store.write_snapshot(snapshot.clone(), &compatibility);
         }
         let next_coords: Vec<ChunkCoord> = next_snapshots
             .iter()
@@ -1380,7 +1359,7 @@ mod tests {
         runtime.mark_chunk_snapshots_persisted(&next_coords);
 
         let visible = store
-            .read_snapshot(ChunkCoord { x: 4, y: 4 })
+            .read_snapshot(ChunkCoord { x: 4, y: 4 }, &compatibility)
             .expect("visible snapshot reflects new event");
         assert!(visible.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
@@ -1509,7 +1488,9 @@ mod tests {
         );
 
         let mut snapshot_store = InMemoryChunkSnapshotStore::default();
-        ChunkSnapshotStore::write_snapshot(&mut snapshot_store, snapshot)
+        let base_world = base_world_fixture();
+        let compatibility = base_world.snapshot_compatibility();
+        ChunkSnapshotStore::write_snapshot(&mut snapshot_store, snapshot, &compatibility)
             .await
             .unwrap();
 
@@ -1530,7 +1511,6 @@ mod tests {
             .await
             .unwrap();
 
-        let base_world = base_world_fixture();
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
@@ -1749,7 +1729,7 @@ mod tests {
 
         assert_eq!(runtime.mobility_tick_for_test(), 0);
         assert_eq!(runtime.mobility_agent_count_for_test(), 1011);
-        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 51);
     }
 
     #[tokio::test]
@@ -1773,6 +1753,7 @@ mod tests {
             "zurich-river-city-v1",
             persisted_tick,
             &authored_snap,
+            &base_world.snapshot_compatibility(),
         )
         .await
         .unwrap();
@@ -1790,7 +1771,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hydrate_reseeds_vehicleless_snapshot_when_network_expects_cars() {
+    async fn hydrate_restores_compatible_vehicleless_snapshot_without_reseeding() {
         use sim_core::mobility::{extract_from_world, seed};
 
         let network = road_test_network();
@@ -1799,7 +1780,6 @@ mod tests {
             sim_core::mobility::seed::SeedDensity {
                 pedestrians_per_corridor: 0,
                 cars_per_arterial: 0,
-                trams_total: 0,
             },
         );
         let authored_snap = extract_from_world(&authored);
@@ -1814,6 +1794,7 @@ mod tests {
             "zurich-river-city-v1",
             99,
             &authored_snap,
+            &base_world_fixture().snapshot_compatibility(),
         )
         .await
         .unwrap();
@@ -1828,7 +1809,6 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(runtime.mobility_tick_for_test(), 0);
-        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 0);
     }
 }

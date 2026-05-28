@@ -59,6 +59,7 @@ fn resolve_base_world_path() -> PathBuf {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BaseWorldResponse {
+    pub schema_version: u32,
     pub world_id: String,
     pub chunk_size: u16,
     pub world_tiles: sim_core::city_network::WorldTiles,
@@ -103,6 +104,7 @@ pub struct BaseWorldDecorationResponse {
 impl From<&BaseWorldBundle> for BaseWorldResponse {
     fn from(bundle: &BaseWorldBundle) -> Self {
         Self {
+            schema_version: bundle.manifest.schema_version,
             world_id: bundle.world_id().to_owned(),
             chunk_size: bundle.chunk_size(),
             world_tiles: bundle.world_tiles(),
@@ -272,7 +274,11 @@ impl AppState {
     ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
         let store = self.snapshot_store();
         let store = store.lock().await;
-        store.read_snapshot(coord).await
+        let compatibility = sim_core::persistence::SnapshotCompatibility::new(
+            self.base_world.world_id.clone(),
+            self.base_world.schema_version,
+        );
+        store.read_snapshot(coord, &compatibility).await
     }
 
     fn subscribe_deltas(&self) -> broadcast::Receiver<w::ServerMessage> {
@@ -383,6 +389,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     let snapshot_store = PostgresChunkSnapshotStore::connect(
         &config.database_url,
         abutown_protocol::WorldId(base_world.world_id().to_owned()),
+        base_world.snapshot_compatibility(),
     )
     .await?;
     let mobility_snapshot_store =
@@ -1346,6 +1353,10 @@ async fn persist_snapshots_once(
         mobility_tick,
         mobility_world,
     } = payload;
+    let compatibility = sim_core::persistence::SnapshotCompatibility::new(
+        state.base_world.world_id.clone(),
+        state.base_world.schema_version,
+    );
 
     let coords: Vec<ChunkCoord> = snapshots
         .iter()
@@ -1361,7 +1372,7 @@ async fn persist_snapshots_once(
         let store = state.snapshot_store();
         let mut store = store.lock().await;
         for snapshot in snapshots {
-            store.write_snapshot(snapshot).await?;
+            store.write_snapshot(snapshot, &compatibility).await?;
         }
     }
 
@@ -1370,7 +1381,7 @@ async fn persist_snapshots_once(
         let mob_store = state.mobility_snapshot_store();
         let mut mob_store = mob_store.lock().await;
         if let Err(error) = mob_store
-            .write(&world_id.0, mobility_tick, &mobility_world)
+            .write(&world_id.0, mobility_tick, &mobility_world, &compatibility)
             .await
         {
             tracing::warn!(%error, "failed to persist mobility snapshot");
@@ -1530,6 +1541,7 @@ mod tests {
         async fn write_snapshot(
             &mut self,
             _snapshot: ChunkSnapshotDto,
+            _compatibility: &sim_core::persistence::SnapshotCompatibility,
         ) -> Result<(), ChunkSnapshotStoreError> {
             tokio::time::sleep(std::time::Duration::from_millis(self.write_delay_ms)).await;
             Ok(())
@@ -1538,6 +1550,7 @@ mod tests {
         async fn read_snapshot(
             &self,
             _coord: ChunkCoord,
+            _compatibility: &sim_core::persistence::SnapshotCompatibility,
         ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
             Ok(None)
         }
@@ -1602,6 +1615,7 @@ mod tests {
         async fn write_snapshot(
             &mut self,
             _snapshot: ChunkSnapshotDto,
+            _compatibility: &sim_core::persistence::SnapshotCompatibility,
         ) -> Result<(), ChunkSnapshotStoreError> {
             Err(ChunkSnapshotStoreError::unavailable("test failure"))
         }
@@ -1609,6 +1623,7 @@ mod tests {
         async fn read_snapshot(
             &self,
             _coord: ChunkCoord,
+            _compatibility: &sim_core::persistence::SnapshotCompatibility,
         ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
             Ok(None)
         }

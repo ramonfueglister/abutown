@@ -535,19 +535,20 @@ async fn postgres_world_state_survives_runtime_restart() {
 
     // ---- First runtime: hydrate, apply a command, persist snapshot, drop.
     {
+        let base_world = base_world_fixture();
         let event_store = PostgresWorldEventStore::connect(&database_url)
             .await
             .expect("connect postgres event store");
         let snapshot_store = PostgresChunkSnapshotStore::connect(
             &database_url,
             SimulationRuntime::default_world_id(),
+            base_world.snapshot_compatibility(),
         )
         .await
         .expect("connect postgres snapshot store");
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store");
-        let base_world = base_world_fixture();
         let (mut runtime, mut snapshot_store_box, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
@@ -584,7 +585,7 @@ async fn postgres_world_state_survives_runtime_restart() {
             .collect();
         for snapshot in snapshots {
             snapshot_store_box
-                .write_snapshot(snapshot)
+                .write_snapshot(snapshot, &base_world.snapshot_compatibility())
                 .await
                 .expect("persist chunk snapshots");
         }
@@ -594,19 +595,20 @@ async fn postgres_world_state_survives_runtime_restart() {
 
     // ---- Second runtime: hydrate fresh from the same database.
     {
+        let base_world = base_world_fixture();
         let event_store = PostgresWorldEventStore::connect(&database_url)
             .await
             .expect("connect postgres event store (restart)");
         let snapshot_store = PostgresChunkSnapshotStore::connect(
             &database_url,
             SimulationRuntime::default_world_id(),
+            base_world.snapshot_compatibility(),
         )
         .await
         .expect("connect postgres snapshot store (restart)");
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store (restart)");
-        let base_world = base_world_fixture();
         let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
@@ -721,6 +723,7 @@ async fn postgres_mobility_state_survives_runtime_restart() {
     };
 
     let world_id = format!("test:mobility:{}", uuid::Uuid::now_v7());
+    let compatibility = base_world_fixture().snapshot_compatibility();
 
     let persisted_tick;
     let persisted_world;
@@ -743,6 +746,7 @@ async fn postgres_mobility_state_survives_runtime_restart() {
             &world_id,
             persisted_tick,
             &runtime.mobility_persist_snapshot(),
+            &compatibility,
         )
         .await
         .expect("persist mobility snapshot");
@@ -751,7 +755,7 @@ async fn postgres_mobility_state_survives_runtime_restart() {
     let store = PostgresMobilitySnapshotStore::connect(&database_url)
         .await
         .expect("connect mobility store (second runtime)");
-    let (tick, restored) = MobilitySnapshotStore::read(&store, &world_id)
+    let (tick, restored) = MobilitySnapshotStore::read(&store, &world_id, &compatibility)
         .await
         .expect("read mobility snapshot")
         .expect("snapshot must be present after restart");
