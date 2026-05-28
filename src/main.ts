@@ -75,6 +75,11 @@ import {
   type RoadTile,
   type Terrain,
 } from './render/backendTerrainRenderState';
+import {
+  buildBackendCarInspector,
+  buildBackendPedestrianInspector,
+  type EntityInspector,
+} from './render/entityInspector';
 
 type Coord = { x: number; y: number };
 
@@ -801,41 +806,6 @@ function drawPedestrian(pedestrian: BackendPedestrian, selected: boolean): void 
   ctx.arc(0, 0, radius, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
-}
-
-type EntityInspectorRow = { label: string; value: string };
-type EntityInspector = { title: string; rows: EntityInspectorRow[] } | null;
-
-function formatBackendCoord(coord: { x: number; y: number }): string {
-  return `${coord.x.toFixed(1)}, ${coord.y.toFixed(1)}`;
-}
-
-function buildBackendPedestrianInspector(agent: BackendPedestrian | null): EntityInspector {
-  if (!agent) return null;
-  return {
-    title: agent.id,
-    rows: [
-      { label: 'State', value: 'walking' },
-      { label: 'Tile', value: formatBackendCoord(agent.path[0]) },
-      { label: 'Next', value: formatBackendCoord(agent.path[1] ?? agent.path[0]) },
-      { label: 'Direction', value: agent.direction },
-      { label: 'Sprite', value: agent.sprite.sheet },
-    ],
-  };
-}
-
-function buildBackendCarInspector(vehicle: BackendCar | null): EntityInspector {
-  if (!vehicle) return null;
-  return {
-    title: vehicle.id,
-    rows: [
-      { label: 'State', value: 'driving' },
-      { label: 'Tile', value: formatBackendCoord(vehicle.path[0]) },
-      { label: 'Next', value: formatBackendCoord(vehicle.path[1] ?? vehicle.path[0]) },
-      { label: 'Direction', value: vehicle.direction },
-      { label: 'Sprite', value: vehicle.sprite.role },
-    ],
-  };
 }
 
 function drawAgentInspectorPanel(inspector: EntityInspector): void {
