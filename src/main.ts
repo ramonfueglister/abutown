@@ -18,8 +18,8 @@ import {
   hasDirectStreetAdjacency,
   hasVisibleStreetFrontage,
 } from './city/buildingFrontage';
-import { countAdjacentParallelRoadRuns, removeAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
-import { countInvalidRoadDeadEnds, pruneInvalidRoadDeadEnds } from './city/roadTopology';
+import { countAdjacentParallelRoadRuns } from './city/roadParallelCleanup';
+import { countInvalidRoadDeadEnds } from './city/roadTopology';
 import {
   constrainCameraTargetToGrid,
   createCameraState,
@@ -33,8 +33,6 @@ import {
   candidateVehicleSprites,
   screenRightLaneOffset,
   vehicleFrameForGridDelta,
-  vehicleFrameRect,
-  type SimutransVehicleDirection,
   type VehicleSprite,
 } from './render/vehicleSprites';
 import {
@@ -142,15 +140,6 @@ type BuildingSheetName =
   | 'tower'
   | 'church';
 
-type DistrictSeed = {
-  id: string;
-  center: Coord;
-  radius: number;
-  gridRadius: number;
-  core: boolean;
-  sheets: BuildingSheetName[];
-};
-
 const activeAssetPack = pak128AssetPack;
 const VISUAL_STYLE_ID = 'minimal-motorways';
 const TILE_W = MINIMAL_MAP_TILE_SIZE.width;
@@ -211,21 +200,6 @@ const camera = createCameraState({ x: 0, y: 0, scale: 0.32 });
 let cameraInitialized = false;
 
 const BUILDING_FRAME_VARIANTS = 4;
-
-const districtSeeds: DistrictSeed[] = [
-  { id: 'old-town', center: { x: 32, y: 30 }, radius: 14, gridRadius: 7, core: true, sheets: ['oldhouses', 'townhouses', 'houses', 'shops'] },
-  { id: 'market', center: { x: 50, y: 33 }, radius: 14, gridRadius: 7, core: true, sheets: ['shops', 'flats', 'office', 'townhouses'] },
-  { id: 'rail-quarter', center: { x: 49, y: 48 }, radius: 13, gridRadius: 6, core: true, sheets: ['shops', 'flats', 'office', 'townhouses'] },
-  { id: 'north-bank', center: { x: 29, y: 51 }, radius: 12, gridRadius: 7, core: false, sheets: ['houses', 'cottages', 'oldhouses', 'townhouses'] },
-  { id: 'infill', center: { x: 40, y: 42 }, radius: 13, gridRadius: 7, core: true, sheets: ['oldhouses', 'shops', 'flats', 'townhouses'] },
-  { id: 'civic', center: { x: 62, y: 51 }, radius: 13, gridRadius: 7, core: true, sheets: ['office', 'flats', 'shops', 'townhouses'] },
-  { id: 'mill-yard', center: { x: 66, y: 30 }, radius: 12, gridRadius: 7, core: false, sheets: ['shops', 'office', 'flats', 'oldhouses'] },
-  { id: 'west-garden', center: { x: 18, y: 24 }, radius: 11, gridRadius: 6, core: false, sheets: ['houses', 'cottages', 'oldhouses'] },
-  { id: 'south-village', center: { x: 26, y: 64 }, radius: 11, gridRadius: 6, core: false, sheets: ['houses', 'cottages', 'townhouses'] },
-  { id: 'east-suburb', center: { x: 76, y: 43 }, radius: 12, gridRadius: 7, core: false, sheets: ['houses', 'townhouses', 'shops'] },
-  { id: 'south-east', center: { x: 76, y: 63 }, radius: 11, gridRadius: 6, core: false, sheets: ['houses', 'townhouses', 'shops'] },
-  { id: 'north-east', center: { x: 78, y: 23 }, radius: 11, gridRadius: 6, core: false, sheets: ['houses', 'townhouses', 'shops'] },
-];
 
 const images = new Map<string, HTMLCanvasElement>();
 const simutransSourceBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
@@ -1109,222 +1083,8 @@ function buildRailPathsFromTiles(railTiles: Map<string, RailTile>): Coord[][] {
   return paths.sort((a, b) => b.length - a.length);
 }
 
-function buildTerrain(): Map<string, Terrain> {
-  const result = new Map<string, Terrain>();
-  for (let y = 0; y < HEIGHT; y += 1) {
-    for (let x = 0; x < WIDTH; x += 1) {
-      let kind: Terrain = 'grass';
-      if (distance({ x, y }, { x: 44, y: 58 }) < 6 || distance({ x, y }, { x: 68, y: 57 }) < 5) kind = 'park';
-      result.set(`${x}:${y}`, kind);
-    }
-  }
-  return result;
-}
-
-function buildRoadNetwork(): Map<string, RoadTile> {
-  const points = new Map<string, RoadKind>();
-  const maxX = WIDTH - 1;
-  const maxY = HEIGHT - 1;
-  const addPath = (path: Coord[]) => {
-    for (const point of path) addRoadPoint(points, point);
-  };
-  const arterialPaths = [
-    linePath({ x: 0, y: 42 }, { x: maxX, y: 42 }),
-    linePath({ x: 52, y: 0 }, { x: 52, y: maxY }),
-    roadRoute([{ x: 0, y: 58 }, { x: 18, y: 54 }, { x: 36, y: 52 }, { x: 56, y: 50 }, { x: 78, y: 55 }, { x: maxX, y: 58 }]),
-    roadRoute([{ x: 6, y: 21 }, { x: 22, y: 23 }, { x: 38, y: 26 }, { x: 54, y: 23 }, { x: 75, y: 20 }, { x: maxX, y: 18 }]),
-    roadRoute([{ x: 14, y: 42 }, { x: 24, y: 48 }, { x: 32, y: 42 }, { x: 42, y: 42 }]),
-    roadRoute([{ x: 47, y: 42 }, { x: 50, y: 34 }, { x: 66, y: 30 }, { x: maxX, y: 30 }]),
-    roadRoute([{ x: 47, y: 42 }, { x: 60, y: 48 }, { x: 65, y: 64 }, { x: 52, y: maxY }]),
-    roadRoute([{ x: 12, y: maxY }, { x: 28, y: 68 }, { x: 46, y: 66 }, { x: 68, y: 68 }, { x: maxX, y: 70 }]),
-  ];
-
-  for (const path of arterialPaths) addPath(path);
-
-  for (const district of districtSeeds) addDistrictStreets(points, district.center, district.gridRadius, district.core);
-
-  const protectedRoads = new Set(arterialPaths.flatMap((path) => path.map(key)));
-  removeAdjacentParallelRoadRuns(points, protectedRoads);
-  removeStraightParallelRoads(points, protectedRoads);
-  pruneDeadEnds(points, protectedRoads);
-  pruneInvalidRoadDeadEnds(points, { width: WIDTH, height: HEIGHT });
-
-  const roads = new Map<string, RoadTile>();
-  for (const [tileKey, kind] of points) {
-    const coord = parseKey(tileKey);
-    const mask =
-      roadMask(points, coord);
-    roads.set(tileKey, { coord, kind, mask });
-  }
-  return roads;
-}
-
-function removeStraightParallelRoads(points: Map<string, RoadKind>, protectedPoints: ReadonlySet<string>): void {
-  const removable = new Set<string>();
-  for (const tileKey of points.keys()) {
-    if (protectedPoints.has(tileKey)) continue;
-    const coord = parseKey(tileKey);
-    const mask = roadMask(points, coord);
-    const south = { x: coord.x, y: coord.y + 1 };
-    const east = { x: coord.x + 1, y: coord.y };
-    if (isStraightEastWest(mask) && points.has(key(south)) && isStraightEastWest(roadMask(points, south))) {
-      removable.add(tileKey);
-    }
-    if (isStraightNorthSouth(mask) && points.has(key(east)) && isStraightNorthSouth(roadMask(points, east))) {
-      removable.add(tileKey);
-    }
-  }
-  for (const tileKey of removable) points.delete(tileKey);
-}
-
-function pruneDeadEnds(points: Map<string, RoadKind>, protectedPoints: ReadonlySet<string>): void {
-  for (let pass = 0; pass < 5; pass += 1) {
-    const removable: string[] = [];
-    for (const tileKey of points.keys()) {
-      if (protectedPoints.has(tileKey)) continue;
-      const coord = parseKey(tileKey);
-      const degree = cardinal(coord).filter((neighbor) => points.has(key(neighbor))).length;
-      if (degree <= 1) removable.push(tileKey);
-    }
-    if (removable.length === 0) return;
-    for (const tileKey of removable) points.delete(tileKey);
-  }
-}
-
-function buildRailPaths(): Coord[][] {
-  const maxX = WIDTH - 1;
-  return [
-    railRoute([{ x: 0, y: 64 }, { x: maxX, y: 64 }]),
-  ];
-}
-
-function buildRailReserved(paths: Coord[][]): Set<string> {
-  const result = new Set<string>();
-  for (const path of paths) {
-    for (const point of path) {
-      if (inside(point) && terrainAt(point) !== 'water') result.add(key(point));
-    }
-  }
-  return result;
-}
-
-function buildRailCrossings(): Set<string> {
-  return new Set(['52:64']);
-}
-
-function buildRailNetwork(paths: Coord[][]): Map<string, RailTile> {
-  const points = new Set<string>();
-  for (const path of paths) {
-    for (const point of path) {
-      if (terrainAt(point) !== 'water') points.add(key(point));
-    }
-  }
-
-  const result = new Map<string, RailTile>();
-  for (const tileKey of points) {
-    const coord = parseKey(tileKey);
-    const mask =
-      (points.has(key({ x: coord.x, y: coord.y - 1 })) ? NORTH : 0) |
-      (points.has(key({ x: coord.x + 1, y: coord.y })) ? EAST : 0) |
-      (points.has(key({ x: coord.x, y: coord.y + 1 })) ? SOUTH : 0) |
-      (points.has(key({ x: coord.x - 1, y: coord.y })) ? WEST : 0);
-    result.set(tileKey, { coord, mask });
-  }
-  return result;
-}
-
 function buildRailStations(): RailStation[] {
   return [];
-}
-
-function addDistrictStreets(points: Map<string, RoadKind>, center: Coord, radius: number, dense: boolean): void {
-  const arm = dense ? radius : Math.max(4, radius - 2);
-  const half = Math.max(3, Math.floor(radius / 2));
-  if (dense) {
-    addStreetSegment(points, { x: center.x - arm, y: center.y }, { x: center.x + arm, y: center.y });
-    if (hash(`district-axis:${key(center)}`) % 2 === 0) {
-      addStreetSegment(points, { x: center.x, y: center.y - half }, { x: center.x, y: center.y + half });
-    }
-    addUrbanBlock(points, center, Math.max(5, radius - 1), Math.max(4, Math.floor(radius * 0.65)));
-  } else if (hash(`district-axis:${key(center)}`) % 2 === 0) {
-    addStreetSegment(points, { x: center.x - arm, y: center.y }, { x: center.x + arm, y: center.y });
-    addStreetSegment(points, { x: center.x, y: center.y - half }, { x: center.x, y: center.y + half });
-  } else {
-    addStreetSegment(points, { x: center.x, y: center.y - arm }, { x: center.x, y: center.y + arm });
-    addStreetSegment(points, { x: center.x - half, y: center.y }, { x: center.x + half, y: center.y });
-  }
-}
-
-function addStreetSegment(points: Map<string, RoadKind>, from: Coord, to: Coord): void {
-  for (const coord of cardinalLinePath(from, to)) addRoadPoint(points, coord);
-}
-
-function addUrbanBlock(points: Map<string, RoadKind>, center: Coord, halfWidth: number, halfHeight: number): void {
-  const west = center.x - halfWidth;
-  const east = center.x + halfWidth;
-  const north = center.y - halfHeight;
-  const south = center.y + halfHeight;
-  addStreetSegment(points, { x: west, y: north }, { x: east, y: north });
-  addStreetSegment(points, { x: east, y: north }, { x: east, y: south });
-  addStreetSegment(points, { x: east, y: south }, { x: west, y: south });
-  addStreetSegment(points, { x: west, y: south }, { x: west, y: north });
-}
-
-function addRoadPoint(points: Map<string, RoadKind>, coord: Coord): void {
-  if (!inside(coord)) return;
-  if (railReserved.has(key(coord)) && !railCrossings.has(key(coord))) return;
-  points.set(key(coord), terrainAt(coord) === 'water' ? 'bridge' : 'street');
-}
-
-function buildBuildings(): Building[] {
-  const result: Building[] = [];
-  const streetFrontages = buildStreetFrontages();
-  const occupied = new Set<string>([
-    ...roads.keys(),
-    ...rails.keys(),
-    ...railStations.map((station) => key(station.coord)),
-  ]);
-  const placeBuilding = (coord: Coord, district: DistrictSeed): boolean => {
-    if (result.length >= 1800 || occupied.has(key(coord)) || !isBuildable(coord)) return false;
-    if (!streetFrontages.has(key(coord))) return false;
-    if (!hasDirectStreetAdjacency(coord, roads)) return false;
-    if (!hasVisibleStreetFrontage(coord, roads)) return false;
-    if (touchesRail(coord)) return false;
-    if (!district.core && hash(key(coord)) % 12 === 0) return false;
-    const sheet = district.sheets[hash(`${district.id}:${key(coord)}`) % district.sheets.length];
-    const frameCount = BUILDING_FRAME_VARIANTS;
-    result.push({ coord, sheet, frame: hash(`${key(coord)}:${sheet}`) % frameCount, district: district.id });
-    occupied.add(key(coord));
-    return true;
-  };
-
-  for (const district of districtSeeds) {
-    const candidates: Coord[] = [];
-    for (let y = district.center.y - district.radius; y <= district.center.y + district.radius; y += 1) {
-      for (let x = district.center.x - district.radius; x <= district.center.x + district.radius; x += 1) {
-        const coord = { x, y };
-        if (!inside(coord) || occupied.has(key(coord)) || !isBuildable(coord)) continue;
-        if (!streetFrontages.has(key(coord))) continue;
-        if (!hasVisibleStreetFrontage(coord, roads)) continue;
-        candidates.push(coord);
-      }
-    }
-    candidates.sort((a, b) => distance(a, district.center) - distance(b, district.center) || a.y - b.y || a.x - b.x);
-    for (const coord of candidates) {
-      placeBuilding(coord, district);
-    }
-  }
-
-  const frontages: Coord[] = [...streetFrontages].map(parseKey).filter((coord) =>
-    inside(coord) && !occupied.has(key(coord)) && isBuildable(coord)
-  );
-  frontages.sort((a, b) => hash(`frontage:${key(a)}`) - hash(`frontage:${key(b)}`));
-  for (const coord of frontages) {
-    const district = nearestDistrict(coord);
-    if (distance(coord, district.center) > district.radius + 4) continue;
-    placeBuilding(coord, district);
-  }
-  return result;
 }
 
 function buildStreetFrontages(): Set<string> {
@@ -1332,7 +1092,8 @@ function buildStreetFrontages(): Set<string> {
   for (const road of roads.values()) {
     if (road.kind !== 'street') continue;
     for (const coord of cardinal(road.coord)) {
-      if (inside(coord) && isBuildable(coord)) result.add(key(coord));
+      const terrainKind = terrainAt(coord);
+      if (isInsidePlayableMap(coord) && (terrainKind === 'grass' || terrainKind === 'park')) result.add(key(coord));
     }
   }
   return result;
@@ -1340,32 +1101,6 @@ function buildStreetFrontages(): Set<string> {
 
 function touchesRail(coord: Coord): boolean {
   return [coord, ...cardinal(coord)].some((neighbor) => railReserved.has(key(neighbor)));
-}
-
-function buildTrees(): Coord[] {
-  const result: Coord[] = [];
-  const blocked = new Set<string>([
-    ...roads.keys(),
-    ...rails.keys(),
-    ...buildings.map((building) => key(building.coord)),
-  ]);
-  for (let y = 0; y < HEIGHT; y += 1) {
-    for (let x = 0; x < WIDTH; x += 1) {
-      const coord = { x, y };
-      if (!isBuildable(coord) || blocked.has(key(coord))) continue;
-      const outsideUrban = Math.min(
-        ...districtSeeds.map((district) => distance(coord, district.center)),
-      ) > 15;
-      if (
-        (outsideUrban && hash(`forest:${key(coord)}`) % 9 === 0) ||
-        (terrainAt(coord) === 'park' && hash(key(coord)) % 5 === 0) ||
-        hash(`tree:${key(coord)}`) % 97 === 0
-      ) {
-        result.push(coord);
-      }
-    }
-  }
-  return result;
 }
 
 function buildTrains(): Train[] {
@@ -1378,31 +1113,6 @@ function buildTrains(): Train[] {
     fadeTiles: TRAIN_FADE_TILES,
     carSpacing: 1.45,
   }];
-}
-
-function usableVehicleSprites(): VehicleSprite[] {
-  return candidateVehicleSprites().filter((sprite) => spriteHasVisiblePixels(sprite));
-}
-
-function spriteHasVisiblePixels(sprite: VehicleSprite): boolean {
-  const image = images.get(sprite.path);
-  if (!image) return false;
-  const probe = document.createElement('canvas');
-  probe.width = image.width;
-  probe.height = image.height;
-  const context = probe.getContext('2d', { willReadFrequently: true });
-  if (!context) return false;
-  context.drawImage(image, 0, 0);
-  const directions: SimutransVehicleDirection[] = ['W', 'NW', 'N', 'NE', 'E', 'SE', 'S', 'SW'];
-  for (const direction of directions) {
-    const rect = vehicleFrameRect(sprite, direction);
-    if (rect.x + rect.width > image.width || rect.y + rect.height > image.height) continue;
-    const data = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] !== 0) return true;
-    }
-  }
-  return false;
 }
 
 function initialCameraFocusCoord(): Coord {
@@ -1471,96 +1181,6 @@ function screenToWorld(point: Coord): Coord {
 
 function trainPosition(train: Train): Coord {
   return movingTrainPosition(train.path, train.offset);
-}
-
-function route(points: Coord[]): Coord[] {
-  const result: Coord[] = [];
-  for (let i = 1; i < points.length; i += 1) {
-    const segment = linePath(points[i - 1], points[i]);
-    result.push(...(i === 1 ? segment : segment.slice(1)));
-  }
-  return result;
-}
-
-function roadRoute(points: Coord[]): Coord[] {
-  const result: Coord[] = [];
-  for (let i = 1; i < points.length; i += 1) {
-    const segment = cardinalLinePath(points[i - 1], points[i]);
-    result.push(...(i === 1 ? segment : segment.slice(1)));
-  }
-  return result;
-}
-
-function railRoute(points: Coord[]): Coord[] {
-  return roadRoute(points);
-}
-
-function cardinalLinePath(from: Coord, to: Coord): Coord[] {
-  const result: Coord[] = [];
-  let x = from.x;
-  let y = from.y;
-  result.push({ x, y });
-  const xFirst = Math.abs(to.x - from.x) >= Math.abs(to.y - from.y);
-  const stepX = () => {
-    while (x !== to.x) {
-      x += Math.sign(to.x - x);
-      result.push({ x, y });
-    }
-  };
-  const stepY = () => {
-    while (y !== to.y) {
-      y += Math.sign(to.y - y);
-      result.push({ x, y });
-    }
-  };
-  if (xFirst) {
-    stepX();
-    stepY();
-  } else {
-    stepY();
-    stepX();
-  }
-  return result.filter(inside);
-}
-
-function linePath(from: Coord, to: Coord): Coord[] {
-  const result: Coord[] = [];
-  let x = from.x;
-  let y = from.y;
-  const dx = Math.abs(to.x - from.x);
-  const dy = Math.abs(to.y - from.y);
-  const sx = Math.sign(to.x - from.x);
-  const sy = Math.sign(to.y - from.y);
-  let err = dx - dy;
-  result.push({ x, y });
-  while (x !== to.x || y !== to.y) {
-    const twiceErr = err * 2;
-    if (twiceErr > -dy && x !== to.x) {
-      err -= dy;
-      x += sx;
-      result.push({ x, y });
-    }
-    if (twiceErr < dx && y !== to.y) {
-      err += dx;
-      y += sy;
-      result.push({ x, y });
-    }
-  }
-  return result.filter(inside);
-}
-
-function isBuildable(coord: Coord): boolean {
-  const kind = terrainAt(coord);
-  return kind === 'grass' || kind === 'park';
-}
-
-function roadMask(points: Map<string, RoadKind>, coord: Coord): number {
-  return (
-    (points.has(key({ x: coord.x, y: coord.y - 1 })) ? NORTH : 0) |
-    (points.has(key({ x: coord.x + 1, y: coord.y })) ? EAST : 0) |
-    (points.has(key({ x: coord.x, y: coord.y + 1 })) ? SOUTH : 0) |
-    (points.has(key({ x: coord.x - 1, y: coord.y })) ? WEST : 0)
-  );
 }
 
 function isStraightEastWest(mask: number): boolean {
@@ -1750,20 +1370,6 @@ function cardinal(coord: Coord): Coord[] {
     { x: coord.x, y: coord.y + 1 },
     { x: coord.x - 1, y: coord.y },
   ];
-}
-
-function inside(coord: Coord): boolean {
-  return coord.x >= 0 && coord.y >= 0 && coord.x < WIDTH && coord.y < HEIGHT;
-}
-
-function distance(a: Coord, b: Coord): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function nearestDistrict(coord: Coord): DistrictSeed {
-  return districtSeeds.reduce((best, district) =>
-    distance(coord, district.center) < distance(coord, best.center) ? district : best,
-  );
 }
 
 function cityDiagnostics(): Record<string, number> {
