@@ -217,9 +217,6 @@ impl JwksCache {
         if let Ok(user_id) = self.try_validate(token) {
             return Ok(user_id);
         }
-        if std::env::var("TEST_MODE_ACCEPT_ALL_JWTS").ok().as_deref() == Some("1") {
-            return Uuid::parse_str(token).map_err(|_| CardHandError::InvalidAuth);
-        }
 
         self.refresh().await?;
         self.try_validate(token)
@@ -393,5 +390,27 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, CardHandError::UnknownCard(id) if id == "missing"));
+    }
+
+    #[tokio::test]
+    async fn supabase_auth_does_not_accept_uuid_bearer_test_bypass() {
+        let keys = Arc::new(RwLock::new(Vec::new()));
+        let cache = JwksCache {
+            keys,
+            jwks_url: "http://127.0.0.1:9/auth/v1/.well-known/jwks.json".to_string(),
+            expected_iss: "http://127.0.0.1:9/auth/v1".to_string(),
+            http: reqwest::Client::new(),
+        };
+        let token = "00000000-0000-0000-0000-000000000001";
+
+        unsafe {
+            std::env::set_var("TEST_MODE_ACCEPT_ALL_JWTS", "1");
+        }
+        let result = cache.validate(token).await;
+        unsafe {
+            std::env::remove_var("TEST_MODE_ACCEPT_ALL_JWTS");
+        }
+
+        assert!(matches!(result, Err(CardHandError::InvalidAuth)));
     }
 }

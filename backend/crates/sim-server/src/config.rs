@@ -1,3 +1,7 @@
+use std::net::SocketAddr;
+
+const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8080";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     pub database_url: String,
@@ -67,6 +71,26 @@ impl ServerConfig {
     }
 }
 
+pub fn listen_addr_from_env() -> Result<SocketAddr, ServerConfigError> {
+    listen_addr_from_pairs(std::env::vars())
+}
+
+pub fn listen_addr_from_pairs<I, K, V>(pairs: I) -> Result<SocketAddr, ServerConfigError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: Into<String>,
+{
+    let bind_addr = pairs
+        .into_iter()
+        .find_map(|(key, value)| (key.as_ref() == "ABUTOWN_BIND_ADDR").then_some(value.into()))
+        .unwrap_or_else(|| DEFAULT_BIND_ADDR.to_string());
+
+    bind_addr
+        .parse()
+        .map_err(|_| ServerConfigError::InvalidBindAddr(bind_addr))
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ServerConfigError {
     #[error("DATABASE_URL is required")]
@@ -75,6 +99,8 @@ pub enum ServerConfigError {
     MissingSupabaseUrl,
     #[error("ABUTOWN_SERVER_MODE must be persistent or memory, got {0}")]
     UnknownServerMode(String),
+    #[error("ABUTOWN_BIND_ADDR must be a socket address, got {0}")]
+    InvalidBindAddr(String),
 }
 
 #[cfg(test)]
@@ -139,6 +165,30 @@ mod tests {
         assert_eq!(
             error,
             ServerConfigError::UnknownServerMode("sqlite".to_string())
+        );
+    }
+
+    #[test]
+    fn listen_addr_defaults_to_loopback_8080() {
+        let addr = listen_addr_from_pairs(std::iter::empty::<(&str, &str)>()).unwrap();
+
+        assert_eq!(addr.to_string(), "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn listen_addr_reads_explicit_env_value() {
+        let addr = listen_addr_from_pairs([("ABUTOWN_BIND_ADDR", "127.0.0.1:18080")]).unwrap();
+
+        assert_eq!(addr.to_string(), "127.0.0.1:18080");
+    }
+
+    #[test]
+    fn listen_addr_rejects_invalid_env_value() {
+        let error = listen_addr_from_pairs([("ABUTOWN_BIND_ADDR", "not-an-address")]).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServerConfigError::InvalidBindAddr("not-an-address".to_string())
         );
     }
 }

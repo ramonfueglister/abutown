@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 
 type ScreenEntity = { id: string; screen: { x: number; y: number } };
 
+const backendBaseUrl = process.env.E2E_BACKEND_URL ?? 'http://127.0.0.1:18080';
+
 test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   await page.setViewportSize({ width: 409, height: 519 });
   const consoleErrors: string[] = [];
@@ -53,7 +55,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.railStations).toBe(0);
   expect(state.city.backend).toEqual(expect.objectContaining({
     required: true,
-    baseUrl: 'http://127.0.0.1:8080',
+    baseUrl: backendBaseUrl,
     status: expect.objectContaining({
       service: 'abutown-sim',
       world_id: 'abutown-main',

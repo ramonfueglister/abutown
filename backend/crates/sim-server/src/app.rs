@@ -8,7 +8,7 @@ use axum::{
         Path, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{self, HeaderMap, StatusCode},
+    http::{self, HeaderMap, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -352,7 +352,17 @@ fn build_router_from_state(state: AppState) -> Router {
         .route("/mobility", get(mobility))
         .route("/ws", get(websocket))
         .with_state(state)
-        .layer(CorsLayer::permissive())
+        .layer(local_dev_cors())
+}
+
+fn local_dev_cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin([
+            HeaderValue::from_static("http://127.0.0.1:5175"),
+            HeaderValue::from_static("http://127.0.0.1:5173"),
+        ])
+        .allow_methods([Method::GET, Method::PUT])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
 }
 
 async fn health(State(state): State<AppState>) -> Response {

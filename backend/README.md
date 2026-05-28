@@ -32,10 +32,11 @@ Other root `.env` keys currently have narrower ownership:
 The server exposes the current backend runtime directly:
 
 - `GET /health` returns service and protocol health.
+- `GET /cards` returns static card definitions.
+- `GET /card-hand` and `PUT /card-hand` read and save the authenticated user's card hand.
 - `GET /world` returns the loaded chunk summary.
 - `GET /chunks/{x}/{y}` returns snapshots for loaded chunks.
 - `GET /mobility` returns the seeded mobility snapshot.
-- `POST /commands` accepts validated local-development commands.
 - `GET /ws` streams a hello message, tile pulses, and mobility deltas.
 
 ```bash
@@ -44,24 +45,21 @@ cargo run --manifest-path backend/Cargo.toml -p sim-server
 
 The runtime currently loads three chunks (`4:4`, `5:4`, and `4:5`) and rotates tile pulses across them. `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
 
-The old frontend bridge described in the visible-slice plan is not present in this branch. The current Vite client still renders the local canvas world without consuming these backend endpoints.
+The current Vite client requires this backend for health, world, terrain, mobility, websocket, and card-hand surfaces.
 
-## Command Event Boundary
+## Mutation Boundary
 
-The first mutation ingress is `POST /commands`. It accepts versioned JSON client commands, validates them inside the Rust runtime, appends accepted events through the configured event store, applies accepted changes to loaded hot state, and broadcasts those events to `/ws` subscribers.
-
-Implemented command:
-
-- `set_tile_kind`: changes one tile in one already-loaded chunk.
+The only HTTP mutation ingress currently exposed by the router is `PUT /card-hand`. It validates a Supabase JWT in persistent mode, scopes writes to the authenticated user, stores the hand through the configured card-hand store, and returns the saved card list.
 
 Current boundaries:
 
-- Commands are unauthenticated local-development inputs.
-- Commands only target loaded chunks.
-- Accepted mutations are appended through the runtime event-store boundary before hot-state application and websocket broadcast.
-- The server entrypoint uses `DATABASE_URL` for persistent `world_events`.
+- Runtime/world mutation commands are not exposed by the current router.
+- Card-hand writes require a bearer token and validate card IDs before persistence.
+- `GET /world`, `GET /chunks/{x}/{y}`, `GET /mobility`, and `GET /ws` are read-only runtime surfaces.
+- The server entrypoint uses `DATABASE_URL` for persistent world snapshots, mobility snapshots, and card hands.
 - Direct test/local app builders use explicit in-memory stores.
-- Command idempotency, permissions, chunk loading, and recovery replay remain later slices.
+
+Runtime mutation ingress, permissions, idempotency, chunk loading, and recovery replay remain later slices.
 
 Targeted commands:
 

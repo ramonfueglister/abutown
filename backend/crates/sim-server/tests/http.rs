@@ -1,17 +1,14 @@
-use abutown_protocol::v1 as w;
 use abutown_protocol::PROTOCOL_VERSION;
+use abutown_protocol::v1 as w;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use prost::Message;
 use serde_json::Value;
 use serde_json::json;
 use tower::ServiceExt;
 
-use sim_server::{
-    app::build_app,
-    runtime::SimulationRuntime,
-};
+use sim_server::{app::build_app, runtime::SimulationRuntime};
 
 const TEST_USER_A: &str = "00000000-0000-0000-0000-000000000001";
 const TEST_USER_B: &str = "00000000-0000-0000-0000-000000000002";
@@ -316,6 +313,59 @@ async fn mobility_snapshot_is_available() {
     assert!(mobility.agents.is_empty());
     assert!(mobility.vehicles.is_empty());
     assert!(mobility.stops.is_empty());
+}
+
+#[tokio::test]
+async fn cors_allows_local_vite_origin() {
+    let app = build_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/health")
+                .header(header::ORIGIN, "http://127.0.0.1:5175")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+        Some(&"http://127.0.0.1:5175".parse().unwrap())
+    );
+}
+
+#[tokio::test]
+async fn cors_does_not_allow_unconfigured_origin() {
+    let app = build_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/health")
+                .header(header::ORIGIN, "https://attacker.example")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_ne!(
+        response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+        Some(&"*".parse().unwrap())
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none()
+    );
 }
 
 #[tokio::test]
