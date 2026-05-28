@@ -40,6 +40,15 @@ export type BackendCar = {
   direction: DirectionDto;
 };
 
+export type BackendTram = {
+  id: string;
+  path: Coord[];
+  offset: number;
+  speed: number;
+  sprite: VehicleSpriteLike;
+  direction: DirectionDto;
+};
+
 const DIRECTION_VECTORS: Record<DirectionDto, Coord> = {
   n: { x: 0, y: -1 },
   ne: { x: 1, y: -1 },
@@ -101,6 +110,31 @@ export function carsFromMobilityState(
     .filter((vehicle) => vehicle.kind === 'car')
     .sort((a, b) => a.id.localeCompare(b.id));
   const out: BackendCar[] = [];
+  for (const vehicle of vehicles) {
+    const sprite = sprites[spriteIndexFromKey(vehicle.sprite_key, sprites.length)];
+    out.push({
+      id: vehicle.id,
+      path: syntheticPath(vehicle.world_coord, vehicle.direction),
+      offset: 0,
+      speed: 0,
+      sprite,
+      direction: vehicle.direction,
+    });
+  }
+  return out;
+}
+
+export function tramsFromMobilityState(
+  state: MobilityOverlayState,
+  sprites: readonly VehicleSpriteLike[],
+  now: number,
+  tickPeriodMs: number,
+): BackendTram[] {
+  if (sprites.length === 0) return [];
+  const vehicles = interpolatedVehicles(state, now, tickPeriodMs)
+    .filter((vehicle) => vehicle.kind === 'tram')
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const out: BackendTram[] = [];
   for (const vehicle of vehicles) {
     const sprite = sprites[spriteIndexFromKey(vehicle.sprite_key, sprites.length)];
     out.push({

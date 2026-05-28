@@ -31,6 +31,7 @@ import {
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
+  tramsFromMobilityState,
   type BackendCar,
   type BackendPedestrian,
 } from './render/backendMobilityDrawables';
@@ -44,23 +45,9 @@ import {
   OUTSKIRTS_TILES,
   renderMinimalMap,
 } from './render/minimalMapRenderer';
-import {
-  buildNorthboundTrainPath,
-  trainFadeAlpha,
-  trainPosition as movingTrainPosition,
-  trainWrappedOffset,
-} from './render/trainMotion';
 import type { ZurichDetail, ZurichTerrainKind } from './city/worldTypes';
 
 type Coord = { x: number; y: number };
-
-type Train = {
-  path: Coord[];
-  offset: number;
-  speed: number;
-  fadeTiles: number;
-  carSpacing: number;
-};
 
 const VISUAL_STYLE_ID = 'minimal-motorways';
 const TILE_W = MINIMAL_MAP_TILE_SIZE.width;
@@ -70,8 +57,6 @@ const CAMERA_EDGE_MARGIN = 8;
 const CAMERA_EDGE_SOFTNESS = 4;
 const CAMERA_MIN_SCALE = 0.18;
 const CAMERA_MAX_SCALE = 2.8;
-const TRAIN_FADE_TILES = 12;
-const TRAIN_SPEED = 8.5;
 
 const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
 let worldId = 'zurich-river-city-v1';
@@ -105,7 +90,6 @@ let trees: Coord[] = [];
 let details: ZurichDetail[] = [];
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: MinimalPedestrianSprite[] = [];
-let trains: Train[] = buildTrains();
 let previousTime = performance.now();
 let backendStatus: BackendHealthDto | null = null;
 let mobilityState: MobilityOverlayState = createMobilityOverlayState();
@@ -207,7 +191,6 @@ function attachCamera(): void {
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - previousTime) / 1000);
   previousTime = now;
-  for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * dt, train.path);
   if (!camera.dragging) constrainCamera(false);
   dampCamera(camera, dt, 18);
   render();
@@ -234,7 +217,6 @@ function render(): void {
     buildings,
     trees,
     details,
-    trains,
     mobilityState,
     mobilityTickPeriodMs,
     vehicleSprites,
@@ -286,7 +268,6 @@ function applyBaseWorld(baseWorld: BaseWorldResponse): void {
     category: toDetailCategory(detail.category),
     assetCategory: detail.asset_category,
   }));
-  trains = buildTrains();
 }
 
 function tileKey(point: { readonly x: number; readonly y: number }): string {
@@ -337,18 +318,6 @@ function toDetailCategory(value: string): ZurichDetail['category'] {
   throw new Error(`Base world detail category is invalid: ${value}`);
 }
 
-function buildTrains(): Train[] {
-  const path = buildNorthboundTrainPath(railPaths[0] ?? [], { fadeTiles: TRAIN_FADE_TILES });
-  if (path.length === 0) return [];
-  return [{
-    path,
-    offset: 0,
-    speed: TRAIN_SPEED,
-    fadeTiles: TRAIN_FADE_TILES,
-    carSpacing: 1.45,
-  }];
-}
-
 function initialCameraFocusCoord(): Coord {
   const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
   const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
@@ -395,10 +364,6 @@ function screenToWorld(point: Coord): Coord {
     x: (point.x - camera.x) / camera.scale,
     y: (point.y - camera.y) / camera.scale,
   };
-}
-
-function trainPosition(train: Train): Coord {
-  return movingTrainPosition(train.path, train.offset);
 }
 
 function iso(coord: Coord): Coord {
@@ -464,7 +429,7 @@ installRuntimeDiagnostics(window, {
     bridges: [...roads.values()].filter((road) => road.kind === 'bridge').length,
     buildings: buildings.length,
     trees: trees.length,
-    trains: trains.length,
+    trains: tramsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs).length,
     railStations: railStations.length,
     railYardTracks: Math.max(0, railPaths.length - 2),
     reserveTiles: countTerrainKind('reserve'),
@@ -489,18 +454,22 @@ installRuntimeDiagnostics(window, {
     y: camera.y + iso(coord).y * camera.scale,
   }),
   carVisualWorldPoint: (vehicle) => worldToGrid(carVisualWorldPoint(vehicle, camera.scale, tileSize)),
-  getTrain: () => trains[0]
-    ? {
-        position: trainPosition(trains[0]),
-        alpha: trainFadeAlpha(trainPosition(trains[0]), { height: HEIGHT, fadeTiles: trains[0].fadeTiles }),
-        speed: trains[0].speed,
-        fadeTiles: trains[0].fadeTiles,
-        direction: 'northbound',
-      }
-    : null,
+  getTrain: () => {
+    const tram = tramsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs)[0];
+    return tram
+      ? {
+          id: tram.id,
+          position: tram.path[0],
+          alpha: 1,
+          speed: 0,
+          fadeTiles: 0,
+          direction: tram.direction,
+        }
+      : null;
+  },
   now: Date.now,
   advanceTime: (ms) => {
-    for (const train of trains) train.offset = trainWrappedOffset(train.offset + train.speed * (ms / 1000), train.path);
+    void ms;
     render();
   },
 });

@@ -104,7 +104,15 @@ mod tests {
     use abutown_protocol::WorldId;
     use bevy_ecs::schedule::Schedule;
     use bevy_ecs::world::World;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
+
+    fn workspace_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("sim-core crate lives under backend/crates/sim-core")
+            .to_path_buf()
+    }
 
     fn install_test_routing(world: &mut World) {
         use crate::routing::{Edge, EdgeId, EdgeKind, Graph, LineId, Node, NodeId, NodeKind};
@@ -852,6 +860,127 @@ mod tests {
             trams, 0,
             "network seeding no longer creates fixed tiny trams"
         );
+    }
+
+    #[test]
+    fn from_base_world_bundle_spawns_declared_trams() {
+        let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
+            workspace_root().join("data/worlds/zurich-river-city-v1"),
+        )
+        .expect("base world fixture loads");
+
+        let expected_trams: usize = bundle
+            .spawns
+            .tram_lines
+            .iter()
+            .map(|line| line.trams as usize)
+            .sum();
+        assert!(expected_trams > 0, "fixture declares backend tram spawns");
+
+        let (mut world, mut schedule) =
+            seed::from_base_world_bundle(&bundle).expect("bundle seeding succeeds");
+        let trams = api::vehicles(&world)
+            .into_iter()
+            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .collect::<Vec<_>>();
+
+        assert_eq!(trams.len(), expected_trams);
+        assert!(
+            trams
+                .iter()
+                .all(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
+        );
+        assert!(
+            trams
+                .iter()
+                .all(|vehicle| vehicle.route_id.starts_with("tram:"))
+        );
+        let unique_positions = trams
+            .iter()
+            .map(|vehicle| {
+                let (x, y) = api::world_coord_for_vehicle(&world, &vehicle.id)
+                    .expect("tram has a resolvable world coord");
+                format!("{x:.2}:{y:.2}")
+            })
+            .collect::<HashSet<_>>();
+        assert!(
+            unique_positions.len() > 1,
+            "declared trams should not spawn stacked at one route position"
+        );
+
+        api::force_all_chunks_active_for_test(&mut world);
+        for _ in 0..400 {
+            let _ = api::tick_mobility(&mut world, &mut schedule);
+        }
+        let trams_after = api::vehicles(&world)
+            .into_iter()
+            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .collect::<Vec<_>>();
+        let unique_positions_after = trams_after
+            .iter()
+            .map(|vehicle| {
+                let (x, y) = api::world_coord_for_vehicle(&world, &vehicle.id)
+                    .expect("tram has a resolvable world coord after ticks");
+                format!("{x:.2}:{y:.2}")
+            })
+            .collect::<HashSet<_>>();
+        assert!(
+            unique_positions_after.len() > 1,
+            "declared trams should not collapse into one route position while ticking"
+        );
+    }
+
+    #[test]
+    fn from_base_world_bundle_rejects_missing_tram_rail_path() {
+        let mut bundle = crate::base_world::BaseWorldBundle::load_from_dir(
+            workspace_root().join("data/worlds/zurich-river-city-v1"),
+        )
+        .expect("base world fixture loads");
+        bundle.spawns.tram_lines[0].rail_path_ids = vec!["rail:missing".to_string()];
+
+        let err = match seed::from_base_world_bundle(&bundle) {
+            Ok(_) => panic!("missing rail path should be fatal"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("rail:missing"));
+    }
+
+    #[test]
+    fn from_base_world_bundle_trams_tick_without_viewport_subscription() {
+        let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
+            workspace_root().join("data/worlds/zurich-river-city-v1"),
+        )
+        .expect("base world fixture loads");
+        let (mut world, mut schedule) =
+            seed::from_base_world_bundle(&bundle).expect("bundle seeding succeeds");
+        let before = api::vehicles(&world)
+            .into_iter()
+            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .map(|vehicle| {
+                let coord = api::world_coord_for_vehicle(&world, &vehicle.id)
+                    .expect("tram has initial world coord");
+                (vehicle.id, coord)
+            })
+            .collect::<HashMap<_, _>>();
+
+        for _ in 0..5 {
+            let _ = api::tick_mobility(&mut world, &mut schedule);
+        }
+
+        let moved = api::vehicles(&world)
+            .into_iter()
+            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .filter(|vehicle| {
+                let Some((before_x, before_y)) = before.get(&vehicle.id) else {
+                    return false;
+                };
+                let (after_x, after_y) = api::world_coord_for_vehicle(&world, &vehicle.id)
+                    .expect("tram has world coord after ticks");
+                (after_x - before_x).abs() + (after_y - before_y).abs() > 0.0
+            })
+            .count();
+
+        assert_eq!(moved, before.len());
     }
 
     #[test]

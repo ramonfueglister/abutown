@@ -27,6 +27,41 @@ pub fn seeded_walks_from_network(network: &CityNetwork) -> Vec<crate::routing::S
     out
 }
 
+pub fn seeded_transit_lines_from_base_world(
+    bundle: &crate::base_world::BaseWorldBundle,
+) -> Result<Vec<crate::routing::SeededTransitLine>, SeedError> {
+    let mut out = Vec::new();
+    for line in &bundle.spawns.tram_lines {
+        if line.rail_path_ids.is_empty() {
+            return Err(SeedError::EmptyTramLine {
+                line_id: line.id.clone(),
+            });
+        }
+        let rail_path_id = &line.rail_path_ids[0];
+        let Some(rail_path) = bundle
+            .transport
+            .rail_paths
+            .iter()
+            .find(|path| &path.id == rail_path_id)
+        else {
+            return Err(SeedError::MissingRailPath {
+                line_id: line.id.clone(),
+                rail_path_id: rail_path_id.clone(),
+            });
+        };
+        out.push(crate::routing::SeededTransitLine {
+            legacy_route_id: line.id.clone(),
+            name: line.id.clone(),
+            polyline: rail_path
+                .points
+                .iter()
+                .map(|point| (point.x as f32, point.y as f32))
+                .collect(),
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 fn test_seeded_walks(network: &CityNetwork) -> Vec<crate::routing::SeededWalk> {
     let mut out = seeded_walks_from_network(network);
@@ -102,6 +137,7 @@ fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedu
     crate::routing::RoutingPlugin {
         seeded_stops: Vec::new(),
         seeded_walks: seeded_walks_from_network(network),
+        seeded_transit_lines: Vec::new(),
     }
     .install(&mut world, &mut schedule);
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
@@ -119,6 +155,7 @@ fn test_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedul
     crate::routing::RoutingPlugin {
         seeded_stops: test_seeded_stops(),
         seeded_walks: test_seeded_walks(network),
+        seeded_transit_lines: Vec::new(),
     }
     .install(&mut world, &mut schedule);
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
@@ -225,6 +262,27 @@ impl Default for SeedDensity {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum SeedError {
+    #[error("base world pedestrian group {group_id} references missing corridor {corridor_id}")]
+    MissingPedestrianCorridor {
+        group_id: String,
+        corridor_id: String,
+    },
+    #[error("base world car group {group_id} references missing arterial path {arterial_id}")]
+    MissingArterialPath {
+        group_id: String,
+        arterial_id: String,
+    },
+    #[error("base world tram line {line_id} references missing rail path {rail_path_id}")]
+    MissingRailPath {
+        line_id: String,
+        rail_path_id: String,
+    },
+    #[error("base world tram line {line_id} has no rail paths")]
+    EmptyTramLine { line_id: String },
+}
+
 pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Schedule) {
     let (mut world, schedule) = empty_world_and_schedule_for_network(network);
 
@@ -295,4 +353,176 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
     }
 
     (world, schedule)
+}
+
+pub fn from_base_world_bundle(
+    bundle: &crate::base_world::BaseWorldBundle,
+) -> Result<(World, Schedule), SeedError> {
+    let network = bundle.to_city_network();
+    let mut world = World::new();
+    let mut schedule = Schedule::default();
+    use crate::world::plugin::CorePlugin;
+    use crate::world::schedule::SimPlugin;
+    CorePlugin::default().install(&mut world, &mut schedule);
+    world.insert_resource(network);
+    crate::routing::RoutingPlugin {
+        seeded_stops: Vec::new(),
+        seeded_walks: seeded_walks_from_network(&bundle.to_city_network()),
+        seeded_transit_lines: seeded_transit_lines_from_base_world(bundle)?,
+    }
+    .install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+
+    seed_pedestrians_from_bundle(&mut world, bundle)?;
+    seed_cars_from_bundle(&mut world, bundle)?;
+    seed_trams_from_bundle(&mut world, bundle)?;
+
+    Ok((world, schedule))
+}
+
+fn seed_pedestrians_from_bundle(
+    world: &mut World,
+    bundle: &crate::base_world::BaseWorldBundle,
+) -> Result<(), SeedError> {
+    let mut agent_index = 0u32;
+    for group in &bundle.spawns.pedestrian_groups {
+        let Some(corridor_index) = bundle
+            .transport
+            .pedestrian_corridors
+            .iter()
+            .position(|path| path.id == group.corridor_id)
+        else {
+            return Err(SeedError::MissingPedestrianCorridor {
+                group_id: group.id.clone(),
+                corridor_id: group.corridor_id.clone(),
+            });
+        };
+        for n in 0..group.agents_per_corridor {
+            let agent_id = AgentId(format!("agent:walk:{agent_index}"));
+            agent_index += 1;
+            let link_id = format!("link:walk:corridor:{corridor_index}");
+            let progress = if group.agents_per_corridor > 0 {
+                (n as f32) / (group.agents_per_corridor as f32)
+            } else {
+                0.0
+            };
+            api::spawn_agent_from_record(
+                world,
+                AgentRecord::new(
+                    agent_id,
+                    AgentMobilityState::Walking { link_id, progress },
+                    vec![PlanStage::Activity {
+                        activity_id: format!("activity:wander:{corridor_index}"),
+                    }],
+                    0.05,
+                ),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn seed_cars_from_bundle(
+    world: &mut World,
+    bundle: &crate::base_world::BaseWorldBundle,
+) -> Result<(), SeedError> {
+    let mut driver_index = 0u32;
+    for group in &bundle.spawns.car_groups {
+        let Some(arterial_index) = bundle
+            .transport
+            .arterial_paths
+            .iter()
+            .position(|path| path.id == group.arterial_id)
+        else {
+            return Err(SeedError::MissingArterialPath {
+                group_id: group.id.clone(),
+                arterial_id: group.arterial_id.clone(),
+            });
+        };
+        for n in 0..group.cars_per_arterial {
+            let vehicle_id = VehicleId(format!("vehicle:car:{arterial_index}:{n}"));
+            let route_id = format!("route:arterial:{arterial_index}");
+            let driver_id = AgentId(format!("agent:driver:{driver_index}"));
+            driver_index += 1;
+            api::spawn_vehicle_from_record(
+                world,
+                VehicleRecord {
+                    id: vehicle_id.clone(),
+                    kind: VehicleKind::Car,
+                    route_id,
+                    link_index: 0,
+                    progress: if group.cars_per_arterial > 0 {
+                        (n as f32) / (group.cars_per_arterial as f32)
+                    } else {
+                        0.0
+                    },
+                    speed_per_tick: 0.02,
+                    capacity: 1,
+                    occupants: vec![driver_id.clone()],
+                    dwell_ticks_remaining: 0,
+                },
+            );
+            api::spawn_agent_from_record(
+                world,
+                AgentRecord::new(
+                    driver_id,
+                    AgentMobilityState::InVehicle {
+                        vehicle_id,
+                        seat_index: 0,
+                    },
+                    vec![PlanStage::Activity {
+                        activity_id: format!("activity:drive:{arterial_index}"),
+                    }],
+                    0.05,
+                ),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn seed_trams_from_bundle(
+    world: &mut World,
+    bundle: &crate::base_world::BaseWorldBundle,
+) -> Result<(), SeedError> {
+    for (line_index, line) in bundle.spawns.tram_lines.iter().enumerate() {
+        if line.rail_path_ids.is_empty() {
+            return Err(SeedError::EmptyTramLine {
+                line_id: line.id.clone(),
+            });
+        }
+        let rail_path_id = &line.rail_path_ids[0];
+        if !bundle
+            .transport
+            .rail_paths
+            .iter()
+            .any(|path| &path.id == rail_path_id)
+        {
+            return Err(SeedError::MissingRailPath {
+                line_id: line.id.clone(),
+                rail_path_id: rail_path_id.clone(),
+            });
+        }
+        for n in 0..line.trams {
+            api::spawn_vehicle_from_record(
+                world,
+                VehicleRecord {
+                    id: VehicleId(format!("vehicle:tram:{line_index}:{n}")),
+                    kind: VehicleKind::Tram,
+                    route_id: line.id.clone(),
+                    link_index: 0,
+                    progress: if line.trams > 0 {
+                        (n as f32) / (line.trams as f32)
+                    } else {
+                        0.0
+                    },
+                    speed_per_tick: 0.03,
+                    capacity: 80,
+                    occupants: Vec::new(),
+                    dwell_ticks_remaining: 0,
+                },
+            );
+        }
+    }
+    Ok(())
 }

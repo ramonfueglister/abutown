@@ -35,6 +35,10 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     const state = await readCityState(page);
     return visibleEntities(state.city.mobilityVehicles.vehicles, { width: 409, height: 519 }).length;
   }, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+  await expect.poll(async () => {
+    const state = await readCityState(page);
+    return state.city.mobilityTrams.trams.length;
+  }, { timeout: 10_000 }).toBe(4);
   const state = await readCityState(page);
   const oldResourceRequests = await page.evaluate((patternSource) =>
     performance
@@ -47,7 +51,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadTiles).toBeGreaterThan(0);
   expect(state.city.buildings).toBeGreaterThan(0);
   expect(state.city.cars).toBeGreaterThanOrEqual(1);
-  expect(state.city.trains).toBe(1);
+  expect(state.city.trains).toBe(4);
   expect(state.city.worldId).toBe('zurich-river-city-v1');
   expect(state.city.visualStyle).toEqual({
     id: 'minimal-motorways',
@@ -133,37 +137,47 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
   }));
-  expect(state.city.train.position.y).toBeGreaterThanOrEqual(-state.city.train.fadeTiles);
-  expect(state.city.train.position.y).toBeLessThanOrEqual(state.city.height - 1 + state.city.train.fadeTiles);
-  expect(state.city.train.alpha).toBeGreaterThanOrEqual(0);
-  expect(state.city.train.alpha).toBeLessThanOrEqual(1);
-  await page.evaluate(() => window.advanceTime?.(2500));
-  const movedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
-  expect(movedState.city.train.position.y).toBeLessThan(state.city.train.position.y);
-  expect(movedState.city.train.alpha).toBeGreaterThan(0);
-  expect(movedState.city.train.alpha).toBeGreaterThanOrEqual(state.city.train.alpha);
-  // Backend-driven movement: at least one stable agent id must change position.
-  // The first visible agent may be a LOD placeholder, so compare the shared ids.
-  const firstSample = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
-  await expect.poll(async () => {
-    const sample = await readCityState(page);
-    return maxCoordMovement(firstSample.city.mobilityAgents.agents, sample.city.mobilityAgents.agents);
-  }, { timeout: 10_000 }).toBeGreaterThan(0);
-  await expect.poll(async () => {
-    const sample = await readCityState(page);
-    return maxCoordMovement(firstSample.city.mobilityVehicles.vehicles, sample.city.mobilityVehicles.vehicles);
-  }, { timeout: 10_000 }).toBeGreaterThan(0);
+  expect(state.city.mobilityTrams.count).toBe(4);
+  expect(state.city.mobilityTrams.trams[0]).toEqual(expect.objectContaining({
+    id: expect.stringMatching(/^vehicle:tram:/),
+    kind: 'tram',
+    state: 'driving',
+    coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+    screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+  }));
+  expect(state.city.train).toEqual(expect.objectContaining({
+    id: expect.stringMatching(/^vehicle:tram:/),
+    position: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+  }));
+  // Backend-driven movement: compare consecutive subscribed samples. The HTTP
+  // full snapshot can be replaced by chunk snapshots once the WebSocket
+  // subscription opens, so anchoring to a pre-subscribe set is flaky.
+  await expect.poll(movementObserver(page, (sample) => sample.city.mobilityAgents.agents), {
+    timeout: 10_000,
+  }).toBeGreaterThan(0);
+  await expect.poll(movementObserver(page, (sample) => sample.city.mobilityVehicles.vehicles), {
+    timeout: 10_000,
+  }).toBeGreaterThan(0);
+  await expect.poll(movementObserver(page, (sample) => sample.city.mobilityTrams.trams), {
+    timeout: 10_000,
+  }).toBeGreaterThan(0);
   const interactionState = await readCityState(page);
-  const clickableAgent = interactionState.city.mobilityAgents.agents.find(
-    (agent: { screen: { x: number; y: number } }) =>
-      agent.screen.x > 16 &&
-      agent.screen.x < 393 &&
-      agent.screen.y > 16 &&
-      agent.screen.y < 503,
+  const agentCandidates = rankedVisibleEntities(
+    interactionState.city.mobilityAgents.agents,
+    { width: 409, height: 519 },
+    [
+      ...interactionState.city.mobilityAgents.agents,
+      ...interactionState.city.mobilityVehicles.vehicles,
+      ...interactionState.city.mobilityTrams.trams,
+    ],
   );
-  expect(clickableAgent).toBeTruthy();
-  await page.mouse.click(clickableAgent.screen.x, clickableAgent.screen.y);
-  const selectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
+  expect(agentCandidates.length).toBeGreaterThan(0);
+  let selectedState = await readCityState(page);
+  for (const { entity: clickableAgent } of agentCandidates.slice(0, 8)) {
+    await page.mouse.click(clickableAgent.screen.x, clickableAgent.screen.y);
+    selectedState = await readCityState(page);
+    if (selectedState.city.mobilityAgents.selectedId === clickableAgent.id) break;
+  }
   expect(selectedState.city.mobilityAgents.selectedId).toEqual(expect.any(String));
   expect(selectedState.city.mobilityAgents.selected).toEqual(expect.objectContaining({
     id: selectedState.city.mobilityAgents.selectedId,
@@ -237,10 +251,18 @@ function isolatedVisibleEntity<T extends ScreenEntity>(
   entities: T[],
   viewport: { width: number; height: number },
 ): T | undefined {
-  return visibleEntities(entities, viewport)
-    .map((entity) => ({ entity, nearestNeighbor: nearestNeighborDistance(entity, entities) }))
-    .sort((a, b) => b.nearestNeighbor - a.nearestNeighbor)
+  return rankedVisibleEntities(entities, viewport, entities)
     .find(({ nearestNeighbor }) => nearestNeighbor > 32)?.entity;
+}
+
+function rankedVisibleEntities<T extends ScreenEntity>(
+  entities: T[],
+  viewport: { width: number; height: number },
+  neighbors: ScreenEntity[],
+): { entity: T; nearestNeighbor: number }[] {
+  return visibleEntities(entities, viewport)
+    .map((entity) => ({ entity, nearestNeighbor: nearestNeighborDistance(entity, neighbors) }))
+    .sort((a, b) => b.nearestNeighbor - a.nearestNeighbor);
 }
 
 function visibleEntities<T extends ScreenEntity>(
@@ -266,6 +288,20 @@ function maxCoordMovement(
     const delta = Math.abs(later.coord.x - entity.coord.x) + Math.abs(later.coord.y - entity.coord.y);
     return Math.max(largest, delta);
   }, 0);
+}
+
+function movementObserver(
+  page: Page,
+  selectEntities: (sample: any) => { id: string; coord: { x: number; y: number } }[],
+): () => Promise<number> {
+  let previous: { id: string; coord: { x: number; y: number } }[] | null = null;
+  return async () => {
+    const sample = await readCityState(page);
+    const current = selectEntities(sample);
+    const movement = previous ? maxCoordMovement(previous, current) : 0;
+    previous = current;
+    return movement;
+  };
 }
 
 function nearestNeighborDistance(entity: ScreenEntity, entities: ScreenEntity[]): number {

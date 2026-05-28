@@ -28,10 +28,20 @@ pub struct SeededWalk {
     pub polyline: Vec<(f32, f32)>,
 }
 
+/// Authoritative transit line geometry authored outside the legacy arterial
+/// network, for example the Base World Bundle rail corridor.
+#[derive(Debug, Clone)]
+pub struct SeededTransitLine {
+    pub legacy_route_id: String,
+    pub name: String,
+    pub polyline: Vec<(f32, f32)>,
+}
+
 pub fn build_graph_from_city_network(
     network: &CityNetwork,
     seeded_stops: &[SeededStop],
     seeded_walks: &[SeededWalk],
+    seeded_transit_lines: &[SeededTransitLine],
 ) -> (Graph, TransitLines, NodeSpatialIndex) {
     // Phase 1: collect polylines + coord occurrence count.
     let mut coord_use_count: HashMap<(i32, i32), u32> = HashMap::new();
@@ -51,6 +61,24 @@ pub fn build_graph_from_city_network(
         }
         polyline_coords.push(coords);
         polyline_kinds.push(PolylineKind::Arterial { index: idx });
+    }
+
+    for (idx, line) in seeded_transit_lines.iter().enumerate() {
+        let coords = line
+            .polyline
+            .iter()
+            .map(|(x, y)| (x.round() as i32, y.round() as i32))
+            .collect::<Vec<_>>();
+        if coords.len() < 2 {
+            continue;
+        }
+        endpoint_coords.push(coords[0]);
+        endpoint_coords.push(*coords.last().unwrap());
+        for c in &coords {
+            *coord_use_count.entry(*c).or_insert(0) += 1;
+        }
+        polyline_coords.push(coords);
+        polyline_kinds.push(PolylineKind::SeededTransit { index: idx });
     }
 
     // Pedestrian corridors from the network JSON are intentionally NOT
@@ -128,6 +156,7 @@ pub fn build_graph_from_city_network(
     // Phase 4: split polylines at node coords, emit edges.
     let mut edges: Vec<Edge> = Vec::new();
     let mut tram_edges_by_arterial: HashMap<usize, Vec<EdgeId>> = HashMap::new();
+    let mut tram_edges_by_seeded_transit: HashMap<usize, Vec<EdgeId>> = HashMap::new();
 
     for (poly_idx, coords) in polyline_coords.iter().enumerate() {
         let kind = polyline_kinds[poly_idx];
@@ -206,6 +235,47 @@ pub fn build_graph_from_city_network(
                         capacity: 1,
                         legacy_id: None,
                     });
+                }
+                PolylineKind::SeededTransit { index } => {
+                    let tram_fwd = Edge {
+                        id: EdgeId(edges.len() as u32),
+                        from,
+                        to,
+                        polyline: polyline.clone(),
+                        length,
+                        kind: EdgeKind::TramTrack,
+                        speed_limit: SPEED_TRAM,
+                        capacity: 1,
+                        legacy_id: Some(format!(
+                            "link:{}:{}_{}",
+                            seeded_transit_lines[index].legacy_route_id, segment[0].0, segment[0].1
+                        )),
+                    };
+                    tram_edges_by_seeded_transit
+                        .entry(index)
+                        .or_default()
+                        .push(tram_fwd.id);
+                    edges.push(tram_fwd);
+
+                    let reverse = Edge {
+                        id: EdgeId(edges.len() as u32),
+                        from: to,
+                        to: from,
+                        polyline: polyline.iter().rev().copied().collect(),
+                        length,
+                        kind: EdgeKind::TramTrack,
+                        speed_limit: SPEED_TRAM,
+                        capacity: 1,
+                        legacy_id: Some(format!(
+                            "link:{}:{}_{}:reverse",
+                            seeded_transit_lines[index].legacy_route_id, segment[0].0, segment[0].1
+                        )),
+                    };
+                    tram_edges_by_seeded_transit
+                        .entry(index)
+                        .or_default()
+                        .push(reverse.id);
+                    edges.push(reverse);
                 }
             }
         }
@@ -298,6 +368,21 @@ pub fn build_graph_from_city_network(
             legacy_route_id,
         });
     }
+
+    let mut seeded_indices: Vec<usize> = tram_edges_by_seeded_transit.keys().copied().collect();
+    seeded_indices.sort();
+    for seeded_idx in seeded_indices {
+        let edges_in_line = tram_edges_by_seeded_transit.remove(&seeded_idx).unwrap();
+        let line = &seeded_transit_lines[seeded_idx];
+        lines.push(TransitLine {
+            id: LineId(lines.len() as u32),
+            name: line.name.clone(),
+            edges: edges_in_line,
+            stops: Vec::new(),
+            legacy_route_id: Some(line.legacy_route_id.clone()),
+        });
+    }
+
     let mut transit_lines = TransitLines::new(lines);
     for arterial_idx in 0..network.arterial_paths.len() {
         if let Some(line_id) = transit_lines
@@ -322,6 +407,7 @@ pub fn build_graph_from_city_network(
 #[derive(Debug, Clone, Copy)]
 enum PolylineKind {
     Arterial { index: usize },
+    SeededTransit { index: usize },
 }
 
 fn polyline_length(points: &[(f32, f32)]) -> f32 {
@@ -366,14 +452,14 @@ mod tests {
 
     #[test]
     fn builder_creates_nodes_at_intersections() {
-        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &[], &[]);
         // Expected nodes: endpoints (0,0), (10,0), (5,5) AND intersection (5,0).
         assert_eq!(graph.node_count(), 4);
     }
 
     #[test]
     fn builder_emits_bidirectional_tram_plus_road_per_arterial_segment() {
-        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &[], &[]);
         // Arterial 0 has 2 segments → 4 edges each = 8.
         // Arterial 1 has 1 segment → 4 edges.
         // Total = 12.
@@ -390,7 +476,7 @@ mod tests {
             coord: (5.0, 0.0),
             legacy_route_id: "route:horizontal".into(),
         }];
-        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &stops, &[]);
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &stops, &[], &[]);
         let node_id = graph
             .node_by_legacy("stop:on_arterial")
             .expect("stop must resolve");
@@ -403,7 +489,7 @@ mod tests {
             legacy_link_id: "link:walk:corridor:7".into(),
             polyline: vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
         }];
-        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &walks);
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &walks, &[]);
         let edge_id = graph
             .edge_by_legacy("link:walk:corridor:7")
             .expect("walk edge must resolve");
@@ -423,7 +509,7 @@ mod tests {
 
     #[test]
     fn builder_creates_one_transit_line_per_arterial() {
-        let (_, lines, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
+        let (_, lines, _) = build_graph_from_city_network(&simple_network(), &[], &[], &[]);
         assert_eq!(lines.count(), 2);
     }
 
@@ -437,7 +523,7 @@ mod tests {
     fn empty_polyline_skipped() {
         let mut net = simple_network();
         net.arterial_paths.push(vec![]);
-        let (graph, _, _) = build_graph_from_city_network(&net, &[], &[]);
+        let (graph, _, _) = build_graph_from_city_network(&net, &[], &[], &[]);
         assert_eq!(graph.node_count(), 4);
         assert_eq!(graph.edge_count(), 12);
     }

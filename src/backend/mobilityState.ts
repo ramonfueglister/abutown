@@ -97,6 +97,8 @@ export function applyMobilityChunkSnapshot(
   msg: MobilityChunkSnapshotDto,
   now = Date.now(),
 ): MobilityOverlayState {
+  if (msg.tick < state.tick) return state;
+
   const chunkKey = `${msg.chunk.x},${msg.chunk.y}`;
   const agents = new Map(state.agents);
   for (const [id, entry] of agents) {
@@ -132,6 +134,8 @@ export function applyMobilityChunkDelta(
   msg: MobilityChunkDeltaDto,
   now = Date.now(),
 ): MobilityOverlayState {
+  if (msg.tick < state.tick) return state;
+
   const agents = new Map(state.agents);
   for (const id of msg.left_agents) agents.delete(id);
   for (const agent of msg.changed_agents) {
@@ -143,7 +147,10 @@ export function applyMobilityChunkDelta(
     });
   }
   const vehicles = new Map(state.vehicles);
-  for (const id of msg.left_vehicles) vehicles.delete(id);
+  for (const id of msg.left_vehicles) {
+    if (vehicles.get(id)?.current.kind === 'tram') continue;
+    vehicles.delete(id);
+  }
   for (const vehicle of msg.changed_vehicles) {
     const previous = vehicles.get(vehicle.id);
     vehicles.set(vehicle.id, {

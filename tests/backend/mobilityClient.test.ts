@@ -370,6 +370,41 @@ describe('mobility backend client', () => {
     bridge.stop();
   });
 
+  it('keeps backend tram chunks in the subscription interest set', async () => {
+    const { Impl, sockets } = mockWebSocketImpl();
+    const tramSnapshot: MobilitySnapshotDto = {
+      ...snapshot,
+      vehicles: [
+        {
+          ...snapshot.vehicles[0],
+          id: 'vehicle:tram:outside-viewport',
+          kind: 'tram',
+          world_coord: { x: 150, y: 224 },
+        },
+      ],
+    };
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/world')) return Promise.resolve(worldSummaryProtoResponse(worldSummary));
+      return Promise.resolve(mobilitySnapshotProtoResponse(tramSnapshot));
+    }) as typeof fetch;
+
+    const bridge = connectMobilityBackend({
+      fetchImpl,
+      WebSocketImpl: Impl,
+      viewport: stubViewport({ viewport: { width: 64, height: 64 } }),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sockets[0].triggerOpen();
+
+    const firstMsg = fromBinary(ClientMessageSchema, sockets[0].sent[0]);
+    expect(firstMsg.body.case).toBe('chunkSubscribe');
+    if (firstMsg.body.case !== 'chunkSubscribe') throw new Error('expected chunkSubscribe');
+    expect(firstMsg.body.value.coords.map((coord) => `${coord.x},${coord.y}`)).toContain('4,7');
+    bridge.stop();
+  });
+
   it('calls injected clearIntervalImpl when the socket closes and when stop() runs', async () => {
     const intervalToken = Symbol('interval') as unknown as ReturnType<typeof setInterval>;
     const setIntervalImpl = vi.fn<typeof setInterval>(() => intervalToken);

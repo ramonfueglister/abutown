@@ -13,25 +13,18 @@ import { compareDrawableOrder } from './drawOrder';
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
+  tramsFromMobilityState,
   type BackendCar,
   type BackendPedestrian,
+  type BackendTram,
 } from './backendMobilityDrawables';
 import { minimalBuildingPlotOffset, minimalBuildingSize } from './minimalBuildingLayout';
 import { screenStableWorldSize } from './minimalGlyphScale';
 import { MINIMAL_MAP_TILE_SIZE, mapProject, mapUnproject } from './minimalMapProjection';
-import { trainFadeAlpha, trainPosition as movingTrainPosition } from './trainMotion';
 import { screenRightLaneOffset, type VehicleSprite } from './vehicleSprites';
 import type { MinimalPedestrianSprite } from './minimalPedestrianSprites';
 
 export type Coord = { x: number; y: number };
-
-export type MinimalMapRendererTrain = {
-  path: Coord[];
-  offset: number;
-  speed: number;
-  fadeTiles: number;
-  carSpacing: number;
-};
 
 export type EntityInspectorRow = { label: string; value: string };
 export type EntityInspector = { title: string; rows: EntityInspectorRow[] } | null;
@@ -51,7 +44,6 @@ export type MinimalMapRendererState = {
   buildings: readonly RuntimeBuilding[];
   trees: readonly Coord[];
   details: readonly ZurichDetail[];
-  trains: readonly MinimalMapRendererTrain[];
   mobilityState: MobilityOverlayState;
   mobilityTickPeriodMs: number;
   vehicleSprites: readonly VehicleSprite[];
@@ -78,7 +70,7 @@ type StaticDrawable =
 
 type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: string };
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
-type TrainDrawable = { type: 'train'; coord: Coord; train: MinimalMapRendererTrain };
+type TrainDrawable = { type: 'train'; coord: Coord; tram: BackendTram };
 type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
 
 export const MAP_BACKGROUND = '#f6f0e3';
@@ -154,6 +146,12 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
     state.now(),
     state.mobilityTickPeriodMs,
   );
+  const trams: BackendTram[] = tramsFromMobilityState(
+    state.mobilityState,
+    state.vehicleSprites,
+    state.now(),
+    state.mobilityTickPeriodMs,
+  );
   const carDrawables = cars
     .map((car) => ({ type: 'car' as const, coord: car.path[0], car, vehicleId: car.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
@@ -162,8 +160,8 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
     .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort((a, b) => compareDrawables(state, a, b));
-  const trainDrawables = state.trains
-    .map((train) => ({ type: 'train' as const, coord: trainPosition(train), train }))
+  const trainDrawables = trams
+    .map((tram) => ({ type: 'train' as const, coord: tram.path[0], tram }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort((a, b) => compareDrawables(state, a, b));
 
@@ -174,7 +172,7 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   for (const detail of state.details) if (isCoordVisible(detail.coord, visibleGrid)) drawDetail(state, detail);
   for (const building of state.buildings) if (isCoordVisible(building.coord, visibleGrid)) drawBuilding(state, building);
   for (const coord of state.trees) if (isCoordVisible(coord, visibleGrid)) drawTree(state, coord);
-  for (const item of trainDrawables) drawTrain(state, item.train);
+  for (const item of trainDrawables) drawTrain(state, item.tram);
   for (const item of carDrawables) drawCar(state, item.car, item.vehicleId === state.selectedVehicleId);
   for (const item of pedestrianDrawables) drawPedestrian(state, item.pedestrian, item.agentId === state.selectedAgentId);
 
@@ -445,25 +443,24 @@ function screenForwardOffset(from: Coord, to: Coord, distance: number): Coord {
   };
 }
 
-function drawTrain(state: MinimalMapRendererState, train: MinimalMapRendererTrain): void {
-  const { ctx, world } = state;
+function drawTrain(state: MinimalMapRendererState, tram: BackendTram): void {
+  const { ctx } = state;
+  const head = iso(state, tram.path[0]);
+  const next = iso(state, tram.path[1] ?? tram.path[0]);
   const segments = [
-    { offset: train.offset, length: 13.5 },
-    { offset: train.offset - train.carSpacing, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 2, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 3, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 4, length: 10.5 },
+    { distance: 0, length: 13.5 },
+    { distance: -9.5, length: 10.5 },
+    { distance: -19, length: 10.5 },
+    { distance: -28.5, length: 10.5 },
+    { distance: -38, length: 10.5 },
   ];
+  const angle = movementAngle(head, next);
 
   for (const segment of segments) {
-    const pos = movingTrainPosition(train.path, segment.offset);
-    const alpha = trainFadeAlpha(pos, { height: world.height, fadeTiles: train.fadeTiles });
-    if (alpha <= 0) continue;
-    const point = iso(state, pos);
-    const nextPoint = iso(state, movingTrainPosition(train.path, segment.offset + 0.2));
+    const offset = screenForwardOffset(head, next, segment.distance);
+    const point = { x: head.x + offset.x, y: head.y + offset.y };
     ctx.save();
-    ctx.globalAlpha *= alpha;
-    drawCapsule(state, point, movementAngle(point, nextPoint), segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
+    drawCapsule(state, point, angle, segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
     ctx.restore();
   }
 }
@@ -761,10 +758,6 @@ function selectedBackendCar(state: MinimalMapRendererState): BackendCar | null {
     state.now(),
     state.mobilityTickPeriodMs,
   ).find((vehicle) => vehicle.id === state.selectedVehicleId) ?? null;
-}
-
-function trainPosition(train: MinimalMapRendererTrain): Coord {
-  return movingTrainPosition(train.path, train.offset);
 }
 
 function iso(state: MinimalMapRendererState, coord: Coord): Coord {

@@ -648,6 +648,7 @@ pub fn vehicle_advance_system(
     mut query: Query<
         (
             Entity,
+            &VehicleKindComponent,
             &Position,
             &mut RoutePosition,
             &mut DwellTicksRemaining,
@@ -658,8 +659,10 @@ pub fn vehicle_advance_system(
     transit_lines: Res<crate::routing::TransitLines>,
     mut dirty: ResMut<DirtyVehicles>,
 ) {
-    for (entity, world_pos, mut pos, mut dwell) in query.iter_mut() {
-        if !chunk_is_simulated(world_pos, &simulated) {
+    for (entity, kind, world_pos, mut pos, mut dwell) in query.iter_mut() {
+        if kind.0 != crate::mobility::records::VehicleKind::Tram
+            && !chunk_is_simulated(world_pos, &simulated)
+        {
             continue;
         }
         // dwell counts down first
