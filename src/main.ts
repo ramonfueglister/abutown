@@ -9,7 +9,6 @@ import {
   terrainTileAt,
   type TerrainBaseKind,
   type TerrainState,
-  type TerrainTile,
 } from './backend/terrainState';
 import { mountCardHandView } from './cardHand/cardHandView';
 import type { AssetFrame, AssetRole } from './assets/assetPack';
@@ -67,38 +66,17 @@ import {
   trainPosition as movingTrainPosition,
   trainWrappedOffset,
 } from './render/trainMotion';
+import {
+  createBackendTerrainRenderState,
+  type Building,
+  type Detail,
+  type RailStation,
+  type RailTile,
+  type RoadTile,
+  type Terrain,
+} from './render/backendTerrainRenderState';
 
 type Coord = { x: number; y: number };
-type Terrain = 'grass' | 'water' | 'riverbank' | 'park' | 'plaza';
-type RoadKind = 'street' | 'bridge';
-type RailTile = {
-  coord: Coord;
-  mask: number;
-};
-
-type RoadTile = {
-  coord: Coord;
-  kind: RoadKind;
-  mask: number;
-};
-
-type Building = {
-  coord: Coord;
-  sheet: BuildingSheetName;
-  frame: number;
-  district: string;
-};
-
-type Detail = {
-  coord: Coord;
-  category: string;
-  assetCategory: string;
-};
-
-type RailStation = {
-  coord: Coord;
-  frame: number;
-};
 
 type Train = {
   path: Coord[];
@@ -127,18 +105,6 @@ type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: stri
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
 type TrainDrawable = { type: 'train'; coord: Coord; train: Train };
 type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
-
-type BuildingSheetName =
-  | 'houses'
-  | 'oldhouses'
-  | 'cottages'
-  | 'townhouses'
-  | 'shops'
-  | 'flats'
-  | 'office'
-  | 'modern'
-  | 'tower'
-  | 'church';
 
 const activeAssetPack = pak128AssetPack;
 const VISUAL_STYLE_ID = 'minimal-motorways';
@@ -270,38 +236,18 @@ async function loadBackendTerrain(baseUrl: string): Promise<void> {
 }
 
 function rebuildRenderStateFromTerrain(): void {
-  terrain = new Map();
-  roads = new Map();
-  rails = new Map();
-  railCrossings = new Set();
-  buildings = [];
-  trees = [];
-  details = [];
-
-  for (const [tileKey, tile] of terrainState.tiles) {
-    const coord = parseKey(tileKey);
-    const base = terrainFromLayer(tile.base);
-    if (base !== 'grass') terrain.set(tileKey, base);
-    if ((tile.surface === 'Street' || tile.surface === 'Bridge' || tile.surface === 'RailCrossing') && tile.roadMask !== null) {
-      roads.set(tileKey, {
-        coord,
-        kind: tile.surface === 'Bridge' ? 'bridge' : 'street',
-        mask: tile.roadMask,
-      });
-    }
-    if ((tile.surface === 'Rail' || tile.surface === 'RailCrossing') && tile.railMask !== null) {
-      rails.set(tileKey, { coord, mask: tile.railMask });
-    }
-    if (tile.surface === 'RailCrossing') railCrossings.add(tileKey);
-    if (tile.cover === 'Building') buildings.push(buildingFromBackendTile(coord, tile));
-    if (tile.cover === 'Tree') trees.push(coord);
-    if (tile.cover === 'Detail') details.push(detailFromBackendTile(coord, tile));
-  }
-
-  railReserved = new Set(rails.keys());
-  railPaths = buildRailPathsFromTiles(rails);
-  railYardPaths = [];
-  railStations = buildRailStations();
+  const renderState = createBackendTerrainRenderState(terrainState, { buildingFrameVariants: BUILDING_FRAME_VARIANTS });
+  terrain = renderState.terrain;
+  roads = renderState.roads;
+  rails = renderState.rails;
+  railCrossings = renderState.railCrossings;
+  railReserved = renderState.railReserved;
+  railPaths = renderState.railPaths;
+  railYardPaths = renderState.railYardPaths;
+  railStations = renderState.railStations;
+  buildings = renderState.buildings;
+  trees = renderState.trees;
+  details = renderState.details;
   staticDrawables = buildStaticDrawables();
   trains = buildTrains();
 }
@@ -995,96 +941,12 @@ function drawPerimeterMist(): void {
   ctx.restore();
 }
 
-function terrainFromLayer(base: TerrainBaseKind): Terrain {
-  if (base === 'Water') return 'water';
-  if (base === 'Riverbank') return 'riverbank';
-  if (base === 'Plaza') return 'plaza';
-  if (base === 'Park' || base === 'Forest' || base === 'Reserve') return 'park';
-  return 'grass';
-}
-
 function terrainAt(coord: Coord): Terrain {
   return terrain.get(key(coord)) ?? 'grass';
 }
 
 function terrainBaseAt(coord: Coord): TerrainBaseKind {
   return terrainTileAt(terrainState, coord)?.base ?? 'Grass';
-}
-
-function buildingFromBackendTile(coord: Coord, tile: TerrainTile): Building {
-  const sheet = buildingSheetFromDisplay(tile.display);
-  return {
-    coord,
-    sheet,
-    frame: hash(`backend-building:${sheet}:${key(coord)}`) % BUILDING_FRAME_VARIANTS,
-    district: tile.zoneId ?? 'zone:backend',
-  };
-}
-
-function buildingSheetFromDisplay(display: string | null): BuildingSheetName {
-  const sheets: readonly BuildingSheetName[] = [
-    'houses',
-    'oldhouses',
-    'cottages',
-    'townhouses',
-    'shops',
-    'flats',
-    'office',
-    'modern',
-    'tower',
-    'church',
-  ];
-  return sheets.includes(display as BuildingSheetName) ? display as BuildingSheetName : 'houses';
-}
-
-function detailFromBackendTile(coord: Coord, tile: TerrainTile): Detail {
-  const assetCategory = tile.display ?? 'decor';
-  return {
-    coord,
-    assetCategory,
-    category: detailCategoryFromDisplay(assetCategory),
-  };
-}
-
-function detailCategoryFromDisplay(assetCategory: string): string {
-  if (assetCategory === 'factory' || assetCategory === 'road-depot' || assetCategory.includes('depot')) return 'industry';
-  if (assetCategory.includes('dock')) return 'dock';
-  if (assetCategory.includes('station')) return 'station';
-  if (assetCategory.includes('field')) return 'field';
-  return 'decor';
-}
-
-function buildRailPathsFromTiles(railTiles: Map<string, RailTile>): Coord[][] {
-  const unvisited = new Set(railTiles.keys());
-  const paths: Coord[][] = [];
-  while (unvisited.size > 0) {
-    const startKey = unvisited.values().next().value as string;
-    const stack = [parseKey(startKey)];
-    const component: Coord[] = [];
-    unvisited.delete(startKey);
-    while (stack.length > 0) {
-      const coord = stack.pop()!;
-      component.push(coord);
-      for (const neighbor of cardinal(coord)) {
-        const neighborKey = key(neighbor);
-        if (!unvisited.has(neighborKey)) continue;
-        unvisited.delete(neighborKey);
-        stack.push(neighbor);
-      }
-    }
-    const minX = Math.min(...component.map((coord) => coord.x));
-    const maxX = Math.max(...component.map((coord) => coord.x));
-    const minY = Math.min(...component.map((coord) => coord.y));
-    const maxY = Math.max(...component.map((coord) => coord.y));
-    const vertical = maxY - minY >= maxX - minX;
-    component.sort((a, b) => vertical ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y);
-    paths.push(component);
-  }
-  return paths.sort((a, b) => b.length - a.length);
-}
-
-function buildRailStations(): RailStation[] {
-  return [];
 }
 
 function buildStreetFrontages(): Set<string> {
@@ -1450,11 +1312,6 @@ function cityDiagnostics(): Record<string, number> {
 
 function key(coord: Coord): string {
   return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
-}
-
-function parseKey(value: string): Coord {
-  const [x, y] = value.split(':').map(Number);
-  return { x, y };
 }
 
 function hash(value: string): number {
