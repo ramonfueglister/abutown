@@ -73,7 +73,6 @@ fn main() {
         SeedDensity {
             pedestrians_per_corridor: 50, // 2000 × 50 = 100_000
             cars_per_arterial: 10,
-            trams_total: 0,
         },
     );
 

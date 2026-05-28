@@ -56,7 +56,7 @@ pub fn build_graph_from_city_network(
     // Pedestrian corridors from the network JSON are intentionally NOT
     // processed here. The seed path generates its own walks procedurally
     // and publishes them via `seeded_walks`; that is the SOLE source of
-    // Footway edges in the graph. See `legacy_seeded_walks` in
+    // Footway edges in the graph. See `seeded_walks_from_network` in
     // `mobility/seed.rs`.
 
     // Collect seeded-walk endpoint coords so they become graph nodes

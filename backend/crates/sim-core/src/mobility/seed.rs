@@ -2,22 +2,14 @@ use bevy_ecs::schedule::Schedule;
 use bevy_ecs::world::World;
 
 use super::*;
-use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+use crate::city_network::CityNetwork;
 use crate::ids::{AgentId, VehicleId};
 
-/// Hardcoded transit stops the world seeds today. Coords are tile-space.
-/// These get promoted to graph nodes via `RoutingPlugin.seeded_stops`.
-/// Pedestrian walks the seed path procedurally generates, expressed as
-/// `SeededWalk` records so the routing builder can emit a Footway edge per
-/// walk. The legacy `link_id` strings here are byte-identical to the agent
-/// plan strings, so walking state resolves via `graph.edge_by_legacy(link_id)`.
-pub fn legacy_seeded_walks(
-    network: &crate::city_network::CityNetwork,
-) -> Vec<crate::routing::SeededWalk> {
+/// Pedestrian walks generated from the authored base-world network.
+pub fn seeded_walks_from_network(network: &CityNetwork) -> Vec<crate::routing::SeededWalk> {
     use crate::city_network::NetworkCoord;
     let mut out: Vec<crate::routing::SeededWalk> = Vec::new();
 
-    // Walks from `from_network`: one Footway per pedestrian corridor.
     for (index, corridor) in network.pedestrian_corridors.iter().enumerate() {
         let polyline: Vec<(f32, f32)> = corridor
             .iter()
@@ -32,11 +24,12 @@ pub fn legacy_seeded_walks(
         });
     }
 
-    // Walks from `tiny_world` (used when the network is empty AND as the
-    // tram-flow re-seed inside `from_network`). The walking link
-    // `link:walk:default` is the link the 20 seeded pedestrians walk on.
-    // The seed path always registers this polyline, so we always publish
-    // a Footway edge for it.
+    out
+}
+
+#[cfg(test)]
+fn test_seeded_walks(network: &CityNetwork) -> Vec<crate::routing::SeededWalk> {
+    let mut out = seeded_walks_from_network(network);
     let c44 = (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
     let c54 = (5.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
     out.push(crate::routing::SeededWalk {
@@ -47,7 +40,8 @@ pub fn legacy_seeded_walks(
     out
 }
 
-pub fn legacy_seeded_stops() -> Vec<crate::routing::SeededStop> {
+#[cfg(test)]
+fn test_seeded_stops() -> Vec<crate::routing::SeededStop> {
     // Tile-space centre coords for the seeded chunks:
     //   c44 = (4 * 32 + 16, 4 * 32 + 16) = (144.0, 144.0)
     //   c54 = (5 * 32 + 16, 4 * 32 + 16) = (176.0, 144.0)
@@ -79,7 +73,9 @@ pub fn legacy_seeded_stops() -> Vec<crate::routing::SeededStop> {
     ]
 }
 
+#[cfg(test)]
 fn tiny_city_network() -> CityNetwork {
+    use crate::city_network::{NetworkCoord, WorldTiles};
     let c44 = NetworkCoord { x: 144, y: 144 };
     let c54 = NetworkCoord { x: 176, y: 144 };
     let c45 = NetworkCoord { x: 144, y: 176 };
@@ -104,25 +100,38 @@ fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedu
     CorePlugin::default().install(&mut world, &mut schedule);
     world.insert_resource(network.clone());
     crate::routing::RoutingPlugin {
-        seeded_stops: legacy_seeded_stops(),
-        seeded_walks: legacy_seeded_walks(network),
+        seeded_stops: Vec::new(),
+        seeded_walks: seeded_walks_from_network(network),
     }
     .install(&mut world, &mut schedule);
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
     (world, schedule)
 }
 
-/// Backward-compatible wrapper — delegates to [`tiny_world`].
-pub fn initial_world() -> (World, Schedule) {
-    tiny_world()
+#[cfg(test)]
+fn test_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedule) {
+    let mut world = World::new();
+    let mut schedule = Schedule::default();
+    use crate::world::plugin::CorePlugin;
+    use crate::world::schedule::SimPlugin;
+    CorePlugin::default().install(&mut world, &mut schedule);
+    world.insert_resource(network.clone());
+    crate::routing::RoutingPlugin {
+        seeded_stops: test_seeded_stops(),
+        seeded_walks: test_seeded_walks(network),
+    }
+    .install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    (world, schedule)
 }
 
-/// Build a deterministic populated mobility world for fresh server starts.
+/// Build a deterministic populated mobility world for unit tests.
 ///
 /// Two routes traverse the seeded chunk neighbourhood; 4 vehicles and
 /// 20 agents are spawned with cyclic plans. Calling this function twice
 /// returns equal worlds (by `extract_from_world`).
-pub fn tiny_world() -> (World, Schedule) {
+#[cfg(test)]
+pub fn test_seed_world() -> (World, Schedule) {
     let horizontal_route = "route:horizontal".to_string();
     let vertical_route = "route:vertical".to_string();
 
@@ -135,7 +144,7 @@ pub fn tiny_world() -> (World, Schedule) {
     let work_activity = "activity:work".to_string();
 
     let network = tiny_city_network();
-    let (mut world, schedule) = empty_world_and_schedule_for_network(&network);
+    let (mut world, schedule) = test_world_and_schedule_for_network(&network);
 
     for offset in 0..4u32 {
         let route_id = if offset % 2 == 0 {
@@ -205,7 +214,6 @@ pub fn tiny_world() -> (World, Schedule) {
 pub struct SeedDensity {
     pub pedestrians_per_corridor: u32,
     pub cars_per_arterial: u32,
-    pub trams_total: u32,
 }
 
 impl Default for SeedDensity {
@@ -213,38 +221,12 @@ impl Default for SeedDensity {
         Self {
             pedestrians_per_corridor: 6,
             cars_per_arterial: 4,
-            trams_total: 4,
         }
     }
 }
 
 pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Schedule) {
     let (mut world, schedule) = empty_world_and_schedule_for_network(network);
-
-    // Trams: seed the fixed tiny tram flow against graph route aliases.
-    if density.trams_total > 0 {
-        for offset in 0..density.trams_total {
-            let route_id = if offset % 2 == 0 {
-                "route:horizontal".to_string()
-            } else {
-                "route:vertical".to_string()
-            };
-            api::spawn_vehicle_from_record(
-                &mut world,
-                VehicleRecord {
-                    id: VehicleId(format!("vehicle:seed:{offset}")),
-                    kind: VehicleKind::Tram,
-                    route_id,
-                    link_index: 0,
-                    progress: (offset as f32) * 0.25,
-                    speed_per_tick: 0.1,
-                    capacity: 4,
-                    occupants: Vec::new(),
-                    dwell_ticks_remaining: 0,
-                },
-            );
-        }
-    }
 
     // Spawn walking agents distributed across corridors.
     if !network.pedestrian_corridors.is_empty() {

@@ -85,7 +85,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     baseUrl: 'http://127.0.0.1:8080',
     status: expect.objectContaining({
       service: 'abutown-sim',
-      world_id: 'abutown-main',
+      world_id: 'zurich-river-city-v1',
       ok: true,
       protocol_version: 1,
     }),

@@ -3,6 +3,10 @@ import {
   type BackendHealthDto,
 } from '../backend/backendGate';
 import {
+  requireBaseWorld as requireBaseWorldClient,
+  type BaseWorldResponse,
+} from '../backend/baseWorldClient';
+import {
   connectMobilityBackend as connectMobilityBackendClient,
   requireMobilitySnapshot as requireMobilitySnapshotClient,
   type MobilityBackendBridge,
@@ -18,6 +22,7 @@ import {
 
 export type AppRuntimeInitialState = {
   backendStatus: BackendHealthDto;
+  baseWorld: BaseWorldResponse;
   mobilityState: MobilityOverlayState;
   mobilityTickPeriodMs: number;
 };
@@ -29,6 +34,7 @@ export type AppRuntimeHandle = {
 
 export type AppRuntimeDependencies = {
   requireBackend: (options: { baseUrl: string }) => Promise<BackendHealthDto>;
+  requireBaseWorld: (options: { baseUrl: string }) => Promise<BaseWorldResponse>;
   requireMobilitySnapshot: (options: { baseUrl: string }) => Promise<RequiredMobility>;
   mountCardHandView: (options: CardHandViewOptions) => void;
   boot: (initialState: AppRuntimeInitialState) => void | Promise<void>;
@@ -55,6 +61,7 @@ export function defaultAppRuntimeDependencies(
 ): AppRuntimeDependencies {
   return {
     requireBackend: requireBackendGate,
+    requireBaseWorld: requireBaseWorldClient,
     requireMobilitySnapshot: requireMobilitySnapshotClient,
     mountCardHandView: mountCardHandViewRuntime,
     boot,
@@ -69,9 +76,11 @@ export async function startAppRuntime(options: StartAppRuntimeOptions): Promise<
 
   try {
     const backendStatus = await dependencies.requireBackend({ baseUrl: backendBaseUrl });
+    const baseWorld = await dependencies.requireBaseWorld({ baseUrl: backendBaseUrl });
     const required = await dependencies.requireMobilitySnapshot({ baseUrl: backendBaseUrl });
     const initialState: AppRuntimeInitialState = {
       backendStatus,
+      baseWorld,
       mobilityState: required.state,
       mobilityTickPeriodMs: required.tickPeriodMs,
     };

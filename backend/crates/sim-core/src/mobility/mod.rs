@@ -335,8 +335,8 @@ mod tests {
     }
 
     #[test]
-    fn initial_world_seeds_expected_population() {
-        let (world, _) = seed::initial_world();
+    fn test_seed_world_seeds_expected_population() {
+        let (world, _) = seed::test_seed_world();
 
         assert_eq!(api::tick(&world), 0);
         assert_eq!(
@@ -362,12 +362,12 @@ mod tests {
     }
 
     #[test]
-    fn initial_world_is_deterministic() {
-        let (a_world, _) = seed::initial_world();
-        let (b_world, _) = seed::initial_world();
+    fn test_seed_world_is_deterministic() {
+        let (a_world, _) = seed::test_seed_world();
+        let (b_world, _) = seed::test_seed_world();
         let a = extract_from_world(&a_world);
         let b = extract_from_world(&b_world);
-        assert_eq!(a, b, "initial_world() must be deterministic across calls");
+        assert_eq!(a, b, "test_seed_world() must be deterministic across calls");
     }
 
     #[test]
@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn world_coord_for_walking_agent_interpolates_link() {
-        let (world, _) = seed::initial_world();
+        let (world, _) = seed::test_seed_world();
         let agent_id = AgentId("agent:seed:0".to_string());
         let expected = (4.0 * 32.0 + 16.0, 4.0 * 32.0 + 16.0);
         let coord = api::world_coord_for_agent(&world, &agent_id).expect("agent resolves to coord");
@@ -772,7 +772,7 @@ mod tests {
 
     #[test]
     fn sprite_key_for_agent_is_deterministic_by_id_hash() {
-        let (world, _) = seed::initial_world();
+        let (world, _) = seed::test_seed_world();
         let a = api::sprite_key_for_agent(&world, &AgentId("agent:seed:0".to_string())).unwrap();
         let b = api::sprite_key_for_agent(&world, &AgentId("agent:seed:0".to_string())).unwrap();
         assert_eq!(
@@ -784,7 +784,7 @@ mod tests {
 
     #[test]
     fn agent_dto_built_through_world_includes_world_coord_direction_and_sprite_key() {
-        let (world, _) = seed::initial_world();
+        let (world, _) = seed::test_seed_world();
         let agent_id = AgentId("agent:seed:0".to_string());
         let dto = api::agent_dto_for(&world, &agent_id).expect("agent exists");
         assert!(dto.sprite_key.starts_with("pedestrian:"));
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn seeded_world_vehicles_default_to_tram_kind() {
-        let (world, _) = seed::initial_world();
+        let (world, _) = seed::test_seed_world();
         for vehicle in api::vehicles(&world) {
             assert_eq!(vehicle.kind, VehicleKind::Tram);
         }
@@ -825,7 +825,6 @@ mod tests {
         let density = seed::SeedDensity {
             pedestrians_per_corridor: 6,
             cars_per_arterial: 4,
-            trams_total: 4,
         };
         let (world, _) = seed::from_network(&network, density);
 
@@ -849,7 +848,10 @@ mod tests {
         assert_eq!(walking_agents, 18, "3 corridors x 6 = 18 walkers");
         assert_eq!(cars, 8, "2 arterials x 4 = 8 cars");
         assert_eq!(driving_agents, 8, "one driver per car");
-        assert_eq!(trams, 4);
+        assert_eq!(
+            trams, 0,
+            "network seeding no longer creates fixed tiny trams"
+        );
     }
 
     #[test]
@@ -875,7 +877,6 @@ mod tests {
         let density = seed::SeedDensity {
             pedestrians_per_corridor: 3,
             cars_per_arterial: 2,
-            trams_total: 0,
         };
         let (a_world, _) = seed::from_network(&network, density);
         let (b_world, _) = seed::from_network(&network, density);
@@ -904,7 +905,6 @@ mod tests {
         let density = seed::SeedDensity {
             pedestrians_per_corridor: 0,
             cars_per_arterial: 2,
-            trams_total: 0,
         };
         let (world, _) = seed::from_network(&network, density);
 
@@ -958,7 +958,6 @@ mod tests {
         let density = seed::SeedDensity {
             pedestrians_per_corridor: 0,
             cars_per_arterial: 2,
-            trams_total: 0,
         };
         let (world, _) = seed::from_network(&network, density);
         let world_id = WorldId("test".to_string());

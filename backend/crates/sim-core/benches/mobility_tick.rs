@@ -29,7 +29,6 @@ fn tick_10k_walkers_1k_cars(c: &mut Criterion) {
             SeedDensity {
                 pedestrians_per_corridor: 10, // 1000 × 10 = 10_000 walkers
                 cars_per_arterial: 20,        // 50 × 20 = 1_000 cars
-                trams_total: 0,
             },
         );
         b.iter(|| {

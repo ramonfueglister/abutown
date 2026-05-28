@@ -17,9 +17,7 @@ use sim_server::{
 };
 
 fn runtime_with_seeded_mobility() -> SimulationRuntime {
-    let mut runtime = SimulationRuntime::new();
-    runtime.set_mobility_for_test(sim_core::mobility::seed::tiny_world());
-    runtime
+    SimulationRuntime::new()
 }
 
 #[tokio::test]
@@ -54,10 +52,10 @@ async fn websocket_sends_hello_and_tile_pulse() {
     )
     .await
     .expect("first tile pulse must arrive within one tick window");
-    assert_eq!(first_pulse.world_id, "abutown-main");
+    assert_eq!(first_pulse.world_id, "zurich-river-city-v1");
     let coord = first_pulse.coord.as_ref().expect("coord");
-    assert_eq!(coord.x, 4);
-    assert_eq!(coord.y, 4);
+    assert_eq!(coord.x, 0);
+    assert_eq!(coord.y, 0);
     assert_eq!(first_pulse.tick, 1);
     assert_eq!(first_pulse.version, 1);
     assert!(first_pulse.local_index < 1024);
@@ -95,9 +93,9 @@ async fn websocket_pulses_rotate_loaded_chunks() {
     let second_delta = read_next_tile_pulse(&mut stream).await;
     let third_delta = read_next_tile_pulse(&mut stream).await;
 
-    assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
-    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 5, y: 4 }));
-    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 4, y: 5 }));
+    assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
+    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 1, y: 0 }));
+    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 2, y: 0 }));
 
     server.abort();
 }
@@ -164,11 +162,11 @@ async fn websocket_sends_mobility_snapshots_after_subscribe() {
     while snapshots.len() < 3 {
         let msg = read_server_message(&mut stream).await;
         if let Some(w::server_message::Body::MobilityChunkSnapshot(snap)) = msg.body {
-            assert_eq!(snap.world_id, "abutown-main");
+            assert_eq!(snap.world_id, "zurich-river-city-v1");
             snapshots.push(snap);
         }
     }
-    // At least one snapshot must carry agents (tiny_world has walking agents in these chunks).
+    // At least one snapshot must carry agents from the authored base-world seed.
     let total_agents: usize = snapshots.iter().map(|s| s.agents.len()).sum();
     assert!(
         total_agents > 0,
@@ -201,7 +199,7 @@ async fn websocket_broadcasts_accepted_command_event() {
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "abutown-main".to_string(),
+                world_id: "zurich-river-city-v1".to_string(),
                 command_id: "command:ws:1".to_string(),
                 coord: Some(w::ChunkCoord { x: 4, y: 4 }),
                 local_index: 12,
@@ -259,7 +257,7 @@ async fn websocket_does_not_broadcast_failed_command_append() {
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "abutown-main".to_string(),
+                world_id: "zurich-river-city-v1".to_string(),
                 command_id: "command:ws:store-failure".to_string(),
                 coord: Some(w::ChunkCoord { x: 4, y: 4 }),
                 local_index: 11,
@@ -450,9 +448,8 @@ async fn chunk_subscribe_emits_chunk_snapshot_frame() {
 
 #[tokio::test]
 async fn two_clients_with_different_subscriptions_see_different_entities() {
-    // tiny_world places agents on link:walk:default which spans chunk_center(4,4)
-    // to chunk_center(5,4).  Agents with progress < 0.5 land in chunk (4,4),
-    // agents with progress >= 0.5 land in chunk (5,4), giving two disjoint sets.
+    // The authored base-world seed places visible entities in both chunks,
+    // giving two disjoint per-chunk snapshots.
     let app = build_app_with_runtime(runtime_with_seeded_mobility());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -507,13 +504,6 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
 
 #[tokio::test]
 async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
-    // tiny_world places 20 walking agents on link:walk:default (chunk_center(4,4)
-    // → chunk_center(5,4)) and 4 tram vehicles split across horizontal and
-    // vertical routes. Progress < 0.5 → chunk (4,4); progress >= 0.5 → chunk
-    // (5,4) for horizontal/walk entities.  The vertical route runs from
-    // chunk_center(4,4) to chunk_center(4,5), so vehicle:seed:3 (progress 0.75)
-    // lands in chunk (4,5). Three fully disjoint entity sets — one per chunk.
-    //
     // This test exercises the per-chunk channel architecture: each client
     // subscribes to a distinct chunk and receives only entities in that chunk.
     let app = build_app_with_runtime(runtime_with_seeded_mobility());
@@ -534,7 +524,7 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
     let _ = read_server_message(&mut client_b).await; // drain hello
     send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 5, y: 4 }]).await;
 
-    // Client C subscribes only to chunk (4,5) — vertical-route vehicles end here.
+    // Client C subscribes only to chunk (4,5).
     let (mut client_c, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_c).await; // drain hello
     send_chunk_subscribe(&mut client_c, &[w::ChunkCoord { x: 4, y: 5 }]).await;
@@ -594,22 +584,8 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
 
 #[tokio::test]
 async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
-    // tiny_world agents walk on link:walk:default whose geometry (from the
-    // hardcoded mobility_geometry fallback) runs chunk_center(4,4) →
-    // chunk_center(5,4).  However, the ECS Position component starts at (0,0)
-    // because compute_world_coord_system only runs for Active/Hot chunks and
-    // uses the registered link_polylines ECS resource — not the fallback.
-    //
-    // Workaround: subscribe to chunk (0,0) in addition to (4,4).
-    //   • (0,0) becomes Active → advance_agents_system runs on agents at
-    //     Position(0,0) → marks them dirty.
-    //   • tick_mobility computes their world coord via the fallback →
-    //     chunk (4,4) → delta map entry for (4,4).
-    //   • chunk_channels has a sender for (4,4) (because the client subscribed
-    //     to it) → delta forwarded to the client.
-    //
-    // The test therefore asserts that ANY MobilityChunkDelta (not necessarily
-    // from exactly (4,4)) arrives, confirming the fan-out pipeline is wired.
+    // The test asserts that a MobilityChunkDelta arrives, confirming the
+    // per-chunk fan-out pipeline is wired.
     let runtime = runtime_with_seeded_mobility();
     let app = build_app_with_runtime(runtime);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -622,11 +598,7 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
     let (mut client, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let _ = client.next().await.unwrap().unwrap(); // hello
 
-    // Subscribe only to (4,4), the chunk where seeded tiny_world agents live.
-    // (The previous chunk(0,0) workaround was needed because seeded agents had
-    // default Position(0,0), which caused LOD to mass-demote them to a single
-    // chunk before they ever ticked. Spawn-time Position init makes that
-    // workaround unnecessary.)
+    // Subscribe only to (4,4), a chunk with authored base-world mobility.
     send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 4, y: 4 }]).await;
 
     let mut snapshot_seen = false;

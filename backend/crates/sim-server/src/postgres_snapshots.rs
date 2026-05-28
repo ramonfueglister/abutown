@@ -3,12 +3,14 @@ use async_trait::async_trait;
 use serde_json::Value;
 use sim_core::{
     ids::ChunkCoord,
-    persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError},
+    persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, SnapshotCompatibility},
 };
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 
 const CHUNK_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605150003_chunk_snapshots.sql");
+const SNAPSHOT_COMPATIBILITY_MIGRATION: &str =
+    include_str!("../migrations/202605280001_snapshot_base_world_metadata.sql");
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SqlChunkSnapshotRecord {
@@ -66,6 +68,7 @@ impl PostgresChunkSnapshotStore {
     pub async fn connect(
         database_url: &str,
         world_id: WorldId,
+        _compatibility: SnapshotCompatibility,
     ) -> Result<Self, ChunkSnapshotStoreError> {
         let pool = PgPoolOptions::new()
             .max_connections(5)
@@ -75,6 +78,7 @@ impl PostgresChunkSnapshotStore {
 
         for statement in CHUNK_SNAPSHOTS_MIGRATION
             .split(';')
+            .chain(SNAPSHOT_COMPATIBILITY_MIGRATION.split(';'))
             .map(str::trim)
             .filter(|statement| !statement.is_empty())
         {
@@ -93,6 +97,7 @@ impl ChunkSnapshotStore for PostgresChunkSnapshotStore {
     async fn write_snapshot(
         &mut self,
         snapshot: ChunkSnapshotDto,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<(), ChunkSnapshotStoreError> {
         let record = SqlChunkSnapshotRecord::from_snapshot(&snapshot)?;
 
@@ -105,14 +110,18 @@ impl ChunkSnapshotStore for PostgresChunkSnapshotStore {
                 chunk_state,
                 chunk_version,
                 tile_count,
+                base_world_id,
+                base_world_schema_version,
                 payload
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (world_id, chunk_x, chunk_y)
             DO UPDATE SET
                 chunk_state = EXCLUDED.chunk_state,
                 chunk_version = EXCLUDED.chunk_version,
                 tile_count = EXCLUDED.tile_count,
+                base_world_id = EXCLUDED.base_world_id,
+                base_world_schema_version = EXCLUDED.base_world_schema_version,
                 payload = EXCLUDED.payload,
                 updated_at = now()
             "#,
@@ -123,6 +132,12 @@ impl ChunkSnapshotStore for PostgresChunkSnapshotStore {
         .bind(record.chunk_state)
         .bind(record.chunk_version)
         .bind(record.tile_count)
+        .bind(&compatibility.base_world_id)
+        .bind(
+            i32::try_from(compatibility.base_world_schema_version).map_err(|_| {
+                ChunkSnapshotStoreError::unavailable("base world schema version exceeds i32")
+            })?,
+        )
         .bind(record.payload)
         .execute(&self.pool)
         .await
@@ -134,17 +149,28 @@ impl ChunkSnapshotStore for PostgresChunkSnapshotStore {
     async fn read_snapshot(
         &self,
         coord: ChunkCoord,
+        compatibility: &SnapshotCompatibility,
     ) -> Result<Option<ChunkSnapshotDto>, ChunkSnapshotStoreError> {
         let row = sqlx::query(
             r#"
             SELECT payload
             FROM chunk_snapshots
-            WHERE world_id = $1 AND chunk_x = $2 AND chunk_y = $3
+            WHERE world_id = $1
+              AND chunk_x = $2
+              AND chunk_y = $3
+              AND base_world_id = $4
+              AND base_world_schema_version = $5
             "#,
         )
         .bind(&self.world_id.0)
         .bind(coord.x)
         .bind(coord.y)
+        .bind(&compatibility.base_world_id)
+        .bind(
+            i32::try_from(compatibility.base_world_schema_version).map_err(|_| {
+                ChunkSnapshotStoreError::unavailable("base world schema version exceeds i32")
+            })?,
+        )
         .fetch_optional(&self.pool)
         .await
         .map_err(|error| ChunkSnapshotStoreError::unavailable(error.to_string()))?;
@@ -218,17 +244,22 @@ mod integration_tests {
             return;
         };
         let world_id = WorldId(format!("test:{}", uuid::Uuid::now_v7()));
-        let mut store = PostgresChunkSnapshotStore::connect(&database_url, world_id.clone())
-            .await
-            .expect("connect postgres snapshot store");
+        let compatibility = SnapshotCompatibility::new(world_id.0.clone(), 1);
+        let mut store = PostgresChunkSnapshotStore::connect(
+            &database_url,
+            world_id.clone(),
+            compatibility.clone(),
+        )
+        .await
+        .expect("connect postgres snapshot store");
         let snapshot = snapshot(world_id);
         let coord = ChunkCoord { x: 4, y: 4 };
 
-        ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone())
+        ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone(), &compatibility)
             .await
             .expect("write snapshot");
 
-        let stored = ChunkSnapshotStore::read_snapshot(&store, coord)
+        let stored = ChunkSnapshotStore::read_snapshot(&store, coord, &compatibility)
             .await
             .expect("read snapshot")
             .expect("snapshot exists");

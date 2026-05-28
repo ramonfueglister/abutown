@@ -11,6 +11,28 @@ function createBackendStatus() {
   };
 }
 
+function createBaseWorld() {
+  return {
+    schema_version: 1,
+    world_id: 'zurich-river-city-v1',
+    chunk_size: 32,
+    world_tiles: { width: 256, height: 256 },
+    terrain: { tiles: [{ x: 1, y: 1, kind: 'water' as const }] },
+    transport: {
+      roads: Array.from({ length: 1800 }, (_, index) => ({ x: index % 256, y: Math.floor(index / 256), kind: 'street' as const, mask: 3 })),
+      rails: Array.from({ length: 256 }, (_, y) => ({ x: 150, y, mask: 5 })),
+      arterial_paths: [0, 1, 2].map((index) => ({ id: `arterial:${index}`, points: [{ x: 0, y: index }, { x: 255, y: index }] })),
+      rail_paths: [{ id: 'rail:0', points: [{ x: 150, y: 0 }, { x: 150, y: 255 }] }],
+      pedestrian_corridors: Array.from({ length: 160 }, (_, index) => ({ id: `pedestrian:${index}`, points: [{ x: 0, y: index }, { x: 10, y: index }] })),
+    },
+    buildings: { footprints: Array.from({ length: 2250 }, (_, index) => ({ id: `building:${index}`, tiles: [{ x: index % 256, y: Math.floor(index / 256) }], sheet: 'houses', frame: 0, district: 'test' })) },
+    decorations: {
+      trees: Array.from({ length: 3000 }, (_, index) => ({ x: index % 256, y: Math.floor(index / 256) })),
+      details: [],
+    },
+  };
+}
+
 function createDependencies(overrides: Partial<AppRuntimeDependencies> = {}) {
   const order: string[] = [];
   const bridge = {
@@ -22,6 +44,10 @@ function createDependencies(overrides: Partial<AppRuntimeDependencies> = {}) {
     requireBackend: vi.fn(async () => {
       order.push('requireBackend');
       return createBackendStatus();
+    }),
+    requireBaseWorld: vi.fn(async () => {
+      order.push('requireBaseWorld');
+      return createBaseWorld();
     }),
     requireMobilitySnapshot: vi.fn(async () => {
       order.push('requireMobilitySnapshot');
@@ -70,6 +96,7 @@ describe('startAppRuntime', () => {
 
     expect(order).toEqual([
       'requireBackend',
+      'requireBaseWorld',
       'requireMobilitySnapshot',
       'mountCardHandView',
       'boot',
@@ -77,6 +104,7 @@ describe('startAppRuntime', () => {
       'addBeforeUnloadListener',
     ]);
     expect(dependencies.requireBackend).toHaveBeenCalledWith({ baseUrl: 'http://127.0.0.1:8080' });
+    expect(dependencies.requireBaseWorld).toHaveBeenCalledWith({ baseUrl: 'http://127.0.0.1:8080' });
     expect(dependencies.requireMobilitySnapshot).toHaveBeenCalledWith({ baseUrl: 'http://127.0.0.1:8080' });
     expect(dependencies.mountCardHandView).toHaveBeenCalledWith({ baseUrl: 'http://127.0.0.1:8080' });
     expect(dependencies.boot).toHaveBeenCalledWith(onInitialState.mock.calls[0][0]);
@@ -91,9 +119,11 @@ describe('startAppRuntime', () => {
 
   it('passes backend status, mobility state, and tick period to onInitialState', async () => {
     const backendStatus = createBackendStatus();
+    const baseWorld = createBaseWorld();
     const mobilityState: MobilityOverlayState = { ...createMobilityOverlayState(), tick: 42 };
     const { dependencies } = createDependencies({
       requireBackend: vi.fn(async () => backendStatus),
+      requireBaseWorld: vi.fn(async () => baseWorld),
       requireMobilitySnapshot: vi.fn(async () => ({ state: mobilityState, tickPeriodMs: 125 })),
     });
     const onInitialState = vi.fn();
@@ -112,6 +142,7 @@ describe('startAppRuntime', () => {
 
     expect(onInitialState).toHaveBeenCalledWith({
       backendStatus,
+      baseWorld,
       mobilityState,
       mobilityTickPeriodMs: 125,
     });
