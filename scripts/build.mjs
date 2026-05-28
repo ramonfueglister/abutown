@@ -10,11 +10,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { shouldCopyPublicEntry } from './publicCopyFilter.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = resolve(repoRoot, 'public');
 const distDir = resolve(repoRoot, 'dist');
-const skippedPublicEntries = new Set([`open${'gfx2'}-classic`, 'simutrans-assets']);
 
 function run(command, args, env = {}) {
   console.log(`\n› ${command} ${args.join(' ')}`);
@@ -39,7 +39,7 @@ run('npx', ['vite', 'build'], { VITE_SKIP_PUBLIC_COPY: '1' });
 if (existsSync(publicDir)) {
   mkdirSync(distDir, { recursive: true });
   for (const entry of readdirSync(publicDir, { withFileTypes: true })) {
-    if (skippedPublicEntries.has(entry.name)) continue;
+    if (!shouldCopyPublicEntry(entry.name)) continue;
     run('cp', ['-R', resolve(publicDir, entry.name), distDir]);
   }
 }

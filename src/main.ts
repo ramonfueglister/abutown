@@ -1,20 +1,16 @@
 import './style.css';
-import { fromBinary } from '@bufbuild/protobuf';
 import { pak128AssetPack } from './assets/pak128Catalog';
 import { backendErrorMessage, requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
+import { loadBackendTerrainState } from './backend/backendTerrain';
 import { connectMobilityBackend, requireMobilitySnapshot, type MobilityBackendBridge } from './backend/mobilityClient';
-import { isWorldSummaryDto, worldSummaryFromProto } from './backend/mobilityProtocol';
 import { createMobilityOverlayState, mobilityDiagnostics, type MobilityOverlayState } from './backend/mobilityState';
 import {
-  applyLayeredChunkSnapshot,
   createTerrainState,
-  layeredChunkSnapshotFromProto,
   terrainTileAt,
   type TerrainBaseKind,
   type TerrainState,
   type TerrainTile,
 } from './backend/terrainState';
-import { ChunkSnapshotSchema, WorldSummarySchema } from './backend/proto/abutown_pb';
 import { mountCardHandView } from './cardHand/cardHandView';
 import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
@@ -292,30 +288,11 @@ async function startRuntime(): Promise<void> {
 }
 
 async function loadBackendTerrain(baseUrl: string): Promise<void> {
-  const worldSummary = await requestBackendWorldSummary(baseUrl);
-  const maxChunkX = Math.max(...worldSummary.loaded_chunks.map((coord) => coord.x), 0);
-  const maxChunkY = Math.max(...worldSummary.loaded_chunks.map((coord) => coord.y), 0);
-  WIDTH = (maxChunkX + 1) * worldSummary.chunk_size;
-  HEIGHT = (maxChunkY + 1) * worldSummary.chunk_size;
-  terrainState = createTerrainState({ width: WIDTH, height: HEIGHT, chunkSize: worldSummary.chunk_size });
-
-  const snapshots = await Promise.all(worldSummary.loaded_chunks.map((coord) => requestBackendChunkSnapshot(baseUrl, coord)));
-  for (const snapshot of snapshots) applyLayeredChunkSnapshot(terrainState, snapshot);
+  const loaded = await loadBackendTerrainState({ baseUrl });
+  WIDTH = loaded.width;
+  HEIGHT = loaded.height;
+  terrainState = loaded.state;
   rebuildRenderStateFromTerrain();
-}
-
-async function requestBackendWorldSummary(baseUrl: string) {
-  const response = await fetch(new URL('/world', baseUrl).toString());
-  if (!response.ok) throw new Error(`World summary HTTP ${response.status}`);
-  const payload = worldSummaryFromProto(fromBinary(WorldSummarySchema, new Uint8Array(await response.arrayBuffer())));
-  if (!isWorldSummaryDto(payload)) throw new Error('Invalid world summary payload');
-  return payload;
-}
-
-async function requestBackendChunkSnapshot(baseUrl: string, coord: Coord) {
-  const response = await fetch(new URL(`/chunks/${coord.x}/${coord.y}`, baseUrl).toString());
-  if (!response.ok) throw new Error(`Chunk ${coord.x}:${coord.y} HTTP ${response.status}`);
-  return layeredChunkSnapshotFromProto(fromBinary(ChunkSnapshotSchema, new Uint8Array(await response.arrayBuffer())));
 }
 
 function rebuildRenderStateFromTerrain(): void {
