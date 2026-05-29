@@ -8,6 +8,7 @@ import {
   createMobilityOverlayState,
   interpolatedAgents,
   mobilityDiagnostics,
+  trafficDiagnostics,
 } from '../../src/backend/mobilityState';
 import type { AgentMobilityDto, MobilityChunkDeltaDto, MobilityChunkSnapshotDto, MobilitySnapshotDto } from '../../src/backend/mobilityProtocol';
 import {
@@ -38,17 +39,17 @@ const snapshot: MobilitySnapshotDto = {
   ],
   vehicles: [
     {
-      id: 'vehicle:shuttle:0',
-      kind: 'tram',
-      route_id: 'route:old-town-loop',
+      id: 'vehicle:car:0:0',
+      kind: 'car',
+      route_id: 'route:arterial:0',
       link_index: 0,
       progress: 0,
-      capacity: 4,
+      capacity: 1,
       occupants: [],
       dwell_ticks_remaining: 0,
       world_coord: { x: 0, y: 0 },
       direction: 'e',
-      sprite_key: 'tram:0',
+      sprite_key: 'vehicle:0',
     },
   ],
   stops: [
@@ -234,7 +235,7 @@ describe('mobility state reducer', () => {
     expect(after.vehicles.size).toBe(0);
   });
 
-  it('keeps backend trams when they leave a subscribed chunk', () => {
+  it('drops cars when they leave a subscribed chunk', () => {
     const state = applyMobilitySnapshot(
       createMobilityOverlayState(),
       {
@@ -243,17 +244,17 @@ describe('mobility state reducer', () => {
         tick: 0,
         agents: [],
         vehicles: [{
-          id: 'vehicle:tram:0:0',
-          kind: 'tram',
-          route_id: 'tram:rail:0',
+          id: 'vehicle:car:outside-viewport',
+          kind: 'car',
+          route_id: 'route:arterial:0',
           link_index: 0,
           progress: 0,
-          capacity: 80,
+          capacity: 1,
           occupants: [],
           dwell_ticks_remaining: 0,
           world_coord: { x: 150, y: 224 },
           direction: 's',
-          sprite_key: 'tram:0',
+          sprite_key: 'vehicle:0',
         }],
         stops: [],
       },
@@ -269,10 +270,10 @@ describe('mobility state reducer', () => {
       changed_agents: [],
       changed_vehicles: [],
       left_agents: [],
-      left_vehicles: ['vehicle:tram:0:0'],
+      left_vehicles: ['vehicle:car:outside-viewport'],
     }, 100);
 
-    expect(after.vehicles.has('vehicle:tram:0:0')).toBe(true);
+    expect(after.vehicles.has('vehicle:car:outside-viewport')).toBe(false);
   });
 
   it('applyMobilityChunkSnapshot replaces entities for that chunk only', () => {
@@ -345,17 +346,17 @@ describe('mobility state reducer', () => {
         tick: 10,
         agents: [],
         vehicles: [{
-          id: 'vehicle:tram:0',
-          kind: 'tram',
-          route_id: 'tram:rail:0',
+          id: 'vehicle:car:0',
+          kind: 'car',
+          route_id: 'route:arterial:0',
           link_index: 0,
           progress: 0.25,
-          capacity: 80,
+          capacity: 1,
           occupants: [],
           dwell_ticks_remaining: 0,
           world_coord: { x: 150, y: 224 },
           direction: 's',
-          sprite_key: 'tram:0',
+          sprite_key: 'vehicle:0',
         }],
         stops: [],
       },
@@ -372,7 +373,7 @@ describe('mobility state reducer', () => {
       vehicles: [],
     }, 100);
     expect(staleSnapshot).toBe(seedState);
-    expect(staleSnapshot.vehicles.has('vehicle:tram:0')).toBe(true);
+    expect(staleSnapshot.vehicles.has('vehicle:car:0')).toBe(true);
 
     const staleDelta = applyMobilityChunkDelta(seedState, {
       type: 'mobility_chunk_delta',
@@ -383,10 +384,101 @@ describe('mobility state reducer', () => {
       changed_agents: [],
       changed_vehicles: [],
       left_agents: [],
-      left_vehicles: ['vehicle:tram:0'],
+      left_vehicles: ['vehicle:car:0'],
     }, 100);
     expect(staleDelta).toBe(seedState);
-    expect(staleDelta.vehicles.has('vehicle:tram:0')).toBe(true);
+    expect(staleDelta.vehicles.has('vehicle:car:0')).toBe(true);
+  });
+
+  it('reports traffic diagnostics for car movement and invalid route messages', () => {
+    let state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'w',
+        tick: 0,
+        agents: [],
+        vehicles: [
+          {
+            id: 'vehicle:car:moving',
+            kind: 'car',
+            route_id: 'route:arterial:0',
+            link_index: 0,
+            progress: 0,
+            capacity: 1,
+            occupants: [],
+            dwell_ticks_remaining: 0,
+            world_coord: { x: 0, y: 0 },
+            direction: 'e',
+            sprite_key: 'vehicle:0',
+          },
+          {
+            id: 'vehicle:car:stuck',
+            kind: 'car',
+            route_id: 'route:arterial:1',
+            link_index: 0,
+            progress: 0,
+            capacity: 1,
+            occupants: [],
+            dwell_ticks_remaining: 0,
+            world_coord: { x: 10, y: 10 },
+            direction: 'e',
+            sprite_key: 'vehicle:1',
+          },
+        ],
+        stops: [],
+      },
+      0,
+    );
+
+    state = applyMobilityChunkDelta(state, {
+      type: 'mobility_chunk_delta',
+      protocol_version: 1,
+      world_id: 'w',
+      tick: 1,
+      chunk: { x: 0, y: 0 },
+      changed_agents: [],
+      changed_vehicles: [
+        {
+          id: 'vehicle:car:moving',
+          kind: 'car',
+          route_id: 'route:arterial:0',
+          link_index: 0,
+          progress: 0.5,
+          capacity: 1,
+          occupants: [],
+          dwell_ticks_remaining: 0,
+          world_coord: { x: 5, y: 0 },
+          direction: 'e',
+          sprite_key: 'vehicle:0',
+        },
+        {
+          id: 'vehicle:car:stuck',
+          kind: 'car',
+          route_id: 'route:arterial:1',
+          link_index: 0,
+          progress: 0,
+          capacity: 1,
+          occupants: [],
+          dwell_ticks_remaining: 0,
+          world_coord: { x: 10, y: 10 },
+          direction: 'e',
+          sprite_key: 'vehicle:1',
+        },
+      ],
+      left_agents: [],
+      left_vehicles: [],
+    }, 100);
+
+    state = applyServerMessage(state, create(ServerMessageSchema, {}), 200);
+
+    expect(trafficDiagnostics(state)).toEqual({
+      routes: 2,
+      cars: 2,
+      movingCars: 1,
+      stuckCars: 1,
+      invalidRouteCars: 1,
+    });
   });
 
 });

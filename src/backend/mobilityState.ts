@@ -35,6 +35,14 @@ export type MobilityDiagnostics = {
   lastError: string | null;
 };
 
+export type TrafficDiagnostics = {
+  routes: number;
+  cars: number;
+  movingCars: number;
+  stuckCars: number;
+  invalidRouteCars: number;
+};
+
 export type MobilityOverlayState = {
   status: MobilityConnectionStatus;
   tick: number;
@@ -148,7 +156,6 @@ export function applyMobilityChunkDelta(
   }
   const vehicles = new Map(state.vehicles);
   for (const id of msg.left_vehicles) {
-    if (vehicles.get(id)?.current.kind === 'tram') continue;
     vehicles.delete(id);
   }
   for (const vehicle of msg.changed_vehicles) {
@@ -211,6 +218,25 @@ export function mobilityDiagnostics(state: MobilityOverlayState): MobilityDiagno
     stops: state.stops.size,
     invalidMessages: state.invalidMessages,
     lastError: state.lastError,
+  };
+}
+
+function moved(entry: InterpolatedEntry<VehicleMobilityDto>): boolean {
+  return (
+    Math.abs(entry.current.world_coord.x - entry.prev.world_coord.x) > 0.001 ||
+    Math.abs(entry.current.world_coord.y - entry.prev.world_coord.y) > 0.001
+  );
+}
+
+export function trafficDiagnostics(state: MobilityOverlayState): TrafficDiagnostics {
+  const cars = [...state.vehicles.values()].filter((entry) => entry.current.kind === 'car');
+  const movingCars = cars.filter(moved).length;
+  return {
+    routes: new Set(cars.map((entry) => entry.current.route_id)).size,
+    cars: cars.length,
+    movingCars,
+    stuckCars: cars.length - movingCars,
+    invalidRouteCars: state.invalidMessages,
   };
 }
 
