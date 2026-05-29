@@ -1,4 +1,4 @@
-use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+use crate::city_network::{CityNetwork, NetworkCoord, NetworkPoint, WorldTiles};
 use crate::ids::ChunkCoord;
 use crate::persistence::SnapshotCompatibility;
 use crate::scheduler::ChunkActivity;
@@ -116,7 +116,7 @@ pub struct RailTile {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TransportPath {
     pub id: String,
-    pub points: Vec<NetworkCoord>,
+    pub points: Vec<NetworkPoint>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -258,7 +258,7 @@ impl BaseWorldBundle {
                 return Err(BaseWorldError::EmptyLayer("transport.path.points"));
             }
             for point in &path.points {
-                self.require_in_bounds(point.x, point.y)?;
+                self.require_point_in_bounds(point.x, point.y)?;
             }
         }
         for footprint in &self.buildings.footprints {
@@ -425,6 +425,19 @@ impl BaseWorldBundle {
         }
     }
 
+    fn require_point_in_bounds(&self, x: f32, y: f32) -> Result<(), BaseWorldError> {
+        if self.point_in_bounds_f32(x, y) {
+            Ok(())
+        } else {
+            Err(BaseWorldError::OutOfBounds {
+                x: x.floor() as i32,
+                y: y.floor() as i32,
+                width: self.manifest.world_tiles.width,
+                height: self.manifest.world_tiles.height,
+            })
+        }
+    }
+
     fn point_in_bounds(&self, x: i32, y: i32) -> bool {
         let Ok(width) = i32::try_from(self.manifest.world_tiles.width) else {
             return false;
@@ -433,6 +446,15 @@ impl BaseWorldBundle {
             return false;
         };
         x >= 0 && y >= 0 && x < width && y < height
+    }
+
+    fn point_in_bounds_f32(&self, x: f32, y: f32) -> bool {
+        x.is_finite()
+            && y.is_finite()
+            && x >= 0.0
+            && y >= 0.0
+            && x < self.manifest.world_tiles.width as f32
+            && y < self.manifest.world_tiles.height as f32
     }
 
     fn transport_paths(&self) -> impl Iterator<Item = &TransportPath> {
@@ -465,4 +487,99 @@ fn validate_schema(version: u32) -> Result<(), BaseWorldError> {
 
 fn water_like(kind: TerrainKind) -> bool {
     matches!(kind, TerrainKind::Water | TerrainKind::Riverbank)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bundle_with_pedestrian_points(points: Vec<NetworkPoint>) -> BaseWorldBundle {
+        BaseWorldBundle {
+            manifest: BaseWorldManifest {
+                schema_version: 1,
+                world_id: "test".into(),
+                display_name: "Test".into(),
+                chunk_size: 32,
+                world_tiles: WorldTiles {
+                    width: 16,
+                    height: 8,
+                },
+                layers: BaseWorldLayerFiles {
+                    terrain: "terrain.json".into(),
+                    transport: "transport.json".into(),
+                    buildings: "buildings.json".into(),
+                    decorations: "decorations.json".into(),
+                    spawns: "spawns.json".into(),
+                },
+            },
+            terrain: TerrainLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                tiles: Vec::new(),
+            },
+            transport: TransportLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                roads: vec![RoadTile {
+                    x: 3,
+                    y: 3,
+                    kind: "street".into(),
+                    mask: 10,
+                }],
+                rails: Vec::new(),
+                arterial_paths: Vec::new(),
+                rail_paths: Vec::new(),
+                pedestrian_corridors: vec![TransportPath {
+                    id: "corridor:test".into(),
+                    points,
+                }],
+            },
+            buildings: BuildingLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                footprints: vec![BuildingFootprint {
+                    id: "building:test".into(),
+                    tiles: vec![NetworkCoord { x: 2, y: 3 }],
+                    sheet: None,
+                    frame: None,
+                    district: None,
+                }],
+            },
+            decorations: DecorationLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                trees: Vec::new(),
+                details: Vec::new(),
+            },
+            spawns: SpawnLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                pedestrian_groups: Vec::new(),
+                car_groups: Vec::new(),
+                tram_lines: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn base_world_preserves_fractional_pedestrian_corridor_points() {
+        let bundle = bundle_with_pedestrian_points(vec![
+            NetworkPoint { x: 2.0, y: 2.49 },
+            NetworkPoint { x: 13.0, y: 2.49 },
+        ]);
+
+        bundle
+            .validate()
+            .expect("fractional transport points are valid");
+        let network = bundle.to_city_network();
+
+        assert_eq!(network.pedestrian_corridors.len(), 1);
+        assert_eq!(
+            network.pedestrian_corridors[0],
+            vec![
+                NetworkPoint { x: 2.0, y: 2.49 },
+                NetworkPoint { x: 13.0, y: 2.49 }
+            ],
+        );
+    }
 }

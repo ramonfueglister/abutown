@@ -8,6 +8,21 @@ pub struct NetworkCoord {
     pub y: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct NetworkPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl From<NetworkCoord> for NetworkPoint {
+    fn from(coord: NetworkCoord) -> Self {
+        Self {
+            x: coord.x as f32,
+            y: coord.y as f32,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldTiles {
     pub width: u32,
@@ -20,8 +35,8 @@ pub struct CityNetwork {
     pub world_id: String,
     pub chunk_size: u16,
     pub world_tiles: WorldTiles,
-    pub arterial_paths: Vec<Vec<NetworkCoord>>,
-    pub pedestrian_corridors: Vec<Vec<NetworkCoord>>,
+    pub arterial_paths: Vec<Vec<NetworkPoint>>,
+    pub pedestrian_corridors: Vec<Vec<NetworkPoint>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,7 +88,39 @@ mod tests {
         assert_eq!(network.pedestrian_corridors.len(), 1);
         assert_eq!(
             network.pedestrian_corridors[0][0],
-            NetworkCoord { x: 2, y: 3 }
+            NetworkPoint { x: 2.0, y: 3.0 }
+        );
+    }
+
+    #[test]
+    fn parses_fractional_transport_points() {
+        let fixture = r#"{
+            "version": 1,
+            "world_id": "abutopia",
+            "chunk_size": 32,
+            "world_tiles": { "width": 16, "height": 8 },
+            "arterial_paths": [
+                [{"x": 3, "y": 3}, {"x": 12, "y": 3}]
+            ],
+            "pedestrian_corridors": [
+                [{"x": 2, "y": 2.49}, {"x": 13, "y": 2.49}],
+                [{"x": 2, "y": 3.51}, {"x": 13, "y": 3.51}]
+            ]
+        }"#;
+
+        let network = CityNetwork::from_json(fixture).expect("parses fractional points");
+
+        assert_eq!(
+            network.arterial_paths[0][0],
+            NetworkPoint { x: 3.0, y: 3.0 }
+        );
+        assert_eq!(
+            network.pedestrian_corridors[0][0],
+            NetworkPoint { x: 2.0, y: 2.49 },
+        );
+        assert_eq!(
+            network.pedestrian_corridors[1][1],
+            NetworkPoint { x: 13.0, y: 3.51 },
         );
     }
 

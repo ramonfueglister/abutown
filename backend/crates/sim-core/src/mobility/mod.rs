@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn from_network_produces_expected_population_counts() {
-        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        use crate::city_network::{CityNetwork, NetworkPoint, WorldTiles};
 
         let network = CityNetwork {
             version: 1,
@@ -776,13 +776,28 @@ mod tests {
                 height: 256,
             },
             arterial_paths: vec![
-                vec![NetworkCoord { x: 10, y: 20 }, NetworkCoord { x: 30, y: 20 }],
-                vec![NetworkCoord { x: 40, y: 60 }, NetworkCoord { x: 60, y: 60 }],
+                vec![
+                    NetworkPoint { x: 10.0, y: 20.0 },
+                    NetworkPoint { x: 30.0, y: 20.0 },
+                ],
+                vec![
+                    NetworkPoint { x: 40.0, y: 60.0 },
+                    NetworkPoint { x: 60.0, y: 60.0 },
+                ],
             ],
             pedestrian_corridors: vec![
-                vec![NetworkCoord { x: 11, y: 30 }, NetworkCoord { x: 31, y: 30 }],
-                vec![NetworkCoord { x: 41, y: 70 }, NetworkCoord { x: 61, y: 70 }],
-                vec![NetworkCoord { x: 71, y: 80 }, NetworkCoord { x: 91, y: 80 }],
+                vec![
+                    NetworkPoint { x: 11.0, y: 30.0 },
+                    NetworkPoint { x: 31.0, y: 30.0 },
+                ],
+                vec![
+                    NetworkPoint { x: 41.0, y: 70.0 },
+                    NetworkPoint { x: 61.0, y: 70.0 },
+                ],
+                vec![
+                    NetworkPoint { x: 71.0, y: 80.0 },
+                    NetworkPoint { x: 91.0, y: 80.0 },
+                ],
             ],
         };
 
@@ -812,7 +827,7 @@ mod tests {
 
     #[test]
     fn from_network_is_deterministic() {
-        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        use crate::city_network::{CityNetwork, NetworkPoint, WorldTiles};
         let network = CityNetwork {
             version: 1,
             world_id: "test".to_string(),
@@ -822,12 +837,12 @@ mod tests {
                 height: 256,
             },
             arterial_paths: vec![vec![
-                NetworkCoord { x: 0, y: 0 },
-                NetworkCoord { x: 10, y: 0 },
+                NetworkPoint { x: 0.0, y: 0.0 },
+                NetworkPoint { x: 10.0, y: 0.0 },
             ]],
             pedestrian_corridors: vec![vec![
-                NetworkCoord { x: 0, y: 5 },
-                NetworkCoord { x: 10, y: 5 },
+                NetworkPoint { x: 0.0, y: 5.0 },
+                NetworkPoint { x: 10.0, y: 5.0 },
             ]],
         };
         let density = seed::SeedDensity {
@@ -843,7 +858,7 @@ mod tests {
 
     #[test]
     fn from_network_assigns_drivers_to_cars() {
-        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        use crate::city_network::{CityNetwork, NetworkPoint, WorldTiles};
         let network = CityNetwork {
             version: 1,
             world_id: "test".to_string(),
@@ -853,8 +868,8 @@ mod tests {
                 height: 256,
             },
             arterial_paths: vec![vec![
-                NetworkCoord { x: 0, y: 0 },
-                NetworkCoord { x: 10, y: 0 },
+                NetworkPoint { x: 0.0, y: 0.0 },
+                NetworkPoint { x: 10.0, y: 0.0 },
             ]],
             pedestrian_corridors: vec![],
         };
@@ -896,7 +911,7 @@ mod tests {
 
     #[test]
     fn snapshot_dto_includes_all_agents_even_in_vehicle() {
-        use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+        use crate::city_network::{CityNetwork, NetworkPoint, WorldTiles};
         let network = CityNetwork {
             version: 1,
             world_id: "test".to_string(),
@@ -906,8 +921,8 @@ mod tests {
                 height: 256,
             },
             arterial_paths: vec![vec![
-                NetworkCoord { x: 0, y: 0 },
-                NetworkCoord { x: 10, y: 0 },
+                NetworkPoint { x: 0.0, y: 0.0 },
+                NetworkPoint { x: 10.0, y: 0.0 },
             ]],
             pedestrian_corridors: vec![],
         };

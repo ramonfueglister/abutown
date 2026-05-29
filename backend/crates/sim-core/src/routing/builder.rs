@@ -39,7 +39,10 @@ pub fn build_graph_from_city_network(
     let mut polyline_kinds: Vec<PolylineKind> = Vec::new();
 
     for (idx, path) in network.arterial_paths.iter().enumerate() {
-        let coords = path.iter().map(|nc| (nc.x, nc.y)).collect::<Vec<_>>();
+        let coords = path
+            .iter()
+            .map(|point| (point.x as i32, point.y as i32))
+            .collect::<Vec<_>>();
         if coords.is_empty() {
             continue;
         }
@@ -290,10 +293,13 @@ fn polyline_length(points: &[(f32, f32)]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+    use crate::city_network::{CityNetwork, NetworkPoint, WorldTiles};
 
-    fn nc(x: i32, y: i32) -> NetworkCoord {
-        NetworkCoord { x, y }
+    fn np(x: i32, y: i32) -> NetworkPoint {
+        NetworkPoint {
+            x: x as f32,
+            y: y as f32,
+        }
     }
 
     fn simple_network() -> CityNetwork {
@@ -309,8 +315,8 @@ mod tests {
                 height: 32,
             },
             arterial_paths: vec![
-                vec![nc(0, 0), nc(5, 0), nc(10, 0)],
-                vec![nc(5, 0), nc(5, 5)],
+                vec![np(0, 0), np(5, 0), np(10, 0)],
+                vec![np(5, 0), np(5, 5)],
             ],
             pedestrian_corridors: vec![],
         }

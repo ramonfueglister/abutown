@@ -7,14 +7,10 @@ use crate::ids::{AgentId, VehicleId};
 
 /// Pedestrian walks generated from the authored base-world network.
 pub fn seeded_walks_from_network(network: &CityNetwork) -> Vec<crate::routing::SeededWalk> {
-    use crate::city_network::NetworkCoord;
     let mut out: Vec<crate::routing::SeededWalk> = Vec::new();
 
     for (index, corridor) in network.pedestrian_corridors.iter().enumerate() {
-        let polyline: Vec<(f32, f32)> = corridor
-            .iter()
-            .map(|NetworkCoord { x, y }| (*x as f32, *y as f32))
-            .collect();
+        let polyline: Vec<(f32, f32)> = corridor.iter().map(|point| (point.x, point.y)).collect();
         if polyline.len() < 2 {
             continue;
         }
@@ -75,10 +71,10 @@ fn test_seeded_stops() -> Vec<crate::routing::SeededStop> {
 
 #[cfg(test)]
 fn tiny_city_network() -> CityNetwork {
-    use crate::city_network::{NetworkCoord, WorldTiles};
-    let c44 = NetworkCoord { x: 144, y: 144 };
-    let c54 = NetworkCoord { x: 176, y: 144 };
-    let c45 = NetworkCoord { x: 144, y: 176 };
+    use crate::city_network::{NetworkPoint, WorldTiles};
+    let c44 = NetworkPoint { x: 144.0, y: 144.0 };
+    let c54 = NetworkPoint { x: 176.0, y: 144.0 };
+    let c45 = NetworkPoint { x: 144.0, y: 176.0 };
     CityNetwork {
         version: 1,
         world_id: "abutown-tiny".into(),
