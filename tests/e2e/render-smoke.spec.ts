@@ -157,7 +157,7 @@ test('renders abutopia with one backend-driven pedestrian', async ({ page }) => 
     let nearBlack = 0;
     let nonBackground = 0;
     let sampled = 0;
-    const bg = { r: 246, g: 240, b: 227 };
+    const bg = { r: 145, g: 200, b: 111 };
     for (let i = 0; i < data.length; i += 4 * 16) {
       const r = data[i];
       const g = data[i + 1];

@@ -41,8 +41,6 @@ import {
   SOUTH,
   WEST,
   coordKey as key,
-  distanceOutsideMap,
-  isInsideMap,
   maskSegments as gridMaskSegments,
   outwardExits as gridOutwardExits,
   stableHash as hash,
@@ -98,8 +96,7 @@ type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: stri
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
 type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 
-export const MAP_BACKGROUND = '#f6f0e3';
-const MAP_OUTSKIRTS = '#eee7d7';
+export const MAP_BACKGROUND = '#91c86f';
 const MAP_WATER = '#92d8e9';
 const MAP_RIVERBANK = '#bde8df';
 const MAP_PARK = '#cfe5bf';
@@ -119,7 +116,7 @@ const BUILDING_INDUSTRIAL = '#cabed6';
 const AGENT_COLOR = '#343b43';
 const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '#ef7f5a', '#28a6b0'];
 const VIEWPORT_GRID_PADDING = 9;
-export const OUTSKIRTS_TILES = 12;
+export const OUTSKIRTS_TILES = 0;
 export const EDGE_EXIT_TILES = 7;
 
 export function renderMinimalMap(state: MinimalMapRendererState): void {
@@ -145,7 +142,6 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   ctx.translate(sceneOffset.x, sceneOffset.y);
   const visibleGrid = visibleGridRect(state);
 
-  drawOutskirtsTerrain(state, visibleGrid);
   const visibleTerrainTiles: Coord[] = [];
   for (let y = Math.max(0, visibleGrid.minY); y <= Math.min(world.height - 1, visibleGrid.maxY); y += 1) {
     for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(world.width - 1, visibleGrid.maxX); x += 1) visibleTerrainTiles.push({ x, y });
@@ -201,28 +197,6 @@ function drawRiverSurface(state: MinimalMapRendererState, coord: Coord): void {
   if (!isWaterSurface(state, coord)) return;
   const kind = state.terrainKinds.get(key(coord))?.kind;
   drawTileFill(state, coord, kind === 'riverbank' ? MAP_RIVERBANK : MAP_WATER, 0.96);
-}
-
-function drawOutskirtsTerrain(state: MinimalMapRendererState, visibleGrid: GridRect): void {
-  const { ctx, world } = state;
-  for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(world.height - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
-    for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(world.width - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
-      const coord = { x, y };
-      if (isInsideMap(coord, world)) continue;
-      const edgeDistance = distanceOutsideMap(coord, world);
-      if (edgeDistance > OUTSKIRTS_TILES) continue;
-
-      const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
-      ctx.save();
-      drawTileFill(state, coord, MAP_OUTSKIRTS, 0.05 + fade * 0.16);
-      if (hash(`outskirts-shadow:${x}:${y}`) % 11 === 0) {
-        const point = iso(state, coord);
-        ctx.fillStyle = `rgba(151, 133, 103, ${0.025 + (1 - fade) * 0.035})`;
-        drawIsoTile(state, point);
-      }
-      ctx.restore();
-    }
-  }
 }
 
 function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
@@ -512,13 +486,6 @@ function isCoordVisible(coord: Coord, rect: GridRect): boolean {
 function isWaterSurface(state: MinimalMapRendererState, coord: Coord): boolean {
   const kind = state.terrain.get(key(coord));
   return kind === 'water' || kind === 'riverbank';
-}
-
-function drawIsoTile(state: MinimalMapRendererState, point: Coord): void {
-  const { ctx, tileSize } = state;
-  ctx.beginPath();
-  ctx.rect(point.x - tileSize.width / 2, point.y - tileSize.height / 2, tileSize.width, tileSize.height);
-  ctx.fill();
 }
 
 function drawFadingEdgeTile(state: MinimalMapRendererState, step: number, draw: () => void): void {
