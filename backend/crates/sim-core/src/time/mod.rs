@@ -18,7 +18,9 @@ pub struct SimClock {
 impl Default for SimClock {
     /// ~2000x at a 10 Hz tick (1 real day ≈ 5.48 sim-years). Tunable.
     fn default() -> Self {
-        Self { sim_seconds_per_tick: 200 }
+        Self {
+            sim_seconds_per_tick: 200,
+        }
     }
 }
 
@@ -87,14 +89,18 @@ mod tests {
 
     #[test]
     fn sim_seconds_is_tick_times_rate() {
-        let clock = SimClock { sim_seconds_per_tick: 200 };
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
         assert_eq!(clock.sim_seconds(0), 0);
         assert_eq!(clock.sim_seconds(10), 2000);
     }
 
     #[test]
     fn calendar_derives_from_seconds() {
-        let clock = SimClock { sim_seconds_per_tick: 200 };
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
         // one sim-year = 31_536_000 s = 157_680 ticks at 200 s/tick
         let d = clock.calendar(157_680);
         assert_eq!(d.year, 1);
@@ -103,7 +109,9 @@ mod tests {
 
     #[test]
     fn age_years_is_elapsed_ticks_times_rate() {
-        let clock = SimClock { sim_seconds_per_tick: 200 };
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
         let years = clock.age_years(157_680, 0);
         assert!((years - 1.0).abs() < 1e-3, "got {years}");
         assert!(clock.age_years(157_680, 78_840) < clock.age_years(157_680, 0));

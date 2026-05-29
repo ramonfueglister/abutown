@@ -777,7 +777,12 @@ where
     loop {
         let response = app
             .clone()
-            .oneshot(Request::builder().uri("/world").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/world")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         if response.status() == StatusCode::OK {
@@ -852,8 +857,7 @@ async fn mobility_snapshot_agent_age_seconds_is_present() {
     }
     // At tick=0, birth_tick=0, age_seconds should be 0.
     assert_eq!(
-        mobility.agents[0].age_seconds,
-        0,
+        mobility.agents[0].age_seconds, 0,
         "agent spawned at tick 0 has age_seconds=0 at tick 0"
     );
 }
