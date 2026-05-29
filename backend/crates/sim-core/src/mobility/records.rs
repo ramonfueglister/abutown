@@ -6,14 +6,12 @@ use crate::routing::{ModeState, RoutingProfileKey};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VehicleKind {
     Car,
-    Tram,
 }
 
 impl From<VehicleKind> for abutown_protocol::VehicleKindDto {
     fn from(value: VehicleKind) -> Self {
         match value {
             VehicleKind::Car => abutown_protocol::VehicleKindDto::Car,
-            VehicleKind::Tram => abutown_protocol::VehicleKindDto::Tram,
         }
     }
 }

@@ -36,8 +36,8 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     if !world.contains_resource::<crate::routing::Graph>() {
         world.insert_resource(crate::routing::Graph::default());
     }
-    if !world.contains_resource::<crate::routing::TransitLines>() {
-        world.insert_resource(crate::routing::TransitLines::default());
+    if !world.contains_resource::<crate::routing::TrafficRoutes>() {
+        world.insert_resource(crate::routing::TrafficRoutes::default());
     }
     if !world.contains_resource::<crate::routing::WaitingAgents>() {
         world.insert_resource(crate::routing::WaitingAgents::default());
@@ -88,7 +88,7 @@ fn compute_agent_sprite_key(id: &AgentId) -> String {
 }
 
 fn compute_vehicle_sprite_key(id: &VehicleId) -> String {
-    format!("tram:{}", stable_index(&id.0) % 4)
+    format!("vehicle:{}", stable_index(&id.0) % 8)
 }
 
 fn initial_agent_position(world: &World, state: &AgentMobilityState) -> (f32, f32) {
@@ -110,8 +110,7 @@ fn initial_agent_position(world: &World, state: &AgentMobilityState) -> (f32, f3
         }
         other => {
             let graph = world.resource::<crate::routing::Graph>();
-            let transit_lines = world.resource::<crate::routing::TransitLines>();
-            crate::mobility::agent_world_coord(other, graph, transit_lines).unwrap_or_else(|| {
+            crate::mobility::agent_world_coord(other, graph).unwrap_or_else(|| {
                 panic!("spawn_agent_from_record: state {other:?} did not resolve through graph")
             })
         }
@@ -491,28 +490,25 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
 
 /// Spawn a vehicle entity from a record. Updates `VehicleIdIndex`.
 ///
-/// Phase 8b T10: `RoutePosition` is keyed by `LineId`. The graph builder
-/// publishes each `TransitLine` with legacy route aliases, and spawning fails
-/// fast if the route is unknown.
 pub fn spawn_vehicle_from_record(world: &mut World, record: VehicleRecord) -> Entity {
     let id = record.id.clone();
     let sprite_key = compute_vehicle_sprite_key(&id);
-    let line_id = world
-        .resource::<crate::routing::TransitLines>()
-        .line_by_legacy(&record.route_id)
-        .unwrap_or_else(|| panic!("unknown route_id {}", record.route_id));
+    let route_id = world
+        .resource::<crate::routing::TrafficRoutes>()
+        .route_by_legacy(&record.route_id)
+        .unwrap_or_else(|| panic!("unknown traffic route_id {}", record.route_id));
     let edge_index = record.link_index;
     let (px, py) = {
-        let transit_lines = world.resource::<crate::routing::TransitLines>();
+        let traffic_routes = world.resource::<crate::routing::TrafficRoutes>();
         let graph = world.resource::<crate::routing::Graph>();
         let rp = RoutePosition {
-            line_id,
+            route_id,
             edge_index,
             progress: record.progress,
             speed: record.speed_per_tick,
         };
-        crate::mobility::vehicle_world_coord(&rp, transit_lines, graph)
-            .expect("vehicle route position must resolve through routing graph")
+        crate::mobility::vehicle_world_coord(&rp, traffic_routes, graph)
+            .expect("vehicle route position must resolve through traffic routes")
     };
     let entity = world
         .spawn((
@@ -520,7 +516,7 @@ pub fn spawn_vehicle_from_record(world: &mut World, record: VehicleRecord) -> En
             StableVehicleId(record.id),
             VehicleKindComponent(record.kind),
             RoutePosition {
-                line_id,
+                route_id,
                 edge_index,
                 progress: record.progress,
                 speed: record.speed_per_tick,
@@ -576,7 +572,7 @@ fn vehicle_record_from_entity(world: &World, entity: Entity) -> Option<VehicleRe
     let cap = world.get::<Capacity>(entity)?;
     let occ = world.get::<Occupants>(entity)?;
     let dwell = world.get::<DwellTicksRemaining>(entity)?;
-    let route_id = legacy_route_id_for(world, pos.line_id);
+    let route_id = legacy_route_id_for(world, pos.route_id);
     Some(VehicleRecord {
         id: stable.0.clone(),
         kind: kind.0,
@@ -590,16 +586,12 @@ fn vehicle_record_from_entity(world: &World, entity: Entity) -> Option<VehicleRe
     })
 }
 
-fn legacy_route_id_for(world: &World, line_id: crate::routing::LineId) -> String {
-    let tl = world.resource::<crate::routing::TransitLines>();
-    if (line_id.0 as usize) < tl.count() {
-        let line = tl.line(line_id);
-        if let Some(legacy) = &line.legacy_route_id {
-            return legacy.clone();
-        }
-        return line.name.clone();
+fn legacy_route_id_for(world: &World, route_id: crate::routing::TrafficRouteId) -> String {
+    let routes = world.resource::<crate::routing::TrafficRoutes>();
+    if (route_id.0 as usize) < routes.count() {
+        return routes.route(route_id).legacy_route_id.clone();
     }
-    panic!("unknown line_id {}", line_id.0)
+    panic!("unknown traffic route_id {}", route_id.0)
 }
 
 fn resolve_link_polyline(
@@ -617,7 +609,6 @@ pub fn world_coord_for_agent(world: &World, agent_id: &AgentId) -> Option<(f32, 
     let entity = *world.resource::<AgentIdIndex>().0.get(agent_id)?;
     let state = world.get::<AgentMobilityStateComponent>(entity)?;
     let graph = world.resource::<crate::routing::Graph>();
-    let transit_lines = world.resource::<crate::routing::TransitLines>();
     match &state.0 {
         AgentMobilityState::AtActivity { activity_id } => {
             activity_geometry(activity_id).map(|g| g.coord)
@@ -625,7 +616,7 @@ pub fn world_coord_for_agent(world: &World, agent_id: &AgentId) -> Option<(f32, 
         AgentMobilityState::InVehicle { vehicle_id, .. } => {
             world_coord_for_vehicle(world, vehicle_id)
         }
-        other => crate::mobility::agent_world_coord(other, graph, transit_lines),
+        other => crate::mobility::agent_world_coord(other, graph),
     }
 }
 
@@ -650,9 +641,9 @@ pub fn direction_for_agent(
 pub fn world_coord_for_vehicle(world: &World, vehicle_id: &VehicleId) -> Option<(f32, f32)> {
     let entity = *world.resource::<VehicleIdIndex>().0.get(vehicle_id)?;
     let pos = world.get::<RoutePosition>(entity)?;
-    let transit_lines = world.resource::<crate::routing::TransitLines>();
+    let traffic_routes = world.resource::<crate::routing::TrafficRoutes>();
     let graph = world.resource::<crate::routing::Graph>();
-    crate::mobility::vehicle_world_coord(pos, transit_lines, graph)
+    crate::mobility::vehicle_world_coord(pos, traffic_routes, graph)
 }
 
 pub fn direction_for_vehicle(
@@ -661,13 +652,13 @@ pub fn direction_for_vehicle(
 ) -> Option<abutown_protocol::DirectionDto> {
     let entity = *world.resource::<VehicleIdIndex>().0.get(vehicle_id)?;
     let pos = world.get::<RoutePosition>(entity)?;
-    let transit_lines = world.resource::<crate::routing::TransitLines>();
+    let traffic_routes = world.resource::<crate::routing::TrafficRoutes>();
     let graph = world.resource::<crate::routing::Graph>();
-    if (pos.line_id.0 as usize) >= transit_lines.count() {
+    if (pos.route_id.0 as usize) >= traffic_routes.count() {
         return None;
     }
-    let line = transit_lines.line(pos.line_id);
-    let edge_id = *line.edges.get(pos.edge_index)?;
+    let route = traffic_routes.route(pos.route_id);
+    let edge_id = *route.edges.get(pos.edge_index)?;
     let edge = graph.edge(edge_id);
     Some(crate::mobility_geometry::direction_at_progress_slice(
         &edge.polyline,
@@ -723,8 +714,8 @@ pub fn vehicle_dto_for(
     let direction =
         direction_for_vehicle(world, vehicle_id).unwrap_or(abutown_protocol::DirectionDto::S);
     let sprite_key =
-        sprite_key_for_vehicle(world, vehicle_id).unwrap_or_else(|| "tram:0".to_string());
-    let route_id_str = legacy_route_id_for(world, pos.line_id);
+        sprite_key_for_vehicle(world, vehicle_id).unwrap_or_else(|| "vehicle:0".to_string());
+    let route_id_str = legacy_route_id_for(world, pos.route_id);
     Some(abutown_protocol::VehicleMobilityDto {
         id: abutown_protocol::EntityId(stable.0.0.clone()),
         kind: kind.0.into(),

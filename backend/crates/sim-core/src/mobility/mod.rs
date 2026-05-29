@@ -51,7 +51,6 @@ pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
 pub fn agent_world_coord(
     state: &AgentMobilityState,
     graph: &crate::routing::Graph,
-    _transit_lines: &crate::routing::TransitLines,
 ) -> Option<(f32, f32)> {
     match state {
         AgentMobilityState::Walking { link_id, progress } => {
@@ -73,22 +72,17 @@ pub fn agent_world_coord(
 }
 
 /// World coord for a vehicle given its route position. Returns `None` if
-/// the line or edge is not registered.
-///
-/// Phase 8b T10 (fixed): the graph is the single source of truth.
-/// `RoutePosition` is `LineId`+`edge_index`-keyed; we look up the edge
-/// directly via `TransitLines::line(line).edges[edge_index]` and read its
-/// geometry from `Graph`.
+/// the traffic route or edge is not registered.
 pub fn vehicle_world_coord(
     route_position: &components::RoutePosition,
-    transit_lines: &crate::routing::TransitLines,
+    traffic_routes: &crate::routing::TrafficRoutes,
     graph: &crate::routing::Graph,
 ) -> Option<(f32, f32)> {
-    if (route_position.line_id.0 as usize) >= transit_lines.count() {
+    if (route_position.route_id.0 as usize) >= traffic_routes.count() {
         return None;
     }
-    let line = transit_lines.line(route_position.line_id);
-    let edge_id = *line.edges.get(route_position.edge_index)?;
+    let route = traffic_routes.route(route_position.route_id);
+    let edge_id = *route.edges.get(route_position.edge_index)?;
     let edge = graph.edge(edge_id);
     Some(crate::mobility_geometry::world_coord_at_progress_slice(
         &edge.polyline,
@@ -115,8 +109,10 @@ mod tests {
     }
 
     fn install_test_routing(world: &mut World) {
-        use crate::routing::{Edge, EdgeId, EdgeKind, Graph, LineId, Node, NodeId, NodeKind};
-        use crate::routing::{TransitLine, TransitLines};
+        use crate::routing::{
+            Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind, TrafficRoute, TrafficRouteId,
+            TrafficRoutes,
+        };
 
         let nodes = vec![
             Node {
@@ -305,32 +301,28 @@ mod tests {
             },
         ];
         let graph = Graph::new(nodes, edges);
-        let mut lines = TransitLines::new(vec![
-            TransitLine {
-                id: LineId(0),
+        let traffic_routes = TrafficRoutes::new(vec![
+            TrafficRoute {
+                id: TrafficRouteId(0),
                 name: "old-town-loop".into(),
                 edges: vec![EdgeId(0)],
-                stops: vec![NodeId(0), NodeId(1)],
-                legacy_route_id: Some("route:old-town-loop".into()),
+                legacy_route_id: "route:old-town-loop".into(),
             },
-            TransitLine {
-                id: LineId(1),
+            TrafficRoute {
+                id: TrafficRouteId(1),
                 name: "r".into(),
                 edges: vec![EdgeId(1)],
-                stops: Vec::new(),
-                legacy_route_id: Some("r".into()),
+                legacy_route_id: "r".into(),
             },
-            TransitLine {
-                id: LineId(2),
+            TrafficRoute {
+                id: TrafficRouteId(2),
                 name: "horizontal".into(),
                 edges: vec![EdgeId(2)],
-                stops: vec![NodeId(2), NodeId(3)],
-                legacy_route_id: Some("route:horizontal".into()),
+                legacy_route_id: "route:horizontal".into(),
             },
         ]);
-        lines.add_legacy_route_alias("r:1".into(), LineId(1));
         world.insert_resource(graph);
-        world.insert_resource(lines);
+        world.insert_resource(traffic_routes);
         if !world.contains_resource::<crate::routing::WaitingAgents>() {
             world.insert_resource(crate::routing::WaitingAgents::default());
         }
@@ -340,6 +332,28 @@ mod tests {
         let (mut world, schedule) = api::empty_world_and_schedule();
         install_test_routing(&mut world);
         (world, schedule)
+    }
+
+    #[test]
+    fn vehicle_world_coord_resolves_traffic_route_edges() {
+        let mut world = World::new();
+        install_test_routing(&mut world);
+        let traffic_routes = world.resource::<crate::routing::TrafficRoutes>();
+        let graph = world.resource::<crate::routing::Graph>();
+        let route_id = traffic_routes
+            .route_by_legacy("route:old-town-loop")
+            .unwrap();
+        let rp = components::RoutePosition {
+            route_id,
+            edge_index: 0,
+            progress: 0.5,
+            speed: 0.1,
+        };
+
+        assert_eq!(
+            vehicle_world_coord(&rp, traffic_routes, graph),
+            Some((15.0, 0.0))
+        );
     }
 
     #[test]
@@ -653,7 +667,7 @@ mod tests {
             vehicle_id.clone(),
             VehicleRecord {
                 id: vehicle_id,
-                kind: VehicleKind::Tram,
+                kind: VehicleKind::Car,
                 route_id,
                 link_index: 0,
                 progress: 0.0,
@@ -762,7 +776,7 @@ mod tests {
             &mut world,
             VehicleRecord {
                 id: vehicle_id.clone(),
-                kind: VehicleKind::Tram,
+                kind: VehicleKind::Car,
                 route_id,
                 link_index: 0,
                 progress: 0.5,
@@ -800,10 +814,10 @@ mod tests {
     }
 
     #[test]
-    fn seeded_world_vehicles_default_to_tram_kind() {
+    fn seeded_world_vehicles_default_to_car_kind() {
         let (world, _) = seed::test_seed_world();
         for vehicle in api::vehicles(&world) {
-            assert_eq!(vehicle.kind, VehicleKind::Tram);
+            assert_eq!(vehicle.kind, VehicleKind::Car);
         }
     }
 
@@ -850,7 +864,7 @@ mod tests {
             .count();
         let trams = api::vehicles(&world)
             .into_iter()
-            .filter(|v| v.kind == VehicleKind::Tram)
+            .filter(|v| v.id.0.starts_with("vehicle:tram:"))
             .count();
 
         assert_eq!(walking_agents, 18, "3 corridors x 6 = 18 walkers");
@@ -881,7 +895,7 @@ mod tests {
             seed::from_base_world_bundle(&bundle).expect("bundle seeding succeeds");
         let trams = api::vehicles(&world)
             .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .filter(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
             .collect::<Vec<_>>();
 
         assert_eq!(trams.len(), expected_trams);
@@ -914,7 +928,7 @@ mod tests {
         }
         let trams_after = api::vehicles(&world)
             .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .filter(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
             .collect::<Vec<_>>();
         let unique_positions_after = trams_after
             .iter()
@@ -955,7 +969,7 @@ mod tests {
             seed::from_base_world_bundle(&bundle).expect("bundle seeding succeeds");
         let before = api::vehicles(&world)
             .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .filter(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
             .map(|vehicle| {
                 let coord = api::world_coord_for_vehicle(&world, &vehicle.id)
                     .expect("tram has initial world coord");
@@ -969,7 +983,7 @@ mod tests {
 
         let moved = api::vehicles(&world)
             .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
+            .filter(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
             .filter(|vehicle| {
                 let Some((before_x, before_y)) = before.get(&vehicle.id) else {
                     return false;
@@ -1327,7 +1341,7 @@ mod tests {
             &mut world,
             VehicleRecord {
                 id: VehicleId("v1".into()),
-                kind: VehicleKind::Tram,
+                kind: VehicleKind::Car,
                 route_id: "r".into(),
                 link_index: 0,
                 progress: 0.0,
