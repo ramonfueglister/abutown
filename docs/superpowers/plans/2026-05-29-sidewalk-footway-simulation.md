@@ -690,7 +690,7 @@ Expected: commit succeeds.
 - Modify: `backend/crates/sim-core/src/mobility/seed.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Add failing seed tests**
+- [x] **Step 1: Add failing seed tests**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`, add these tests inside the existing `#[cfg(test)] mod tests` block:
 
@@ -754,7 +754,7 @@ fn from_base_world_bundle_seeds_pedestrian_on_sidewalk_corridor() {
 }
 ```
 
-- [ ] **Step 2: Update `seeded_walks_from_network` implementation**
+- [x] **Step 2: Update `seeded_walks_from_network` implementation**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`, replace the integer mapping in `seeded_walks_from_network` with:
 
@@ -764,7 +764,7 @@ let polyline: Vec<(f32, f32)> = corridor.iter().map(|point| (point.x, point.y)).
 
 Remove the now-unused local `use crate::city_network::NetworkCoord;`.
 
-- [ ] **Step 3: Add runtime footway geometry test**
+- [x] **Step 3: Add runtime footway geometry test**
 
 In `backend/crates/sim-server/src/runtime.rs`, add this test near `runtime_can_find_seeded_walk_path`:
 
@@ -787,7 +787,7 @@ fn runtime_uses_sidewalk_footway_geometry_from_base_world() {
 }
 ```
 
-- [ ] **Step 4: Run backend seed/runtime tests**
+- [x] **Step 4: Run backend seed/runtime tests**
 
 Run:
 
@@ -799,7 +799,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit backend sidewalk seeding**
+- [x] **Step 5: Commit backend sidewalk seeding**
 
 Run:
 
