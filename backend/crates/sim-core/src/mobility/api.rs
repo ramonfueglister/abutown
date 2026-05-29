@@ -407,7 +407,7 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
         birth_tick,
         active_route,
         sex,
-        parent_id: _parent_id,
+        parent_id,
     } = record;
     let id = record_id.clone();
     let sprite_key = compute_agent_sprite_key(&id);
@@ -439,6 +439,7 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
             WalkSpeed(walk_speed_per_tick),
             crate::mobility::components::BirthTick(birth_tick),
             sex,
+            crate::mobility::components::ParentId(parent_id),
             Position { x: px, y: py },
             Direction(abutown_protocol::DirectionDto::S),
             SpriteKey(sprite_key),
@@ -526,6 +527,9 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
                 })
                 .collect(),
         });
+    let parent_id = world
+        .get::<crate::mobility::components::ParentId>(entity)
+        .and_then(|p| p.0.clone());
     Some(AgentRecord {
         id: stable.0.clone(),
         state: state.0.clone(),
@@ -535,7 +539,7 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
         birth_tick,
         active_route,
         sex,
-        parent_id: None,
+        parent_id,
     })
 }
 
