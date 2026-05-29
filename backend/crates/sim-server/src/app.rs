@@ -377,6 +377,14 @@ pub fn build_app() -> Router {
     build_app_with_runtime(runtime)
 }
 
+pub fn build_app_with_allowed_origins(allowed_origins: &[String]) -> anyhow::Result<Router> {
+    let runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())
+        .expect("base world bundle is required for app startup");
+    let state = AppState::new(runtime);
+    let cors = cors_layer(allowed_origins)?;
+    Ok(build_router_from_state(state, cors))
+}
+
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
     let _ = dotenvy::dotenv();
     let config = ServerConfig::from_env()?;
