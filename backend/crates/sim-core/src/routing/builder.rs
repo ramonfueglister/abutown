@@ -33,23 +33,25 @@ pub fn build_graph_from_city_network(
     seeded_walks: &[SeededWalk],
 ) -> (Graph, TrafficRoutes, NodeSpatialIndex) {
     // Phase 1: collect polylines + coord occurrence count.
-    let mut coord_use_count: HashMap<(i32, i32), u32> = HashMap::new();
-    let mut endpoint_coords: Vec<(i32, i32)> = Vec::new();
-    let mut polyline_coords: Vec<Vec<(i32, i32)>> = Vec::new();
+    let mut coord_use_count: HashMap<CoordKey, u32> = HashMap::new();
+    let mut point_by_key: HashMap<CoordKey, (f32, f32)> = HashMap::new();
+    let mut endpoint_coords: Vec<CoordKey> = Vec::new();
+    let mut polyline_coords: Vec<Vec<(f32, f32)>> = Vec::new();
     let mut polyline_kinds: Vec<PolylineKind> = Vec::new();
 
     for (idx, path) in network.arterial_paths.iter().enumerate() {
         let coords = path
             .iter()
-            .map(|point| (point.x as i32, point.y as i32))
+            .map(|point| (point.x, point.y))
             .collect::<Vec<_>>();
         if coords.is_empty() {
             continue;
         }
-        endpoint_coords.push(coords[0]);
-        endpoint_coords.push(*coords.last().unwrap());
-        for c in &coords {
-            *coord_use_count.entry(*c).or_insert(0) += 1;
+        endpoint_coords.push(remember_point(&mut point_by_key, coords[0]));
+        endpoint_coords.push(remember_point(&mut point_by_key, *coords.last().unwrap()));
+        for coord in &coords {
+            let key = remember_point(&mut point_by_key, *coord);
+            *coord_use_count.entry(key).or_insert(0) += 1;
         }
         polyline_coords.push(coords);
         polyline_kinds.push(PolylineKind::Arterial { index: idx });
@@ -65,25 +67,19 @@ pub fn build_graph_from_city_network(
     // alongside arterial endpoints + intersections + seeded stops. The
     // walks themselves are emitted as Footway edges after arterial
     // splitting (Phase 4b below) — they are NOT split at intersections.
-    let mut walk_coords: Vec<(i32, i32)> = Vec::new();
+    let mut walk_coords: Vec<CoordKey> = Vec::new();
     for walk in seeded_walks {
         if walk.polyline.len() < 2 {
             continue;
         }
-        let from = (
-            walk.polyline.first().unwrap().0.round() as i32,
-            walk.polyline.first().unwrap().1.round() as i32,
-        );
-        let to = (
-            walk.polyline.last().unwrap().0.round() as i32,
-            walk.polyline.last().unwrap().1.round() as i32,
-        );
+        let from = remember_point(&mut point_by_key, *walk.polyline.first().unwrap());
+        let to = remember_point(&mut point_by_key, *walk.polyline.last().unwrap());
         walk_coords.push(from);
         walk_coords.push(to);
     }
 
     // Phase 2: identify which coords become nodes.
-    let mut is_node: HashMap<(i32, i32), bool> = HashMap::new();
+    let mut is_node: HashMap<CoordKey, bool> = HashMap::new();
     for c in &endpoint_coords {
         is_node.insert(*c, true);
     }
@@ -93,24 +89,23 @@ pub fn build_graph_from_city_network(
         }
     }
     for stop in seeded_stops {
-        let coord = (stop.coord.0.round() as i32, stop.coord.1.round() as i32);
-        is_node.insert(coord, true);
+        is_node.insert(remember_point(&mut point_by_key, stop.coord), true);
     }
     for coord in &walk_coords {
         is_node.insert(*coord, true);
     }
 
     // Phase 3: assign NodeIds deterministically (sorted by coord).
-    let mut node_coords: Vec<(i32, i32)> = is_node.keys().copied().collect();
-    node_coords.sort();
-    let mut nodes: Vec<Node> = Vec::with_capacity(node_coords.len());
-    let mut node_id_by_coord: HashMap<(i32, i32), NodeId> = HashMap::new();
-    for (idx, coord) in node_coords.iter().enumerate() {
+    let mut node_keys: Vec<CoordKey> = is_node.keys().copied().collect();
+    node_keys.sort();
+    let mut nodes: Vec<Node> = Vec::with_capacity(node_keys.len());
+    let mut node_id_by_coord: HashMap<CoordKey, NodeId> = HashMap::new();
+    for (idx, key) in node_keys.iter().enumerate() {
         let id = NodeId(idx as u32);
-        node_id_by_coord.insert(*coord, id);
+        node_id_by_coord.insert(*key, id);
         nodes.push(Node {
             id,
-            position: (coord.0 as f32, coord.1 as f32),
+            position: point_by_key[key],
             kind: NodeKind::Intersection,
             legacy_id: None,
         });
@@ -118,7 +113,7 @@ pub fn build_graph_from_city_network(
 
     // Mark stop nodes.
     for stop in seeded_stops {
-        let coord = (stop.coord.0.round() as i32, stop.coord.1.round() as i32);
+        let coord = coord_key(stop.coord);
         let node_id = *node_id_by_coord
             .get(&coord)
             .expect("seeded stop coord must be a node");
@@ -141,7 +136,7 @@ pub fn build_graph_from_city_network(
             .skip(1)
             .take(coords.len().saturating_sub(2))
         {
-            if node_id_by_coord.contains_key(c) {
+            if node_id_by_coord.contains_key(&coord_key(*c)) {
                 split_indices.push(i);
             }
         }
@@ -149,13 +144,13 @@ pub fn build_graph_from_city_network(
         for win in split_indices.windows(2) {
             let (a, b) = (win[0], win[1]);
             let segment = &coords[a..=b];
-            let from = node_id_by_coord[&segment[0]];
-            let to = node_id_by_coord[segment.last().unwrap()];
-            let polyline: Vec<(f32, f32)> =
-                segment.iter().map(|c| (c.0 as f32, c.1 as f32)).collect();
+            let from = node_id_by_coord[&coord_key(segment[0])];
+            let to = node_id_by_coord[&coord_key(*segment.last().unwrap())];
+            let polyline: Vec<(f32, f32)> = segment.to_vec();
             let length = polyline_length(&polyline);
             match kind {
                 PolylineKind::Arterial { index } => {
+                    let legacy_key = coord_key(segment[0]);
                     let fwd_id = EdgeId(edges.len() as u32);
                     edges.push(Edge {
                         id: fwd_id,
@@ -168,7 +163,7 @@ pub fn build_graph_from_city_network(
                         capacity: 1,
                         legacy_id: Some(format!(
                             "link:road:{index}:{}_{},fwd",
-                            segment[0].0, segment[0].1
+                            legacy_key.0, legacy_key.1
                         )),
                     });
                     road_forward_by_arterial
@@ -188,7 +183,7 @@ pub fn build_graph_from_city_network(
                         capacity: 1,
                         legacy_id: Some(format!(
                             "link:road:{index}:{}_{},rev",
-                            segment[0].0, segment[0].1
+                            legacy_key.0, legacy_key.1
                         )),
                     });
                     road_reverse_by_arterial
@@ -211,8 +206,8 @@ pub fn build_graph_from_city_network(
         }
         let first = walk.polyline.first().unwrap();
         let last = walk.polyline.last().unwrap();
-        let from_coord = (first.0.round() as i32, first.1.round() as i32);
-        let to_coord = (last.0.round() as i32, last.1.round() as i32);
+        let from_coord = coord_key(*first);
+        let to_coord = coord_key(*last);
         let from = node_id_by_coord[&from_coord];
         let to = node_id_by_coord[&to_coord];
         let length = polyline_length(&walk.polyline);
@@ -242,7 +237,7 @@ pub fn build_graph_from_city_network(
 
     let mut graph = Graph::new(nodes, edges);
     for stop in seeded_stops {
-        let coord = (stop.coord.0.round() as i32, stop.coord.1.round() as i32);
+        let coord = coord_key(stop.coord);
         if let Some(node_id) = node_id_by_coord.get(&coord).copied() {
             graph.add_legacy_node_alias(stop.legacy_stop_id.clone(), node_id);
         }
@@ -277,6 +272,22 @@ pub fn build_graph_from_city_network(
 #[derive(Debug, Clone, Copy)]
 enum PolylineKind {
     Arterial { index: usize },
+}
+
+type CoordKey = (i32, i32);
+const COORD_KEY_SCALE: f32 = 1000.0;
+
+fn coord_key(point: (f32, f32)) -> CoordKey {
+    (
+        (point.0 * COORD_KEY_SCALE).round() as i32,
+        (point.1 * COORD_KEY_SCALE).round() as i32,
+    )
+}
+
+fn remember_point(points: &mut HashMap<CoordKey, (f32, f32)>, point: (f32, f32)) -> CoordKey {
+    let key = coord_key(point);
+    points.entry(key).or_insert(point);
+    key
 }
 
 fn polyline_length(points: &[(f32, f32)]) -> f32 {
@@ -376,6 +387,47 @@ mod tests {
                 .filter(|e| e.kind == EdgeKind::Footway)
                 .count()
                 >= 2
+        );
+    }
+
+    #[test]
+    fn builder_preserves_fractional_seeded_walk_nodes() {
+        let walks = vec![
+            SeededWalk {
+                legacy_link_id: "link:walk:corridor:north".into(),
+                polyline: vec![(2.0, 2.49), (13.0, 2.49)],
+            },
+            SeededWalk {
+                legacy_link_id: "link:walk:corridor:south".into(),
+                polyline: vec![(2.0, 3.51), (13.0, 3.51)],
+            },
+        ];
+
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &walks);
+        let north = graph.edge(
+            graph
+                .edge_by_legacy("link:walk:corridor:north")
+                .expect("north sidewalk edge exists"),
+        );
+        let south = graph.edge(
+            graph
+                .edge_by_legacy("link:walk:corridor:south")
+                .expect("south sidewalk edge exists"),
+        );
+
+        assert_eq!(north.polyline, vec![(2.0, 2.49), (13.0, 2.49)]);
+        assert_eq!(south.polyline, vec![(2.0, 3.51), (13.0, 3.51)]);
+        assert!(
+            graph
+                .nodes()
+                .iter()
+                .any(|node| node.position == (2.0, 2.49))
+        );
+        assert!(
+            graph
+                .nodes()
+                .iter()
+                .any(|node| node.position == (2.0, 3.51))
         );
     }
 
