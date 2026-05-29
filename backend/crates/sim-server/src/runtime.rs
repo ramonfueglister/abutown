@@ -451,6 +451,11 @@ impl SimulationRuntime {
     }
 
     pub fn world_summary(&self) -> WorldSummaryDto {
+        let current_tick = mobility_api::tick(&self.world);
+        let sim_time = self
+            .world
+            .resource::<sim_core::time::SimClock>()
+            .sim_seconds(current_tick);
         WorldSummaryDto {
             protocol_version: PROTOCOL_VERSION,
             world_id: self.world_id.clone(),
@@ -461,6 +466,7 @@ impl SimulationRuntime {
                 .map(ChunkCoordDto::from)
                 .collect(),
             tick_period_ms: TICK_PERIOD_MS,
+            sim_time,
         }
     }
 

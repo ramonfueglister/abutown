@@ -768,6 +768,96 @@ async fn postgres_mobility_state_survives_runtime_restart() {
         .await;
 }
 
+/// Poll /world until `predicate(&world_summary)` returns true, or panic after ~1s.
+async fn poll_world_until<F>(app: &axum::Router, predicate: F) -> w::WorldSummary
+where
+    F: Fn(&w::WorldSummary) -> bool,
+{
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
+    loop {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/world").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        if response.status() == StatusCode::OK {
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            if let Ok(summary) = w::WorldSummary::decode(body.as_ref())
+                && predicate(&summary)
+            {
+                return summary;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("poll_world_until timed out after 1s");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn world_summary_sim_time_is_present_and_advances() {
+    let app = build_app();
+
+    // Capture the initial sim_time.
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/world")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = first.into_body().collect().await.unwrap().to_bytes();
+    let first_summary = w::WorldSummary::decode(first_body.as_ref()).unwrap();
+    let initial_sim_time = first_summary.sim_time;
+    // sim_time is a u64 — always non-negative; document that it is present.
+
+    // Wait until sim_time advances (the background tick loop runs every 100 ms).
+    let advanced = poll_world_until(&app, |s| s.sim_time > initial_sim_time).await;
+    assert!(
+        advanced.sim_time > initial_sim_time,
+        "sim_time must advance after ticks: got {} expected > {}",
+        advanced.sim_time,
+        initial_sim_time
+    );
+}
+
+#[tokio::test]
+async fn mobility_snapshot_agent_age_seconds_is_present() {
+    let app = build_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/mobility")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let mobility = w::MobilitySnapshot::decode(body.as_ref()).unwrap();
+    assert!(
+        !mobility.agents.is_empty(),
+        "at least one agent must be present for the age_seconds assertion"
+    );
+    for agent in &mobility.agents {
+        // age_seconds is u64 — presence means we can decode and read it (>= 0 always).
+        let _ = agent.age_seconds;
+    }
+    // At tick=0, birth_tick=0, age_seconds should be 0.
+    assert_eq!(
+        mobility.agents[0].age_seconds,
+        0,
+        "agent spawned at tick 0 has age_seconds=0 at tick 0"
+    );
+}
+
 #[test]
 fn auth_backdoor_env_var_is_not_referenced_in_source() {
     // Regression guard: the Supabase verifier must never contain a runtime

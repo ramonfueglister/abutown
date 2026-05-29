@@ -19,6 +19,7 @@ fn sample_delta_proto(n_agents: usize) -> ServerMessage {
             direction: Direction::E as i32,
             sprite_key: format!("pedestrian:{}", i % 16),
             plan_cursor: 0,
+            age_seconds: 0,
         })
         .collect();
 

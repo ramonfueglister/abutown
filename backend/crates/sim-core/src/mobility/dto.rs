@@ -20,6 +20,7 @@ impl From<&AgentRecord> for AgentMobilityDto {
             world_coord: abutown_protocol::WorldCoordDto { x: 0.0, y: 0.0 },
             direction: abutown_protocol::DirectionDto::S,
             sprite_key: String::from("pedestrian:0"),
+            age_seconds: 0,
         }
     }
 }

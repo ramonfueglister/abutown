@@ -200,6 +200,7 @@ message WorldSummary {
   uint32 chunk_size = 3;
   repeated ChunkCoord loaded_chunks = 4;
   uint32 tick_period_ms = 5;
+  uint64 sim_time = 6;
 }
 
 message ChunkSnapshot {
@@ -236,6 +237,7 @@ message AgentMobility {
   Direction direction = 4;
   string sprite_key = 5;
   uint32 plan_cursor = 6;
+  uint64 age_seconds = 7;
 }
 
 message AgentState {

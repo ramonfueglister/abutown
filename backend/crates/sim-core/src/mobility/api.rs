@@ -653,6 +653,14 @@ pub fn agent_dto_for(
         direction_for_agent(world, agent_id).unwrap_or(abutown_protocol::DirectionDto::S);
     let sprite_key =
         sprite_key_for_agent(world, agent_id).unwrap_or_else(|| "pedestrian:0".to_string());
+    let current_tick = tick(world);
+    let birth_tick = world
+        .get::<crate::mobility::components::BirthTick>(entity)
+        .map(|b| b.0)
+        .unwrap_or(0);
+    let age_seconds = world
+        .resource::<crate::time::SimClock>()
+        .age_seconds(current_tick, birth_tick);
     Some(abutown_protocol::AgentMobilityDto {
         id: abutown_protocol::EntityId(stable.0.0.clone()),
         state: abutown_protocol::AgentMobilityStateDto::from(&state.0),
@@ -660,6 +668,7 @@ pub fn agent_dto_for(
         world_coord: abutown_protocol::WorldCoordDto { x: cx, y: cy },
         direction,
         sprite_key,
+        age_seconds,
     })
 }
 

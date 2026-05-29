@@ -98,6 +98,7 @@ fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedu
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     CorePlugin::default().install(&mut world, &mut schedule);
+    crate::time::TimePlugin.install(&mut world, &mut schedule);
     world.insert_resource(network.clone());
     crate::routing::RoutingPlugin {
         seeded_stops: Vec::new(),
@@ -115,6 +116,7 @@ fn test_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedul
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     CorePlugin::default().install(&mut world, &mut schedule);
+    crate::time::TimePlugin.install(&mut world, &mut schedule);
     world.insert_resource(network.clone());
     crate::routing::RoutingPlugin {
         seeded_stops: test_seeded_stops(),
