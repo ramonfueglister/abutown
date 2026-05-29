@@ -88,6 +88,18 @@ fn tiny_city_network() -> CityNetwork {
     }
 }
 
+/// Deterministic sex assignment from agent id string (stable ~50/50 split).
+fn sex_from_id(agent_id_str: &str) -> crate::mobility::components::Sex {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    agent_id_str.hash(&mut h);
+    if h.finish() & 1 == 0 {
+        crate::mobility::components::Sex::Female
+    } else {
+        crate::mobility::components::Sex::Male
+    }
+}
+
 fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedule) {
     let mut world = World::new();
     let mut schedule = Schedule::default();
@@ -249,17 +261,16 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
             let agent_id = AgentId(format!("agent:walk:{n}"));
             let link_id = format!("link:walk:corridor:{corridor_index}");
             let progress = ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
-            api::spawn_agent_from_record(
-                &mut world,
-                AgentRecord::new(
-                    agent_id,
-                    AgentMobilityState::Walking { link_id, progress },
-                    vec![PlanStage::Activity {
-                        activity_id: format!("activity:wander:{corridor_index}"),
-                    }],
-                    0.05,
-                ),
+            let mut rec = AgentRecord::new(
+                agent_id.clone(),
+                AgentMobilityState::Walking { link_id, progress },
+                vec![PlanStage::Activity {
+                    activity_id: format!("activity:wander:{corridor_index}"),
+                }],
+                0.05,
             );
+            rec.sex = sex_from_id(&agent_id.0);
+            api::spawn_agent_from_record(&mut world, rec);
         }
     }
 
@@ -358,17 +369,16 @@ fn seed_pedestrians_from_bundle(
             } else {
                 0.0
             };
-            api::spawn_agent_from_record(
-                world,
-                AgentRecord::new(
-                    agent_id,
-                    AgentMobilityState::Walking { link_id, progress },
-                    vec![PlanStage::Activity {
-                        activity_id: format!("activity:wander:{corridor_index}"),
-                    }],
-                    0.05,
-                ),
+            let mut rec = AgentRecord::new(
+                agent_id.clone(),
+                AgentMobilityState::Walking { link_id, progress },
+                vec![PlanStage::Activity {
+                    activity_id: format!("activity:wander:{corridor_index}"),
+                }],
+                0.05,
             );
+            rec.sex = sex_from_id(&agent_id.0);
+            api::spawn_agent_from_record(world, rec);
         }
     }
     Ok(())

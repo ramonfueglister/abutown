@@ -88,6 +88,10 @@ pub struct AgentRecord {
     pub birth_tick: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_route: Option<PersistedActiveRoute>,
+    #[serde(default)]
+    pub sex: crate::mobility::components::Sex,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<AgentId>,
 }
 
 impl AgentRecord {
@@ -119,6 +123,8 @@ impl AgentRecord {
             walk_speed_per_tick,
             birth_tick,
             active_route: None,
+            sex: crate::mobility::components::Sex::default(),
+            parent_id: None,
         }
     }
 }

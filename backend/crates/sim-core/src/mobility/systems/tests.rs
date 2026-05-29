@@ -1381,6 +1381,26 @@ fn incremental_chunk_populations_matches_full_rebuild() {
     );
 }
 #[test]
+fn spawned_agent_carries_sex_and_parent() {
+    use crate::mobility::components::Sex;
+    let (mut world, _s) = crate::mobility::api::empty_world_and_schedule();
+    let mut rec = crate::mobility::records::AgentRecord::new_born_at(
+        crate::ids::AgentId("agent:f".into()),
+        crate::mobility::records::AgentMobilityState::AtActivity {
+            activity_id: "a".into(),
+        },
+        vec![crate::mobility::records::PlanStage::Activity {
+            activity_id: "a".into(),
+        }],
+        0.05,
+        0,
+    );
+    rec.sex = Sex::Female;
+    rec.parent_id = Some(crate::ids::AgentId("agent:mum".into()));
+    let e = crate::mobility::api::spawn_agent_from_record(&mut world, rec);
+    assert_eq!(*world.get::<Sex>(e).unwrap(), Sex::Female);
+}
+#[test]
 fn spawned_agent_carries_birth_tick_and_ages() {
     use crate::mobility::components::BirthTick;
     use crate::time::SimClock;

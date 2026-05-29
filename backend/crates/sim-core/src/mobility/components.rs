@@ -107,6 +107,16 @@ pub struct NearStop;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BirthTick(pub u64);
 
+/// Biological sex of an agent. Durable: mirrors `AgentRecord.sex`.
+#[derive(
+    Component, Default, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+pub enum Sex {
+    #[default]
+    Male,
+    Female,
+}
+
 /// Cached resolved polyline for the link this entity currently traverses.
 /// Refreshed by `update_link_polyline_cache_system` (runs first in Advance)
 /// when the entity's link changes. Eliminates the per-tick HashMap chain
