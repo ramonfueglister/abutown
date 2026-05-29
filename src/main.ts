@@ -43,7 +43,6 @@ import {
   RIVERBANK_WEST,
   riverSurfaceSourceFromMask,
 } from './render/riverbankFrames';
-import { compareDrawableOrder, type DrawableType } from './render/drawOrder';
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
@@ -84,6 +83,13 @@ import {
 } from './render/cameraViewport';
 import { createCityDiagnostics } from './render/cityDiagnostics';
 import { buildRenderGameText, nonPak128AssetPaths } from './render/renderGameText';
+import {
+  buildVisibleCarDrawables,
+  buildVisiblePedestrianDrawables,
+  buildVisibleTrainDrawables,
+  compareGridDrawables,
+  visibleTerrainCoords,
+} from './render/sceneDrawables';
 
 type Coord = { x: number; y: number };
 
@@ -102,8 +108,6 @@ type StaticDrawable =
   | { type: 'detail'; coord: Coord; detail: Detail }
   | { type: 'tree'; coord: Coord }
   | { type: 'building'; coord: Coord; building: Building };
-
-type DrawableForOrder = { type: DrawableType; coord: Coord };
 
 const activeAssetPack = pak128AssetPack;
 const VISUAL_STYLE_ID = 'minimal-motorways';
@@ -386,28 +390,15 @@ function drawScene(offset: Coord): void {
   const visibleGrid = visibleGridRect();
 
   drawOutskirtsTerrain(visibleGrid);
-  const visibleTerrainTiles: Coord[] = [];
-  for (let y = Math.max(0, visibleGrid.minY); y <= Math.min(HEIGHT - 1, visibleGrid.maxY); y += 1) {
-    for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(WIDTH - 1, visibleGrid.maxX); x += 1) visibleTerrainTiles.push({ x, y });
-  }
-  visibleTerrainTiles.sort((a, b) => iso(a).y - iso(b).y || a.x - b.x);
+  const visibleTerrainTiles = visibleTerrainCoords(visibleGrid, { width: WIDTH, height: HEIGHT }, iso);
   for (const coord of visibleTerrainTiles) drawTerrainBase(coord);
   for (const coord of visibleTerrainTiles) drawRiverSurface(coord);
 
   const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
   const cars: BackendCar[] = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const carDrawables = cars
-    .map((car) => ({ type: 'car' as const, coord: car.path[0], car, vehicleId: car.id }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort(compareDrawables);
-  const pedestrianDrawables = pedestrians
-    .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort(compareDrawables);
-  const trainDrawables = trains
-    .map((train) => ({ type: 'train' as const, coord: trainPosition(train), train }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort(compareDrawables);
+  const carDrawables = buildVisibleCarDrawables(cars, visibleGrid, iso);
+  const pedestrianDrawables = buildVisiblePedestrianDrawables(pedestrians, visibleGrid, iso);
+  const trainDrawables = buildVisibleTrainDrawables(trains, trainPosition, visibleGrid, iso);
 
   for (const road of roads.values()) if (isCoordVisible(road.coord, visibleGrid)) drawRoad(road);
   for (const path of railPaths) drawRailPath(path);
@@ -988,7 +979,7 @@ function buildStaticDrawables(): StaticDrawable[] {
     ...details.map((detail) => ({ type: 'detail' as const, coord: detail.coord, detail })),
     ...trees.map((coord) => ({ type: 'tree' as const, coord })),
     ...buildings.map((building) => ({ type: 'building' as const, coord: building.coord, building })),
-  ].sort(compareDrawables);
+  ].sort((a, b) => compareGridDrawables(a, b, iso));
 }
 
 function constrainCamera(allowOverscroll: boolean): void {
@@ -1097,13 +1088,6 @@ function outwardExits(coord: Coord, mask: number): { dx: number; dy: number; mas
   if (coord.y === HEIGHT - 1 && (mask & SOUTH) !== 0) exits.push({ dx: 0, dy: 1, mask: NORTH | SOUTH });
   if (coord.x === 0 && (mask & WEST) !== 0) exits.push({ dx: -1, dy: 0, mask: EAST | WEST });
   return exits;
-}
-
-function compareDrawables(a: DrawableForOrder, b: DrawableForOrder): number {
-  return compareDrawableOrder(
-    { type: a.type, isoY: iso(a.coord).y, x: a.coord.x },
-    { type: b.type, isoY: iso(b.coord).y, x: b.coord.x },
-  );
 }
 
 function key(coord: Coord): string {
