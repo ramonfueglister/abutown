@@ -8,10 +8,11 @@ pub mod pathfinding;
 pub mod plugin;
 pub mod profile;
 pub mod spatial_index;
+pub mod traffic;
 pub mod transit;
 pub mod waiting;
 
-pub use builder::{SeededStop, SeededTransitLine, SeededWalk, build_graph_from_city_network};
+pub use builder::{SeededStop, SeededWalk, build_graph_from_city_network};
 pub use cost_model::{CostModel, DistanceCost, ModeFilterCost, TimeCost};
 pub use flow_field::{
     FlowField, FlowFieldCache, FlowFieldCacheKey, FlowFieldCacheStats, FlowFieldEntry,
@@ -29,5 +30,5 @@ pub use pathfinding::{
 pub use plugin::{FlowFieldPlugin, HierarchicalRoutingPlugin, PathfindingPlugin, RoutingPlugin};
 pub use profile::{ModeState, RoutingProfile, RoutingProfileKey};
 pub use spatial_index::{IndexedNode, NodeSpatialIndex};
-pub use transit::{LineId, TransitLine, TransitLines};
+pub use traffic::{TrafficRoute, TrafficRouteId, TrafficRoutes};
 pub use waiting::WaitingAgents;
