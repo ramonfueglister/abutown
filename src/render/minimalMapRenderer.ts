@@ -180,7 +180,6 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   for (const item of carDrawables) drawCar(state, item.car, item.vehicleId === state.selectedVehicleId);
   for (const item of pedestrianDrawables) drawPedestrian(state, item.pedestrian, item.agentId === state.selectedAgentId);
 
-  drawPerimeterMist(state);
   ctx.restore();
 }
 
@@ -279,9 +278,6 @@ function drawBuilding(state: MinimalMapRendererState, building: RuntimeBuilding)
   const x = point.x - width / 2 + offset.x + jitter.x;
   const y = point.y - height / 2 + offset.y + jitter.y;
   ctx.save();
-  ctx.fillStyle = 'rgba(108, 97, 77, 0.07)';
-  roundedRectPath(ctx, x + 1.5, y + 1.5, width, height, 1.4);
-  ctx.fill();
   ctx.globalAlpha = 0.66;
   ctx.fillStyle = buildingVectorColor(building);
   roundedRectPath(ctx, x, y, width, height, 1.4);
@@ -447,19 +443,6 @@ function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRe
       }
     }
   }
-}
-
-function drawPerimeterMist(state: MinimalMapRendererState): void {
-  const { ctx, world, tileSize } = state;
-  const minX = 0;
-  const minY = 0;
-  const maxX = world.width * tileSize.width;
-  const maxY = world.height * tileSize.height;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(139, 129, 108, 0.18)';
-  ctx.lineWidth = 1.4;
-  ctx.strokeRect(minX, minY, maxX, maxY);
-  ctx.restore();
 }
 
 function visibleGridRect(state: MinimalMapRendererState): GridRect {
