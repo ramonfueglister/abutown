@@ -47,8 +47,8 @@ pub enum HydrationError {
 
 use crate::commands::{AppliedCommand, CommandRejection};
 
-const WORLD_ID: &str = "zurich-river-city-v1";
-pub const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/zurich-river-city-v1";
+const WORLD_ID: &str = "abutopia";
+pub const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/abutopia";
 const PULSE_STRIDE: u64 = 37;
 pub const TICK_PERIOD_MS: u32 = 100;
 
@@ -952,48 +952,27 @@ mod tests {
 
     #[test]
     fn runtime_materializes_base_world_instead_of_demo_chunks() {
-        let fixture_root = workspace_root().join("data/worlds/zurich-river-city-v1");
+        let fixture_root = workspace_root().join("data/worlds/abutopia");
         let runtime = SimulationRuntime::new_from_base_world_dir(&fixture_root)
             .expect("base world fixture must load");
         let summary = runtime.world_summary();
 
-        assert_eq!(summary.world_id.0, "zurich-river-city-v1");
+        assert_eq!(summary.world_id.0, "abutopia");
         assert_eq!(summary.chunk_size, 32);
-        assert!(
-            summary.loaded_chunks.len() > 3,
-            "base world must not be the old three seeded chunks"
-        );
-        assert!(
-            summary
-                .loaded_chunks
-                .iter()
-                .any(|coord| coord.x == 4 && coord.y == 4),
-            "central Zurich chunk remains available"
-        );
+        assert_eq!(summary.loaded_chunks, vec![ChunkCoordDto { x: 0, y: 0 }]);
     }
 
     #[test]
-    fn runtime_seeds_backend_cars_from_base_world() {
-        let fixture_root = workspace_root().join("data/worlds/zurich-river-city-v1");
+    fn runtime_seeds_backend_pedestrian_from_base_world() {
+        let fixture_root = workspace_root().join("data/worlds/abutopia");
         let runtime = SimulationRuntime::new_from_base_world_dir(&fixture_root)
             .expect("base world fixture must load");
+        let agents = sim_core::mobility::api::agents(&runtime.world);
         let vehicles = sim_core::mobility::api::vehicles(&runtime.world);
 
-        assert!(
-            vehicles
-                .iter()
-                .all(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Car)
-        );
-        assert!(
-            vehicles
-                .iter()
-                .any(|vehicle| vehicle.id.0.starts_with("vehicle:car:"))
-        );
-        assert!(
-            vehicles
-                .iter()
-                .all(|vehicle| vehicle.id.0.starts_with("vehicle:car:"))
-        );
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id.0, "agent:walk:0");
+        assert!(vehicles.is_empty());
     }
 
     fn workspace_root() -> std::path::PathBuf {
@@ -1006,13 +985,13 @@ mod tests {
 
     fn base_world_fixture() -> sim_core::base_world::BaseWorldBundle {
         sim_core::base_world::BaseWorldBundle::load_from_dir(
-            workspace_root().join("data/worlds/zurich-river-city-v1"),
+            workspace_root().join("data/worlds/abutopia"),
         )
         .expect("base world fixture loads")
     }
 
     #[test]
-    fn mobility_snapshot_base_world_match_rejects_wrong_car_route() {
+    fn mobility_snapshot_base_world_match_rejects_stale_vehicle() {
         use sim_core::mobility::{extract_from_world, seed};
 
         let base_world = base_world_fixture();
@@ -1024,12 +1003,20 @@ mod tests {
             &base_world
         ));
 
-        let vehicle = authored_snap
-            .vehicles
-            .values_mut()
-            .next()
-            .expect("base world seed contains at least one car");
-        vehicle.route_id = "route:arterial:invalid".to_string();
+        authored_snap.vehicles.insert(
+            sim_core::ids::VehicleId("vehicle:stale".to_string()),
+            sim_core::mobility::VehicleRecord {
+                id: sim_core::ids::VehicleId("vehicle:stale".to_string()),
+                kind: sim_core::mobility::VehicleKind::Car,
+                route_id: "route:arterial:stale".to_string(),
+                link_index: 0,
+                progress: 0.0,
+                speed_per_tick: 0.0,
+                capacity: 1,
+                occupants: Vec::new(),
+                dwell_ticks_remaining: 0,
+            },
+        );
 
         assert!(!mobility_snapshot_matches_base_world(
             &authored_snap,
@@ -1039,10 +1026,7 @@ mod tests {
 
     #[test]
     fn runtime_has_populated_routing_graph() {
-        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../data/city/zurich-network.json");
-        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
-            .expect("zurich fixture network must load");
+        let network = base_world_fixture().to_city_network();
         let runtime = SimulationRuntime::new_from_network(&network);
         let world = &runtime.world;
         let graph = world.resource::<sim_core::routing::Graph>();
@@ -1055,16 +1039,7 @@ mod tests {
             "graph must have edges after hydration"
         );
         let traffic_routes = world.resource::<sim_core::routing::TrafficRoutes>();
-        assert!(
-            traffic_routes.count() > 0,
-            "must have at least one traffic route"
-        );
-        assert!(traffic_routes.iter().all(|route| {
-            route
-                .edges
-                .iter()
-                .all(|edge_id| graph.edge(*edge_id).kind == sim_core::routing::EdgeKind::Road)
-        }));
+        assert_eq!(traffic_routes.count(), 0);
         let spatial = world.resource::<sim_core::routing::NodeSpatialIndex>();
         assert_eq!(spatial.size(), graph.node_count());
     }
@@ -1098,96 +1073,80 @@ mod tests {
 
     #[test]
     fn runtime_installs_hpa_index_for_seeded_graph() {
-        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../data/city/zurich-network.json");
-        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
-            .expect("zurich fixture network must load");
+        let network = base_world_fixture().to_city_network();
         let runtime = SimulationRuntime::new_from_network(&network);
         let graph = runtime.world.resource::<sim_core::routing::Graph>();
         let hpa = runtime.world.resource::<sim_core::routing::HpaIndex>();
 
         assert!(hpa.cluster_count() > 0);
-        assert!(hpa.portal_count() > 0);
+        assert_eq!(hpa.portal_count(), 0);
         assert!(hpa.cluster_count() <= graph.node_count());
     }
 
     #[test]
-    fn runtime_can_find_seeded_hierarchical_car_path() {
-        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../data/city/zurich-network.json");
-        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
-            .expect("zurich fixture network must load");
+    fn runtime_can_find_seeded_hierarchical_walk_path() {
+        let network = base_world_fixture().to_city_network();
         let runtime = SimulationRuntime::new_from_network(&network);
         let graph = runtime.world.resource::<sim_core::routing::Graph>();
         let hpa = runtime.world.resource::<sim_core::routing::HpaIndex>();
-        let traffic_routes = runtime.world.resource::<sim_core::routing::TrafficRoutes>();
-        let route = traffic_routes
+        let walk_edge = graph
+            .edges()
             .iter()
-            .find(|route| !route.edges.is_empty())
-            .expect("seeded runtime should contain a non-empty traffic route");
-        let road_edge = graph.edge(*route.edges.first().expect("route has first edge"));
-        assert_eq!(road_edge.kind, sim_core::routing::EdgeKind::Road);
+            .find(|edge| edge.kind == sim_core::routing::EdgeKind::Footway)
+            .expect("seeded runtime should contain a footway edge");
 
         let (path, stats) = sim_core::routing::HpaRouter::find_path(
             graph,
             hpa,
             sim_core::routing::PathRequest {
-                from: road_edge.from,
-                to: road_edge.to,
-                profile: sim_core::routing::RoutingProfileKey::Car,
+                from: walk_edge.from,
+                to: walk_edge.to,
+                profile: sim_core::routing::RoutingProfileKey::Walk,
             },
-            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Car),
+            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Walk),
         )
-        .expect("seeded road edge endpoints should route through HPA");
+        .expect("seeded footway edge endpoints should route through HPA");
 
         assert!(!path.edges.is_empty());
         assert!(stats.corridor_cluster_count >= 1);
         assert!(
             path.edges
                 .iter()
-                .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road)
+                .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Footway)
         );
     }
 
     #[test]
-    fn runtime_can_find_seeded_car_path() {
-        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../data/city/zurich-network.json");
-        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
-            .expect("zurich fixture network must load");
+    fn runtime_can_find_seeded_walk_path() {
+        let network = base_world_fixture().to_city_network();
         let runtime = SimulationRuntime::new_from_network(&network);
         let graph = runtime.world.resource::<sim_core::routing::Graph>();
-        let traffic_routes = runtime.world.resource::<sim_core::routing::TrafficRoutes>();
-        let route = traffic_routes
+        let walk_edge = graph
+            .edges()
             .iter()
-            .find(|route| !route.edges.is_empty())
-            .expect("seeded runtime should contain a non-empty traffic route");
-        let road_edge = graph.edge(*route.edges.first().expect("route has first edge"));
-        assert_eq!(road_edge.kind, sim_core::routing::EdgeKind::Road);
+            .find(|edge| edge.kind == sim_core::routing::EdgeKind::Footway)
+            .expect("seeded runtime should contain a footway edge");
         let path = sim_core::routing::AStarRouter::find_path(
             graph,
             sim_core::routing::PathRequest {
-                from: road_edge.from,
-                to: road_edge.to,
-                profile: sim_core::routing::RoutingProfileKey::Car,
+                from: walk_edge.from,
+                to: walk_edge.to,
+                profile: sim_core::routing::RoutingProfileKey::Walk,
             },
-            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Car),
+            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Walk),
         )
-        .expect("seeded road edge endpoints should be connected by the routing graph");
+        .expect("seeded footway edge endpoints should be connected by the routing graph");
         assert!(!path.edges.is_empty());
         assert!(
             path.edges
                 .iter()
-                .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road)
+                .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Footway)
         );
     }
 
     #[test]
     fn set_mobility_for_test_refreshes_hpa_index() {
-        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../data/city/zurich-network.json");
-        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
-            .expect("zurich fixture network must load");
+        let network = base_world_fixture().to_city_network();
         let mut runtime = SimulationRuntime::new_from_network(&network);
 
         runtime.set_mobility_for_test(sim_core::mobility::seed::from_network(
@@ -1213,10 +1172,7 @@ mod tests {
 
     #[test]
     fn set_mobility_for_test_refreshes_flow_field_cache() {
-        let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../data/city/zurich-network.json");
-        let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
-            .expect("zurich fixture network must load");
+        let network = base_world_fixture().to_city_network();
         let mut runtime = SimulationRuntime::new_from_network(&network);
         runtime.world.insert_resource(populated_flow_field_cache());
 
@@ -1244,16 +1200,11 @@ mod tests {
         let runtime = SimulationRuntime::new();
         let world = &runtime.world;
         let by_coord = world.resource::<sim_core::world::resources::ChunksByCoord>();
-        assert_eq!(by_coord.0.len(), 64);
+        assert_eq!(by_coord.0.len(), 1);
         assert!(
             by_coord
                 .0
-                .contains_key(&sim_core::ids::ChunkCoord { x: 4, y: 4 })
-        );
-        assert!(
-            by_coord
-                .0
-                .contains_key(&sim_core::ids::ChunkCoord { x: 7, y: 7 })
+                .contains_key(&sim_core::ids::ChunkCoord { x: 0, y: 0 })
         );
     }
     use sim_core::persistence::{
@@ -1267,72 +1218,36 @@ mod tests {
         delta
     }
 
-    fn road_test_network() -> sim_core::city_network::CityNetwork {
-        sim_core::city_network::CityNetwork {
-            version: 1,
-            world_id: "test".to_string(),
-            chunk_size: 32,
-            world_tiles: sim_core::city_network::WorldTiles {
-                width: 256,
-                height: 256,
-            },
-            arterial_paths: vec![
-                vec![
-                    sim_core::city_network::NetworkCoord { x: 0, y: 64 },
-                    sim_core::city_network::NetworkCoord { x: 64, y: 64 },
-                ],
-                vec![
-                    sim_core::city_network::NetworkCoord { x: 32, y: 0 },
-                    sim_core::city_network::NetworkCoord { x: 32, y: 64 },
-                ],
-            ],
-            pedestrian_corridors: vec![],
-        }
-    }
-
     #[test]
-    fn runtime_summarizes_multiple_loaded_chunks() {
+    fn runtime_summarizes_abutopia_loaded_chunk() {
         let runtime = SimulationRuntime::new();
 
         let summary = runtime.world_summary();
 
         assert_eq!(summary.chunk_size, 32);
-        assert_eq!(summary.world_id.0, "zurich-river-city-v1");
-        assert_eq!(summary.loaded_chunks.len(), 64);
+        assert_eq!(summary.world_id.0, "abutopia");
+        assert_eq!(summary.loaded_chunks.len(), 1);
         assert_eq!(
             summary.loaded_chunks.first(),
             Some(&ChunkCoordDto { x: 0, y: 0 })
         );
-        assert!(
-            summary
-                .loaded_chunks
-                .contains(&ChunkCoordDto { x: 4, y: 4 })
-        );
     }
 
     #[test]
-    fn runtime_returns_snapshots_for_each_loaded_chunk() {
+    fn runtime_returns_snapshot_for_abutopia_chunk() {
         let runtime = SimulationRuntime::new();
 
         let visible = runtime
-            .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .chunk_snapshot(ChunkCoord { x: 0, y: 0 })
             .expect("visible chunk loaded");
-        let east = runtime
-            .chunk_snapshot(ChunkCoord { x: 5, y: 4 })
-            .expect("east chunk loaded");
-        let south = runtime
-            .chunk_snapshot(ChunkCoord { x: 4, y: 5 })
-            .expect("south chunk loaded");
 
-        assert_eq!(visible.coord, ChunkCoordDto { x: 4, y: 4 });
-        assert_eq!(east.coord, ChunkCoordDto { x: 5, y: 4 });
-        assert_eq!(south.coord, ChunkCoordDto { x: 4, y: 5 });
+        assert_eq!(visible.coord, ChunkCoordDto { x: 0, y: 0 });
         assert!(runtime.chunk_snapshot(ChunkCoord { x: 0, y: 0 }).is_some());
-        assert!(runtime.chunk_snapshot(ChunkCoord { x: 8, y: 0 }).is_none());
+        assert!(runtime.chunk_snapshot(ChunkCoord { x: 1, y: 0 }).is_none());
     }
 
     #[test]
-    fn runtime_rotates_pulses_through_loaded_chunks() {
+    fn runtime_pulses_the_single_abutopia_chunk() {
         let mut runtime = SimulationRuntime::new();
 
         let first = tile_pulse(runtime.next_pulse());
@@ -1345,11 +1260,11 @@ mod tests {
         assert_eq!(first.coord, ChunkCoordDto { x: 0, y: 0 });
         assert!(first.local_index < 1024);
         assert_eq!(second.tick, 2);
-        assert_eq!(second.coord, ChunkCoordDto { x: 1, y: 0 });
+        assert_eq!(second.coord, ChunkCoordDto { x: 0, y: 0 });
         assert_eq!(third.tick, 3);
-        assert_eq!(third.coord, ChunkCoordDto { x: 2, y: 0 });
+        assert_eq!(third.coord, ChunkCoordDto { x: 0, y: 0 });
         assert_eq!(fourth.tick, 4);
-        assert_eq!(fourth.coord, ChunkCoordDto { x: 3, y: 0 });
+        assert_eq!(fourth.coord, ChunkCoordDto { x: 0, y: 0 });
     }
 
     #[tokio::test]
@@ -1361,16 +1276,15 @@ mod tests {
         use sim_core::persistence::InMemoryChunkSnapshotStore;
 
         let mut runtime = SimulationRuntime::new();
-        // `SimulationRuntime::new()` already applies one tile mutation per
-        // seeded chunk, so all three chunks are dirty. Mutate one again to
-        // make sure the dirty path through SnapshotProviders is exercised.
+        // Mutate the authored abutopia chunk to make sure the dirty path
+        // through SnapshotProviders is exercised.
         runtime
             .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
                 abutown_protocol::SetTileKindCommandDto {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
-                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     command_id: "command:provider-path:1".to_string(),
-                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    coord: abutown_protocol::ChunkCoordDto { x: 0, y: 0 },
                     local_index: 9,
                     kind: abutown_protocol::TileKindDto::Water,
                 },
@@ -1406,9 +1320,9 @@ mod tests {
         }
 
         let stored = store
-            .read_snapshot(ChunkCoord { x: 4, y: 4 }, &compatibility)
+            .read_snapshot(ChunkCoord { x: 0, y: 0 }, &compatibility)
             .expect("snapshot for the mutated chunk landed in the store");
-        assert_eq!(stored.coord, abutown_protocol::ChunkCoordDto { x: 4, y: 4 });
+        assert_eq!(stored.coord, abutown_protocol::ChunkCoordDto { x: 0, y: 0 });
     }
 
     #[tokio::test]
@@ -1431,9 +1345,9 @@ mod tests {
             .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
                 abutown_protocol::SetTileKindCommandDto {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
-                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     command_id: "command:persist-test:1".to_string(),
-                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    coord: abutown_protocol::ChunkCoordDto { x: 0, y: 0 },
                     local_index: 11,
                     kind: abutown_protocol::TileKindDto::Water,
                 },
@@ -1456,7 +1370,7 @@ mod tests {
         runtime.mark_chunk_snapshots_persisted(&next_coords);
 
         let visible = store
-            .read_snapshot(ChunkCoord { x: 4, y: 4 }, &compatibility)
+            .read_snapshot(ChunkCoord { x: 0, y: 0 }, &compatibility)
             .expect("visible snapshot reflects new event");
         assert!(visible.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
@@ -1471,9 +1385,9 @@ mod tests {
             .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
                 abutown_protocol::SetTileKindCommandDto {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
-                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     command_id: "command:test:1".to_string(),
-                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    coord: abutown_protocol::ChunkCoordDto { x: 0, y: 0 },
                     local_index: 11,
                     kind: abutown_protocol::TileKindDto::Water,
                 },
@@ -1490,7 +1404,7 @@ mod tests {
         assert_eq!(runtime.event_count(), 1);
 
         let snapshot = runtime
-            .chunk_snapshot(sim_core::ids::ChunkCoord { x: 4, y: 4 })
+            .chunk_snapshot(sim_core::ids::ChunkCoord { x: 0, y: 0 })
             .expect("mutated chunk snapshot exists");
         assert!(snapshot.tiles.iter().any(|tile| {
             tile.local_index == 11 && tile.kind == abutown_protocol::TileKindDto::Water
@@ -1507,7 +1421,7 @@ mod tests {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
                     world_id: abutown_protocol::WorldId("other-world".to_string()),
                     command_id: "command:test:2".to_string(),
-                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    coord: abutown_protocol::ChunkCoordDto { x: 0, y: 0 },
                     local_index: 11,
                     kind: abutown_protocol::TileKindDto::Water,
                 },
@@ -1527,7 +1441,7 @@ mod tests {
             .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
                 abutown_protocol::SetTileKindCommandDto {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
-                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     command_id: "command:test:3".to_string(),
                     coord: abutown_protocol::ChunkCoordDto { x: 9, y: 9 },
                     local_index: 11,
@@ -1545,7 +1459,7 @@ mod tests {
     async fn runtime_rejects_no_op_tile_kind_commands_without_appending_event() {
         let mut runtime = SimulationRuntime::new();
         let current_kind = runtime
-            .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .chunk_snapshot(ChunkCoord { x: 0, y: 0 })
             .and_then(|snapshot| {
                 snapshot
                     .tiles
@@ -1559,9 +1473,9 @@ mod tests {
             .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
                 abutown_protocol::SetTileKindCommandDto {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
-                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     command_id: "command:test:4".to_string(),
-                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    coord: abutown_protocol::ChunkCoordDto { x: 0, y: 0 },
                     local_index: 11,
                     kind: current_kind,
                 },
@@ -1576,13 +1490,9 @@ mod tests {
     #[tokio::test]
     async fn hydrate_from_stores_restores_chunk_from_snapshot_and_replays_tail_events() {
         // Seed: a chunk with tile 0 = Road at version 1, snapshotted.
-        let mut authoring_chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
+        let mut authoring_chunk = Chunk::new(ChunkCoord { x: 0, y: 0 }, 32);
         authoring_chunk.set_tile_kind(0, TileKind::Road).unwrap();
-        let snapshot = build_chunk_snapshot(
-            "zurich-river-city-v1",
-            &authoring_chunk,
-            ChunkActivity::Active,
-        );
+        let snapshot = build_chunk_snapshot("abutopia", &authoring_chunk, ChunkActivity::Active);
 
         let mut snapshot_store = InMemoryChunkSnapshotStore::default();
         let base_world = base_world_fixture();
@@ -1596,10 +1506,10 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:tail".to_string(),
             command_id: "command:tail".to_string(),
-            world_id: WorldId("zurich-river-city-v1".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 2,
             version: 2,
-            coord: ChunkCoordDto { x: 4, y: 4 },
+            coord: ChunkCoordDto { x: 0, y: 0 },
             local_index: 7,
             kind: TileKindDto::Water,
         });
@@ -1617,7 +1527,7 @@ mod tests {
         .await
         .unwrap();
 
-        let restored = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
+        let restored = runtime.chunk_snapshot(ChunkCoord { x: 0, y: 0 }).unwrap();
         assert_eq!(restored.chunk_version, 2);
         let kinds: std::collections::HashMap<u16, TileKindDto> = restored
             .tiles
@@ -1641,7 +1551,7 @@ mod tests {
         .await
         .unwrap();
 
-        let snap = runtime.chunk_snapshot(ChunkCoord { x: 4, y: 4 }).unwrap();
+        let snap = runtime.chunk_snapshot(ChunkCoord { x: 0, y: 0 }).unwrap();
         assert_eq!(
             snap.chunk_version, 0,
             "base world chunks start at version 0 before player mutations"
@@ -1655,16 +1565,16 @@ mod tests {
         ));
 
         let before = runtime
-            .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .chunk_snapshot(ChunkCoord { x: 0, y: 0 })
             .expect("chunk exists");
 
         let rejection = runtime
             .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
                 abutown_protocol::SetTileKindCommandDto {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
-                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     command_id: "command:test:store-failure".to_string(),
-                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    coord: abutown_protocol::ChunkCoordDto { x: 0, y: 0 },
                     local_index: 11,
                     kind: abutown_protocol::TileKindDto::Water,
                 },
@@ -1676,7 +1586,7 @@ mod tests {
         assert_eq!(runtime.event_count(), 0);
         assert_eq!(
             runtime
-                .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+                .chunk_snapshot(ChunkCoord { x: 0, y: 0 })
                 .expect("chunk still exists"),
             before
         );
@@ -1692,9 +1602,9 @@ mod tests {
         let mut runtime = SimulationRuntime::new();
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("zurich-river-city-v1".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             command_id: "command:dup".to_string(),
-            coord: ChunkCoordDto { x: 4, y: 4 },
+            coord: ChunkCoordDto { x: 0, y: 0 },
             local_index: 12,
             kind: TileKindDto::Water,
         });
@@ -1785,10 +1695,10 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:winner".to_string(),
             command_id: "command:race".to_string(),
-            world_id: WorldId("zurich-river-city-v1".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 7,
             version: 7,
-            coord: ChunkCoordDto { x: 4, y: 4 },
+            coord: ChunkCoordDto { x: 0, y: 0 },
             local_index: 0,
             kind: TileKindDto::Water,
         });
@@ -1797,9 +1707,9 @@ mod tests {
 
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("zurich-river-city-v1".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             command_id: "command:race".to_string(),
-            coord: ChunkCoordDto { x: 4, y: 4 },
+            coord: ChunkCoordDto { x: 0, y: 0 },
             local_index: 13,
             kind: TileKindDto::Road,
         });
@@ -1825,7 +1735,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(runtime.mobility_tick_for_test(), 0);
-        assert_eq!(runtime.mobility_agent_count_for_test(), 1011);
+        assert_eq!(runtime.mobility_agent_count_for_test(), 1);
         assert_eq!(
             runtime.mobility_vehicle_count_for_test(),
             expected_base_world_car_count(&base_world)
@@ -1848,7 +1758,7 @@ mod tests {
         let mut mobility_store = InMemoryMobilitySnapshotStore::default();
         MobilitySnapshotStore::write(
             &mut mobility_store,
-            "zurich-river-city-v1",
+            "abutopia",
             persisted_tick,
             &authored_snap,
             &base_world.snapshot_compatibility(),
@@ -1869,71 +1779,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hydrate_ignores_snapshot_missing_base_world_cars() {
-        use sim_core::mobility::{extract_from_world, seed};
-
-        let network = road_test_network();
-        let (authored, _) = seed::from_network(
-            &network,
-            sim_core::mobility::seed::SeedDensity {
-                pedestrians_per_corridor: 0,
-                cars_per_arterial: 0,
-            },
-        );
-        let authored_snap = extract_from_world(&authored);
-        assert!(
-            authored_snap.vehicles.is_empty(),
-            "test fixture should mimic the stale persisted vehicleless snapshot"
-        );
-
-        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
-        MobilitySnapshotStore::write(
-            &mut mobility_store,
-            "zurich-river-city-v1",
-            99,
-            &authored_snap,
-            &base_world_fixture().snapshot_compatibility(),
-        )
-        .await
-        .unwrap();
-
-        let base_world = base_world_fixture();
-        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
-            Box::new(InMemoryWorldEventStore::default()),
-            Box::new(InMemoryChunkSnapshotStore::default()),
-            Box::new(mobility_store),
-            &base_world,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(runtime.mobility_tick_for_test(), 0);
-        assert_eq!(
-            runtime.mobility_vehicle_count_for_test(),
-            expected_base_world_car_count(&base_world)
-        );
-    }
-
-    #[tokio::test]
-    async fn hydrate_ignores_snapshot_with_wrong_base_world_car_count() {
+    async fn hydrate_ignores_snapshot_with_stale_vehicle_for_carless_abutopia() {
         use sim_core::mobility::seed;
 
         let base_world = base_world_fixture();
         let (authored, _) =
             seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
         let mut authored_snap = extract_from_world(&authored);
-        let removed = authored_snap
-            .vehicles
-            .keys()
-            .next()
-            .cloned()
-            .expect("base world seed contains at least one car");
-        authored_snap.vehicles.remove(&removed);
+        authored_snap.vehicles.insert(
+            sim_core::ids::VehicleId("vehicle:stale".to_string()),
+            sim_core::mobility::VehicleRecord {
+                id: sim_core::ids::VehicleId("vehicle:stale".to_string()),
+                kind: sim_core::mobility::VehicleKind::Car,
+                route_id: "route:arterial:stale".to_string(),
+                link_index: 0,
+                progress: 0.0,
+                speed_per_tick: 0.0,
+                capacity: 1,
+                occupants: Vec::new(),
+                dwell_ticks_remaining: 0,
+            },
+        );
 
         let mut mobility_store = InMemoryMobilitySnapshotStore::default();
         MobilitySnapshotStore::write(
             &mut mobility_store,
-            "zurich-river-city-v1",
+            "abutopia",
             99,
             &authored_snap,
             &base_world.snapshot_compatibility(),

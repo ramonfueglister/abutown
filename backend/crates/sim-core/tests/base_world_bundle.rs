@@ -7,26 +7,26 @@ fn fixture_root() -> PathBuf {
         .ancestors()
         .nth(3)
         .expect("sim-core crate lives under backend/crates/sim-core")
-        .join("data/worlds/zurich-river-city-v1")
+        .join("data/worlds/abutopia")
 }
 
 #[test]
-fn loads_zurich_base_world_fixture() {
+fn loads_abutopia_base_world_fixture() {
     let bundle = BaseWorldBundle::load_from_dir(fixture_root()).expect("bundle loads");
 
-    assert_eq!(bundle.world_id(), "zurich-river-city-v1");
+    assert_eq!(bundle.world_id(), "abutopia");
     assert_eq!(bundle.chunk_size(), 32);
-    assert_eq!(bundle.world_tiles().width, 256);
-    assert_eq!(bundle.world_tiles().height, 256);
-    assert_eq!(bundle.transport.roads.len(), 3_396);
-    assert_eq!(bundle.transport.rails.len(), 256);
-    assert_eq!(bundle.transport.arterial_paths.len(), 3);
-    assert_eq!(bundle.transport.rail_paths.len(), 1);
-    assert_eq!(bundle.transport.pedestrian_corridors.len(), 160);
-    assert!(bundle.buildings.footprints.len() >= 2_268);
-    assert!(bundle.decorations.trees.len() > 3_000);
-    assert!(bundle.decorations.details.len() >= 260);
-    assert_eq!(bundle.chunk_coords().len(), 64);
+    assert_eq!(bundle.world_tiles().width, 16);
+    assert_eq!(bundle.world_tiles().height, 8);
+    assert_eq!(bundle.transport.roads.len(), 10);
+    assert!(bundle.transport.rails.is_empty());
+    assert!(bundle.transport.arterial_paths.is_empty());
+    assert!(bundle.transport.rail_paths.is_empty());
+    assert_eq!(bundle.transport.pedestrian_corridors.len(), 1);
+    assert_eq!(bundle.buildings.footprints.len(), 2);
+    assert!(bundle.decorations.trees.is_empty());
+    assert!(bundle.decorations.details.is_empty());
+    assert_eq!(bundle.chunk_coords().len(), 1);
 }
 
 #[test]
@@ -40,11 +40,10 @@ fn missing_manifest_fails_closed() {
 #[test]
 fn materializes_chunk_tiles_from_bundle_layers() {
     let bundle = BaseWorldBundle::load_from_dir(fixture_root()).expect("bundle loads");
-    let chunk = bundle.tiles_for_chunk(sim_core::ids::ChunkCoord { x: 4, y: 4 }, 7);
+    let chunk = bundle.tiles_for_chunk(sim_core::ids::ChunkCoord { x: 0, y: 0 }, 7);
 
     assert_eq!(chunk.len(), 32 * 32);
     assert!(chunk.iter().any(|tile| tile.kind == TileKind::Road));
-    assert!(chunk.iter().any(|tile| tile.kind == TileKind::Water));
     assert!(
         chunk
             .iter()

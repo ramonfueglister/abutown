@@ -52,7 +52,7 @@ async fn websocket_sends_hello_and_tile_pulse() {
     )
     .await
     .expect("first tile pulse must arrive within one tick window");
-    assert_eq!(first_pulse.world_id, "zurich-river-city-v1");
+    assert_eq!(first_pulse.world_id, "abutopia");
     let coord = first_pulse.coord.as_ref().expect("coord");
     assert_eq!(coord.x, 0);
     assert_eq!(coord.y, 0);
@@ -73,7 +73,7 @@ async fn websocket_sends_hello_and_tile_pulse() {
 }
 
 #[tokio::test]
-async fn websocket_pulses_rotate_loaded_chunks() {
+async fn websocket_pulses_single_abutopia_chunk() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -94,8 +94,8 @@ async fn websocket_pulses_rotate_loaded_chunks() {
     let third_delta = read_next_tile_pulse(&mut stream).await;
 
     assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
-    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 1, y: 0 }));
-    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 2, y: 0 }));
+    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
+    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
 
     server.abort();
 }
@@ -157,12 +157,12 @@ async fn websocket_sends_mobility_snapshots_after_subscribe() {
 
     subscribe_to_seeded_chunks(&mut stream).await;
 
-    // Subscribe emits one MobilityChunkSnapshot per chunk. Collect all three.
+    // Subscribe emits one MobilityChunkSnapshot per subscribed chunk.
     let mut snapshots: Vec<w::MobilityChunkSnapshot> = Vec::new();
-    while snapshots.len() < 3 {
+    while snapshots.is_empty() {
         let msg = read_server_message(&mut stream).await;
         if let Some(w::server_message::Body::MobilityChunkSnapshot(snap)) = msg.body {
-            assert_eq!(snap.world_id, "zurich-river-city-v1");
+            assert_eq!(snap.world_id, "abutopia");
             snapshots.push(snap);
         }
     }
@@ -199,9 +199,9 @@ async fn websocket_broadcasts_accepted_command_event() {
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "zurich-river-city-v1".to_string(),
+                world_id: "abutopia".to_string(),
                 command_id: "command:ws:1".to_string(),
-                coord: Some(w::ChunkCoord { x: 4, y: 4 }),
+                coord: Some(w::ChunkCoord { x: 0, y: 0 }),
                 local_index: 12,
                 kind: w::TileKind::BuildingFootprint as i32,
             },
@@ -228,7 +228,7 @@ async fn websocket_broadcasts_accepted_command_event() {
             && let Some(w::world_event::Event::TileKindSet(tk)) = event.event
         {
             assert_eq!(tk.command_id, "command:ws:1");
-            assert_eq!(tk.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
+            assert_eq!(tk.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
             assert_eq!(tk.local_index, 12);
             assert_eq!(tk.kind, w::TileKind::BuildingFootprint as i32);
             break;
@@ -257,9 +257,9 @@ async fn websocket_does_not_broadcast_failed_command_append() {
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "zurich-river-city-v1".to_string(),
+                world_id: "abutopia".to_string(),
                 command_id: "command:ws:store-failure".to_string(),
-                coord: Some(w::ChunkCoord { x: 4, y: 4 }),
+                coord: Some(w::ChunkCoord { x: 0, y: 0 }),
                 local_index: 11,
                 kind: w::TileKind::Water as i32,
             },
@@ -373,11 +373,7 @@ where
     let subscribe = w::ClientMessage {
         body: Some(w::client_message::Body::ChunkSubscribe(w::ChunkSubscribe {
             protocol_version: u32::from(PROTOCOL_VERSION),
-            coords: vec![
-                w::ChunkCoord { x: 4, y: 4 },
-                w::ChunkCoord { x: 5, y: 4 },
-                w::ChunkCoord { x: 4, y: 5 },
-            ],
+            coords: vec![w::ChunkCoord { x: 0, y: 0 }],
         })),
     };
     let bytes = subscribe.encode_to_vec();
@@ -424,7 +420,7 @@ async fn chunk_subscribe_emits_chunk_snapshot_frame() {
     // Drain the Hello frame.
     let _ = client.next().await.unwrap().unwrap();
 
-    send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 4, y: 4 }]).await;
+    send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 0, y: 0 }]).await;
 
     let mut got_snapshot = false;
     for _ in 0..10 {
@@ -434,8 +430,8 @@ async fn chunk_subscribe_emits_chunk_snapshot_frame() {
             && let Some(w::server_message::Body::MobilityChunkSnapshot(snap)) = parsed.body
         {
             let coord = snap.chunk.as_ref().expect("chunk coord present");
-            assert_eq!(coord.x, 4);
-            assert_eq!(coord.y, 4);
+            assert_eq!(coord.x, 0);
+            assert_eq!(coord.y, 0);
             got_snapshot = true;
             break;
         }
@@ -447,9 +443,7 @@ async fn chunk_subscribe_emits_chunk_snapshot_frame() {
 }
 
 #[tokio::test]
-async fn two_clients_with_different_subscriptions_see_different_entities() {
-    // The authored base-world seed places visible entities in both chunks,
-    // giving two disjoint per-chunk snapshots.
+async fn two_clients_subscribed_to_abutopia_chunk_see_the_same_seeded_pedestrian() {
     let app = build_app_with_runtime(runtime_with_seeded_mobility());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -458,17 +452,14 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
     });
     let url = format!("ws://{addr}/ws");
 
-    // Client A subscribes only to chunk (4,4).
     let (mut client_a, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_a).await; // drain hello
-    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 4, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 0, y: 0 }]).await;
 
-    // Client B subscribes only to chunk (5,4).
     let (mut client_b, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_b).await; // drain hello
-    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 5, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 0, y: 0 }]).await;
 
-    // Subscribe emits one MobilityChunkSnapshot per subscribed chunk — read it.
     let snap_a = read_next_chunk_snapshot(&mut client_a).await;
     let snap_b = read_next_chunk_snapshot(&mut client_b).await;
 
@@ -485,27 +476,19 @@ async fn two_clients_with_different_subscriptions_see_different_entities() {
         .chain(snap_b.vehicles.iter().map(|v| v.id.clone()))
         .collect();
 
-    // Each client must receive at least one entity — otherwise the test is vacuous.
     assert!(
         !ids_a.is_empty(),
-        "client A should see entities in chunk (4,4)"
+        "client A should see entities in the abutopia chunk"
     );
     assert!(
         !ids_b.is_empty(),
-        "client B should see entities in chunk (5,4)"
+        "client B should see entities in the abutopia chunk"
     );
-
-    // Per-chunk snapshots carry only entities in that chunk — sets are disjoint by construction.
-    assert!(
-        ids_a.intersection(&ids_b).next().is_none(),
-        "client A and client B should see disjoint entity sets (A={ids_a:?}, B={ids_b:?})",
-    );
+    assert_eq!(ids_a, ids_b);
 }
 
 #[tokio::test]
-async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
-    // This test exercises the per-chunk channel architecture: each client
-    // subscribes to a distinct chunk and receives only entities in that chunk.
+async fn three_clients_subscribed_to_abutopia_chunk_each_receive_snapshot() {
     let app = build_app_with_runtime(runtime_with_seeded_mobility());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -514,22 +497,18 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
     });
     let url = format!("ws://{addr}/ws");
 
-    // Client A subscribes only to chunk (4,4).
     let (mut client_a, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_a).await; // drain hello
-    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 4, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 0, y: 0 }]).await;
 
-    // Client B subscribes only to chunk (5,4).
     let (mut client_b, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_b).await; // drain hello
-    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 5, y: 4 }]).await;
+    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 0, y: 0 }]).await;
 
-    // Client C subscribes only to chunk (4,5).
     let (mut client_c, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_c).await; // drain hello
-    send_chunk_subscribe(&mut client_c, &[w::ChunkCoord { x: 4, y: 5 }]).await;
+    send_chunk_subscribe(&mut client_c, &[w::ChunkCoord { x: 0, y: 0 }]).await;
 
-    // Subscribe emits one MobilityChunkSnapshot per subscribed chunk — read one per client.
     let snap_a = read_next_chunk_snapshot(&mut client_a).await;
     let snap_b = read_next_chunk_snapshot(&mut client_b).await;
     let snap_c = read_next_chunk_snapshot(&mut client_c).await;
@@ -553,33 +532,20 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
         .chain(snap_c.vehicles.iter().map(|v| v.id.clone()))
         .collect();
 
-    // Each client must receive at least one entity — otherwise the test is vacuous.
     assert!(
         !ids_a.is_empty(),
-        "client A should see entities in chunk (4,4)"
+        "client A should see entities in the abutopia chunk"
     );
     assert!(
         !ids_b.is_empty(),
-        "client B should see entities in chunk (5,4)"
+        "client B should see entities in the abutopia chunk"
     );
     assert!(
         !ids_c.is_empty(),
-        "client C should see entities in chunk (4,5)"
+        "client C should see entities in the abutopia chunk"
     );
-
-    // Per-chunk snapshots carry only entities in that chunk — sets are disjoint by construction.
-    assert!(
-        ids_a.intersection(&ids_b).next().is_none(),
-        "client A and client B should see disjoint entity sets (A={ids_a:?}, B={ids_b:?})",
-    );
-    assert!(
-        ids_a.intersection(&ids_c).next().is_none(),
-        "client A and client C should see disjoint entity sets (A={ids_a:?}, C={ids_c:?})",
-    );
-    assert!(
-        ids_b.intersection(&ids_c).next().is_none(),
-        "client B and client C should see disjoint entity sets (B={ids_b:?}, C={ids_c:?})",
-    );
+    assert_eq!(ids_a, ids_b);
+    assert_eq!(ids_a, ids_c);
 }
 
 #[tokio::test]
@@ -598,8 +564,8 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
     let (mut client, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let _ = client.next().await.unwrap().unwrap(); // hello
 
-    // Subscribe only to (4,4), a chunk with authored base-world mobility.
-    send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 4, y: 4 }]).await;
+    // Subscribe only to the abutopia chunk with authored base-world mobility.
+    send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 0, y: 0 }]).await;
 
     let mut snapshot_seen = false;
     let mut delta_seen = false;
