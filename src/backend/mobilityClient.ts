@@ -65,6 +65,7 @@ export type MobilitySnapshotOptions = {
 export type RequiredMobility = {
   state: MobilityOverlayState;
   tickPeriodMs: number;
+  simTime: number;
 };
 
 const DEFAULT_TICK_PERIOD_MS = 100;
@@ -93,6 +94,7 @@ export async function requireMobilitySnapshot(options: MobilitySnapshotOptions =
 
   const worldSummary = await requestWorldSummary(baseUrl, fetchImpl);
   const tickPeriodMs = worldSummary.tick_period_ms > 0 ? worldSummary.tick_period_ms : DEFAULT_TICK_PERIOD_MS;
+  const simTime = worldSummary.sim_time;
 
   const mobilityPayload = await requestMobilitySnapshot(baseUrl, fetchImpl);
 
@@ -100,7 +102,7 @@ export async function requireMobilitySnapshot(options: MobilitySnapshotOptions =
   state = markMobilityConnecting(state, now());
   state = applyMobilitySnapshot(state, mobilityPayload, now());
 
-  return { state, tickPeriodMs };
+  return { state, tickPeriodMs, simTime };
 }
 
 export function connectMobilityBackend(options: MobilityBackendBridgeOptions): MobilityBackendBridge {

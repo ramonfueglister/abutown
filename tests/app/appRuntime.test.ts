@@ -56,7 +56,7 @@ function createDependencies(overrides: Partial<AppRuntimeDependencies> = {}) {
     }),
     requireMobilitySnapshot: vi.fn(async () => {
       order.push('requireMobilitySnapshot');
-      return { state: createMobilityOverlayState(), tickPeriodMs: 250 };
+      return { state: createMobilityOverlayState(), tickPeriodMs: 250, simTime: 0 };
     }),
     mountCardHandView: vi.fn(() => {
       order.push('mountCardHandView');
@@ -129,7 +129,7 @@ describe('startAppRuntime', () => {
     const { dependencies } = createDependencies({
       requireBackend: vi.fn(async () => backendStatus),
       requireBaseWorld: vi.fn(async () => baseWorld),
-      requireMobilitySnapshot: vi.fn(async () => ({ state: mobilityState, tickPeriodMs: 125 })),
+      requireMobilitySnapshot: vi.fn(async () => ({ state: mobilityState, tickPeriodMs: 125, simTime: 0 })),
     });
     const onInitialState = vi.fn();
 
@@ -150,6 +150,7 @@ describe('startAppRuntime', () => {
       baseWorld,
       mobilityState,
       mobilityTickPeriodMs: 125,
+      simTime: 0,
     });
   });
 

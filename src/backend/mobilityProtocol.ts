@@ -17,6 +17,7 @@ export type AgentMobilityDto = {
   world_coord: WorldCoordDto;
   direction: DirectionDto;
   sprite_key: string;
+  age_seconds: number; // elapsed sim-seconds; 0 when not provided by the backend
 };
 
 export type VehicleKindDto = 'car';
@@ -133,6 +134,7 @@ export type WorldSummaryDto = {
   chunk_size: number;
   loaded_chunks: ChunkCoordDto[];
   tick_period_ms: number;
+  sim_time: number;
 };
 
 export function isMobilitySnapshotDto(value: unknown): value is MobilitySnapshotDto {
@@ -416,6 +418,7 @@ export function agentMobilityFromProto(p: AgentMobilityProto): AgentMobilityDto 
     world_coord: { x: p.worldCoord.x, y: p.worldCoord.y },
     direction: directionFromProto(p.direction),
     sprite_key: p.spriteKey,
+    age_seconds: Number(p.ageSeconds),
   };
 }
 
@@ -492,6 +495,7 @@ export function worldSummaryFromProto(p: WorldSummaryProto): WorldSummaryDto {
     chunk_size: p.chunkSize,
     loaded_chunks: p.loadedChunks.map((c) => ({ x: c.x, y: c.y })),
     tick_period_ms: p.tickPeriodMs,
+    sim_time: Number(p.simTime),
   };
 }
 

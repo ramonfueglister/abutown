@@ -43,6 +43,7 @@ const snapshot: MobilitySnapshotDto = {
       world_coord: { x: 0, y: 0 },
       direction: 'e',
       sprite_key: 'pedestrian:0',
+      age_seconds: 0,
     },
   ],
   vehicles: [

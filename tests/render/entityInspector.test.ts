@@ -18,6 +18,7 @@ describe('entity inspector', () => {
       speed: 0,
       laneOffset: 0,
       direction: 'e',
+      ageSeconds: 2 * 31_536_000,
       sprite: { sheet: 'minimal-peds.0', frameWidth: 16, frameHeight: 32 },
     })).toEqual({
       title: 'agent:1',
@@ -26,6 +27,7 @@ describe('entity inspector', () => {
         { label: 'Tile', value: '10.0, 20.0' },
         { label: 'Next', value: '11.0, 20.0' },
         { label: 'Direction', value: 'e' },
+        { label: 'Age', value: '2.0 yr' },
         { label: 'Sprite', value: 'minimal-peds.0' },
       ],
     });

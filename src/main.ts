@@ -95,6 +95,7 @@ let previousTime = performance.now();
 let backendStatus: BackendHealthDto | null = null;
 let mobilityState: MobilityOverlayState = createMobilityOverlayState();
 let mobilityTickPeriodMs = 100;
+let simTime = 0;
 let mobilityBackendBridge: MobilityBackendBridge | null = null;
 const entitySelection = createEntitySelection<BackendPedestrian, BackendCar>({
   getPedestrians: () => pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs),
@@ -136,6 +137,7 @@ function applyInitialRuntimeState(initial: AppRuntimeInitialState): void {
   applyBaseWorld(initial.baseWorld);
   mobilityState = initial.mobilityState;
   mobilityTickPeriodMs = initial.mobilityTickPeriodMs;
+  simTime = initial.simTime;
 }
 
 async function boot(): Promise<void> {
@@ -225,6 +227,7 @@ function render(): void {
     selectedAgentId: entitySelection.selectedAgentId(),
     selectedVehicleId: entitySelection.selectedVehicleId(),
     now: Date.now,
+    simTime,
   });
 }
 

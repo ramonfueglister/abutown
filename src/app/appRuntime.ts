@@ -25,6 +25,7 @@ export type AppRuntimeInitialState = {
   baseWorld: BaseWorldResponse;
   mobilityState: MobilityOverlayState;
   mobilityTickPeriodMs: number;
+  simTime: number;
 };
 
 export type AppRuntimeHandle = {
@@ -83,6 +84,7 @@ export async function startAppRuntime(options: StartAppRuntimeOptions): Promise<
       baseWorld,
       mobilityState: required.state,
       mobilityTickPeriodMs: required.tickPeriodMs,
+      simTime: required.simTime,
     };
 
     options.onInitialState(initialState);
