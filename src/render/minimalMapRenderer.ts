@@ -37,6 +37,20 @@ import {
   VEHICLE_INSPECTOR_PANEL,
   drawInspectorPanel,
 } from './inspectorPanelPainter';
+import {
+  EAST,
+  NORTH,
+  SOUTH,
+  WEST,
+  coordKey as key,
+  distanceOutsideMap,
+  isInsideMap,
+  maskSegments as gridMaskSegments,
+  movementAngle,
+  outwardExits as gridOutwardExits,
+  screenForwardOffset,
+  stableHash as hash,
+} from './gridMath';
 
 export type Coord = { x: number; y: number };
 
@@ -108,10 +122,6 @@ const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '
 const VIEWPORT_GRID_PADDING = 9;
 export const OUTSKIRTS_TILES = 12;
 export const EDGE_EXIT_TILES = 7;
-const NORTH = 1;
-const EAST = 2;
-const SOUTH = 4;
-const WEST = 8;
 
 export function renderMinimalMap(state: MinimalMapRendererState): void {
   const { ctx, camera, viewport } = state;
@@ -211,8 +221,8 @@ function drawOutskirtsTerrain(state: MinimalMapRendererState, visibleGrid: GridR
   for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(world.height - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
     for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(world.width - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
       const coord = { x, y };
-      if (isInsidePlayableMap(state, coord)) continue;
-      const edgeDistance = distanceOutsidePlayableMap(state, coord);
+      if (isInsideMap(coord, world)) continue;
+      const edgeDistance = distanceOutsideMap(coord, world);
       if (edgeDistance > OUTSKIRTS_TILES) continue;
 
       const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
@@ -358,7 +368,7 @@ function drawMaskLine(
 ): void {
   const { ctx } = state;
   const point = iso(state, coord);
-  const segments = maskSegments(state, mask);
+  const segments = gridMaskSegments(mask, state.tileSize);
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -381,16 +391,6 @@ function drawRoadPass(state: MinimalMapRendererState, point: Coord, segments: Co
     }
   }
   ctx.stroke();
-}
-
-function maskSegments(state: MinimalMapRendererState, mask: number): Coord[] {
-  const { tileSize } = state;
-  const result: Coord[] = [];
-  if ((mask & NORTH) !== 0) result.push({ x: 0, y: -tileSize.height / 2 });
-  if ((mask & EAST) !== 0) result.push({ x: tileSize.width / 2, y: 0 });
-  if ((mask & SOUTH) !== 0) result.push({ x: 0, y: tileSize.height / 2 });
-  if ((mask & WEST) !== 0) result.push({ x: -tileSize.width / 2, y: 0 });
-  return result;
 }
 
 function buildingVectorColor(building: RuntimeBuilding): string {
@@ -443,17 +443,6 @@ export function carVisualWorldPoint(
   };
 }
 
-function screenForwardOffset(from: Coord, to: Coord, distance: number): Coord {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy);
-  if (length === 0 || distance === 0) return { x: 0, y: 0 };
-  return {
-    x: (dx / length) * distance,
-    y: (dy / length) * distance,
-  };
-}
-
 function drawTrain(state: MinimalMapRendererState, tram: BackendTram): void {
   const { ctx } = state;
   const head = iso(state, tram.path[0]);
@@ -474,13 +463,6 @@ function drawTrain(state: MinimalMapRendererState, tram: BackendTram): void {
     drawCapsule(ctx, point, angle, segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
     ctx.restore();
   }
-}
-
-function movementAngle(currentPoint: Coord, nextPoint: Coord): number {
-  const dx = nextPoint.x - currentPoint.x;
-  const dy = nextPoint.y - currentPoint.y;
-  if (Math.abs(dx) + Math.abs(dy) < 0.001) return 0;
-  return Math.atan2(dy, dx);
 }
 
 function vehicleVectorColor(id: string): string {
@@ -526,7 +508,7 @@ function drawCarInspectorPanel(state: MinimalMapRendererState, inspector: Entity
 
 function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRect): void {
   for (const road of state.roads.values()) {
-    for (const exit of outwardExits(state, road.coord, road.mask)) {
+    for (const exit of gridOutwardExits(road.coord, road.mask, state.world)) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
         const coord = { x: road.coord.x + exit.dx * step, y: road.coord.y + exit.dy * step };
         if (!isCoordVisible(coord, visibleGrid)) continue;
@@ -540,7 +522,7 @@ function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRe
   }
 
   for (const rail of state.rails.values()) {
-    for (const exit of outwardExits(state, rail.coord, rail.mask)) {
+    for (const exit of gridOutwardExits(rail.coord, rail.mask, state.world)) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
         const coord = { x: rail.coord.x + exit.dx * step, y: rail.coord.y + exit.dy * step };
         if (!isCoordVisible(coord, visibleGrid)) continue;
@@ -587,18 +569,9 @@ function isCoordVisible(coord: Coord, rect: GridRect): boolean {
   return coord.x >= rect.minX && coord.x <= rect.maxX && coord.y >= rect.minY && coord.y <= rect.maxY;
 }
 
-function isInsidePlayableMap(state: MinimalMapRendererState, coord: Coord): boolean {
-  return coord.x >= 0 && coord.y >= 0 && coord.x < state.world.width && coord.y < state.world.height;
-}
-
 function isWaterSurface(state: MinimalMapRendererState, coord: Coord): boolean {
   const kind = state.terrain.get(key(coord));
   return kind === 'water' || kind === 'riverbank';
-}
-
-function distanceOutsidePlayableMap(state: MinimalMapRendererState, coord: Coord): number {
-  const { world } = state;
-  return Math.max(0, -coord.x, coord.x - (world.width - 1), -coord.y, coord.y - (world.height - 1));
 }
 
 function drawIsoTile(state: MinimalMapRendererState, point: Coord): void {
@@ -614,16 +587,6 @@ function drawFadingEdgeTile(state: MinimalMapRendererState, step: number, draw: 
   ctx.globalAlpha = 0.68 * (1 - step / (EDGE_EXIT_TILES + 1));
   draw();
   ctx.restore();
-}
-
-function outwardExits(state: MinimalMapRendererState, coord: Coord, mask: number): { dx: number; dy: number; mask: number }[] {
-  const { world } = state;
-  const exits: { dx: number; dy: number; mask: number }[] = [];
-  if (coord.y === 0 && (mask & NORTH) !== 0) exits.push({ dx: 0, dy: -1, mask: NORTH | SOUTH });
-  if (coord.x === world.width - 1 && (mask & EAST) !== 0) exits.push({ dx: 1, dy: 0, mask: EAST | WEST });
-  if (coord.y === world.height - 1 && (mask & SOUTH) !== 0) exits.push({ dx: 0, dy: 1, mask: NORTH | SOUTH });
-  if (coord.x === 0 && (mask & WEST) !== 0) exits.push({ dx: -1, dy: 0, mask: EAST | WEST });
-  return exits;
 }
 
 function compareDrawables(state: MinimalMapRendererState, a: Drawable, b: Drawable): number {
@@ -657,17 +620,4 @@ function iso(state: MinimalMapRendererState, coord: Coord): Coord {
 
 function worldToGrid(state: MinimalMapRendererState, point: Coord): Coord {
   return mapUnproject(point, state.tileSize);
-}
-
-function key(coord: Coord): string {
-  return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
-}
-
-function hash(value: string): number {
-  let result = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    result ^= value.charCodeAt(i);
-    result = Math.imul(result, 16777619);
-  }
-  return result >>> 0;
 }
