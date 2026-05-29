@@ -320,6 +320,40 @@ fn route_assignment_uses_full_hpa_corridor() {
     assert_eq!(world.resource::<RouteAssignmentStats>().assigned, 1);
     assert_eq!(world.resource::<RouteAssignmentStats>().failed, 0);
 }
+
+#[test]
+fn route_assignment_activity_walker_continues_on_connected_footway() {
+    let (mut world, mut schedule, entity) = world_schedule_and_agent_with_graph(
+        outgoing_from_destination_graph(),
+        "walk:b",
+        "activity:work",
+        0.0,
+    );
+    world.get_mut::<WalkPlan>(entity).unwrap().stages = vec![PlanStage::Activity {
+        activity_id: "activity:wander".into(),
+    }];
+    world
+        .get_mut::<AgentMobilityStateComponent>(entity)
+        .unwrap()
+        .0 = AgentMobilityState::Walking {
+        link_id: "walk:b".into(),
+        progress: 1.0,
+    };
+
+    schedule.run(&mut world);
+
+    let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+    assert!(matches!(
+        &state.0,
+        AgentMobilityState::Walking { link_id, progress }
+            if link_id == "walk:out" && *progress == 0.0
+    ));
+    assert!(
+        world.resource::<DirtyAgents>().0.contains(&entity),
+        "link switch must be published in the mobility delta"
+    );
+}
+
 #[test]
 fn route_assignment_and_advance_accept_graph_native_edge_keys() {
     let (mut world, mut schedule, entity) = world_schedule_and_agent_with_graph(

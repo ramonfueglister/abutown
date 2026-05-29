@@ -307,9 +307,9 @@ impl SimulationRuntime {
     ) -> anyhow::Result<Self> {
         let mut world = sim_core::bevy_ecs::world::World::new();
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
-        let city_network = bundle.to_city_network();
         let seeded_stops = Vec::new();
-        let seeded_walks = sim_core::mobility::seed::seeded_walks_from_network(&city_network);
+        let seeded_walks = sim_core::mobility::seed::seeded_walks_from_base_world(&bundle);
+        let city_network = bundle.to_city_network();
         world.insert_resource(city_network);
 
         CorePlugin::default().install(&mut world, &mut schedule);
@@ -424,7 +424,7 @@ impl SimulationRuntime {
         let mut schedule = sim_core::bevy_ecs::schedule::Schedule::default();
 
         let seeded_stops = Vec::new();
-        let seeded_walks = sim_core::mobility::seed::seeded_walks_from_network(&network);
+        let seeded_walks = sim_core::mobility::seed::seeded_walks_from_base_world(base_world);
 
         // Insert city network as resource before plugins run.
         world.insert_resource(network);
@@ -1355,6 +1355,42 @@ mod tests {
         assert_eq!(edge.polyline.first().copied(), Some((2.0, 3.51)));
         assert_eq!(edge.polyline.last().copied(), Some((13.0, 3.51)));
         assert!(edge.polyline.iter().all(|(_, y)| (*y - 3.0).abs() > 0.001));
+    }
+
+    #[test]
+    fn runtime_uses_grass_footways_from_base_world() {
+        let base_world = base_world_fixture();
+        let runtime = SimulationRuntime::new_with_event_store_and_base_world(
+            Box::new(InMemoryWorldEventStore::default()),
+            base_world.clone(),
+        )
+        .expect("base world runtime should construct");
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let grass_edges: Vec<_> = graph
+            .edges()
+            .iter()
+            .filter(|edge| {
+                edge.kind == sim_core::routing::EdgeKind::Footway
+                    && edge
+                        .legacy_id
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("link:walk:grass:"))
+            })
+            .collect();
+
+        assert!(
+            !grass_edges.is_empty(),
+            "base world graph has grass footways"
+        );
+        for edge in grass_edges {
+            for (x, y) in &edge.polyline {
+                assert_eq!(
+                    base_world.tile_kind_at(x.floor() as i32, y.floor() as i32),
+                    sim_core::tile::TileKind::Grass,
+                    "grass footway endpoints must stay on grass tiles"
+                );
+            }
+        }
     }
 
     #[test]

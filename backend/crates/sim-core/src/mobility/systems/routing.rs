@@ -141,6 +141,7 @@ pub fn route_assignment_system(
         (With<AgentMarker>, Without<ActiveRoute>),
     >,
     simulated: Res<SimulatedChunks>,
+    tick: Res<Tick>,
     graph: Res<crate::routing::Graph>,
     hpa: Option<Res<crate::routing::HpaIndex>>,
     spatial: Option<Res<crate::routing::NodeSpatialIndex>>,
@@ -166,8 +167,11 @@ pub fn route_assignment_system(
         };
         if matches!(stage, PlanStage::Activity { .. }) {
             if progress >= 1.0 {
+                let next_link =
+                    next_wander_footway_link(&graph, &link_id, progress, &stable.0, tick.0)
+                        .unwrap_or_else(|| link_id.clone());
                 state.0 = AgentMobilityState::Walking {
-                    link_id,
+                    link_id: next_link,
                     progress: 0.0,
                 };
                 dirty.0.insert(entity);
@@ -261,6 +265,62 @@ pub fn route_assignment_system(
         });
         stats.assigned += 1;
     }
+}
+
+fn next_wander_footway_link(
+    graph: &crate::routing::Graph,
+    current_link_id: &str,
+    progress: f32,
+    agent_id: &crate::ids::AgentId,
+    tick: u64,
+) -> Option<String> {
+    let current_edge_id = crate::mobility::api::edge_by_canonical_key(graph, current_link_id)?;
+    let current_edge = graph.edge(current_edge_id);
+    let node = if progress >= 1.0 {
+        current_edge.to
+    } else {
+        current_edge.from
+    };
+    let mut candidates: Vec<_> = graph
+        .outgoing(node)
+        .iter()
+        .copied()
+        .filter(|edge_id| {
+            let edge = graph.edge(*edge_id);
+            edge.kind == crate::routing::EdgeKind::Footway && *edge_id != current_edge_id
+        })
+        .map(|edge_id| crate::mobility::api::canonical_edge_key(graph, edge_id))
+        .collect();
+    if candidates.is_empty() {
+        candidates = graph
+            .outgoing(node)
+            .iter()
+            .copied()
+            .filter(|edge_id| graph.edge(*edge_id).kind == crate::routing::EdgeKind::Footway)
+            .map(|edge_id| crate::mobility::api::canonical_edge_key(graph, edge_id))
+            .collect();
+    }
+    candidates.sort();
+    candidates.dedup();
+    if candidates.is_empty() {
+        return None;
+    }
+    let index = (wander_seed(&agent_id.0, current_link_id, tick) as usize) % candidates.len();
+    Some(candidates[index].clone())
+}
+
+fn wander_seed(agent_id: &str, current_link_id: &str, tick: u64) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in agent_id
+        .as_bytes()
+        .iter()
+        .chain(current_link_id.as_bytes())
+        .chain(tick.to_le_bytes().iter())
+    {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]

@@ -319,6 +319,18 @@ fn cached_or_graph_link_polylines_for_persist(
                 .clone()
         });
     }
+    for edge in graph.edges() {
+        if edge.kind != EdgeKind::Footway {
+            continue;
+        }
+        let Some(link_id) = &edge.legacy_id else {
+            continue;
+        };
+        if link_id.starts_with("link:walk:") {
+            out.entry(link_id.clone())
+                .or_insert_with(|| edge.polyline.clone());
+        }
+    }
     out
 }
 
@@ -531,6 +543,29 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
             link_id.clone(),
             polyline,
             kind,
+        );
+        edge_by_link.insert(link_id, edge_id);
+    }
+
+    let mut walk_link_ids: Vec<_> = snap
+        .link_polylines
+        .keys()
+        .filter(|link_id| link_id.starts_with("link:walk:"))
+        .cloned()
+        .collect();
+    walk_link_ids.sort();
+    for link_id in walk_link_ids {
+        if edge_by_link.contains_key(&link_id) {
+            continue;
+        }
+        let polyline = resolve_snapshot_polyline(world, &link_id, &snap.link_polylines);
+        let edge_id = push_edge(
+            &mut nodes,
+            &mut point_nodes,
+            &mut edges,
+            link_id.clone(),
+            polyline,
+            EdgeKind::Footway,
         );
         edge_by_link.insert(link_id, edge_id);
     }
