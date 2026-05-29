@@ -171,7 +171,7 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
     .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort((a, b) => compareDrawables(state, a, b));
-  for (const road of state.roads.values()) if (isCoordVisible(road.coord, visibleGrid)) drawRoad(state, road);
+  drawRoads(state, [...state.roads.values()].filter((road) => isCoordVisible(road.coord, visibleGrid)));
   for (const path of state.railPaths) drawRailPath(state, path);
   drawEdgeConnections(state, visibleGrid);
   for (const station of state.railStations) if (isCoordVisible(station.coord, visibleGrid)) drawRailStation(state, station);
@@ -207,6 +207,52 @@ function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
   drawRoadBand(state, road.coord, road.mask, ROAD_CENTER_LINE, screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }));
 }
 
+function drawRoads(state: MinimalMapRendererState, roads: RuntimeRoadTile[]): void {
+  if (roads.length === 0) return;
+  const bands = [
+    { color: ROAD_SIDEWALK, width: screenStableWorldSize(24, state.camera.scale, { minWorld: 24, maxWorld: 36 }) },
+    { color: ROAD_CURB, width: screenStableWorldSize(18, state.camera.scale, { minWorld: 18, maxWorld: 29 }) },
+    { color: ROAD_CASING, width: screenStableWorldSize(16, state.camera.scale, { minWorld: 16, maxWorld: 26 }) },
+    { color: ROAD_CORE, width: screenStableWorldSize(13, state.camera.scale, { minWorld: 13, maxWorld: 22 }) },
+    { color: ROAD_CENTER_LINE, width: screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }) },
+  ];
+  for (const band of bands) drawRoadRuns(state, roads, band.color, band.width);
+}
+
+function drawRoadRuns(state: MinimalMapRendererState, roads: RuntimeRoadTile[], color: string, width: number): void {
+  const horizontal = new Map<number, number[]>();
+  const vertical = new Map<number, number[]>();
+  for (const road of roads) {
+    if ((road.mask & (EAST | WEST)) !== 0) appendGrouped(horizontal, road.coord.y, road.coord.x);
+    if ((road.mask & (NORTH | SOUTH)) !== 0) appendGrouped(vertical, road.coord.x, road.coord.y);
+  }
+
+  const { ctx, tileSize } = state;
+  ctx.save();
+  ctx.fillStyle = color;
+  for (const [y, xs] of horizontal) {
+    for (const run of mergedRuns(xs)) {
+      ctx.fillRect(
+        run.min * tileSize.width,
+        y * tileSize.height + tileSize.height / 2 - width / 2,
+        (run.max - run.min + 1) * tileSize.width,
+        width,
+      );
+    }
+  }
+  for (const [x, ys] of vertical) {
+    for (const run of mergedRuns(ys)) {
+      ctx.fillRect(
+        x * tileSize.width + tileSize.width / 2 - width / 2,
+        run.min * tileSize.height,
+        width,
+        (run.max - run.min + 1) * tileSize.height,
+      );
+    }
+  }
+  ctx.restore();
+}
+
 function drawRoadBand(state: MinimalMapRendererState, coord: Coord, mask: number, color: string, width: number): void {
   const { ctx, tileSize } = state;
   const point = iso(state, coord);
@@ -225,6 +271,23 @@ function drawRoadBand(state: MinimalMapRendererState, coord: Coord, mask: number
     ctx.fillRect(point.x - width / 2, point.y - width / 2, width, width);
   }
   ctx.restore();
+}
+
+function appendGrouped(groups: Map<number, number[]>, key: number, value: number): void {
+  const values = groups.get(key);
+  if (values) values.push(value);
+  else groups.set(key, [value]);
+}
+
+function mergedRuns(values: number[]): { min: number; max: number }[] {
+  const sorted = [...new Set(values)].sort((a, b) => a - b);
+  const runs: { min: number; max: number }[] = [];
+  for (const value of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && value <= last.max + 1) last.max = value;
+    else runs.push({ min: value, max: value });
+  }
+  return runs;
 }
 
 function drawRail(state: MinimalMapRendererState, rail: RuntimeRailTile): void {
