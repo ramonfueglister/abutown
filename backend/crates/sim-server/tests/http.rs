@@ -649,6 +649,7 @@ async fn postgres_duplicate_command_returns_same_response() {
     let config = ServerConfig {
         database_url,
         supabase_url: "http://dummy.local".to_string(),
+        cors_allowed_origins: Vec::new(),
     };
     let app = build_app_from_config(&config)
         .await

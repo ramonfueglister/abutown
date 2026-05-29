@@ -2,6 +2,7 @@
 pub struct ServerConfig {
     pub database_url: String,
     pub supabase_url: String,
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl ServerConfig {
@@ -17,11 +18,21 @@ impl ServerConfig {
     {
         let mut database_url = None;
         let mut supabase_url = None;
+        let mut cors_allowed_origins = Vec::new();
 
         for (key, value) in pairs {
             match key.as_ref() {
                 "DATABASE_URL" => database_url = Some(value.into()),
                 "SUPABASE_URL" => supabase_url = Some(value.into()),
+                "CORS_ALLOWED_ORIGINS" => {
+                    cors_allowed_origins = value
+                        .into()
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|origin| !origin.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                }
                 _ => {}
             }
         }
@@ -29,6 +40,7 @@ impl ServerConfig {
         Ok(Self {
             database_url: database_url.ok_or(ServerConfigError::MissingDatabaseUrl)?,
             supabase_url: supabase_url.ok_or(ServerConfigError::MissingSupabaseUrl)?,
+            cors_allowed_origins,
         })
     }
 }
@@ -70,5 +82,52 @@ mod tests {
         let error = ServerConfig::from_pairs([("DATABASE_URL", "postgres://primary")]).unwrap_err();
 
         assert_eq!(error, ServerConfigError::MissingSupabaseUrl);
+    }
+
+    #[test]
+    fn config_parses_comma_separated_cors_origins() {
+        let config = ServerConfig::from_pairs([
+            ("DATABASE_URL", "postgres://primary"),
+            ("SUPABASE_URL", "https://project.supabase.co"),
+            (
+                "CORS_ALLOWED_ORIGINS",
+                "http://127.0.0.1:5173,https://app.example.com",
+            ),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            config.cors_allowed_origins,
+            vec![
+                "http://127.0.0.1:5173".to_string(),
+                "https://app.example.com".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn config_defaults_to_no_cors_origins_when_unset() {
+        let config = ServerConfig::from_pairs([
+            ("DATABASE_URL", "postgres://primary"),
+            ("SUPABASE_URL", "https://project.supabase.co"),
+        ])
+        .unwrap();
+
+        assert!(config.cors_allowed_origins.is_empty());
+    }
+
+    #[test]
+    fn config_ignores_blank_cors_entries() {
+        let config = ServerConfig::from_pairs([
+            ("DATABASE_URL", "postgres://primary"),
+            ("SUPABASE_URL", "https://project.supabase.co"),
+            ("CORS_ALLOWED_ORIGINS", " http://a , ,http://b "),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            config.cors_allowed_origins,
+            vec!["http://a".to_string(), "http://b".to_string()]
+        );
     }
 }
