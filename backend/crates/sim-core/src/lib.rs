@@ -10,6 +10,7 @@ pub mod persistence;
 pub mod routing;
 pub mod scheduler;
 pub mod tile;
+pub mod time;
 pub mod world;
 
 // Re-export bevy_ecs so downstream crates (sim-server, sim-runner) can refer

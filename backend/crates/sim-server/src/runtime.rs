@@ -201,6 +201,7 @@ impl SimulationRuntime {
         world.insert_resource(city_network);
 
         CorePlugin::default().install(&mut world, &mut schedule);
+        sim_core::time::TimePlugin.install(&mut world, &mut schedule);
 
         sim_core::routing::RoutingPlugin {
             seeded_stops,
@@ -317,6 +318,7 @@ impl SimulationRuntime {
         world.insert_resource(network);
 
         CorePlugin::default().install(&mut world, &mut schedule);
+        sim_core::time::TimePlugin.install(&mut world, &mut schedule);
 
         sim_core::routing::RoutingPlugin {
             seeded_stops,
