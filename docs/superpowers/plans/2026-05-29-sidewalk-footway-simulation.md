@@ -927,7 +927,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Add sidewalk assertion to browser smoke**
+- [x] **Step 1: Add sidewalk assertion to browser smoke**
 
 In `tests/e2e/render-smoke.spec.ts`, after the existing mobility agent object expectation block, add:
 
@@ -940,7 +940,7 @@ expect(agent.coord.y).toBeLessThan(3.57);
 expect(agent.coord.y).not.toBe(3);
 ```
 
-- [ ] **Step 2: Run TypeScript and unit tests**
+- [x] **Step 2: Run TypeScript and unit tests**
 
 Run:
 
@@ -952,7 +952,7 @@ npm run build
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Run Rust formatting, clippy, and tests**
+- [x] **Step 3: Run Rust formatting, clippy, and tests**
 
 Run:
 
@@ -964,7 +964,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Stop existing local dev servers before Playwright**
+- [x] **Step 4: Stop existing local dev servers before Playwright**
 
 Run:
 
@@ -977,7 +977,7 @@ done
 
 Expected: ports `8080` and `5173` are free for Playwright web servers.
 
-- [ ] **Step 5: Run mandatory browser smoke**
+- [x] **Step 5: Run mandatory browser smoke**
 
 Run:
 
@@ -987,7 +987,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target npx playwright test tests/e2e/rend
 
 Expected: PASS. The smoke must confirm one backend-driven pedestrian, no retired transit assets, no rail/tram diagnostics, and `coord.y` in the sidewalk band around `3.51`.
 
-- [ ] **Step 6: Commit e2e assertion**
+- [x] **Step 6: Commit e2e assertion**
 
 Run:
 
@@ -998,7 +998,7 @@ git commit -m "test(e2e): assert pedestrians render on sidewalks"
 
 Expected: commit succeeds.
 
-- [ ] **Step 7: Final branch status**
+- [x] **Step 7: Final branch status**
 
 Run:
 
