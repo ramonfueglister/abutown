@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Split the browser runtime out of `src/main.ts` into focused, testable modules while preserving current app behavior.
 
 **Architecture:** `src/main.ts` becomes a composition root. New `src/app/*` modules own startup, fail-closed backend UI, entity selection, input wiring, static Zurich context, and runtime diagnostics. `src/render/minimalMapRenderer.ts` owns the current canvas draw path after the startup and diagnostics boundaries are protected by tests.
@@ -50,7 +52,7 @@ Do not modify:
 - Create: `tests/app/backendRequiredView.test.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/app/backendRequiredView.test.ts`:
 
@@ -162,7 +164,7 @@ describe('backendRequiredView', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run:
 
@@ -172,7 +174,7 @@ npx vitest run tests/app/backendRequiredView.test.ts --passWithNoTests
 
 Expected: FAIL because `src/app/backendRequiredView.ts` does not exist.
 
-- [ ] **Step 3: Implement the fail-closed view module**
+- [x] **Step 3: Implement the fail-closed view module**
 
 Create `src/app/backendRequiredView.ts`:
 
@@ -236,7 +238,7 @@ export function escapeHtml(value: unknown): string {
 }
 ```
 
-- [ ] **Step 4: Wire `src/main.ts` to use the module**
+- [x] **Step 4: Wire `src/main.ts` to use the module**
 
 In `src/main.ts`:
 
@@ -262,7 +264,7 @@ function renderBackendRequired(error: unknown): void {
 
 3. Delete the local `escapeHtml` function from `src/main.ts`.
 
-- [ ] **Step 5: Run focused verification**
+- [x] **Step 5: Run focused verification**
 
 Run:
 
@@ -273,7 +275,7 @@ npx tsc --noEmit --pretty false
 
 Expected: both exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/backendRequiredView.ts tests/app/backendRequiredView.test.ts src/main.ts
@@ -291,7 +293,7 @@ git commit -m "refactor: extract backend required view"
 - Modify: `src/main.ts`
 - Modify: `tests/backend/cardHandView.test.ts`
 
-- [ ] **Step 1: Write the failing runtime tests**
+- [x] **Step 1: Write the failing runtime tests**
 
 Create `tests/app/appRuntime.test.ts`:
 
@@ -390,7 +392,7 @@ describe('startAppRuntime', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run:
 
@@ -400,7 +402,7 @@ npx vitest run tests/app/appRuntime.test.ts --passWithNoTests
 
 Expected: FAIL because `src/app/appRuntime.ts` does not exist.
 
-- [ ] **Step 3: Implement `src/app/appRuntime.ts`**
+- [x] **Step 3: Implement `src/app/appRuntime.ts`**
 
 Create `src/app/appRuntime.ts`:
 
@@ -492,7 +494,7 @@ export async function startAppRuntime(options: StartAppRuntimeOptions): Promise<
 }
 ```
 
-- [ ] **Step 4: Wire `src/main.ts` through `startAppRuntime`**
+- [x] **Step 4: Wire `src/main.ts` through `startAppRuntime`**
 
 In `src/main.ts`:
 
@@ -547,7 +549,7 @@ function applyInitialRuntimeState(initial: AppRuntimeInitialState): void {
 
 3. Keep `boot()` and `renderBackendRequired()` in `main.ts` until later tasks extract more code.
 
-- [ ] **Step 5: Replace the static card-hand runtime test**
+- [x] **Step 5: Replace the static card-hand runtime test**
 
 In `tests/backend/cardHandView.test.ts`, remove:
 
@@ -557,7 +559,7 @@ import { readFileSync } from 'node:fs';
 
 Remove the whole `describe('card hand view runtime integration', ...)` block. The real runtime mount is now covered by `tests/app/appRuntime.test.ts`.
 
-- [ ] **Step 6: Run focused verification**
+- [x] **Step 6: Run focused verification**
 
 Run:
 
@@ -568,7 +570,7 @@ npx tsc --noEmit --pretty false
 
 Expected: both commands exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/app/appRuntime.ts tests/app/appRuntime.test.ts src/main.ts tests/backend/cardHandView.test.ts
@@ -585,7 +587,7 @@ git commit -m "refactor: isolate app runtime startup"
 - Create: `tests/app/entitySelection.test.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/app/entitySelection.test.ts`:
 
@@ -654,7 +656,7 @@ describe('entitySelection', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run:
 
@@ -664,7 +666,7 @@ npx vitest run tests/app/entitySelection.test.ts --passWithNoTests
 
 Expected: FAIL because `src/app/entitySelection.ts` does not exist.
 
-- [ ] **Step 3: Implement the pure selection module**
+- [x] **Step 3: Implement the pure selection module**
 
 Create `src/app/entitySelection.ts`:
 
@@ -738,7 +740,7 @@ export function findNearestProjectedEntity<T extends SelectableEntity>(
 }
 ```
 
-- [ ] **Step 4: Wire `src/main.ts` to use `createEntitySelection`**
+- [x] **Step 4: Wire `src/main.ts` to use `createEntitySelection`**
 
 In `src/main.ts`:
 
@@ -829,7 +831,7 @@ selectedId: entitySelection.selectedVehicleId(),
 
 7. Delete local `findNearestProjectedEntity` from `src/main.ts`.
 
-- [ ] **Step 5: Run focused verification**
+- [x] **Step 5: Run focused verification**
 
 Run:
 
@@ -840,7 +842,7 @@ npx tsc --noEmit --pretty false
 
 Expected: both commands exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/entitySelection.ts tests/app/entitySelection.test.ts src/main.ts
@@ -856,7 +858,7 @@ git commit -m "refactor: extract mobility entity selection"
 - Create: `src/app/interaction.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Create the interaction module**
+- [x] **Step 1: Create the interaction module**
 
 Create `src/app/interaction.ts`:
 
@@ -923,7 +925,7 @@ export function attachMapInteraction(options: AttachMapInteractionOptions): void
 }
 ```
 
-- [ ] **Step 2: Wire `src/main.ts` to use it**
+- [x] **Step 2: Wire `src/main.ts` to use it**
 
 In `src/main.ts`:
 
@@ -950,7 +952,7 @@ function attachCamera(): void {
 
 3. Remove now-unused `panCameraTarget` and `zoomCameraAt` imports from `src/main.ts`.
 
-- [ ] **Step 3: Run focused verification**
+- [x] **Step 3: Run focused verification**
 
 Run:
 
@@ -961,7 +963,7 @@ npx vitest run tests/app/entitySelection.test.ts --passWithNoTests
 
 Expected: both commands exit 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/app/interaction.ts src/main.ts
@@ -978,7 +980,7 @@ git commit -m "refactor: extract canvas interaction wiring"
 - Create: `tests/app/runtimeDiagnostics.test.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Write the failing diagnostics tests**
+- [x] **Step 1: Write the failing diagnostics tests**
 
 Create `tests/app/runtimeDiagnostics.test.ts`:
 
@@ -1067,7 +1069,7 @@ describe('runtimeDiagnostics', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run:
 
@@ -1077,7 +1079,7 @@ npx vitest run tests/app/runtimeDiagnostics.test.ts --passWithNoTests
 
 Expected: FAIL because `src/app/runtimeDiagnostics.ts` does not exist.
 
-- [ ] **Step 3: Implement `runtimeDiagnostics.ts`**
+- [x] **Step 3: Implement `runtimeDiagnostics.ts`**
 
 Create `src/app/runtimeDiagnostics.ts` with this exported shape:
 
@@ -1283,7 +1285,7 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
 }
 ```
 
-- [ ] **Step 4: Wire diagnostics from `src/main.ts`**
+- [x] **Step 4: Wire diagnostics from `src/main.ts`**
 
 In `src/main.ts`:
 
@@ -1368,7 +1370,7 @@ installRuntimeDiagnostics(window, {
 
 3. Delete `loadedRasterAssetPaths()` from `src/main.ts`.
 
-- [ ] **Step 5: Run focused verification**
+- [x] **Step 5: Run focused verification**
 
 Run:
 
@@ -1379,7 +1381,7 @@ npx tsc --noEmit --pretty false
 
 Expected: both commands exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/runtimeDiagnostics.ts tests/app/runtimeDiagnostics.test.ts src/main.ts
@@ -1396,7 +1398,7 @@ git commit -m "refactor: extract runtime diagnostics"
 - Create: `tests/app/zurichRuntimeContext.test.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Write the failing context tests**
+- [x] **Step 1: Write the failing context tests**
 
 Create `tests/app/zurichRuntimeContext.test.ts`:
 
@@ -1431,7 +1433,7 @@ describe('zurichRuntimeContext', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run:
 
@@ -1441,7 +1443,7 @@ npx vitest run tests/app/zurichRuntimeContext.test.ts --passWithNoTests
 
 Expected: FAIL because `src/app/zurichRuntimeContext.ts` does not exist.
 
-- [ ] **Step 3: Implement the context module**
+- [x] **Step 3: Implement the context module**
 
 Create `src/app/zurichRuntimeContext.ts` by moving the existing static world setup from `src/main.ts` into a factory. Use these exported types and function names:
 
@@ -1537,7 +1539,7 @@ export function toRuntimeBuilding(building: ZurichBuilding): RuntimeBuilding {
 
 Add `buildStaticDiagnostics(...)` in the same file by moving the current `cityDiagnostics()`, `buildStreetFrontages()`, `touchesRail()`, `cardinal()`, `key()`, and related static helpers from `src/main.ts`. It must use the `runtime` object passed to it, not globals.
 
-- [ ] **Step 4: Wire context from `src/main.ts`**
+- [x] **Step 4: Wire context from `src/main.ts`**
 
 In `src/main.ts`:
 
@@ -1615,7 +1617,7 @@ function cityDiagnostics(): Record<string, number> {
 
 Keep helpers still used by drawing, routing projection, or diagnostics.
 
-- [ ] **Step 5: Run focused verification**
+- [x] **Step 5: Run focused verification**
 
 Run:
 
@@ -1626,7 +1628,7 @@ npx tsc --noEmit --pretty false
 
 Expected: both commands exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/zurichRuntimeContext.ts tests/app/zurichRuntimeContext.test.ts src/main.ts
@@ -1643,7 +1645,7 @@ git commit -m "refactor: extract zurich runtime context"
 - Modify: `src/main.ts`
 - Test: existing render and e2e tests
 
-- [ ] **Step 1: Create the renderer API shell**
+- [x] **Step 1: Create the renderer API shell**
 
 Create `src/render/minimalMapRenderer.ts` with the exported shell first:
 
@@ -1694,7 +1696,7 @@ export function renderMinimalMap(state: MinimalMapRendererState): void {
 }
 ```
 
-- [ ] **Step 2: Move draw functions without behavior changes**
+- [x] **Step 2: Move draw functions without behavior changes**
 
 Move the draw-related functions from `src/main.ts` into `src/render/minimalMapRenderer.ts`. Preserve function bodies and order as much as possible:
 
@@ -1809,7 +1811,7 @@ Export `MAP_BACKGROUND` if `backendRequiredView` still needs the same color:
 export const MAP_BACKGROUND = '#f6f0e3';
 ```
 
-- [ ] **Step 3: Replace `render()` in `src/main.ts`**
+- [x] **Step 3: Replace `render()` in `src/main.ts`**
 
 In `src/main.ts`, add:
 
@@ -1850,7 +1852,7 @@ function render(): void {
 }
 ```
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -1861,7 +1863,7 @@ npx vitest run tests/render/minimalMapProjection.test.ts tests/render/minimalGly
 
 Expected: both commands exit 0.
 
-- [ ] **Step 5: Run visual smoke**
+- [x] **Step 5: Run visual smoke**
 
 Run:
 
@@ -1877,7 +1879,7 @@ Expected: Playwright passes; current renderer diagnostics still report:
 - at least one visible vehicle
 - moving backend entities over time
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/render/minimalMapRenderer.ts src/main.ts
@@ -1893,7 +1895,7 @@ git commit -m "refactor: extract minimal map renderer"
 - Modify: `src/main.ts`
 - Modify: imports in new modules if needed
 
-- [ ] **Step 1: Remove unused symbols from `src/main.ts`**
+- [x] **Step 1: Remove unused symbols from `src/main.ts`**
 
 Run:
 
@@ -1922,7 +1924,7 @@ const ctx = canvasContext;
 // state variables, runtime setup, resize/frame/render composition
 ```
 
-- [ ] **Step 2: Add a static composition-root regression test**
+- [x] **Step 2: Add a static composition-root regression test**
 
 Create `tests/app/mainComposition.test.ts`:
 
@@ -1948,7 +1950,7 @@ describe('main composition root', () => {
 });
 ```
 
-- [ ] **Step 3: Run focused verification**
+- [x] **Step 3: Run focused verification**
 
 Run:
 
@@ -1959,7 +1961,7 @@ npx tsc --noEmit --pretty false
 
 Expected: both commands exit 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/main.ts tests/app/mainComposition.test.ts
@@ -1974,7 +1976,7 @@ git commit -m "refactor: reduce main to composition root"
 
 - No planned source changes unless verification exposes a defect.
 
-- [ ] **Step 1: Run unit tests**
+- [x] **Step 1: Run unit tests**
 
 Run:
 
@@ -1984,7 +1986,7 @@ npm test
 
 Expected: all Vitest files pass.
 
-- [ ] **Step 2: Run production build**
+- [x] **Step 2: Run production build**
 
 Run:
 
@@ -1994,7 +1996,7 @@ npm run build
 
 Expected: proto generation, TypeScript, and Vite build exit 0.
 
-- [ ] **Step 3: Run browser e2e**
+- [x] **Step 3: Run browser e2e**
 
 Run:
 
@@ -2004,7 +2006,7 @@ npm run test:e2e
 
 Expected: Playwright passes.
 
-- [ ] **Step 4: Run forbidden-path grep**
+- [x] **Step 4: Run forbidden-path grep**
 
 Run:
 
@@ -2014,7 +2016,7 @@ rg -n "fallback|fall back|unwrap_or\\(\\(0\\.0, 0\\.0\\)\\)|at_activity with emp
 
 Expected: no matches.
 
-- [ ] **Step 5: Run retired asset grep**
+- [x] **Step 5: Run retired asset grep**
 
 Run:
 
@@ -2024,7 +2026,7 @@ npx vitest run tests/render/noRetiredAssets.test.ts --passWithNoTests
 
 Expected: pass.
 
-- [ ] **Step 6: Browser spot-check current local app**
+- [x] **Step 6: Browser spot-check current local app**
 
 Open `http://127.0.0.1:5175/` against the current dev stack and verify with the browser:
 
@@ -2036,7 +2038,7 @@ Open `http://127.0.0.1:5175/` against the current dev stack and verify with the 
 - `city.loadedRasterAssetPaths.length === 0`
 - `city.mobilityVehicles.count >= 1`
 
-- [ ] **Step 7: Commit verification note if docs changed**
+- [x] **Step 7: Commit verification note if docs changed**
 
 If no files changed during verification, do not create an empty commit. If verification required doc updates, commit them:
 

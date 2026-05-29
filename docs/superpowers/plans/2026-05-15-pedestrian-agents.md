@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Remove the hard-coded demo mobility-agent mapping and make the already-rendered pedestrians the primary local agents, including click selection.
 
 **Architecture:** Add a small local-agent boundary in `src/render/pedestrianAgents.ts` that derives stable agent records from runtime pedestrians without duplicating rendering. `src/main.ts` owns selection state, hit testing, debug serialization, and visual selection rings around the existing pedestrian sprite.

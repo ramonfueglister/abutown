@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Connect the Vite client to the Rust mobility backend when explicitly enabled and render additive server-owned mobility markers.
 
 **Architecture:** Keep the Rust backend authoritative and the browser read-only. Add focused TypeScript modules for protocol guards, immutable mobility state reduction, a browser client bridge, and a canvas overlay; wire them into `src/main.ts` without replacing the existing local cars, pedestrians, or train.
@@ -27,11 +29,11 @@
 - Create: `src/backend/mobilityProtocol.ts`
 - Create: `tests/backend/mobilityProtocol.test.ts`
 
-- [ ] **Step 1: Add failing protocol tests**
+- [x] **Step 1: Add failing protocol tests**
 
 Create `tests/backend/mobilityProtocol.test.ts` with tests for accepting a valid mobility snapshot, accepting a `mobility_delta` message, and rejecting malformed payloads.
 
-- [ ] **Step 2: Run failing protocol tests**
+- [x] **Step 2: Run failing protocol tests**
 
 Run:
 
@@ -41,11 +43,11 @@ npm test -- tests/backend/mobilityProtocol.test.ts
 
 Expected: FAIL because `src/backend/mobilityProtocol.ts` does not exist.
 
-- [ ] **Step 3: Implement protocol guards**
+- [x] **Step 3: Implement protocol guards**
 
 Create `src/backend/mobilityProtocol.ts` with DTO types for `MobilitySnapshotDto`, `MobilityDeltaDto`, `AgentMobilityDto`, `VehicleMobilityDto`, `StopMobilityDto`, `AgentMobilityStateDto`, and `ServerMessageDto`. Export `isMobilitySnapshotDto`, `isMobilityDeltaDto`, and `parseServerMessage`.
 
-- [ ] **Step 4: Verify protocol tests pass**
+- [x] **Step 4: Verify protocol tests pass**
 
 Run:
 
@@ -61,11 +63,11 @@ Expected: PASS.
 - Create: `src/backend/mobilityState.ts`
 - Create: `tests/backend/mobilityState.test.ts`
 
-- [ ] **Step 1: Add failing state tests**
+- [x] **Step 1: Add failing state tests**
 
 Create tests that verify: initial disconnected state, snapshot application stores agents/vehicles/stops, `mobility_delta` replaces changed records, invalid messages increment `invalidMessages`, and the seeded walking agent projects to a Zurich-grid coordinate.
 
-- [ ] **Step 2: Run failing state tests**
+- [x] **Step 2: Run failing state tests**
 
 Run:
 
@@ -75,11 +77,11 @@ npm test -- tests/backend/mobilityState.test.ts
 
 Expected: FAIL because `src/backend/mobilityState.ts` does not exist.
 
-- [ ] **Step 3: Implement state reducer and projection**
+- [x] **Step 3: Implement state reducer and projection**
 
 Create `src/backend/mobilityState.ts`. It should expose `createMobilityOverlayState`, `applyMobilitySnapshot`, `applyMobilityDelta`, `applyServerMessage`, `markMobilityConnecting`, `markMobilityDisconnected`, `mobilityMarkers`, and `mobilityDiagnostics`.
 
-- [ ] **Step 4: Verify state tests pass**
+- [x] **Step 4: Verify state tests pass**
 
 Run:
 
@@ -95,11 +97,11 @@ Expected: PASS.
 - Create: `src/render/mobilityOverlay.ts`
 - Create: `tests/render/mobilityOverlay.test.ts`
 
-- [ ] **Step 1: Add failing overlay tests**
+- [x] **Step 1: Add failing overlay tests**
 
 Create tests that verify `buildMobilityOverlayDrawItems` returns visible agent/vehicle/stop draw items and respects an optional visibility predicate.
 
-- [ ] **Step 2: Run failing overlay tests**
+- [x] **Step 2: Run failing overlay tests**
 
 Run:
 
@@ -109,11 +111,11 @@ npm test -- tests/render/mobilityOverlay.test.ts
 
 Expected: FAIL because `src/render/mobilityOverlay.ts` does not exist.
 
-- [ ] **Step 3: Implement overlay helpers**
+- [x] **Step 3: Implement overlay helpers**
 
 Create `src/render/mobilityOverlay.ts` with `buildMobilityOverlayDrawItems` and `drawMobilityOverlay`. The draw function should use compact filled shapes and labels only at tiny scale so it stays diagnostic and does not dominate the game scene.
 
-- [ ] **Step 4: Verify overlay tests pass**
+- [x] **Step 4: Verify overlay tests pass**
 
 Run:
 
@@ -128,11 +130,11 @@ Expected: PASS.
 **Files:**
 - Create: `src/backend/mobilityClient.ts`
 
-- [ ] **Step 1: Implement browser bridge**
+- [x] **Step 1: Implement browser bridge**
 
 Create `src/backend/mobilityClient.ts` with `connectMobilityBackend(options)`. The bridge should fetch `/mobility`, validate it, open `/ws`, apply `mobility_delta` messages, ignore non-mobility messages, mark disconnected on fetch/WebSocket failure, and reconnect with a bounded delay unless stopped. The current game path keeps mobility in the default local-pedestrian layer, so runtime startup must not require URL or localStorage flags for pedestrian agents.
 
-- [ ] **Step 2: Type-check bridge through full build**
+- [x] **Step 2: Type-check bridge through full build**
 
 Run:
 
@@ -147,11 +149,11 @@ Expected: PASS or fail only on later missing `main.ts` wiring, which Task 5 reso
 **Files:**
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Wire mobility state into main**
+- [x] **Step 1: Wire mobility state into main**
 
 Modify `src/main.ts` to import the bridge/state/overlay modules, create a `mobilityState` variable, start `connectMobilityBackend` during boot, draw `drawMobilityOverlay` after dynamic city drawables, and include `mobilityDiagnostics(mobilityState)` under `city.mobility` in `render_game_to_text`.
 
-- [ ] **Step 2: Verify local no-backend behavior**
+- [x] **Step 2: Verify local no-backend behavior**
 
 Run:
 
@@ -166,7 +168,7 @@ Expected: existing e2e smoke remains green without requiring the Rust server.
 **Files:**
 - All changed files.
 
-- [ ] **Step 1: Run frontend unit tests**
+- [x] **Step 1: Run frontend unit tests**
 
 Run:
 
@@ -176,7 +178,7 @@ npm test
 
 Expected: PASS.
 
-- [ ] **Step 2: Run frontend build**
+- [x] **Step 2: Run frontend build**
 
 Run:
 
@@ -186,7 +188,7 @@ npm run build
 
 Expected: PASS.
 
-- [ ] **Step 3: Run backend tests**
+- [x] **Step 3: Run backend tests**
 
 Run:
 
@@ -196,7 +198,7 @@ cargo test --manifest-path backend/Cargo.toml --workspace
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit implementation**
+- [x] **Step 4: Commit implementation**
 
 Run:
 

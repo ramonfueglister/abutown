@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the first durable-world boundary: the Rust runtime periodically writes authoritative chunk snapshots into an in-memory snapshot store and clears dirty chunk state after each successful snapshot pass.
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
 
-**Status 2026-05-15:** Implemented in `sim-core` and `sim-server`; verified with `cargo test --manifest-path backend/Cargo.toml --workspace`. The checkbox list below is the original execution plan and has not been used as the source of truth for current implementation status.
+**Goal:** Add the first durable-world boundary: the Rust runtime periodically writes authoritative chunk snapshots into an in-memory snapshot store and clears dirty chunk state after each successful snapshot pass.
 
 **Architecture:** Keep hot simulation state in `SimulationRuntime` and `ChunkRegistry`; add a snapshot persistence pass that copies loaded chunk snapshots into `sim_core::persistence::InMemoryChunkSnapshotStore`. The server starts a separate snapshot loop next to the existing broadcast tick loop, so persistence remains outside websocket client handling and does not advance simulation time.
 
@@ -48,7 +48,7 @@ It does not implement Supabase/Postgres, schema migrations, external database wr
 **Files:**
 - Modify: `backend/crates/sim-core/src/persistence.rs`
 
-- [ ] **Step 1: Write failing tests for snapshot store helpers**
+- [x] **Step 1: Write failing tests for snapshot store helpers**
 
 Add this test after `snapshot_contains_only_dirty_tiles_then_clears_dirty_state` in `backend/crates/sim-core/src/persistence.rs`:
 
@@ -83,7 +83,7 @@ fn snapshot_store_reports_count_and_sorted_coords() {
 }
 ```
 
-- [ ] **Step 2: Run the store tests to verify they fail**
+- [x] **Step 2: Run the store tests to verify they fail**
 
 Run:
 
@@ -93,7 +93,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core persistence::tests::sn
 
 Expected: FAIL with missing methods `snapshot_count` and `snapshot_coords`.
 
-- [ ] **Step 3: Implement store helpers**
+- [x] **Step 3: Implement store helpers**
 
 Add these methods to `impl InMemoryChunkSnapshotStore` after `read_snapshot`:
 
@@ -109,7 +109,7 @@ pub fn snapshot_coords(&self) -> Vec<ChunkCoord> {
 }
 ```
 
-- [ ] **Step 4: Run the focused test**
+- [x] **Step 4: Run the focused test**
 
 Run:
 
@@ -119,7 +119,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core persistence::tests::sn
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/persistence.rs
@@ -133,7 +133,7 @@ git commit -m "feat: expose snapshot store queries"
 **Files:**
 - Modify: `backend/crates/sim-server/src/chunk_registry.rs`
 
-- [ ] **Step 1: Write failing registry persistence tests**
+- [x] **Step 1: Write failing registry persistence tests**
 
 Add `InMemoryChunkSnapshotStore` to the top imports in `backend/crates/sim-server/src/chunk_registry.rs`:
 
@@ -190,7 +190,7 @@ fn registry_writes_snapshots_and_clears_dirty_tiles() {
 }
 ```
 
-- [ ] **Step 2: Run the registry persistence test to verify it fails**
+- [x] **Step 2: Run the registry persistence test to verify it fails**
 
 Run:
 
@@ -200,7 +200,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server chunk_registry::test
 
 Expected: FAIL with missing method `ChunkRegistry::write_snapshots`.
 
-- [ ] **Step 3: Implement registry snapshot writing**
+- [x] **Step 3: Implement registry snapshot writing**
 
 Add this method to `impl ChunkRegistry` after `tile_count`:
 
@@ -228,7 +228,7 @@ pub(crate) fn write_snapshots(
 }
 ```
 
-- [ ] **Step 4: Run registry tests**
+- [x] **Step 4: Run registry tests**
 
 Run:
 
@@ -238,7 +238,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server chunk_registry
 
 Expected: PASS, with the existing registry tests plus the new persistence test passing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/chunk_registry.rs
@@ -252,7 +252,7 @@ git commit -m "feat: persist chunk registry snapshots"
 **Files:**
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Write failing runtime persistence tests**
+- [x] **Step 1: Write failing runtime persistence tests**
 
 Add `InMemoryChunkSnapshotStore` to the imports in `backend/crates/sim-server/src/runtime.rs`:
 
@@ -298,7 +298,7 @@ fn runtime_persists_loaded_chunk_snapshots_and_clears_dirty_state() {
 }
 ```
 
-- [ ] **Step 2: Run runtime persistence test to verify it fails**
+- [x] **Step 2: Run runtime persistence test to verify it fails**
 
 Run:
 
@@ -308,7 +308,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server runtime::tests::runt
 
 Expected: FAIL with missing `snapshot_store`, `persist_chunk_snapshots`, and `stored_chunk_snapshot`.
 
-- [ ] **Step 3: Add snapshot store to runtime**
+- [x] **Step 3: Add snapshot store to runtime**
 
 Modify the `SimulationRuntime` struct to:
 
@@ -341,7 +341,7 @@ pub fn stored_chunk_snapshot(&self, coord: ChunkCoord) -> Option<&ChunkSnapshotD
 }
 ```
 
-- [ ] **Step 4: Run runtime tests**
+- [x] **Step 4: Run runtime tests**
 
 Run:
 
@@ -351,7 +351,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server runtime::
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/runtime.rs
@@ -365,7 +365,7 @@ git commit -m "feat: add runtime snapshot store"
 **Files:**
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Write failing app snapshot helper test**
+- [x] **Step 1: Write failing app snapshot helper test**
 
 Add this test module to the bottom of `backend/crates/sim-server/src/app.rs`:
 
@@ -392,7 +392,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run app test to verify it fails**
+- [x] **Step 2: Run app test to verify it fails**
 
 Run:
 
@@ -402,7 +402,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server app::tests::persist_
 
 Expected: FAIL with missing function `persist_snapshots_once`.
 
-- [ ] **Step 3: Implement snapshot loop wiring**
+- [x] **Step 3: Implement snapshot loop wiring**
 
 Add this constant next to `SIMULATION_TICK_INTERVAL`:
 
@@ -442,7 +442,7 @@ async fn persist_snapshots_once(state: &AppState) -> usize {
 }
 ```
 
-- [ ] **Step 4: Run app tests**
+- [x] **Step 4: Run app tests**
 
 Run:
 
@@ -452,7 +452,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server app::tests::persist_
 
 Expected: PASS.
 
-- [ ] **Step 5: Run websocket tests**
+- [x] **Step 5: Run websocket tests**
 
 Run:
 
@@ -462,7 +462,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server --test websocket
 
 Expected: PASS. The snapshot loop must not interfere with websocket broadcast cadence.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs
@@ -476,7 +476,7 @@ git commit -m "feat: run backend snapshot loop"
 **Files:**
 - Modify: `backend/README.md`
 
-- [ ] **Step 1: Update backend README**
+- [x] **Step 1: Update backend README**
 
 Add this paragraph after the current `/ws` ticking paragraph in `backend/README.md`:
 
@@ -484,7 +484,7 @@ Add this paragraph after the current `/ws` ticking paragraph in `backend/README.
 The server also runs an in-memory snapshot loop every five seconds. It writes snapshots for all loaded chunks into the current process snapshot store and clears chunk dirty flags after each successful pass. This is the first persistence boundary; Supabase/Postgres adapters remain a later slice.
 ```
 
-- [ ] **Step 2: Run complete backend verification**
+- [x] **Step 2: Run complete backend verification**
 
 Run:
 
@@ -496,7 +496,7 @@ cargo test --manifest-path backend/Cargo.toml --workspace
 
 Expected: all commands pass.
 
-- [ ] **Step 3: Run relevant frontend verification**
+- [x] **Step 3: Run relevant frontend verification**
 
 Run:
 
@@ -509,7 +509,7 @@ Expected:
 - backend bridge tests pass,
 - production build passes.
 
-- [ ] **Step 4: Run browser smoke**
+- [x] **Step 4: Run browser smoke**
 
 Start the backend server:
 
@@ -533,14 +533,14 @@ Open `http://127.0.0.1:5177/` and confirm:
 
 Stop both servers after the smoke test.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/README.md
 git commit -m "docs: document backend snapshot loop"
 ```
 
-- [ ] **Step 6: Push plan branch**
+- [x] **Step 6: Push plan branch**
 
 Run:
 

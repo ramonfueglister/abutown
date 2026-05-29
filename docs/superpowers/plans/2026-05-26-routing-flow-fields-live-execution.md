@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Build graph flow fields and wire walking agents to execute multi-edge graph routes in the live mobility schedule.
 
 **Architecture:** Add `routing/flow_field.rs` as the batch-routing layer over `Graph`, `RoutingProfile`, and HPA corridor clusters. Add `FlowFieldCache` through a plugin, then add mobility `ActiveRoute` execution components and systems that assign and advance walking routes without changing vehicle/tram execution. Persist route execution in the existing JSONB mobility payload and tighten frontend proto decoding so malformed mobility frames are not rendered as valid state.
@@ -44,7 +46,7 @@
 - Create: `backend/crates/sim-core/src/routing/flow_field.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Add module export and failing flow-field tests**
+- [x] **Step 1: Add module export and failing flow-field tests**
 
 In `backend/crates/sim-core/src/routing/mod.rs`, add:
 
@@ -195,7 +197,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -206,7 +208,7 @@ cargo test -p sim-core routing::flow_field -- --nocapture
 
 Expected: compile fails because `FlowFieldRouter`, `FlowFieldScope`, `FlowFieldError`, and `FlowField` are not implemented.
 
-- [ ] **Step 3: Implement flow-field types and reverse Dijkstra**
+- [x] **Step 3: Implement flow-field types and reverse Dijkstra**
 
 In `backend/crates/sim-core/src/routing/flow_field.rs`, above the test module, add:
 
@@ -443,7 +445,7 @@ where
 }
 ```
 
-- [ ] **Step 4: Adjust the corridor test to assert explicit reachability**
+- [x] **Step 4: Adjust the corridor test to assert explicit reachability**
 
 Replace the final assertion in `corridor_scope_rejects_edges_outside_cluster_set` with:
 
@@ -464,7 +466,7 @@ Replace the final assertion in `corridor_scope_rejects_edges_outside_cluster_set
         );
 ```
 
-- [ ] **Step 5: Run targeted tests**
+- [x] **Step 5: Run targeted tests**
 
 Run:
 
@@ -475,7 +477,7 @@ cargo test -p sim-core routing::flow_field -- --nocapture
 
 Expected: all `routing::flow_field` tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -492,7 +494,7 @@ git commit -m "feat(8e): add graph flow fields"
 - Modify: `backend/crates/sim-core/src/routing/plugin.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Add failing cache tests**
+- [x] **Step 1: Add failing cache tests**
 
 Append to `routing/flow_field.rs` tests:
 
@@ -545,7 +547,7 @@ Append to `routing/flow_field.rs` tests:
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -556,7 +558,7 @@ cargo test -p sim-core routing::flow_field::tests::cache_tracks_miss_hit_insert_
 
 Expected: compile fails because cache types and methods are missing.
 
-- [ ] **Step 3: Implement cache types**
+- [x] **Step 3: Implement cache types**
 
 Add to `routing/flow_field.rs` above tests:
 
@@ -673,7 +675,7 @@ impl FlowFieldCache {
 }
 ```
 
-- [ ] **Step 4: Add plugin failing tests**
+- [x] **Step 4: Add plugin failing tests**
 
 In `backend/crates/sim-core/src/routing/plugin.rs`, add `FlowFieldCache` to imports:
 
@@ -722,7 +724,7 @@ Add a test:
     }
 ```
 
-- [ ] **Step 5: Re-export plugin**
+- [x] **Step 5: Re-export plugin**
 
 In `routing/mod.rs`, extend the plugin re-export:
 
@@ -730,7 +732,7 @@ In `routing/mod.rs`, extend the plugin re-export:
 pub use plugin::{FlowFieldPlugin, HierarchicalRoutingPlugin, PathfindingPlugin, RoutingPlugin};
 ```
 
-- [ ] **Step 6: Run targeted tests**
+- [x] **Step 6: Run targeted tests**
 
 Run:
 
@@ -741,7 +743,7 @@ cargo test -p sim-core routing::flow_field routing::plugin -- --nocapture
 
 Expected: flow-field and routing plugin tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -759,7 +761,7 @@ git commit -m "feat(8e): add flow field cache plugin"
 - Modify: `backend/crates/sim-core/src/mobility/api.rs`
 - Modify: `backend/crates/sim-core/src/mobility/persist_snapshot.rs`
 
-- [ ] **Step 1: Add failing record round-trip test**
+- [x] **Step 1: Add failing record round-trip test**
 
 In `backend/crates/sim-core/src/mobility/records.rs`, append:
 
@@ -815,7 +817,7 @@ mod route_execution_tests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -826,7 +828,7 @@ cargo test -p sim-core mobility::records::route_execution_tests -- --nocapture
 
 Expected: compile fails because persisted route types and `AgentRecord.active_route` are missing.
 
-- [ ] **Step 3: Add persisted and ECS route types**
+- [x] **Step 3: Add persisted and ECS route types**
 
 In `mobility/records.rs`, import routing types:
 
@@ -896,7 +898,7 @@ pub struct RouteStep {
 }
 ```
 
-- [ ] **Step 4: Wire spawn/extract through API**
+- [x] **Step 4: Wire spawn/extract through API**
 
 In `mobility/api.rs`, update `spawn_agent_from_record` so it inserts `ActiveRoute` when present:
 
@@ -973,7 +975,7 @@ Return:
     })
 ```
 
-- [ ] **Step 5: Add persisted route validation**
+- [x] **Step 5: Add persisted route validation**
 
 In `mobility/persist_snapshot.rs`, add:
 
@@ -1033,7 +1035,7 @@ In `apply_into_world`, before spawning agents:
     }
 ```
 
-- [ ] **Step 6: Run targeted tests**
+- [x] **Step 6: Run targeted tests**
 
 Run:
 
@@ -1045,7 +1047,7 @@ cargo test -p sim-core mobility:: -- --nocapture
 
 Expected: mobility tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1062,7 +1064,7 @@ git commit -m "feat(8e): persist active walking routes"
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 - Modify: `backend/crates/sim-core/src/mobility/api.rs`
 
-- [ ] **Step 1: Add route-assignment stats resource**
+- [x] **Step 1: Add route-assignment stats resource**
 
 In `mobility/resources.rs`, add:
 
@@ -1081,7 +1083,7 @@ In `mobility/api.rs::install_mobility`, insert:
     world.insert_resource(RouteAssignmentStats::default());
 ```
 
-- [ ] **Step 2: Add failing system tests**
+- [x] **Step 2: Add failing system tests**
 
 Append to `mobility/systems.rs` tests module if one exists. If the file has no tests module, add this at the bottom:
 
@@ -1210,7 +1212,7 @@ mod route_execution_tests {
 }
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -1221,7 +1223,7 @@ cargo test -p sim-core mobility::systems::route_execution_tests -- --nocapture
 
 Expected: compile fails because route assignment/advance systems are not registered and helpers are missing.
 
-- [ ] **Step 4: Add canonical edge helpers**
+- [x] **Step 4: Add canonical edge helpers**
 
 In `mobility/api.rs`, add:
 
@@ -1246,7 +1248,7 @@ pub fn edge_by_canonical_key(
 }
 ```
 
-- [ ] **Step 5: Add route assignment materialization**
+- [x] **Step 5: Add route assignment materialization**
 
 In `mobility/systems.rs`, add imports:
 
@@ -1323,7 +1325,7 @@ fn materialize_route_steps(
 }
 ```
 
-- [ ] **Step 6: Implement `route_assignment_system`**
+- [x] **Step 6: Implement `route_assignment_system`**
 
 Add:
 
@@ -1427,7 +1429,7 @@ pub fn route_assignment_system(
 
 Note: the first implementation uses the same-cluster corridor and direct start/destination clusters. If a test needs a longer corridor, use a small graph where both nodes share one cluster. Do not add a global-routing retry.
 
-- [ ] **Step 7: Implement `route_advance_system`**
+- [x] **Step 7: Implement `route_advance_system`**
 
 Add:
 
@@ -1484,7 +1486,7 @@ pub fn route_advance_system(
 }
 ```
 
-- [ ] **Step 8: Register systems in order**
+- [x] **Step 8: Register systems in order**
 
 In `install_systems`, update the Advance set tuple so route systems run before `walk_advance_system`:
 
@@ -1503,7 +1505,7 @@ In `install_systems`, update the Advance set tuple so route systems run before `
 
 Keep the existing downstream `.after(walk_advance_system)` ordering for boarding, stop arrival, and vehicle advancement.
 
-- [ ] **Step 9: Run targeted mobility tests**
+- [x] **Step 9: Run targeted mobility tests**
 
 Run:
 
@@ -1515,7 +1517,7 @@ cargo test -p sim-core mobility:: -- --nocapture
 
 Expected: route execution tests pass and existing mobility tests remain green.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1531,7 +1533,7 @@ git commit -m "feat(8e): execute walking graph routes"
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-core/src/routing/plugin.rs`
 
-- [ ] **Step 1: Add failing runtime tests**
+- [x] **Step 1: Add failing runtime tests**
 
 In `backend/crates/sim-server/src/runtime.rs`, find the existing runtime tests for HPA/pathfinding resources and add:
 
@@ -1567,7 +1569,7 @@ In `backend/crates/sim-server/src/runtime.rs`, find the existing runtime tests f
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1578,7 +1580,7 @@ cargo test -p sim-server runtime_installs_flow_field_cache set_mobility_for_test
 
 Expected: compile or assertion failure because runtime does not install/refresh `FlowFieldCache`.
 
-- [ ] **Step 3: Install FlowFieldPlugin in runtime construction**
+- [x] **Step 3: Install FlowFieldPlugin in runtime construction**
 
 In `runtime.rs`, wherever plugins are installed in runtime setup, ensure order is:
 
@@ -1596,7 +1598,7 @@ sim_core::mobility::MobilityPlugin.install(&mut world, &mut schedule);
 
 Keep existing local variables and world-network setup intact; only insert `FlowFieldPlugin` after HPA and before mobility.
 
-- [ ] **Step 4: Refresh caches after graph replacement**
+- [x] **Step 4: Refresh caches after graph replacement**
 
 Add a helper near existing HPA refresh helpers:
 
@@ -1617,7 +1619,7 @@ refresh_hpa_index(&mut self.world);
 refresh_flow_field_resources(&mut self.world);
 ```
 
-- [ ] **Step 5: Run targeted runtime tests**
+- [x] **Step 5: Run targeted runtime tests**
 
 Run:
 
@@ -1628,7 +1630,7 @@ cargo test -p sim-server runtime_ -- --nocapture
 
 Expected: runtime tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1644,7 +1646,7 @@ git commit -m "feat(8e): install flow fields in runtime"
 - Modify: `src/backend/mobilityProtocol.ts`
 - Modify: `tests/backend/mobilityProtocol.test.ts`
 
-- [ ] **Step 1: Add failing frontend tests**
+- [x] **Step 1: Add failing frontend tests**
 
 In `tests/backend/mobilityProtocol.test.ts`, add:
 
@@ -1703,7 +1705,7 @@ describe('strict agent proto conversion', () => {
 
 If those imports already exist in the file, merge the new names into the existing import statements instead of duplicating imports.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1714,7 +1716,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown
 
 Expected: tests fail because `agentMobilityFromProto` currently fabricates `at_activity` and `(0, 0)`.
 
-- [ ] **Step 3: Make proto conversion strict**
+- [x] **Step 3: Make proto conversion strict**
 
 In `src/backend/mobilityProtocol.ts`, replace `agentStateFromProto` with:
 
@@ -1754,7 +1756,7 @@ Then return:
     world_coord: { x: p.worldCoord.x, y: p.worldCoord.y },
 ```
 
-- [ ] **Step 4: Run targeted frontend tests**
+- [x] **Step 4: Run targeted frontend tests**
 
 Run:
 
@@ -1765,7 +1767,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown
 
 Expected: mobility protocol tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1780,7 +1782,7 @@ git commit -m "fix(8e): reject malformed mobility proto frames"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run full backend verification**
+- [x] **Step 1: Run full backend verification**
 
 Run:
 
@@ -1801,7 +1803,7 @@ Expected:
 - Full workspace tests pass.
 - Clippy exits cleanly with `-D warnings`.
 
-- [ ] **Step 2: Run frontend verification**
+- [x] **Step 2: Run frontend verification**
 
 Run:
 
@@ -1813,7 +1815,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown
 
 Expected: TypeScript compiles and Vitest passes.
 
-- [ ] **Step 3: Run browser smoke**
+- [x] **Step 3: Run browser smoke**
 
 Ensure the dev stack is running at `http://127.0.0.1:5175/` and backend at `http://127.0.0.1:8080/`, then run:
 
@@ -1824,7 +1826,7 @@ node scripts/smoke-7b.mjs
 
 Expected: all smoke checks pass, binary mobility frames are received, and console errors are zero. If the Postgres-backed local state is quiet, run the same smoke against a fresh in-memory backend and document both results in `progress.md`.
 
-- [ ] **Step 4: Run acceptance greps**
+- [x] **Step 4: Run acceptance greps**
 
 Run:
 
@@ -1836,7 +1838,7 @@ rg -n "FlowFieldCache|ActiveRoute|route_assignment_system|route_advance_system" 
 
 Expected: the first grep returns no newly introduced production fallback behavior. The second grep shows the expected 8e implementation symbols.
 
-- [ ] **Step 5: Record progress**
+- [x] **Step 5: Record progress**
 
 Prepend an entry to `progress.md`:
 
@@ -1846,7 +1848,7 @@ Prepend an entry to `progress.md`:
 
 Before committing `progress.md`, adjust the timestamp to the actual UTC minute when verification completes and replace the evidence sentence with the real command outputs from Steps 1-4.
 
-- [ ] **Step 6: Commit progress**
+- [x] **Step 6: Commit progress**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1854,7 +1856,7 @@ git add progress.md
 git commit -m "docs(8e): record flow field verification"
 ```
 
-- [ ] **Step 7: Request code review**
+- [x] **Step 7: Request code review**
 
 Use `superpowers:requesting-code-review` before merging or pushing. Ask the reviewer to focus on:
 

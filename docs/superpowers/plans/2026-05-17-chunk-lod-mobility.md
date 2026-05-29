@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Introduce per-chunk `MobilityActivity` (`Hot`/`Active`/`Warm`/`Asleep`) driven by subscribers + population with hysteresis. Hot/Active chunks tick at full ECS fidelity; Warm chunks run gravity-flow OD-matrix at 1 Hz; Asleep chunks skip. Promote/demote transitions spawn/despawn discrete agents in/out of `FlowCell` aggregates while preserving population.
 
 **Architecture:** New `mobility/lod.rs` module defines `MobilityActivity`, `FlowCell`, and the classifier. New resources `ChunkActivities`, `ChunkActivityCooldowns`, `FlowCells`, `ChunkSubscribers`, `ChunkPopulations`, `ChunkTransitions` live in `mobility/resources.rs`. New systems `classify_activity_system`, `promote_warm_to_active_system`, `demote_active_to_warm_system`, `warm_chunk_flow_system`, `track_chunk_populations_system` join the schedule in a new `MobilitySet::LOD` that runs before `Advance`. Advance/Output systems gain chunk-activity filters. WS task updates `ChunkSubscribers` on subscribe/unsubscribe. Persistence-boundary `MobilitySnapshot` gains two `#[serde(default)]` fields.
@@ -45,7 +47,7 @@ Persistence: no SQL migration. The `MobilitySnapshot` JSONB shape extends with t
 - Create: `backend/crates/sim-core/src/mobility/lod.rs`
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 
-- [ ] **Step 1: Add tests**
+- [x] **Step 1: Add tests**
 
 Create `backend/crates/sim-core/src/mobility/lod.rs`:
 
@@ -166,7 +168,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Wire module into mod.rs**
+- [x] **Step 2: Wire module into mod.rs**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, add near the other `pub mod ...;` lines:
 
@@ -174,7 +176,7 @@ In `backend/crates/sim-core/src/mobility/mod.rs`, add near the other `pub mod ..
 pub mod lod;
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -184,7 +186,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --lib -- -D
 
 Expected: 7 new tests pass, clippy clean.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/lod.rs backend/crates/sim-core/src/mobility/mod.rs
@@ -198,7 +200,7 @@ git commit -m "feat: MobilityActivity enum + FlowCell + classifier with hysteres
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/resources.rs`
 
-- [ ] **Step 1: Append the new resource types**
+- [x] **Step 1: Append the new resource types**
 
 Open `backend/crates/sim-core/src/mobility/resources.rs`. After the existing six resources (Tick, Routes, Stops, LinkPolylines, DirtyAgents, DirtyVehicles), append:
 
@@ -238,7 +240,7 @@ pub struct ChunkTransitions(pub Vec<(ChunkCoord, MobilityActivity, MobilityActiv
 
 Make sure the existing `use std::collections::HashMap` at the top stays (or add it if missing). `ChunkCoord` and the lod types need their own `use`.
 
-- [ ] **Step 2: Verify build**
+- [x] **Step 2: Verify build**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -247,7 +249,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --lib -- -D
 
 Expected: green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/resources.rs
@@ -261,7 +263,7 @@ git commit -m "feat: LOD resources (ChunkActivities, FlowCells, ChunkSubscribers
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 
-- [ ] **Step 1: Find `MobilityWorld::empty()` in mod.rs**
+- [x] **Step 1: Find `MobilityWorld::empty()` in mod.rs**
 
 Inside `impl MobilityWorld` find `pub fn empty() -> Self`. Currently it inserts six resources (Tick, Routes, Stops, LinkPolylines, DirtyAgents, DirtyVehicles). Add the six LOD resources before constructing the Schedule:
 
@@ -296,7 +298,7 @@ pub fn empty() -> Self {
 
 Make sure the `use crate::mobility::resources::*;` import at top of mod.rs covers the new types (it likely uses `*` so should already work).
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -305,7 +307,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib
 
 Expected: 72 sim-core tests still pass (no behavior change yet; resources just inserted but no system reads them).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs
@@ -319,7 +321,7 @@ git commit -m "feat: insert LOD resources at MobilityWorld init"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Add the system body**
+- [x] **Step 1: Add the system body**
 
 In `systems.rs`, near the other helpers (after `dir_at_progress`), add:
 
@@ -352,7 +354,7 @@ pub fn track_chunk_populations_system(
 
 (`crate::mobility::chunk_of` is the existing helper from Phase 5. If it's in `mobility::dto` instead, adjust the path.)
 
-- [ ] **Step 2: Add a test**
+- [x] **Step 2: Add a test**
 
 Append to the existing `#[cfg(test)] mod tests` block in `systems.rs`:
 
@@ -415,7 +417,7 @@ fn track_chunk_populations_sums_agents_vehicles_and_flow_cells() {
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib track_chunk_populations
@@ -424,7 +426,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --lib -- -D
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -438,7 +440,7 @@ git commit -m "feat: track_chunk_populations_system aggregates agents+vehicles+f
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Add the system body**
+- [x] **Step 1: Add the system body**
 
 In `systems.rs`:
 
@@ -487,7 +489,7 @@ pub fn classify_activity_system(
 }
 ```
 
-- [ ] **Step 2: Add tests**
+- [x] **Step 2: Add tests**
 
 ```rust
 #[test]
@@ -541,7 +543,7 @@ fn classify_activity_records_transitions_and_starts_cooldown() {
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib classify_activity
@@ -550,7 +552,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --lib -- -D
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -564,7 +566,7 @@ git commit -m "feat: classify_activity_system with hysteresis + transition list"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```rust
 pub fn promote_warm_to_active_system(
@@ -654,7 +656,7 @@ Note: `stable_hash` using `RandomState` is NOT deterministic across runs. For Ph
 
 For now, accept that `by_agent_id` is incomplete for LOD-spawned agents and Task 14 fixes it.
 
-- [ ] **Step 2: Add basic test**
+- [x] **Step 2: Add basic test**
 
 ```rust
 #[test]
@@ -691,7 +693,7 @@ fn promote_warm_spawns_floor_population_agents() {
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib promote_warm_spawns
@@ -700,7 +702,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --lib -- -D
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -714,7 +716,7 @@ git commit -m "feat: promote_warm_to_active_system spawns agents from FlowCell"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```rust
 pub fn demote_active_to_warm_system(
@@ -786,7 +788,7 @@ pub fn demote_active_to_warm_system(
 }
 ```
 
-- [ ] **Step 2: Test**
+- [x] **Step 2: Test**
 
 ```rust
 #[test]
@@ -840,7 +842,7 @@ fn demote_active_to_warm_collapses_agents_into_flow_cell() {
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib demote_active_to_warm
@@ -849,7 +851,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --lib -- -D
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -863,7 +865,7 @@ git commit -m "feat: demote_active_to_warm_system collapses agents into FlowCell
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```rust
 pub fn warm_chunk_flow_system(
@@ -902,7 +904,7 @@ pub fn warm_chunk_flow_system(
 }
 ```
 
-- [ ] **Step 2: Test**
+- [x] **Step 2: Test**
 
 ```rust
 #[test]
@@ -969,7 +971,7 @@ fn warm_chunk_flow_skips_non_multiple_of_10_ticks() {
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib warm_chunk_flow
@@ -978,7 +980,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --lib -- -D
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -996,7 +998,7 @@ This is a trickier task — the existing `walk_advance_system`, `vehicle_advance
 
 The simplest approach: add an inner filter at the top of each system that checks each entity's chunk against `Res<ChunkActivities>`.
 
-- [ ] **Step 1: Update `walk_advance_system` to filter**
+- [x] **Step 1: Update `walk_advance_system` to filter**
 
 Find the existing body. Change the iter to skip entities not in Active/Hot chunks:
 
@@ -1026,7 +1028,7 @@ pub fn walk_advance_system(
 
 The query now also pulls `&Position`. Make sure the query signature change matches.
 
-- [ ] **Step 2: Apply same filter pattern to vehicle_advance_system**
+- [x] **Step 2: Apply same filter pattern to vehicle_advance_system**
 
 ```rust
 pub fn vehicle_advance_system(
@@ -1060,7 +1062,7 @@ pub fn vehicle_advance_system(
 }
 ```
 
-- [ ] **Step 3: Same filter for stop_arrival_system and boarding_alighting_system and compute_world_coord_system / compute_direction_system**
+- [x] **Step 3: Same filter for stop_arrival_system and boarding_alighting_system and compute_world_coord_system / compute_direction_system**
 
 For each system, add the chunk lookup against `ChunkActivities`. For systems that don't currently take `&Position` (e.g. some accessor-style systems), add it to the query signature.
 
@@ -1081,7 +1083,7 @@ The boarding_alighting system uses ParamSet — apply the filter inside each pha
 
 For `compute_world_coord_system` and `compute_direction_system`, the filter goes around the entity-iter loops. Skip the chunk lookup for vehicles in vehicle iter (their position derives from RoutePosition, not Position).
 
-- [ ] **Step 4: Add a smoke test**
+- [x] **Step 4: Add a smoke test**
 
 ```rust
 #[test]
@@ -1162,7 +1164,7 @@ fn walk_advance_advances_agents_in_active_chunks() {
 }
 ```
 
-- [ ] **Step 5: Run all existing system tests**
+- [x] **Step 5: Run all existing system tests**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib mobility::systems
@@ -1170,7 +1172,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib mobilit
 
 Expected: pre-existing tests still pass. They'll have to seed `ChunkActivities` if they weren't already. If existing tests fail because their world has no `ChunkActivities`, add `world.insert_resource(ChunkActivities::default())` plus mark the relevant chunks Active. For Phase-5 tests that didn't care about LOD, the simplest fix: insert the resource AND mark all chunks the test entity is in as Active. Look for the failure messages and adapt minimally — don't change semantics.
 
-- [ ] **Step 6: Run workspace tests**
+- [x] **Step 6: Run workspace tests**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -1206,7 +1208,7 @@ Call this from the Phase-5 integration test setups.
 
 Pick whatever's least invasive. Document in the commit message.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -1220,7 +1222,7 @@ git commit -m "feat: filter advance/output systems by chunk activity (Active/Hot
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Update install_systems**
+- [x] **Step 1: Update install_systems**
 
 Find `pub fn install_systems(schedule: &mut Schedule)`. Add a new `MobilitySet::LOD` variant and run all the new systems in the LOD set BEFORE Advance:
 
@@ -1260,7 +1262,7 @@ pub fn install_systems(schedule: &mut Schedule) {
 
 The new `MobilitySet::LOD` runs FIRST so by the time Advance systems iterate, `ChunkActivities` is up to date. `track_chunk_populations_system` runs first within LOD so `classify_activity_system` has population counts. `promote`/`demote` run after classify so they see fresh transitions.
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -1269,7 +1271,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib mobilit
 
 Expected: green (systems compile in their new positions). Some integration tests may need the `force_all_chunks_active_for_test` workaround from Task 9.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -1285,7 +1287,7 @@ git commit -m "feat: install LOD systems in MobilitySet::LOD before Advance"
 
 `promote_warm_to_active_system` uses `Commands::spawn` to create new agents. These don't update `MobilityWorld::by_agent_id`. We need a pass after `schedule.run` to sync the index.
 
-- [ ] **Step 1: Add sync-after-tick logic**
+- [x] **Step 1: Add sync-after-tick logic**
 
 Update `tick_mobility`:
 
@@ -1352,7 +1354,7 @@ pub fn tick_mobility(&mut self) -> MobilityDelta {
 }
 ```
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib
@@ -1360,7 +1362,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --lib
 
 Expected: green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs
@@ -1374,7 +1376,7 @@ git commit -m "feat: tick_mobility syncs by_agent_id/by_vehicle_id with LOD spaw
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs` (custom Serialize/Deserialize)
 
-- [ ] **Step 1: Update Serialize impl**
+- [x] **Step 1: Update Serialize impl**
 
 Inside the custom `impl Serialize for MobilityWorld`, add the two new fields to the inner `WorldRepr`:
 
@@ -1407,7 +1409,7 @@ WorldRepr {
 }.serialize(ser)
 ```
 
-- [ ] **Step 2: Update Deserialize**
+- [x] **Step 2: Update Deserialize**
 
 ```rust
 #[derive(serde::Deserialize)]
@@ -1432,7 +1434,7 @@ world.world.resource_mut::<FlowCells>().0 = repr.flow_cells;
 world.world.resource_mut::<ChunkActivities>().0 = repr.chunk_activities;
 ```
 
-- [ ] **Step 3: Run the existing fixture round-trip test**
+- [x] **Step 3: Run the existing fixture round-trip test**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --test mobility_persistence_round_trip
@@ -1455,7 +1457,7 @@ for key in ["tick", "agents", "vehicles", "stops", "routes", "link_polylines"] {
 }
 ```
 
-- [ ] **Step 4: Add a Phase-6-aware round-trip test**
+- [x] **Step 4: Add a Phase-6-aware round-trip test**
 
 ```rust
 #[test]
@@ -1491,13 +1493,13 @@ fn phase6_snapshot_with_flow_cells_round_trips() {
 
 Place this in the test module of `mod.rs` or a separate integration test file.
 
-- [ ] **Step 5: Verify all**
+- [x] **Step 5: Verify all**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-core/tests/mobility_persistence_round_trip.rs
@@ -1512,7 +1514,7 @@ git commit -m "feat: extend snapshot persistence with flow_cells + chunk_activit
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Add helper on SimulationRuntime**
+- [x] **Step 1: Add helper on SimulationRuntime**
 
 In `backend/crates/sim-server/src/runtime.rs` `impl SimulationRuntime`:
 
@@ -1568,7 +1570,7 @@ pub fn update_chunk_subscribers(&mut self, before: &HashSet<ChunkCoord>, after: 
 }
 ```
 
-- [ ] **Step 2: Wire into WS handler**
+- [x] **Step 2: Wire into WS handler**
 
 In `backend/crates/sim-server/src/app.rs`, find `handle_client_message`. After it mutates the `connection.subscription`, call `runtime.update_chunk_subscribers(&before, &after)`:
 
@@ -1605,7 +1607,7 @@ async fn handle_client_message(
 }
 ```
 
-- [ ] **Step 3: Handle WS disconnect**
+- [x] **Step 3: Handle WS disconnect**
 
 In `stream_world_deltas`, when the connection closes (the `select!` arm returns), decrement subscribers held by this connection. Add at every return point that's a normal close:
 
@@ -1638,7 +1640,7 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
 
 This is fiddly because `select!` arms may `return` directly. Refactor the `return` to `break` so the loop ends cleanly, then the cleanup runs.
 
-- [ ] **Step 4: Test**
+- [x] **Step 4: Test**
 
 Append to `backend/crates/sim-server/tests/websocket.rs`:
 
@@ -1666,14 +1668,14 @@ async fn chunk_subscribe_increments_subscriber_count() {
 
 If verifying ChunkSubscribers state directly is hard (no debug endpoint), accept that the integration is verified by the broader Hot/Active/Warm test in Task 14.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
 cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/src/app.rs backend/crates/sim-server/tests/websocket.rs
@@ -1687,7 +1689,7 @@ git commit -m "feat: WS task updates ChunkSubscribers on subscribe/unsubscribe/d
 **Files:**
 - Create: `backend/crates/sim-core/tests/mobility_lod_lifecycle.rs`
 
-- [ ] **Step 1: Write the integration test**
+- [x] **Step 1: Write the integration test**
 
 ```rust
 use sim_core::ids::*;
@@ -1774,7 +1776,7 @@ impl MobilityWorld {
 
 For an integration test in `tests/`, these need to be `pub` not `#[cfg(test)]` — change to public methods named `activity_for_chunk` and `flow_cell_for_chunk`.
 
-- [ ] **Step 2: Add the public accessors to mod.rs**
+- [x] **Step 2: Add the public accessors to mod.rs**
 
 ```rust
 impl MobilityWorld {
@@ -1790,7 +1792,7 @@ impl MobilityWorld {
 
 Adapt the test to call these.
 
-- [ ] **Step 3: Run the integration test**
+- [x] **Step 3: Run the integration test**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --test mobility_lod_lifecycle
@@ -1805,7 +1807,7 @@ Likely fixes:
 - The hysteresis cooldown may interact with the test's "tick count needed". Adjust test to wait an extra tick.
 - The first tick after subscribe might not flip activity — needs a second tick for `track_chunk_populations` → `classify` to converge.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-core/tests/mobility_lod_lifecycle.rs
@@ -1820,7 +1822,7 @@ git commit -m "test: integration lifecycle Hot → Warm → Asleep → Warm → 
 - Create: `backend/crates/sim-core/benches/mobility_tick_lod.rs`
 - Modify: `backend/crates/sim-core/Cargo.toml`
 
-- [ ] **Step 1: Add bench harness to Cargo.toml**
+- [x] **Step 1: Add bench harness to Cargo.toml**
 
 In `backend/crates/sim-core/Cargo.toml`:
 
@@ -1830,7 +1832,7 @@ name = "mobility_tick_lod"
 harness = false
 ```
 
-- [ ] **Step 2: Write the bench**
+- [x] **Step 2: Write the bench**
 
 ```rust
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -1894,7 +1896,7 @@ criterion_group!(benches, tick_100k_with_5_subscribed);
 criterion_main!(benches);
 ```
 
-- [ ] **Step 3: Run**
+- [x] **Step 3: Run**
 
 ```bash
 cargo bench --locked --manifest-path backend/Cargo.toml -p sim-core --bench mobility_tick_lod 2>&1 | tail -10
@@ -1902,7 +1904,7 @@ cargo bench --locked --manifest-path backend/Cargo.toml -p sim-core --bench mobi
 
 Expected: criterion prints `tick_100k_with_5_subscribed_chunks time: [N ms]`. Informal target: < 5 ms.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/benches/mobility_tick_lod.rs backend/crates/sim-core/Cargo.toml
@@ -1916,7 +1918,7 @@ git commit -m "feat: criterion benchmark mobility_tick_lod (100k entities, 5 sub
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Full gates**
+- [x] **Step 1: Full gates**
 
 ```bash
 cargo fmt --manifest-path backend/Cargo.toml --all
@@ -1929,7 +1931,7 @@ npm run build
 
 Expected: all green except 2 pre-existing noRetiredAssets failures (unrelated).
 
-- [ ] **Step 2: Restart stack + browser verify**
+- [x] **Step 2: Restart stack + browser verify**
 
 ```bash
 pkill -f run-dev-stack; pkill -f sim-server; pkill -f "vite --host"
@@ -1942,13 +1944,13 @@ curl -s http://127.0.0.1:8080/mobility | python3 -c "import sys,json; d=json.loa
 
 Expected: agents/vehicles counts depend on what's Active. With no subscribers initially, MOST entities should be in Warm/Asleep chunks → fewer agents in the snapshot. The frontend's `chunkSubscriptionClient` (Phase 4) subscribes to all 8x8 chunks → after subscribe arrives, populations will migrate to Active.
 
-- [ ] **Step 3: progress.md entry**
+- [x] **Step 3: progress.md entry**
 
 ```
 2026-05-17T<HH:MM:SS>.000Z - Chunk-LOD mobility: MobilityActivity { Hot, Active, Warm, Asleep } per chunk driven by client-subscriber count + population with 30-tick hysteresis. Hot/Active chunks tick at full ECS fidelity; Warm chunks run gravity-flow OD-matrix at 1 Hz via warm_chunk_flow_system; Asleep chunks skip entirely. Promote/demote transitions spawn/despawn discrete agents in/out of FlowCell aggregates preserving total population. New resources ChunkActivities, ChunkActivityCooldowns, FlowCells, ChunkSubscribers, ChunkPopulations, ChunkTransitions. New MobilitySet::LOD runs first in the schedule. WS task updates ChunkSubscribers on subscribe/unsubscribe/disconnect. Persistence shape extended with flow_cells + chunk_activities via #[serde(default)] (backward-compatible). New criterion benchmark mobility_tick_lod targets 100k entities with 5 subscribed chunks. Phase 6 of the million-agent roadmap.
 ```
 
-- [ ] **Step 4: Final commit + push**
+- [x] **Step 4: Final commit + push**
 
 ```bash
 git add backend/ progress.md

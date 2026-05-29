@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Make the Zurich map read as a grown European river city through generator rules for district density, river corridor control, forest clusters, and bridge approaches.
 
 **Architecture:** Keep the existing `zurichWorld`, `zurichTransport`, and `zurichPlacement` modules. Add small local helpers inside those modules rather than introducing a new system: road organicity belongs in transport, river/forest terrain shape belongs in world, and building/tree clustering belongs in placement.
@@ -16,7 +18,7 @@
 - Modify: `tests/city/zurichPlacement.test.ts`
 - Modify: `tests/city/zurichTransport.test.ts`
 
-- [ ] **Step 1: Write failing placement tests**
+- [x] **Step 1: Write failing placement tests**
 
 Add tests that compare old-town density against edge residential density, limit direct river-adjacent buildings, and require forest clusters. The tests should use existing public builders:
 
@@ -28,11 +30,11 @@ const placement = buildZurichPlacement(world, transport);
 
 Use `world.zones`, `world.terrain`, `placement.buildings`, and `placement.trees` to calculate metrics. Expected first run: at least one density/corridor/cluster assertion fails on the current generator.
 
-- [ ] **Step 2: Write failing transport tests**
+- [x] **Step 2: Write failing transport tests**
 
 Add a transport assertion that residential zones do not produce excessive adjacent parallel road runs. Use the existing `countAdjacentParallelRoadRuns` helper against `transport.roads`. Expected first run: fails until district street generation is less grid-like.
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 Run:
 
@@ -48,15 +50,15 @@ Expected: FAIL for the new city-planning assertions.
 - Modify: `src/city/zurichTransport.ts`
 - Test: `tests/city/zurichTransport.test.ts`
 
-- [ ] **Step 1: Keep arterials bridge-enabled**
+- [x] **Step 1: Keep arterials bridge-enabled**
 
 Preserve `addRoad(coord, true)` for arterial paths so bridge spans stay valid.
 
-- [ ] **Step 2: Reduce district grid loops**
+- [x] **Step 2: Reduce district grid loops**
 
 Adjust `addDistrictStreetPattern` so lower-density districts get one curved axis plus short spurs instead of full cross grids. Keep high-density old-town/civic districts more connected, but avoid long parallel blocks.
 
-- [ ] **Step 3: Verify transport**
+- [x] **Step 3: Verify transport**
 
 Run:
 
@@ -72,23 +74,23 @@ Expected: PASS with at least three bridge spans and acceptable adjacent parallel
 - Modify: `src/city/zurichPlacement.ts`
 - Test: `tests/city/zurichPlacement.test.ts`
 
-- [ ] **Step 1: Add placement scoring helpers**
+- [x] **Step 1: Add placement scoring helpers**
 
 Add local helpers to score each frontage candidate by zone kind, distance to zone center, distance to water, and hash jitter. Keep helpers deterministic.
 
-- [ ] **Step 2: Protect raw river banks**
+- [x] **Step 2: Protect raw river banks**
 
 Skip buildings within two tiles of water except for old-town, rail-center, and waterfront zones. Even in those zones, reduce probability near the water instead of filling every frontage.
 
-- [ ] **Step 3: Apply density falloff**
+- [x] **Step 3: Apply density falloff**
 
 Make residential and reserve placement more selective as distance from the zone center grows. Keep old-town dense near its center.
 
-- [ ] **Step 4: Prune isolated edge buildings**
+- [x] **Step 4: Prune isolated edge buildings**
 
 After placement, remove buildings in residential/reserve zones that have no nearby building within a small radius and are far from the zone center.
 
-- [ ] **Step 5: Verify placement**
+- [x] **Step 5: Verify placement**
 
 Run:
 
@@ -106,15 +108,15 @@ Expected: PASS with validation clean and first-row frames preserved.
 - Test: `tests/city/zurichWorld.test.ts`
 - Test: `tests/city/zurichPlacement.test.ts`
 
-- [ ] **Step 1: Keep forest terrain as broad zones**
+- [x] **Step 1: Keep forest terrain as broad zones**
 
 Do not remove the current forest zones. If needed, add deterministic patch scoring inside placement so trees become denser in local pockets.
 
-- [ ] **Step 2: Generate irregular tree clusters**
+- [x] **Step 2: Generate irregular tree clusters**
 
 Use hash-noise and distance-to-zone-center to place trees in clumps rather than every third forest tile.
 
-- [ ] **Step 3: Verify forest tests**
+- [x] **Step 3: Verify forest tests**
 
 Run:
 
@@ -130,7 +132,7 @@ Expected: PASS with tree count still above the existing threshold and forest clu
 - Modify: `progress.md`
 - Create ignored screenshot: `artifacts/abutown-zurich-river-city-2026-05-14-v4.png`
 
-- [ ] **Step 1: Run complete verification**
+- [x] **Step 1: Run complete verification**
 
 Run:
 
@@ -142,15 +144,15 @@ npm run test:e2e
 
 Expected: all pass.
 
-- [ ] **Step 2: Capture screenshot**
+- [x] **Step 2: Capture screenshot**
 
 Use Playwright against the local Vite dev server to capture a screenshot to `artifacts/abutown-zurich-river-city-2026-05-14-v4.png`.
 
-- [ ] **Step 3: Update progress**
+- [x] **Step 3: Update progress**
 
 Append a short line to `progress.md` documenting the city-planning pass and screenshot.
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 Stage the changed source, tests, docs, and progress file. Do not stage `.gitignore 2`. Commit with:
 

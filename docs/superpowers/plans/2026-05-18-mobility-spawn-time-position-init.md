@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Fix the Phase-6 LOD-vs-spawn-order bug exposed by the Phase-7b browser smoke: seeded agents start with `Position(0,0)`, get classified into chunk(0,0) by LOD, then mass-demoted into FlowCells where they sit forever. Make Position correct from spawn time via a shared `agent_world_coord` / `vehicle_world_coord` helper used by both the per-tick `compute_world_coord_system` and the spawn paths.
 
 **Architecture:** Extract two pure free functions on `MobilityWorld`'s module that map `(state, resources) -> Option<(f32, f32)>` for agents and `(route_position, resources) -> Option<(f32, f32)>` for vehicles. Call them from `compute_world_coord_system` (behaviour-preserving refactor), from `spawn_agent_from_record` / `spawn_vehicle_from_record` (set Position at spawn), and inline in `promote_warm_to_active_system` (LOD respawn).
@@ -34,7 +36,7 @@ Behaviour-preserving extraction. No tests change, no behaviour change, just refa
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Add `agent_world_coord` + `vehicle_world_coord` to mod.rs**
+- [x] **Step 1: Add `agent_world_coord` + `vehicle_world_coord` to mod.rs**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, at module top-level (near the existing `chunk_of` free function), add:
 
@@ -86,7 +88,7 @@ pub fn vehicle_world_coord(
 
 Adjust the import paths (`crate::mobility::records::`, etc.) to match the conventions already used in `mod.rs` — many of these types are re-exported and the existing functions may use shorter paths.
 
-- [ ] **Step 2: Refactor `compute_world_coord_system` to delegate**
+- [x] **Step 2: Refactor `compute_world_coord_system` to delegate**
 
 In `backend/crates/sim-core/src/mobility/systems.rs`, replace the existing `compute_world_coord_system` body:
 
@@ -132,7 +134,7 @@ pub fn compute_world_coord_system(
 
 The old inline `match` block is replaced by the helper call. The `coord_at_progress` local helper at the top of `systems.rs` is now unused — delete it.
 
-- [ ] **Step 3: Run existing sim-core tests**
+- [x] **Step 3: Run existing sim-core tests**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -141,7 +143,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core 2>&1 | grep -
 
 Expected: same green count as before (no behaviour change). If `coord_at_progress` was used elsewhere in `systems.rs` than just `compute_world_coord_system`, the compiler will tell you; restore it as needed.
 
-- [ ] **Step 4: Workspace + clippy**
+- [x] **Step 4: Workspace + clippy**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -151,7 +153,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targe
 
 Expected: all green, clippy clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-core/src/mobility/systems.rs
@@ -168,7 +170,7 @@ TDD: write failing test, then update both spawn functions + the LOD respawn to u
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Write the failing TDD test**
+- [x] **Step 1: Write the failing TDD test**
 
 Append to the existing test module in `backend/crates/sim-core/src/mobility/mod.rs`:
 
@@ -239,7 +241,7 @@ fn spawn_vehicle_from_record_initializes_position_from_route() {
 
 Adjust the `RouteRecord` / `VehicleRecord` field shapes to match what's in `records.rs` (the field names above are best-guess — read the actual struct first).
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -248,7 +250,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core spawn_agent_f
 
 Expected: FAIL with `(0.0, 0.0) != (10.0, 20.0)` (and similar for vehicle).
 
-- [ ] **Step 3: Update `spawn_agent_from_record` to compute Position**
+- [x] **Step 3: Update `spawn_agent_from_record` to compute Position**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, find `spawn_agent_from_record`. It currently spawns the entity with `Position { x: 0.0, y: 0.0 }` (or similar literal). Locate the spawn call.
 
@@ -266,7 +268,7 @@ let (px, py) = {
 
 Then in the actual `self.world.spawn(...)` call, replace `Position { x: 0.0, y: 0.0 }` with `Position { x: px, y: py }`.
 
-- [ ] **Step 4: Update `spawn_vehicle_from_record` to compute Position**
+- [x] **Step 4: Update `spawn_vehicle_from_record` to compute Position**
 
 In the same file, find `spawn_vehicle_from_record`. Locate the spawn call (also has `Position { x: 0.0, y: 0.0 }`). Add at the top:
 
@@ -289,7 +291,7 @@ let (px, py) = {
 
 Replace `Position { x: 0.0, y: 0.0 }` with `Position { x: px, y: py }` in the spawn call.
 
-- [ ] **Step 5: Update `promote_warm_to_active_system` to compute Position**
+- [x] **Step 5: Update `promote_warm_to_active_system` to compute Position**
 
 In `backend/crates/sim-core/src/mobility/systems.rs`, find `promote_warm_to_active_system`. The function does something like `commands.spawn((AgentMarker, ..., Position { x: 0.0, y: 0.0 }, ...))`.
 
@@ -308,7 +310,7 @@ Replace the `Position { x: 0.0, y: 0.0 }` literal in the spawn call with `Positi
 
 If the system already constructs the `AgentMobilityState` in a local var (it should — it builds it for the `AgentMobilityStateComponent`), reuse that var. If it constructs the component inline, refactor to a local var first.
 
-- [ ] **Step 6: Run TDD tests to verify they pass**
+- [x] **Step 6: Run TDD tests to verify they pass**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -317,7 +319,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core spawn_agent_f
 
 Expected: PASS.
 
-- [ ] **Step 7: Full workspace + clippy**
+- [x] **Step 7: Full workspace + clippy**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -327,7 +329,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targe
 
 Expected: all green, clippy clean.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-core/src/mobility/systems.rs
@@ -342,7 +344,7 @@ git commit -m "fix(mobility): compute Position at spawn so LOD classifies into r
 - Modify: `backend/crates/sim-server/tests/websocket.rs`
 - Modify: `scripts/smoke-7b.mjs`
 
-- [ ] **Step 1: Simplify `subscribed_chunk_receives_mobility_chunk_delta_each_tick`**
+- [x] **Step 1: Simplify `subscribed_chunk_receives_mobility_chunk_delta_each_tick`**
 
 In `backend/crates/sim-server/tests/websocket.rs`, find the test added in Phase 7b T7. It currently subscribes to BOTH `(0, 0)` AND another chunk to work around the bug now fixed. Simplify to subscribe ONLY to the chunk where seeded agents actually live (the second one in the original list — most likely `(4, 4)` per the Phase-6 / Phase-7 work, but verify by reading the existing test).
 
@@ -361,7 +363,7 @@ send_chunk_subscribe(&mut client, &[ChunkCoordDto { x: 4, y: 4 }]).await;
 
 The rest of the test (read frames, assert MobilityChunkDelta arrives for chunk(4,4)) stays unchanged.
 
-- [ ] **Step 2: Run the simplified test**
+- [x] **Step 2: Run the simplified test**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -370,7 +372,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server --test webs
 
 Expected: PASS without the chunk(0,0) crutch.
 
-- [ ] **Step 3: Strengthen `scripts/smoke-7b.mjs`**
+- [x] **Step 3: Strengthen `scripts/smoke-7b.mjs`**
 
 In `scripts/smoke-7b.mjs`, find the `checks` object. Replace it:
 
@@ -402,7 +404,7 @@ const checks = {
 
 Delete the stale comment block at the bottom of the previous `checks` object (the one explaining why per-tick deltas weren't asserted).
 
-- [ ] **Step 4: Start dev stack**
+- [x] **Step 4: Start dev stack**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -413,7 +415,7 @@ until curl -sf http://127.0.0.1:8080/health > /dev/null; do sleep 3; done
 echo BACKEND_UP
 ```
 
-- [ ] **Step 5: Run smoke**
+- [x] **Step 5: Run smoke**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -424,7 +426,7 @@ Expected: all 9 checks (was 7) pass. If `got_chunk_deltas_per_tick` is false, th
 
 If `snapshots_contain_entities` is false, the snapshots are still empty — agents may be in some chunk other than the visible ones. Check the city_network seed to see where agents land.
 
-- [ ] **Step 6: Stop dev stack**
+- [x] **Step 6: Stop dev stack**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -435,7 +437,7 @@ sleep 1
 pgrep -fl "run-dev-stack|sim-server|vite --host" || echo all-stopped
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-server/tests/websocket.rs scripts/smoke-7b.mjs
@@ -449,7 +451,7 @@ git commit -m "test(ws): drop chunk(0,0) workaround + strengthen 7b smoke after 
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Full gates**
+- [x] **Step 1: Full gates**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -463,7 +465,7 @@ npm run build 2>&1 | tail -5
 
 Expected: all green.
 
-- [ ] **Step 2: Add progress entry**
+- [x] **Step 2: Add progress entry**
 
 Get timestamp:
 ```bash
@@ -476,7 +478,7 @@ Insert at the top of the reverse-chronological tail in `progress.md` (immediatel
 <TIMESTAMP> - Spawn-time Position init (Phase 7b loose-end fix): the Phase-7b browser smoke surfaced that seeded agents have `Position(0,0)` until `compute_world_coord_system` runs in tick 1's Output phase — but the LOD systems run BEFORE Output in the same tick, so they mass-classify all ~1011 seeded agents into chunk(0,0). chunk(0,0) is unsubscribed by camera-driven viewports → `demote_active_to_warm_system` collapses everyone into a FlowCell → agents never tick again and the frontend renders nothing. Fix: extract two pure helpers `agent_world_coord(state, routes, stops, link_polylines) -> Option<(f32, f32)>` and `vehicle_world_coord(route_position, routes, link_polylines) -> Option<(f32, f32)>` in `mobility::mod`, then use them from `compute_world_coord_system` (behaviour-preserving refactor), `spawn_agent_from_record`/`spawn_vehicle_from_record` (set Position at spawn time so LOD classifies correctly on tick 1), and `promote_warm_to_active_system` (LOD respawn). The simplified `subscribed_chunk_receives_mobility_chunk_delta_each_tick` integration test no longer needs to subscribe to chunk(0,0) as a workaround. `scripts/smoke-7b.mjs` re-enables `got_chunk_deltas_per_tick` and adds `snapshots_contain_entities` — both gaps that let the original bug ship.
 ```
 
-- [ ] **Step 3: Commit + push**
+- [x] **Step 3: Commit + push**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown

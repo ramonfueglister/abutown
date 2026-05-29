@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Bring `MobilityWorld::tick_mobility()` from 24.4 ms to < 5 ms at 100 000 active entities, all chunks subscribed.
 
 **Architecture:** Five focused TDD-ordered optimizations: (1) expose stable-id → Entity HashMaps as ECS resources so boarding/alighting can do O(1) lookups, (2) add a `NearStop` marker so `stop_arrival_system` skips 100 k agents, (3) cache the active link polyline on each entity as `CurrentLinkPolyline` so the Output systems skip 2× HashMap chain per tick, (4) make `track_chunk_populations_system` incremental via `Changed<Position>` and a `PreviousChunkByEntity` resource, (5) lazy chunk-activity filter in boarding_alighting (drop the 100 k pre-pass). Each task ends with a re-bench and a commit.
@@ -19,7 +21,7 @@
 - Already-modified (uncommitted): `backend/crates/sim-core/src/mobility/mod.rs` (added `profile_world_mut`)
 - Already-untracked: `backend/crates/sim-core/examples/profile_lod_tick.rs`
 
-- [ ] **Step 1: Verify baseline measurement reproduces**
+- [x] **Step 1: Verify baseline measurement reproduces**
 
 Run:
 ```bash
@@ -27,7 +29,7 @@ cargo run --release --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown
 ```
 Expected: `tick_mobility()  mean=~24ms` with per-system breakdown showing `boarding_alighting ~6.5ms`, `direction ~3.8ms`, `world_coord ~3.7ms`, `stop_arrive ~3.6ms`, `track_pop ~2.5ms`. If numbers differ by more than 20 % from the spec, stop and re-investigate before continuing.
 
-- [ ] **Step 2: Add `tick_100k_all_active` to the LOD bench**
+- [x] **Step 2: Add `tick_100k_all_active` to the LOD bench**
 
 Append to `backend/crates/sim-core/benches/mobility_tick_lod.rs` **before** the `criterion_group!` line:
 
@@ -72,7 +74,7 @@ And update the `criterion_group!` line at the bottom:
 criterion_group!(benches, tick_100k_with_5_subscribed_chunks, tick_100k_all_active);
 ```
 
-- [ ] **Step 3: Run the new bench to capture baseline**
+- [x] **Step 3: Run the new bench to capture baseline**
 
 Run:
 ```bash
@@ -80,7 +82,7 @@ cargo bench --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend
 ```
 Expected: `tick_100k_all_active  time:   [~24 ms]` (give or take 2 ms). Capture the exact number for the commit message.
 
-- [ ] **Step 4: Run workspace tests to confirm no regression from bench addition**
+- [x] **Step 4: Run workspace tests to confirm no regression from bench addition**
 
 Run:
 ```bash
@@ -88,7 +90,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: all tests pass (178 workspace, 158 sim-core).
 
-- [ ] **Step 5: Commit Step 1's changes**
+- [x] **Step 5: Commit Step 1's changes**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add \
@@ -130,7 +132,7 @@ EOF
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs:104-133` (empty()), `:757-823` (spawn helpers), `:547-600` (tick_mobility post-schedule sync)
 - Test: `backend/crates/sim-core/src/mobility/mod.rs` (new module-level tests near existing ones)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `backend/crates/sim-core/src/mobility/mod.rs` inside the existing `#[cfg(test)] mod tests` block:
 
@@ -189,7 +191,7 @@ fn vehicle_id_index_resource_matches_by_vehicle_id_after_spawn() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 ```bash
@@ -197,7 +199,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: compile error — `unresolved import 'crate::mobility::resources::AgentIdIndex'`.
 
-- [ ] **Step 3: Add the resources**
+- [x] **Step 3: Add the resources**
 
 Append to `backend/crates/sim-core/src/mobility/resources.rs`:
 
@@ -214,7 +216,7 @@ pub struct AgentIdIndex(pub HashMap<AgentId, Entity>);
 pub struct VehicleIdIndex(pub HashMap<VehicleId, Entity>);
 ```
 
-- [ ] **Step 4: Register the resources in `MobilityWorld::empty()`**
+- [x] **Step 4: Register the resources in `MobilityWorld::empty()`**
 
 In `backend/crates/sim-core/src/mobility/mod.rs:104-133`, add `world.insert_resource(...)` calls for the two new resources alongside the existing ones (right after `PreviousVehicleChunks`):
 
@@ -225,7 +227,7 @@ In `backend/crates/sim-core/src/mobility/mod.rs:104-133`, add `world.insert_reso
         world.insert_resource(crate::mobility::resources::VehicleIdIndex::default());
 ```
 
-- [ ] **Step 5: Sync inside `spawn_agent_from_record`**
+- [x] **Step 5: Sync inside `spawn_agent_from_record`**
 
 In `backend/crates/sim-core/src/mobility/mod.rs:783`, change:
 
@@ -245,7 +247,7 @@ to:
         entity
 ```
 
-- [ ] **Step 6: Sync inside `spawn_vehicle_from_record`**
+- [x] **Step 6: Sync inside `spawn_vehicle_from_record`**
 
 In `backend/crates/sim-core/src/mobility/mod.rs:821`, change:
 
@@ -265,7 +267,7 @@ to:
         entity
 ```
 
-- [ ] **Step 7: Sync inside `tick_mobility`'s post-schedule block**
+- [x] **Step 7: Sync inside `tick_mobility`'s post-schedule block**
 
 In `backend/crates/sim-core/src/mobility/mod.rs:562-600` (the four sync blocks that handle newly-spawned and despawned agents/vehicles), update each to mirror into the resources.
 
@@ -331,7 +333,7 @@ And mirror for vehicles (replacing the corresponding block):
         }
 ```
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 Run:
 ```bash
@@ -339,7 +341,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: all 160 tests pass (158 + the 2 new ones).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/crates/sim-core/src/mobility/
@@ -369,7 +371,7 @@ EOF
 
 This task changes only how the system finds entities by id; it does not change observable behavior. All existing boarding/alighting tests must stay green.
 
-- [ ] **Step 1: Run existing boarding tests as the contract baseline**
+- [x] **Step 1: Run existing boarding tests as the contract baseline**
 
 Run:
 ```bash
@@ -377,7 +379,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: all boarding/alighting tests pass. Note which test names exist so we can re-run them post-refactor.
 
-- [ ] **Step 2: Drop the A.0 pre-pass and use lazy chunk_is_simulated**
+- [x] **Step 2: Drop the A.0 pre-pass and use lazy chunk_is_simulated**
 
 The current code builds a HashMap of all 100 k agent simulation states up front (A.0). We replace this with on-demand `chunk_is_simulated` calls inside each candidate check via `world.get::<Position>(entity)`.
 
@@ -621,7 +623,7 @@ pub fn boarding_alighting_system(
 
 Note: the inner `drop(agents); let vehicles = sets.p1(); ...; let _ = sets.p0();` dance in A.2 is required because `ParamSet` only lets one inner query be borrowed at a time. Each candidate releases the agents borrow, takes the vehicles borrow to find a match, then re-takes the agents borrow on next iteration.
 
-- [ ] **Step 3: Build to surface any borrow-checker issues**
+- [x] **Step 3: Build to surface any borrow-checker issues**
 
 Run:
 ```bash
@@ -629,7 +631,7 @@ cargo build --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend
 ```
 Expected: clean build. If the borrow-checker complains about A.2 (ParamSet borrow split), rework into two passes: first collect `(agent_entity, agent_pos)` for all candidates, drop the borrow, then run the vehicle-matching pass.
 
-- [ ] **Step 4: Re-run boarding tests**
+- [x] **Step 4: Re-run boarding tests**
 
 Run:
 ```bash
@@ -637,7 +639,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: all boarding/alighting tests pass — semantic behavior unchanged.
 
-- [ ] **Step 5: Run full workspace tests**
+- [x] **Step 5: Run full workspace tests**
 
 Run:
 ```bash
@@ -645,7 +647,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: all 178 workspace tests pass.
 
-- [ ] **Step 6: Bench: confirm reduction**
+- [x] **Step 6: Bench: confirm reduction**
 
 Run:
 ```bash
@@ -653,7 +655,7 @@ cargo bench --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend
 ```
 Expected: `tick_100k_all_active` mean ≤ 18 ms. If it's still ≥ 22 ms, the refactor is not removing the O(N²) — re-profile via `cargo run --release ... --example profile_lod_tick` and inspect `boarding_alighting` mean before continuing.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/crates/sim-core/src/mobility/systems.rs
@@ -682,7 +684,7 @@ EOF
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs` (`walk_advance_system`, `stop_arrival_system`)
 - Test: add tests in `backend/crates/sim-core/src/mobility/systems.rs` inside the existing `#[cfg(test)]` block.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to the existing `#[cfg(test)] mod tests` block at the bottom of `backend/crates/sim-core/src/mobility/systems.rs`:
 
@@ -778,7 +780,7 @@ fn stop_arrival_removes_near_stop_marker_after_transition() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 ```bash
@@ -786,7 +788,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: compile error — `cannot find type 'NearStop'`.
 
-- [ ] **Step 3: Add the `NearStop` component**
+- [x] **Step 3: Add the `NearStop` component**
 
 Append to `backend/crates/sim-core/src/mobility/components.rs`:
 
@@ -800,7 +802,7 @@ Append to `backend/crates/sim-core/src/mobility/components.rs`:
 pub struct NearStop;
 ```
 
-- [ ] **Step 4: walk_advance inserts the marker**
+- [x] **Step 4: walk_advance inserts the marker**
 
 In `backend/crates/sim-core/src/mobility/systems.rs:93-118` (the `walk_advance_system`), change the signature to take `Commands` and add the marker on saturation:
 
@@ -837,7 +839,7 @@ pub fn walk_advance_system(
 }
 ```
 
-- [ ] **Step 5: stop_arrival filters by `With<NearStop>` and removes the marker**
+- [x] **Step 5: stop_arrival filters by `With<NearStop>` and removes the marker**
 
 In `backend/crates/sim-core/src/mobility/systems.rs:159-208` (the `stop_arrival_system`), change the query filter and add a `Commands` parameter to remove the marker:
 
@@ -899,7 +901,7 @@ pub fn stop_arrival_system(
 }
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run:
 ```bash
@@ -936,7 +938,7 @@ If `stop_arrival_transitions_walking_agent_to_waiting_at_stop` fails, edit the s
 
 Also check `walk_advance_clamps_at_one_and_marks_dirty` — if it spawns an agent that should hit progress=1.0, then after this change it will also acquire `NearStop` which the test doesn't check. The test is checking dirty insertion, not marker absence, so it should still pass; but if assertion failures show up, add the marker check (`assert!(world.get::<NearStop>(entity).is_some())`) rather than removing it.
 
-- [ ] **Step 7: Run full workspace tests + bench**
+- [x] **Step 7: Run full workspace tests + bench**
 
 Run:
 ```bash
@@ -950,7 +952,7 @@ cargo bench --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend
 ```
 Expected: `tick_100k_all_active` mean ≤ 15 ms (down from ~17). The stop_arrival savings (3.6 ms → ~0.2 ms) account for ~3 ms of reduction.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/crates/sim-core/src/mobility/
@@ -978,7 +980,7 @@ EOF
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs` (new `update_link_polyline_cache_system`, modify `compute_world_coord_system`, `compute_direction_system`, `install_systems`)
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs:757-823` (spawn helpers insert initial cache)
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add to the existing `#[cfg(test)] mod tests` block at the bottom of `backend/crates/sim-core/src/mobility/systems.rs`:
 
@@ -1106,7 +1108,7 @@ fn current_link_polyline_invalidates_on_vehicle_link_change() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 ```bash
@@ -1114,7 +1116,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: compile errors for `CurrentLinkPolyline` and `update_link_polyline_cache_system`.
 
-- [ ] **Step 3: Add the `CurrentLinkPolyline` component**
+- [x] **Step 3: Add the `CurrentLinkPolyline` component**
 
 Append to `backend/crates/sim-core/src/mobility/components.rs`:
 
@@ -1136,7 +1138,7 @@ pub struct CurrentLinkPolyline {
 
 Note: this component is derived state and is **not** serialized — `MobilityWorld`'s custom serde does not touch it, so snapshot round-trip stays byte-stable.
 
-- [ ] **Step 4: Add `update_link_polyline_cache_system`**
+- [x] **Step 4: Add `update_link_polyline_cache_system`**
 
 Insert this new system in `backend/crates/sim-core/src/mobility/systems.rs` just after `walk_advance_system` (so before `boarding_alighting_system`):
 
@@ -1229,7 +1231,7 @@ pub fn update_link_polyline_cache_system(
 }
 ```
 
-- [ ] **Step 5: Register it in `install_systems`**
+- [x] **Step 5: Register it in `install_systems`**
 
 In `backend/crates/sim-core/src/mobility/systems.rs:73-91` (the `install_systems` Advance set), insert `update_link_polyline_cache_system` first and order the rest after it:
 
@@ -1257,7 +1259,7 @@ In `backend/crates/sim-core/src/mobility/systems.rs:73-91` (the `install_systems
     ));
 ```
 
-- [ ] **Step 6: Modify `compute_world_coord_system` to read the cache**
+- [x] **Step 6: Modify `compute_world_coord_system` to read the cache**
 
 In `backend/crates/sim-core/src/mobility/systems.rs:444-478` replace with:
 
@@ -1325,7 +1327,7 @@ grep -n "point_at_progress_slice\|fn point_at_progress" /Users/ramonfuglister/De
 ```
 If it doesn't exist, find the equivalent helper (likely named `point_at_progress` or similar) and use that name; if no slice variant exists, add one inline or split out — but most likely `direction_at_progress_slice`'s sibling `point_at_progress_slice` is already in `mobility_geometry`.
 
-- [ ] **Step 7: Modify `compute_direction_system` to read the cache**
+- [x] **Step 7: Modify `compute_direction_system` to read the cache**
 
 In `backend/crates/sim-core/src/mobility/systems.rs:481-520` replace with:
 
@@ -1383,7 +1385,7 @@ pub fn compute_direction_system(
 }
 ```
 
-- [ ] **Step 8: Run tests**
+- [x] **Step 8: Run tests**
 
 Run:
 ```bash
@@ -1395,7 +1397,7 @@ Expected: all 164 sim-core tests pass (162 + 2 new). The snapshot roundtrip test
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p sim-core phase3 2>&1 | tail -10
 ```
 
-- [ ] **Step 9: Run bench**
+- [x] **Step 9: Run bench**
 
 Run:
 ```bash
@@ -1403,7 +1405,7 @@ cargo bench --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend
 ```
 Expected: `tick_100k_all_active` mean ≤ 9 ms (down from ~14 ms). Output systems should drop from ~7.5 ms combined to ~1 ms combined; cache-update system adds ~0.3 ms.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/crates/sim-core/src/mobility/
@@ -1435,7 +1437,7 @@ EOF
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs:526-560` (rewrite the system)
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs:104-133` (`empty()` registers the new resource)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to the existing `#[cfg(test)] mod tests` block at the bottom of `backend/crates/sim-core/src/mobility/systems.rs`:
 
@@ -1527,7 +1529,7 @@ fn incremental_chunk_populations_matches_full_rebuild() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 ```bash
@@ -1535,7 +1537,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: compile error — `unresolved import 'crate::mobility::resources::PreviousChunkByEntity'`.
 
-- [ ] **Step 3: Add both resources**
+- [x] **Step 3: Add both resources**
 
 Append to `backend/crates/sim-core/src/mobility/resources.rs`:
 
@@ -1556,7 +1558,7 @@ pub struct PreviousChunkByEntity(pub HashMap<Entity, ChunkCoord>);
 pub struct PreviousFlowCellContrib(pub HashMap<ChunkCoord, u32>);
 ```
 
-- [ ] **Step 4: Register the resources in `MobilityWorld::empty()`**
+- [x] **Step 4: Register the resources in `MobilityWorld::empty()`**
 
 In `backend/crates/sim-core/src/mobility/mod.rs:104-133`, add:
 
@@ -1565,7 +1567,7 @@ In `backend/crates/sim-core/src/mobility/mod.rs:104-133`, add:
         world.insert_resource(crate::mobility::resources::PreviousFlowCellContrib::default());
 ```
 
-- [ ] **Step 5: Rewrite the system**
+- [x] **Step 5: Rewrite the system**
 
 In `backend/crates/sim-core/src/mobility/systems.rs:526-560`, replace `track_chunk_populations_system` with:
 
@@ -1696,7 +1698,7 @@ pub fn track_chunk_populations_system(
 
 Why the FlowCell handling: `classify_activity_system` reads `ChunkPopulations` and treats a positive value as "this chunk has population". FlowCell aggregates contribute to that value but their entity count isn't tracked by `Changed<Position>` — they live as numeric values in `FlowCells`. The `prev_flow.0.drain()` at the start of each incremental tick removes the previous tick's FlowCell contribution from `populations` before the entity-count deltas land; Step D re-adds the current tick's FlowCell contribution. Net result: `populations[chunk] = entity_count + flow_cell_aggregate`, exact same semantic as the old full-rebuild path.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run:
 ```bash
@@ -1704,7 +1706,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: all 165 sim-core tests pass (164 + 1 new). The `track_chunk_populations_sums_agents_vehicles_and_flow_cells` test at `systems.rs:1444` must still pass — it spawns then runs the schedule once, hitting the first-run path. If it spawns and runs twice expecting populations to be stable, adjust the test to insert `PreviousChunkByEntity` + `PreviousFlowCellContrib` and update assertions if needed.
 
-- [ ] **Step 7: Run full workspace + bench**
+- [x] **Step 7: Run full workspace + bench**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml 2>&1 | tail -10
@@ -1716,7 +1718,7 @@ cargo bench --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend
 ```
 Expected: `tick_100k_all_active` mean ≤ 5 ms ✓ goal met. If still > 5 ms, run the profile example to identify the new top hotspot and continue to Task 7's stretch step.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/crates/sim-core/src/mobility/
@@ -1748,7 +1750,7 @@ EOF
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Full workspace tests + clippy**
+- [x] **Step 1: Full workspace tests + clippy**
 
 Run:
 ```bash
@@ -1757,7 +1759,7 @@ cargo clippy --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backen
 ```
 Expected: all tests pass, clippy clean.
 
-- [ ] **Step 2: TSC + vitest**
+- [x] **Step 2: TSC + vitest**
 
 Run from project root (use absolute paths to avoid cwd drift):
 ```bash
@@ -1766,7 +1768,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && npx vitest run 2>&1 | tail -1
 ```
 Expected: tsc clean, 158/158 vitest tests pass (or 156/158 with the known `noRetiredAssets` pre-existing failures).
 
-- [ ] **Step 3: Browser smoke**
+- [x] **Step 3: Browser smoke**
 
 CLAUDE.md mandates this for boundary-crossing changes. This rework is backend-only and doesn't change wire formats, but smoke acts as a final guard.
 
@@ -1775,14 +1777,14 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && node scripts/smoke-7b.mjs 2>&
 ```
 Expected: all 9 checks pass.
 
-- [ ] **Step 4: Capture final bench numbers**
+- [x] **Step 4: Capture final bench numbers**
 
 ```bash
 cargo bench --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p sim-core --bench mobility_tick_lod 2>&1 | tail -20
 ```
 Capture the exact mean for `tick_100k_all_active` and `tick_100k_with_5_subscribed_chunks` for the progress.md entry.
 
-- [ ] **Step 5: Append progress.md entry**
+- [x] **Step 5: Append progress.md entry**
 
 At the top of the reverse-chronological block (line 19 onwards — see CLAUDE.md note about insertion point), insert a new entry. Use the exact format of the surrounding entries. Replace `<FINAL_NUMBER>` with the captured bench mean:
 
@@ -1792,7 +1794,7 @@ Edit `progress.md` to insert immediately after line 18 (between the original lin
 2026-05-19T<HH:MM:SS>.000Z - Mobility tick perf rework (Phase 6 followup): the original 2026-05-17 progress note claimed the LOD-filter overhead was the bottleneck — fresh profiling debunked that. The existing `tick_100k_with_5_subscribed_chunks` bench warms down to ~0 active entities because LOD demotes everything outside the 5 subscribed chunks (still 21µs — unchanged). New bench `tick_100k_all_active` subscribes all 32×16 chunks so 100k walkers + 1k cars stay in the ECS hot path; baseline was 24.4 ms / tick. Five optimizations land under that bench: (1) `AgentIdIndex` + `VehicleIdIndex` ECS resources mirror `MobilityWorld.by_agent_id` / `by_vehicle_id` so `boarding_alighting_system` does O(1) lookups instead of three nested 100k-entity scans (A.5, B.2, B.3) — also drops the 100k-entry A.0 pre-pass, replacing it with lazy per-candidate `chunk_is_simulated`; (2) new `NearStop` marker (inserted by `walk_advance_system` on progress saturation, removed by `stop_arrival_system` post-transition) confines `stop_arrival_system`'s query to candidates only; (3) `CurrentLinkPolyline { link_id, points: Arc<Vec<(f32,f32)>> }` component cache refreshed by new `update_link_polyline_cache_system` (first in `MobilitySet::Advance`) — `compute_world_coord_system` and `compute_direction_system` read the cached `Arc` directly instead of doing `routes.get() → links.get() → link_polylines.get()` per entity per tick; (4) `track_chunk_populations_system` rewritten incrementally — `Query<..., Changed<Position>>` only re-buckets moved entities, `PreviousChunkByEntity` tracks each entity's old bucket, `PreviousFlowCellContrib` keeps the FlowCell aggregate slice consistent across ticks; (5) lazy chunk-activity filter inside `boarding_alighting_system` (covered in #1) — no 100k pre-pass. New profile example `examples/profile_lod_tick.rs` and `MobilityWorld::profile_world_mut()` accessor support per-system timing during development. `CurrentLinkPolyline` is derived state and not serialized — snapshot roundtrip stays byte-stable. Bench: `tick_100k_all_active` 24.4 ms → <FINAL_NUMBER> (<5 ms target met). All 181 workspace cargo tests + 158 vitest + clippy + tsc + browser smoke 9/9 pass.
 ```
 
-- [ ] **Step 6: Commit progress.md**
+- [x] **Step 6: Commit progress.md**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add progress.md

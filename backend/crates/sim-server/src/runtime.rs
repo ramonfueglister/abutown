@@ -97,12 +97,16 @@ fn expected_base_world_car_routes(
             });
         let route_id = format!("route:arterial:{arterial_index}");
         for n in 0..group.cars_per_arterial {
-            expected.insert(format!("vehicle:car:{arterial_index}:{n}"), route_id.clone());
+            expected.insert(
+                format!("vehicle:car:{arterial_index}:{n}"),
+                route_id.clone(),
+            );
         }
     }
     expected
 }
 
+#[cfg(test)]
 fn expected_base_world_car_count(base_world: &BaseWorldBundle) -> usize {
     expected_base_world_car_routes(base_world).len()
 }
@@ -985,9 +989,11 @@ mod tests {
                 .iter()
                 .any(|vehicle| vehicle.id.0.starts_with("vehicle:car:"))
         );
-        assert!(vehicles
-            .iter()
-            .all(|vehicle| vehicle.id.0.starts_with("vehicle:car:")));
+        assert!(
+            vehicles
+                .iter()
+                .all(|vehicle| vehicle.id.0.starts_with("vehicle:car:"))
+        );
     }
 
     fn workspace_root() -> std::path::PathBuf {
@@ -1053,9 +1059,12 @@ mod tests {
             traffic_routes.count() > 0,
             "must have at least one traffic route"
         );
-        assert!(traffic_routes.iter().all(|route| route.edges.iter().all(
-            |edge_id| graph.edge(*edge_id).kind == sim_core::routing::EdgeKind::Road
-        )));
+        assert!(traffic_routes.iter().all(|route| {
+            route
+                .edges
+                .iter()
+                .all(|edge_id| graph.edge(*edge_id).kind == sim_core::routing::EdgeKind::Road)
+        }));
         let spatial = world.resource::<sim_core::routing::NodeSpatialIndex>();
         assert_eq!(spatial.size(), graph.node_count());
     }
@@ -1133,10 +1142,11 @@ mod tests {
 
         assert!(!path.edges.is_empty());
         assert!(stats.corridor_cluster_count >= 1);
-        assert!(path
-            .edges
-            .iter()
-            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road));
+        assert!(
+            path.edges
+                .iter()
+                .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road)
+        );
     }
 
     #[test]
@@ -1165,10 +1175,11 @@ mod tests {
         )
         .expect("seeded road edge endpoints should be connected by the routing graph");
         assert!(!path.edges.is_empty());
-        assert!(path
-            .edges
-            .iter()
-            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road));
+        assert!(
+            path.edges
+                .iter()
+                .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road)
+        );
     }
 
     #[test]

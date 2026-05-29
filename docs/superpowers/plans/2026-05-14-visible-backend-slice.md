@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the first visible browser-to-Rust runtime slice: the existing Zurich canvas scene shows a Rust-owned live chunk overlay and server-driven pulse.
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
 
-**Status 2026-05-15:** Backend protocol, runtime, HTTP routes, and WebSocket stream are implemented and tested. The frontend bridge files referenced by this original plan (`src/backend/*`, `src/render/backendOverlay.ts`, and related tests) are not present in this branch, so the visible browser overlay portion remains pending.
+**Goal:** Build the first visible browser-to-Rust runtime slice: the existing Zurich canvas scene shows a Rust-owned live chunk overlay and server-driven pulse.
 
 **Architecture:** Extend the Rust protocol with JSON WebSocket messages, give `sim-server` a small in-memory authoritative runtime, and expose `/ws` for low-frequency tile pulse deltas. Add a frontend backend bridge that fetches snapshot state, consumes WebSocket messages, and passes a render-friendly overlay state to a focused canvas overlay renderer.
 
@@ -40,7 +40,7 @@ This plan implements one vertical slice from `docs/superpowers/specs/2026-05-14-
 **Files:**
 - Modify: `backend/crates/protocol/src/lib.rs`
 
-- [ ] **Step 1: Add failing protocol serialization tests**
+- [x] **Step 1: Add failing protocol serialization tests**
 
 Add these tests inside the existing `#[cfg(test)] mod tests` block in `backend/crates/protocol/src/lib.rs`:
 
@@ -81,7 +81,7 @@ Add these tests inside the existing `#[cfg(test)] mod tests` block in `backend/c
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -91,7 +91,7 @@ cargo test --manifest-path backend/Cargo.toml -p abutown-protocol websocket_
 
 Expected: FAIL because `ServerMessageDto`, `ServerHelloDto`, and `TilePulseDeltaDto` are not defined.
 
-- [ ] **Step 3: Add the protocol DTOs**
+- [x] **Step 3: Add the protocol DTOs**
 
 Insert this code after `ChunkSnapshotDto` in `backend/crates/protocol/src/lib.rs`:
 
@@ -130,7 +130,7 @@ pub struct ServerErrorDto {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -140,7 +140,7 @@ cargo test --manifest-path backend/Cargo.toml -p abutown-protocol websocket_
 
 Expected: PASS with 2 protocol tests passing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/protocol/src/lib.rs
@@ -156,7 +156,7 @@ git commit -m "feat: add backend websocket protocol messages"
 - Create: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-server/tests/http.rs`
 
-- [ ] **Step 1: Write failing runtime-backed HTTP test**
+- [x] **Step 1: Write failing runtime-backed HTTP test**
 
 Replace `backend/crates/sim-server/tests/http.rs` with:
 
@@ -258,7 +258,7 @@ async fn unloaded_chunk_returns_not_found() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails against the old static chunk**
+- [x] **Step 2: Run test to verify it fails against the old static chunk**
 
 Run:
 
@@ -268,7 +268,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server --test http
 
 Expected: FAIL because the old static handler exposes chunk `0:0`, while this visible slice uses chunk `4:4`.
 
-- [ ] **Step 3: Update sim-server dependencies**
+- [x] **Step 3: Update sim-server dependencies**
 
 In `backend/crates/sim-server/Cargo.toml`, change the library section and dependencies to:
 
@@ -295,7 +295,7 @@ tracing-subscriber.workspace = true
 
 Keep the existing `[package]` and `[dev-dependencies]` sections, with `serde_json.workspace = true` removed from `[dev-dependencies]` if it now appears under `[dependencies]`.
 
-- [ ] **Step 4: Create the library root**
+- [x] **Step 4: Create the library root**
 
 Create `backend/crates/sim-server/src/lib.rs`:
 
@@ -304,7 +304,7 @@ pub mod app;
 pub mod runtime;
 ```
 
-- [ ] **Step 5: Create the in-memory runtime**
+- [x] **Step 5: Create the in-memory runtime**
 
 Create `backend/crates/sim-server/src/runtime.rs`:
 
@@ -443,7 +443,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 6: Replace app routing with state-backed handlers**
+- [x] **Step 6: Replace app routing with state-backed handlers**
 
 Replace `backend/crates/sim-server/src/app.rs` with:
 
@@ -517,7 +517,7 @@ async fn chunk(
 }
 ```
 
-- [ ] **Step 7: Run runtime and HTTP tests**
+- [x] **Step 7: Run runtime and HTTP tests**
 
 Run:
 
@@ -527,7 +527,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: PASS for runtime unit tests and HTTP integration tests.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/crates/sim-server/Cargo.toml backend/crates/sim-server/src/lib.rs backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/tests/http.rs
@@ -542,7 +542,7 @@ git commit -m "feat: add state-backed simulation runtime"
 - Modify: `backend/crates/sim-server/src/app.rs`
 - Create: `backend/crates/sim-server/tests/websocket.rs`
 
-- [ ] **Step 1: Add failing WebSocket integration test**
+- [x] **Step 1: Add failing WebSocket integration test**
 
 Create `backend/crates/sim-server/tests/websocket.rs`:
 
@@ -602,7 +602,7 @@ async fn websocket_sends_hello_and_tile_pulse() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -612,7 +612,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server --test websocket
 
 Expected: FAIL because `/ws` is not routed and `futures-util` / `tokio-tungstenite` are not declared direct dev dependencies.
 
-- [ ] **Step 3: Add workspace test dependencies**
+- [x] **Step 3: Add workspace test dependencies**
 
 In `backend/Cargo.toml`, add these entries under `[workspace.dependencies]`:
 
@@ -628,7 +628,7 @@ futures-util.workspace = true
 tokio-tungstenite.workspace = true
 ```
 
-- [ ] **Step 4: Add WebSocket route and stream handler**
+- [x] **Step 4: Add WebSocket route and stream handler**
 
 Modify `backend/crates/sim-server/src/app.rs` imports to include:
 
@@ -701,7 +701,7 @@ async fn send_server_message(
 }
 ```
 
-- [ ] **Step 5: Run WebSocket test**
+- [x] **Step 5: Run WebSocket test**
 
 Run:
 
@@ -711,7 +711,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server --test websocket
 
 Expected: PASS and receive hello plus tile pulse.
 
-- [ ] **Step 6: Run full backend tests**
+- [x] **Step 6: Run full backend tests**
 
 Run:
 
@@ -721,7 +721,7 @@ cargo test --manifest-path backend/Cargo.toml --workspace
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/Cargo.toml backend/Cargo.lock backend/crates/sim-server/Cargo.toml backend/crates/sim-server/src/app.rs backend/crates/sim-server/tests/websocket.rs
@@ -736,7 +736,7 @@ git commit -m "feat: stream visible backend deltas"
 - Create: `src/backend/backendClient.ts`
 - Create: `tests/backend/backendState.test.ts`
 
-- [ ] **Step 1: Write failing frontend state tests**
+- [x] **Step 1: Write failing frontend state tests**
 
 Create `tests/backend/backendState.test.ts`:
 
@@ -831,7 +831,7 @@ describe('backend overlay state', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -841,7 +841,7 @@ npm test -- tests/backend/backendState.test.ts
 
 Expected: FAIL because frontend backend modules do not exist.
 
-- [ ] **Step 3: Create TypeScript protocol guards**
+- [x] **Step 3: Create TypeScript protocol guards**
 
 Create `src/backend/protocol.ts`:
 
@@ -961,7 +961,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 ```
 
-- [ ] **Step 4: Create pure backend state reducer**
+- [x] **Step 4: Create pure backend state reducer**
 
 Create `src/backend/backendState.ts`:
 
@@ -1140,7 +1140,7 @@ export function applyServerMessage(
 }
 ```
 
-- [ ] **Step 5: Create browser backend client**
+- [x] **Step 5: Create browser backend client**
 
 Create `src/backend/backendClient.ts`:
 
@@ -1281,7 +1281,7 @@ function toWebSocketUrl(baseUrl: string, path: string): string {
 }
 ```
 
-- [ ] **Step 6: Run frontend state tests**
+- [x] **Step 6: Run frontend state tests**
 
 Run:
 
@@ -1291,7 +1291,7 @@ npm test -- tests/backend/backendState.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/backend/protocol.ts src/backend/backendState.ts src/backend/backendClient.ts tests/backend/backendState.test.ts
@@ -1305,7 +1305,7 @@ git commit -m "feat: add browser backend state bridge"
 - Create: `tests/render/backendOverlay.test.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Write failing overlay helper tests**
+- [x] **Step 1: Write failing overlay helper tests**
 
 Create `tests/render/backendOverlay.test.ts`:
 
@@ -1331,7 +1331,7 @@ describe('backend overlay helpers', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1341,7 +1341,7 @@ npm test -- tests/render/backendOverlay.test.ts
 
 Expected: FAIL because `backendOverlay.ts` does not exist.
 
-- [ ] **Step 3: Create overlay renderer**
+- [x] **Step 3: Create overlay renderer**
 
 Create `src/render/backendOverlay.ts`:
 
@@ -1495,7 +1495,7 @@ function roundRect(
 }
 ```
 
-- [ ] **Step 4: Wire overlay state into `src/main.ts`**
+- [x] **Step 4: Wire overlay state into `src/main.ts`**
 
 Add these imports near the other imports:
 
@@ -1541,7 +1541,7 @@ Add this line inside `drawScene()` after the drawable loop and before `drawPerim
   drawBackendWorldOverlay(ctx, backendOverlayState, iso, TILE_W, TILE_H, performance.now());
 ```
 
-- [ ] **Step 5: Run overlay tests and TypeScript build**
+- [x] **Step 5: Run overlay tests and TypeScript build**
 
 Run:
 
@@ -1552,7 +1552,7 @@ npm run build
 
 Expected: both tests PASS and TypeScript build PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/render/backendOverlay.ts tests/render/backendOverlay.test.ts src/main.ts
@@ -1564,7 +1564,7 @@ git commit -m "feat: render visible backend overlay"
 **Files:**
 - Modify: `backend/README.md`
 
-- [ ] **Step 1: Update backend README run instructions**
+- [x] **Step 1: Update backend README run instructions**
 
 Append this section to `backend/README.md`:
 
@@ -1586,7 +1586,7 @@ npm run dev
 Open the Vite URL. The city should render normally and show a `RUST LIVE` badge. Chunk `4:4` is outlined from the server snapshot, and a server-driven pulse appears from `/ws` roughly once per second.
 ````
 
-- [ ] **Step 2: Run full backend verification**
+- [x] **Step 2: Run full backend verification**
 
 Run:
 
@@ -1598,7 +1598,7 @@ cargo test --manifest-path backend/Cargo.toml --workspace
 
 Expected: all commands PASS.
 
-- [ ] **Step 3: Run full frontend verification**
+- [x] **Step 3: Run full frontend verification**
 
 Run:
 
@@ -1609,7 +1609,7 @@ npm run build
 
 Expected: all tests PASS and production build PASS.
 
-- [ ] **Step 4: Manual visible smoke**
+- [x] **Step 4: Manual visible smoke**
 
 Run the Rust server:
 
@@ -1631,7 +1631,7 @@ Open the Vite URL in the browser. Verify:
 - chunk `4:4` outline is visible,
 - pulse marker appears and changes over time.
 
-- [ ] **Step 5: Commit docs and final verification notes**
+- [x] **Step 5: Commit docs and final verification notes**
 
 ```bash
 git add backend/README.md
@@ -1642,10 +1642,10 @@ If verification required code fixes, include only the touched files in the same 
 
 ## Final Review
 
-- [ ] Run `git status --short` and confirm only intentional tracked changes are committed.
-- [ ] Confirm `.gitignore 2` remains untracked and untouched.
-- [ ] Confirm the feature branch contains the visible backend slice commits.
-- [ ] Prepare a concise summary with exact verification commands and results.
+- [x] Run `git status --short` and confirm only intentional tracked changes are committed.
+- [x] Confirm `.gitignore 2` remains untracked and untouched.
+- [x] Confirm the feature branch contains the visible backend slice commits.
+- [x] Prepare a concise summary with exact verification commands and results.
 
 ## Spec Coverage
 

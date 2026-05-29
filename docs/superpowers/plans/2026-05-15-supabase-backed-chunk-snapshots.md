@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Make the root `.env` Supabase/Postgres configuration first-class for the Rust server, then persist authoritative chunk snapshots durably without touching the already-merged card-hand/auth work.
 
 **Architecture:** Introduce a small `ServerConfig` boundary in `sim-server` that loads root `.env` values and maps `DATABASE_URL` to the existing Postgres runtime. Add an async chunk snapshot store contract beside the current in-memory snapshot store, then add a Postgres adapter and wire the snapshot loop through it. Keep startup hydration/replay as the next slice after durable writes are verified.

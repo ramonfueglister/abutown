@@ -27,6 +27,32 @@ the client sends. Adapt the script (or write a similar one) per feature.
 the wire. The lesson cost two extra commits to fix after the original
 "complete" claim; a browser smoke would have caught it in one minute.
 
+## Never run two cargo commands at once — route cargo through `scripts/cargo-serial.sh`
+
+**Trigger:** any `cargo` invocation (test / build / clippy / check), whether you
+run it yourself, in a background task, or via a dispatched subagent.
+
+**Why:** two cargo processes against the same `backend/target/` block on
+cargo's build lock. Nothing corrupts — but the second one silently stalls
+waiting for the lock, which looks exactly like the session hanging for
+minutes. This bit us hard (escalated to "ALARM") when a background subagent
+ran a broad `cargo test --workspace --all-targets` while a scoped
+`cargo test -p sim-server` was still going, and an orphaned test process
+lingered after the subagent finished.
+
+**Action:**
+- Run cargo through `scripts/cargo-serial.sh` (e.g.
+  `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-server`).
+  It serializes via an atomic mkdir lock: the second caller WAITS with visible
+  progress instead of stalling, reclaims the lock if the holder died, and times
+  out via `CARGO_SERIAL_MAX_WAIT` (default 1200s).
+- Run slow cargo in the **background** (`run_in_background`) and poll, so you
+  stay responsive instead of blocking the whole turn.
+- Dispatch Rust-touching subagents **one at a time**, and tell them to run
+  exactly the scoped cargo command given — never a broad
+  `--workspace --all-targets` run during iteration.
+- Before launching cargo, `pgrep -f cargo` and clear orphans.
+
 ## Other notes for future sessions
 
 - `progress.md` lines 4-18 are chronological-ascending; from line 19 onward

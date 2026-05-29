@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Completed and merged to `main` in `927e576` (`Merge traffic simulation hardening`). The checklist below has been reconciled after the merge; see `progress.md` for the verification summary.
+
 **Goal:** Remove tram/transit mobility runtime code and make cars move through a backend-authoritative road-only traffic route catalog.
 
 **Architecture:** Replace `TransitLines` with `TrafficRoutes`, a road-only catalog built from `EdgeKind::Road` graph edges. Keep passive rail visuals in the frontend map, but remove all tram vehicles, tram DTO success paths, tram renderer drawables, and transit-interest WebSocket code. Preserve backend-required startup, Mini Metro-style vector rendering, and deterministic smoke-test diagnostics.
@@ -80,7 +82,7 @@
 - Modify: `backend/crates/sim-core/src/routing/builder.rs`
 - Modify: `backend/crates/sim-core/src/routing/plugin.rs`
 
-- [ ] **Step 1: Write the failing routing-builder tests**
+- [x] **Step 1: Write the failing routing-builder tests**
 
 Add these tests to `backend/crates/sim-core/src/routing/builder.rs` inside the existing `#[cfg(test)] mod tests` block:
 
@@ -116,7 +118,7 @@ fn builder_does_not_create_tram_track_edges_for_runtime_routes() {
 }
 ```
 
-- [ ] **Step 2: Run the routing-builder tests and verify failure**
+- [x] **Step 2: Run the routing-builder tests and verify failure**
 
 Run:
 
@@ -126,7 +128,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core routing::builder::test
 
 Expected: FAIL because `build_graph_from_city_network` still returns `TransitLines`, accepts `seeded_transit_lines`, and `TrafficRoutes` does not exist.
 
-- [ ] **Step 3: Create `TrafficRoutes`**
+- [x] **Step 3: Create `TrafficRoutes`**
 
 Create `backend/crates/sim-core/src/routing/traffic.rs`:
 
@@ -202,7 +204,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Export traffic routes**
+- [x] **Step 4: Export traffic routes**
 
 In `backend/crates/sim-core/src/routing/mod.rs`, add:
 
@@ -218,7 +220,7 @@ pub use traffic::{TrafficRoute, TrafficRouteId, TrafficRoutes};
 
 Keep `pub mod transit;` through Task 3 while mobility compile errors are being migrated. Delete `transit.rs` in Task 4 after the search gate proves no code references it.
 
-- [ ] **Step 5: Rewrite builder return type and road route construction**
+- [x] **Step 5: Rewrite builder return type and road route construction**
 
 In `backend/crates/sim-core/src/routing/builder.rs`:
 
@@ -307,7 +309,7 @@ let traffic_routes = TrafficRoutes::new(routes);
 (graph, traffic_routes, spatial_index)
 ```
 
-- [ ] **Step 6: Update routing plugin**
+- [x] **Step 6: Update routing plugin**
 
 In `backend/crates/sim-core/src/routing/plugin.rs`, remove `SeededTransitLine` and `TransitLines` imports. Import `TrafficRoutes`.
 
@@ -340,7 +342,7 @@ Update the plugin test assertion:
 assert!(world.contains_resource::<TrafficRoutes>());
 ```
 
-- [ ] **Step 7: Run routing tests**
+- [x] **Step 7: Run routing tests**
 
 Run:
 
@@ -350,7 +352,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core routing::traffic routi
 
 Expected: PASS for touched routing tests. Other modules may still fail because mobility still references `TransitLines`.
 
-- [ ] **Step 8: Commit routing route catalog**
+- [x] **Step 8: Commit routing route catalog**
 
 ```bash
 git add backend/crates/sim-core/src/routing
@@ -365,7 +367,7 @@ git commit -m "refactor: add road traffic route catalog"
 - Modify: `backend/crates/sim-core/src/mobility/api.rs`
 - Modify: `backend/crates/sim-core/src/mobility/records.rs`
 
-- [ ] **Step 1: Write failing vehicle coordinate tests**
+- [x] **Step 1: Write failing vehicle coordinate tests**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, update the test helper `install_test_routing` to install `TrafficRoutes` instead of `TransitLines`, then add this test:
 
@@ -391,7 +393,7 @@ fn vehicle_world_coord_resolves_traffic_route_edges() {
 }
 ```
 
-- [ ] **Step 2: Run the mobility coordinate test and verify failure**
+- [x] **Step 2: Run the mobility coordinate test and verify failure**
 
 Run:
 
@@ -401,7 +403,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core mobility::tests::vehic
 
 Expected: FAIL because `RoutePosition` still uses `LineId` and `vehicle_world_coord` still expects `TransitLines`.
 
-- [ ] **Step 3: Update mobility records to car-only**
+- [x] **Step 3: Update mobility records to car-only**
 
 In `backend/crates/sim-core/src/mobility/records.rs`, replace `VehicleKind` and conversion with:
 
@@ -420,7 +422,7 @@ impl From<VehicleKind> for abutown_protocol::VehicleKindDto {
 }
 ```
 
-- [ ] **Step 4: Update `RoutePosition`**
+- [x] **Step 4: Update `RoutePosition`**
 
 In `backend/crates/sim-core/src/mobility/components.rs`, replace `RoutePosition` with:
 
@@ -437,7 +439,7 @@ pub struct RoutePosition {
 }
 ```
 
-- [ ] **Step 5: Update coordinate helpers**
+- [x] **Step 5: Update coordinate helpers**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, change `agent_world_coord` signature:
 
@@ -471,7 +473,7 @@ pub fn vehicle_world_coord(
 }
 ```
 
-- [ ] **Step 6: Update API route lookup**
+- [x] **Step 6: Update API route lookup**
 
 In `backend/crates/sim-core/src/mobility/api.rs`, replace the `TransitLines` default insert with:
 
@@ -527,7 +529,7 @@ fn legacy_route_id_for(world: &World, route_id: crate::routing::TrafficRouteId) 
 
 Update vehicle record/DTO callers to use `pos.route_id`.
 
-- [ ] **Step 7: Run focused mobility tests**
+- [x] **Step 7: Run focused mobility tests**
 
 Run:
 
@@ -537,7 +539,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core mobility::tests::vehic
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit mobility route position migration**
+- [x] **Step 8: Commit mobility route position migration**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/components.rs backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-core/src/mobility/api.rs backend/crates/sim-core/src/mobility/records.rs
@@ -550,7 +552,7 @@ git commit -m "refactor: move vehicles to traffic routes"
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 
-- [ ] **Step 1: Write failing vehicle advance tests**
+- [x] **Step 1: Write failing vehicle advance tests**
 
 In `backend/crates/sim-core/src/mobility/systems.rs`, add or update tests so a car route advances through road edges and loops:
 
@@ -591,7 +593,7 @@ fn vehicle_advance_loops_car_over_traffic_route_edges() {
 
 Update the existing `insert_test_routing` helper so it returns `TrafficRouteId`.
 
-- [ ] **Step 2: Run the systems test and verify failure**
+- [x] **Step 2: Run the systems test and verify failure**
 
 Run:
 
@@ -601,7 +603,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core mobility::systems::tes
 
 Expected: FAIL because systems still use `TransitLines` and tram-specific LOD bypass.
 
-- [ ] **Step 3: Add traffic route edge helper**
+- [x] **Step 3: Add traffic route edge helper**
 
 Near the top of `backend/crates/sim-core/src/mobility/systems.rs`, add:
 
@@ -620,7 +622,7 @@ fn traffic_route_edge<'a>(
 }
 ```
 
-- [ ] **Step 4: Update `update_link_polyline_cache_system`**
+- [x] **Step 4: Update `update_link_polyline_cache_system`**
 
 Replace the vehicle half of `update_link_polyline_cache_system` so it takes `traffic_routes: Res<crate::routing::TrafficRoutes>` and uses:
 
@@ -635,7 +637,7 @@ let resolved: Option<(String, Vec<(f32, f32)>)> =
     });
 ```
 
-- [ ] **Step 5: Update `vehicle_advance_system`**
+- [x] **Step 5: Update `vehicle_advance_system`**
 
 Replace the system parameters with:
 
@@ -688,7 +690,7 @@ for (entity, world_pos, mut pos, mut dwell) in query.iter_mut() {
 }
 ```
 
-- [ ] **Step 6: Update output systems**
+- [x] **Step 6: Update output systems**
 
 In `compute_world_coord_system`, replace `transit_lines` with `traffic_routes` and call:
 
@@ -712,7 +714,7 @@ if let Some(edge) = traffic_route_edge(&graph, &traffic_routes, rp) {
 
 For walking agents, keep the cached-link fast path and use `edge_by_canonical_key` for uncached links.
 
-- [ ] **Step 7: Remove transit boarding/alighting from the installed schedule**
+- [x] **Step 7: Remove transit boarding/alighting from the installed schedule**
 
 In `install_systems`, remove `boarding_alighting_system` from the schedule. Keep `stop_arrival_system` only for walking state completion, but do not install any system that matches vehicles to stops.
 
@@ -727,11 +729,11 @@ Change the ordering comment to:
 //   6. vehicle_advance     — decrement dwell or push cars along road routes.
 ```
 
-- [ ] **Step 8: Remove transit arguments from LOD helpers**
+- [x] **Step 8: Remove transit arguments from LOD helpers**
 
 Change `promote_warm_to_active_system`, `demote_active_to_warm_system`, and `agent_destination_chunk` to call `agent_world_coord(&state.0, &graph)` without `TransitLines`.
 
-- [ ] **Step 9: Run focused system tests**
+- [x] **Step 9: Run focused system tests**
 
 Run:
 
@@ -741,7 +743,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core mobility::systems
 
 Expected: PASS after updating tests that intentionally created `VehicleKind::Tram` to use `VehicleKind::Car` or deleting tests that only covered transit boarding.
 
-- [ ] **Step 10: Commit systems migration**
+- [x] **Step 10: Commit systems migration**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs backend/crates/sim-core/src/mobility/mod.rs
@@ -756,7 +758,7 @@ git commit -m "refactor: advance vehicles on traffic routes"
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 - Delete: `backend/crates/sim-core/src/routing/transit.rs`
 
-- [ ] **Step 1: Write failing seed tests**
+- [x] **Step 1: Write failing seed tests**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`, add:
 
@@ -778,7 +780,7 @@ fn from_base_world_bundle_seeds_no_trams() {
 
 Use the existing `workspace_root()` helper if present in the module; otherwise add the same helper used in `mobility/mod.rs`.
 
-- [ ] **Step 2: Run the seed test and verify failure**
+- [x] **Step 2: Run the seed test and verify failure**
 
 Run:
 
@@ -788,7 +790,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core mobility::seed::tests:
 
 Expected: FAIL while `seed_trams_from_bundle` still creates tram vehicles.
 
-- [ ] **Step 3: Remove tram seed types and calls**
+- [x] **Step 3: Remove tram seed types and calls**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`:
 
@@ -808,7 +810,7 @@ crate::routing::RoutingPlugin {
 
 In `test_seed_world`, change seeded test vehicles to `VehicleKind::Car` and route ids that resolve through `TrafficRoutes`.
 
-- [ ] **Step 4: Migrate persistence to `TrafficRoutes`**
+- [x] **Step 4: Migrate persistence to `TrafficRoutes`**
 
 In `backend/crates/sim-core/src/mobility/persist_snapshot.rs`, replace imports of `TransitLine` and `TransitLines` with `TrafficRoute`, `TrafficRouteId`, and `TrafficRoutes`.
 
@@ -856,7 +858,7 @@ let traffic_routes = routes
 world.insert_resource(TrafficRoutes::new(traffic_routes));
 ```
 
-- [ ] **Step 5: Delete transit module export**
+- [x] **Step 5: Delete transit module export**
 
 After all Rust references to `crate::routing::TransitLines`, `TransitLine`, and `LineId` are gone:
 
@@ -866,7 +868,7 @@ rm backend/crates/sim-core/src/routing/transit.rs
 
 Then remove `pub mod transit;` and any `pub use transit::...` line from `backend/crates/sim-core/src/routing/mod.rs`.
 
-- [ ] **Step 6: Run backend search gate**
+- [x] **Step 6: Run backend search gate**
 
 Run:
 
@@ -876,7 +878,7 @@ rg -n "TransitLines|TransitLine|SeededTransitLine|seed_trams|VehicleKind::Tram|L
 
 Expected: no matches in runtime code. Test names may mention removed behavior only if the test asserts rejection of old tram data.
 
-- [ ] **Step 7: Run sim-core tests**
+- [x] **Step 7: Run sim-core tests**
 
 Run:
 
@@ -886,7 +888,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit tram seeding removal**
+- [x] **Step 8: Commit tram seeding removal**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/seed.rs backend/crates/sim-core/src/mobility/persist_snapshot.rs backend/crates/sim-core/src/routing
@@ -901,7 +903,7 @@ git commit -m "refactor: remove transit runtime seeding"
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Keep: `backend/crates/protocol/proto/abutown.proto`
 
-- [ ] **Step 1: Write failing protocol/server tests**
+- [x] **Step 1: Write failing protocol/server tests**
 
 In `backend/crates/protocol/src/lib.rs`, add a test near proto conversion tests:
 
@@ -920,7 +922,7 @@ assert!(vehicles.iter().all(|vehicle| vehicle.kind == VehicleKind::Car));
 assert!(vehicles.iter().any(|vehicle| vehicle.id.0.starts_with("vehicle:car:")));
 ```
 
-- [ ] **Step 2: Run focused server tests and verify failure**
+- [x] **Step 2: Run focused server tests and verify failure**
 
 Run:
 
@@ -931,7 +933,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server runtime_
 
 Expected: protocol may pass before implementation, server tests fail until tram expectations are removed.
 
-- [ ] **Step 3: Make `VehicleKindDto` car-only**
+- [x] **Step 3: Make `VehicleKindDto` car-only**
 
 In `backend/crates/protocol/src/lib.rs`, replace:
 
@@ -952,7 +954,7 @@ pub enum VehicleKindDto {
 
 Do not remove `VEHICLE_KIND_TRAM = 2` from `backend/crates/protocol/proto/abutown.proto` in this branch. The wire enum value remains as a legacy invalid value; conversion boundaries reject it by not mapping it to DTO/runtime state.
 
-- [ ] **Step 4: Update server proto emission**
+- [x] **Step 4: Update server proto emission**
 
 In `backend/crates/sim-server/src/app.rs`, replace:
 
@@ -971,7 +973,7 @@ let kind = match dto.kind {
 };
 ```
 
-- [ ] **Step 5: Remove runtime tram freshness checks**
+- [x] **Step 5: Remove runtime tram freshness checks**
 
 In `backend/crates/sim-server/src/runtime.rs`, remove functions and assertions that:
 
@@ -1002,7 +1004,7 @@ fn mobility_snapshot_matches_base_world(
 }
 ```
 
-- [ ] **Step 6: Run protocol and server tests**
+- [x] **Step 6: Run protocol and server tests**
 
 Run:
 
@@ -1013,7 +1015,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit car-only protocol/server runtime**
+- [x] **Step 7: Commit car-only protocol/server runtime**
 
 ```bash
 git add backend/crates/protocol/src/lib.rs backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/runtime.rs
@@ -1032,7 +1034,7 @@ git commit -m "refactor: make vehicle protocol car-only"
 - Modify: `tests/render/backendMobilityDrawables.test.ts`
 - Delete: `tests/render/backendTransitDrawables.test.ts`
 
-- [ ] **Step 1: Write failing frontend protocol tests**
+- [x] **Step 1: Write failing frontend protocol tests**
 
 In `tests/backend/mobilityProtocol.test.ts`, change the fixture vehicle to a car:
 
@@ -1074,7 +1076,7 @@ it('rejects tram vehicle proto values at the DTO boundary', () => {
 });
 ```
 
-- [ ] **Step 2: Run frontend protocol tests and verify failure**
+- [x] **Step 2: Run frontend protocol tests and verify failure**
 
 Run:
 
@@ -1084,7 +1086,7 @@ npx vitest run tests/backend/mobilityProtocol.test.ts --passWithNoTests
 
 Expected: FAIL because `VehicleKindDto` still includes `'tram'` and proto conversion maps tram to DTO.
 
-- [ ] **Step 3: Make DTO validation car-only**
+- [x] **Step 3: Make DTO validation car-only**
 
 In `src/backend/mobilityProtocol.ts`, replace:
 
@@ -1109,7 +1111,7 @@ function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
 }
 ```
 
-- [ ] **Step 4: Remove tram state exceptions**
+- [x] **Step 4: Remove tram state exceptions**
 
 In `src/backend/mobilityState.ts`, replace the left-vehicle loop with:
 
@@ -1150,7 +1152,7 @@ export function trafficDiagnostics(state: MobilityOverlayState): TrafficDiagnost
 }
 ```
 
-- [ ] **Step 5: Remove transit-interest subscription expansion**
+- [x] **Step 5: Remove transit-interest subscription expansion**
 
 In `src/backend/mobilityClient.ts`, replace:
 
@@ -1166,7 +1168,7 @@ subscription?.update(visible);
 
 Delete `withTransitInterestChunks`, `chunkKey`, and the `WorldDims` type if unused after this change.
 
-- [ ] **Step 6: Remove tram drawables**
+- [x] **Step 6: Remove tram drawables**
 
 In `src/render/backendMobilityDrawables.ts`:
 
@@ -1176,7 +1178,7 @@ In `src/render/backendMobilityDrawables.ts`:
 
 Delete `tests/render/backendTransitDrawables.test.ts`.
 
-- [ ] **Step 7: Run frontend unit tests for state/protocol/drawables**
+- [x] **Step 7: Run frontend unit tests for state/protocol/drawables**
 
 Run:
 
@@ -1186,7 +1188,7 @@ npx vitest run tests/backend/mobilityProtocol.test.ts tests/backend/mobilityStat
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit frontend tram DTO removal**
+- [x] **Step 8: Commit frontend tram DTO removal**
 
 ```bash
 git add src/backend/mobilityProtocol.ts src/backend/mobilityState.ts src/backend/mobilityClient.ts src/render/backendMobilityDrawables.ts tests/backend/mobilityProtocol.test.ts tests/backend/mobilityState.test.ts tests/render/backendMobilityDrawables.test.ts
@@ -1203,7 +1205,7 @@ git commit -m "refactor: remove frontend tram mobility paths"
 - Modify: `tests/app/runtimeDiagnostics.test.ts`
 - Modify: `tests/render/minimalGlyphScale.test.ts` only if renderer import changes require a test import update
 
-- [ ] **Step 1: Write failing diagnostics tests**
+- [x] **Step 1: Write failing diagnostics tests**
 
 In `tests/app/runtimeDiagnostics.test.ts`, add:
 
@@ -1224,7 +1226,7 @@ it('reports car traffic diagnostics without tram runtime diagnostics', () => {
 });
 ```
 
-- [ ] **Step 2: Run diagnostics tests and verify failure**
+- [x] **Step 2: Run diagnostics tests and verify failure**
 
 Run:
 
@@ -1234,7 +1236,7 @@ npx vitest run tests/app/runtimeDiagnostics.test.ts --passWithNoTests
 
 Expected: FAIL because `mobilityTrams`, `train`, and `trains` still exist.
 
-- [ ] **Step 3: Update runtime diagnostics**
+- [x] **Step 3: Update runtime diagnostics**
 
 In `src/app/runtimeDiagnostics.ts`:
 
@@ -1258,7 +1260,7 @@ traffic,
 
 Delete `mobilityTramEntry`.
 
-- [ ] **Step 4: Update minimal renderer**
+- [x] **Step 4: Update minimal renderer**
 
 In `src/render/minimalMapRenderer.ts`:
 
@@ -1270,7 +1272,7 @@ In `src/render/minimalMapRenderer.ts`:
 - Delete `drawTrain` if it becomes unused.
 - Keep `drawRailPath`, `drawRail`, and passive rail station rendering.
 
-- [ ] **Step 5: Update main diagnostics options**
+- [x] **Step 5: Update main diagnostics options**
 
 In `src/main.ts`:
 
@@ -1278,7 +1280,7 @@ In `src/main.ts`:
 - In `getCounts`, remove the `trains` property.
 - Remove the whole `getTrain` option.
 
-- [ ] **Step 6: Run frontend type/unit tests**
+- [x] **Step 6: Run frontend type/unit tests**
 
 Run:
 
@@ -1288,7 +1290,7 @@ npm test -- --run tests/app/runtimeDiagnostics.test.ts tests/render/backendMobil
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit runtime diagnostics cleanup**
+- [x] **Step 7: Commit runtime diagnostics cleanup**
 
 ```bash
 git add src/app/runtimeDiagnostics.ts src/render/minimalMapRenderer.ts src/main.ts tests/app/runtimeDiagnostics.test.ts
@@ -1300,7 +1302,7 @@ git commit -m "refactor: remove tram runtime diagnostics"
 **Files:**
 - Modify: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Update smoke assertions**
+- [x] **Step 1: Update smoke assertions**
 
 In `tests/e2e/render-smoke.spec.ts`:
 
@@ -1357,7 +1359,7 @@ expect(
 ).toBe(true);
 ```
 
-- [ ] **Step 2: Run smoke test and verify failure before backend is complete**
+- [x] **Step 2: Run smoke test and verify failure before backend is complete**
 
 Run:
 
@@ -1367,7 +1369,7 @@ npm run test:e2e -- --project=chromium tests/e2e/render-smoke.spec.ts
 
 Expected before all backend changes are complete: FAIL. Expected after Tasks 1-7: PASS.
 
-- [ ] **Step 3: Commit smoke update**
+- [x] **Step 3: Commit smoke update**
 
 ```bash
 git add tests/e2e/render-smoke.spec.ts
@@ -1379,7 +1381,7 @@ git commit -m "test: smoke road traffic without trams"
 **Files:**
 - No planned source edits unless a verification command identifies a defect.
 
-- [ ] **Step 1: Generate protobuf TypeScript**
+- [x] **Step 1: Generate protobuf TypeScript**
 
 Run:
 
@@ -1389,7 +1391,7 @@ npm run generate:proto
 
 Expected: generated TS updates cleanly. If generated files are ignored, `git status` remains unchanged.
 
-- [ ] **Step 2: Run Rust formatting**
+- [x] **Step 2: Run Rust formatting**
 
 Run:
 
@@ -1405,7 +1407,7 @@ cargo fmt --manifest-path backend/Cargo.toml --all
 
 then re-run the check.
 
-- [ ] **Step 3: Run Rust tests**
+- [x] **Step 3: Run Rust tests**
 
 Run:
 
@@ -1415,7 +1417,7 @@ cargo test --manifest-path backend/Cargo.toml --workspace
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Rust clippy**
+- [x] **Step 4: Run Rust clippy**
 
 Run:
 
@@ -1425,7 +1427,7 @@ cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D 
 
 Expected: PASS.
 
-- [ ] **Step 5: Run frontend tests**
+- [x] **Step 5: Run frontend tests**
 
 Run:
 
@@ -1435,7 +1437,7 @@ npm test
 
 Expected: PASS.
 
-- [ ] **Step 6: Run production build**
+- [x] **Step 6: Run production build**
 
 Run:
 
@@ -1445,7 +1447,7 @@ npm run build
 
 Expected: PASS.
 
-- [ ] **Step 7: Run browser smoke**
+- [x] **Step 7: Run browser smoke**
 
 Run:
 
@@ -1455,7 +1457,7 @@ npm run test:e2e
 
 Expected: PASS.
 
-- [ ] **Step 8: Search for removed runtime paths**
+- [x] **Step 8: Search for removed runtime paths**
 
 Run:
 
@@ -1465,7 +1467,7 @@ rg -n "TransitLines|TransitLine|SeededTransitLine|seed_trams|VehicleKind::Tram|m
 
 Expected: no runtime or test success-path matches. Acceptable matches are comments documenting rejected legacy wire values in protocol tests.
 
-- [ ] **Step 9: Verify app in the browser**
+- [x] **Step 9: Verify app in the browser**
 
 With the dev stack running at `http://127.0.0.1:5175/`, run a Playwright probe:
 
@@ -1507,7 +1509,7 @@ Expected output:
 
 The exact car and route counts may be higher than `1`, but `mobilityTrams` and `train` must be absent.
 
-- [ ] **Step 10: Confirm no unplanned verification edits remain**
+- [x] **Step 10: Confirm no unplanned verification edits remain**
 
 Run:
 

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Eliminate the two WS multi-client bottlenecks identified after Phase 6: a single `tokio::sync::Mutex` serializing every read path, and a static 64-chunk client subscription that ignores viewport. After this plan: WS broadcast filters run in parallel under `RwLock::read`, and clients subscribe only to visible chunks + 1-chunk margin, updated every 200 ms.
 
 **Architecture:** Backend swaps `Arc<Mutex<SimulationRuntime>>` for `Arc<RwLock<SimulationRuntime>>`, mechanical split of `.lock()` into `.read()` / `.write()` per call site. Frontend gains a pure `visibleChunks` function (driven by camera + viewport), a stateful subscription client that sends diff messages, and a 200 ms polling tick wired through `connectMobilityBackend`.
@@ -38,7 +40,7 @@ This plan implements `docs/superpowers/specs/2026-05-18-ws-multi-client-scalabil
 - Create: `src/render/viewportChunks.ts`
 - Create: `tests/render/viewportChunks.test.ts`
 
-- [ ] **Step 1: Write the failing test file**
+- [x] **Step 1: Write the failing test file**
 
 ```ts
 // tests/render/viewportChunks.test.ts
@@ -123,7 +125,7 @@ describe('visibleChunks', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 ```bash
@@ -132,7 +134,7 @@ npx vitest run tests/render/viewportChunks.test.ts
 
 Expected: FAIL — `Cannot find module '../../src/render/viewportChunks'`.
 
-- [ ] **Step 3: Write the minimal implementation**
+- [x] **Step 3: Write the minimal implementation**
 
 ```ts
 // src/render/viewportChunks.ts
@@ -192,7 +194,7 @@ export function visibleChunks(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 ```bash
@@ -201,7 +203,7 @@ npx vitest run tests/render/viewportChunks.test.ts
 
 Expected: PASS (6 tests across 2 describe blocks).
 
-- [ ] **Step 5: Run tsc to verify types**
+- [x] **Step 5: Run tsc to verify types**
 
 Run:
 ```bash
@@ -210,7 +212,7 @@ npx tsc --noEmit
 
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/render/viewportChunks.ts tests/render/viewportChunks.test.ts
@@ -225,7 +227,7 @@ git commit -m "feat(render): visibleChunks pure function with world-bound clampi
 - Modify: `src/backend/chunkSubscriptionClient.ts`
 - Create: `tests/backend/chunkSubscriptionClient.test.ts`
 
-- [ ] **Step 1: Write the failing test file**
+- [x] **Step 1: Write the failing test file**
 
 ```ts
 // tests/backend/chunkSubscriptionClient.test.ts
@@ -292,7 +294,7 @@ describe('createSubscriptionClient', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 ```bash
@@ -301,7 +303,7 @@ npx vitest run tests/backend/chunkSubscriptionClient.test.ts
 
 Expected: FAIL — current `createSubscriptionClient` returns `{ start() }`, not `{ update, reset }`.
 
-- [ ] **Step 3: Rewrite `chunkSubscriptionClient.ts` with the new shape**
+- [x] **Step 3: Rewrite `chunkSubscriptionClient.ts` with the new shape**
 
 ```ts
 // src/backend/chunkSubscriptionClient.ts
@@ -362,7 +364,7 @@ export function createSubscriptionClient(opts: {
 
 Note: this deletes the old `computeInitialSubscriptionCoords` and `start()` method. Task 3 wires the new API in `mobilityClient.ts`, so the build will be broken between Tasks 2 and 3 — don't run the full vitest suite until Task 3 finishes.
 
-- [ ] **Step 4: Run the subscription-client test to verify it passes**
+- [x] **Step 4: Run the subscription-client test to verify it passes**
 
 Run:
 ```bash
@@ -371,7 +373,7 @@ npx vitest run tests/backend/chunkSubscriptionClient.test.ts
 
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Commit (build is intentionally broken until Task 3)**
+- [x] **Step 5: Commit (build is intentionally broken until Task 3)**
 
 ```bash
 git add src/backend/chunkSubscriptionClient.ts tests/backend/chunkSubscriptionClient.test.ts
@@ -385,7 +387,7 @@ git commit -m "refactor(ws): stateful chunkSubscriptionClient with update/reset 
 **Files:**
 - Modify: `src/backend/mobilityClient.ts`
 
-- [ ] **Step 1: Read current `connectMobilityBackend` signature**
+- [x] **Step 1: Read current `connectMobilityBackend` signature**
 
 Run:
 ```bash
@@ -394,7 +396,7 @@ grep -n "export function connectMobilityBackend\|connectMobilityBackend(" src/ba
 
 Read the function body (it's around line 100+). Note the `opts` shape, the place where `openSocket` is called, and the existing `socket.onopen` block at ~line 132–140.
 
-- [ ] **Step 2: Extend the opts type and wire the polling**
+- [x] **Step 2: Extend the opts type and wire the polling**
 
 In `src/backend/mobilityClient.ts`:
 
@@ -457,7 +459,7 @@ if (subscriptionInterval !== null) {
 }
 ```
 
-- [ ] **Step 3: Verify tsc**
+- [x] **Step 3: Verify tsc**
 
 Run:
 ```bash
@@ -466,7 +468,7 @@ npx tsc --noEmit
 
 Expected: errors at call sites of `connectMobilityBackend` (because `main.ts` doesn't pass `viewport` yet). That's expected — Task 4 fixes the caller. If tsc complains about anything else inside `mobilityClient.ts`, fix it now.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/backend/mobilityClient.ts
@@ -480,7 +482,7 @@ git commit -m "feat(ws): 200ms viewport-driven subscription polling in mobilityC
 **Files:**
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Locate the call site**
+- [x] **Step 1: Locate the call site**
 
 Run:
 ```bash
@@ -489,7 +491,7 @@ grep -n "connectMobilityBackend(" src/main.ts
 
 Expected: one call near line 237.
 
-- [ ] **Step 2: Find the viewport size source**
+- [x] **Step 2: Find the viewport size source**
 
 The canvas dimensions are typically already available as a `viewport` or `canvas` variable. Check:
 
@@ -499,7 +501,7 @@ grep -n "ViewportSize\|canvas\.width\|canvas\.height\|viewport\b" src/main.ts | 
 
 Identify which expression gives the current `{ width, height }` of the rendering surface, and which expression gives the current world dimensions (look for `worldWidthTiles`, `WORLD_TILES`, or similar — the `zurichWorld.ts` file uses `chunkSize: CHUNK_SIZE`).
 
-- [ ] **Step 3: Add the `viewport` argument to the `connectMobilityBackend` call**
+- [x] **Step 3: Add the `viewport` argument to the `connectMobilityBackend` call**
 
 The exact code depends on what `main.ts` already has in scope. The pattern:
 
@@ -526,7 +528,7 @@ If `viewportSize` is mutable (resizes on window resize), wrap it: `getViewport: 
 
 If `camera` / world dims / viewport size aren't in scope at the call site, hoist them: this is a wiring change, not a refactor — keep the diff minimal.
 
-- [ ] **Step 4: Verify tsc**
+- [x] **Step 4: Verify tsc**
 
 Run:
 ```bash
@@ -535,7 +537,7 @@ npx tsc --noEmit
 
 Expected: clean.
 
-- [ ] **Step 5: Run full vitest suite**
+- [x] **Step 5: Run full vitest suite**
 
 Run:
 ```bash
@@ -544,7 +546,7 @@ npx vitest run
 
 Expected: all green (the existing 139 + 6 new viewport + 5 new subscription tests = ~150 total).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main.ts
@@ -560,7 +562,7 @@ git commit -m "feat(main): wire camera + viewport getters into mobilityClient"
 - Modify: `backend/crates/sim-server/tests/websocket.rs` (only if it accesses the lock directly)
 - Modify: `backend/crates/sim-server/tests/http.rs` (same)
 
-- [ ] **Step 1: Find every `.lock().await` call site**
+- [x] **Step 1: Find every `.lock().await` call site**
 
 Run:
 ```bash
@@ -569,7 +571,7 @@ cd backend && grep -n "\\.lock()\\.await\|Mutex<SimulationRuntime>\|Arc<Mutex" c
 
 Expected: ~10–15 hits, mostly in `app.rs`.
 
-- [ ] **Step 2: Swap the type in `AppState`**
+- [x] **Step 2: Swap the type in `AppState`**
 
 In `backend/crates/sim-server/src/app.rs`, change:
 
@@ -611,7 +613,7 @@ pub(crate) fn runtime(&self) -> Arc<RwLock<SimulationRuntime>> {
 }
 ```
 
-- [ ] **Step 3: Split every call site into `.read()` or `.write()`**
+- [x] **Step 3: Split every call site into `.read()` or `.write()`**
 
 Go through each `.lock().await` hit from Step 1. The rule:
 
@@ -640,7 +642,7 @@ For each site: change `let runtime = runtime.lock().await;` to `let runtime = ru
 
 In `handle_client_message`, the existing block does both `apply_subscription_diff` (write) and `synthetic_mobility_delta_for_subscription` (read). Keep both inside a single `.write().await` — splitting buys nothing here (one WS message per pan-tick per client) and is simpler.
 
-- [ ] **Step 4: Verify backend builds**
+- [x] **Step 4: Verify backend builds**
 
 Run:
 ```bash
@@ -649,7 +651,7 @@ cd backend && cargo build --locked -p sim-server
 
 Expected: clean.
 
-- [ ] **Step 5: Run existing sim-server tests**
+- [x] **Step 5: Run existing sim-server tests**
 
 Run:
 ```bash
@@ -660,7 +662,7 @@ If any test fails because it calls `.lock().await` on the runtime: apply the sam
 
 Expected: all sim-server tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -675,7 +677,7 @@ git commit -m "perf(ws): swap Mutex<SimulationRuntime> for RwLock — parallel r
 **Files:**
 - Modify: `backend/crates/sim-server/tests/websocket.rs`
 
-- [ ] **Step 1: Locate the existing 2-client test**
+- [x] **Step 1: Locate the existing 2-client test**
 
 Run:
 ```bash
@@ -684,7 +686,7 @@ grep -n "two_clients_with_different_subscriptions" backend/crates/sim-server/tes
 
 Read it — note the helper functions it uses (`send_chunk_subscribe`, `read_next_mobility_delta`, etc.) and the assertion pattern.
 
-- [ ] **Step 2: Add the 3-client test next to it**
+- [x] **Step 2: Add the 3-client test next to it**
 
 ```rust
 #[tokio::test]
@@ -702,7 +704,7 @@ async fn three_clients_with_disjoint_subscriptions_see_only_their_chunks() {
 
 Implementation: clone the existing 2-client test body, add a third client subscribing to a different chunk coordinate, collect first delta from each, assert each client's `changed_agents` ids are disjoint from the other two.
 
-- [ ] **Step 3: Run the new test**
+- [x] **Step 3: Run the new test**
 
 Run:
 ```bash
@@ -711,7 +713,7 @@ cd backend && cargo test --locked -p sim-server --test websocket three_clients_w
 
 Expected: PASS.
 
-- [ ] **Step 4: Run the full websocket test suite to confirm no regression**
+- [x] **Step 4: Run the full websocket test suite to confirm no regression**
 
 Run:
 ```bash
@@ -720,7 +722,7 @@ cd backend && cargo test --locked -p sim-server --test websocket
 
 Expected: 8 tests pass (7 existing + 1 new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/tests/websocket.rs
@@ -734,7 +736,7 @@ git commit -m "test(ws): three-client disjoint-subscription integration test"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Full workspace gates**
+- [x] **Step 1: Full workspace gates**
 
 Run all in sequence:
 
@@ -756,7 +758,7 @@ Expected:
 
 If any failure: address it before continuing. Do NOT skip.
 
-- [ ] **Step 2: Manual browser smoke**
+- [x] **Step 2: Manual browser smoke**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -785,7 +787,7 @@ After verifying:
 pkill -f run-dev-stack; pkill -f sim-server; pkill -f "vite --host"
 ```
 
-- [ ] **Step 3: Add progress note**
+- [x] **Step 3: Add progress note**
 
 Today's UTC timestamp:
 
@@ -799,7 +801,7 @@ Add an entry to `progress.md` at the top of the entries list (immediately after 
 <TIMESTAMP> - Phase 7a WS multi-client scalability: replaced `Arc<Mutex<SimulationRuntime>>` with `Arc<RwLock<SimulationRuntime>>` so per-client mobility-delta filters (`filtered_mobility_delta_from_dto`) run in parallel under `.read()` while the tick loop / snapshot loop / `apply_subscription_diff` take exclusive `.write()`. Frontend `chunkSubscriptionClient` is now stateful — `update(visible)` diffs against the cached subscription set and emits `chunk_subscribe(added)` / `chunk_unsubscribe(removed)` only on change. A 200 ms poll in `connectMobilityBackend` recomputes `visibleChunks(camera, viewport, world, 32, margin=1)` and feeds the diff. Frontend `visibleChunks` is a pure function (4 screen corners → `screenToWorld` → `chunkOf` AABB + 1-chunk ring → clamp to world bounds). Per-client bandwidth no longer scales with world size, only with viewport size. Three-client disjoint-subscription integration test exercises the new read-side parallelism. Phase 7a of the WS scalability arc; Phase 7b (per-chunk broadcast channels + Arc-snapshot lock-free reads) is the next architectural step.
 ```
 
-- [ ] **Step 4: Final commit + push**
+- [x] **Step 4: Final commit + push**
 
 ```bash
 git add progress.md

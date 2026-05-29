@@ -496,7 +496,10 @@ mod proto_roundtrip_tests {
             .expect("legacy wire enum value still exists");
         assert_eq!(
             VehicleKindDto::try_from(legacy_kind),
-            Err(("invalid_enum", "VehicleKind TRAM is unsupported by the runtime"))
+            Err((
+                "invalid_enum",
+                "VehicleKind TRAM is unsupported by the runtime"
+            ))
         );
     }
 

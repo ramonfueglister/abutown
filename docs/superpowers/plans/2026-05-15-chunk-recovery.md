@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** After a `sim-server` restart, the world state is byte-for-byte identical to the state before the restart, and a duplicate `command_id` never produces a second mutation.
 
 **Architecture:** Per-chunk CQRS + Event Sourcing. Chunk aggregates hydrate from a full-state snapshot, then replay events with `chunk_version > snapshot.chunk_version`. Commands deduplicate via a `UNIQUE (world_id, command_id)` constraint on `world_events`. Mobility is explicitly out of scope.
@@ -47,13 +49,13 @@
 - Modify: `backend/crates/sim-server/src/chunk_registry.rs` (test reference)
 - Modify: `backend/crates/sim-server/src/runtime.rs` (test reference)
 
-- [ ] **Step 1: Rename `dirty_tiles` → `tiles` in the DTO**
+- [x] **Step 1: Rename `dirty_tiles` → `tiles` in the DTO**
 
 In `backend/crates/protocol/src/lib.rs`, locate the `ChunkSnapshotDto` struct (around line 61) and the field name `dirty_tiles`. Rename it to `tiles`. Update every place in the file that references `dirty_tiles` (including JSON serde rename if present, and test fixtures around lines 296–365).
 
 Also rename the snapshot JSON key in the existing tests: search the file for the literal string `"dirty_tiles"` and replace with `"tiles"`.
 
-- [ ] **Step 2: Update protocol JSON tests**
+- [x] **Step 2: Update protocol JSON tests**
 
 Run:
 
@@ -63,7 +65,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol
 
 Expected: all tests pass. If a JSON round-trip test references `dirty_tiles`, update its expected string to `tiles`.
 
-- [ ] **Step 3: Write a failing test for full-state snapshot**
+- [x] **Step 3: Write a failing test for full-state snapshot**
 
 In `backend/crates/sim-core/src/persistence.rs`, inside the existing `#[cfg(test)] mod tests`, add:
 
@@ -84,7 +86,7 @@ fn build_chunk_snapshot_emits_all_non_default_tiles_after_clear_dirty() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it fails**
+- [x] **Step 4: Run the test to verify it fails**
 
 Run:
 
@@ -94,7 +96,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core build_chunk_s
 
 Expected: FAIL — the current code only emits dirty indices, so index 0 and 17 are missing after `clear_dirty`.
 
-- [ ] **Step 5: Implement full-state sparse encoding**
+- [x] **Step 5: Implement full-state sparse encoding**
 
 In `backend/crates/sim-core/src/persistence.rs`, replace the body of `build_chunk_snapshot`:
 
@@ -130,7 +132,7 @@ pub fn build_chunk_snapshot(
 
 Add `use crate::tile::TileKind;` at the top if not already imported.
 
-- [ ] **Step 6: Update any other references to `dirty_tiles`**
+- [x] **Step 6: Update any other references to `dirty_tiles`**
 
 Run:
 
@@ -140,7 +142,7 @@ grep -rn "dirty_tiles" backend/
 
 Expected output should be empty after this task. If there are references in `postgres_snapshots.rs`, `chunk_registry.rs`, `runtime.rs`, or any test, rename them to `tiles`.
 
-- [ ] **Step 7: Run all affected tests**
+- [x] **Step 7: Run all affected tests**
 
 Run:
 
@@ -152,7 +154,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol
 
 Expected: all green. If any test asserts on the old delta behavior (e.g., "snapshot is empty after clear_dirty"), update it to assert the new full-state behavior.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/crates/protocol/src/lib.rs backend/crates/sim-core/src/persistence.rs backend/crates/sim-server/src/postgres_snapshots.rs backend/crates/sim-server/src/chunk_registry.rs backend/crates/sim-server/src/runtime.rs
@@ -166,7 +168,7 @@ git commit -m "feat: chunk snapshots carry full non-default tile state"
 **Files:**
 - Modify: `backend/crates/sim-core/src/chunk.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add inside `chunk.rs` `#[cfg(test)] mod tests`:
 
@@ -218,7 +220,7 @@ fn chunk_from_snapshot_rejects_oversized_local_index() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -228,7 +230,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core chunk_from_sn
 
 Expected: FAIL — `Chunk::from_snapshot` and `SnapshotDecodeError` do not exist yet.
 
-- [ ] **Step 3: Implement `from_snapshot` + error type**
+- [x] **Step 3: Implement `from_snapshot` + error type**
 
 In `backend/crates/sim-core/src/chunk.rs`, add:
 
@@ -280,7 +282,7 @@ pub fn from_snapshot(snapshot: &ChunkSnapshotDto) -> Result<Self, SnapshotDecode
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -304,7 +306,7 @@ git commit -m "feat: reconstruct chunk from full-state snapshot"
 **Files:**
 - Modify: `backend/crates/sim-core/src/chunk.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `chunk.rs` test module:
 
@@ -378,7 +380,7 @@ fn chunk_apply_event_idempotent_for_same_chunk_version() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -388,7 +390,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core chunk_apply_e
 
 Expected: FAIL — `apply_event` and `EventApplyError` do not exist.
 
-- [ ] **Step 3: Implement `apply_event`**
+- [x] **Step 3: Implement `apply_event`**
 
 Add the error in `chunk.rs`:
 
@@ -461,7 +463,7 @@ pub fn apply_event(
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -485,7 +487,7 @@ git commit -m "feat: apply world events to chunk for replay"
 **Files:**
 - Modify: `backend/crates/sim-core/src/events.rs`
 
-- [ ] **Step 1: Write failing tests for new trait methods on in-memory store**
+- [x] **Step 1: Write failing tests for new trait methods on in-memory store**
 
 In `events.rs` test module, add:
 
@@ -540,7 +542,7 @@ async fn event_store_reports_max_tick_and_version() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -550,7 +552,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core event_store
 
 Expected: FAIL — three new methods do not exist on the trait.
 
-- [ ] **Step 3: Add a `DuplicateCommand` error variant**
+- [x] **Step 3: Add a `DuplicateCommand` error variant**
 
 In `events.rs`, extend the error:
 
@@ -565,7 +567,7 @@ impl WorldEventStoreError {
 }
 ```
 
-- [ ] **Step 4: Extend the trait**
+- [x] **Step 4: Extend the trait**
 
 Replace the trait body:
 
@@ -593,7 +595,7 @@ pub trait WorldEventStore: std::fmt::Debug + Send {
 }
 ```
 
-- [ ] **Step 5: Implement on `InMemoryWorldEventStore`**
+- [x] **Step 5: Implement on `InMemoryWorldEventStore`**
 
 Replace the impl block:
 
@@ -675,7 +677,7 @@ impl WorldEventStore for InMemoryWorldEventStore {
 
 Note: the in-memory `append` now rejects duplicates to mirror the new Postgres unique-constraint behavior. Update the existing `event_store_appends_events_in_order` test only if needed (it uses distinct command_ids derived from event_id, so it should still pass).
 
-- [ ] **Step 6: Implement on `FailingWorldEventStore`**
+- [x] **Step 6: Implement on `FailingWorldEventStore`**
 
 ```rust
 #[async_trait]
@@ -707,7 +709,7 @@ impl WorldEventStore for FailingWorldEventStore {
 }
 ```
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
 Run:
 
@@ -731,7 +733,7 @@ git commit -m "feat: world event store supports dedup and chunk replay queries"
 **Files:**
 - Create: `backend/crates/sim-server/migrations/202605160001_chunk_recovery.sql`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create the file with the following contents:
 
@@ -759,7 +761,7 @@ CREATE INDEX IF NOT EXISTS world_events_chunk_version_idx
   ON world_events (world_id, chunk_x, chunk_y, chunk_version);
 ```
 
-- [ ] **Step 2: Verify migration ordering**
+- [x] **Step 2: Verify migration ordering**
 
 Run:
 
@@ -769,7 +771,7 @@ ls backend/crates/sim-server/migrations/
 
 Expected output includes `202605150001_world_events.sql`, `202605150002_card_hand_core.sql`, `202605150003_chunk_snapshots.sql`, `202605160001_chunk_recovery.sql` — alphabetical order matches intended execution order.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-server/migrations/202605160001_chunk_recovery.sql
@@ -783,7 +785,7 @@ git commit -m "feat: migrate world_events for chunk-aware recovery"
 **Files:**
 - Modify: `backend/crates/sim-server/src/postgres_events.rs`
 
-- [ ] **Step 1: Read the existing `append` implementation**
+- [x] **Step 1: Read the existing `append` implementation**
 
 Run:
 
@@ -793,7 +795,7 @@ grep -n "fn append\|INSERT INTO world_events\|sqlx::query" backend/crates/sim-se
 
 Expected: locates the existing INSERT statement for events. Note its column order.
 
-- [ ] **Step 2: Update the INSERT to include the new columns and ON CONFLICT clause**
+- [x] **Step 2: Update the INSERT to include the new columns and ON CONFLICT clause**
 
 Change the existing INSERT in `append` to include `chunk_x`, `chunk_y`, `chunk_version` and to use `ON CONFLICT (world_id, command_id) DO NOTHING`:
 
@@ -833,7 +835,7 @@ let (chunk_x, chunk_y, chunk_version) = match &event {
 };
 ```
 
-- [ ] **Step 3: Implement `find_event_by_command`**
+- [x] **Step 3: Implement `find_event_by_command`**
 
 Add:
 
@@ -865,7 +867,7 @@ async fn find_event_by_command(
 }
 ```
 
-- [ ] **Step 4: Implement `read_chunk_events_since`**
+- [x] **Step 4: Implement `read_chunk_events_since`**
 
 ```rust
 async fn read_chunk_events_since(
@@ -896,7 +898,7 @@ async fn read_chunk_events_since(
 }
 ```
 
-- [ ] **Step 5: Implement `max_tick` and `max_version`**
+- [x] **Step 5: Implement `max_tick` and `max_version`**
 
 ```rust
 async fn max_tick(&self, world_id: &str) -> Result<Option<u64>, WorldEventStoreError> {
@@ -922,7 +924,7 @@ async fn max_version(&self, world_id: &str) -> Result<Option<u64>, WorldEventSto
 }
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run:
 
@@ -946,7 +948,7 @@ git commit -m "feat: postgres event store supports recovery queries"
 **Files:**
 - Modify: `backend/crates/sim-server/src/chunk_registry.rs`
 
-- [ ] **Step 1: Read the existing registry shape**
+- [x] **Step 1: Read the existing registry shape**
 
 Run:
 
@@ -956,7 +958,7 @@ grep -n "struct LoadedChunk\|insert_chunk\|fn collect_snapshots\|fn mark_snapsho
 
 Expected: locates the inner per-chunk record. Note its field names.
 
-- [ ] **Step 2: Add `last_persisted_version` and `last_snapshot_at` to the loaded chunk struct**
+- [x] **Step 2: Add `last_persisted_version` and `last_snapshot_at` to the loaded chunk struct**
 
 In the struct that holds a loaded chunk (likely `LoadedChunk` or similar), add fields:
 
@@ -967,7 +969,7 @@ last_snapshot_at: std::time::Instant,
 
 Default them to `0` and `Instant::now()` on insert.
 
-- [ ] **Step 3: Write a failing test for the trigger logic**
+- [x] **Step 3: Write a failing test for the trigger logic**
 
 Add to the registry test module:
 
@@ -1014,7 +1016,7 @@ fn collect_snapshots_emits_again_after_new_event() {
 
 Note: if the registry exposes a different mutation entry point than `set_tile_kind`, adjust the second test to use whatever the current API offers (search the file for the mutation helper).
 
-- [ ] **Step 4: Run tests to verify they fail**
+- [x] **Step 4: Run tests to verify they fail**
 
 Run:
 
@@ -1024,7 +1026,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server collect_sna
 
 Expected: FAIL — `collect_snapshots` today always returns every chunk regardless of state.
 
-- [ ] **Step 5: Update `collect_snapshots`**
+- [x] **Step 5: Update `collect_snapshots`**
 
 Change it to filter:
 
@@ -1051,7 +1053,7 @@ pub(crate) fn collect_snapshots(&self, world_id: &WorldId) -> Vec<ChunkSnapshotD
 
 Field names (`self.chunks`, `loaded.chunk`, `loaded.activity`) must match what is in the file — adjust if different.
 
-- [ ] **Step 6: Update `mark_snapshots_persisted`**
+- [x] **Step 6: Update `mark_snapshots_persisted`**
 
 ```rust
 pub(crate) fn mark_snapshots_persisted(&mut self, coords: &[ChunkCoord]) {
@@ -1066,7 +1068,7 @@ pub(crate) fn mark_snapshots_persisted(&mut self, coords: &[ChunkCoord]) {
 }
 ```
 
-- [ ] **Step 7: Add `insert_hydrated`**
+- [x] **Step 7: Add `insert_hydrated`**
 
 ```rust
 pub(crate) fn insert_hydrated(
@@ -1090,7 +1092,7 @@ pub(crate) fn insert_hydrated(
 
 (Adjust `LoadedChunk` field list to match whatever the struct actually has.)
 
-- [ ] **Step 8: Verify and commit**
+- [x] **Step 8: Verify and commit**
 
 Run:
 
@@ -1114,7 +1116,7 @@ git commit -m "feat: snapshot only chunks with new events or beyond ceiling"
 **Files:**
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Write a failing unit test for hydration**
+- [x] **Step 1: Write a failing unit test for hydration**
 
 Add to `runtime.rs` test module:
 
@@ -1181,7 +1183,7 @@ async fn hydrate_from_stores_falls_back_to_seed_when_no_snapshot() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1191,7 +1193,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server hydrate_fro
 
 Expected: FAIL — `hydrate_from_stores` does not exist.
 
-- [ ] **Step 3: Implement `hydrate_from_stores`**
+- [x] **Step 3: Implement `hydrate_from_stores`**
 
 In `backend/crates/sim-server/src/runtime.rs`, add a new async constructor. Place it near `new_with_stores`:
 
@@ -1301,7 +1303,7 @@ pub enum HydrationError {
 
 Make `ChunkError`, `SnapshotDecodeError`, `EventApplyError` `pub` in `sim_core::chunk` if not already.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -1325,7 +1327,7 @@ git commit -m "feat: hydrate simulation runtime from stores"
 **Files:**
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Locate the command-handling entry point**
+- [x] **Step 1: Locate the command-handling entry point**
 
 Run:
 
@@ -1335,7 +1337,7 @@ grep -n "pub async fn handle_command\|pub fn apply_set_tile_kind\|append.*event\
 
 Expected: identifies the function that today applies a command and writes an event. Note the function name (referred to below as `handle_command` — adjust if the actual name differs).
 
-- [ ] **Step 2: Write a failing test for duplicate command handling**
+- [x] **Step 2: Write a failing test for duplicate command handling**
 
 Add to the runtime test module:
 
@@ -1364,7 +1366,7 @@ async fn duplicate_command_id_is_idempotent_and_writes_only_one_event() {
 
 Adjust `handle_command` signature in the test to match what the actual method is named.
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run:
 
@@ -1374,7 +1376,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server duplicate_c
 
 Expected: FAIL — either two events get appended (if the in-memory store accepts duplicates) or the function panics on the unique-constraint error.
 
-- [ ] **Step 4: Implement pre-flight dedup + clone-then-commit**
+- [x] **Step 4: Implement pre-flight dedup + clone-then-commit**
 
 In `handle_command` (or the equivalent), restructure to:
 
@@ -1447,7 +1449,7 @@ pub async fn handle_command(
 
 If `build_applied_command`, `commit_applied`, and `accepted_dto_from_event` do not yet exist, factor them out of the current `handle_command` body. The current code combines compute + mutate + append in one pass; this task splits the three.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -1471,7 +1473,7 @@ git commit -m "feat: dedupe duplicate command_id at command intake"
 **Files:**
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Locate the current branch in `build_app_from_config`**
+- [x] **Step 1: Locate the current branch in `build_app_from_config`**
 
 Run:
 
@@ -1481,7 +1483,7 @@ grep -n "build_app_from_config\|new_with_event_store\|new_with_stores\|PostgresW
 
 Expected: identifies the branch that constructs the runtime when `database_url` is present.
 
-- [ ] **Step 2: Replace `new_with_stores` with `hydrate_from_stores` on the postgres branch**
+- [x] **Step 2: Replace `new_with_stores` with `hydrate_from_stores` on the postgres branch**
 
 Change the relevant block to:
 
@@ -1502,7 +1504,7 @@ Note: `HydrationError` must satisfy `Into<anyhow::Error>` (derive via thiserror 
 
 The in-memory branch (no `database_url`) still uses `build_app()` which internally calls `SimulationRuntime::new()`.
 
-- [ ] **Step 3: Verify build**
+- [x] **Step 3: Verify build**
 
 Run:
 
@@ -1512,7 +1514,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: compiles.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs
@@ -1526,7 +1528,7 @@ git commit -m "feat: hydrate runtime from stores on startup"
 **Files:**
 - Modify: `backend/crates/sim-server/tests/http.rs`
 
-- [ ] **Step 1: Write a recovery integration test**
+- [x] **Step 1: Write a recovery integration test**
 
 Add a `#[tokio::test]` gated on `ABUTOWN_TEST_DATABASE_URL`:
 
@@ -1582,7 +1584,7 @@ async fn world_state_survives_runtime_restart() {
 
 `build_test_app_with_postgres` and `persist_snapshots_once` already exist in the test file (or are exposed from `sim_server::app`). Reuse what's there.
 
-- [ ] **Step 2: Write a duplicate-command integration test**
+- [x] **Step 2: Write a duplicate-command integration test**
 
 ```rust
 #[tokio::test]
@@ -1635,7 +1637,7 @@ async fn duplicate_command_returns_same_response_and_writes_one_event() {
 }
 ```
 
-- [ ] **Step 3: Verify all existing tests still pass with in-memory stores**
+- [x] **Step 3: Verify all existing tests still pass with in-memory stores**
 
 Run:
 
@@ -1645,7 +1647,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: all green. Integration tests gated on `ABUTOWN_TEST_DATABASE_URL` silently skip if the var is unset.
 
-- [ ] **Step 4: If a Postgres dev DB is available, run with the var set**
+- [x] **Step 4: If a Postgres dev DB is available, run with the var set**
 
 If you have a database URL, run:
 
@@ -1655,7 +1657,7 @@ ABUTOWN_TEST_DATABASE_URL="$DATABASE_URL" cargo test --locked --manifest-path ba
 
 Expected: both integration tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/tests/http.rs
@@ -1668,7 +1670,7 @@ git commit -m "test: cover postgres recovery and command idempotency end-to-end"
 
 **Files:** none modified — verification only.
 
-- [ ] **Step 1: Run formatter, full test suite, clippy**
+- [x] **Step 1: Run formatter, full test suite, clippy**
 
 Run in sequence:
 
@@ -1680,7 +1682,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targe
 
 Expected: all three succeed.
 
-- [ ] **Step 2: Update progress.md**
+- [x] **Step 2: Update progress.md**
 
 Append one line to `progress.md`:
 

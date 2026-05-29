@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Unify `MobilityWorld` + `ChunkRegistry` into a single `bevy_ecs::World` (SimWorld) with chunks as entities, plugin-style composition, event-driven boundaries, and a determinism + persistence scaffold — without adding any features.
 
 **Architecture:** A new `sim_core::world` module ships foundation components, events, resources, a `CoreSet` SystemSet enum, and a local `SimPlugin` trait. The runtime collapses to `bevy_ecs::World` + `Schedule` + an event store. `ChunkRegistry`'s HashMap dissolves; chunks become entities with a dense `Tiles(Vec<TileRecord>)` component. Mobility's `MobilityWorld` wrapper dissolves likewise; its bevy World moves directly onto `SimulationRuntime`.
@@ -53,7 +55,7 @@
 - Modify: `backend/crates/sim-core/src/lib.rs` (add `pub mod world;`)
 - Modify: `backend/crates/sim-core/Cargo.toml` (add `rand`, `blake3`)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/crates/sim-core/src/world/mod.rs`:
 ```rust
@@ -81,13 +83,13 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && cargo test -p sim-core --lib world::components::tests::world_module_compiles 2>&1 | tail -10`
 
 Expected: FAIL with "could not find `world` in `sim_core`" or similar (because `lib.rs` may not have the new module declared yet).
 
-- [ ] **Step 3: Add dependencies to Cargo.toml**
+- [x] **Step 3: Add dependencies to Cargo.toml**
 
 Modify `backend/crates/sim-core/Cargo.toml` — find the `[dependencies]` section and add:
 ```toml
@@ -95,13 +97,13 @@ rand = "0.8"
 blake3 = "1"
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && cargo test -p sim-core --lib world::components::tests::world_module_compiles 2>&1 | tail -10`
 
 Expected: PASS with `test result: ok. 1 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -118,7 +120,7 @@ git commit -m "scaffold(8a): empty sim_core::world module + rand/blake3 deps"
 - Modify: `backend/crates/sim-core/src/world/events.rs`
 - Modify: `backend/crates/sim-core/src/world/mod.rs` (re-exports)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `backend/crates/sim-core/src/world/components.rs`:
 ```rust
@@ -222,13 +224,13 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail (or pass partially)**
+- [x] **Step 2: Run tests to verify they fail (or pass partially)**
 
 Run: `cd backend && cargo test -p sim-core --lib world::components 2>&1 | tail -10`
 
 Expected: tests compile and pass (no implementation gap; components are pure data).
 
-- [ ] **Step 3: Write events module**
+- [x] **Step 3: Write events module**
 
 In `backend/crates/sim-core/src/world/events.rs`:
 ```rust
@@ -310,13 +312,13 @@ pub use components::*;
 pub use events::*;
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd backend && cargo test -p sim-core --lib world:: 2>&1 | tail -15`
 
 Expected: all `world::components::tests::*` and `world::events::tests::*` pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -333,7 +335,7 @@ git commit -m "feat(8a): chunk components + ChunkLod enum + foundation events"
 - Create: `backend/crates/sim-core/src/world/tile_entity.rs`
 - Modify: `backend/crates/sim-core/src/world/mod.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/crates/sim-core/src/world/tile_entity.rs`:
 ```rust
@@ -439,19 +441,19 @@ impl ChunkTiles {
 
 In `backend/crates/sim-core/src/world/mod.rs` add `pub mod tile_entity;` and `pub use tile_entity::spawn_functional_tile;`.
 
-- [ ] **Step 2: Run tests to verify they pass**
+- [x] **Step 2: Run tests to verify they pass**
 
 Run: `cd backend && cargo test -p sim-core --lib world::tile_entity 2>&1 | tail -15`
 
 Expected: 2 passed (or compiler errors that need fixing — bevy 0.18 Relationship API; if `#[relationship_target(...)]` requires different syntax see `bevy_ecs::relationship` docs and adjust both attributes).
 
-- [ ] **Step 3: Verify with workspace tests still green**
+- [x] **Step 3: Verify with workspace tests still green**
 
 Run: `cd backend && cargo test --workspace 2>&1 | grep -E "test result|FAILED" | tail -15`
 
 Expected: all existing tests still pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -469,7 +471,7 @@ git commit -m "feat(8a): tile-entity scaffold (Tile, BelongsToChunk relationship
 - Modify: `backend/crates/sim-core/src/world/schedule.rs`
 - Modify: `backend/crates/sim-core/src/world/mod.rs`
 
-- [ ] **Step 1: Write resources**
+- [x] **Step 1: Write resources**
 
 In `backend/crates/sim-core/src/world/resources.rs`:
 ```rust
@@ -565,13 +567,13 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `cd backend && cargo test -p sim-core --lib world::resources 2>&1 | tail -10`
 
 Expected: 2 passed.
 
-- [ ] **Step 3: Write persistence types**
+- [x] **Step 3: Write persistence types**
 
 In `backend/crates/sim-core/src/world/persistence.rs`:
 ```rust
@@ -658,7 +660,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Write schedule labels and SimPlugin trait**
+- [x] **Step 4: Write schedule labels and SimPlugin trait**
 
 In `backend/crates/sim-core/src/world/schedule.rs`:
 ```rust
@@ -722,13 +724,13 @@ pub use schedule::{CoreSet, SimPlugin};
 pub use tile_entity::spawn_functional_tile;
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `cd backend && cargo test -p sim-core --lib world:: 2>&1 | grep -E "test result|FAILED" | tail -10`
 
 Expected: all world:: tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -744,7 +746,7 @@ git commit -m "feat(8a): foundation resources, persistence trait, CoreSet + SimP
 - Modify: `backend/crates/sim-core/src/world/plugin.rs`
 - Modify: `backend/crates/sim-core/src/world/systems.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `backend/crates/sim-core/src/world/plugin.rs`:
 ```rust
@@ -896,7 +898,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `cd backend && cargo test -p sim-core --lib world::plugin 2>&1 | tail -15`
 
@@ -906,13 +908,13 @@ Run: `cd backend && cargo test -p sim-core --lib world::systems 2>&1 | tail -10`
 
 Expected: tests pass.
 
-- [ ] **Step 3: Verify workspace still green**
+- [x] **Step 3: Verify workspace still green**
 
 Run: `cd backend && cargo build && cargo test --workspace 2>&1 | grep -E "test result|FAILED" | tail -15`
 
 Expected: all tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -928,7 +930,7 @@ git commit -m "feat(8a): CorePlugin registers resources/events + event buffer fl
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-core/src/world/systems.rs` (helper functions)
 
-- [ ] **Step 1: Add chunk-entity spawn helper**
+- [x] **Step 1: Add chunk-entity spawn helper**
 
 In `backend/crates/sim-core/src/world/systems.rs`, append:
 ```rust
@@ -978,7 +980,7 @@ pub fn spawn_chunk_entity(
 }
 ```
 
-- [ ] **Step 2: Write failing integration test**
+- [x] **Step 2: Write failing integration test**
 
 Add to `backend/crates/sim-server/src/runtime.rs`'s test module (find `#[cfg(test)] mod tests`):
 ```rust
@@ -1012,13 +1014,13 @@ Easier path: add to `backend/crates/sim-core/src/mobility/mod.rs` in the `impl M
 
 Then the test reads via `runtime.mobility.world_view().resource::<...>()`.
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `cd backend && cargo test -p sim-server hydration_spawns_chunk_entity 2>&1 | tail -15`
 
 Expected: FAIL — `ChunksByCoord` resource doesn't exist in the mobility world yet (CorePlugin hasn't been installed there).
 
-- [ ] **Step 4: Wire `CorePlugin` install into `MobilityWorld::default`**
+- [x] **Step 4: Wire `CorePlugin` install into `MobilityWorld::default`**
 
 Modify `backend/crates/sim-core/src/mobility/mod.rs`, in `impl MobilityWorld { fn empty() }` or `Default for MobilityWorld`, after constructing `world` and `schedule`:
 ```rust
@@ -1056,19 +1058,19 @@ Replace the existing `mobility: MobilityWorld::default(),` line in the struct co
 
 (If `registry.chunk()` / `registry.activity()` / `chunk.tiles_iter()` / `chunk.version()` accessor names differ in `chunk_registry.rs` and `chunk.rs`, adjust to whatever public accessor returns the same data. `cargo build` will surface the mismatch.)
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cd backend && cargo test -p sim-server hydration_spawns_chunk_entity 2>&1 | tail -15`
 
 Expected: PASS.
 
-- [ ] **Step 6: Run all workspace tests**
+- [x] **Step 6: Run all workspace tests**
 
 Run: `cd backend && cargo test --workspace 2>&1 | grep -E "test result|FAILED" | tail -15`
 
 Expected: all green (dual-write doesn't break anything).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1086,7 +1088,7 @@ git commit -m "feat(8a): dual-write chunk entities at hydration (HashMap + ECS)"
 - Modify: `backend/crates/sim-core/src/world/systems.rs` (add tile-mutation helper + query helpers)
 - Delete: `backend/crates/sim-server/src/chunk_registry.rs`
 
-- [ ] **Step 1: Add tile-mutation helper that emits `TileChanged`**
+- [x] **Step 1: Add tile-mutation helper that emits `TileChanged`**
 
 In `backend/crates/sim-core/src/world/systems.rs`, append:
 ```rust
@@ -1227,13 +1229,13 @@ mod ecs_mutation_tests {
 }
 ```
 
-- [ ] **Step 2: Run new ECS mutation tests**
+- [x] **Step 2: Run new ECS mutation tests**
 
 Run: `cd backend && cargo test -p sim-core --lib world::systems::ecs_mutation_tests 2>&1 | tail -10`
 
 Expected: 2 passed.
 
-- [ ] **Step 3: Migrate read sites in `app.rs`**
+- [x] **Step 3: Migrate read sites in `app.rs`**
 
 In `backend/crates/sim-server/src/app.rs`, find every site that calls `state.runtime.registry.get_chunk(coord)`, `state.runtime.registry.iter_chunks()`, etc. and replace with World queries.
 
@@ -1252,7 +1254,7 @@ grep -n "registry\\.chunk\\|registry\\.get_chunk\\|registry\\.iter_chunks\\|regi
 
 Each site moves to either `chunk_snapshot_data`, `world.get::<...>(...)`, or `world.resource::<ChunksByCoord>()` iteration.
 
-- [ ] **Step 4: Migrate write site in `runtime.rs`**
+- [x] **Step 4: Migrate write site in `runtime.rs`**
 
 In `backend/crates/sim-server/src/runtime.rs`, find `pub async fn apply_set_tile_kind` and the supporting plan helpers (search for `plan_set_tile_kind` and `apply_set_tile_kind` and `registry.plan_set_tile_kind`).
 
@@ -1291,7 +1293,7 @@ let result = sim_core::world::systems::apply_set_tile_kind_ecs(
 
 Delete or stop calling `self.registry.plan_set_tile_kind` and `self.registry.apply_set_tile_kind`. They will be removed entirely in step 5.
 
-- [ ] **Step 5: Delete `chunk_registry.rs` and the `registry` field**
+- [x] **Step 5: Delete `chunk_registry.rs` and the `registry` field**
 
 ```bash
 git rm backend/crates/sim-server/src/chunk_registry.rs
@@ -1328,7 +1330,7 @@ for (offset, coord) in SEEDED_CHUNKS.into_iter().enumerate() {
 }
 ```
 
-- [ ] **Step 6: Build + run workspace tests + clippy**
+- [x] **Step 6: Build + run workspace tests + clippy**
 
 ```bash
 cd backend && cargo build 2>&1 | tail -10
@@ -1338,7 +1340,7 @@ cd backend && cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail 
 
 Expected: all green. Any compile errors are missed call sites — fix iteratively.
 
-- [ ] **Step 7: Run browser smoke**
+- [x] **Step 7: Run browser smoke**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1347,7 +1349,7 @@ node scripts/smoke-7b.mjs 2>&1 | tail -20
 
 Expected: 9/9 pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1364,7 +1366,7 @@ git commit -m "refactor(8a): chunks-as-entities — delete ChunkRegistry, all re
 - Modify: `backend/crates/sim-core/src/world/systems.rs`
 - Modify: `backend/crates/sim-core/src/world/plugin.rs` (register the system)
 
-- [ ] **Step 1: Write a failing test**
+- [x] **Step 1: Write a failing test**
 
 In `backend/crates/sim-core/src/world/systems.rs`, append a test block:
 ```rust
@@ -1399,7 +1401,7 @@ mod lod_reclassify_tests {
 }
 ```
 
-- [ ] **Step 2: Implement the system**
+- [x] **Step 2: Implement the system**
 
 In `backend/crates/sim-core/src/world/systems.rs`, append:
 ```rust
@@ -1484,7 +1486,7 @@ pub fn reclassify_chunk_lod_system(world: &mut World) {
 }
 ```
 
-- [ ] **Step 3: Register the system in `CorePlugin::install`**
+- [x] **Step 3: Register the system in `CorePlugin::install`**
 
 In `backend/crates/sim-core/src/world/plugin.rs`, modify the `install` method — add to the schedule:
 ```rust
@@ -1494,13 +1496,13 @@ In `backend/crates/sim-core/src/world/plugin.rs`, modify the `install` method �
         );
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd backend && cargo test -p sim-core --lib world::systems::lod_reclassify_tests 2>&1 | tail -15`
 
 Expected: PASS.
 
-- [ ] **Step 5: Remove duplicate LOD logic from mobility**
+- [x] **Step 5: Remove duplicate LOD logic from mobility**
 
 In `backend/crates/sim-core/src/mobility/systems.rs`, find:
 - `classify_activity_system`
@@ -1526,7 +1528,7 @@ Lower-friction path: in `reclassify_chunk_lod_system`, after determining each ch
 
 Then remove `classify_activity_system`, `promote_warm_to_active_system`, `demote_active_to_warm_system` from `install_systems` (they're replaced).
 
-- [ ] **Step 6: Run workspace tests + smoke**
+- [x] **Step 6: Run workspace tests + smoke**
 
 ```bash
 cd backend && cargo test --workspace 2>&1 | grep -E "test result|FAILED" | tail -15
@@ -1536,7 +1538,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && node scripts/smoke-7b.mjs 2>&
 
 Expected: all green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1552,7 +1554,7 @@ git commit -m "refactor(8a): chunk LOD classification moves into CoreSet::LodRec
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs` (delete `pub struct MobilityWorld`)
 - Modify: `backend/crates/sim-server/src/runtime.rs` (collapse fields, install plugins directly)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `backend/crates/sim-server/src/runtime.rs` test module:
 ```rust
@@ -1567,13 +1569,13 @@ Add to `backend/crates/sim-server/src/runtime.rs` test module:
     }
 ```
 
-- [ ] **Step 2: Verify failure**
+- [x] **Step 2: Verify failure**
 
 Run: `cd backend && cargo test -p sim-server simulation_runtime_holds_world_directly 2>&1 | tail -5`
 
 Expected: FAIL — no `world` field on `SimulationRuntime`.
 
-- [ ] **Step 3: Extract MobilityWorld's setup into a free function**
+- [x] **Step 3: Extract MobilityWorld's setup into a free function**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, find `impl MobilityWorld { pub fn empty() }` (or `Default for MobilityWorld`). Refactor: the bulk of the setup (insert resources, install schedule systems) moves into a free function:
 ```rust
@@ -1613,7 +1615,7 @@ pub mod api;
 pub use api::*;
 ```
 
-- [ ] **Step 4: Refactor `SimulationRuntime`**
+- [x] **Step 4: Refactor `SimulationRuntime`**
 
 In `backend/crates/sim-server/src/runtime.rs`:
 ```rust
@@ -1654,7 +1656,7 @@ Every call to `self.mobility.X` becomes `sim_core::mobility::api::X(&self.world)
 
 Methods like `apply_set_tile_kind`, `apply_subscription_diff`, `next_pulse` keep their signatures but their bodies operate on `self.world` directly.
 
-- [ ] **Step 5: Run tests + smoke**
+- [x] **Step 5: Run tests + smoke**
 
 ```bash
 cd backend && cargo build 2>&1 | tail -10
@@ -1665,7 +1667,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && node scripts/smoke-7b.mjs 2>&
 
 Expected: all green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1683,7 +1685,7 @@ git commit -m "refactor(8a): dissolve MobilityWorld wrapper — world lives on S
 - Modify: `backend/crates/sim-server/src/lib.rs` (register module)
 - Modify: `backend/crates/sim-server/src/runtime.rs` (use providers for collection)
 
-- [ ] **Step 1: ChunkSnapshotProvider impl**
+- [x] **Step 1: ChunkSnapshotProvider impl**
 
 In `backend/crates/sim-core/src/world/snapshot_provider.rs`:
 ```rust
@@ -1754,7 +1756,7 @@ impl SnapshotProvider for ChunkSnapshotProvider {
 
 (Implementation mirrors today's `build_chunk_snapshot` in `persistence.rs:12-38`.)
 
-- [ ] **Step 2: PersistencePlugin in sim-server**
+- [x] **Step 2: PersistencePlugin in sim-server**
 
 In `backend/crates/sim-server/src/persistence_plugin.rs`:
 ```rust
@@ -1791,7 +1793,7 @@ In `backend/crates/sim-server/src/runtime.rs::new_with_event_store`, after the e
         .install(&mut world, &mut schedule);
 ```
 
-- [ ] **Step 3: Migrate persist-collection call site**
+- [x] **Step 3: Migrate persist-collection call site**
 
 Find the persist loop (today calls `chunk_registry::collect_snapshots`). Replace with iteration over `SnapshotProviders`:
 ```rust
@@ -1815,7 +1817,7 @@ match item.key.kind {
 
 (If today's stores don't have `upsert_raw`, add it as a thin wrapper that takes `&[u8]` and bypasses the DTO type — or keep providing the DTO via `serde_json::from_slice(&item.payload)` at the call site for minimal store changes.)
 
-- [ ] **Step 4: Run tests + smoke**
+- [x] **Step 4: Run tests + smoke**
 
 ```bash
 cd backend && cargo test --workspace 2>&1 | grep -E "test result|FAILED" | tail -15
@@ -1824,7 +1826,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && node scripts/smoke-7b.mjs 2>&
 
 Expected: all green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1842,7 +1844,7 @@ git commit -m "feat(8a): PersistencePlugin + ChunkSnapshotProvider (Postgres sch
 - Modify: `backend/crates/sim-server/src/persistence_plugin.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs` (use plugin instead of `install_mobility` free fn)
 
-- [ ] **Step 1: Wrap mobility installation in `MobilityPlugin` struct**
+- [x] **Step 1: Wrap mobility installation in `MobilityPlugin` struct**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, add:
 ```rust
@@ -1860,7 +1862,7 @@ impl SimPlugin for MobilityPlugin {
 
 (The `install_mobility` free function from Task 9 stays; the struct is just a `SimPlugin`-implementing wrapper around it. Keeps test-friendly free-function form available.)
 
-- [ ] **Step 2: MobilitySnapshotProvider**
+- [x] **Step 2: MobilitySnapshotProvider**
 
 In `backend/crates/sim-core/src/mobility/snapshot_provider.rs`:
 ```rust
@@ -1899,7 +1901,7 @@ impl SnapshotProvider for MobilitySnapshotProvider {
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, add `pub mod snapshot_provider;`.
 
-- [ ] **Step 3: Register MobilitySnapshotProvider in PersistencePlugin**
+- [x] **Step 3: Register MobilitySnapshotProvider in PersistencePlugin**
 
 In `backend/crates/sim-server/src/persistence_plugin.rs`, append to the existing `install`:
 ```rust
@@ -1908,7 +1910,7 @@ In `backend/crates/sim-server/src/persistence_plugin.rs`, append to the existing
         }));
 ```
 
-- [ ] **Step 4: Switch runtime to plugin form**
+- [x] **Step 4: Switch runtime to plugin form**
 
 In `backend/crates/sim-server/src/runtime.rs::new_with_event_store`, replace:
 ```rust
@@ -1919,7 +1921,7 @@ with:
 sim_core::mobility::MobilityPlugin.install(&mut world, &mut schedule);
 ```
 
-- [ ] **Step 5: Run tests + smoke**
+- [x] **Step 5: Run tests + smoke**
 
 ```bash
 cd backend && cargo test --workspace 2>&1 | grep -E "test result|FAILED" | tail -15
@@ -1929,7 +1931,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && node scripts/smoke-7b.mjs 2>&
 
 Expected: all green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1944,7 +1946,7 @@ git commit -m "feat(8a): MobilityPlugin + MobilitySnapshotProvider (plugin compo
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run all acceptance greps**
+- [x] **Step 1: Run all acceptance greps**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1962,7 +1964,7 @@ grep -n 'world: bevy_ecs::world::World' backend/crates/sim-server/src/runtime.rs
 
 Expected: greps 1-4 print "OK" (no matches). Grep 5 returns exactly one match.
 
-- [ ] **Step 2: Run all test suites**
+- [x] **Step 2: Run all test suites**
 
 ```bash
 cd backend && cargo build 2>&1 | tail -5
@@ -1975,7 +1977,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && node scripts/smoke-7b.mjs 2>&
 
 Expected: all green; smoke 9/9.
 
-- [ ] **Step 3: Run perf bench + capture delta**
+- [x] **Step 3: Run perf bench + capture delta**
 
 ```bash
 cd backend && cargo bench --bench mobility_tick_lod -- tick_100k_all_active 2>&1 | grep -A 1 "tick_100k_all_active" | tail -5
@@ -1983,7 +1985,7 @@ cd backend && cargo bench --bench mobility_tick_lod -- tick_100k_all_active 2>&1
 
 Compare against Phase 7c's documented number (`13.18 ms`). Record the new number — must be within 5% (≤ ~14 ms).
 
-- [ ] **Step 4: Update progress.md**
+- [x] **Step 4: Update progress.md**
 
 Modify `progress.md` — insert new entry at the top of the reverse-chronological block (lines 19+):
 ```
@@ -1992,7 +1994,7 @@ Modify `progress.md` — insert new entry at the top of the reverse-chronologica
 
 Substitute `<NEW MS>` and `<PCT>` from step 3 output.
 
-- [ ] **Step 5: Commit progress note**
+- [x] **Step 5: Commit progress note**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown

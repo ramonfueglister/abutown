@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Add deterministic corridor-HPA* routing over the existing 8c graph, A* profiles, and path cache without changing mobility execution, wire bytes, persistence bytes, or frontend state.
 
 **Architecture:** Add a focused `routing/hpa.rs` module that builds a fixed-size cluster index from `Graph`, discovers real cross-cluster portals, searches an abstract cluster graph, and then delegates final path legality to 8c A* through a corridor edge constraint. Extend `AStarRouter` with constrained search while keeping the current unconstrained API as a thin `AllEdges` wrapper.
@@ -39,7 +41,7 @@
 **Files:**
 - Modify: `backend/crates/sim-core/src/routing/pathfinding.rs`
 
-- [ ] **Step 1: Write failing constraint tests**
+- [x] **Step 1: Write failing constraint tests**
 
 Append these tests inside the existing `#[cfg(test)] mod tests` in `backend/crates/sim-core/src/routing/pathfinding.rs`:
 
@@ -119,7 +121,7 @@ Append these tests inside the existing `#[cfg(test)] mod tests` in `backend/crat
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -130,7 +132,7 @@ cargo test -p sim-core routing::pathfinding::tests::edge_constraint_blocks_disal
 
 Expected: compile fails because `EdgeConstraint`, `AllEdges`, and `find_path_with_constraint` are not defined.
 
-- [ ] **Step 3: Add the constraint API**
+- [x] **Step 3: Add the constraint API**
 
 In `backend/crates/sim-core/src/routing/pathfinding.rs`, extend the import and add the public trait near `pub struct AStarRouter;`:
 
@@ -264,7 +266,7 @@ Add the constrained method immediately after `find_path` and move the existing s
     }
 ```
 
-- [ ] **Step 4: Run targeted tests**
+- [x] **Step 4: Run targeted tests**
 
 Run:
 
@@ -275,7 +277,7 @@ cargo test -p sim-core routing::pathfinding -- --nocapture
 
 Expected: all `routing::pathfinding` tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown/.worktrees/phase-8d-routing-hpa
@@ -291,7 +293,7 @@ git commit -m "feat(8d): add constrained pathfinding"
 - Create: `backend/crates/sim-core/src/routing/hpa.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Add the module and failing index tests**
+- [x] **Step 1: Add the module and failing index tests**
 
 Add this line to `backend/crates/sim-core/src/routing/mod.rs`:
 
@@ -427,7 +429,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -438,7 +440,7 @@ cargo test -p sim-core routing::hpa -- --nocapture
 
 Expected: compile fails because HPA types and functions are not implemented.
 
-- [ ] **Step 3: Implement config, ids, index storage, and portal detection**
+- [x] **Step 3: Implement config, ids, index storage, and portal detection**
 
 Replace the top of `backend/crates/sim-core/src/routing/hpa.rs`, keeping the tests, with:
 
@@ -671,7 +673,7 @@ fn profiles_for_cross_cluster_edge(graph: &Graph, edge: &Edge) -> Vec<RoutingPro
 }
 ```
 
-- [ ] **Step 4: Run targeted tests**
+- [x] **Step 4: Run targeted tests**
 
 Run:
 
@@ -682,7 +684,7 @@ cargo test -p sim-core routing::hpa -- --nocapture
 
 Expected: HPA index tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown/.worktrees/phase-8d-routing-hpa
@@ -697,7 +699,7 @@ git commit -m "feat(8d): build hierarchical routing index"
 **Files:**
 - Modify: `backend/crates/sim-core/src/routing/hpa.rs`
 
-- [ ] **Step 1: Add failing adjacency tests**
+- [x] **Step 1: Add failing adjacency tests**
 
 Append these tests inside `routing/hpa.rs`'s test module:
 
@@ -774,7 +776,7 @@ Append these tests inside `routing/hpa.rs`'s test module:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify behavior**
+- [x] **Step 2: Run tests to verify behavior**
 
 Run:
 
@@ -785,7 +787,7 @@ cargo test -p sim-core routing::hpa -- --nocapture
 
 Expected: tests pass if Task 2 implemented adjacency correctly. If either test fails, fix only `profiles_for_cross_cluster_edge` or deterministic adjacency ordering.
 
-- [ ] **Step 3: Ensure deterministic adjacency order**
+- [x] **Step 3: Ensure deterministic adjacency order**
 
 If the tests expose unstable ordering, ensure `adjacency_sets` remains a `BTreeSet<ClusterId>` until final collection:
 
@@ -796,7 +798,7 @@ let adjacency = adjacency_sets
     .collect();
 ```
 
-- [ ] **Step 4: Run all HPA tests**
+- [x] **Step 4: Run all HPA tests**
 
 Run:
 
@@ -807,7 +809,7 @@ cargo test -p sim-core routing::hpa -- --nocapture
 
 Expected: all HPA tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown/.worktrees/phase-8d-routing-hpa
@@ -822,7 +824,7 @@ git commit -m "test(8d): cover profile-aware cluster adjacency"
 **Files:**
 - Modify: `backend/crates/sim-core/src/routing/hpa.rs`
 
-- [ ] **Step 1: Add failing router tests**
+- [x] **Step 1: Add failing router tests**
 
 Append these tests inside `routing/hpa.rs`'s test module:
 
@@ -969,7 +971,7 @@ Append these tests inside `routing/hpa.rs`'s test module:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -980,7 +982,7 @@ cargo test -p sim-core routing::hpa::tests::same_cluster_route_uses_base_case --
 
 Expected: compile fails because `HpaRouter` and route helpers are not implemented.
 
-- [ ] **Step 3: Implement router structs and abstract cluster search**
+- [x] **Step 3: Implement router structs and abstract cluster search**
 
 First extend the imports at the top of `routing/hpa.rs`:
 
@@ -1160,7 +1162,7 @@ fn reconstruct_cluster_path(
 }
 ```
 
-- [ ] **Step 4: Implement corridor expansion and constrained exact search**
+- [x] **Step 4: Implement corridor expansion and constrained exact search**
 
 Add these helpers below the abstract search helpers:
 
@@ -1239,7 +1241,7 @@ Add the test-only helper inside `impl HpaIndex`:
     }
 ```
 
-- [ ] **Step 5: Run HPA tests**
+- [x] **Step 5: Run HPA tests**
 
 Run:
 
@@ -1250,7 +1252,7 @@ cargo test -p sim-core routing::hpa -- --nocapture
 
 Expected: all HPA tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown/.worktrees/phase-8d-routing-hpa
@@ -1267,7 +1269,7 @@ git commit -m "feat(8d): route through hierarchical corridors"
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Add plugin tests first**
+- [x] **Step 1: Add plugin tests first**
 
 In `backend/crates/sim-core/src/routing/plugin.rs`, extend imports:
 
@@ -1315,7 +1317,7 @@ Append tests inside the existing test module:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1326,7 +1328,7 @@ cargo test -p sim-core routing::plugin::tests::hierarchical_routing_plugin_insta
 
 Expected: compile fails because `HierarchicalRoutingPlugin` is not implemented or not re-exported.
 
-- [ ] **Step 3: Implement plugin and exports**
+- [x] **Step 3: Implement plugin and exports**
 
 In `backend/crates/sim-core/src/routing/plugin.rs`, add:
 
@@ -1365,7 +1367,7 @@ In `backend/crates/sim-core/src/routing/mod.rs`, update the plugin re-export:
 pub use plugin::{HierarchicalRoutingPlugin, PathfindingPlugin, RoutingPlugin};
 ```
 
-- [ ] **Step 4: Add runtime installation**
+- [x] **Step 4: Add runtime installation**
 
 In both runtime construction paths in `backend/crates/sim-server/src/runtime.rs`, install hierarchical routing immediately after `PathfindingPlugin`:
 
@@ -1376,7 +1378,7 @@ In both runtime construction paths in `backend/crates/sim-server/src/runtime.rs`
         MobilityPlugin.install(&mut world, &mut schedule);
 ```
 
-- [ ] **Step 5: Add runtime tests**
+- [x] **Step 5: Add runtime tests**
 
 Append these tests near the existing routing runtime tests in `backend/crates/sim-server/src/runtime.rs`:
 
@@ -1433,7 +1435,7 @@ Append these tests near the existing routing runtime tests in `backend/crates/si
     }
 ```
 
-- [ ] **Step 6: Run targeted plugin and runtime tests**
+- [x] **Step 6: Run targeted plugin and runtime tests**
 
 Run:
 
@@ -1445,7 +1447,7 @@ cargo test -p sim-server runtime_ -- --nocapture
 
 Expected: plugin tests and runtime HPA tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown/.worktrees/phase-8d-routing-hpa
@@ -1460,7 +1462,7 @@ git commit -m "feat(8d): install hierarchical routing plugin"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run targeted backend tests**
+- [x] **Step 1: Run targeted backend tests**
 
 Run:
 
@@ -1474,7 +1476,7 @@ cargo test -p sim-server runtime_ -- --nocapture
 
 Expected: all targeted tests pass.
 
-- [ ] **Step 2: Run full backend verification**
+- [x] **Step 2: Run full backend verification**
 
 Run:
 
@@ -1486,7 +1488,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Expected: workspace tests pass; clippy has zero warnings.
 
-- [ ] **Step 3: Run frontend verification**
+- [x] **Step 3: Run frontend verification**
 
 Run:
 
@@ -1498,7 +1500,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown/.worktrees/phase-8d-routing-hpa
 
 Expected: TypeScript and Vitest pass unchanged.
 
-- [ ] **Step 4: Run smoke and perf gates**
+- [x] **Step 4: Run smoke and perf gates**
 
 Start the dev stack if it is not already running for this worktree:
 
@@ -1521,7 +1523,7 @@ cd backend && cargo bench -p sim-core tick_100k_all_active
 
 Expected: smoke remains 9/9 green with binary frames. `tick_100k_all_active` median stays at or below 11.599 ms, the Phase 8c +5% budget.
 
-- [ ] **Step 5: Add progress entry**
+- [x] **Step 5: Add progress entry**
 
 Run:
 
@@ -1535,7 +1537,7 @@ Add a new top entry to `progress.md`. Start the line with the exact timestamp pr
  - Phase 8d verification pass: corridor-HPA* routing is implemented on top of the Phase 8c graph and A* layer. `HpaIndex` builds deterministic fixed-size clusters, detects real cross-cluster portals, records profile-aware abstract adjacency, and `HpaRouter` routes through explicit cluster corridors before delegating final legality to constrained 8c A*. `HierarchicalRoutingPlugin` is installed after `PathfindingPlugin`; runtime seeded Zurich tests verify the HPA resource and a seeded tram route. Targeted routing tests pass, sim-server runtime tests pass, workspace cargo tests pass, clippy `-D warnings` is clean, tsc is clean, Vitest is clean, browser smoke `scripts/smoke-7b.mjs` is 9/9 green with binary frames, and `tick_100k_all_active` stays within the Phase 8c +5% budget. Wire protocol, frontend state, and mobility JSONB snapshot schema remain unchanged.
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown/.worktrees/phase-8d-routing-hpa
@@ -1550,7 +1552,7 @@ git commit -m "docs(8d): record hierarchical routing verification"
 **Files:**
 - No code changes unless a verification command exposes a real defect.
 
-- [ ] **Step 1: Confirm no forbidden surfaces changed**
+- [x] **Step 1: Confirm no forbidden surfaces changed**
 
 Run:
 
@@ -1566,7 +1568,7 @@ git diff -- src
 
 Expected: proto, mobility persistence/state, and frontend diffs are empty.
 
-- [ ] **Step 2: Confirm no forbidden routing language landed in implementation**
+- [x] **Step 2: Confirm no forbidden routing language landed in implementation**
 
 Run:
 
@@ -1578,7 +1580,7 @@ rg -n "fallback|synthetic|unwrap_or\\(\\(0\\.0, 0\\.0\\)\\)|global A\\* fallback
 
 Expected: no matches in implementation. If this matches only spec or plan prose, do not change code. If it matches routing implementation comments, rewrite the comments to say "explicit error" or remove the comment.
 
-- [ ] **Step 3: Confirm branch is clean**
+- [x] **Step 3: Confirm branch is clean**
 
 Run:
 
@@ -1589,7 +1591,7 @@ git status -sb
 
 Expected: clean working tree on `codex/phase-8d-routing-hpa`.
 
-- [ ] **Step 4: Commit any doc-only acceptance cleanup**
+- [x] **Step 4: Commit any doc-only acceptance cleanup**
 
 If Task 7 required doc-only cleanup, commit it:
 
