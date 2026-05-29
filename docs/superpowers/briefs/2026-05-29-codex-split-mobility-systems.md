@@ -22,9 +22,15 @@ public API.
    Run cargo **serially** (never two cargo at once). If you stay in the repo's
    default target instead, route cargo through `scripts/cargo-serial.sh`.
 
-2. **Branch:** start a fresh branch off the latest `main`
-   (`git checkout main && git pull && git checkout -b codex/split-mobility-systems`).
-   Do **not** work on `plan/security-ci-guardrails`.
+2. **Work in your OWN git worktree — do NOT `git checkout` in the shared
+   directory** (another agent is on `plan/security-ci-guardrails` in the main
+   checkout; switching its branch would break it). Create a separate worktree:
+   ```
+   git worktree add ../abutown-codex -b codex/split-mobility-systems main
+   cd ../abutown-codex
+   ```
+   Do all work from `../abutown-codex`. Do **not** touch
+   `plan/security-ci-guardrails`.
 
 3. **Do NOT touch these files — the other agent owns them right now:**
    - `backend/crates/sim-server/src/runtime.rs`, `app.rs`, `config.rs`, `card_hand.rs`
