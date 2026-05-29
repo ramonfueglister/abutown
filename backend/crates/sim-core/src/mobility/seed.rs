@@ -450,23 +450,16 @@ mod tests {
     #[test]
     fn from_base_world_bundle_seeds_no_trams() {
         let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
-            workspace_root().join("data/worlds/zurich-river-city-v1"),
+            workspace_root().join("data/worlds/abutopia"),
         )
         .expect("base world bundle should load");
 
         let (world, _) = from_base_world_bundle(&bundle).expect("base world should seed");
+        let agents = crate::mobility::api::agents(&world);
         let vehicles = crate::mobility::api::vehicles(&world);
 
-        assert!(
-            vehicles
-                .iter()
-                .all(|vehicle| vehicle.kind == VehicleKind::Car)
-        );
-        assert!(
-            vehicles
-                .iter()
-                .any(|vehicle| vehicle.id.0.starts_with("vehicle:car:"))
-        );
+        assert_eq!(agents.len(), 1);
+        assert!(vehicles.is_empty());
         let tram_prefix = ["vehicle:", "tram:"].concat();
         assert!(
             vehicles

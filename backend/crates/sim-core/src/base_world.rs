@@ -234,23 +234,14 @@ impl BaseWorldBundle {
         self.validate_world_id(&self.decorations.world_id)?;
         self.validate_world_id(&self.spawns.world_id)?;
 
-        if self.terrain.tiles.is_empty() {
-            return Err(BaseWorldError::EmptyLayer("terrain.tiles"));
-        }
         if self.transport.roads.is_empty() {
             return Err(BaseWorldError::EmptyLayer("transport.roads"));
-        }
-        if self.transport.arterial_paths.is_empty() {
-            return Err(BaseWorldError::EmptyLayer("transport.arterial_paths"));
         }
         if self.transport.pedestrian_corridors.is_empty() {
             return Err(BaseWorldError::EmptyLayer("transport.pedestrian_corridors"));
         }
         if self.buildings.footprints.is_empty() {
             return Err(BaseWorldError::EmptyLayer("buildings.footprints"));
-        }
-        if self.decorations.trees.is_empty() {
-            return Err(BaseWorldError::EmptyLayer("decorations.trees"));
         }
 
         for tile in &self.terrain.tiles {

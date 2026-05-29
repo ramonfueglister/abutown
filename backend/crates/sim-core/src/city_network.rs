@@ -55,26 +55,26 @@ mod tests {
 
     const FIXTURE: &str = r#"{
         "version": 1,
-        "world_id": "zurich-river-city-v1",
+        "world_id": "abutopia",
         "chunk_size": 32,
-        "world_tiles": { "width": 256, "height": 256 },
-        "arterial_paths": [
-            [{"x": 10, "y": 20}, {"x": 14, "y": 20}, {"x": 14, "y": 24}]
-        ],
+        "world_tiles": { "width": 16, "height": 8 },
+        "arterial_paths": [],
         "pedestrian_corridors": [
-            [{"x": 11, "y": 30}, {"x": 15, "y": 30}]
+            [{"x": 2, "y": 3}, {"x": 13, "y": 3}]
         ]
     }"#;
 
     #[test]
     fn parses_fixture_with_paths_and_corridors() {
         let network = CityNetwork::from_json(FIXTURE).expect("parses");
-        assert_eq!(network.world_id, "zurich-river-city-v1");
+        assert_eq!(network.world_id, "abutopia");
         assert_eq!(network.chunk_size, 32);
-        assert_eq!(network.arterial_paths.len(), 1);
-        assert_eq!(network.arterial_paths[0].len(), 3);
-        assert_eq!(network.arterial_paths[0][0], NetworkCoord { x: 10, y: 20 });
+        assert_eq!(network.arterial_paths.len(), 0);
         assert_eq!(network.pedestrian_corridors.len(), 1);
+        assert_eq!(
+            network.pedestrian_corridors[0][0],
+            NetworkCoord { x: 2, y: 3 }
+        );
     }
 
     #[test]

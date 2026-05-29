@@ -1,12 +1,12 @@
 import type { CameraState } from '../cameraController';
-import type { ZurichDetail, ZurichTerrainKind } from '../city/worldTypes';
+import type { TerrainKind, WorldDetail } from '../city/worldTypes';
 import type {
   RuntimeBuilding,
   RuntimeRailStation,
   RuntimeRailTile,
   RuntimeRoadTile,
   RuntimeTerrain,
-} from '../app/zurichRuntimeContext';
+} from './worldRuntimeTypes';
 import type { MobilityOverlayState } from '../backend/mobilityState';
 import { shouldRenderDetail } from './detailRenderPolicy';
 import { compareDrawableOrder } from './drawOrder';
@@ -41,8 +41,6 @@ import {
   SOUTH,
   WEST,
   coordKey as key,
-  distanceOutsideMap,
-  isInsideMap,
   maskSegments as gridMaskSegments,
   outwardExits as gridOutwardExits,
   stableHash as hash,
@@ -62,14 +60,14 @@ export type MinimalMapRendererState = {
   world: { width: number; height: number };
   tileSize: { width: number; height: number };
   terrain: ReadonlyMap<string, RuntimeTerrain>;
-  terrainKinds: ReadonlyMap<string, { kind: ZurichTerrainKind }>;
+  terrainKinds: ReadonlyMap<string, { kind: TerrainKind }>;
   roads: ReadonlyMap<string, RuntimeRoadTile>;
   rails: ReadonlyMap<string, RuntimeRailTile>;
   railPaths: readonly Coord[][];
   railStations: readonly RuntimeRailStation[];
   buildings: readonly RuntimeBuilding[];
   trees: readonly Coord[];
-  details: readonly ZurichDetail[];
+  details: readonly WorldDetail[];
   mobilityState: MobilityOverlayState;
   mobilityTickPeriodMs: number;
   vehicleSprites: readonly VehicleSprite[];
@@ -90,7 +88,7 @@ type StaticDrawable =
   | { type: 'rail'; coord: Coord; rail: RuntimeRailTile }
   | { type: 'road'; coord: Coord; road: RuntimeRoadTile }
   | { type: 'railStation'; coord: Coord; station: RuntimeRailStation }
-  | { type: 'detail'; coord: Coord; detail: ZurichDetail }
+  | { type: 'detail'; coord: Coord; detail: WorldDetail }
   | { type: 'tree'; coord: Coord }
   | { type: 'building'; coord: Coord; building: RuntimeBuilding };
 
@@ -98,16 +96,16 @@ type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: stri
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
 type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 
-export const MAP_BACKGROUND = '#f6f0e3';
-const MAP_OUTSKIRTS = '#eee7d7';
+export const MAP_BACKGROUND = '#91c86f';
 const MAP_WATER = '#92d8e9';
 const MAP_RIVERBANK = '#bde8df';
 const MAP_PARK = '#cfe5bf';
 const MAP_PLAZA = '#eadbbd';
-const ROAD_CASING = '#c7d1cf';
-const ROAD_CORE = '#fffdf7';
-const ROAD_BRIDGE_CASING = '#8fc9d7';
-const ROAD_BRIDGE_CORE = '#fff9e9';
+const ROAD_SIDEWALK = '#d8d3c5';
+const ROAD_CURB = '#aaa69c';
+const ROAD_CASING = '#565d61';
+const ROAD_CORE = '#71797d';
+const ROAD_CENTER_LINE = '#f1c93a';
 const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
 const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
 const TREE_COLOR = '#84ad78';
@@ -119,7 +117,7 @@ const BUILDING_INDUSTRIAL = '#cabed6';
 const AGENT_COLOR = '#343b43';
 const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '#ef7f5a', '#28a6b0'];
 const VIEWPORT_GRID_PADDING = 9;
-export const OUTSKIRTS_TILES = 12;
+export const OUTSKIRTS_TILES = 0;
 export const EDGE_EXIT_TILES = 7;
 
 export function renderMinimalMap(state: MinimalMapRendererState): void {
@@ -145,7 +143,6 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   ctx.translate(sceneOffset.x, sceneOffset.y);
   const visibleGrid = visibleGridRect(state);
 
-  drawOutskirtsTerrain(state, visibleGrid);
   const visibleTerrainTiles: Coord[] = [];
   for (let y = Math.max(0, visibleGrid.minY); y <= Math.min(world.height - 1, visibleGrid.maxY); y += 1) {
     for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(world.width - 1, visibleGrid.maxX); x += 1) visibleTerrainTiles.push({ x, y });
@@ -174,7 +171,7 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
     .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort((a, b) => compareDrawables(state, a, b));
-  for (const road of state.roads.values()) if (isCoordVisible(road.coord, visibleGrid)) drawRoad(state, road);
+  drawRoads(state, [...state.roads.values()].filter((road) => isCoordVisible(road.coord, visibleGrid)));
   for (const path of state.railPaths) drawRailPath(state, path);
   drawEdgeConnections(state, visibleGrid);
   for (const station of state.railStations) if (isCoordVisible(station.coord, visibleGrid)) drawRailStation(state, station);
@@ -184,7 +181,6 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   for (const item of carDrawables) drawCar(state, item.car, item.vehicleId === state.selectedVehicleId);
   for (const item of pedestrianDrawables) drawPedestrian(state, item.pedestrian, item.agentId === state.selectedAgentId);
 
-  drawPerimeterMist(state);
   ctx.restore();
 }
 
@@ -203,39 +199,95 @@ function drawRiverSurface(state: MinimalMapRendererState, coord: Coord): void {
   drawTileFill(state, coord, kind === 'riverbank' ? MAP_RIVERBANK : MAP_WATER, 0.96);
 }
 
-function drawOutskirtsTerrain(state: MinimalMapRendererState, visibleGrid: GridRect): void {
-  const { ctx, world } = state;
-  for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(world.height - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
-    for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(world.width - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
-      const coord = { x, y };
-      if (isInsideMap(coord, world)) continue;
-      const edgeDistance = distanceOutsideMap(coord, world);
-      if (edgeDistance > OUTSKIRTS_TILES) continue;
-
-      const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
-      ctx.save();
-      drawTileFill(state, coord, MAP_OUTSKIRTS, 0.05 + fade * 0.16);
-      if (hash(`outskirts-shadow:${x}:${y}`) % 11 === 0) {
-        const point = iso(state, coord);
-        ctx.fillStyle = `rgba(151, 133, 103, ${0.025 + (1 - fade) * 0.035})`;
-        drawIsoTile(state, point);
-      }
-      ctx.restore();
-    }
-  }
+function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
+  drawRoadBand(state, road.coord, road.mask, ROAD_SIDEWALK, screenStableWorldSize(24, state.camera.scale, { minWorld: 24, maxWorld: 36 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CURB, screenStableWorldSize(18, state.camera.scale, { minWorld: 18, maxWorld: 29 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CASING, screenStableWorldSize(16, state.camera.scale, { minWorld: 16, maxWorld: 26 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CORE, screenStableWorldSize(13, state.camera.scale, { minWorld: 13, maxWorld: 22 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CENTER_LINE, screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }));
 }
 
-function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
-  drawMaskLine(state, road.coord, road.mask, {
-    casing: road.kind === 'bridge' ? ROAD_BRIDGE_CASING : ROAD_CASING,
-    core: road.kind === 'bridge' ? ROAD_BRIDGE_CORE : ROAD_CORE,
-    casingWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(5.5, state.camera.scale, { minWorld: 10.5, maxWorld: 17 })
-      : screenStableWorldSize(4.8, state.camera.scale, { minWorld: 9.2, maxWorld: 16 }),
-    coreWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(3.8, state.camera.scale, { minWorld: 7, maxWorld: 12 })
-      : screenStableWorldSize(3.4, state.camera.scale, { minWorld: 6.4, maxWorld: 10.5 }),
-  });
+function drawRoads(state: MinimalMapRendererState, roads: RuntimeRoadTile[]): void {
+  if (roads.length === 0) return;
+  const bands = [
+    { color: ROAD_SIDEWALK, width: screenStableWorldSize(24, state.camera.scale, { minWorld: 24, maxWorld: 36 }) },
+    { color: ROAD_CURB, width: screenStableWorldSize(18, state.camera.scale, { minWorld: 18, maxWorld: 29 }) },
+    { color: ROAD_CASING, width: screenStableWorldSize(16, state.camera.scale, { minWorld: 16, maxWorld: 26 }) },
+    { color: ROAD_CORE, width: screenStableWorldSize(13, state.camera.scale, { minWorld: 13, maxWorld: 22 }) },
+    { color: ROAD_CENTER_LINE, width: screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }) },
+  ];
+  for (const band of bands) drawRoadRuns(state, roads, band.color, band.width);
+}
+
+function drawRoadRuns(state: MinimalMapRendererState, roads: RuntimeRoadTile[], color: string, width: number): void {
+  const horizontal = new Map<number, number[]>();
+  const vertical = new Map<number, number[]>();
+  for (const road of roads) {
+    if ((road.mask & (EAST | WEST)) !== 0) appendGrouped(horizontal, road.coord.y, road.coord.x);
+    if ((road.mask & (NORTH | SOUTH)) !== 0) appendGrouped(vertical, road.coord.x, road.coord.y);
+  }
+
+  const { ctx, tileSize } = state;
+  ctx.save();
+  ctx.fillStyle = color;
+  for (const [y, xs] of horizontal) {
+    for (const run of mergedRuns(xs)) {
+      ctx.fillRect(
+        run.min * tileSize.width,
+        y * tileSize.height + tileSize.height / 2 - width / 2,
+        (run.max - run.min + 1) * tileSize.width,
+        width,
+      );
+    }
+  }
+  for (const [x, ys] of vertical) {
+    for (const run of mergedRuns(ys)) {
+      ctx.fillRect(
+        x * tileSize.width + tileSize.width / 2 - width / 2,
+        run.min * tileSize.height,
+        width,
+        (run.max - run.min + 1) * tileSize.height,
+      );
+    }
+  }
+  ctx.restore();
+}
+
+function drawRoadBand(state: MinimalMapRendererState, coord: Coord, mask: number, color: string, width: number): void {
+  const { ctx, tileSize } = state;
+  const point = iso(state, coord);
+  const horizontal = (mask & (EAST | WEST)) !== 0;
+  const vertical = (mask & (NORTH | SOUTH)) !== 0;
+  const overlap = 0.8;
+  ctx.save();
+  ctx.fillStyle = color;
+  if (horizontal) {
+    ctx.fillRect(point.x - tileSize.width / 2 - overlap, point.y - width / 2, tileSize.width + overlap * 2, width);
+  }
+  if (vertical) {
+    ctx.fillRect(point.x - width / 2, point.y - tileSize.height / 2 - overlap, width, tileSize.height + overlap * 2);
+  }
+  if (!horizontal && !vertical) {
+    ctx.fillRect(point.x - width / 2, point.y - width / 2, width, width);
+  }
+  ctx.restore();
+}
+
+function appendGrouped(groups: Map<number, number[]>, key: number, value: number): void {
+  const values = groups.get(key);
+  if (values) values.push(value);
+  else groups.set(key, [value]);
+}
+
+function mergedRuns(values: number[]): { min: number; max: number }[] {
+  const sorted = [...new Set(values)].sort((a, b) => a - b);
+  const runs: { min: number; max: number }[] = [];
+  for (const value of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && value <= last.max + 1) last.max = value;
+    else runs.push({ min: value, max: value });
+  }
+  return runs;
 }
 
 function drawRail(state: MinimalMapRendererState, rail: RuntimeRailTile): void {
@@ -285,7 +337,7 @@ function drawRailStation(state: MinimalMapRendererState, station: RuntimeRailSta
   ctx.restore();
 }
 
-function drawDetail(state: MinimalMapRendererState, detail: ZurichDetail): void {
+function drawDetail(state: MinimalMapRendererState, detail: WorldDetail): void {
   if (!shouldRenderDetail(detail)) return;
   if (detail.category !== 'industry' && detail.category !== 'dock' && detail.category !== 'station') return;
   const { ctx } = state;
@@ -305,9 +357,6 @@ function drawBuilding(state: MinimalMapRendererState, building: RuntimeBuilding)
   const x = point.x - width / 2 + offset.x + jitter.x;
   const y = point.y - height / 2 + offset.y + jitter.y;
   ctx.save();
-  ctx.fillStyle = 'rgba(108, 97, 77, 0.07)';
-  roundedRectPath(ctx, x + 1.5, y + 1.5, width, height, 1.4);
-  ctx.fill();
   ctx.globalAlpha = 0.66;
   ctx.fillStyle = buildingVectorColor(building);
   roundedRectPath(ctx, x, y, width, height, 1.4);
@@ -475,19 +524,6 @@ function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRe
   }
 }
 
-function drawPerimeterMist(state: MinimalMapRendererState): void {
-  const { ctx, world, tileSize } = state;
-  const minX = 0;
-  const minY = 0;
-  const maxX = world.width * tileSize.width;
-  const maxY = world.height * tileSize.height;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(139, 129, 108, 0.18)';
-  ctx.lineWidth = 1.4;
-  ctx.strokeRect(minX, minY, maxX, maxY);
-  ctx.restore();
-}
-
 function visibleGridRect(state: MinimalMapRendererState): GridRect {
   const { camera, viewport } = state;
   const inverseScale = 1 / camera.scale;
@@ -512,13 +548,6 @@ function isCoordVisible(coord: Coord, rect: GridRect): boolean {
 function isWaterSurface(state: MinimalMapRendererState, coord: Coord): boolean {
   const kind = state.terrain.get(key(coord));
   return kind === 'water' || kind === 'riverbank';
-}
-
-function drawIsoTile(state: MinimalMapRendererState, point: Coord): void {
-  const { ctx, tileSize } = state;
-  ctx.beginPath();
-  ctx.rect(point.x - tileSize.width / 2, point.y - tileSize.height / 2, tileSize.width, tileSize.height);
-  ctx.fill();
 }
 
 function drawFadingEdgeTile(state: MinimalMapRendererState, step: number, draw: () => void): void {

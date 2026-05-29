@@ -1,60 +1,8 @@
 export type Coord = { x: number; y: number };
 
-export type ZurichTerrainKind = 'grass' | 'water' | 'riverbank' | 'park' | 'forest' | 'reserve' | 'plaza';
+export type TerrainKind = 'grass' | 'water' | 'riverbank' | 'park' | 'forest' | 'reserve' | 'plaza';
 
-export type ZurichZoneKind =
-  | 'river'
-  | 'old-town'
-  | 'rail-center'
-  | 'residential'
-  | 'forest'
-  | 'park'
-  | 'industry'
-  | 'reserve'
-  | 'civic'
-  | 'waterfront';
-
-export type ZurichTerrainTile = {
-  coord: Coord;
-  kind: ZurichTerrainKind;
-  elevation: 0;
-  zoneId?: string;
-};
-
-export type ZurichZone = {
-  id: string;
-  kind: ZurichZoneKind;
-  name: string;
-  center: Coord;
-  radius: number;
-  density: number;
-};
-
-export type ZurichWorld = {
-  id: string;
-  seed: number;
-  width: number;
-  height: number;
-  chunkSize: number;
-  zones: ZurichZone[];
-  terrain: Map<string, ZurichTerrainTile>;
-  river: Coord[];
-};
-
-export type ZurichRoadKind = 'street' | 'bridge';
-
-export type ZurichRoadTile = {
-  coord: Coord;
-  kind: ZurichRoadKind;
-  mask: number;
-};
-
-export type ZurichRailTile = {
-  coord: Coord;
-  mask: number;
-};
-
-export type ZurichBuildingSheet =
+export type BuildingSheet =
   | 'houses'
   | 'oldhouses'
   | 'cottages'
@@ -66,23 +14,10 @@ export type ZurichBuildingSheet =
   | 'tower'
   | 'church';
 
-export type ZurichBuilding = {
-  coord: Coord;
-  sheet: ZurichBuildingSheet;
-  frame: number;
-  zoneId: string;
-};
-
-export type ZurichDetail = {
+export type WorldDetail = {
   coord: Coord;
   category: 'tree' | 'park' | 'civic' | 'industry' | 'decor' | 'station' | 'dock' | 'quai' | 'field' | 'yard';
   assetCategory: string;
-};
-
-export type ZurichValidationResult = {
-  valid: boolean;
-  errors: string[];
-  stats: Record<string, number>;
 };
 
 export function key(coord: Coord): string {

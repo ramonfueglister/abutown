@@ -9,17 +9,18 @@ function read(path: string): string {
 }
 
 describe('base world cutover guards', () => {
-  it('does not use procedural Zurich builders as runtime map authority', () => {
+  it('does not use procedural builders as runtime map authority', () => {
     const runtimeEntrypoints = [
       'src/main.ts',
       'src/app/appRuntime.ts',
     ];
 
     const forbidden = [
-      'createZurichRuntimeContext(',
-      'buildZurichWorld(',
-      'buildZurichTransport(',
-      'buildZurichPlacement(',
+      'generateCity(',
+      'buildRuntimeContext(',
+      'buildWorld(',
+      'buildTransport(',
+      'buildPlacement(',
     ];
 
     const hits = runtimeEntrypoints.flatMap((file) => {

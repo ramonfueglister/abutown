@@ -76,7 +76,7 @@ fn set_tile_kind_proto(
         command: Some(w::client_command::Command::SetTileKind(
             w::SetTileKindCommand {
                 protocol_version: u32::from(PROTOCOL_VERSION),
-                world_id: "zurich-river-city-v1".to_string(),
+                world_id: "abutopia".to_string(),
                 command_id: command_id.to_string(),
                 coord: Some(w::ChunkCoord { x, y }),
                 local_index,
@@ -88,8 +88,7 @@ fn set_tile_kind_proto(
 
 fn base_world_fixture() -> sim_core::base_world::BaseWorldBundle {
     sim_core::base_world::BaseWorldBundle::load_from_dir(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../data/worlds/zurich-river-city-v1"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../data/worlds/abutopia"),
     )
     .expect("base world fixture loads")
 }
@@ -117,7 +116,7 @@ async fn health_and_world_summary_are_available() {
         .to_bytes();
     let health = w::HealthResponse::decode(health_body.as_ref()).unwrap();
     assert_eq!(health.protocol_version, u32::from(PROTOCOL_VERSION));
-    assert_eq!(health.world_id, "zurich-river-city-v1");
+    assert_eq!(health.world_id, "abutopia");
     assert!(health.ok);
 
     let world_response = app
@@ -139,11 +138,10 @@ async fn health_and_world_summary_are_available() {
         .to_bytes();
     let world = w::WorldSummary::decode(body.as_ref()).unwrap();
     assert_eq!(world.protocol_version, u32::from(PROTOCOL_VERSION));
-    assert_eq!(world.world_id, "zurich-river-city-v1");
+    assert_eq!(world.world_id, "abutopia");
     assert_eq!(world.chunk_size, 32);
-    assert_eq!(world.loaded_chunks.len(), 64);
+    assert_eq!(world.loaded_chunks.len(), 1);
     assert_eq!(world.loaded_chunks[0], w::ChunkCoord { x: 0, y: 0 });
-    assert!(world.loaded_chunks.contains(&w::ChunkCoord { x: 4, y: 4 }));
     assert_eq!(world.tick_period_ms, 100);
 }
 
@@ -269,7 +267,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/chunks/4/4")
+                .uri("/chunks/0/0")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -280,8 +278,8 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let snap = w::ChunkSnapshot::decode(body.as_ref()).unwrap();
 
-    assert_eq!(snap.world_id, "zurich-river-city-v1");
-    assert_eq!(snap.coord, Some(w::ChunkCoord { x: 4, y: 4 }));
+    assert_eq!(snap.world_id, "abutopia");
+    assert_eq!(snap.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
     assert_eq!(snap.tile_count, 1024);
     assert_eq!(snap.chunk_state, w::ChunkState::Warm as i32);
 
@@ -297,7 +295,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
 async fn every_loaded_chunk_snapshot_is_available() {
     let app = build_app();
 
-    for (x, y) in [(4, 4), (5, 4), (4, 5)] {
+    for (x, y) in [(0, 0)] {
         let response = app
             .clone()
             .oneshot(
@@ -353,16 +351,16 @@ async fn mobility_snapshot_is_available() {
     let mobility = w::MobilitySnapshot::decode(body.as_ref()).unwrap();
 
     assert_eq!(mobility.protocol_version, u32::from(PROTOCOL_VERSION));
-    assert_eq!(mobility.world_id, "zurich-river-city-v1");
+    assert_eq!(mobility.world_id, "abutopia");
     assert_eq!(mobility.tick, 0);
-    assert!(mobility.agents.len() >= 50);
-    assert!(!mobility.vehicles.is_empty());
+    assert_eq!(mobility.agents.len(), 1);
+    assert!(mobility.vehicles.is_empty());
 }
 
 #[tokio::test]
 async fn command_sets_tile_kind_and_returns_event() {
     let app = build_app();
-    let command = set_tile_kind_proto("command:http:1", 4, 4, 11, w::TileKind::Water);
+    let command = set_tile_kind_proto("command:http:1", 0, 0, 11, w::TileKind::Water);
 
     let response = post_command(&app, command).await;
 
@@ -387,7 +385,7 @@ async fn command_sets_tile_kind_and_returns_event() {
     // published once per tick (100 ms). Poll for the mutation to become
     // visible instead of using a fixed sleep — faster + more robust on
     // slow CI than `sleep(150ms)`.
-    let snapshot = poll_chunk_until(&app, "/chunks/4/4", |snap| {
+    let snapshot = poll_chunk_until(&app, "/chunks/0/0", |snap| {
         snap.tiles
             .iter()
             .any(|tile| tile.local_index == 11 && tile.kind == w::TileKind::Water as i32)
@@ -423,7 +421,7 @@ async fn command_rejects_unloaded_chunk() {
 #[tokio::test]
 async fn command_rejects_tile_out_of_bounds() {
     let app = build_app();
-    let command = set_tile_kind_proto("command:http:3", 4, 4, 1024, w::TileKind::Water);
+    let command = set_tile_kind_proto("command:http:3", 0, 0, 1024, w::TileKind::Water);
 
     let response = post_command(&app, command).await;
 
@@ -448,7 +446,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/chunks/4/4")
+                .uri("/chunks/0/0")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -462,7 +460,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
         .to_bytes();
     let before = w::ChunkSnapshot::decode(before_body.as_ref()).unwrap();
 
-    let command = set_tile_kind_proto("command:http:store-failure", 4, 4, 11, w::TileKind::Water);
+    let command = set_tile_kind_proto("command:http:store-failure", 0, 0, 11, w::TileKind::Water);
     let response = post_command(&app, command).await;
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -477,7 +475,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
     let after_response = app
         .oneshot(
             Request::builder()
-                .uri("/chunks/4/4")
+                .uri("/chunks/0/0")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -560,9 +558,9 @@ async fn postgres_world_state_survives_runtime_restart() {
 
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("zurich-river-city-v1".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             command_id: command_id.clone(),
-            coord: ChunkCoordDto { x: 4, y: 4 },
+            coord: ChunkCoordDto { x: 0, y: 0 },
             local_index,
             kind: TileKindDto::Water,
         });
@@ -619,8 +617,8 @@ async fn postgres_world_state_survives_runtime_restart() {
         .expect("hydrate restarted runtime");
 
         let restored = runtime
-            .chunk_snapshot(ChunkCoord { x: 4, y: 4 })
-            .expect("chunk (4,4) loaded after restart");
+            .chunk_snapshot(ChunkCoord { x: 0, y: 0 })
+            .expect("chunk (0,0) loaded after restart");
         assert!(
             restored
                 .tiles

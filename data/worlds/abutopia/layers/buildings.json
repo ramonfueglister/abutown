@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "world_id": "abutopia",
+  "footprints": [
+    {
+      "id": "building:house-a",
+      "tiles": [
+        {
+          "x": 2,
+          "y": 3
+        }
+      ],
+      "sheet": "oldhouses",
+      "frame": 0
+    },
+    {
+      "id": "building:house-b",
+      "tiles": [
+        {
+          "x": 13,
+          "y": 3
+        }
+      ],
+      "sheet": "oldhouses",
+      "frame": 1
+    }
+  ]
+}

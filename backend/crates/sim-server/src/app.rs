@@ -43,7 +43,7 @@ use crate::{
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
-const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/zurich-river-city-v1";
+const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/abutopia";
 
 fn resolve_base_world_path() -> PathBuf {
     std::env::var("ABUTOWN_BASE_WORLD_PATH")
@@ -375,6 +375,14 @@ pub fn build_app() -> Router {
     let runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())
         .expect("base world bundle is required for app startup");
     build_app_with_runtime(runtime)
+}
+
+pub fn build_app_with_allowed_origins(allowed_origins: &[String]) -> anyhow::Result<Router> {
+    let runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())
+        .expect("base world bundle is required for app startup");
+    let state = AppState::new(runtime);
+    let cors = cors_layer(allowed_origins)?;
+    Ok(build_router_from_state(state, cors))
 }
 
 pub async fn build_app_from_env() -> anyhow::Result<Router> {
@@ -1466,9 +1474,9 @@ mod tests {
             .apply_client_command(abutown_protocol::ClientCommandDto::SetTileKind(
                 abutown_protocol::SetTileKindCommandDto {
                     protocol_version: abutown_protocol::PROTOCOL_VERSION,
-                    world_id: abutown_protocol::WorldId("zurich-river-city-v1".to_string()),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     command_id: command_id.to_string(),
-                    coord: abutown_protocol::ChunkCoordDto { x: 4, y: 4 },
+                    coord: abutown_protocol::ChunkCoordDto { x: 0, y: 0 },
                     local_index: 11,
                     kind: abutown_protocol::TileKindDto::Water,
                 },
@@ -1547,12 +1555,12 @@ mod tests {
         assert_eq!(persist_snapshots_once(&state).await.unwrap(), 1);
 
         let snapshot = state
-            .stored_chunk_snapshot(ChunkCoord { x: 4, y: 4 })
+            .stored_chunk_snapshot(ChunkCoord { x: 0, y: 0 })
             .await
             .unwrap()
             .expect("visible snapshot stored");
-        assert_eq!(snapshot.coord.x, 4);
-        assert_eq!(snapshot.coord.y, 4);
+        assert_eq!(snapshot.coord.x, 0);
+        assert_eq!(snapshot.coord.y, 0);
     }
 
     /// A snapshot store that sleeps during writes to simulate slow DB I/O.
@@ -1665,7 +1673,7 @@ mod tests {
         state
             .mutations
             .send(crate::runtime_view::Mutation::SubscriptionDiff {
-                added: vec![sim_core::ids::ChunkCoord { x: 4, y: 4 }],
+                added: vec![sim_core::ids::ChunkCoord { x: 0, y: 0 }],
                 removed: Vec::new(),
                 reply: reply_tx,
             })
@@ -1677,14 +1685,14 @@ mod tests {
             .expect("reply not dropped");
         assert_eq!(snapshots.len(), 1, "expected one snapshot for added chunk");
         let chunk = snapshots[0].chunk.as_ref().expect("chunk coord present");
-        assert_eq!(chunk.x, 4);
-        assert_eq!(chunk.y, 4);
+        assert_eq!(chunk.x, 0);
+        assert_eq!(chunk.y, 0);
     }
 
     #[tokio::test]
     async fn chunk_subscribe_uses_published_view_snapshots_without_waiting_for_tick_reply() {
         let state = state_with_delayed_subscription_reply(Duration::from_millis(650));
-        let coord = sim_core::ids::ChunkCoord { x: 4, y: 4 };
+        let coord = sim_core::ids::ChunkCoord { x: 0, y: 0 };
         let message = w::ClientMessage {
             body: Some(w::client_message::Body::ChunkSubscribe(w::ChunkSubscribe {
                 protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
@@ -1781,7 +1789,7 @@ mod tests {
         state
             .mutations
             .send(crate::runtime_view::Mutation::SubscriptionDiff {
-                added: vec![sim_core::ids::ChunkCoord { x: 4, y: 4 }],
+                added: vec![sim_core::ids::ChunkCoord { x: 0, y: 0 }],
                 removed: Vec::new(),
                 reply: reply_tx,
             })

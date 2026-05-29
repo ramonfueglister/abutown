@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "world_id": "abutopia",
+  "roads": [
+    {
+      "x": 3,
+      "y": 3,
+      "kind": "street",
+      "mask": 2
+    },
+    {
+      "x": 4,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 5,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 6,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 7,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 8,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 9,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 10,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 11,
+      "y": 3,
+      "kind": "street",
+      "mask": 10
+    },
+    {
+      "x": 12,
+      "y": 3,
+      "kind": "street",
+      "mask": 8
+    }
+  ],
+  "rails": [],
+  "arterial_paths": [],
+  "rail_paths": [],
+  "pedestrian_corridors": [
+    {
+      "id": "corridor:main",
+      "points": [
+        {
+          "x": 2,
+          "y": 3
+        },
+        {
+          "x": 3,
+          "y": 3
+        },
+        {
+          "x": 4,
+          "y": 3
+        },
+        {
+          "x": 5,
+          "y": 3
+        },
+        {
+          "x": 6,
+          "y": 3
+        },
+        {
+          "x": 7,
+          "y": 3
+        },
+        {
+          "x": 8,
+          "y": 3
+        },
+        {
+          "x": 9,
+          "y": 3
+        },
+        {
+          "x": 10,
+          "y": 3
+        },
+        {
+          "x": 11,
+          "y": 3
+        },
+        {
+          "x": 12,
+          "y": 3
+        },
+        {
+          "x": 13,
+          "y": 3
+        }
+      ]
+    }
+  ]
+}

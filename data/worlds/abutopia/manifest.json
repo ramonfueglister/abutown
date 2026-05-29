@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "world_id": "zurich-river-city-v1",
-  "display_name": "Zurich River City",
+  "world_id": "abutopia",
+  "display_name": "Abutopia",
   "chunk_size": 32,
   "world_tiles": {
-    "width": 256,
-    "height": 256
+    "width": 16,
+    "height": 8
   },
   "layers": {
     "terrain": "layers/terrain.json",

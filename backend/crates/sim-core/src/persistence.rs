@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn snapshot_store_reports_count_and_sorted_coords() {
         let mut store = InMemoryChunkSnapshotStore::default();
-        let compatibility = SnapshotCompatibility::new("zurich-river-city-v1", 1);
+        let compatibility = SnapshotCompatibility::new("abutopia", 1);
 
         let mut east = Chunk::new(ChunkCoord { x: 5, y: 4 }, 32);
         east.set_tile_kind(0, TileKind::Water).expect("tile exists");
@@ -313,7 +313,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
         chunk.set_tile_kind(0, TileKind::Road).expect("tile exists");
         let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
-        let compatibility = SnapshotCompatibility::new("zurich-river-city-v1", 1);
+        let compatibility = SnapshotCompatibility::new("abutopia", 1);
 
         ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone(), &compatibility)
             .await
@@ -332,9 +332,9 @@ mod tests {
         let mut store = InMemoryChunkSnapshotStore::default();
         let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
         chunk.set_tile_kind(0, TileKind::Road).unwrap();
-        let snapshot = build_chunk_snapshot("zurich-river-city-v1", &chunk, ChunkActivity::Active);
-        let current = SnapshotCompatibility::new("zurich-river-city-v1", 1);
-        let stale = SnapshotCompatibility::new("zurich-river-city-v1", 0);
+        let snapshot = build_chunk_snapshot("abutopia", &chunk, ChunkActivity::Active);
+        let current = SnapshotCompatibility::new("abutopia", 1);
+        let stale = SnapshotCompatibility::new("abutopia", 0);
 
         ChunkSnapshotStore::write_snapshot(&mut store, snapshot, &stale)
             .await
@@ -356,7 +356,7 @@ mod tests {
         let mut store = InMemoryMobilitySnapshotStore::default();
         let (world, _) = seed::test_seed_world();
         let snap = extract_from_world(&world);
-        let compatibility = SnapshotCompatibility::new("zurich-river-city-v1", 1);
+        let compatibility = SnapshotCompatibility::new("abutopia", 1);
 
         MobilitySnapshotStore::write(&mut store, "abutown-main", 42, &snap, &compatibility)
             .await
@@ -378,15 +378,15 @@ mod tests {
         let mut store = InMemoryMobilitySnapshotStore::default();
         let (world, _) = seed::test_seed_world();
         let snap = extract_from_world(&world);
-        let current = SnapshotCompatibility::new("zurich-river-city-v1", 1);
+        let current = SnapshotCompatibility::new("abutopia", 1);
         let stale = SnapshotCompatibility::new("abutown-main", 1);
 
-        MobilitySnapshotStore::write(&mut store, "zurich-river-city-v1", 42, &snap, &stale)
+        MobilitySnapshotStore::write(&mut store, "abutopia", 42, &snap, &stale)
             .await
             .unwrap();
 
         assert!(
-            MobilitySnapshotStore::read(&store, "zurich-river-city-v1", &current)
+            MobilitySnapshotStore::read(&store, "abutopia", &current)
                 .await
                 .unwrap()
                 .is_none(),
@@ -400,7 +400,7 @@ mod tests {
         let result = MobilitySnapshotStore::read(
             &store,
             "missing-world",
-            &SnapshotCompatibility::new("zurich-river-city-v1", 1),
+            &SnapshotCompatibility::new("abutopia", 1),
         )
         .await
         .unwrap();

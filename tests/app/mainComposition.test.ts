@@ -10,7 +10,7 @@ describe('main composition root', () => {
     expect(source).toContain("from './app/entitySelection'");
     expect(source).toContain("from './app/interaction'");
     expect(source).toContain("from './app/runtimeDiagnostics'");
-    expect(source).toContain("from './app/zurichRuntimeContext'");
+    expect(source).toContain("from './render/worldRuntimeTypes'");
     expect(source).toContain("from './render/minimalMapRenderer'");
     expect(source).not.toContain('function drawRoad(');
     expect(source).not.toContain('function drawPedestrian(');
