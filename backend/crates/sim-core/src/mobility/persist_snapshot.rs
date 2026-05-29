@@ -447,6 +447,24 @@ fn push_edge(
     edge_id
 }
 
+fn push_reverse_footway_for_edge(edges: &mut Vec<Edge>, edge_id: EdgeId) {
+    let edge = edges[edge_id.0 as usize].clone();
+    if edge.kind != EdgeKind::Footway {
+        return;
+    }
+    edges.push(Edge {
+        id: EdgeId(edges.len() as u32),
+        from: edge.to,
+        to: edge.from,
+        length: edge.length,
+        polyline: edge.polyline.iter().rev().copied().collect(),
+        kind: EdgeKind::Footway,
+        speed_limit: edge.speed_limit,
+        capacity: edge.capacity,
+        legacy_id: None,
+    });
+}
+
 fn edge_kind_for_mode(mode: ModeState) -> EdgeKind {
     match mode {
         ModeState::Walking => EdgeKind::Footway,
@@ -544,6 +562,9 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
             polyline,
             kind,
         );
+        if link_id.starts_with("link:walk:") {
+            push_reverse_footway_for_edge(&mut edges, edge_id);
+        }
         edge_by_link.insert(link_id, edge_id);
     }
 
@@ -567,6 +588,7 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
             polyline,
             EdgeKind::Footway,
         );
+        push_reverse_footway_for_edge(&mut edges, edge_id);
         edge_by_link.insert(link_id, edge_id);
     }
 

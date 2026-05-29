@@ -355,6 +355,35 @@ fn route_assignment_activity_walker_continues_on_connected_footway() {
 }
 
 #[test]
+fn route_assignment_activity_walker_does_not_reset_at_dead_end() {
+    let (mut world, mut schedule, entity) =
+        world_schedule_and_agent_with_graph(route_graph(None), "walk:b", "activity:work", 0.0);
+    world.get_mut::<WalkPlan>(entity).unwrap().stages = vec![PlanStage::Activity {
+        activity_id: "activity:wander".into(),
+    }];
+    world
+        .get_mut::<AgentMobilityStateComponent>(entity)
+        .unwrap()
+        .0 = AgentMobilityState::Walking {
+        link_id: "walk:b".into(),
+        progress: 1.0,
+    };
+
+    schedule.run(&mut world);
+
+    let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+    assert!(matches!(
+        &state.0,
+        AgentMobilityState::Walking { link_id, progress }
+            if link_id == "walk:b" && *progress == 1.0
+    ));
+    assert!(
+        !world.resource::<DirtyAgents>().0.contains(&entity),
+        "a dead-end without a next footway must not publish a teleport back to progress 0"
+    );
+}
+
+#[test]
 fn route_assignment_and_advance_accept_graph_native_edge_keys() {
     let (mut world, mut schedule, entity) = world_schedule_and_agent_with_graph(
         graph_native_route_graph(Some("activity:work")),

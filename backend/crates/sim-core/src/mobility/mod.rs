@@ -523,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_only_walker_restarts_after_reaching_link_end() {
+    fn activity_only_walker_stays_at_dead_end_without_connected_footway() {
         let (mut world, mut schedule) = empty_world();
         api::force_all_chunks_active_for_test(&mut world);
         let agent_id = AgentId("agent:ambient".to_string());
@@ -549,7 +549,7 @@ mod tests {
             agent.state,
             AgentMobilityState::Walking {
                 link_id: "l".to_string(),
-                progress: 0.05
+                progress: 1.0
             }
         );
     }

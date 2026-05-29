@@ -1394,6 +1394,37 @@ mod tests {
     }
 
     #[test]
+    fn runtime_restores_grass_footways_bidirectionally() {
+        let base_world = base_world_fixture();
+        let runtime = SimulationRuntime::new_with_event_store_and_base_world(
+            Box::new(InMemoryWorldEventStore::default()),
+            base_world,
+        )
+        .expect("base world runtime should construct");
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let grass_edge = graph
+            .edges()
+            .iter()
+            .find(|edge| {
+                edge.kind == sim_core::routing::EdgeKind::Footway
+                    && edge
+                        .legacy_id
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("link:walk:grass:"))
+            })
+            .expect("base world graph has grass footways");
+
+        assert!(
+            graph.outgoing(grass_edge.to).iter().any(|edge_id| {
+                let candidate = graph.edge(*edge_id);
+                candidate.kind == sim_core::routing::EdgeKind::Footway
+                    && candidate.to == grass_edge.from
+            }),
+            "restored grass footway endpoints need a reverse footway so walkers do not reset at dead ends"
+        );
+    }
+
+    #[test]
     fn set_mobility_for_test_refreshes_hpa_index() {
         let network = base_world_fixture().to_city_network();
         let mut runtime = SimulationRuntime::new_from_network(&network);

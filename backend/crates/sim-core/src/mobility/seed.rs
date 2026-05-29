@@ -115,6 +115,14 @@ fn nearest_grass_center(
 }
 
 fn is_walkable_grass(bundle: &BaseWorldBundle, x: i32, y: i32) -> bool {
+    let world_tiles = bundle.world_tiles();
+    if x < 0
+        || y < 0
+        || x >= i32::try_from(world_tiles.width).expect("world width fits i32")
+        || y >= i32::try_from(world_tiles.height).expect("world height fits i32")
+    {
+        return false;
+    }
     bundle.tile_kind_at(x, y) == TileKind::Grass
 }
 
@@ -692,6 +700,33 @@ mod tests {
                     "building tile center must not be walkable"
                 );
                 assert_ne!((x, y), (1.5, 0.5), "water tile center must not be walkable");
+            }
+        }
+    }
+
+    #[test]
+    fn seeded_walks_from_base_world_keeps_grass_links_inside_world_bounds() {
+        let bundle = walkability_bundle();
+        let world_tiles = bundle.world_tiles();
+
+        let grass_walks: Vec<_> = seeded_walks_from_base_world(&bundle)
+            .into_iter()
+            .filter(|walk| walk.legacy_link_id.starts_with("link:walk:grass:"))
+            .collect();
+
+        assert!(!grass_walks.is_empty(), "fixture should emit grass walks");
+        for walk in grass_walks {
+            for (x, y) in walk.polyline {
+                assert!(
+                    x >= 0.0 && x < world_tiles.width as f32,
+                    "grass footway x={x} must stay inside {} tiles",
+                    world_tiles.width
+                );
+                assert!(
+                    y >= 0.0 && y < world_tiles.height as f32,
+                    "grass footway y={y} must stay inside {} tiles",
+                    world_tiles.height
+                );
             }
         }
     }

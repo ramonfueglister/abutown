@@ -166,10 +166,10 @@ pub fn route_assignment_system(
             continue;
         };
         if matches!(stage, PlanStage::Activity { .. }) {
-            if progress >= 1.0 {
-                let next_link =
+            if progress >= 1.0
+                && let Some(next_link) =
                     next_wander_footway_link(&graph, &link_id, progress, &stable.0, tick.0)
-                        .unwrap_or_else(|| link_id.clone());
+            {
                 state.0 = AgentMobilityState::Walking {
                     link_id: next_link,
                     progress: 0.0,
