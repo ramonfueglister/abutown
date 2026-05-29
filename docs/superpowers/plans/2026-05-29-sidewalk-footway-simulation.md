@@ -361,7 +361,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `backend/crates/sim-core/src/routing/builder.rs`
 
-- [ ] **Step 1: Add a failing routing-builder test**
+- [x] **Step 1: Add a failing routing-builder test**
 
 In `backend/crates/sim-core/src/routing/builder.rs`, add this test inside the existing `#[cfg(test)] mod tests` block:
 
@@ -398,7 +398,7 @@ fn builder_preserves_fractional_seeded_walk_nodes() {
 }
 ```
 
-- [ ] **Step 2: Run the failing routing test**
+- [x] **Step 2: Run the failing routing test**
 
 Run:
 
@@ -408,7 +408,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: FAIL because walk endpoint nodes are still rounded to integer coordinates.
 
-- [ ] **Step 3: Add quantized graph-node keys**
+- [x] **Step 3: Add quantized graph-node keys**
 
 In `backend/crates/sim-core/src/routing/builder.rs`, add these helpers near `polyline_length`:
 
@@ -430,7 +430,7 @@ fn remember_point(points: &mut HashMap<CoordKey, (f32, f32)>, point: (f32, f32))
 }
 ```
 
-- [ ] **Step 4: Replace rounded integer node collection**
+- [x] **Step 4: Replace rounded integer node collection**
 
 Inside `build_graph_from_city_network`, use `CoordKey` for node identity and keep the original `(f32, f32)` for node positions:
 
@@ -506,7 +506,7 @@ let legacy_key = coord_key(segment[0]);
 legacy_id: Some(format!("link:road:{index}:{}_{},fwd", legacy_key.0, legacy_key.1)),
 ```
 
-- [ ] **Step 5: Run routing tests**
+- [x] **Step 5: Run routing tests**
 
 Run:
 
@@ -516,7 +516,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit routing graph change**
+- [x] **Step 6: Commit routing graph change**
 
 Run:
 
