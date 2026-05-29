@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Scale `MobilityWorld` to ~1000 visible entities (~600 walking agents + ~400 car-Vehicles each driven by an Agent + 4 trams) sourced from a shared JSON city descriptor generated from the existing TS world build. Retire Phase-1's `RoadVehicleWorld` parallel subsystem in favor of the SUMO/MATSim agent+vehicle doctrine from `agent-mobility-foundation`.
 
 **Architecture:** Generator script writes `data/city/zurich-network.json` from `buildZurichWorld`+`buildZurichTransport`+`buildPedestrianCorridors`. Backend loads it at startup, runs `mobility::seed::from_network(network, density)` producing walking agents, car-Vehicles+drivers, and trams. `VehicleRecord.kind: Car|Tram` plus polyline `LinkGeometry`. `RoadVehicleWorld` and its protocol/persistence/frontend surface are removed in this same slice.
@@ -76,7 +78,7 @@ Docs:
 - Create: `data/city/zurich-network.json` (generated artifact)
 - Modify: `package.json`
 
-- [ ] **Step 1: Add npm script**
+- [x] **Step 1: Add npm script**
 
 Edit `package.json` and add to the `scripts` object:
 
@@ -84,7 +86,7 @@ Edit `package.json` and add to the `scripts` object:
 "generate:city-network": "node scripts/generate-city-network.mjs"
 ```
 
-- [ ] **Step 2: Write generator script**
+- [x] **Step 2: Write generator script**
 
 Create `scripts/generate-city-network.mjs`:
 
@@ -133,7 +135,7 @@ console.log(
 npm install --save-dev tsx
 ```
 
-- [ ] **Step 3: Run the generator**
+- [x] **Step 3: Run the generator**
 
 ```bash
 npm run generate:city-network
@@ -141,7 +143,7 @@ npm run generate:city-network
 
 Expected: prints `wrote .../zurich-network.json — N arterial paths, M pedestrian corridors` with `N > 5` and `M > 30`.
 
-- [ ] **Step 4: Verify the output**
+- [x] **Step 4: Verify the output**
 
 ```bash
 test -s data/city/zurich-network.json && head -20 data/city/zurich-network.json
@@ -149,7 +151,7 @@ test -s data/city/zurich-network.json && head -20 data/city/zurich-network.json
 
 Expected: JSON starts with `{`, has `"version": 1`, `"world_id": "zurich-river-city-v1"`, `"arterial_paths"`, `"pedestrian_corridors"`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/generate-city-network.mjs data/city/zurich-network.json package.json package-lock.json
@@ -164,7 +166,7 @@ git commit -m "feat: generate shared zurich city network json"
 - Create: `backend/crates/sim-core/src/city_network.rs`
 - Modify: `backend/crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Add module to lib.rs**
+- [x] **Step 1: Add module to lib.rs**
 
 In `backend/crates/sim-core/src/lib.rs`, alongside the other `pub mod` lines, add:
 
@@ -172,7 +174,7 @@ In `backend/crates/sim-core/src/lib.rs`, alongside the other `pub mod` lines, ad
 pub mod city_network;
 ```
 
-- [ ] **Step 2: Write failing tests**
+- [x] **Step 2: Write failing tests**
 
 Create `backend/crates/sim-core/src/city_network.rs` with the test module first:
 
@@ -213,7 +215,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run to confirm failure**
+- [x] **Step 3: Run to confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core city_network
@@ -221,7 +223,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core city_network
 
 Expected: FAIL — types don't exist.
 
-- [ ] **Step 4: Implement the loader**
+- [x] **Step 4: Implement the loader**
 
 Add to the same file, above the tests:
 
@@ -271,7 +273,7 @@ impl CityNetwork {
 }
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core city_network
@@ -279,7 +281,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core city_network
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/city_network.rs backend/crates/sim-core/src/lib.rs
@@ -293,7 +295,7 @@ git commit -m "feat: load shared city network from json"
 **Files:**
 - Modify: `backend/crates/protocol/src/lib.rs`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 In `backend/crates/protocol/src/lib.rs` test module:
 
@@ -321,7 +323,7 @@ fn vehicle_mobility_dto_carries_kind() {
 }
 ```
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol vehicle_mobility_dto_carries_kind
@@ -329,7 +331,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol vehic
 
 Expected: FAIL — `VehicleKindDto` and `kind` field don't exist.
 
-- [ ] **Step 3: Add the type and field**
+- [x] **Step 3: Add the type and field**
 
 In `backend/crates/protocol/src/lib.rs`, near `DirectionDto`:
 
@@ -363,7 +365,7 @@ pub struct VehicleMobilityDto {
 
 Update all existing protocol tests that construct `VehicleMobilityDto` literals to include `kind: VehicleKindDto::Tram` (preserves current tram-only semantic until Task 6 introduces cars).
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol
@@ -371,7 +373,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol
 
 Expected: green.
 
-- [ ] **Step 5: Update `From<&VehicleRecord> for VehicleMobilityDto` placeholder impl in mobility.rs**
+- [x] **Step 5: Update `From<&VehicleRecord> for VehicleMobilityDto` placeholder impl in mobility.rs**
 
 In `backend/crates/sim-core/src/mobility.rs`, the placeholder `From<&VehicleRecord> for VehicleMobilityDto` impl (added in Phase 1 as a legacy fallback) needs the new `kind` field. Set it to `VehicleKindDto::Tram` as the placeholder — Task 6 will replace this path with `vehicle_dto_for` which reads the real kind from `VehicleRecord`. The build needs to succeed in this commit.
 
@@ -391,7 +393,7 @@ impl From<&VehicleRecord> for VehicleMobilityDto {
 
 Also update the live builder `vehicle_dto_for` in `mobility.rs` (added in Phase 1) to read `value.kind` from `VehicleRecord` — but `VehicleRecord` doesn't have `kind` yet. So for THIS task, hardcode `kind: VehicleKindDto::Tram` in `vehicle_dto_for` too. Task 6 adds the `kind` field on `VehicleRecord` and switches `vehicle_dto_for` to read it.
 
-- [ ] **Step 6: Verify workspace**
+- [x] **Step 6: Verify workspace**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -399,7 +401,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/protocol/src/lib.rs backend/crates/sim-core/src/mobility.rs
@@ -413,7 +415,7 @@ git commit -m "feat: add VehicleKind to vehicle DTO with tram default"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility_geometry.rs`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Append to the test module:
 
@@ -458,7 +460,7 @@ fn polyline_with_two_points_matches_old_start_end_semantics() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core polyline
@@ -466,7 +468,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core polyline
 
 Expected: FAIL — `LinkGeometry.points` and methods don't exist (current shape is `start`/`end`).
 
-- [ ] **Step 3: Rewrite LinkGeometry**
+- [x] **Step 3: Rewrite LinkGeometry**
 
 Replace the `LinkGeometry` struct in `mobility_geometry.rs`:
 
@@ -574,7 +576,7 @@ fn link_geometry_lookup_returns_seeded_routes() {
 
 The interpolation test in `route_link_geometry_interpolates_progress` keeps working because at `progress=0.5` on a 2-point polyline, you get the midpoint of those 2 points.
 
-- [ ] **Step 4: Update MobilityWorld helpers using start/end**
+- [x] **Step 4: Update MobilityWorld helpers using start/end**
 
 In `backend/crates/sim-core/src/mobility.rs`, find `world_coord_for_agent` and `direction_for_agent`. They currently read `geom.start` and `geom.end`. Replace with the new helpers:
 
@@ -599,7 +601,7 @@ AgentMobilityState::Walking { link_id, .. } => {
 
 Adjust nearby code paths likewise. Any use of `geom.start.0 + (geom.end.0 - geom.start.0) * t` becomes `geom.world_coord_at_progress(t)`.
 
-- [ ] **Step 5: Verify workspace**
+- [x] **Step 5: Verify workspace**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -607,7 +609,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: green. If any existing test broke because it asserted on `start`/`end` fields, update it to use `points.first()`/`points.last()`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility_geometry.rs backend/crates/sim-core/src/mobility.rs
@@ -621,7 +623,7 @@ git commit -m "feat: polyline link geometry"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to the mobility.rs test module:
 
@@ -635,7 +637,7 @@ fn seeded_world_vehicles_default_to_tram_kind() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core seeded_world_vehicles_default_to_tram_kind
@@ -643,7 +645,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core seeded_world_
 
 Expected: FAIL — `VehicleKind` and `vehicle.kind` don't exist.
 
-- [ ] **Step 3: Add VehicleKind enum and field**
+- [x] **Step 3: Add VehicleKind enum and field**
 
 In `backend/crates/sim-core/src/mobility.rs`, add near the other public types:
 
@@ -699,7 +701,7 @@ pub fn vehicle_dto_for(&self, vehicle_id: &VehicleId) -> Option<abutown_protocol
 
 Update the `From<&VehicleRecord> for VehicleMobilityDto` placeholder similarly to read `value.kind.into()` instead of hardcoded.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -707,7 +709,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green. Mobility tests will need to satisfy serde — the JSON-serialised `MobilityWorld` now has `kind` on each vehicle. If any test compares serialised JSON strings, update those.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility.rs
@@ -721,7 +723,7 @@ git commit -m "feat: VehicleKind field on VehicleRecord"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add tests**
+- [x] **Step 1: Add tests**
 
 Append to mobility.rs test module:
 
@@ -812,7 +814,7 @@ fn from_network_assigns_drivers_to_cars() {
 }
 ```
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core from_network
@@ -820,7 +822,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core from_network
 
 Expected: FAIL.
 
-- [ ] **Step 3: Rename initial_world to tiny_world**
+- [x] **Step 3: Rename initial_world to tiny_world**
 
 In `backend/crates/sim-core/src/mobility.rs`, find the `pub mod seed { pub fn initial_world() -> MobilityWorld { ... } }`. Rename the function to `tiny_world`. Then add `pub fn initial_world()` that just delegates to `tiny_world()` so callers don't break:
 
@@ -836,7 +838,7 @@ pub fn tiny_world() -> MobilityWorld {
 
 Callers of `seed::initial_world` (e.g., in `SimulationRuntime::new_with_stores` and `hydrate_from_stores`) keep working without code changes.
 
-- [ ] **Step 4: Add seed::from_network**
+- [x] **Step 4: Add seed::from_network**
 
 In the same `seed` module, add:
 
@@ -1026,7 +1028,7 @@ pub fn world_coord_for_vehicle(&self, vehicle_id: &VehicleId) -> Option<(f32, f3
 
 (Drop the legacy `route_link_world_coord` if no longer used, or keep it as a thin wrapper around the new lookup. For YAGNI: keep it for `tiny_world`'s benefit since its routes don't populate `link_polylines`.)
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -1034,7 +1036,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green. New tests pass, old tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility.rs
@@ -1048,7 +1050,7 @@ git commit -m "feat: seed mobility from city network"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add failing test**
+- [x] **Step 1: Add failing test**
 
 ```rust
 #[test]
@@ -1153,7 +1155,7 @@ fn snapshot_dto_includes_all_agents_even_in_vehicle() {
 
 (The snapshot keeps the in_vehicle agents — only deltas filter them. Initial hydration needs the full picture; deltas don't because the client tracks agent state across messages.)
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core delta_dto_excludes_in_vehicle snapshot_dto_includes_all_agents
@@ -1161,7 +1163,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core delta_dto_exc
 
 Expected: FAIL — current `build_mobility_delta_dto` includes all changed agents.
 
-- [ ] **Step 3: Filter in the delta builder**
+- [x] **Step 3: Filter in the delta builder**
 
 In `mobility.rs`, find `build_mobility_delta_dto`. Update:
 
@@ -1195,7 +1197,7 @@ pub fn build_mobility_delta_dto(
 
 `build_mobility_snapshot_dto` stays as-is — it includes ALL agents including in_vehicle ones so clients can hydrate state on first load.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -1203,7 +1205,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility.rs
@@ -1231,23 +1233,23 @@ This task removes a substantial amount of code across several files in a single 
 - `backend/crates/sim-server/tests/websocket.rs`
 - `backend/crates/protocol/src/lib.rs`
 
-- [ ] **Step 1: Delete the road-vehicle modules**
+- [x] **Step 1: Delete the road-vehicle modules**
 
 ```bash
 git rm backend/crates/sim-core/src/road_vehicles.rs backend/crates/sim-server/src/postgres_road_vehicles.rs
 ```
 
-- [ ] **Step 2: Drop the module declarations**
+- [x] **Step 2: Drop the module declarations**
 
 In `backend/crates/sim-core/src/lib.rs`, remove the line `pub mod road_vehicles;`.
 
 In `backend/crates/sim-server/src/lib.rs`, remove the line `pub mod postgres_road_vehicles;`.
 
-- [ ] **Step 3: Remove `RoadVehicleId` from ids.rs**
+- [x] **Step 3: Remove `RoadVehicleId` from ids.rs**
 
 In `backend/crates/sim-core/src/ids.rs`, delete the entire `pub struct RoadVehicleId(pub String);` block.
 
-- [ ] **Step 4: Drop `RoadVehicleSnapshotStore` from persistence.rs**
+- [x] **Step 4: Drop `RoadVehicleSnapshotStore` from persistence.rs**
 
 In `backend/crates/sim-core/src/persistence.rs`, delete:
 - `pub struct RoadVehicleSnapshotStoreError` and its `impl`.
@@ -1256,7 +1258,7 @@ In `backend/crates/sim-core/src/persistence.rs`, delete:
 - The `use crate::road_vehicles::RoadVehicleWorld;` import.
 - The two `road_vehicle_snapshot_store_*` tests at the bottom of the test module.
 
-- [ ] **Step 5: Drop road-vehicle DTOs from protocol/lib.rs**
+- [x] **Step 5: Drop road-vehicle DTOs from protocol/lib.rs**
 
 In `backend/crates/protocol/src/lib.rs`, delete:
 - `pub struct RoadVehicleDto { ... }`.
@@ -1265,7 +1267,7 @@ In `backend/crates/protocol/src/lib.rs`, delete:
 - The `ServerMessageDto::RoadVehicleDelta(RoadVehicleDeltaDto)` variant.
 - Any protocol tests asserting on RoadVehicle* DTOs (e.g. `road_vehicle_dto_serializes_full_shape`, `road_vehicle_delta_serializes_with_type_tag`).
 
-- [ ] **Step 6: Drop road-vehicle from SimulationRuntime**
+- [x] **Step 6: Drop road-vehicle from SimulationRuntime**
 
 In `backend/crates/sim-server/src/runtime.rs`:
 - Remove the `use sim_core::road_vehicles::*;` and any `use sim_core::persistence::{InMemoryRoadVehicleSnapshotStore, RoadVehicleSnapshotStore, RoadVehicleSnapshotStoreError}` imports.
@@ -1280,7 +1282,7 @@ In `backend/crates/sim-server/src/runtime.rs`:
 - In `next_server_messages`, remove the road-vehicle delta tick + push.
 - In the `Self { ... }` blocks of `new_with_stores`, `new()`, `new_with_event_store`, and `hydrate_from_stores`, remove the `road_vehicle_world` and `road_vehicle_snapshot_store` field initializers.
 
-- [ ] **Step 7: Drop road-vehicle from app.rs**
+- [x] **Step 7: Drop road-vehicle from app.rs**
 
 In `backend/crates/sim-server/src/app.rs`:
 - Remove the `use crate::postgres_road_vehicles::PostgresRoadVehicleSnapshotStore;` import.
@@ -1290,7 +1292,7 @@ In `backend/crates/sim-server/src/app.rs`:
 - Update the `SimulationRuntime::hydrate_from_stores(...)` call to pass only 3 stores (drop the road-vehicle arg).
 - In `persist_snapshots_once`, remove the `runtime.persist_road_vehicle_snapshot()` block.
 
-- [ ] **Step 8: Update tests in sim-server**
+- [x] **Step 8: Update tests in sim-server**
 
 In `backend/crates/sim-server/tests/http.rs`:
 - Delete the `road_vehicles_endpoint_returns_seeded_snapshot` test.
@@ -1304,7 +1306,7 @@ In `backend/crates/sim-server/tests/websocket.rs`:
 - In `websocket_sends_hello_and_tile_pulse`, remove the `read_server_message(&mut stream)` call that expected a `RoadVehicleDelta` message. After the `MobilityDelta` read, the next message should be the second tick's `TilePulse`.
 - Drop any other reference to `ServerMessageDto::RoadVehicleDelta`.
 
-- [ ] **Step 9: Verify build**
+- [x] **Step 9: Verify build**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml --workspace
@@ -1312,7 +1314,7 @@ cargo build --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: compiles. Any remaining references to removed types must be fixed.
 
-- [ ] **Step 10: Verify tests**
+- [x] **Step 10: Verify tests**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -1320,7 +1322,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: all green.
 
-- [ ] **Step 11: Verify clippy**
+- [x] **Step 11: Verify clippy**
 
 ```bash
 cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
@@ -1328,7 +1330,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targe
 
 Expected: clean.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add -A
@@ -1342,13 +1344,13 @@ git commit -m "refactor: retire RoadVehicleWorld in favor of MobilityWorld vehic
 **Files:**
 - Create: `backend/crates/sim-server/migrations/202605160005_drop_road_vehicle_snapshots.sql`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 DROP TABLE IF EXISTS road_vehicle_snapshots;
 ```
 
-- [ ] **Step 2: Wire the migration into a runner**
+- [x] **Step 2: Wire the migration into a runner**
 
 The current migration loader is split across `postgres_events.rs`, `postgres_snapshots.rs`, `postgres_mobility.rs` — each loads its module-specific migration. There's no central runner.
 
@@ -1376,7 +1378,7 @@ for statement in DROP_ROAD_VEHICLE_SNAPSHOTS_MIGRATION
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -1384,7 +1386,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: green. The drop runs on every connect; idempotent thanks to `IF EXISTS`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-server/migrations/202605160005_drop_road_vehicle_snapshots.sql backend/crates/sim-server/src/postgres_mobility.rs
@@ -1399,7 +1401,7 @@ git commit -m "feat: drop unused road_vehicle_snapshots table on backend startup
 - Modify: `backend/crates/sim-server/src/app.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Add SeedDensity to SimulationRuntime constructors**
+- [x] **Step 1: Add SeedDensity to SimulationRuntime constructors**
 
 In `backend/crates/sim-server/src/runtime.rs`, add a `pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity = sim_core::mobility::seed::SeedDensity { pedestrians_per_corridor: 6, cars_per_arterial: 4, trams_total: 4 };` alongside the existing constants.
 
@@ -1428,7 +1430,7 @@ pub async fn hydrate_from_stores(
 
 The mobility fallback within `hydrate_from_stores` changes from `seed::tiny_world()` to `seed::from_network(network, SEED_DENSITY)`.
 
-- [ ] **Step 2: Load network in build_app_from_config**
+- [x] **Step 2: Load network in build_app_from_config**
 
 In `backend/crates/sim-server/src/app.rs`:
 
@@ -1471,7 +1473,7 @@ pub fn build_app() -> Router {
 
 (For tests where the descriptor isn't present, `tiny_world` keeps existing assertions stable.)
 
-- [ ] **Step 3: Update all `hydrate_from_stores` callers**
+- [x] **Step 3: Update all `hydrate_from_stores` callers**
 
 `tests/http.rs` integration tests that call `hydrate_from_stores(...)` directly need the new 4th argument. For the in-memory tests, construct a minimal `CityNetwork` literal:
 
@@ -1488,7 +1490,7 @@ let network = sim_core::city_network::CityNetwork {
 
 Empty arterial+corridor lists yield zero new walking/driving agents, so `from_network` produces only the tram fallback (4 trams + their associated agents). Tests asserting specific agent counts must be updated accordingly.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -1496,7 +1498,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/src/app.rs backend/crates/sim-server/tests/http.rs
@@ -1511,7 +1513,7 @@ git commit -m "feat: backend seeds mobility from city network at startup"
 - Modify: `src/backend/mobilityProtocol.ts`
 - Modify: `tests/backend/mobilityProtocol.test.ts`
 
-- [ ] **Step 1: Update VehicleMobilityDto type**
+- [x] **Step 1: Update VehicleMobilityDto type**
 
 In `src/backend/mobilityProtocol.ts`:
 
@@ -1565,7 +1567,7 @@ function isVehicleMobilityDto(value: unknown): value is VehicleMobilityDto {
 
 In `parseServerMessage`, remove the `road_vehicle_delta` branch.
 
-- [ ] **Step 2: Update test**
+- [x] **Step 2: Update test**
 
 In `tests/backend/mobilityProtocol.test.ts`, any vehicle fixture must include `kind`. E.g.:
 
@@ -1577,7 +1579,7 @@ const vehicle = {
 };
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 npx vitest run
@@ -1585,7 +1587,7 @@ npx vitest run
 
 Expected: green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/backend/mobilityProtocol.ts tests/backend/mobilityProtocol.test.ts
@@ -1607,13 +1609,13 @@ git commit -m "feat: typed VehicleKind on frontend; drop road-vehicle protocol"
 - `tests/backend/mobilityClient.test.ts`
 - `tests/backend/mobilityState.test.ts`
 
-- [ ] **Step 1: Delete frontend road-vehicle modules**
+- [x] **Step 1: Delete frontend road-vehicle modules**
 
 ```bash
 git rm src/backend/roadVehicleProtocol.ts src/backend/roadVehicleState.ts tests/backend/roadVehicleState.test.ts
 ```
 
-- [ ] **Step 2: Drop roadVehicles from MobilityOverlayState**
+- [x] **Step 2: Drop roadVehicles from MobilityOverlayState**
 
 In `src/backend/mobilityState.ts`:
 - Remove the `roadVehicles: RoadVehicleOverlayState` field from `MobilityOverlayState`.
@@ -1622,7 +1624,7 @@ In `src/backend/mobilityState.ts`:
 - In `mobilityDiagnostics`, drop the `roadVehicles: state.roadVehicles.vehicles.size` line.
 - Remove the imports `applyRoadVehicleSnapshot`, `applyRoadVehicleDelta`, `createRoadVehicleOverlayState`, `RoadVehicleOverlayState`, `RoadVehicleSnapshotDto`.
 
-- [ ] **Step 3: Drop /road-vehicles fetch in mobilityClient**
+- [x] **Step 3: Drop /road-vehicles fetch in mobilityClient**
 
 In `src/backend/mobilityClient.ts`:
 - Remove the `import { isRoadVehicleSnapshotDto, type RoadVehicleSnapshotDto } from './roadVehicleProtocol';`.
@@ -1631,18 +1633,18 @@ In `src/backend/mobilityClient.ts`:
 - Drop the `requestRoadVehicleSnapshot` helper function.
 - In the `connect()` inner function (websocket reconnect path), drop the road-vehicle fetch + apply.
 
-- [ ] **Step 4: Update mobilityClient test**
+- [x] **Step 4: Update mobilityClient test**
 
 In `tests/backend/mobilityClient.test.ts`:
 - Remove fetch-mock branches that handled `/road-vehicles`.
 - Update assertions that checked road-vehicle state.
 
-- [ ] **Step 5: Update mobilityState test**
+- [x] **Step 5: Update mobilityState test**
 
 In `tests/backend/mobilityState.test.ts`:
 - Remove any test asserting `state.roadVehicles` or invoking `road_vehicle_delta` payloads.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 ```bash
 npx vitest run
@@ -1652,7 +1654,7 @@ npm run build
 
 Expected: green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -1667,7 +1669,7 @@ git commit -m "refactor: retire frontend RoadVehicle state and client"
 - Modify: `src/render/backendMobilityDrawables.ts`
 - Modify: `tests/render/backendMobilityDrawables.test.ts`
 
-- [ ] **Step 1: Replace existing tests**
+- [x] **Step 1: Replace existing tests**
 
 In `tests/render/backendMobilityDrawables.test.ts`, the test that asserted cars come from `state.roadVehicles` must change to vehicles filtered by kind. And the pedestrian test must verify in_vehicle agents are skipped.
 
@@ -1750,7 +1752,7 @@ describe('backendMobilityDrawables', () => {
 });
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 npx vitest run tests/render/backendMobilityDrawables.test.ts
@@ -1758,7 +1760,7 @@ npx vitest run tests/render/backendMobilityDrawables.test.ts
 
 Expected: FAIL — current projector reads `state.roadVehicles` and doesn't filter in_vehicle agents.
 
-- [ ] **Step 3: Rewrite the projector**
+- [x] **Step 3: Rewrite the projector**
 
 Replace `src/render/backendMobilityDrawables.ts`:
 
@@ -1877,7 +1879,7 @@ export function carsFromMobilityState(
 
 `interpolatedVehicles` already exists in `mobilityState.ts` (added Phase 2 alongside `interpolatedAgents`).
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 npx vitest run
@@ -1887,7 +1889,7 @@ npm run build
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/render/backendMobilityDrawables.ts tests/render/backendMobilityDrawables.test.ts
@@ -1901,7 +1903,7 @@ git commit -m "feat: drawables source cars from vehicles kind=car; pedestrians s
 **Files:**
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Update main.ts diagnostics**
+- [x] **Step 1: Update main.ts diagnostics**
 
 In `src/main.ts`, find the `render_game_to_text` function's `mobility` block. The current shape includes `roadVehicles: ...` and the diagnostics derived from `mobilityState.roadVehicles`. Replace:
 
@@ -1930,7 +1932,7 @@ mobility: {
 
 Adjust `mobilityAgents`/`mobilityVehicles` block similarly — they may still reference road-vehicle shape.
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 npx vitest run
@@ -1940,7 +1942,7 @@ npm run build
 
 Expected: green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/main.ts
@@ -1954,7 +1956,7 @@ git commit -m "chore: update render_game_to_text diagnostics for unified vehicle
 **Files:**
 - Modify: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Update assertions**
+- [x] **Step 1: Update assertions**
 
 In `tests/e2e/render-smoke.spec.ts`:
 - The Phase-1 assertions about `mobilityAgents.agents` and `mobilityVehicles.vehicles` need to reflect the new counts. With `seed::from_network(zurich-network, default density)` the expected counts are: walking agents ~600 (varies with corridor count, expect ≥ 50 to be lenient on test reliability); cars ≥ 50; trams ≥ 1.
@@ -1979,7 +1981,7 @@ expect(carVehicle).toBeDefined();
 
 The `clickableAgent`/`clickableVehicle` selection blocks update for the new ids.
 
-- [ ] **Step 2: Verify ts compile**
+- [x] **Step 2: Verify ts compile**
 
 ```bash
 npx tsc --noEmit
@@ -1987,7 +1989,7 @@ npx tsc --noEmit
 
 Expected: clean.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/e2e/render-smoke.spec.ts
@@ -2001,7 +2003,7 @@ git commit -m "test: render smoke expects city-wide procedural population"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run all gates**
+- [x] **Step 1: Run all gates**
 
 ```bash
 cargo fmt --manifest-path backend/Cargo.toml --all -- --check
@@ -2013,13 +2015,13 @@ npm run build
 
 Expected: all green. If fmt fails, run `cargo fmt --manifest-path backend/Cargo.toml --all` and stage.
 
-- [ ] **Step 2: Append to progress.md**
+- [x] **Step 2: Append to progress.md**
 
 ```
 2026-05-16T<HH:MM:SS>.000Z - Procedural population: generated shared data/city/zurich-network.json from the existing TS world build; backend MobilityWorld now seeded across all 64 chunks (~600 walking agents + ~400 car-Vehicles with driver-Agents + 4 trams) via mobility::seed::from_network. Retired Phase-1's RoadVehicleWorld; cars are now Vehicles in MobilityWorld with kind=Car, drivers are Agents in InVehicle state. LinkGeometry is now a polyline. In-vehicle agents filtered from delta broadcasts. One-time pre-deploy: DELETE FROM mobility_snapshots (old rows lack kind field). Phase 3 of the million-agent roadmap.
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add progress.md backend/ src/ tests/

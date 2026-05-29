@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Eliminate the per-client per-tick filter walk in the WS broadcast path by sharding the broadcast into per-chunk `tokio::broadcast` channels. Each WS handler holds receivers only for its subscribed chunks; tick-loop publishes once per Active|Hot chunk; the global `ServerMessageDto::MobilityDelta` wire variant is deleted in favour of `MobilityChunkDelta` + `MobilityChunkSnapshot`.
 
 **Architecture:** New `AppState.chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDelta>>>`. `MobilityWorld::tick_mobility()` returns `HashMap<ChunkCoord, MobilityChunkDelta>` (uses new `PreviousAgentChunks` / `PreviousVehicleChunks` resources to compute `left_*`). WS handlers maintain `StreamMap<ChunkCoord, BroadcastStream<MobilityChunkDelta>>` for dynamic per-chunk receiver multiplexing. Subscribe creates the channel (if first) and sends one `MobilityChunkSnapshot`; unsubscribe drops the receiver and reaps the channel when subscriber count hits 0.
@@ -50,7 +52,7 @@ This plan implements `docs/superpowers/specs/2026-05-18-ws-multi-client-scalabil
 
 This task is purely additive — no behavior changes, no signature changes. Sets up the types and resources later tasks consume.
 
-- [ ] **Step 1: Add dependencies**
+- [x] **Step 1: Add dependencies**
 
 Edit `backend/crates/sim-server/Cargo.toml`. Add under `[dependencies]`:
 
@@ -61,7 +63,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 
 The `sync` feature on `tokio-stream` enables `BroadcastStream`.
 
-- [ ] **Step 2: Verify deps fetch + sim-server still builds**
+- [x] **Step 2: Verify deps fetch + sim-server still builds**
 
 Run:
 ```bash
@@ -71,7 +73,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-server 2>&1 | tai
 
 Expected: `Finished dev profile`. If dashmap version doesn't exist, pick the latest 6.x from crates.io and update the version string.
 
-- [ ] **Step 3: Add `PreviousAgentChunks` + `PreviousVehicleChunks` resources**
+- [x] **Step 3: Add `PreviousAgentChunks` + `PreviousVehicleChunks` resources**
 
 In `backend/crates/sim-core/src/mobility/resources.rs`, append:
 
@@ -91,7 +93,7 @@ pub struct PreviousAgentChunks(pub HashMap<AgentId, ChunkCoord>);
 pub struct PreviousVehicleChunks(pub HashMap<VehicleId, ChunkCoord>);
 ```
 
-- [ ] **Step 4: Insert the new resources in `MobilityWorld::empty()`**
+- [x] **Step 4: Insert the new resources in `MobilityWorld::empty()`**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, find `MobilityWorld::empty()` and add (next to the other LOD resources):
 
@@ -100,7 +102,7 @@ world.insert_resource(PreviousAgentChunks::default());
 world.insert_resource(PreviousVehicleChunks::default());
 ```
 
-- [ ] **Step 5: Add `MobilityChunkDeltaDto` + `MobilityChunkSnapshotDto` to protocol**
+- [x] **Step 5: Add `MobilityChunkDeltaDto` + `MobilityChunkSnapshotDto` to protocol**
 
 In `backend/crates/protocol/src/lib.rs`, find the existing `MobilityDeltaDto` definition. Below it, add:
 
@@ -137,7 +139,7 @@ MobilityChunkSnapshot(MobilityChunkSnapshotDto),
 
 Do NOT remove the existing `MobilityDelta(MobilityDeltaDto)` variant — Task 7 deletes it after the new path is wired.
 
-- [ ] **Step 6: Verify protocol builds + add round-trip tests**
+- [x] **Step 6: Verify protocol builds + add round-trip tests**
 
 Add to the existing tests module in `backend/crates/protocol/src/lib.rs` (alongside other DTO round-trip tests):
 
@@ -192,7 +194,7 @@ fn server_message_chunk_delta_variant_parses() {
 }
 ```
 
-- [ ] **Step 7: Run protocol tests**
+- [x] **Step 7: Run protocol tests**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -201,7 +203,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol 2>&1 
 
 Expected: all tests pass (existing 18 + 3 new = 21).
 
-- [ ] **Step 8: Workspace check**
+- [x] **Step 8: Workspace check**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -210,7 +212,7 @@ cargo build --locked --manifest-path backend/Cargo.toml --workspace 2>&1 | tail 
 
 Expected: clean.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/crates/sim-server/Cargo.toml backend/Cargo.lock backend/crates/sim-core/src/mobility/resources.rs backend/crates/sim-core/src/mobility/mod.rs backend/crates/protocol/src/lib.rs
@@ -224,7 +226,7 @@ git commit -m "feat(ws): add dashmap dep, Previous*Chunks resources, ChunkDelta/
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 
-- [ ] **Step 1: Add the internal `MobilityChunkDelta` struct**
+- [x] **Step 1: Add the internal `MobilityChunkDelta` struct**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, near the existing `MobilityDelta` struct definition, add:
 
@@ -249,7 +251,7 @@ pub struct MobilityChunkSnapshot {
 }
 ```
 
-- [ ] **Step 2: Write the failing test for `build_chunk_snapshot`**
+- [x] **Step 2: Write the failing test for `build_chunk_snapshot`**
 
 In the existing test module of `backend/crates/sim-core/src/mobility/mod.rs`, append:
 
@@ -289,7 +291,7 @@ fn build_chunk_snapshot_returns_only_entities_in_that_chunk() {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -298,7 +300,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core build_chunk_s
 
 Expected: FAIL with `no method named 'build_chunk_snapshot' found`.
 
-- [ ] **Step 4: Implement `build_chunk_snapshot`**
+- [x] **Step 4: Implement `build_chunk_snapshot`**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, in the existing `impl MobilityWorld` block (find the one that defines `agent`, `vehicle`, `agents`, `vehicles` accessors), add:
 
@@ -335,7 +337,7 @@ pub fn build_chunk_snapshot(
 
 If `world_coord_for_vehicle` doesn't exist (only `world_coord_for_agent` does), check the existing mod.rs for the equivalent vehicle accessor — likely uses `vehicle(&id).and_then(...)` pattern. If neither exists, query the Position component directly: `self.world.entity(*self.by_vehicle_id.get(&record.id).unwrap()).get::<Position>().map(|p| (p.x, p.y))`.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -344,7 +346,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core build_chunk_s
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs
@@ -362,7 +364,7 @@ This is the centrepiece. `tick_mobility` changes return type, and all callers mu
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs` (only if `track_previous_chunks_system` lives here)
 
-- [ ] **Step 1: Write the failing test for the new tick_mobility shape**
+- [x] **Step 1: Write the failing test for the new tick_mobility shape**
 
 In `backend/crates/sim-core/src/mobility/mod.rs` test module, append:
 
@@ -443,7 +445,7 @@ fn tick_mobility_omits_unchanged_chunks() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail (compile error on return type)**
+- [x] **Step 2: Run tests to verify they fail (compile error on return type)**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -452,7 +454,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core tick_mobility
 
 Expected: FAIL — `tick_mobility` still returns the old `MobilityDelta`, so `.contains_key` and the indexing don't compile.
 
-- [ ] **Step 3: Refactor `tick_mobility` to return per-chunk map**
+- [x] **Step 3: Refactor `tick_mobility` to return per-chunk map**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, locate the existing `pub fn tick_mobility(&mut self) -> MobilityDelta`. Replace it with:
 
@@ -614,7 +616,7 @@ pub fn tick_mobility(&mut self) -> std::collections::HashMap<crate::ids::ChunkCo
 
 If the existing function did NOT have `sync_indexes_after_tick` and instead inlined the index sync, preserve that — only change the data-shaping at the end. Read the existing function first to be sure.
 
-- [ ] **Step 4: Update sim-server callers (temporary glue)**
+- [x] **Step 4: Update sim-server callers (temporary glue)**
 
 In `backend/crates/sim-server/src/runtime.rs`, find `next_mobility_delta` (returns `MobilityDeltaDto`). It currently does:
 ```rust
@@ -645,7 +647,7 @@ pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
 
 The `MobilityDelta` struct (the old one) must still exist in sim-core for this glue to compile. If `tick_mobility` no longer returns it, the struct itself stays as a type used only by `build_mobility_delta_dto`. That's fine — Task 7 removes it.
 
-- [ ] **Step 5: Update `next_mobility_delta_for_test` and any other callers**
+- [x] **Step 5: Update `next_mobility_delta_for_test` and any other callers**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -656,7 +658,7 @@ Adapt each call site to expect `HashMap<ChunkCoord, MobilityChunkDelta>`. The tw
 - Test code that asserts on `delta.changed_agents.len()` → change to iterate the map values and sum.
 - Code paths in app.rs/runtime.rs that broadcast → use the glue from Step 4 OR collect into a flat list.
 
-- [ ] **Step 6: Run the new tests + workspace**
+- [x] **Step 6: Run the new tests + workspace**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -666,7 +668,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace 2>&1 | grep -
 
 Expected: new tests pass, workspace remains green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-server/src/runtime.rs
@@ -680,7 +682,7 @@ git commit -m "feat(mobility): tick_mobility returns per-chunk delta map with le
 **Files:**
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Add the field to AppState**
+- [x] **Step 1: Add the field to AppState**
 
 In `backend/crates/sim-server/src/app.rs`, locate the `pub struct AppState` definition. Add:
 
@@ -700,7 +702,7 @@ pub struct AppState {
 
 (Adjust field order/visibility to match existing.)
 
-- [ ] **Step 2: Initialise in all AppState constructors**
+- [x] **Step 2: Initialise in all AppState constructors**
 
 Find `AppState::new`, `AppState::new_with_card_hands`, `AppState::new_with_stores`, etc. In each, add:
 
@@ -710,7 +712,7 @@ chunk_channels: Arc::new(DashMap::new()),
 
 next to where the other Arc-wrapped fields are constructed.
 
-- [ ] **Step 3: Add accessor**
+- [x] **Step 3: Add accessor**
 
 In `impl AppState`:
 
@@ -720,7 +722,7 @@ pub(crate) fn chunk_channels(&self) -> Arc<DashMap<sim_core::ids::ChunkCoord, br
 }
 ```
 
-- [ ] **Step 4: Verify build**
+- [x] **Step 4: Verify build**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -729,7 +731,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-server 2>&1 | tai
 
 Expected: clean.
 
-- [ ] **Step 5: Workspace test**
+- [x] **Step 5: Workspace test**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -738,7 +740,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace 2>&1 | grep -
 
 Expected: still green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs
@@ -754,7 +756,7 @@ git commit -m "feat(ws): AppState.chunk_channels DashMap for per-chunk broadcast
 
 Phase 7a's `handle_client_message` already does `apply_subscription_diff` on subscribe/unsubscribe and emits a synthetic `MobilityDelta`. This task wires the NEW path: per added chunk, create channel + store receiver + send `MobilityChunkSnapshot`. Per removed chunk, drop receiver + reap channel if last.
 
-- [ ] **Step 1: Extend ConnectionState with chunk_streams**
+- [x] **Step 1: Extend ConnectionState with chunk_streams**
 
 In `app.rs`, find `struct ConnectionState`. Change to:
 
@@ -787,7 +789,7 @@ impl ConnectionState {
 
 Replace any `ConnectionState::default()` with `ConnectionState::new()`.
 
-- [ ] **Step 2: Helper to convert sim-core types to DTO**
+- [x] **Step 2: Helper to convert sim-core types to DTO**
 
 Add a free function in `app.rs` (or use existing one in `dto.rs` if it exists):
 
@@ -815,7 +817,7 @@ fn chunk_snapshot_to_dto(
 
 If `build_agent_record_dto` / `build_vehicle_record_dto` don't exist, look in `backend/crates/sim-core/src/mobility/dto.rs` for similar helpers — they almost certainly do under different names. Adapt.
 
-- [ ] **Step 3: Refactor `handle_client_message` subscribe path**
+- [x] **Step 3: Refactor `handle_client_message` subscribe path**
 
 Find the subscribe branch in `handle_client_message`. Replace the existing logic with:
 
@@ -909,7 +911,7 @@ ClientMessageDto::ChunkUnsubscribe(payload) => {
 
 You'll need to expose `chunk_subscriber_count(coord) -> u8` on `SimulationRuntime` (reads `ChunkSubscribers` resource). Simple addition.
 
-- [ ] **Step 4: Write a TDD test for the subscribe-emits-snapshot behavior**
+- [x] **Step 4: Write a TDD test for the subscribe-emits-snapshot behavior**
 
 Add to `backend/crates/sim-server/tests/websocket.rs`:
 
@@ -946,7 +948,7 @@ async fn chunk_subscribe_emits_chunk_snapshot_frame() {
 }
 ```
 
-- [ ] **Step 5: Run the test (should pass)**
+- [x] **Step 5: Run the test (should pass)**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -955,7 +957,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server --test webs
 
 Expected: PASS.
 
-- [ ] **Step 6: Workspace check**
+- [x] **Step 6: Workspace check**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -964,7 +966,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace 2>&1 | grep -
 
 Expected: green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/tests/websocket.rs
@@ -978,7 +980,7 @@ git commit -m "feat(ws): subscribe creates per-chunk channel + emits MobilityChu
 **Files:**
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Add the chunk_streams arm to stream_world_deltas select!**
+- [x] **Step 1: Add the chunk_streams arm to stream_world_deltas select!**
 
 Find `stream_world_deltas`. Inside the main `loop { tokio::select! { … } }`, add a new arm BEFORE the existing `deltas.recv()` arm (so chunk-specific path has priority):
 
@@ -1016,7 +1018,7 @@ Some((chunk, item)) = connection.chunk_streams.next(), if !connection.chunk_stre
 
 You'll need `use futures::StreamExt;` (or `tokio_stream::StreamExt;`) for `.next()` on `StreamMap`. Check which is the right import — tokio-stream version.
 
-- [ ] **Step 2: Write integration test**
+- [x] **Step 2: Write integration test**
 
 In `tests/websocket.rs`, append:
 
@@ -1062,7 +1064,7 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
 
 Actually flip — skip the test for now (don't write it yet) and add it in Task 8 once fan-out is wired.
 
-- [ ] **Step 3: Verify build**
+- [x] **Step 3: Verify build**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1071,7 +1073,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-server 2>&1 | tai
 
 Expected: clean (the chunk_streams arm compiles even with no incoming traffic).
 
-- [ ] **Step 4: Workspace test**
+- [x] **Step 4: Workspace test**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1080,7 +1082,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace 2>&1 | grep -
 
 Expected: all green (no behavior tests added yet, just plumbing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs
@@ -1096,7 +1098,7 @@ git commit -m "feat(ws): stream_world_deltas reads per-chunk receivers via Strea
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-server/tests/websocket.rs`
 
-- [ ] **Step 1: Add `tick_and_fan_out` to AppState (or a free function)**
+- [x] **Step 1: Add `tick_and_fan_out` to AppState (or a free function)**
 
 In `app.rs`, add:
 
@@ -1155,7 +1157,7 @@ pub fn tick_world_mobility(&mut self) -> std::collections::HashMap<
 }
 ```
 
-- [ ] **Step 2: Rewrite `spawn_delta_loop` to use `tick_and_fan_out`**
+- [x] **Step 2: Rewrite `spawn_delta_loop` to use `tick_and_fan_out`**
 
 Find `spawn_delta_loop`. Currently it builds `ServerMessageDto::MobilityDelta` and broadcasts to the global `deltas` channel. Add a parallel new behavior:
 
@@ -1197,11 +1199,11 @@ let messages = {
 
 Where `next_pulse` is on SimulationRuntime, returns one `TilePulseDelta` per call. If it requires `&mut self` (it does — increments pulse counter), use write lock.
 
-- [ ] **Step 3: Write the integration test (was deferred from Task 6)**
+- [x] **Step 3: Write the integration test (was deferred from Task 6)**
 
 In `tests/websocket.rs`, append the test from Task 6 Step 2 (the `subscribed_chunk_receives_mobility_chunk_delta_each_tick` test).
 
-- [ ] **Step 4: Run new test**
+- [x] **Step 4: Run new test**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1210,7 +1212,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server --test webs
 
 Expected: PASS.
 
-- [ ] **Step 5: Workspace test**
+- [x] **Step 5: Workspace test**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1219,7 +1221,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace 2>&1 | grep -
 
 Expected: all green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/tests/websocket.rs
@@ -1240,7 +1242,7 @@ This is the cleanup task that removes the "old crap" per the spec's state-of-the
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs` (delete unused `MobilityDelta` struct)
 - Modify: `backend/crates/sim-server/tests/websocket.rs` (remove tests for deleted variants)
 
-- [ ] **Step 1: Delete from runtime.rs**
+- [x] **Step 1: Delete from runtime.rs**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1255,7 +1257,7 @@ Delete each method:
 
 Keep: `next_pulse(&mut self) -> ServerMessageDto` (the tile-pulse path is independent).
 
-- [ ] **Step 2: Delete from app.rs**
+- [x] **Step 2: Delete from app.rs**
 
 - Remove `deltas: broadcast::Sender<ServerMessageDto>` field from `AppState`.
 - Remove `subscribe_deltas`, the `deltas.recv()` arm in `stream_world_deltas`, the legacy half of `spawn_delta_loop` (only `tick_and_fan_out` remains).
@@ -1267,13 +1269,13 @@ Keep: `next_pulse(&mut self) -> ServerMessageDto` (the tile-pulse path is indepe
 - chunk_streams arm
 - cleanup on close
 
-- [ ] **Step 3: Delete from protocol**
+- [x] **Step 3: Delete from protocol**
 
 In `backend/crates/protocol/src/lib.rs`:
 - Delete the `MobilityDelta(MobilityDeltaDto)` variant from `ServerMessageDto`.
 - Delete the `MobilityDeltaDto` struct itself.
 
-- [ ] **Step 4: Delete from sim-core**
+- [x] **Step 4: Delete from sim-core**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`, the `MobilityDelta` struct (the OLD one with global `changed_agents` / `changed_vehicles`) is now unused.
 
@@ -1284,7 +1286,7 @@ grep -rn "MobilityDelta\b" backend/crates/ 2>&1 | grep -v "MobilityChunkDelta\|M
 
 Delete `pub struct MobilityDelta { ... }` from sim-core. Any remaining `build_mobility_delta_dto` / `build_filtered_mobility_delta_dto` helpers in `dto.rs` that took `&MobilityDelta` go too.
 
-- [ ] **Step 5: Adapt tests**
+- [x] **Step 5: Adapt tests**
 
 Some existing tests may use the deleted methods. Grep:
 
@@ -1294,7 +1296,7 @@ grep -rn "MobilityDelta\|filtered_mobility_delta_from_dto\|synthetic_mobility_de
 
 For each match, either delete the test (if it tested behavior that no longer exists) or rewrite it for the new per-chunk shape. Specifically the Phase 7a `two_clients_with_different_subscriptions_see_different_entities` and `three_clients_with_disjoint_subscriptions_see_only_their_chunks` need adaptation — they currently expect `MobilityDelta` frames. Change them to expect `MobilityChunkSnapshot` then `MobilityChunkDelta`.
 
-- [ ] **Step 6: Workspace check**
+- [x] **Step 6: Workspace check**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1305,7 +1307,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targe
 
 Expected: clean build, all tests green, clippy clean.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/runtime.rs backend/crates/protocol/src/lib.rs backend/crates/sim-core/src/mobility/mod.rs backend/crates/sim-core/src/mobility/dto.rs backend/crates/sim-server/tests/
@@ -1322,7 +1324,7 @@ git commit -m "refactor(ws): delete MobilityDelta variant + filtered/synthetic/g
 - Modify: `tests/backend/mobilityProtocol.test.ts`
 - Modify: `tests/backend/mobilityState.test.ts`
 
-- [ ] **Step 1: Add new DTO types + parsers**
+- [x] **Step 1: Add new DTO types + parsers**
 
 In `src/backend/mobilityProtocol.ts`, find the existing `ServerMessageDto` union. Add:
 
@@ -1364,7 +1366,7 @@ Add parsers `isMobilityChunkDeltaDto`, `isMobilityChunkSnapshotDto`, and extend 
 
 DELETE the old `MobilityDeltaDto` type and its parser branch.
 
-- [ ] **Step 2: Update protocol tests**
+- [x] **Step 2: Update protocol tests**
 
 In `tests/backend/mobilityProtocol.test.ts`, delete tests for the old `MobilityDelta`. Add:
 
@@ -1400,7 +1402,7 @@ it('parses a MobilityChunkSnapshot server message', () => {
 });
 ```
 
-- [ ] **Step 3: Add `applyMobilityChunkSnapshot` and `applyMobilityChunkDelta`**
+- [x] **Step 3: Add `applyMobilityChunkSnapshot` and `applyMobilityChunkDelta`**
 
 In `src/backend/mobilityState.ts`:
 
@@ -1456,7 +1458,7 @@ case 'mobility_chunk_delta':
 
 DELETE the `mobility_delta` case and the `applyMobilityDelta` function.
 
-- [ ] **Step 4: Update state tests**
+- [x] **Step 4: Update state tests**
 
 In `tests/backend/mobilityState.test.ts`, delete `applyMobilityDelta` tests. Add tests for the two new functions:
 
@@ -1472,7 +1474,7 @@ it('applyMobilityChunkDelta removes left_agents and merges changed_agents', () =
 });
 ```
 
-- [ ] **Step 5: Run frontend tests**
+- [x] **Step 5: Run frontend tests**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1482,7 +1484,7 @@ npx tsc --noEmit 2>&1 | head -5
 
 Expected: all green, tsc clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/backend/mobilityProtocol.ts src/backend/mobilityState.ts tests/backend/mobilityProtocol.test.ts tests/backend/mobilityState.test.ts
@@ -1496,7 +1498,7 @@ git commit -m "feat(ws): frontend learns MobilityChunkDelta/Snapshot, drops Mobi
 **Files:**
 - Create: `scripts/smoke-7b.mjs`
 
-- [ ] **Step 1: Write the smoke script**
+- [x] **Step 1: Write the smoke script**
 
 Copy `scripts/smoke-7a.mjs` to `scripts/smoke-7b.mjs`, then adapt the message-classification logic:
 
@@ -1552,7 +1554,7 @@ const allPass = Object.values(checks).every(Boolean);
 process.exit(allPass ? 0 : 1);
 ```
 
-- [ ] **Step 2: Start dev stack**
+- [x] **Step 2: Start dev stack**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1563,7 +1565,7 @@ until curl -sf http://127.0.0.1:8080/health > /dev/null; do sleep 3; done
 echo BACKEND_UP
 ```
 
-- [ ] **Step 3: Run smoke**
+- [x] **Step 3: Run smoke**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1574,7 +1576,7 @@ Expected: SANITY CHECKS all true. Process exits 0.
 
 If anything fails (e.g., no `mobility_chunk_snapshot` received), instrument as we did for the 7a bugfix — that's exactly the kind of bug the smoke is designed to catch.
 
-- [ ] **Step 4: Stop stack**
+- [x] **Step 4: Stop stack**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1583,7 +1585,7 @@ sleep 1
 pgrep -fl "run-dev-stack|sim-server|vite --host" || echo all-stopped
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/smoke-7b.mjs
@@ -1597,7 +1599,7 @@ git commit -m "test(ws): browser smoke 7b verifies chunk-snapshot/delta flow + n
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run all gates**
+- [x] **Step 1: Run all gates**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1618,7 +1620,7 @@ Expected:
 
 Fix any failure before continuing.
 
-- [ ] **Step 2: Add progress.md entry**
+- [x] **Step 2: Add progress.md entry**
 
 Get timestamp:
 ```bash
@@ -1631,7 +1633,7 @@ Insert at top of the reverse-chronological tail (immediately after the latest en
 <TIMESTAMP> - Phase 7b WS multi-client scalability: replaced the global filtered-delta broadcast with per-chunk `tokio::broadcast` channels. `MobilityWorld::tick_mobility` now returns `HashMap<ChunkCoord, MobilityChunkDelta>`, computing `left_*` via new `PreviousAgentChunks`/`PreviousVehicleChunks` resources that track each entity's chunk at end-of-tick. New `AppState.chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<MobilityChunkDeltaDto>>>` holds one channel per Active|Hot chunk (created on first subscribe, reaped on last unsubscribe). Each WS handler maintains a `tokio_stream::StreamMap<ChunkCoord, BroadcastStream<…>>` for dynamic per-chunk multiplexing; `tokio::select!` reads it alongside `socket.recv`. Subscribe emits one `ServerMessageDto::MobilityChunkSnapshot` per added chunk (replaces the Phase-7a synthetic delta); ticks emit per-chunk `MobilityChunkDelta` only for chunks with changes. The lagged-receiver recovery path re-snapshots the affected chunk. The old `ServerMessageDto::MobilityDelta` variant, `MobilityDeltaDto`, `filtered_mobility_delta_from_dto`, `synthetic_mobility_delta_for_subscription`, `next_mobility_delta`, `next_server_messages`, and the global `tokio::broadcast::Sender<ServerMessageDto>` in `AppState` are all gone — state-of-the-art wire protocol, no per-client filter step. Per-client per-tick CPU now scales with `N_subscribed_chunks`, not `N_world_entities`. Phase 7b of the WS scalability arc; Phase 7c (Arc-snapshot lock-free reads) is the next architectural step.
 ```
 
-- [ ] **Step 3: Commit + push**
+- [x] **Step 3: Commit + push**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Build the first Rust backend foundation slice for Abutown's single persistent aquarium world: protocol types, chunk-local tile arrays, ECS materialization, dirty snapshots, and a small read-only server surface.
 
 **Architecture:** Create a Rust workspace under `backend/` with `protocol`, `sim-core`, and `sim-server`. Keep tiles in dense chunk-local arrays with dirty bitsets; use `bevy_ecs` only for materialized dynamic entities. Persistence is an in-memory adapter in this slice so the hot loop and durable boundary are shaped before Supabase/Postgres is introduced.
@@ -43,7 +45,7 @@ It does not implement economy, ledger, citizens, production, auth, Supabase migr
 - Create: `backend/crates/protocol/Cargo.toml`
 - Create: `backend/crates/protocol/src/lib.rs`
 
-- [ ] **Step 1: Write the failing protocol test**
+- [x] **Step 1: Write the failing protocol test**
 
 Create `backend/crates/protocol/src/lib.rs` with only:
 
@@ -71,7 +73,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -81,7 +83,7 @@ cargo test --manifest-path backend/Cargo.toml -p abutown-protocol health_respons
 
 Expected: FAIL because the workspace and DTOs are not implemented.
 
-- [ ] **Step 3: Add the workspace and protocol implementation**
+- [x] **Step 3: Add the workspace and protocol implementation**
 
 Create `backend/Cargo.toml`:
 
@@ -255,7 +257,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Verify protocol tests pass**
+- [x] **Step 4: Verify protocol tests pass**
 
 Run:
 
@@ -265,7 +267,7 @@ cargo test --manifest-path backend/Cargo.toml -p abutown-protocol
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/Cargo.toml backend/README.md backend/crates/protocol/Cargo.toml backend/crates/protocol/src/lib.rs
@@ -281,7 +283,7 @@ git commit -m "feat: add backend protocol workspace"
 - Create: `backend/crates/sim-core/src/tile.rs`
 - Create: `backend/crates/sim-core/src/chunk.rs`
 
-- [ ] **Step 1: Write failing chunk tests**
+- [x] **Step 1: Write failing chunk tests**
 
 Create `backend/crates/sim-core/src/chunk.rs` with only:
 
@@ -310,7 +312,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -320,7 +322,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core chunk_uses_dense_tiles
 
 Expected: FAIL because `sim-core`, `Chunk`, `ChunkCoord`, and `TileKind` are missing.
 
-- [ ] **Step 3: Implement sim-core IDs, tiles, and chunk arrays**
+- [x] **Step 3: Implement sim-core IDs, tiles, and chunk arrays**
 
 Create `backend/crates/sim-core/Cargo.toml`:
 
@@ -530,7 +532,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Verify chunk tests pass**
+- [x] **Step 4: Verify chunk tests pass**
 
 Run:
 
@@ -540,7 +542,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core chunk_uses_dense_tiles
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/Cargo.toml backend/crates/sim-core/src/lib.rs backend/crates/sim-core/src/ids.rs backend/crates/sim-core/src/tile.rs backend/crates/sim-core/src/chunk.rs
@@ -553,7 +555,7 @@ git commit -m "feat: add dense chunk tile storage"
 - Create: `backend/crates/sim-core/src/ecs_runtime.rs`
 - Modify: `backend/crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing ECS runtime tests**
+- [x] **Step 1: Write failing ECS runtime tests**
 
 Create `backend/crates/sim-core/src/ecs_runtime.rs` with only:
 
@@ -580,7 +582,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -590,7 +592,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core materialized_entities_
 
 Expected: FAIL because the runtime types are missing.
 
-- [ ] **Step 3: Implement materialized runtime**
+- [x] **Step 3: Implement materialized runtime**
 
 Replace `backend/crates/sim-core/src/ecs_runtime.rs` with:
 
@@ -678,7 +680,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Verify ECS runtime tests pass**
+- [x] **Step 4: Verify ECS runtime tests pass**
 
 Run:
 
@@ -688,7 +690,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core materialized_entities_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/ecs_runtime.rs backend/crates/sim-core/src/lib.rs
@@ -701,7 +703,7 @@ git commit -m "feat: add ECS materialization runtime"
 - Create: `backend/crates/sim-core/src/scheduler.rs`
 - Modify: `backend/crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing scheduler tests**
+- [x] **Step 1: Write failing scheduler tests**
 
 Create `backend/crates/sim-core/src/scheduler.rs` with only:
 
@@ -721,7 +723,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -731,7 +733,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core chunk_activity_scales_
 
 Expected: FAIL because `ChunkActivity` and `classify_chunk_activity` are missing.
 
-- [ ] **Step 3: Implement activity classification**
+- [x] **Step 3: Implement activity classification**
 
 Replace `backend/crates/sim-core/src/scheduler.rs` with:
 
@@ -785,7 +787,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Verify scheduler tests pass**
+- [x] **Step 4: Verify scheduler tests pass**
 
 Run:
 
@@ -795,7 +797,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core chunk_activity_scales_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/scheduler.rs backend/crates/sim-core/src/lib.rs
@@ -809,7 +811,7 @@ git commit -m "feat: add chunk activity scheduler"
 - Modify: `backend/crates/sim-core/src/chunk.rs`
 - Modify: `backend/crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing snapshot tests**
+- [x] **Step 1: Write failing snapshot tests**
 
 Create `backend/crates/sim-core/src/persistence.rs` with only:
 
@@ -840,7 +842,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -850,7 +852,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core snapshot_contains_only
 
 Expected: FAIL because snapshot functions are missing.
 
-- [ ] **Step 3: Implement snapshot builder and in-memory store**
+- [x] **Step 3: Implement snapshot builder and in-memory store**
 
 Replace `backend/crates/sim-core/src/persistence.rs` with:
 
@@ -940,7 +942,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Verify persistence tests pass**
+- [x] **Step 4: Verify persistence tests pass**
 
 Run:
 
@@ -950,7 +952,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core snapshot_contains_only
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/persistence.rs backend/crates/sim-core/src/chunk.rs backend/crates/sim-core/src/lib.rs
@@ -965,7 +967,7 @@ git commit -m "feat: add dirty chunk snapshot boundary"
 - Create: `backend/crates/sim-server/src/app.rs`
 - Create: `backend/crates/sim-server/tests/http.rs`
 
-- [ ] **Step 1: Write failing HTTP integration tests**
+- [x] **Step 1: Write failing HTTP integration tests**
 
 Create `backend/crates/sim-server/tests/http.rs`:
 
@@ -1002,7 +1004,7 @@ async fn health_and_world_summary_are_available() {
 }
 ```
 
-- [ ] **Step 2: Run the failing HTTP test**
+- [x] **Step 2: Run the failing HTTP test**
 
 Run:
 
@@ -1012,7 +1014,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server health_and_world_sum
 
 Expected: FAIL because `sim-server` is not implemented.
 
-- [ ] **Step 3: Implement app and endpoints**
+- [x] **Step 3: Implement app and endpoints**
 
 Create `backend/crates/sim-server/Cargo.toml`:
 
@@ -1127,7 +1129,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-- [ ] **Step 4: Verify HTTP tests pass**
+- [x] **Step 4: Verify HTTP tests pass**
 
 Run:
 
@@ -1137,7 +1139,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server health_and_world_sum
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/Cargo.toml backend/crates/sim-server/src/main.rs backend/crates/sim-server/src/app.rs backend/crates/sim-server/tests/http.rs
@@ -1149,7 +1151,7 @@ git commit -m "feat: expose simulation foundation endpoints"
 **Files:**
 - Modify: `backend/README.md`
 
-- [ ] **Step 1: Run full backend tests**
+- [x] **Step 1: Run full backend tests**
 
 Run:
 
@@ -1159,7 +1161,7 @@ cargo test --manifest-path backend/Cargo.toml --workspace
 
 Expected: PASS for `abutown-protocol`, `sim-core`, and `sim-server`.
 
-- [ ] **Step 2: Run Rust formatting**
+- [x] **Step 2: Run Rust formatting**
 
 Run:
 
@@ -1175,7 +1177,7 @@ cargo fmt --manifest-path backend/Cargo.toml --all
 
 Then rerun the check command.
 
-- [ ] **Step 3: Run clippy**
+- [x] **Step 3: Run clippy**
 
 Run:
 
@@ -1185,7 +1187,7 @@ cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D 
 
 Expected: PASS.
 
-- [ ] **Step 4: Confirm no frontend files were required**
+- [x] **Step 4: Confirm no frontend files were required**
 
 Run:
 
@@ -1195,7 +1197,7 @@ git diff --name-only HEAD
 
 Expected: only backend files are listed for this implementation slice before commit.
 
-- [ ] **Step 5: Commit final verification updates**
+- [x] **Step 5: Commit final verification updates**
 
 If `cargo fmt` changed files or `backend/README.md` needed command corrections, commit them:
 

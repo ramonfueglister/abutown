@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Goal:** Add the first Rust-authoritative mutation path: a client command is validated, applied to hot chunk state, stored as an in-memory append-only event, and broadcast over `/ws`.
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
 
-**Status 2026-05-15:** Implemented on branch `codex/zurich-river-city-world`. All plan tasks were executed with subagent-driven review checkpoints, including the no-op command correction so unchanged tile writes are rejected without appending events.
+**Goal:** Add the first Rust-authoritative mutation path: a client command is validated, applied to hot chunk state, stored as an in-memory append-only event, and broadcast over `/ws`.
 
 **Architecture:** Keep browser input indirect and server-authoritative. Add JSON command DTOs to `abutown-protocol`, an in-memory event store in `sim-core`, command validation/application in `sim-server`, and `POST /commands` as the first testable ingress. Supabase/Postgres is intentionally not part of this slice; the event boundary is shaped so a durable adapter can replace or mirror the in-memory store later.
 

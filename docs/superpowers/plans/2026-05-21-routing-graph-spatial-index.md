@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Replace the polyline-soup `CityNetwork` + `Routes`/`Stops`/`LinkPolylines` triple with a proper routing graph (Nodes + Edges), an rstar-backed spatial index, and a pluggable `CostModel` trait — without changing wire or persistence bytes.
 
 **Architecture:** A new `sim_core::routing` module ships compact `Vec`-indexed graph types, a `TransitLines` resource for fixed tram routes, an rstar `NodeSpatialIndex`, and a `CostModel` trait with three composable impls. `RoutingPlugin` builds the graph once at startup from `CityNetwork` and inserts everything as resources. Mobility systems are rewritten to read the graph; the old resources are deleted in a final cut. Wire ids (`link_id: String`, `stop_id: String`) stay intact via per-edge/per-node `legacy_id` fields.
@@ -66,7 +68,7 @@ These types are referenced throughout. Quick reference so engineers reading task
 - Modify: `backend/crates/sim-core/Cargo.toml` (add `rstar`)
 - Modify: `backend/crates/sim-core/src/lib.rs` (add `pub mod routing;`)
 
-- [ ] **Step 1: Create skeleton files**
+- [x] **Step 1: Create skeleton files**
 
 Create `backend/crates/sim-core/src/routing/mod.rs`:
 ```rust
@@ -92,14 +94,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Add rstar to Cargo.toml**
+- [x] **Step 2: Add rstar to Cargo.toml**
 
 In `backend/crates/sim-core/Cargo.toml` `[dependencies]`:
 ```toml
 rstar = "0.12"
 ```
 
-- [ ] **Step 3: Verify build + test**
+- [x] **Step 3: Verify build + test**
 
 Run from `backend/`:
 ```
@@ -109,7 +111,7 @@ cargo test -p sim-core --lib routing::graph::tests 2>&1 | tail -5
 
 Expected: build clean, 1 passed.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -125,7 +127,7 @@ git commit -m "scaffold(8b): empty sim_core::routing module + rstar dep"
 - Modify: `backend/crates/sim-core/src/routing/graph.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs` (re-exports)
 
-- [ ] **Step 1: Write `graph.rs`**
+- [x] **Step 1: Write `graph.rs`**
 
 Replace `backend/crates/sim-core/src/routing/graph.rs` with:
 
@@ -318,14 +320,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Re-export from `routing/mod.rs`**
+- [x] **Step 2: Re-export from `routing/mod.rs`**
 
 Append to `backend/crates/sim-core/src/routing/mod.rs`:
 ```rust
 pub use graph::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind};
 ```
 
-- [ ] **Step 3: Verify tests pass**
+- [x] **Step 3: Verify tests pass**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -334,7 +336,7 @@ cargo test -p sim-core --lib routing::graph 2>&1 | tail -10
 
 Expected: 3 passed.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -350,7 +352,7 @@ git commit -m "feat(8b): graph types — Node, Edge, Graph with legacy-id maps"
 - Modify: `backend/crates/sim-core/src/routing/transit.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Write `transit.rs`**
+- [x] **Step 1: Write `transit.rs`**
 
 ```rust
 use bevy_ecs::prelude::*;
@@ -428,14 +430,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Re-export**
+- [x] **Step 2: Re-export**
 
 In `backend/crates/sim-core/src/routing/mod.rs` append:
 ```rust
 pub use transit::{LineId, TransitLine, TransitLines};
 ```
 
-- [ ] **Step 3: Test + commit**
+- [x] **Step 3: Test + commit**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -458,7 +460,7 @@ git commit -m "feat(8b): TransitLine + TransitLines resource with legacy-route-i
 - Modify: `backend/crates/sim-core/src/routing/cost_model.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Write `cost_model.rs`**
+- [x] **Step 1: Write `cost_model.rs`**
 
 ```rust
 use crate::routing::graph::{Edge, EdgeKind};
@@ -550,14 +552,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Re-export**
+- [x] **Step 2: Re-export**
 
 In `backend/crates/sim-core/src/routing/mod.rs` append:
 ```rust
 pub use cost_model::{CostModel, DistanceCost, ModeFilterCost, TimeCost};
 ```
 
-- [ ] **Step 3: Test + commit**
+- [x] **Step 3: Test + commit**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -580,7 +582,7 @@ git commit -m "feat(8b): CostModel trait + DistanceCost, TimeCost, ModeFilterCos
 - Modify: `backend/crates/sim-core/src/routing/spatial_index.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Write `spatial_index.rs`**
+- [x] **Step 1: Write `spatial_index.rs`**
 
 ```rust
 use bevy_ecs::prelude::*;
@@ -691,14 +693,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Re-export**
+- [x] **Step 2: Re-export**
 
 In `backend/crates/sim-core/src/routing/mod.rs` append:
 ```rust
 pub use spatial_index::{IndexedNode, NodeSpatialIndex};
 ```
 
-- [ ] **Step 3: Test + commit**
+- [x] **Step 3: Test + commit**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -721,7 +723,7 @@ git commit -m "feat(8b): NodeSpatialIndex resource (rstar R-tree wrapper)"
 - Modify: `backend/crates/sim-core/src/routing/waiting.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Write `waiting.rs`**
+- [x] **Step 1: Write `waiting.rs`**
 
 The old `StopRecord.waiting_agents: VecDeque<AgentId>` per-tick state is moved out of the immutable Graph into its own Resource.
 
@@ -802,14 +804,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Re-export**
+- [x] **Step 2: Re-export**
 
 In `backend/crates/sim-core/src/routing/mod.rs` append:
 ```rust
 pub use waiting::WaitingAgents;
 ```
 
-- [ ] **Step 3: Test + commit**
+- [x] **Step 3: Test + commit**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -832,7 +834,7 @@ git commit -m "feat(8b): WaitingAgents resource (per-stop boarding queue)"
 - Modify: `backend/crates/sim-core/src/routing/builder.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Write the builder skeleton + tests first**
+- [x] **Step 1: Write the builder skeleton + tests first**
 
 Write tests first to lock the algorithmic contract, then implement.
 
@@ -1174,14 +1176,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Re-export**
+- [x] **Step 2: Re-export**
 
 In `backend/crates/sim-core/src/routing/mod.rs` append:
 ```rust
 pub use builder::{build_graph_from_city_network, SeededStop};
 ```
 
-- [ ] **Step 3: Test + commit**
+- [x] **Step 3: Test + commit**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1205,7 +1207,7 @@ git commit -m "feat(8b): graph builder from CityNetwork + seeded stops"
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Write `plugin.rs`**
+- [x] **Step 1: Write `plugin.rs`**
 
 The plugin reads `CityNetwork` (a Resource, already installed by callers — `runtime.rs` inserts it before plugin install). For tests that don't have a network, the plugin installs an empty graph.
 
@@ -1266,14 +1268,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Re-export**
+- [x] **Step 2: Re-export**
 
 In `backend/crates/sim-core/src/routing/mod.rs` append:
 ```rust
 pub use plugin::RoutingPlugin;
 ```
 
-- [ ] **Step 3: Install in runtime**
+- [x] **Step 3: Install in runtime**
 
 In `backend/crates/sim-server/src/runtime.rs`, find `new_with_event_store` (the constructor). Currently the plugin install sequence is:
 ```rust
@@ -1323,7 +1325,7 @@ impl CityNetwork {
 
 (If a constructor with this name exists already, use it instead.)
 
-- [ ] **Step 4: Build + test**
+- [x] **Step 4: Build + test**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1333,7 +1335,7 @@ cargo test --workspace 2>&1 | grep -E "test result|FAILED" | tail -15
 
 Expected: all tests pass. Routing resources now exist in every constructed runtime.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1353,7 +1355,7 @@ The old `from_network(network, density)` builds `Routes`/`Stops`/`LinkPolylines`
 - Stops are derived from a small `seeded_stops` list and become real `NodeKind::TransitStop` graph nodes.
 - Agents and vehicles are seeded against graph entities — their `WalkPlan`/`RoutePosition` fields carry **string ids** (preserving wire compat) that resolve through `graph.node_by_legacy()` / `graph.edge_by_legacy()` / `transit_lines.line_by_legacy()` at runtime.
 
-- [ ] **Step 1: Extract seeded stops into a top-level constant**
+- [x] **Step 1: Extract seeded stops into a top-level constant**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`, near the top, define:
 ```rust
@@ -1387,7 +1389,7 @@ pub fn legacy_seeded_stops() -> Vec<crate::routing::SeededStop> {
 
 (Inspect the existing seed.rs to find the precise current coord values and stop ids — replace these placeholder values with the actual ones. The function shape is what matters.)
 
-- [ ] **Step 2: Update runtime to pass seeded stops to RoutingPlugin**
+- [x] **Step 2: Update runtime to pass seeded stops to RoutingPlugin**
 
 In `backend/crates/sim-server/src/runtime.rs`, replace the empty `seeded_stops` from T8 with:
 ```rust
@@ -1396,7 +1398,7 @@ sim_core::routing::RoutingPlugin { seeded_stops }
     .install(&mut world, &mut schedule);
 ```
 
-- [ ] **Step 3: Rewrite `mobility::seed::from_network`**
+- [x] **Step 3: Rewrite `mobility::seed::from_network`**
 
 The body that today calls `world.add_route(...)`, `world.add_stop(...)`, `world.set_link_polyline(...)` is replaced with reads from `Graph` and `TransitLines`. Agents and vehicles still spawn via the existing `spawn_agent_from_record` / `spawn_vehicle_from_record` helpers, but their plan stages carry strings (legacy ids) that resolve through graph at runtime.
 
@@ -1413,7 +1415,7 @@ So in this task seed.rs both:
 
 T10-T12 migrate the consumers; T13 deletes the old.
 
-- [ ] **Step 4: Build + smoke**
+- [x] **Step 4: Build + smoke**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1436,7 +1438,7 @@ pkill -f "vite.*5175" 2>/dev/null
 
 Expected: workspace tests green, smoke 9/9 (mobility still works via old resources, graph exists in parallel).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1453,7 +1455,7 @@ git commit -m "feat(8b): seed.rs publishes seeded stops to RoutingPlugin (dual-t
 - Modify: `backend/crates/sim-core/src/mobility/components.rs`
 - Modify: `backend/crates/sim-core/src/mobility/dto.rs` (if it has anything that needs graph lookup)
 
-- [ ] **Step 1: Change `RoutePosition` to carry `LineId` + `edge_index`**
+- [x] **Step 1: Change `RoutePosition` to carry `LineId` + `edge_index`**
 
 In `backend/crates/sim-core/src/mobility/components.rs`, find the existing `RoutePosition`:
 ```rust
@@ -1479,7 +1481,7 @@ pub struct RoutePosition {
 
 The vehicle DTO (wire / persistence) keeps a `route_id: String` field — the encoding/decoding happens at the DTO boundary using `transit_lines.line(line_id).legacy_route_id.clone().unwrap_or_else(|| line.name.clone())`.
 
-- [ ] **Step 2: Update `spawn_vehicle_from_record` to resolve string→LineId**
+- [x] **Step 2: Update `spawn_vehicle_from_record` to resolve string→LineId**
 
 In `backend/crates/sim-core/src/mobility/api.rs`, find `spawn_vehicle_from_record`. The record arrives with `route_id: RouteId` (string-wrapped). Convert to `LineId`:
 ```rust
@@ -1491,7 +1493,7 @@ let line_id = transit_lines.line_by_legacy(&record.route_id.0).unwrap_or_else(||
 
 Build `RoutePosition` with that `line_id`.
 
-- [ ] **Step 3: Rewrite `vehicle_advance_system`**
+- [x] **Step 3: Rewrite `vehicle_advance_system`**
 
 The system today reads `routes: Res<Routes>` + `link_polylines: Res<LinkPolylines>`. Rewrite to read `Res<Graph>` + `Res<TransitLines>`:
 ```rust
@@ -1513,7 +1515,7 @@ fn vehicle_advance_system(
 
 (Use the existing arc-length-walk helper `mobility_geometry::world_coord_at_progress_slice(&edge.polyline, progress)` — same one as today.)
 
-- [ ] **Step 4: Rewrite `walk_advance_system`**
+- [x] **Step 4: Rewrite `walk_advance_system`**
 
 Today reads `LinkPolylines`. Rewrite to read `Res<Graph>`. The agent state `Walking { link_id: String }` keeps the string; the system resolves once per agent:
 ```rust
@@ -1536,7 +1538,7 @@ fn walk_advance_system(
 
 (The exact field names of components — match the existing system body. The point is: replace `link_polylines.0.get(link_id)` with `graph.edge_by_legacy(link_id)`. The `Routes` resource is no longer needed by this system.)
 
-- [ ] **Step 5: Build + smoke**
+- [x] **Step 5: Build + smoke**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1559,7 +1561,7 @@ pkill -f "vite.*5175" 2>/dev/null
 
 Expected: cargo green, smoke 9/9.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1574,7 +1576,7 @@ git commit -m "refactor(8b): walk_advance + vehicle_advance read from Graph"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Migrate `stop_arrival_system`**
+- [x] **Step 1: Migrate `stop_arrival_system`**
 
 Today reads `routes: Res<Routes>` + `stops: ResMut<Stops>` and inserts the agent into `StopRecord.waiting_agents`. Rewrite to use `Graph` + `WaitingAgents` resource:
 
@@ -1600,7 +1602,7 @@ fn stop_arrival_system(
 
 (Replicate the existing transition logic verbatim; only the `stops.0.get_mut(...).waiting_agents.push_back(...)` becomes `waiting.enqueue(node_id, agent_id)`.)
 
-- [ ] **Step 2: Migrate `boarding_alighting_system`**
+- [x] **Step 2: Migrate `boarding_alighting_system`**
 
 Today the system reads `routes: Res<Routes>` + `stops: ResMut<Stops>` and walks each vehicle's `RoutePosition` to find matching stops via the `routes` table and the `stops` waiting-queue. Rewrite to read `Graph` + `TransitLines` + `WaitingAgents`:
 
@@ -1627,7 +1629,7 @@ fn boarding_alighting_system(
 
 The agent-side state transitions when boarding/alighting are unchanged in structure; only the data sources change.
 
-- [ ] **Step 3: Build + smoke**
+- [x] **Step 3: Build + smoke**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1650,7 +1652,7 @@ pkill -f "vite.*5175" 2>/dev/null
 
 Expected: cargo green, smoke 9/9 (agents board + alight trams correctly).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1671,7 +1673,7 @@ git commit -m "refactor(8b): boarding_alighting + stop_arrival use Graph + Waiti
 - Modify: `backend/crates/sim-core/src/mobility/persist_snapshot.rs` (`StopRecord` references → small persistence-local stop type or string fields only)
 - Modify: any tests still constructing `Routes`/`Stops`/`LinkPolylines`/`RouteRecord`/`StopRecord` — rewrite to construct the equivalent graph entries via the builder or to test against the graph directly
 
-- [ ] **Step 1: Grep all call sites**
+- [x] **Step 1: Grep all call sites**
 
 ```bash
 grep -rn "Routes\b\|Stops\b\|LinkPolylines\b" backend/crates/ --include='*.rs' | grep -v 'TransitLines\|legacy_route' | head -50
@@ -1681,7 +1683,7 @@ grep -rn "RouteRecord\b\|StopRecord\b" backend/crates/ --include='*.rs' | head -
 
 Make a checklist. Every match must either become a graph query or be deleted (test code, no-longer-needed accessor, etc.).
 
-- [ ] **Step 2: Delete the type declarations**
+- [x] **Step 2: Delete the type declarations**
 
 In `backend/crates/sim-core/src/mobility/resources.rs`, delete:
 ```rust
@@ -1704,7 +1706,7 @@ pub struct LinkId(pub String);
 pub struct StopId(pub String);
 ```
 
-- [ ] **Step 3: Migrate remaining call sites**
+- [x] **Step 3: Migrate remaining call sites**
 
 Iterate `cargo build` and fix each compile error:
 - `world.resource::<Routes>()` → `world.resource::<crate::routing::TransitLines>()`
@@ -1731,7 +1733,7 @@ On `extract_from_world`, build `Vec<PersistedStop>` from `graph.nodes()` filtere
 
 (The JSON wire format MUST stay identical to today's. The fields `id`, `route_id`, `link_index`, `progress`, `waiting_agents` are the on-disk schema — preserve exactly. Note: today's persistence uses `link_index`, not `edge_index`. The persistence field stays `link_index` for wire compat; only the internal type changed.)
 
-- [ ] **Step 4: Build + test + clippy + smoke**
+- [x] **Step 4: Build + test + clippy + smoke**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1758,7 +1760,7 @@ pkill -f "vite.*5175" 2>/dev/null
 
 Expected: everything green, smoke 9/9.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1773,7 +1775,7 @@ git commit -m "refactor(8b): delete Routes/Stops/LinkPolylines + RouteRecord/Sto
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run all acceptance greps**
+- [x] **Step 1: Run all acceptance greps**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1792,7 +1794,7 @@ echo "=== Grep 5: Graph populated ==="
 
 Greps 1–3 should print "OK". Grep 4 should list the 8 files.
 
-- [ ] **Step 2: Add graph-populated runtime test**
+- [x] **Step 2: Add graph-populated runtime test**
 
 In `backend/crates/sim-server/src/runtime.rs` `#[cfg(test)] mod tests`, add:
 ```rust
@@ -1810,7 +1812,7 @@ In `backend/crates/sim-server/src/runtime.rs` `#[cfg(test)] mod tests`, add:
     }
 ```
 
-- [ ] **Step 3: Run all test suites**
+- [x] **Step 3: Run all test suites**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1826,7 +1828,7 @@ npx vitest run --reporter=dot 2>&1 | tail -10
 
 Expected: workspace tests pass, clippy clean, tsc clean, vitest pass.
 
-- [ ] **Step 4: Browser smoke**
+- [x] **Step 4: Browser smoke**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1845,7 +1847,7 @@ pkill -f "vite.*5175" 2>/dev/null
 
 Expected: 9/9.
 
-- [ ] **Step 5: Perf bench**
+- [x] **Step 5: Perf bench**
 
 ```
 cd /Users/ramonfuglister/Desktop/Coding/abutown/backend
@@ -1854,7 +1856,7 @@ cargo bench --bench mobility_tick_lod -- tick_100k_all_active 2>&1 | tail -20
 
 Capture median. Compare to Phase 8a baseline 11.84 ms. Compute delta %. Spec budget: ≤ +5% (12.43 ms).
 
-- [ ] **Step 6: Write progress.md entry**
+- [x] **Step 6: Write progress.md entry**
 
 Insert at the TOP of the reverse-chronological block (line 19+, right after line 18) in `progress.md`:
 
@@ -1864,7 +1866,7 @@ Insert at the TOP of the reverse-chronological block (line 19+, right after line
 
 Substitute the placeholders (`<HH:MM:SS>`, `<CARGO_COUNT>`, `<NEW_MS>`, `<PCT>`, `<NODES>`, `<EDGES>`, `<LINES>`) with the captured values.
 
-- [ ] **Step 7: Commit progress note**
+- [x] **Step 7: Commit progress note**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown

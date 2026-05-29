@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Build the first implementation slice of the approved Zurich-inspired flat OpenGFX river city: broad OpenGFX asset import, a deterministic 256 by 256 world model, validated city placement, and integration into the current Canvas demo without changing existing camera or vehicle mechanics.
 
 **Architecture:** Add pure city-generation modules under `src/city/world*` and keep `src/main.ts` as the Canvas runtime. Generate a 256 by 256 world from semantic zones, then adapt that world into the existing road, rail, building, tree, and diagnostic structures. Add an OpenGFX import script and generated catalog so the renderer can use much broader asset coverage without hard-coding every sheet manually.
@@ -41,7 +43,7 @@ This plan implements the first playable visual city-world slice. It does not imp
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/opengfxCatalog.test.ts`
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/package.json`
 
-- [ ] **Step 1: Write the failing catalog tests**
+- [x] **Step 1: Write the failing catalog tests**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/opengfxCatalog.test.ts`:
 
@@ -72,7 +74,7 @@ describe('OpenGFX catalog', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing catalog test**
+- [x] **Step 2: Run the failing catalog test**
 
 Run:
 
@@ -82,7 +84,7 @@ npm test -- tests/render/opengfxCatalog.test.ts
 
 Expected: fail because `src/assets/opengfxCatalog.generated.ts` and `src/assets/opengfxCatalog.ts` do not exist.
 
-- [ ] **Step 3: Add the import script and npm command**
+- [x] **Step 3: Add the import script and npm command**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/scripts/import-opengfx-assets.mjs`:
 
@@ -194,7 +196,7 @@ Modify `/Users/ramonfuglister/Desktop/Coding/abutown/package.json` scripts:
 "assets:opengfx": "node scripts/import-opengfx-assets.mjs"
 ```
 
-- [ ] **Step 4: Add catalog helper implementation**
+- [x] **Step 4: Add catalog helper implementation**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/assets/opengfxCatalog.ts`:
 
@@ -220,7 +222,7 @@ export function firstAssetPath(category: OpenGfxAssetCategory | string, fallback
 }
 ```
 
-- [ ] **Step 5: Run the importer**
+- [x] **Step 5: Run the importer**
 
 Run:
 
@@ -230,7 +232,7 @@ npm run assets:opengfx
 
 Expected: command exits `0`, `public/opengfx2/all` contains many PNG files, and `src/assets/opengfxCatalog.generated.ts` exists.
 
-- [ ] **Step 6: Verify catalog tests pass**
+- [x] **Step 6: Verify catalog tests pass**
 
 Run:
 
@@ -240,7 +242,7 @@ npm test -- tests/render/opengfxCatalog.test.ts
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -258,7 +260,7 @@ Expected: commit succeeds.
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/zurichWorld.ts`
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/city/zurichWorld.test.ts`
 
-- [ ] **Step 1: Write failing world layout tests**
+- [x] **Step 1: Write failing world layout tests**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/city/zurichWorld.test.ts`:
 
@@ -304,7 +306,7 @@ describe('buildZurichWorld', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing world tests**
+- [x] **Step 2: Run the failing world tests**
 
 Run:
 
@@ -314,7 +316,7 @@ npm test -- tests/city/zurichWorld.test.ts
 
 Expected: fail because `src/city/zurichWorld.ts` does not exist.
 
-- [ ] **Step 3: Add shared world types**
+- [x] **Step 3: Add shared world types**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/worldTypes.ts`:
 
@@ -424,7 +426,7 @@ export function distance(a: Coord, b: Coord): number {
 }
 ```
 
-- [ ] **Step 4: Implement deterministic Zurich world layout**
+- [x] **Step 4: Implement deterministic Zurich world layout**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/zurichWorld.ts`:
 
@@ -516,7 +518,7 @@ function nearestZone(coord: Coord): ZurichZone | undefined {
 }
 ```
 
-- [ ] **Step 5: Verify world tests pass**
+- [x] **Step 5: Verify world tests pass**
 
 Run:
 
@@ -526,7 +528,7 @@ npm test -- tests/city/zurichWorld.test.ts
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -543,7 +545,7 @@ Expected: commit succeeds.
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/zurichTransport.ts`
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/city/zurichTransport.test.ts`
 
-- [ ] **Step 1: Write failing transport tests**
+- [x] **Step 1: Write failing transport tests**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/city/zurichTransport.test.ts`:
 
@@ -582,7 +584,7 @@ describe('buildZurichTransport', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing transport test**
+- [x] **Step 2: Run the failing transport test**
 
 Run:
 
@@ -592,7 +594,7 @@ npm test -- tests/city/zurichTransport.test.ts
 
 Expected: fail because `src/city/zurichTransport.ts` does not exist.
 
-- [ ] **Step 3: Implement transport generation**
+- [x] **Step 3: Implement transport generation**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/zurichTransport.ts`:
 
@@ -725,7 +727,7 @@ function maskForRail(points: ReadonlySet<string>, coord: Coord): number {
 }
 ```
 
-- [ ] **Step 4: Verify transport tests pass**
+- [x] **Step 4: Verify transport tests pass**
 
 Run:
 
@@ -735,7 +737,7 @@ npm test -- tests/city/zurichTransport.test.ts
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -753,7 +755,7 @@ Expected: commit succeeds.
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/zurichValidation.ts`
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/city/zurichPlacement.test.ts`
 
-- [ ] **Step 1: Write failing placement and validation tests**
+- [x] **Step 1: Write failing placement and validation tests**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/city/zurichPlacement.test.ts`:
 
@@ -796,7 +798,7 @@ describe('buildZurichPlacement', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing placement test**
+- [x] **Step 2: Run the failing placement test**
 
 Run:
 
@@ -806,7 +808,7 @@ npm test -- tests/city/zurichPlacement.test.ts
 
 Expected: fail because placement and validation modules do not exist.
 
-- [ ] **Step 3: Implement placement**
+- [x] **Step 3: Implement placement**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/zurichPlacement.ts`:
 
@@ -917,7 +919,7 @@ function hash(value: string): number {
 }
 ```
 
-- [ ] **Step 4: Implement validation**
+- [x] **Step 4: Implement validation**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/city/zurichValidation.ts`:
 
@@ -971,7 +973,7 @@ export function validateZurichCity(world: ZurichWorld, transport: ZurichTranspor
 }
 ```
 
-- [ ] **Step 5: Verify placement tests pass**
+- [x] **Step 5: Verify placement tests pass**
 
 Run:
 
@@ -981,7 +983,7 @@ npm test -- tests/city/zurichPlacement.test.ts
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -998,7 +1000,7 @@ Expected: commit succeeds.
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/src/main.ts`
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Extend the e2e smoke test before changing the runtime**
+- [x] **Step 1: Extend the e2e smoke test before changing the runtime**
 
 Modify `/Users/ramonfuglister/Desktop/Coding/abutown/tests/e2e/render-smoke.spec.ts` by adding these assertions after `expect(state.city.cars).toBeGreaterThan(0);`:
 
@@ -1014,7 +1016,7 @@ Modify `/Users/ramonfuglister/Desktop/Coding/abutown/tests/e2e/render-smoke.spec
   expect(state.city.roadRailOverlap).toBe(0);
 ```
 
-- [ ] **Step 2: Run the failing e2e test**
+- [x] **Step 2: Run the failing e2e test**
 
 Run:
 
@@ -1024,7 +1026,7 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: fail because the current runtime still exposes the old smaller city diagnostics.
 
-- [ ] **Step 3: Import Zurich world modules into `src/main.ts`**
+- [x] **Step 3: Import Zurich world modules into `src/main.ts`**
 
 At the top of `/Users/ramonfuglister/Desktop/Coding/abutown/src/main.ts`, add:
 
@@ -1036,7 +1038,7 @@ import { buildZurichWorld } from './city/zurichWorld';
 import { key as worldKey, type ZurichBuilding, type ZurichRailTile, type ZurichRoadTile } from './city/worldTypes';
 ```
 
-- [ ] **Step 4: Replace local world constants and generated collections**
+- [x] **Step 4: Replace local world constants and generated collections**
 
 Replace the current `WIDTH`, `HEIGHT`, `terrain`, `railPaths`, `railReserved`, `railCrossings`, `roads`, `rails`, `buildings`, and `trees` initialization block with:
 
@@ -1085,7 +1087,7 @@ function toRuntimeBuilding(building: ZurichBuilding): Building {
 }
 ```
 
-- [ ] **Step 5: Remove obsolete local generation calls from runtime path**
+- [x] **Step 5: Remove obsolete local generation calls from runtime path**
 
 Leave old helper functions in the file only if TypeScript does not report unused errors. Remove or stop calling these local generators when they are no longer needed:
 
@@ -1102,7 +1104,7 @@ buildTrees();
 
 Keep rendering functions, camera functions, vehicle functions, sprite cleanup, and asset loading behavior unchanged.
 
-- [ ] **Step 6: Update rail station positions for the 256 map**
+- [x] **Step 6: Update rail station positions for the 256 map**
 
 Modify `buildRailStations()` in `/Users/ramonfuglister/Desktop/Coding/abutown/src/main.ts` to return station tiles near the Zurich rail center:
 
@@ -1118,7 +1120,7 @@ function buildRailStations(): RailStation[] {
 }
 ```
 
-- [ ] **Step 7: Focus the initial camera on the new city center**
+- [x] **Step 7: Focus the initial camera on the new city center**
 
 In `resize()`, replace the first-focus coordinate with:
 
@@ -1128,7 +1130,7 @@ const focus = iso({ x: 128, y: 132 });
 
 Keep all existing camera control, zoom, damping, and bounds logic unchanged.
 
-- [ ] **Step 8: Extend runtime diagnostics**
+- [x] **Step 8: Extend runtime diagnostics**
 
 In the object returned by `window.render_game_to_text`, add:
 
@@ -1148,7 +1150,7 @@ railCrossings: zurichValidation.stats.railCrossings,
 invalidBuildings: zurichValidation.stats.invalidBuildings,
 ```
 
-- [ ] **Step 9: Run unit tests and build**
+- [x] **Step 9: Run unit tests and build**
 
 Run:
 
@@ -1159,7 +1161,7 @@ npm run build
 
 Expected: both commands exit `0`.
 
-- [ ] **Step 10: Run the browser smoke test**
+- [x] **Step 10: Run the browser smoke test**
 
 Run:
 
@@ -1169,7 +1171,7 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: pass with no console errors.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 Run:
 
@@ -1186,7 +1188,7 @@ Expected: commit succeeds.
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/progress.md`
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/artifacts/abutown-zurich-river-city-2026-05-14.png`
 
-- [ ] **Step 1: Start the local dev server**
+- [x] **Step 1: Start the local dev server**
 
 Run:
 
@@ -1196,7 +1198,7 @@ npm run dev -- --port 5175
 
 Expected: Vite serves `http://127.0.0.1:5175/`. Keep the session running while verifying.
 
-- [ ] **Step 2: Capture a browser screenshot**
+- [x] **Step 2: Capture a browser screenshot**
 
 Run Playwright against `http://127.0.0.1:5175/` and save a screenshot to:
 
@@ -1218,7 +1220,7 @@ await page.screenshot({ path: 'artifacts/abutown-zurich-river-city-2026-05-14.pn
 await browser.close();
 ```
 
-- [ ] **Step 3: Inspect diagnostics**
+- [x] **Step 3: Inspect diagnostics**
 
 Run in the browser page:
 
@@ -1240,7 +1242,7 @@ Expected values:
 }
 ```
 
-- [ ] **Step 4: Update progress**
+- [x] **Step 4: Update progress**
 
 Append this line to `/Users/ramonfuglister/Desktop/Coding/abutown/progress.md`:
 
@@ -1248,7 +1250,7 @@ Append this line to `/Users/ramonfuglister/Desktop/Coding/abutown/progress.md`:
 2026-05-14 - Zurich river city world: imported broad OpenGFX coverage, added deterministic 256x256 flat river-city layout, integrated validated roads/rails/buildings/trees into the existing Canvas demo, and captured visual QA at artifacts/abutown-zurich-river-city-2026-05-14.png.
 ```
 
-- [ ] **Step 5: Run final verification**
+- [x] **Step 5: Run final verification**
 
 Run:
 
@@ -1260,7 +1262,7 @@ npm run test:e2e
 
 Expected: all commands exit `0`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 

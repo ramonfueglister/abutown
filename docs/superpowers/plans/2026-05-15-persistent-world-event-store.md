@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Persist accepted Rust-authoritative world events through an explicit store boundary before hot-state mutation, HTTP acceptance, and websocket broadcast.
 
 **Architecture:** Add an async `WorldEventStore` contract in `sim-core`, keep the in-memory store as the default local implementation, and add a Postgres/Supabase-compatible adapter in `sim-server`. Split tile mutation into validate/plan and apply steps so append failure leaves loaded chunk state unchanged.
@@ -79,7 +81,7 @@ Relevant current behavior:
 - Modify: `backend/crates/sim-core/Cargo.toml`
 - Modify: `backend/crates/sim-core/src/events.rs`
 
-- [ ] **Step 1: Add dependency entries**
+- [x] **Step 1: Add dependency entries**
 
 Add this workspace dependency in `backend/Cargo.toml` under `[workspace.dependencies]`:
 
@@ -96,7 +98,7 @@ async-trait.workspace = true
 tokio.workspace = true
 ```
 
-- [ ] **Step 2: Write failing event-store contract tests**
+- [x] **Step 2: Write failing event-store contract tests**
 
 Replace the existing tests in `backend/crates/sim-core/src/events.rs` with these tests:
 
@@ -165,7 +167,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run failing sim-core events tests**
+- [x] **Step 3: Run failing sim-core events tests**
 
 Run:
 
@@ -175,7 +177,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core events
 
 Expected: FAIL because `WorldEventStore`, `WorldEventStoreError`, `FailingWorldEventStore`, and `WorldEventMetadata` do not exist.
 
-- [ ] **Step 4: Implement event-store contract**
+- [x] **Step 4: Implement event-store contract**
 
 Replace `backend/crates/sim-core/src/events.rs` with:
 
@@ -289,7 +291,7 @@ impl FailingWorldEventStore {
 
 Keep the tests from Step 2 below this code.
 
-- [ ] **Step 5: Run sim-core events tests**
+- [x] **Step 5: Run sim-core events tests**
 
 Run:
 
@@ -300,7 +302,7 @@ cargo check --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/Cargo.toml backend/Cargo.lock backend/crates/sim-core/Cargo.toml backend/crates/sim-core/src/events.rs
@@ -314,7 +316,7 @@ git commit -m "feat: add world event store contract"
 **Files:**
 - Modify: `backend/crates/sim-server/src/chunk_registry.rs`
 
-- [ ] **Step 1: Write failing registry planning tests**
+- [x] **Step 1: Write failing registry planning tests**
 
 Add this type assertion and test inside `#[cfg(test)] mod tests` in `backend/crates/sim-server/src/chunk_registry.rs` after `registry_sets_tile_kind_on_loaded_chunk`:
 
@@ -375,7 +377,7 @@ Add this type assertion and test inside `#[cfg(test)] mod tests` in `backend/cra
     }
 ```
 
-- [ ] **Step 2: Run failing registry tests**
+- [x] **Step 2: Run failing registry tests**
 
 Run:
 
@@ -385,7 +387,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server chunk_registry::test
 
 Expected: FAIL because `SetTileKindPlan`, `plan_set_tile_kind`, and `apply_set_tile_kind` do not exist.
 
-- [ ] **Step 3: Add plan type and methods**
+- [x] **Step 3: Add plan type and methods**
 
 Add this public-in-crate type near `ChunkMutationError` in `chunk_registry.rs`:
 
@@ -469,7 +471,7 @@ Replace the body of `set_tile_kind` and add the new methods:
     }
 ```
 
-- [ ] **Step 4: Run registry tests**
+- [x] **Step 4: Run registry tests**
 
 Run:
 
@@ -479,7 +481,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server chunk_registry::test
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/chunk_registry.rs
@@ -497,7 +499,7 @@ git commit -m "feat: split chunk mutation planning and apply"
 - Modify: `backend/crates/sim-server/tests/http.rs`
 - Modify: `backend/crates/sim-server/tests/websocket.rs`
 
-- [ ] **Step 1: Add failing runtime append-failure test**
+- [x] **Step 1: Add failing runtime append-failure test**
 
 In `backend/crates/sim-server/src/runtime.rs`, add `FailingWorldEventStore` to the test imports by using the fully qualified path in the test. Add this test after `runtime_rejects_no_op_tile_kind_commands_without_appending_event`:
 
@@ -539,7 +541,7 @@ In `backend/crates/sim-server/src/runtime.rs`, add `FailingWorldEventStore` to t
 
 Convert the existing runtime command tests that call `apply_client_command` to `#[tokio::test]`, add `.await` before `expect`/`expect_err`, and keep their existing assertions.
 
-- [ ] **Step 2: Run failing runtime test**
+- [x] **Step 2: Run failing runtime test**
 
 Run:
 
@@ -549,7 +551,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server runtime::tests::runt
 
 Expected: FAIL because `SimulationRuntime::new_with_event_store` does not exist and command application is not async.
 
-- [ ] **Step 3: Extend command rejection type**
+- [x] **Step 3: Extend command rejection type**
 
 No field change is needed in `CommandRejection`, but runtime code will now build a rejection from `WorldEventStoreError`:
 
@@ -562,7 +564,7 @@ CommandRejection {
 }
 ```
 
-- [ ] **Step 4: Make runtime own a boxed event store**
+- [x] **Step 4: Make runtime own a boxed event store**
 
 In `backend/crates/sim-server/src/runtime.rs`, change the event imports to:
 
@@ -592,7 +594,7 @@ In `new()`, initialize:
 event_store: Box::new(InMemoryWorldEventStore::default()),
 ```
 
-- [ ] **Step 5: Append before applying planned mutation**
+- [x] **Step 5: Append before applying planned mutation**
 
 Make `apply_client_command` async:
 
@@ -673,7 +675,7 @@ Make `apply_set_tile_kind` async and replace its mutation block with planning, e
 
 Keep the existing `CommandAcceptedDto` construction after this block.
 
-- [ ] **Step 6: Await command application in app handler**
+- [x] **Step 6: Await command application in app handler**
 
 In `backend/crates/sim-server/src/app.rs`, change:
 
@@ -687,7 +689,7 @@ to:
         runtime.apply_client_command(command).await
 ```
 
-- [ ] **Step 7: Add HTTP append-failure test**
+- [x] **Step 7: Add HTTP append-failure test**
 
 In `backend/crates/sim-server/tests/http.rs`, add a test that builds an app with a failing store:
 
@@ -746,7 +748,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
 }
 ```
 
-- [ ] **Step 8: Add websocket no-broadcast-on-failure test**
+- [x] **Step 8: Add websocket no-broadcast-on-failure test**
 
 In `backend/crates/sim-server/tests/websocket.rs`, add a test that connects a websocket to an app with `FailingWorldEventStore`, posts a command, and asserts the HTTP response is rejected. Do not wait for a world event, because no event should be broadcast. Use a short timeout to prove no message arrives:
 
@@ -797,7 +799,7 @@ async fn websocket_does_not_broadcast_failed_command_append() {
 }
 ```
 
-- [ ] **Step 9: Run command tests**
+- [x] **Step 9: Run command tests**
 
 Run:
 
@@ -808,7 +810,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_does_not_b
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/commands.rs backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/src/app.rs backend/crates/sim-server/tests/http.rs backend/crates/sim-server/tests/websocket.rs
@@ -825,7 +827,7 @@ git commit -m "feat: append command events before mutation"
 - Create: `backend/crates/sim-server/src/postgres_events.rs`
 - Modify: `backend/crates/sim-server/src/lib.rs`
 
-- [ ] **Step 1: Add sim-server dependencies**
+- [x] **Step 1: Add sim-server dependencies**
 
 Add these to `backend/crates/sim-server/Cargo.toml`:
 
@@ -840,7 +842,7 @@ Add this workspace dependency in `backend/Cargo.toml` under `[workspace.dependen
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "json", "time"] }
 ```
 
-- [ ] **Step 2: Create migration SQL**
+- [x] **Step 2: Create migration SQL**
 
 Create `backend/crates/sim-server/migrations/202605150001_world_events.sql`:
 
@@ -866,7 +868,7 @@ CREATE INDEX IF NOT EXISTS world_events_world_command_idx
     ON world_events (world_id, command_id);
 ```
 
-- [ ] **Step 3: Add failing adapter unit tests**
+- [x] **Step 3: Add failing adapter unit tests**
 
 Create `backend/crates/sim-server/src/postgres_events.rs` with tests first:
 
@@ -906,7 +908,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Run failing adapter tests**
+- [x] **Step 4: Run failing adapter tests**
 
 Run:
 
@@ -916,7 +918,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server postgres_events
 
 Expected: FAIL because `SqlWorldEventRecord` does not exist.
 
-- [ ] **Step 5: Implement adapter record and store**
+- [x] **Step 5: Implement adapter record and store**
 
 Replace `backend/crates/sim-server/src/postgres_events.rs` with:
 
@@ -1015,7 +1017,7 @@ impl WorldEventStore for PostgresWorldEventStore {
 
 Then append the test from Step 3 below the implementation. Do not add count/list helpers to the DB adapter in this slice; durable read APIs belong in a later replay or admin-query slice.
 
-- [ ] **Step 6: Export module**
+- [x] **Step 6: Export module**
 
 In `backend/crates/sim-server/src/lib.rs`, add:
 
@@ -1023,7 +1025,7 @@ In `backend/crates/sim-server/src/lib.rs`, add:
 pub(crate) mod postgres_events;
 ```
 
-- [ ] **Step 7: Add opt-in Postgres integration test**
+- [x] **Step 7: Add opt-in Postgres integration test**
 
 Add this test module to the bottom of `postgres_events.rs`:
 
@@ -1052,7 +1054,7 @@ mod integration_tests {
 
 Add `uuid.workspace = true` to `backend/crates/sim-server/Cargo.toml` dev dependencies if it is not already available to the package.
 
-- [ ] **Step 8: Run adapter tests**
+- [x] **Step 8: Run adapter tests**
 
 Run:
 
@@ -1062,7 +1064,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server postgres_events
 
 Expected: PASS without a database URL. The integration test prints a skip message and returns.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/crates/sim-server/Cargo.toml backend/crates/sim-server/migrations/202605150001_world_events.sql backend/crates/sim-server/src/postgres_events.rs backend/crates/sim-server/src/lib.rs
@@ -1078,7 +1080,7 @@ git commit -m "feat: add postgres world event store"
 - Modify: `backend/crates/sim-server/src/main.rs`
 - Modify: `backend/README.md`
 
-- [ ] **Step 1: Add app builder from environment**
+- [x] **Step 1: Add app builder from environment**
 
 In `backend/crates/sim-server/src/app.rs`, import the adapter:
 
@@ -1101,7 +1103,7 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 }
 ```
 
-- [ ] **Step 2: Update main**
+- [x] **Step 2: Update main**
 
 In `backend/crates/sim-server/src/main.rs`, change the import:
 
@@ -1117,7 +1119,7 @@ Change the serve call:
         .context("run simulation server")
 ```
 
-- [ ] **Step 3: Run server build test**
+- [x] **Step 3: Run server build test**
 
 Run:
 
@@ -1128,7 +1130,7 @@ cargo clippy --manifest-path backend/Cargo.toml -p sim-server --all-targets -- -
 
 Expected: PASS.
 
-- [ ] **Step 4: Update README**
+- [x] **Step 4: Update README**
 
 In `backend/README.md`, update the Command Event Boundary section so the current boundaries say:
 
@@ -1148,7 +1150,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server command_
 cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_does_not_broadcast_failed_command_append
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/main.rs backend/README.md
@@ -1162,7 +1164,7 @@ git commit -m "feat: configure persistent world event store"
 **Files:**
 - Verify all backend files changed by this plan.
 
-- [ ] **Step 1: Run formatting**
+- [x] **Step 1: Run formatting**
 
 Run:
 
@@ -1183,7 +1185,7 @@ git add backend
 git commit -m "style: format persistent event store"
 ```
 
-- [ ] **Step 2: Run complete backend tests**
+- [x] **Step 2: Run complete backend tests**
 
 Run:
 
@@ -1193,7 +1195,7 @@ cargo test --manifest-path backend/Cargo.toml --workspace
 
 Expected: PASS without requiring `ABUTOWN_TEST_DATABASE_URL`.
 
-- [ ] **Step 3: Run complete backend clippy**
+- [x] **Step 3: Run complete backend clippy**
 
 Run:
 
@@ -1203,7 +1205,7 @@ cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D 
 
 Expected: PASS.
 
-- [ ] **Step 4: Confirm frontend worktree remains untouched by this slice**
+- [x] **Step 4: Confirm frontend worktree remains untouched by this slice**
 
 Run:
 
@@ -1213,7 +1215,7 @@ git diff --name-only -- src tests package.json vite.config.ts
 
 Expected: no new files from this backend slice. Existing user changes may still appear; do not stage them unless they were intentionally part of this plan.
 
-- [ ] **Step 5: Final status**
+- [x] **Step 5: Final status**
 
 Run:
 

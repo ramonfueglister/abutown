@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Spawn a small fixed set of mobility entities at server start so the world is visibly alive, persist the full `MobilityWorld` snapshot to Postgres, and restore it on restart so `tick_mobility` resumes exactly where it left off.
 
 **Architecture:** Per-world full-state snapshot table (`mobility_snapshots`, single row per `world_id`), UPSERT-style. No mobility event log — `tick_mobility` is already deterministic, so snapshot + tick is sufficient. A deterministic in-process seeder (`mobility::seed::initial_world()`) populates fresh worlds. Persistence rides on the existing snapshot loop.
@@ -47,7 +49,7 @@
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add Serde imports at the top of mobility.rs**
+- [x] **Step 1: Add Serde imports at the top of mobility.rs**
 
 Add right after the existing `use` block (around line 5–8):
 
@@ -55,7 +57,7 @@ Add right after the existing `use` block (around line 5–8):
 use serde::{Deserialize, Serialize};
 ```
 
-- [ ] **Step 2: Add the failing roundtrip test**
+- [x] **Step 2: Add the failing roundtrip test**
 
 Append inside the existing `#[cfg(test)] mod tests` block in `mobility.rs`:
 
@@ -73,7 +75,7 @@ fn mobility_world_serde_round_trip_preserves_state() {
 
 Add `MobilityWorld` to the existing `#[derive(...)]` so it implements `PartialEq` — check first whether it already does. If `MobilityWorld` lacks `PartialEq`, add it: `#[derive(Debug, Default, PartialEq)]`.
 
-- [ ] **Step 3: Run the test to confirm it fails**
+- [x] **Step 3: Run the test to confirm it fails**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_world_serde_round_trip
@@ -81,7 +83,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_worl
 
 Expected: FAIL — no `Serialize`/`Deserialize` derive on the types.
 
-- [ ] **Step 4: Add Serde derives to all 7 types**
+- [x] **Step 4: Add Serde derives to all 7 types**
 
 Locate each derive line and add `Serialize, Deserialize`:
 
@@ -97,7 +99,7 @@ Locate each derive line and add `Serialize, Deserialize`:
 
 `AgentId`, `VehicleId`, `StopId`, `RouteId`, `LinkId` are defined in `sim_core::ids`. Verify they already have Serde derives by running the test — if compilation fails because an inner type is not serializable, add the derive there too.
 
-- [ ] **Step 5: Run the test to confirm it passes**
+- [x] **Step 5: Run the test to confirm it passes**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_world_serde_round_trip
@@ -105,7 +107,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_worl
 
 Expected: PASS.
 
-- [ ] **Step 6: Run the rest of the workspace to check nothing broke**
+- [x] **Step 6: Run the rest of the workspace to check nothing broke**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -113,7 +115,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: all green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility.rs backend/crates/sim-core/src/ids.rs
@@ -129,7 +131,7 @@ git commit -m "feat: serde-derive mobility records for persistence"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 Append to the test module in `mobility.rs`:
 
@@ -174,7 +176,7 @@ assert_eq!(snapshot.stops.len(), 4, "expected 4 stops");
 // etc.
 ```
 
-- [ ] **Step 2: Run tests to confirm they fail**
+- [x] **Step 2: Run tests to confirm they fail**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core initial_world_seeds initial_world_is_deterministic
@@ -182,7 +184,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core initial_world
 
 Expected: FAIL — `seed::initial_world` does not exist.
 
-- [ ] **Step 3: Implement the seeder**
+- [x] **Step 3: Implement the seeder**
 
 At the bottom of `mobility.rs` (above the `#[cfg(test)] mod tests` block), add:
 
@@ -326,7 +328,7 @@ pub mod seed {
 
 If any field on `MobilityWorld` is not visible from this module path (it should be — `seed` is a child module so it has access to private fields), make the struct field accessible by using `pub(super)` or via a builder method. Concretely: if compilation fails, add a `pub(crate) fn from_fixture(...)` constructor on `MobilityWorld` and call it from `seed`. The likely outcome is that direct field access works because `seed` is a child of the same module.
 
-- [ ] **Step 4: Run tests to confirm they pass**
+- [x] **Step 4: Run tests to confirm they pass**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core initial_world_seeds initial_world_is_deterministic
@@ -334,7 +336,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core initial_world
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility.rs
@@ -348,7 +350,7 @@ git commit -m "feat: deterministic initial mobility world seeder"
 **Files:**
 - Modify: `backend/crates/sim-core/src/persistence.rs`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Append to the test module in `persistence.rs`:
 
@@ -381,7 +383,7 @@ async fn mobility_snapshot_store_read_returns_none_for_unknown_world() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_snapshot_store
@@ -389,7 +391,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_snap
 
 Expected: FAIL — types do not exist.
 
-- [ ] **Step 3: Implement trait, error, and in-memory store**
+- [x] **Step 3: Implement trait, error, and in-memory store**
 
 Add to `backend/crates/sim-core/src/persistence.rs`:
 
@@ -455,7 +457,7 @@ impl MobilitySnapshotStore for InMemoryMobilitySnapshotStore {
 
 The existing `HashMap` import at the top of `persistence.rs` may already be present from chunk snapshots — verify and avoid duplicate imports.
 
-- [ ] **Step 4: Run tests to confirm pass**
+- [x] **Step 4: Run tests to confirm pass**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_snapshot_store persistence
@@ -463,7 +465,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility_snap
 
 Expected: all sim-core persistence tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/persistence.rs backend/crates/sim-core/src/mobility.rs
@@ -479,7 +481,7 @@ git commit -m "feat: in-memory mobility snapshot store"
 **Files:**
 - Create: `backend/crates/sim-server/migrations/202605160002_mobility_snapshots.sql`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create the file with contents:
 
@@ -492,7 +494,7 @@ CREATE TABLE IF NOT EXISTS mobility_snapshots (
 );
 ```
 
-- [ ] **Step 2: Verify ordering**
+- [x] **Step 2: Verify ordering**
 
 ```bash
 ls backend/crates/sim-server/migrations/
@@ -508,7 +510,7 @@ Expected list (alphabetical = execution order):
 202605160002_mobility_snapshots.sql
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-server/migrations/202605160002_mobility_snapshots.sql
@@ -523,7 +525,7 @@ git commit -m "feat: migrate mobility_snapshots table"
 - Create: `backend/crates/sim-server/src/postgres_mobility.rs`
 - Modify: `backend/crates/sim-server/src/lib.rs`
 
-- [ ] **Step 1: Add the module export**
+- [x] **Step 1: Add the module export**
 
 In `backend/crates/sim-server/src/lib.rs`, after the existing `pub mod postgres_snapshots;` line, add:
 
@@ -531,7 +533,7 @@ In `backend/crates/sim-server/src/lib.rs`, after the existing `pub mod postgres_
 pub mod postgres_mobility;
 ```
 
-- [ ] **Step 2: Write the adapter with a unit-test stub**
+- [x] **Step 2: Write the adapter with a unit-test stub**
 
 Create `backend/crates/sim-server/src/postgres_mobility.rs`:
 
@@ -658,7 +660,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Verify build and test**
+- [x] **Step 3: Verify build and test**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-server
@@ -667,7 +669,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server postgres_mo
 
 Expected: builds; the opt-in test silently returns when env var is unset.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/postgres_mobility.rs backend/crates/sim-server/src/lib.rs
@@ -681,7 +683,7 @@ git commit -m "feat: postgres mobility snapshot adapter"
 **Files:**
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Extend imports**
+- [x] **Step 1: Extend imports**
 
 Add at the top of `runtime.rs` (alongside the existing `use sim_core::...` block):
 
@@ -694,7 +696,7 @@ use sim_core::persistence::{
 
 Make sure `MobilitySnapshotStore`, `InMemoryMobilitySnapshotStore`, `MobilitySnapshotStoreError` come from the same `persistence` module (they do — Task 3 added them there). Drop duplicate `use` lines if needed.
 
-- [ ] **Step 2: Add the field**
+- [x] **Step 2: Add the field**
 
 Locate the `pub struct SimulationRuntime { ... }` definition. Add a new field after `snapshot_store`:
 
@@ -704,7 +706,7 @@ mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send>,
 
 In the `Debug` impl, add `.field("mobility_snapshot_store", ...)` if other stores are listed there, or skip it (the existing impl uses `finish_non_exhaustive`).
 
-- [ ] **Step 3: Add the new constructor**
+- [x] **Step 3: Add the new constructor**
 
 Inside `impl SimulationRuntime`, add:
 
@@ -720,7 +722,7 @@ pub fn new_with_all_stores(
 }
 ```
 
-- [ ] **Step 4: Update existing constructors to inject the default**
+- [x] **Step 4: Update existing constructors to inject the default**
 
 Edit `new()`:
 
@@ -758,7 +760,7 @@ pub fn new_with_stores(
 
 (Edit only the struct-init block — keep the seeded-chunks loop intact. Read the existing `new_with_stores` body and add the one new field assignment in the right place.)
 
-- [ ] **Step 5: Add the persist method**
+- [x] **Step 5: Add the persist method**
 
 Inside `impl SimulationRuntime`, alongside `persist_chunk_snapshots`:
 
@@ -770,7 +772,7 @@ pub async fn persist_mobility_snapshot(&mut self) -> Result<(), MobilitySnapshot
 }
 ```
 
-- [ ] **Step 6: Add a unit test for the round trip**
+- [x] **Step 6: Add a unit test for the round trip**
 
 In the runtime test module, add:
 
@@ -813,7 +815,7 @@ pub fn set_mobility_for_test(&mut self, mobility: MobilityWorld) {
 
 The test also reads `runtime.mobility_snapshot_store` and `runtime.world_id` directly — they're private fields. Both reads are within `mod tests`, which is inside `runtime.rs`, so private access works.
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-server runtime_persists_mobility_snapshot
@@ -822,7 +824,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: green.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/runtime.rs
@@ -837,7 +839,7 @@ git commit -m "feat: simulation runtime stores and persists mobility snapshot"
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 - Modify: `backend/crates/sim-server/src/app.rs` (compile-only change at first, see below)
 
-- [ ] **Step 1: Add a failing test for hydration**
+- [x] **Step 1: Add a failing test for hydration**
 
 In the runtime test module:
 
@@ -945,7 +947,7 @@ impl SimulationRuntime {
 }
 ```
 
-- [ ] **Step 2: Run tests to confirm failure**
+- [x] **Step 2: Run tests to confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-server hydrate_seeds_fresh_mobility hydrate_restores_mobility_from_store
@@ -953,7 +955,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server hydrate_see
 
 Expected: FAIL — `hydrate_from_stores` only takes 2 arguments today.
 
-- [ ] **Step 3: Extend `hydrate_from_stores` signature and body**
+- [x] **Step 3: Extend `hydrate_from_stores` signature and body**
 
 Locate the existing async fn:
 
@@ -1009,7 +1011,7 @@ pub enum HydrationError {
 }
 ```
 
-- [ ] **Step 4: Update the production caller in app.rs**
+- [x] **Step 4: Update the production caller in app.rs**
 
 In `backend/crates/sim-server/src/app.rs`, the function `build_app_from_config` currently calls `hydrate_from_stores(event_store, snapshot_store)`. Update:
 
@@ -1027,7 +1029,7 @@ Import: add `use crate::postgres_mobility::PostgresMobilitySnapshotStore;` at th
 
 `MobilitySnapshotStoreError` propagates as `anyhow::Error` via `?` because it derives `thiserror::Error` (i.e., implements `std::error::Error`).
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-server hydrate_seeds_fresh_mobility hydrate_restores_mobility_from_store
@@ -1036,7 +1038,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: both new tests pass; full workspace green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/src/app.rs backend/crates/sim-core/src/mobility.rs
@@ -1052,7 +1054,7 @@ git commit -m "feat: hydrate mobility world on runtime startup"
 **Files:**
 - Modify: `backend/crates/sim-server/src/app.rs`
 
-- [ ] **Step 1: Inspect the existing snapshot loop**
+- [x] **Step 1: Inspect the existing snapshot loop**
 
 ```bash
 grep -n "spawn_snapshot_loop\|persist_chunk_snapshots\|persist_snapshots_once" backend/crates/sim-server/src/app.rs
@@ -1067,7 +1069,7 @@ async fn persist_snapshots_once(state: Arc<...>) -> Result<usize, ...> {
 }
 ```
 
-- [ ] **Step 2: Add mobility persistence after the chunk write**
+- [x] **Step 2: Add mobility persistence after the chunk write**
 
 Change the body so both kinds of snapshot are written in sequence:
 
@@ -1096,7 +1098,7 @@ async fn persist_snapshots_once(state: Arc<...>) -> Result<usize, ChunkSnapshotS
 
 If `tracing` is not in scope, use `eprintln!` instead. Search the existing file for `tracing::` or `eprintln!` usage and match it.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-server
@@ -1105,7 +1107,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: builds and all tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs
@@ -1119,7 +1121,7 @@ git commit -m "feat: snapshot loop persists mobility world"
 **Files:**
 - Modify: `backend/crates/sim-server/tests/http.rs`
 
-- [ ] **Step 1: Add the test**
+- [x] **Step 1: Add the test**
 
 Append to `backend/crates/sim-server/tests/http.rs`:
 
@@ -1217,7 +1219,7 @@ pub fn pool_for_test(&self) -> &sqlx::PgPool {
 }
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-server
@@ -1225,7 +1227,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: all pass; the postgres test silently skips when env var is unset.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-server/tests/http.rs backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/src/postgres_mobility.rs
@@ -1239,7 +1241,7 @@ git commit -m "test: cover postgres mobility recovery end-to-end"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run formatter, full test suite, clippy**
+- [x] **Step 1: Run formatter, full test suite, clippy**
 
 ```bash
 cargo fmt --manifest-path backend/Cargo.toml --all -- --check
@@ -1251,7 +1253,7 @@ Expected: all three succeed.
 
 If `cargo fmt --check` finds drift, run `cargo fmt --manifest-path backend/Cargo.toml --all` and stage the changed files.
 
-- [ ] **Step 2: Append to progress.md**
+- [x] **Step 2: Append to progress.md**
 
 Add one line at the end of `progress.md`:
 
@@ -1261,7 +1263,7 @@ Add one line at the end of `progress.md`:
 
 Use the current UTC timestamp.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add progress.md

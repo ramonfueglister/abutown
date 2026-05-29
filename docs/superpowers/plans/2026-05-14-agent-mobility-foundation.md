@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the first authoritative backend slice where an agent can walk to a stop, board a vehicle, ride as a passenger, alight, and continue walking.
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
 
-**Status 2026-05-15:** Backend foundation implemented and verified with `cargo test --manifest-path backend/Cargo.toml --workspace`. The current branch exposes `/mobility` and streams `mobility_delta` messages over `/ws`; frontend rendering of mobility is still outside this plan's completed backend scope.
+**Goal:** Build the first authoritative backend slice where an agent can walk to a stop, board a vehicle, ride as a passenger, alight, and continue walking.
 
 **Architecture:** Keep agent intent/mobility separate from traffic. `sim-core` owns deterministic mobility data and systems; `sim-server` exposes snapshots and deltas. Vehicles are independent simulated objects, and agents refer to vehicles through an explicit `InVehicle` location instead of being moved separately while riding.
 
@@ -63,7 +63,7 @@ This plan does not implement lane traffic, congestion, pathfinding, parking, pla
 **Files:**
 - Modify: `backend/crates/protocol/src/lib.rs`
 
-- [ ] **Step 1: Add failing protocol serialization tests**
+- [x] **Step 1: Add failing protocol serialization tests**
 
 Append these tests inside the existing `#[cfg(test)] mod tests` in `backend/crates/protocol/src/lib.rs`:
 
@@ -137,7 +137,7 @@ fn websocket_mobility_delta_serializes_with_type_tag() {
 }
 ```
 
-- [ ] **Step 2: Run the failing protocol tests**
+- [x] **Step 2: Run the failing protocol tests**
 
 Run:
 
@@ -147,7 +147,7 @@ cargo test --manifest-path backend/Cargo.toml -p abutown-protocol mobility_
 
 Expected: FAIL with missing `MobilitySnapshotDto`, `AgentMobilityDto`, `VehicleMobilityDto`, `StopMobilityDto`, `AgentMobilityStateDto`, `MobilityDeltaDto`, and `ServerMessageDto::MobilityDelta`.
 
-- [ ] **Step 3: Add protocol DTOs**
+- [x] **Step 3: Add protocol DTOs**
 
 In `backend/crates/protocol/src/lib.rs`, add these DTOs above `ServerMessageDto`:
 
@@ -223,7 +223,7 @@ pub enum ServerMessageDto {
 }
 ```
 
-- [ ] **Step 4: Verify protocol tests pass**
+- [x] **Step 4: Verify protocol tests pass**
 
 Run:
 
@@ -233,7 +233,7 @@ cargo test --manifest-path backend/Cargo.toml -p abutown-protocol mobility_
 
 Expected: PASS for the two mobility protocol tests.
 
-- [ ] **Step 5: Commit protocol DTOs**
+- [x] **Step 5: Commit protocol DTOs**
 
 Run:
 
@@ -249,7 +249,7 @@ git commit -m "feat: add mobility protocol DTOs"
 - Create: `backend/crates/sim-core/src/mobility.rs`
 - Modify: `backend/crates/sim-core/src/lib.rs`
 
-- [ ] **Step 1: Write failing domain tests**
+- [x] **Step 1: Write failing domain tests**
 
 Create `backend/crates/sim-core/src/mobility.rs` with only this test module:
 
@@ -287,7 +287,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the failing domain test**
+- [x] **Step 2: Run the failing domain test**
 
 Run:
 
@@ -297,7 +297,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core seeded_world_starts_wi
 
 Expected: FAIL because the mobility module and ID newtypes do not exist.
 
-- [ ] **Step 3: Add stable mobility IDs**
+- [x] **Step 3: Add stable mobility IDs**
 
 In `backend/crates/sim-core/src/ids.rs`, add these newtypes below `StableEntityId`:
 
@@ -318,7 +318,7 @@ pub struct RouteId(pub String);
 pub struct LinkId(pub String);
 ```
 
-- [ ] **Step 4: Add the mobility module export**
+- [x] **Step 4: Add the mobility module export**
 
 In `backend/crates/sim-core/src/lib.rs`, add:
 
@@ -326,7 +326,7 @@ In `backend/crates/sim-core/src/lib.rs`, add:
 pub mod mobility;
 ```
 
-- [ ] **Step 5: Implement the domain model**
+- [x] **Step 5: Implement the domain model**
 
 Replace `backend/crates/sim-core/src/mobility.rs` with:
 
@@ -700,7 +700,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 6: Verify the domain test passes**
+- [x] **Step 6: Verify the domain test passes**
 
 Run:
 
@@ -710,7 +710,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core seeded_world_starts_wi
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the domain model**
+- [x] **Step 7: Commit the domain model**
 
 Run:
 
@@ -724,7 +724,7 @@ git commit -m "feat: add mobility domain model"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add failing walking tests**
+- [x] **Step 1: Add failing walking tests**
 
 Append these tests to the existing mobility test module:
 
@@ -763,7 +763,7 @@ fn walking_agent_reaches_pickup_stop_and_waits() {
 }
 ```
 
-- [ ] **Step 2: Run the failing walking test**
+- [x] **Step 2: Run the failing walking test**
 
 Run:
 
@@ -773,7 +773,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core walking_agent_reaches_
 
 Expected: FAIL because `tick_mobility` does not exist.
 
-- [ ] **Step 3: Implement walking progression**
+- [x] **Step 3: Implement walking progression**
 
 In the `impl MobilityWorld` block in `backend/crates/sim-core/src/mobility.rs`, add:
 
@@ -837,7 +837,7 @@ fn tick_walking_agent(&mut self, agent_id: &AgentId) -> bool {
 }
 ```
 
-- [ ] **Step 4: Verify walking test passes**
+- [x] **Step 4: Verify walking test passes**
 
 Run:
 
@@ -847,7 +847,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core walking_agent_reaches_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit walking tick**
+- [x] **Step 5: Commit walking tick**
 
 Run:
 
@@ -861,7 +861,7 @@ git commit -m "feat: move agents from walking to waiting"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add failing vehicle tick test**
+- [x] **Step 1: Add failing vehicle tick test**
 
 Append this test to the mobility test module:
 
@@ -891,7 +891,7 @@ fn vehicle_respects_initial_dwell_then_moves_on_route() {
 }
 ```
 
-- [ ] **Step 2: Run the failing vehicle test**
+- [x] **Step 2: Run the failing vehicle test**
 
 Run:
 
@@ -901,7 +901,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core vehicle_respects_initi
 
 Expected: FAIL because `tick_mobility` only changes agents.
 
-- [ ] **Step 3: Implement vehicle movement**
+- [x] **Step 3: Implement vehicle movement**
 
 In `tick_mobility`, after the walking-agent loop and before returning `MobilityDelta`, add:
 
@@ -945,7 +945,7 @@ fn tick_vehicle(&mut self, vehicle_id: &VehicleId) -> bool {
 }
 ```
 
-- [ ] **Step 4: Verify vehicle test passes**
+- [x] **Step 4: Verify vehicle test passes**
 
 Run:
 
@@ -955,7 +955,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core vehicle_respects_initi
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit vehicle route tick**
+- [x] **Step 5: Commit vehicle route tick**
 
 Run:
 
@@ -969,7 +969,7 @@ git commit -m "feat: add deterministic vehicle movement"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add failing boarding and alighting test**
+- [x] **Step 1: Add failing boarding and alighting test**
 
 Append this test to the mobility test module:
 
@@ -1033,7 +1033,7 @@ fn agent_boards_rides_alights_and_walks_to_activity() {
 }
 ```
 
-- [ ] **Step 2: Run the failing boarding test**
+- [x] **Step 2: Run the failing boarding test**
 
 Run:
 
@@ -1043,7 +1043,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core agent_boards_rides_ali
 
 Expected: FAIL because boarding and alighting are not implemented.
 
-- [ ] **Step 3: Extend walking completion for final activity**
+- [x] **Step 3: Extend walking completion for final activity**
 
 Replace `tick_walking_agent` with this version:
 
@@ -1092,7 +1092,7 @@ fn tick_walking_agent(&mut self, agent_id: &AgentId) -> bool {
 }
 ```
 
-- [ ] **Step 4: Add boarding and alighting phases**
+- [x] **Step 4: Add boarding and alighting phases**
 
 Replace `tick_mobility` with this phased order. Boarding happens before walking, so an agent that reaches a stop boards on the next tick. Alighting happens before vehicle movement, so an agent rides through the tick where the vehicle arrives and exits on the next tick.
 
@@ -1286,7 +1286,7 @@ fn tick_alighting(&mut self) -> Vec<AgentId> {
 }
 ```
 
-- [ ] **Step 5: Verify boarding test passes**
+- [x] **Step 5: Verify boarding test passes**
 
 Run:
 
@@ -1296,7 +1296,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core agent_boards_rides_ali
 
 Expected: PASS.
 
-- [ ] **Step 6: Run all mobility core tests**
+- [x] **Step 6: Run all mobility core tests**
 
 Run:
 
@@ -1306,7 +1306,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core mobility
 
 Expected: PASS for all mobility module tests.
 
-- [ ] **Step 7: Commit boarding and alighting**
+- [x] **Step 7: Commit boarding and alighting**
 
 Run:
 
@@ -1320,7 +1320,7 @@ git commit -m "feat: board agents into vehicles"
 **Files:**
 - Modify: `backend/crates/sim-core/src/ecs_runtime.rs`
 
-- [ ] **Step 1: Add failing materialization test**
+- [x] **Step 1: Add failing materialization test**
 
 Append this test to the existing `ecs_runtime.rs` test module:
 
@@ -1345,7 +1345,7 @@ fn agents_and_vehicles_can_be_materialized_as_hot_entities() {
 }
 ```
 
-- [ ] **Step 2: Run the failing materialization test**
+- [x] **Step 2: Run the failing materialization test**
 
 Run:
 
@@ -1355,7 +1355,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core agents_and_vehicles_ca
 
 Expected: FAIL because `MaterializedKind::Agent` and `MaterializedKind::Vehicle` do not exist.
 
-- [ ] **Step 3: Add materialized kinds**
+- [x] **Step 3: Add materialized kinds**
 
 Change `MaterializedKind` in `backend/crates/sim-core/src/ecs_runtime.rs` to:
 
@@ -1370,7 +1370,7 @@ pub enum MaterializedKind {
 }
 ```
 
-- [ ] **Step 4: Verify materialization test passes**
+- [x] **Step 4: Verify materialization test passes**
 
 Run:
 
@@ -1380,7 +1380,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-core agents_and_vehicles_ca
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit materialized kinds**
+- [x] **Step 5: Commit materialized kinds**
 
 Run:
 
@@ -1396,7 +1396,7 @@ git commit -m "feat: materialize agents and vehicles"
 - Modify: `backend/crates/sim-server/src/app.rs`
 - Modify: `backend/crates/sim-server/tests/http.rs`
 
-- [ ] **Step 1: Add failing HTTP snapshot test**
+- [x] **Step 1: Add failing HTTP snapshot test**
 
 Append this test to `backend/crates/sim-server/tests/http.rs`:
 
@@ -1434,7 +1434,7 @@ async fn mobility_snapshot_is_available() {
 }
 ```
 
-- [ ] **Step 2: Run the failing HTTP snapshot test**
+- [x] **Step 2: Run the failing HTTP snapshot test**
 
 Run:
 
@@ -1444,7 +1444,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server mobility_snapshot_is
 
 Expected: FAIL with 404 for `/mobility`.
 
-- [ ] **Step 3: Add mobility state to `SimulationRuntime`**
+- [x] **Step 3: Add mobility state to `SimulationRuntime`**
 
 Modify the imports in `backend/crates/sim-server/src/runtime.rs` to include:
 
@@ -1488,7 +1488,7 @@ pub fn next_mobility_delta(&mut self) -> MobilityDeltaDto {
 }
 ```
 
-- [ ] **Step 4: Add `/mobility` route**
+- [x] **Step 4: Add `/mobility` route**
 
 In `backend/crates/sim-server/src/app.rs`, add `MobilitySnapshotDto` to the protocol import:
 
@@ -1514,7 +1514,7 @@ async fn mobility(State(state): State<AppState>) -> Json<MobilitySnapshotDto> {
 }
 ```
 
-- [ ] **Step 5: Verify HTTP snapshot test passes**
+- [x] **Step 5: Verify HTTP snapshot test passes**
 
 Run:
 
@@ -1524,7 +1524,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server mobility_snapshot_is
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit runtime snapshot**
+- [x] **Step 6: Commit runtime snapshot**
 
 Run:
 
@@ -1540,7 +1540,7 @@ git commit -m "feat: expose mobility snapshot"
 - Modify: `backend/crates/sim-server/src/app.rs`
 - Modify: `backend/crates/sim-server/tests/websocket.rs`
 
-- [ ] **Step 1: Add failing WebSocket mobility test**
+- [x] **Step 1: Add failing WebSocket mobility test**
 
 Append this test to `backend/crates/sim-server/tests/websocket.rs`:
 
@@ -1576,7 +1576,7 @@ async fn websocket_sends_mobility_deltas_after_hello() {
 }
 ```
 
-- [ ] **Step 2: Run the failing WebSocket mobility test**
+- [x] **Step 2: Run the failing WebSocket mobility test**
 
 Run:
 
@@ -1586,7 +1586,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobi
 
 Expected: FAIL because the broadcast loop only emits tile pulses.
 
-- [ ] **Step 3: Add combined simulation tick messages**
+- [x] **Step 3: Add combined simulation tick messages**
 
 In `backend/crates/sim-server/src/runtime.rs`, add:
 
@@ -1614,7 +1614,7 @@ loop {
 }
 ```
 
-- [ ] **Step 4: Verify WebSocket mobility test passes**
+- [x] **Step 4: Verify WebSocket mobility test passes**
 
 Run:
 
@@ -1624,7 +1624,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobi
 
 Expected: PASS.
 
-- [ ] **Step 5: Run existing WebSocket tests**
+- [x] **Step 5: Run existing WebSocket tests**
 
 Run:
 
@@ -1655,7 +1655,7 @@ where
 }
 ```
 
-- [ ] **Step 6: Commit WebSocket mobility deltas**
+- [x] **Step 6: Commit WebSocket mobility deltas**
 
 Run:
 
@@ -1669,7 +1669,7 @@ git commit -m "feat: stream mobility deltas"
 **Files:**
 - Modify: `backend/README.md`
 
-- [ ] **Step 1: Update backend README**
+- [x] **Step 1: Update backend README**
 
 Add this section to `backend/README.md` after the common commands:
 
@@ -1699,7 +1699,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobi
 ```
 ```
 
-- [ ] **Step 2: Run targeted verification**
+- [x] **Step 2: Run targeted verification**
 
 Run:
 
@@ -1712,7 +1712,7 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobi
 
 Expected: all commands PASS.
 
-- [ ] **Step 3: Run formatting**
+- [x] **Step 3: Run formatting**
 
 Run:
 
@@ -1722,7 +1722,7 @@ cargo fmt --manifest-path backend/Cargo.toml --all
 
 Expected: command exits 0.
 
-- [ ] **Step 4: Run clippy on changed backend crates**
+- [x] **Step 4: Run clippy on changed backend crates**
 
 Run:
 
@@ -1732,7 +1732,7 @@ cargo clippy --manifest-path backend/Cargo.toml -p abutown-protocol -p sim-core 
 
 Expected: command exits 0.
 
-- [ ] **Step 5: Commit docs and formatting**
+- [x] **Step 5: Commit docs and formatting**
 
 Run:
 

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Replace JSON wire encoding (WS + HTTP) with Protocol Buffers; schema lives in `backend/crates/protocol/proto/abutown.proto` as the single source of truth.
 
 **Architecture:** Schema-first. Rust codegen via `prost-build` in `build.rs`. TS codegen via `@bufbuild/protoc-gen-es`. DB persistence stays JSON (separate storage DTOs). Atomic cutover — no JSON fallback on the wire.
@@ -26,14 +28,14 @@
 - Modify: `package.json` (scripts + devDependencies)
 - Modify: `backend/Cargo.toml` (workspace dependency)
 
-- [ ] **Step 1: Verify `protoc` is in PATH**
+- [x] **Step 1: Verify `protoc` is in PATH**
 
 ```bash
 which protoc && protoc --version
 ```
 Expected: `protoc` resolvable, version ≥ 3.20. If not, halt and tell the user to `brew install protobuf`. `prost-build` shells out to `protoc`.
 
-- [ ] **Step 2: Add prost workspace dependencies**
+- [x] **Step 2: Add prost workspace dependencies**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml`, add to `[workspace.dependencies]`:
 
@@ -42,7 +44,7 @@ prost = "0.13"
 prost-build = "0.13"
 ```
 
-- [ ] **Step 3: Add prost to `abutown-protocol` deps + build-deps**
+- [x] **Step 3: Add prost to `abutown-protocol` deps + build-deps**
 
 Replace the `[dependencies]` section of `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/Cargo.toml` with:
 
@@ -67,7 +69,7 @@ prost-build.workspace = true
 serde_json.workspace = true
 ```
 
-- [ ] **Step 4: Create the proto directory + empty schema**
+- [x] **Step 4: Create the proto directory + empty schema**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/proto/abutown.proto`:
 
@@ -81,7 +83,7 @@ message Ping {
 }
 ```
 
-- [ ] **Step 5: Create `build.rs`**
+- [x] **Step 5: Create `build.rs`**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/build.rs`:
 
@@ -93,7 +95,7 @@ fn main() {
 }
 ```
 
-- [ ] **Step 6: Wire the generated module into `lib.rs`**
+- [x] **Step 6: Wire the generated module into `lib.rs`**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/src/lib.rs`, ABOVE all existing serde DTOs, add at the very top:
 
@@ -107,14 +109,14 @@ pub mod v1 {
 
 Do NOT touch the existing serde DTOs in this task — they coexist with the empty proto module. They're removed in Tasks 4-7 as call sites migrate.
 
-- [ ] **Step 7: Build to confirm codegen works**
+- [x] **Step 7: Build to confirm codegen works**
 
 ```bash
 cargo build --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p abutown-protocol 2>&1 | tail -10
 ```
 Expected: clean build. If `protoc` fails or the include path can't be found, abort and read the prost-build error.
 
-- [ ] **Step 8: Verify the generated `Ping` type is accessible**
+- [x] **Step 8: Verify the generated `Ping` type is accessible**
 
 Add a sanity test in `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/src/lib.rs` at the very end:
 
@@ -140,7 +142,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: PASS.
 
-- [ ] **Step 9: Create `buf.yaml`**
+- [x] **Step 9: Create `buf.yaml`**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/buf.yaml`:
 
@@ -156,7 +158,7 @@ breaking:
     - WIRE_JSON
 ```
 
-- [ ] **Step 10: Create `buf.gen.yaml`**
+- [x] **Step 10: Create `buf.gen.yaml`**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/buf.gen.yaml`:
 
@@ -172,7 +174,7 @@ inputs:
   - directory: backend/crates/protocol/proto
 ```
 
-- [ ] **Step 11: Add `@bufbuild/protobuf` runtime + dev tools to `package.json`**
+- [x] **Step 11: Add `@bufbuild/protobuf` runtime + dev tools to `package.json`**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/package.json` add to `dependencies`:
 
@@ -200,7 +202,7 @@ And modify the existing `"build"` script to chain proto generation:
 "build": "npm run generate:proto && node scripts/build.mjs"
 ```
 
-- [ ] **Step 12: Create `scripts/generate-proto-ts.mjs`**
+- [x] **Step 12: Create `scripts/generate-proto-ts.mjs`**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/scripts/generate-proto-ts.mjs`:
 
@@ -231,14 +233,14 @@ if (result.status !== 0) {
 console.log('proto codegen complete →', outDir);
 ```
 
-- [ ] **Step 13: Run `npm install` to fetch the new packages**
+- [x] **Step 13: Run `npm install` to fetch the new packages**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npm install 2>&1 | tail -10
 ```
 Expected: clean install. `@bufbuild/protobuf` and `@bufbuild/buf` resolved.
 
-- [ ] **Step 14: Run `npm run generate:proto` to verify the toolchain**
+- [x] **Step 14: Run `npm run generate:proto` to verify the toolchain**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npm run generate:proto 2>&1 | tail -10
@@ -256,7 +258,7 @@ plugins:
       - import_extension=js
 ```
 
-- [ ] **Step 15: Gitignore generated output**
+- [x] **Step 15: Gitignore generated output**
 
 Append to `/Users/ramonfuglister/Desktop/Coding/abutown/.gitignore`:
 
@@ -273,14 +275,14 @@ Actually create `.gitkeep` now:
 mkdir -p /Users/ramonfuglister/Desktop/Coding/abutown/src/backend/proto && touch /Users/ramonfuglister/Desktop/Coding/abutown/src/backend/proto/.gitkeep
 ```
 
-- [ ] **Step 16: Verify TS codegen produces compilable output**
+- [x] **Step 16: Verify TS codegen produces compilable output**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npx tsc --noEmit 2>&1 | tail -5
 ```
 Expected: clean. The Ping type from the proto file should compile.
 
-- [ ] **Step 17: Run all gates**
+- [x] **Step 17: Run all gates**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p abutown-protocol 2>&1 | grep "test result"
@@ -289,7 +291,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && npx tsc --noEmit 2>&1 | tail 
 ```
 Expected: all clean.
 
-- [ ] **Step 18: Commit**
+- [x] **Step 18: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/Cargo.toml backend/crates/protocol/Cargo.toml backend/crates/protocol/build.rs backend/crates/protocol/proto/abutown.proto backend/crates/protocol/src/lib.rs buf.yaml buf.gen.yaml scripts/generate-proto-ts.mjs src/backend/proto/.gitkeep .gitignore package.json package-lock.json
@@ -318,7 +320,7 @@ EOF
 - Modify: `backend/crates/protocol/proto/abutown.proto` (replace placeholder with full schema)
 - Modify: `backend/crates/protocol/src/lib.rs` (add roundtrip tests)
 
-- [ ] **Step 1: Replace `abutown.proto` with the full schema**
+- [x] **Step 1: Replace `abutown.proto` with the full schema**
 
 Overwrite `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/proto/abutown.proto` with:
 
@@ -562,21 +564,21 @@ message Stop {
 }
 ```
 
-- [ ] **Step 2: Verify Rust codegen still compiles**
+- [x] **Step 2: Verify Rust codegen still compiles**
 
 ```bash
 cargo build --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p abutown-protocol 2>&1 | tail -10
 ```
 Expected: clean. If a proto syntax error occurs, fix and retry.
 
-- [ ] **Step 3: Regenerate TS code**
+- [x] **Step 3: Regenerate TS code**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npm run generate:proto 2>&1 | tail -5
 ```
 Expected: clean. `src/backend/proto/abutown/v1/abutown_pb.ts` now contains all the types.
 
-- [ ] **Step 4: Replace the placeholder roundtrip test with the full suite**
+- [x] **Step 4: Replace the placeholder roundtrip test with the full suite**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/src/lib.rs`, REPLACE the `proto_scaffolding_tests` module with:
 
@@ -808,14 +810,14 @@ mod proto_roundtrip_tests {
 }
 ```
 
-- [ ] **Step 5: Run the new tests**
+- [x] **Step 5: Run the new tests**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p abutown-protocol proto_roundtrip 2>&1 | tail -20
 ```
 Expected: 14 tests pass.
 
-- [ ] **Step 6: Verify the unknown-field-tag byte sequence**
+- [x] **Step 6: Verify the unknown-field-tag byte sequence**
 
 If `unknown_field_is_ignored` fails on the manually-encoded tag, recompute via:
 
@@ -833,7 +835,7 @@ If `unknown_field_is_ignored` fails on the manually-encoded tag, recompute via:
 
 If the manual bytes don't decode cleanly, simplify the test to encode a `MobilityChunkDelta` with field 99 set, then decode as `Hello` — proves cross-message unknown-tag tolerance.
 
-- [ ] **Step 7: Run workspace tests + clippy**
+- [x] **Step 7: Run workspace tests + clippy**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml 2>&1 | tail -5
@@ -841,7 +843,7 @@ cargo clippy --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backen
 ```
 Expected: all clean.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/crates/protocol/proto/abutown.proto backend/crates/protocol/src/lib.rs
@@ -870,21 +872,21 @@ EOF
 - Modify: `src/backend/proto/` (regenerated; not committed since gitignored)
 - Create: `src/backend/proto/roundtrip.test.ts`
 
-- [ ] **Step 1: Regenerate TS to pick up the full schema**
+- [x] **Step 1: Regenerate TS to pick up the full schema**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npm run generate:proto 2>&1 | tail -5
 ```
 Expected: success.
 
-- [ ] **Step 2: Verify generated types compile**
+- [x] **Step 2: Verify generated types compile**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npx tsc --noEmit 2>&1 | tail -5
 ```
 Expected: clean.
 
-- [ ] **Step 3: Inspect the generated module structure**
+- [x] **Step 3: Inspect the generated module structure**
 
 ```bash
 ls /Users/ramonfuglister/Desktop/Coding/abutown/src/backend/proto/abutown/v1/
@@ -896,7 +898,7 @@ grep -E "^export (class|enum)" /Users/ramonfuglister/Desktop/Coding/abutown/src/
 ```
 Expected: `ServerMessage`, `ClientMessage`, `Hello`, etc.
 
-- [ ] **Step 4: Write the TS roundtrip test**
+- [x] **Step 4: Write the TS roundtrip test**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/backend/proto/roundtrip.test.ts`:
 
@@ -1005,21 +1007,21 @@ describe('proto roundtrip', () => {
 });
 ```
 
-- [ ] **Step 5: Run vitest**
+- [x] **Step 5: Run vitest**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npx vitest run src/backend/proto/roundtrip.test.ts 2>&1 | tail -20
 ```
 Expected: 4 tests pass.
 
-- [ ] **Step 6: Run all vitest tests to confirm nothing else broke**
+- [x] **Step 6: Run all vitest tests to confirm nothing else broke**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npx vitest run 2>&1 | tail -10
 ```
 Expected: previous 158 + 4 new = 162 (give or take).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 The test file is committed; the generated TS files are gitignored.
 
@@ -1052,7 +1054,7 @@ EOF
 
 This task is large. Approach: introduce `wire::*` re-exports of proto types as the canonical wire-DTO names. Migrate the WS hot path (`chunk_delta_to_dto`, `chunk_snapshot_to_dto`, `send_server_message`, WS recv arm). Leave HTTP endpoints on JSON until Task 6.
 
-- [ ] **Step 1: Add a `wire` re-export module to `abutown-protocol`**
+- [x] **Step 1: Add a `wire` re-export module to `abutown-protocol`**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/src/lib.rs`, after the `pub mod v1;` block, add:
 
@@ -1066,7 +1068,7 @@ pub mod wire {
 
 This gives callers `abutown_protocol::wire::ServerMessage` to disambiguate from legacy serde DTOs while migration proceeds.
 
-- [ ] **Step 2: Update `chunk_delta_to_dto` in `app.rs`**
+- [x] **Step 2: Update `chunk_delta_to_dto` in `app.rs`**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/sim-server/src/app.rs`, find `fn chunk_delta_to_dto`. Replace its body to produce the proto type. The function signature changes:
 
@@ -1180,7 +1182,7 @@ fn direction_to_proto(d: abutown_protocol::DirectionDto) -> abutown_protocol::wi
 
 Note: the exact field names on the legacy `AgentMobilityStateDto`, `VehicleMobilityDto` etc. depend on the existing serde structs. Cross-check by reading `protocol/src/lib.rs:237-300` and adapt field accessors if they differ from what's shown above.
 
-- [ ] **Step 3: Update `chunk_snapshot_to_dto` similarly**
+- [x] **Step 3: Update `chunk_snapshot_to_dto` similarly**
 
 In `app.rs`, replace `chunk_snapshot_to_dto`:
 
@@ -1213,7 +1215,7 @@ fn chunk_snapshot_to_dto(
 }
 ```
 
-- [ ] **Step 4: Update `RuntimeReadView` field types**
+- [x] **Step 4: Update `RuntimeReadView` field types**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/sim-server/src/runtime_view.rs`, change the field types from serde DTOs to proto types:
 
@@ -1270,7 +1272,7 @@ Note: `PersistPayload.chunk_snapshots` is internal to sim-server's persist path.
 
 For this task, prefer minimal disruption: keep `pub chunk_snapshots: Vec<sim_core::persistence::ChunkSnapshotPayload>` referencing whatever currently exists. The wire-side `chunk_snapshots: HashMap<ChunkCoord, w::ChunkSnapshot>` is the new field for the HTTP /chunks endpoint (lock-free reads).
 
-- [ ] **Step 5: Update `build_read_view_from_runtime`**
+- [x] **Step 5: Update `build_read_view_from_runtime`**
 
 In `app.rs`, modify `build_read_view_from_runtime` to construct the proto types. The construction is mechanical: every legacy DTO build becomes a proto build. Add conversion helpers:
 
@@ -1357,7 +1359,7 @@ fn stop_dto_to_proto(s: &abutown_protocol::StopMobilityDto) -> abutown_protocol:
 
 Wire it up: every field of `RuntimeReadView` populated in `build_read_view_from_runtime` calls one of the conversion helpers above.
 
-- [ ] **Step 6: Update `send_server_message` to encode binary**
+- [x] **Step 6: Update `send_server_message` to encode binary**
 
 In `app.rs`, find `send_server_message`:
 
@@ -1389,7 +1391,7 @@ abutown_protocol::wire::ServerMessage {
 
 Apply similarly for `Hello`, `MobilityChunkSnapshot`, `WorldEvent`, `TilePulse`.
 
-- [ ] **Step 7: Update WS recv arm**
+- [x] **Step 7: Update WS recv arm**
 
 Find the WS recv arm in `app.rs`:
 
@@ -1426,7 +1428,7 @@ inbound = socket.recv() => {
 
 Add `use prost::Message;` at the top of `app.rs` if not already present.
 
-- [ ] **Step 8: Update `handle_client_message` to accept proto type**
+- [x] **Step 8: Update `handle_client_message` to accept proto type**
 
 The signature changes from `&ClientMessageDto` to `&w::ClientMessage`. The match arms inside change from `ClientMessageDto::ChunkSubscribe(payload)` to matching on the oneof:
 
@@ -1464,11 +1466,11 @@ out.push(abutown_protocol::wire::ServerMessage {
 });
 ```
 
-- [ ] **Step 9: Update `apply_mutation_owned` for SubscriptionDiff snapshots**
+- [x] **Step 9: Update `apply_mutation_owned` for SubscriptionDiff snapshots**
 
 Inside `app.rs::apply_mutation_owned`, the SubscriptionDiff arm builds snapshots. Change to produce proto types via `chunk_snapshot_to_dto` (already returns proto after Step 3).
 
-- [ ] **Step 10: Update `Hello` construction**
+- [x] **Step 10: Update `Hello` construction**
 
 Find the WS hello assembly (`stream_world_deltas` early part):
 
@@ -1487,13 +1489,13 @@ let hello = {
 };
 ```
 
-- [ ] **Step 11: Update `next_pulse` and `WorldEvent` paths**
+- [x] **Step 11: Update `next_pulse` and `WorldEvent` paths**
 
 `runtime::next_pulse()` currently returns `ServerMessageDto::TilePulse(TilePulseDeltaDto {...})`. Change it to return `abutown_protocol::wire::ServerMessage` carrying `TilePulse`. Find and update.
 
 Similarly, the command-acceptance path in `command` HTTP handler sends `ServerMessageDto::WorldEvent`. Convert.
 
-- [ ] **Step 12: Build and fix everything that fails to compile**
+- [x] **Step 12: Build and fix everything that fails to compile**
 
 ```bash
 cargo build --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p sim-server 2>&1 | tail -40
@@ -1511,14 +1513,14 @@ let legacy = runtime.world_summary();
 let proto = world_summary_to_proto(&legacy);
 ```
 
-- [ ] **Step 13: Run sim-server lib tests**
+- [x] **Step 13: Run sim-server lib tests**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p sim-server --lib 2>&1 | tail -5
 ```
 Adapt failing tests where the new wire type differs from the old DTO (field-name mapping, oneof unwrapping).
 
-- [ ] **Step 14: Update `tests/websocket.rs`**
+- [x] **Step 14: Update `tests/websocket.rs`**
 
 Each test that currently does `serde_json::from_str::<ServerMessageDto>(&text)` on a Text frame becomes `prost::Message::decode` on a Binary frame. Update the test helper that connects WS:
 
@@ -1567,14 +1569,14 @@ let sub = abutown_protocol::wire::ClientMessage {
 ws.send(tokio_tungstenite::tungstenite::Message::Binary(sub.encode_to_vec().into())).await.unwrap();
 ```
 
-- [ ] **Step 15: Run all sim-server tests**
+- [x] **Step 15: Run all sim-server tests**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p sim-server 2>&1 | tail -15
 ```
 Expected: all tests pass after WS test updates.
 
-- [ ] **Step 16: Clippy + workspace tests**
+- [x] **Step 16: Clippy + workspace tests**
 
 ```bash
 cargo clippy --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml --all-targets -- -D warnings 2>&1 | tail -5
@@ -1582,7 +1584,7 @@ cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/
 ```
 Expected: all green.
 
-- [ ] **Step 17: Commit**
+- [x] **Step 17: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/
@@ -1618,7 +1620,7 @@ EOF
 - Modify: `src/backend/mobilityState.ts` (consume proto types)
 - Modify: `scripts/smoke-7b.mjs` (decode binary frames)
 
-- [ ] **Step 1: Set binaryType + replace onmessage**
+- [x] **Step 1: Set binaryType + replace onmessage**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/src/backend/mobilityClient.ts` find the WS construction and `onmessage` handler. Change:
 
@@ -1646,7 +1648,7 @@ socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
 
 The function `applyServerMessage` in `mobilityState.ts` now receives a `ServerMessage` proto object instead of a discriminated-union JSON-shaped one. Update its signature in Step 4.
 
-- [ ] **Step 2: Update `chunkSubscriptionClient.ts` to encode binary**
+- [x] **Step 2: Update `chunkSubscriptionClient.ts` to encode binary**
 
 ```typescript
 import {
@@ -1686,7 +1688,7 @@ if (removed.length > 0) {
 
 Change `send` type to `(bytes: Uint8Array) => void`. Caller (mobilityClient.ts) does `socket.send(bytes)`.
 
-- [ ] **Step 3: Slim down `mobilityProtocol.ts`**
+- [x] **Step 3: Slim down `mobilityProtocol.ts`**
 
 Most of this file's JSON parsing / encoding is now dead. Replace its contents with thin re-exports + type shim where needed:
 
@@ -1719,7 +1721,7 @@ export type ChunkCoordDto = { x: number; y: number };
 
 Old functions `parseServerMessage`, `encodeClientMessage` are DELETED. Callers of `encodeClientMessage` in `chunkSubscriptionClient.ts` are already updated in Step 2.
 
-- [ ] **Step 4: Update `mobilityState.ts::applyServerMessage`**
+- [x] **Step 4: Update `mobilityState.ts::applyServerMessage`**
 
 The function previously matched on `message.type` strings. Now match on the proto `oneof` discriminator:
 
@@ -1755,7 +1757,7 @@ export function applyServerMessage(
 
 `applyMobilityChunkSnapshot` and `applyMobilityChunkDelta` now accept the proto types directly. Field access changes from `delta.chunk.x` to `delta.chunk?.x ?? 0` because proto-es makes `oneof`-targeted fields optional. Update accordingly.
 
-- [ ] **Step 5: Update `mobilityClient.test.ts`**
+- [x] **Step 5: Update `mobilityClient.test.ts`**
 
 Tests that mocked `JSON.stringify(serverMessage)` → `WS.onmessage({data: text})` now need `ServerMessage(...).toBinary()` → `WS.onmessage({data: bytes.buffer})`. Replace mock helpers accordingly.
 
@@ -1770,14 +1772,14 @@ function helloMessage(worldId: string): ArrayBuffer {
 }
 ```
 
-- [ ] **Step 6: Run vitest**
+- [x] **Step 6: Run vitest**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npx vitest run 2>&1 | tail -10
 ```
 Adapt failing tests one by one. Expected: 158+ pass after migration.
 
-- [ ] **Step 7: Update `smoke-7b.mjs` to decode binary frames**
+- [x] **Step 7: Update `smoke-7b.mjs` to decode binary frames**
 
 Replace the `framereceived` handler in `/Users/ramonfuglister/Desktop/Coding/abutown/scripts/smoke-7b.mjs`:
 
@@ -1835,7 +1837,7 @@ function summarise(frames) {
 
 Remove the legacy `mobility_delta_LEGACY` key (it's no longer wire-relevant).
 
-- [ ] **Step 8: Run smoke**
+- [x] **Step 8: Run smoke**
 
 Start a fresh dev stack and run smoke:
 
@@ -1855,7 +1857,7 @@ If `got_chunk_deltas_per_tick` fails, verify:
 - Frontend's `mobilityState.ts` correctly handles proto types
 - Smoke's binary-decode branch is reachable (add a `console.log(frames.length, frames[0]?.body.case)` before the assertions)
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add src/ scripts/smoke-7b.mjs
@@ -1888,7 +1890,7 @@ EOF
 - Modify: `backend/crates/sim-server/tests/http.rs` (assertions on binary bodies)
 - Modify: any frontend HTTP consumers (`fetch` calls) — likely none post-Phase-7c but verify
 
-- [ ] **Step 1: Add a proto-bytes responder helper**
+- [x] **Step 1: Add a proto-bytes responder helper**
 
 In `app.rs`, near `build_router_from_state`:
 
@@ -1904,7 +1906,7 @@ fn proto_response<M: prost::Message>(message: M) -> axum::response::Response {
 }
 ```
 
-- [ ] **Step 2: Migrate `/health`**
+- [x] **Step 2: Migrate `/health`**
 
 ```rust
 async fn health(State(state): State<AppState>) -> axum::response::Response {
@@ -1912,7 +1914,7 @@ async fn health(State(state): State<AppState>) -> axum::response::Response {
 }
 ```
 
-- [ ] **Step 3: Migrate `/world`**
+- [x] **Step 3: Migrate `/world`**
 
 ```rust
 async fn world(State(state): State<AppState>) -> axum::response::Response {
@@ -1920,7 +1922,7 @@ async fn world(State(state): State<AppState>) -> axum::response::Response {
 }
 ```
 
-- [ ] **Step 4: Migrate `/mobility`**
+- [x] **Step 4: Migrate `/mobility`**
 
 ```rust
 async fn mobility(State(state): State<AppState>) -> axum::response::Response {
@@ -1928,7 +1930,7 @@ async fn mobility(State(state): State<AppState>) -> axum::response::Response {
 }
 ```
 
-- [ ] **Step 5: Migrate `/chunks/{x}/{y}`**
+- [x] **Step 5: Migrate `/chunks/{x}/{y}`**
 
 ```rust
 async fn chunk(
@@ -1943,7 +1945,7 @@ async fn chunk(
 }
 ```
 
-- [ ] **Step 6: Add proto extractor for `POST /commands`**
+- [x] **Step 6: Add proto extractor for `POST /commands`**
 
 In `app.rs`, add a custom extractor type:
 
@@ -1968,7 +1970,7 @@ where
 }
 ```
 
-- [ ] **Step 7: Migrate `command` handler**
+- [x] **Step 7: Migrate `command` handler**
 
 ```rust
 async fn command(
@@ -2031,7 +2033,7 @@ fn world_event_to_proto(e: &crate::commands::AppliedEvent) -> abutown_protocol::
 
 The `runtime_view::Mutation::ApplyCommand` field type changes to `abutown_protocol::wire::ClientCommand`. Update the drain handler in `apply_mutation_owned` to decode/handle the proto command type and translate to the internal command if needed.
 
-- [ ] **Step 8: Update `tests/http.rs`**
+- [x] **Step 8: Update `tests/http.rs`**
 
 Replace JSON-decoding assertions with prost-decode:
 
@@ -2104,13 +2106,13 @@ where F: Fn(&abutown_protocol::wire::ChunkSnapshot) -> bool,
 
 Update its callers accordingly (predicate type changes).
 
-- [ ] **Step 9: Run all integration tests**
+- [x] **Step 9: Run all integration tests**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml 2>&1 | tail -10
 ```
 
-- [ ] **Step 10: Run clippy + tsc + vitest + smoke**
+- [x] **Step 10: Run clippy + tsc + vitest + smoke**
 
 ```bash
 cargo clippy --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml --all-targets -- -D warnings 2>&1 | tail -3
@@ -2120,7 +2122,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && npx vitest run 2>&1 | tail -5
 
 Restart dev stack + run smoke (same as Task 5 step 8). Expected: 9/9.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/
@@ -2152,14 +2154,14 @@ EOF
 - Delete: `src/backend/mobilityProtocol.ts` JSON-encoder/parser sections (already done in Task 5, finalize re-exports)
 - Verify: no `serde_json::to_string` / `from_str` on wire path
 
-- [ ] **Step 1: Grep for remaining wire-side JSON usage**
+- [x] **Step 1: Grep for remaining wire-side JSON usage**
 
 ```bash
 grep -rn "serde_json::to_string\|serde_json::from_str\|serde_json::from_slice\|Json(" /Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/sim-server/src/ | grep -v "test\|persist\|storage" | head -20
 ```
 Expected: zero results. If any remain, migrate or document why (e.g. debug logging).
 
-- [ ] **Step 2: Drop serde derives from legacy wire DTOs**
+- [x] **Step 2: Drop serde derives from legacy wire DTOs**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/src/lib.rs`, for any DTO that no longer crosses the wire (because it's been replaced by proto), remove `Serialize, Deserialize` from its `#[derive(...)]`. Specifically these are candidates for removal:
 
@@ -2176,7 +2178,7 @@ In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/src/lib
 
 If conversion helpers in `app.rs` still construct legacy DTOs (because they convert legacy DTOs → proto), keep the legacy DTOs as plain `#[derive(Debug, Clone, PartialEq)]` (no serde) — they're still pure Rust types.
 
-- [ ] **Step 3: Verify build still passes**
+- [x] **Step 3: Verify build still passes**
 
 ```bash
 cargo build --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml 2>&1 | tail -10
@@ -2184,18 +2186,18 @@ cargo build --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend
 
 If a build fails because something still tries to serialize an ex-serde DTO, that's the smoking gun for a wire-path JSON leak. Fix the caller (it should be using proto).
 
-- [ ] **Step 4: Final `mobilityProtocol.ts` cleanup**
+- [x] **Step 4: Final `mobilityProtocol.ts` cleanup**
 
 Confirm the file is just re-exports. Anything else that survived Task 5 (e.g., type aliases, helper constructors) — review and either move to `proto/abutown/v1/abutown_pb.ts` (no, it's generated) or to a new `mobilityState.ts` helper. The endpoint of this step is a `mobilityProtocol.ts` of < 30 lines, all re-exports.
 
-- [ ] **Step 5: Search for orphaned legacy-DTO usages in frontend**
+- [x] **Step 5: Search for orphaned legacy-DTO usages in frontend**
 
 ```bash
 grep -rn "ServerMessageDto\|ClientMessageDto\|MobilityChunkDeltaDto" /Users/ramonfuglister/Desktop/Coding/abutown/src/ 2>/dev/null | head -20
 ```
 Expected: zero. If any remain, replace with proto types.
 
-- [ ] **Step 6: Run all gates**
+- [x] **Step 6: Run all gates**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml 2>&1 | tail -5
@@ -2204,7 +2206,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && npx tsc --noEmit 2>&1 | tail 
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npx vitest run 2>&1 | tail -5
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add backend/ src/
@@ -2234,7 +2236,7 @@ EOF
 - Modify: `backend/crates/protocol/Cargo.toml` (add bench entry + criterion dev-dep if absent)
 - Modify: `progress.md`
 
-- [ ] **Step 1: Add criterion to protocol crate**
+- [x] **Step 1: Add criterion to protocol crate**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/Cargo.toml`, ensure `[dev-dependencies]` contains:
 
@@ -2250,7 +2252,7 @@ name = "wire_size"
 harness = false
 ```
 
-- [ ] **Step 2: Create `wire_size.rs` bench**
+- [x] **Step 2: Create `wire_size.rs` bench**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/protocol/benches/wire_size.rs`:
 
@@ -2338,7 +2340,7 @@ criterion_group!(benches, bench_wire_size);
 criterion_main!(benches);
 ```
 
-- [ ] **Step 3: Run the bench and capture output**
+- [x] **Step 3: Run the bench and capture output**
 
 ```bash
 cargo bench --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml -p abutown-protocol --bench wire_size 2>&1 | tail -30
@@ -2352,7 +2354,7 @@ Expected output includes lines like:
 
 Verify the 50-agent ratio is ≥ 3×. If not, investigate (over-large strings, missing varint encoding for IDs, etc.) and re-bench.
 
-- [ ] **Step 4: Run all gates**
+- [x] **Step 4: Run all gates**
 
 ```bash
 cargo test --manifest-path /Users/ramonfuglister/Desktop/Coding/abutown/backend/Cargo.toml 2>&1 | tail -5
@@ -2361,7 +2363,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown && npx tsc --noEmit 2>&1 | tail 
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npx vitest run 2>&1 | tail -5
 ```
 
-- [ ] **Step 5: Bundle-size measurement**
+- [x] **Step 5: Bundle-size measurement**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown && npm run build 2>&1 | tail -10
@@ -2370,7 +2372,7 @@ du -sh dist/ 2>/dev/null || echo "no dist/"
 
 Compare with pre-migration build size (run `git stash`, `npm run build`, note size, `git stash pop`). Expected delta ≤ 50 KB gzipped from `@bufbuild/protobuf` runtime.
 
-- [ ] **Step 6: Re-confirm browser smoke 9/9**
+- [x] **Step 6: Re-confirm browser smoke 9/9**
 
 ```bash
 pkill -9 -f "sim-server" 2>/dev/null; pkill -f "vite" 2>/dev/null; sleep 2
@@ -2383,14 +2385,14 @@ pkill -f "sim-server" ; pkill -f "vite"
 
 Expected: 9/9.
 
-- [ ] **Step 7: Capture final acceptance grep**
+- [x] **Step 7: Capture final acceptance grep**
 
 ```bash
 grep -rn "serde_json::to_string\|serde_json::from_str" /Users/ramonfuglister/Desktop/Coding/abutown/backend/crates/sim-server/src/ | grep -v "test\|persist\|storage"
 ```
 Expected: zero matches. Otherwise: address before committing the progress note.
 
-- [ ] **Step 8: Append progress.md entry**
+- [x] **Step 8: Append progress.md entry**
 
 Insert immediately after line 18 in `/Users/ramonfuglister/Desktop/Coding/abutown/progress.md`. Use `date -u +%Y-%m-%dT%H:%M:%SZ` for the timestamp. Template (fill in measured numbers):
 
@@ -2398,7 +2400,7 @@ Insert immediately after line 18 in `/Users/ramonfuglister/Desktop/Coding/abutow
 2026-05-20T<HH:MM:SS>.000Z - Binary wire protocol via Protobuf: replaced JSON wire encoding (WS + HTTP) with Protocol Buffers. Single source of truth at `backend/crates/protocol/proto/abutown.proto` (proto3, package `abutown.v1`, 25+ messages + 4 enums covering hello / pulse / chunk delta-and-snapshot / world-event on the server side, chunk subscribe-and-unsubscribe + client command on the client side, plus all HTTP response bodies). Rust codegen via `prost-build` in `backend/crates/protocol/build.rs`; TS codegen via `@bufbuild/buf` driving `@bufbuild/protoc-gen-es` into `src/backend/proto/` (gitignored, regenerated by `npm run generate:proto` which now precedes `npm run build`). WS frames switched from `Message::Text` carrying JSON to `Message::Binary` carrying `prost::Message::encode_to_vec`; frontend `socket.binaryType = 'arraybuffer'`, decode via `ServerMessage.fromBinary`. HTTP endpoints (`/health`, `/world`, `/mobility`, `/chunks/{x}/{y}`, `POST /commands`) respond with `Content-Type: application/x-protobuf`; new `proto_response` helper + `ProtoBody<M>` extractor in `sim-server::app`. `RuntimeReadView`'s wire-facing fields all carry proto types; conversion helpers (`agent_dto_to_proto`, `vehicle_dto_to_proto`, `world_summary_to_proto`, etc.) bridge legacy serde DTOs to the new wire types. DB persistence (mobility_snapshots JSONB column) intentionally stays JSON-encoded — wire vs storage are now separate concerns. Legacy serde `Serialize`/`Deserialize` derives stripped from all wire-only DTOs (`ServerMessageDto`, etc.); they remain plain Rust types used only in conversion helpers. Wire-size bench `protocol/benches/wire_size`: for a `MobilityChunkDelta` with 50 walking agents, JSON is <JSON_BYTES> bytes vs Protobuf <PROTO_BYTES> bytes — ratio <RATIO>×, comfortably above the spec's ≥3× gate. Frontend bundle gained <BUNDLE_KB> KB gzipped from `@bufbuild/protobuf` runtime. All workspace cargo tests + 158+ vitest + clippy `-D warnings` + tsc clean. Browser smoke `scripts/smoke-7b.mjs` 9/9 with binary frames (`framereceived.payload` decoded via `ServerMessage.fromBinary` and counted by `body.case` discriminator). Acceptance grep `serde_json::{to_string,from_str}` returns zero matches under `backend/crates/sim-server/src/` (excluding tests and storage paths). Curl-debug recipe: `curl -s http://127.0.0.1:8080/world | protoc --decode=abutown.v1.WorldSummary -I backend/crates/protocol/proto abutown.proto`. Spec `docs/superpowers/specs/2026-05-20-binary-wire-protobuf-design.md`, plan `docs/superpowers/plans/2026-05-20-binary-wire-protobuf.md`. State-of-the-art 2026 ECS server wire protocol — single source of truth, schema-enforced, ~<RATIO>× smaller payloads per delta, future-compatible via Protobuf field tags.
 ```
 
-- [ ] **Step 9: Commit progress.md**
+- [x] **Step 9: Commit progress.md**
 
 ```bash
 git -C /Users/ramonfuglister/Desktop/Coding/abutown add progress.md backend/crates/protocol/Cargo.toml backend/crates/protocol/benches/wire_size.rs

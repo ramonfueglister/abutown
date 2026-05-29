@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Migrate `MobilityWorld` internal storage from `HashMap` to `bevy_ecs::World` + Components + Systems orchestrated via `Schedule`, keeping the public API and JSONB persistence byte-for-byte identical.
 
 **Architecture:** `MobilityWorld { world: World, schedule: Schedule, by_agent_id, by_vehicle_id }`. All entity state lives in ECS components (`Position`, `Direction`, `AgentMobilityStateComponent`, `WalkPlan`, `RoutePosition`, `VehicleKindComponent`, etc.). Tick logic runs as `bevy_ecs` systems. `AgentRecord` / `VehicleRecord` become boundary-only DTOs used by serde and accessor methods. Single PR, full migration, no duplicate paths.
@@ -45,7 +47,7 @@ Modified Cargo.toml:
 
 This task contains no code changes — it produces a written audit at the top of the implementation log. Confirms current `pub`/`priv` boundary so the migration doesn't accidentally break a hidden external access.
 
-- [ ] **Step 1: List all `MobilityWorld { ... }` struct-literal constructors**
+- [x] **Step 1: List all `MobilityWorld { ... }` struct-literal constructors**
 
 ```bash
 rg -n "MobilityWorld \{" backend/crates/
@@ -57,7 +59,7 @@ Expected hits:
 
 Note any unexpected hit — that's a site that needs to be updated to use `MobilityWorld::empty() + spawn_*` instead.
 
-- [ ] **Step 2: List all external accessors to `MobilityWorld` private fields**
+- [x] **Step 2: List all external accessors to `MobilityWorld` private fields**
 
 ```bash
 rg -nE "\.(agents|vehicles|stops|routes|link_polylines)\b" backend/crates/ --type rust | grep -v "mobility.rs"
@@ -69,7 +71,7 @@ Expected: `link_polylines` is `pub` today (line 143). Confirm which crates read 
 
 Make a list. Each site needs an accessor method on `MobilityWorld` (e.g. `pub fn link_polyline(&self, link_id: &LinkId) -> Option<&[(f32, f32)]>`).
 
-- [ ] **Step 3: Document audit results in a fresh commit message**
+- [x] **Step 3: Document audit results in a fresh commit message**
 
 No code change. Commit only this plan (already committed). Write the audit findings into the implementation log of the subagent's progress report.
 
@@ -91,14 +93,14 @@ This is a pure re-org: take the existing 1870-LOC file, split into the module st
 
 (Components/resources/systems modules come in Tasks 3-9; for now we just split records / dto / seed out and keep `MobilityWorld` + tick + accessors in `mod.rs`.)
 
-- [ ] **Step 1: Move `mobility.rs` to `mobility/mod.rs`**
+- [x] **Step 1: Move `mobility.rs` to `mobility/mod.rs`**
 
 ```bash
 mkdir -p backend/crates/sim-core/src/mobility
 git mv backend/crates/sim-core/src/mobility.rs backend/crates/sim-core/src/mobility/mod.rs
 ```
 
-- [ ] **Step 2: Verify it still compiles unchanged**
+- [x] **Step 2: Verify it still compiles unchanged**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -106,7 +108,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green. Rust's module system finds `mobility/mod.rs` from `pub mod mobility;` in `lib.rs`.
 
-- [ ] **Step 3: Extract `records.rs`**
+- [x] **Step 3: Extract `records.rs`**
 
 Move these types out of `mod.rs` into `mobility/records.rs`:
 
@@ -135,7 +137,7 @@ mod records;
 pub use records::*;
 ```
 
-- [ ] **Step 4: Extract `dto.rs`**
+- [x] **Step 4: Extract `dto.rs`**
 
 Move into `mobility/dto.rs`:
 - `impl From<&AgentRecord> for AgentMobilityDto`
@@ -154,7 +156,7 @@ mod dto;
 pub use dto::*;
 ```
 
-- [ ] **Step 5: Extract `seed.rs`**
+- [x] **Step 5: Extract `seed.rs`**
 
 Move the entire `pub mod seed { ... }` block out of `mod.rs` into `mobility/seed.rs`:
 
@@ -173,7 +175,7 @@ pub mod seed;
 
 (Note: `seed` was already `pub mod seed` inside the file — same pub-ness, different file.)
 
-- [ ] **Step 6: Verify the full split compiles**
+- [x] **Step 6: Verify the full split compiles**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml --workspace
@@ -182,7 +184,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility
 
 Expected: green. If `cargo` complains about imports, fix per-file `use` statements until clean. Don't change semantics.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/ backend/crates/sim-core/src/lib.rs
@@ -198,7 +200,7 @@ git commit -m "refactor: split mobility.rs into module (records, dto, seed)"
 - Create: `backend/crates/sim-core/src/mobility/components.rs`
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs` (add `pub mod components;`)
 
-- [ ] **Step 1: Write the file**
+- [x] **Step 1: Write the file**
 
 Create `backend/crates/sim-core/src/mobility/components.rs`:
 
@@ -285,7 +287,7 @@ pub struct DwellTicksRemaining(pub u16);
 pub struct Dirty;
 ```
 
-- [ ] **Step 2: Wire into `mod.rs`**
+- [x] **Step 2: Wire into `mod.rs`**
 
 In `backend/crates/sim-core/src/mobility/mod.rs`:
 
@@ -293,7 +295,7 @@ In `backend/crates/sim-core/src/mobility/mod.rs`:
 pub mod components;
 ```
 
-- [ ] **Step 3: Verify compile**
+- [x] **Step 3: Verify compile**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -301,7 +303,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green. No new tests yet (components are passive declarations; behavior comes in Task 5).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/components.rs backend/crates/sim-core/src/mobility/mod.rs
@@ -316,7 +318,7 @@ git commit -m "feat: define mobility ECS components"
 - Create: `backend/crates/sim-core/src/mobility/resources.rs`
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 
-- [ ] **Step 1: Write the file**
+- [x] **Step 1: Write the file**
 
 Create `backend/crates/sim-core/src/mobility/resources.rs`:
 
@@ -345,13 +347,13 @@ pub struct DirtyAgents(pub HashSet<Entity>);
 pub struct DirtyVehicles(pub HashSet<Entity>);
 ```
 
-- [ ] **Step 2: Wire into `mod.rs`**
+- [x] **Step 2: Wire into `mod.rs`**
 
 ```rust
 pub mod resources;
 ```
 
-- [ ] **Step 3: Verify compile**
+- [x] **Step 3: Verify compile**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -359,7 +361,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/resources.rs backend/crates/sim-core/src/mobility/mod.rs
@@ -375,7 +377,7 @@ This is the central task. `MobilityWorld` stops being a struct of HashMaps and b
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 
-- [ ] **Step 1: Replace the `MobilityWorld` struct**
+- [x] **Step 1: Replace the `MobilityWorld` struct**
 
 Replace:
 
@@ -408,7 +410,7 @@ pub struct MobilityWorld {
 
 `pub(crate)` (not `pub`) — externally only the accessor methods are visible.
 
-- [ ] **Step 2: Add `MobilityWorld::empty()` constructor**
+- [x] **Step 2: Add `MobilityWorld::empty()` constructor**
 
 Inside `impl MobilityWorld`:
 
@@ -442,7 +444,7 @@ impl MobilityWorld {
 
 Actually no — strict ordering matters. Move on to Task 6 next which creates the stub `systems.rs` module so this compiles immediately.
 
-- [ ] **Step 3: Replace accessor methods**
+- [x] **Step 3: Replace accessor methods**
 
 `agent`, `vehicle`, `stop`, `tick` all change. Replace the existing bodies:
 
@@ -510,7 +512,7 @@ Return types for `agent`/`vehicle` change from `Option<&AgentRecord>` to `Option
 
 The plan-vs-reality: today some callers do `world.agent(&id).cloned()`. After this change they'd do `world.agent(&id)` directly (and the returned `Option<AgentRecord>` is already owned). For the migration, also accept that `&AgentRecord` callers need updating; that's part of the cutover.
 
-- [ ] **Step 4: Add private helpers `agent_record_from_entity` / `vehicle_record_from_entity`**
+- [x] **Step 4: Add private helpers `agent_record_from_entity` / `vehicle_record_from_entity`**
 
 ```rust
 impl MobilityWorld {
@@ -552,7 +554,7 @@ impl MobilityWorld {
 
 The exact field names depend on what `AgentRecord` / `VehicleRecord` actually have — read them in `records.rs` and align.
 
-- [ ] **Step 5: Add `spawn_agent` / `spawn_vehicle` from records**
+- [x] **Step 5: Add `spawn_agent` / `spawn_vehicle` from records**
 
 These are used by `seed::*` and the snapshot deserializer:
 
@@ -619,7 +621,7 @@ impl MobilityWorld {
 
 Initial `Position` / `Direction` are placeholders — the first call to `tick_mobility` runs `compute_world_coord_system` which overwrites them. (Or we eagerly compute them at spawn — implementer choice; both work.)
 
-- [ ] **Step 6: Add `tick_mobility` running the schedule**
+- [x] **Step 6: Add `tick_mobility` running the schedule**
 
 Replace the existing `tick_mobility` body:
 
@@ -642,7 +644,7 @@ impl MobilityWorld {
 }
 ```
 
-- [ ] **Step 7: Update `snapshot()` to query ECS**
+- [x] **Step 7: Update `snapshot()` to query ECS**
 
 ```rust
 impl MobilityWorld {
@@ -658,7 +660,7 @@ impl MobilityWorld {
 
 Same return shape as before. The serde derive on `MobilitySnapshot` produces identical JSON.
 
-- [ ] **Step 8: Remove the old HashMap-based methods**
+- [x] **Step 8: Remove the old HashMap-based methods**
 
 Delete the obsolete `tick_walking_agent`, `tick_vehicle`, `tick_boarding`, `tick_alighting`, `resolve_link_polyline`, `world_coord_for_agent`, `direction_for_agent`, `world_coord_for_vehicle`, `direction_for_vehicle`, `sprite_key_for_agent`, `sprite_key_for_vehicle`, `agent_dto_for`, `vehicle_dto_for` impl bodies that operated on `self.agents` / `self.vehicles` as HashMaps.
 
@@ -716,7 +718,7 @@ pub fn agent_dto_for(&self, agent_id: &AgentId) -> Option<abutown_protocol::Agen
 
 The exact `sprite_key` derivation must match the current impl byte-for-byte — read the old code and replicate.
 
-- [ ] **Step 9: Build the workspace; iterate on compile errors**
+- [x] **Step 9: Build the workspace; iterate on compile errors**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -726,7 +728,7 @@ Expected at first: MANY compile errors. The old `tick_walking_agent` etc. refere
 
 For NOW, get the *non-test* code to compile. Comment out the body of `tick_mobility` if needed (replace with `MobilityDelta::default()`) so the file compiles. Tasks 6-9 add the schedule + systems back.
 
-- [ ] **Step 10: Commit (intermediate, won't pass tests yet)**
+- [x] **Step 10: Commit (intermediate, won't pass tests yet)**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs
@@ -742,7 +744,7 @@ git commit -m "refactor(WIP): MobilityWorld storage on bevy_ecs::World"
 **Files:**
 - Create: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Create the file with empty systems and the install function**
+- [x] **Step 1: Create the file with empty systems and the install function**
 
 ```rust
 use bevy_ecs::prelude::*;
@@ -786,13 +788,13 @@ pub fn tick_increment_system(mut tick: ResMut<Tick>) {
 }
 ```
 
-- [ ] **Step 2: Wire into mod.rs**
+- [x] **Step 2: Wire into mod.rs**
 
 ```rust
 pub mod systems;
 ```
 
-- [ ] **Step 3: Compile**
+- [x] **Step 3: Compile**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -800,7 +802,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green for non-test code. Tests still don't compile (Task 10 fixes them).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs backend/crates/sim-core/src/mobility/mod.rs
@@ -816,7 +818,7 @@ git commit -m "feat: mobility systems skeleton with bevy Schedule"
 
 Each system reads the current state, mutates progress, marks dirty.
 
-- [ ] **Step 1: Implement `walk_advance_system`**
+- [x] **Step 1: Implement `walk_advance_system`**
 
 ```rust
 pub fn walk_advance_system(
@@ -853,7 +855,7 @@ fn arc_length(points: &[(f32, f32)]) -> f32 {
 
 This is a simplification of the existing `tick_walking_agent` — the implementer should read that fn carefully and preserve its full state-transition logic. If the existing fn does plan-cursor advancement on `progress >= 1.0`, the system must do the same. The implementer plans the actual transitions per existing semantics.
 
-- [ ] **Step 2: Implement `vehicle_advance_system`**
+- [x] **Step 2: Implement `vehicle_advance_system`**
 
 ```rust
 pub fn vehicle_advance_system(
@@ -893,7 +895,7 @@ pub fn vehicle_advance_system(
 
 Match the existing semantics from `tick_vehicle` — in particular, the dwell-on-arriving-at-stop logic.
 
-- [ ] **Step 3: Compile**
+- [x] **Step 3: Compile**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -901,7 +903,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green. Tests still broken — that's Task 10.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -917,7 +919,7 @@ git commit -m "feat: walk_advance + vehicle_advance ECS systems"
 
 These two systems are the trickiest because they touch BOTH agents and vehicles. Use `ParamSet` to hold the two disjoint queries.
 
-- [ ] **Step 1: Implement `stop_arrival_system`**
+- [x] **Step 1: Implement `stop_arrival_system`**
 
 Read the existing `tick_boarding` logic to understand the exact transition rules (which `AgentMobilityState` variant flips to which based on what conditions). Replicate as a system that:
 
@@ -936,7 +938,7 @@ pub fn stop_arrival_system(
 
 The actual logic body comes from reading the old `tick_boarding` carefully and porting it.
 
-- [ ] **Step 2: Implement `boarding_alighting_system`**
+- [x] **Step 2: Implement `boarding_alighting_system`**
 
 This one needs both agent and vehicle queries. Use `ParamSet`:
 
@@ -959,7 +961,7 @@ pub fn boarding_alighting_system(
 
 The exact logic mirrors the old `tick_boarding` and `tick_alighting`. The two-phase approach is necessary because Bevy's borrow checker doesn't allow holding mutable refs from both ParamSet slots simultaneously.
 
-- [ ] **Step 3: Compile + targeted test**
+- [x] **Step 3: Compile + targeted test**
 
 After Task 10 fixes the test compilation, the test `agent_boards_rides_alights_and_walks_to_activity` will run through this code path. For now, just verify compile.
 
@@ -967,7 +969,7 @@ After Task 10 fixes the test compilation, the test `agent_boards_rides_alights_a
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -981,7 +983,7 @@ git commit -m "feat: stop_arrival + boarding_alighting ECS systems"
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility/systems.rs`
 
-- [ ] **Step 1: Implement `compute_world_coord_system`**
+- [x] **Step 1: Implement `compute_world_coord_system`**
 
 ```rust
 pub fn compute_world_coord_system(
@@ -1048,11 +1050,11 @@ fn world_coord_at_progress(points: &[(f32, f32)], progress: f32) -> (f32, f32) {
 
 This logic is duplicated from `LinkGeometry::world_coord_at_progress`. Tempting to dedupe — but the function is in `mobility_geometry.rs` and importing it via `crate::mobility_geometry::LinkGeometry::world_coord_at_progress` adds a heap allocation per call. Acceptable to inline for the hot path; OR keep using the existing helper if profiling later shows the heap is OK. Pick one; either works for correctness.
 
-- [ ] **Step 2: Implement `compute_direction_system`**
+- [x] **Step 2: Implement `compute_direction_system`**
 
 Same shape but computes `Direction` from the polyline tangent at `progress`.
 
-- [ ] **Step 3: Compile**
+- [x] **Step 3: Compile**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -1060,7 +1062,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
 
 Expected: green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/systems.rs
@@ -1076,7 +1078,7 @@ git commit -m "feat: compute_world_coord + compute_direction ECS systems"
 
 Replace the existing `MobilityWorld { agents: HashMap::new(), ... }` literal initializers with `MobilityWorld::empty()` + `spawn_*` / `add_*` / `set_link_polyline` calls.
 
-- [ ] **Step 1: Rewrite `tiny_world()`**
+- [x] **Step 1: Rewrite `tiny_world()`**
 
 The existing function builds 20 walking agents + 4 trams + stops + routes. Replace:
 
@@ -1118,11 +1120,11 @@ pub fn tiny_world() -> MobilityWorld {
 
 Read the existing 130-LOC body of `tiny_world` carefully and port every literal. Don't change any IDs or values — Phase-3 tests assert on these exact values.
 
-- [ ] **Step 2: Rewrite `from_network()`**
+- [x] **Step 2: Rewrite `from_network()`**
 
 Same approach: replace the existing struct literal with `empty() + spawn_*` calls. The logic for "spawn 6 walkers per corridor, 17 cars per arterial, 4 trams" stays — only the storage mechanism changes.
 
-- [ ] **Step 3: Compile + test seed::* fns**
+- [x] **Step 3: Compile + test seed::* fns**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-core
@@ -1131,7 +1133,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core seed::
 
 Expected: green for the seed tests. Other tests still broken — fixing them in Task 11.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/seed.rs
@@ -1147,7 +1149,7 @@ git commit -m "feat: seed via spawn_*_from_record (no more HashMap literals)"
 
 The existing tests use `MobilityWorld { agents: HashMap::new(), ... }` literals (sample_world helper at line 1390 of the original file). Convert them to `MobilityWorld::empty() + spawn_*` calls. Also: today the `MobilityWorld` derives `Serialize`/`Deserialize` directly via `#[derive(Serialize, Deserialize)]` on the struct. The new `MobilityWorld` can't derive serde because it contains `World` (not Serialize). Implement custom impls that serialize/deserialize the `MobilitySnapshot` shape (already serde-derived in `records.rs`).
 
-- [ ] **Step 1: Add custom `Serialize` for `MobilityWorld`**
+- [x] **Step 1: Add custom `Serialize` for `MobilityWorld`**
 
 ```rust
 impl serde::Serialize for MobilityWorld {
@@ -1201,7 +1203,7 @@ struct WorldRepr<'a> {
 
 The implementer MUST verify this against the actual Phase-3 JSON before proceeding. Pin a Phase-3 snapshot file as fixture (Task 12).
 
-- [ ] **Step 2: Add `Deserialize`**
+- [x] **Step 2: Add `Deserialize`**
 
 ```rust
 impl<'de> serde::Deserialize<'de> for MobilityWorld {
@@ -1238,11 +1240,11 @@ impl<'de> serde::Deserialize<'de> for MobilityWorld {
 }
 ```
 
-- [ ] **Step 3: Update test helpers that built struct literals**
+- [x] **Step 3: Update test helpers that built struct literals**
 
 Find `sample_world` (at original line 1302, now in mod.rs) and rewrite it as `MobilityWorld::empty() + spawn_*` calls — same agents/vehicles/routes/stops as before, just constructed differently.
 
-- [ ] **Step 4: Run all mobility tests**
+- [x] **Step 4: Run all mobility tests**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core mobility
@@ -1252,7 +1254,7 @@ Expected: green. The existing 30+ tests pass because the public API didn't chang
 
 If `mobility_world_serde_round_trip_preserves_state` fails: the JSON shape diverged. Run the test with `--nocapture` and inspect the diff. The likely culprit is field ordering inside the WorldRepr struct — match the alphabetic/declared order the old derive used.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility/mod.rs
@@ -1267,7 +1269,7 @@ git commit -m "feat: custom serde for ECS MobilityWorld; tests converted"
 - Create: `backend/crates/sim-core/tests/fixtures/phase3-mobility-snapshot.json`
 - Create: `backend/crates/sim-core/tests/mobility_persistence_round_trip.rs`
 
-- [ ] **Step 1: Capture a Phase-3 snapshot**
+- [x] **Step 1: Capture a Phase-3 snapshot**
 
 Before merging any of this branch, capture a snapshot from the current main. The simplest approach:
 
@@ -1296,7 +1298,7 @@ If the test doesn't print the JSON, add a temporary println, capture, then remov
 
 If the captured-pre-Phase-5 approach is awkward, the alternative: trust that the new ECS-based serialize produces a stable shape, and check it in as the canonical fixture. Future regressions detected via diff against this fixture. Either way the fixture exists.
 
-- [ ] **Step 2: Write the round-trip test**
+- [x] **Step 2: Write the round-trip test**
 
 `backend/crates/sim-core/tests/mobility_persistence_round_trip.rs`:
 
@@ -1319,7 +1321,7 @@ fn phase3_snapshot_round_trips_byte_for_byte() {
 }
 ```
 
-- [ ] **Step 3: Run**
+- [x] **Step 3: Run**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --test mobility_persistence_round_trip
@@ -1327,7 +1329,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core --test mobili
 
 Expected: PASS. If it fails: the new ECS serialize produces a different shape than Phase-3 (e.g. different HashMap ordering, missing fields). Fix the `Serialize` impl until equal.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/crates/sim-core/tests/fixtures/phase3-mobility-snapshot.json backend/crates/sim-core/tests/mobility_persistence_round_trip.rs
@@ -1343,7 +1345,7 @@ git commit -m "test: phase-3 mobility snapshot round-trips byte-for-byte through
 - Modify: `backend/crates/sim-core/Cargo.toml` (add criterion + bench harness)
 - Create: `backend/crates/sim-core/benches/mobility_tick.rs`
 
-- [ ] **Step 1: Add criterion dep**
+- [x] **Step 1: Add criterion dep**
 
 In `backend/Cargo.toml`'s `[workspace.dependencies]`:
 
@@ -1362,7 +1364,7 @@ name = "mobility_tick"
 harness = false
 ```
 
-- [ ] **Step 2: Write the bench**
+- [x] **Step 2: Write the bench**
 
 ```rust
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -1409,7 +1411,7 @@ criterion_group!(benches, tick_benchmark);
 criterion_main!(benches);
 ```
 
-- [ ] **Step 3: Run the benchmark**
+- [x] **Step 3: Run the benchmark**
 
 ```bash
 cargo bench --locked --manifest-path backend/Cargo.toml -p sim-core --bench mobility_tick
@@ -1419,7 +1421,7 @@ Expected: criterion prints throughput (e.g. `tick_10k_walkers_1k_cars time: [N �
 
 If the bench is much slower (>10 ms), there's a perf bug somewhere — profile with `cargo bench -- --profile-time 5` and address. For Phase 5 acceptance, the bench just has to **run**; the number is recorded but not asserted.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/Cargo.toml backend/crates/sim-core/Cargo.toml backend/crates/sim-core/benches/mobility_tick.rs
@@ -1433,7 +1435,7 @@ git commit -m "feat: criterion benchmark for mobility tick hot-path"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run full quality gates**
+- [x] **Step 1: Run full quality gates**
 
 ```bash
 cargo fmt --manifest-path backend/Cargo.toml --all
@@ -1446,7 +1448,7 @@ npm run build
 
 Expected: all green (excluding the 2 pre-existing `noRetiredAssets.test.ts` failures unrelated to Phase 5).
 
-- [ ] **Step 2: Restart the dev stack and probe**
+- [x] **Step 2: Restart the dev stack and probe**
 
 ```bash
 pkill -f run-dev-stack 2>/dev/null
@@ -1460,20 +1462,20 @@ curl -s http://127.0.0.1:8080/mobility | python3 -c "import sys,json; d=json.loa
 
 Expected: `agents=1011 vehicles=55`. Same numbers as Phase 3 (the seed produces the same population; only the storage changed).
 
-- [ ] **Step 3: Append to progress.md**
+- [x] **Step 3: Append to progress.md**
 
 ```
 2026-05-16T<HH:MM:SS>.000Z - Mobility hot-path migrated to bevy_ecs: MobilityWorld now wraps bevy_ecs::World with Position/Direction/AgentMarker/VehicleMarker/AgentMobilityStateComponent/WalkPlan/WalkSpeed/RoutePosition/VehicleKindComponent/Capacity/Occupants/DwellTicksRemaining components. Tick logic runs as bevy systems (walk_advance, vehicle_advance, stop_arrival, boarding_alighting, compute_world_coord, compute_direction, tick_increment) orchestrated by a Schedule with Advance→Output→Bookkeeping ordering. Public API unchanged; JSONB persistence byte-for-byte identical (verified via frozen phase3-mobility-snapshot.json round-trip test). New criterion benchmark mobility_tick measures 10k walkers + 1k cars per-tick cost. Phase 5 of the million-agent roadmap; backend now positioned to scale to ~100k entities per the bevy_ecs literature.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add progress.md
 git commit -m "chore: phase 5 quality gate + progress note"
 ```
 
-- [ ] **Step 5: Push**
+- [x] **Step 5: Push**
 
 ```bash
 git push origin main

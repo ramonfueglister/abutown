@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Replace the wrapping map camera with a smoother bounded camera and a subtle world-edge treatment so the player always understands they are on one fixed city map.
 
 **Architecture:** Keep the current single-canvas renderer. Move camera math into a small pure TypeScript module, test the camera constraints and zoom anchoring there, then wire `src/main.ts` to render one map plus an atmospheric non-interactive outskirts band instead of nine wrapped copies.
@@ -24,7 +26,7 @@
 - Create: `src/cameraController.ts`
 - Create: `tests/render/cameraController.test.ts`
 
-- [ ] **Step 1: Write failing camera tests**
+- [x] **Step 1: Write failing camera tests**
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -112,16 +114,16 @@ describe('cameraController', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `npm test -- tests/render/cameraController.test.ts`
 Expected: FAIL because `src/cameraController.ts` does not exist.
 
-- [ ] **Step 3: Implement camera controller**
+- [x] **Step 3: Implement camera controller**
 
 Create `src/cameraController.ts` with a mutable camera state, pointer-anchored zoom, exponential damping, and hard/soft grid-center constraints.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- tests/render/cameraController.test.ts`
 Expected: PASS.
@@ -132,20 +134,20 @@ Expected: PASS.
 - Modify: `src/main.ts`
 - Modify: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Add an e2e assertion for fixed-map camera metadata**
+- [x] **Step 1: Add an e2e assertion for fixed-map camera metadata**
 
 Extend the smoke test to assert `state.city.camera.mode === 'bounded-fixed-map'` and that the camera target exists.
 
-- [ ] **Step 2: Run e2e test to verify it fails**
+- [x] **Step 2: Run e2e test to verify it fails**
 
 Run: `npm run test:e2e -- tests/e2e/render-smoke.spec.ts`
 Expected: FAIL because the state still exposes the old camera object.
 
-- [ ] **Step 3: Wire `src/main.ts` to the camera controller**
+- [x] **Step 3: Wire `src/main.ts` to the camera controller**
 
 Replace direct `camera.x/y/scale` mutation with target mutation plus `dampCamera()` in the frame loop. Remove `wrapCameraAroundMap()` and `wrappedSceneOffsets()`. Render only the original city map.
 
-- [ ] **Step 4: Run e2e test to verify it passes**
+- [x] **Step 4: Run e2e test to verify it passes**
 
 Run: `npm run test:e2e -- tests/e2e/render-smoke.spec.ts`
 Expected: PASS.
@@ -155,19 +157,19 @@ Expected: PASS.
 **Files:**
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Add non-interactive outskirts rendering**
+- [x] **Step 1: Add non-interactive outskirts rendering**
 
 Draw a thin band of low-alpha terrain tiles outside the playable rectangle before drawing the city terrain. Use deterministic hash jitter and lower alpha so the area reads as distance, not extra playable map.
 
-- [ ] **Step 2: Add map-edge exit continuation**
+- [x] **Step 2: Add map-edge exit continuation**
 
 Extend border roads and rails a few tiles into the outskirts when their masks point outward, so transport lines visually disappear into the edge treatment.
 
-- [ ] **Step 3: Add perimeter mist**
+- [x] **Step 3: Add perimeter mist**
 
 Draw a subtle diamond-shaped mist band outside the playable map after world drawables, keeping the city readable while softening the hard rectangular cutoff.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run: `npm run build`
 Expected: PASS.

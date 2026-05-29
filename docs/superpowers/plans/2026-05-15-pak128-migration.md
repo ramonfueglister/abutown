@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Replace the OpenTTD/OpenGFX visual stack with a pak128-only Simutrans renderer and remove the old OpenTTD asset files, import scripts, catalogs, and runtime references.
 
 **Architecture:** Keep the Zurich world model, placement, topology, and movement systems. Replace every renderer asset path with semantic pak128 catalog lookup, use native pak128 frame metadata, and make missing roles fail tests and startup instead of silently drawing an old asset. Delete the retired OpenTTD/OpenGFX asset pipeline once the pak128 catalog covers the visible runtime categories.
@@ -53,7 +55,7 @@ This is a hard visual cutover, not an incremental mixed-asset slice. It is accep
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/src/assets/assetPack.ts`
 - Test: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/assetPack.test.ts`
 
-- [ ] **Step 1: Write strict lookup tests**
+- [x] **Step 1: Write strict lookup tests**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/assetPack.test.ts`:
 
@@ -101,7 +103,7 @@ describe('asset pack lookup', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -111,7 +113,7 @@ npm test -- tests/render/assetPack.test.ts
 
 Expected: FAIL with an import error for `../../src/assets/assetPack`.
 
-- [ ] **Step 3: Implement strict asset-pack contract**
+- [x] **Step 3: Implement strict asset-pack contract**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/assets/assetPack.ts`:
 
@@ -201,7 +203,7 @@ export function createAssetPack(definition: AssetPackDefinition): AssetPack {
 }
 ```
 
-- [ ] **Step 4: Run asset-pack tests**
+- [x] **Step 4: Run asset-pack tests**
 
 Run:
 
@@ -211,7 +213,7 @@ npm test -- tests/render/assetPack.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -229,7 +231,7 @@ git commit -m "feat: add strict pak128 asset pack contract"
 - Create: `/Users/ramonfuglister/Desktop/Coding/abutown/public/simutrans-assets/pak128/README.md`
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/package.json`
 
-- [ ] **Step 1: Write catalog completeness tests**
+- [x] **Step 1: Write catalog completeness tests**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/pak128Catalog.test.ts`:
 
@@ -271,7 +273,7 @@ describe('pak128 catalog', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -281,11 +283,11 @@ npm test -- tests/render/pak128Catalog.test.ts
 
 Expected: FAIL with an import error for `../../src/assets/pak128Catalog`.
 
-- [ ] **Step 3: Add importer**
+- [x] **Step 3: Add importer**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/scripts/import-pak128-assets.mjs` with a sparse checkout that copies every source PNG/DAT referenced by `src/assets/pak128Catalog.ts` plus `LICENSE.txt` and `README.txt`. Use revision `acdf2f0793a6beee5ea34ea85d308fbbeccf50c5`. The importer must delete and recreate only `/Users/ramonfuglister/Desktop/Coding/abutown/public/simutrans-assets/pak128`.
 
-- [ ] **Step 4: Add complete pak128 catalog**
+- [x] **Step 4: Add complete pak128 catalog**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/src/assets/pak128Catalog.ts` with:
 
@@ -362,7 +364,7 @@ for (const role of PAK128_REQUIRED_ROLES) pak128AssetPack.require(role);
 
 Extend `pak128Assets` in the same file until every `PAK128_REQUIRED_ROLES` entry resolves to a real pak128 asset. Use DAT files to derive source rectangles; do not invent rectangles where DAT coordinates exist. The `for` loop is intentional: app startup must fail during development if a role is missing.
 
-- [ ] **Step 5: Update package script**
+- [x] **Step 5: Update package script**
 
 Modify `/Users/ramonfuglister/Desktop/Coding/abutown/package.json`:
 
@@ -376,7 +378,7 @@ Remove:
 "assets:opengfx": "node scripts/import-opengfx-assets.mjs"
 ```
 
-- [ ] **Step 6: Run importer and catalog tests**
+- [x] **Step 6: Run importer and catalog tests**
 
 Run:
 
@@ -387,7 +389,7 @@ npm test -- tests/render/pak128Catalog.test.ts tests/render/assetPack.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -408,7 +410,7 @@ git commit -m "feat: add complete pak128 asset catalog"
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/vehicleSprites.test.ts`
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/spriteCleanup.test.ts`
 
-- [ ] **Step 1: Update smoke test first**
+- [x] **Step 1: Update smoke test first**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/tests/e2e/render-smoke.spec.ts`, assert:
 
@@ -420,7 +422,7 @@ expect(state.city.assetPack).toEqual({
 expect(state.city.nonPak128AssetPaths).toEqual([]);
 ```
 
-- [ ] **Step 2: Run smoke test to verify it fails**
+- [x] **Step 2: Run smoke test to verify it fails**
 
 Run:
 
@@ -430,7 +432,7 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: FAIL because `assetPack` and `nonPak128AssetPaths` are not reported yet.
 
-- [ ] **Step 3: Replace runtime asset loading**
+- [x] **Step 3: Replace runtime asset loading**
 
 In `/Users/ramonfuglister/Desktop/Coding/abutown/src/main.ts`, remove `assetPaths`, `buildingSheets`, `/opengfx2/` image loading, and OpenGFX draw branches. Add:
 
@@ -452,11 +454,11 @@ const imageEntries = [
 ];
 ```
 
-- [ ] **Step 4: Draw all categories through pak128 roles**
+- [x] **Step 4: Draw all categories through pak128 roles**
 
 Update terrain, road, rail, rail station, detail, building, tree, car, train, and pedestrian draw helpers so every category calls `activeAssetPack.require(role)` before drawing. Keep per-category layout logic, but remove every old path constant.
 
-- [ ] **Step 5: Report pak128 runtime diagnostics**
+- [x] **Step 5: Report pak128 runtime diagnostics**
 
 In `window.render_game_to_text`, add:
 
@@ -468,7 +470,7 @@ assetPack: {
 nonPak128AssetPaths: [...images.keys()].filter((path) => !path.startsWith('/simutrans-assets/pak128/')),
 ```
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 
@@ -479,7 +481,7 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: PASS and `nonPak128AssetPaths` is `[]`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -500,7 +502,7 @@ git commit -m "feat: cut renderer over to pak128 assets"
 - Delete: `/Users/ramonfuglister/Desktop/Coding/abutown/public/openttd-fan-assets`
 - Test: `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noRetiredAssets.test.ts`
 
-- [ ] **Step 1: Add retired-asset guard test**
+- [x] **Step 1: Add retired-asset guard test**
 
 Create `/Users/ramonfuglister/Desktop/Coding/abutown/tests/render/noRetiredAssets.test.ts`:
 
@@ -541,7 +543,7 @@ describe('retired OpenTTD/OpenGFX asset removal', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -551,7 +553,7 @@ npm test -- tests/render/noRetiredAssets.test.ts
 
 Expected: FAIL while retired files/directories still exist.
 
-- [ ] **Step 3: Delete retired files**
+- [x] **Step 3: Delete retired files**
 
 Run:
 
@@ -560,7 +562,7 @@ git rm -r public/opengfx2 public/openttd-fan-assets
 git rm scripts/import-opengfx-assets.mjs scripts/decode-openttd-fan-grfs.mjs src/assets/opengfxCatalog.ts src/assets/opengfxCatalog.generated.ts tests/render/opengfxCatalog.test.ts
 ```
 
-- [ ] **Step 4: Run guard test**
+- [x] **Step 4: Run guard test**
 
 Run:
 
@@ -570,7 +572,7 @@ npm test -- tests/render/noRetiredAssets.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -584,7 +586,7 @@ git commit -m "chore: remove retired OpenTTD asset pipeline"
 **Files:**
 - Modify: `/Users/ramonfuglister/Desktop/Coding/abutown/public/simutrans-assets/pak128/README.md`
 
-- [ ] **Step 1: Confirm pak128 provenance**
+- [x] **Step 1: Confirm pak128 provenance**
 
 Ensure `/Users/ramonfuglister/Desktop/Coding/abutown/public/simutrans-assets/pak128/README.md` records:
 
@@ -599,7 +601,7 @@ This directory contains the pak128 source PNG and DAT files used by Abutown's ru
 License: Artistic License 2.0 unless an imported DAT file declares otherwise. See `LICENSE.txt` and individual DAT files.
 ```
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -612,7 +614,7 @@ rg -n "opengfx2|openttd-fan-assets|assets:opengfx|opengfxCatalog|import-opengfx|
 
 Expected: tests, build, and e2e PASS. The `rg` command prints no matches.
 
-- [ ] **Step 3: Commit final provenance changes if needed**
+- [x] **Step 3: Commit final provenance changes if needed**
 
 Run:
 

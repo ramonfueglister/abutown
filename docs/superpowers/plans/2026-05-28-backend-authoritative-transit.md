@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This backend-transit slice was completed at the time, then superseded by Traffic Simulation Hardening, which removed runtime tram movement again.
+
 **Goal:** Replace frontend-only moving trains with backend-authoritative tram vehicles seeded from the canonical Base World Bundle.
 
 **Architecture:** Extend bundle validation and mobility seeding so `spawns.tram_lines` creates deterministic `VehicleKind::Tram` records on routing transit lines. Then remove local train offset state from the browser runtime and render backend tram vehicles from the existing mobility stream.
@@ -45,7 +47,7 @@ Modify:
 - Modify: `backend/crates/sim-core/src/mobility/mod.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Write failing sim-core tests**
+- [x] **Step 1: Write failing sim-core tests**
 
 Add tests near the existing `from_network_*` tests:
 
@@ -96,7 +98,7 @@ fn workspace_root() -> std::path::PathBuf {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -106,7 +108,7 @@ PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" cargo test
 
 Expected: FAIL to compile because `seed::from_base_world_bundle` does not exist.
 
-- [ ] **Step 3: Write failing sim-server runtime test**
+- [x] **Step 3: Write failing sim-server runtime test**
 
 Add near `runtime_materializes_base_world_instead_of_demo_chunks`:
 
@@ -130,7 +132,7 @@ fn runtime_seeds_backend_trams_from_base_world() {
 }
 ```
 
-- [ ] **Step 4: Verify RED**
+- [x] **Step 4: Verify RED**
 
 Run:
 
@@ -148,7 +150,7 @@ Expected: FAIL because the runtime currently exposes zero backend tram vehicles 
 - Modify: `backend/crates/sim-core/src/mobility/seed.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Add seed error type and bundle seeding function**
+- [x] **Step 1: Add seed error type and bundle seeding function**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`, add:
 
@@ -175,7 +177,7 @@ pub fn from_base_world_bundle(
 }
 ```
 
-- [ ] **Step 2: Add bundle pedestrian and car helpers**
+- [x] **Step 2: Add bundle pedestrian and car helpers**
 
 Still in `seed.rs`, add helpers that preserve the existing deterministic ids:
 
@@ -268,7 +270,7 @@ fn seed_cars_from_bundle(world: &mut World, bundle: &crate::base_world::BaseWorl
 }
 ```
 
-- [ ] **Step 3: Add tram helper**
+- [x] **Step 3: Add tram helper**
 
 Add:
 
@@ -320,7 +322,7 @@ fn seed_trams_from_bundle(
 }
 ```
 
-- [ ] **Step 4: Replace runtime seeding path**
+- [x] **Step 4: Replace runtime seeding path**
 
 In `backend/crates/sim-server/src/runtime.rs`, change `initial_mobility_snapshot_for_base_world` to:
 
@@ -333,7 +335,7 @@ fn initial_mobility_snapshot_for_base_world(bundle: &BaseWorldBundle) -> anyhow:
 
 Update callers in `new_with_event_store_and_base_world` and `hydrate_from_stores` to propagate the error with `?` or map it into `HydrationError`.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run:
 
@@ -351,7 +353,7 @@ Expected: both exit 0.
 - Create: `tests/render/backendTransitDrawables.test.ts`
 - Modify: `tests/app/noProductionFallbacks.test.ts`
 
-- [ ] **Step 1: Add projection tests**
+- [x] **Step 1: Add projection tests**
 
 Create `tests/render/backendTransitDrawables.test.ts`:
 
@@ -417,7 +419,7 @@ describe('backend transit drawables', () => {
 });
 ```
 
-- [ ] **Step 2: Add local train fallback guard**
+- [x] **Step 2: Add local train fallback guard**
 
 Extend `tests/app/noProductionFallbacks.test.ts` with forbidden runtime patterns in `src/main.ts`:
 
@@ -427,7 +429,7 @@ Extend `tests/app/noProductionFallbacks.test.ts` with forbidden runtime patterns
 "for (const train of trains)",
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -447,7 +449,7 @@ Expected: FAIL because `tramsFromMobilityState` does not exist and `src/main.ts`
 - Modify: `src/main.ts`
 - Modify: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Add tram drawable projection**
+- [x] **Step 1: Add tram drawable projection**
 
 In `backendMobilityDrawables.ts`, add a tram type and projection:
 
@@ -482,7 +484,7 @@ export function tramsFromMobilityState(
 }
 ```
 
-- [ ] **Step 2: Draw backend trams in minimal renderer**
+- [x] **Step 2: Draw backend trams in minimal renderer**
 
 In `minimalMapRenderer.ts`:
 
@@ -494,7 +496,7 @@ In `minimalMapRenderer.ts`:
 
 Keep the visual glyph compact and selected state separate from cars. Do not add a local fallback when the list is empty.
 
-- [ ] **Step 3: Remove local train state from main runtime**
+- [x] **Step 3: Remove local train state from main runtime**
 
 In `src/main.ts`:
 
@@ -504,7 +506,7 @@ In `src/main.ts`:
 - delete `advanceTime` train mutation
 - pass tram sprites to the renderer instead of `trains`
 
-- [ ] **Step 4: Update diagnostics**
+- [x] **Step 4: Update diagnostics**
 
 In `runtimeDiagnostics.ts`, derive:
 
@@ -519,7 +521,7 @@ Report:
 - `city.mobilityVehicles.vehicles` remains car-only for existing vehicle selection
 - add `city.mobilityTrams.trams` for backend tram diagnostics
 
-- [ ] **Step 5: Update E2E expectations**
+- [x] **Step 5: Update E2E expectations**
 
 In `tests/e2e/render-smoke.spec.ts`:
 
@@ -527,7 +529,7 @@ In `tests/e2e/render-smoke.spec.ts`:
 - update train movement assertions to compare `state.city.mobilityTrams.trams[0]` between samples
 - remove reliance on `city.train.position` if it is no longer the primary contract
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run:
 
@@ -546,7 +548,7 @@ Expected: all exit 0.
 - Modify: `progress.md`
 - Modify: `docs/superpowers/plans/2026-05-28-backend-authoritative-transit.md`
 
-- [ ] **Step 1: Run Rust verification**
+- [x] **Step 1: Run Rust verification**
 
 Run:
 
@@ -559,7 +561,7 @@ PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" cargo clip
 
 Expected: all exit 0.
 
-- [ ] **Step 2: Run frontend and browser verification**
+- [x] **Step 2: Run frontend and browser verification**
 
 Run:
 
@@ -571,7 +573,7 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: all exit 0.
 
-- [ ] **Step 3: Run forbidden fallback sweep**
+- [x] **Step 3: Run forbidden fallback sweep**
 
 Run:
 
@@ -581,11 +583,11 @@ rg -n "buildNorthboundTrainPath\\(|trainWrappedOffset\\(|fallback|legacy_seeded|
 
 Expected: no production fallback hits. Test names and explicit guard patterns are acceptable only when they assert absence.
 
-- [ ] **Step 4: Update progress**
+- [x] **Step 4: Update progress**
 
 Add a `progress.md` entry with the exact verification commands and results.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 

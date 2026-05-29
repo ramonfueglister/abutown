@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Introduce a `ChunkSubscribe`/`ChunkUnsubscribe` client→server primitive and filter `MobilityDelta` per connection so each client only receives entities in its subscribed chunks.
 
 **Architecture:** New `ClientMessageDto` enum with `chunk_subscribe`/`chunk_unsubscribe` variants. WS task refactored from forward-only into a `select!` loop with per-connection `ConnectionState { subscription, last_visible_agents, last_visible_vehicles }`. A pure-function `ConnectionMobilityFilter::apply(delta, world, state)` produces per-connection `MobilityDeltaDto` with `changed_*`/`left_*` fields. Frontend gets a thin `chunkSubscriptionClient` that sends an initial 8×8 subscribe after `Hello`.
@@ -46,7 +48,7 @@ Backend tests modified:
 **Files:**
 - Modify: `backend/crates/protocol/src/lib.rs`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Append to `backend/crates/protocol/src/lib.rs` test module:
 
@@ -109,7 +111,7 @@ fn mobility_delta_dto_accepts_missing_left_fields_for_backward_compat() {
 }
 ```
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol client_message_chunk_subscribe_round_trips
@@ -117,7 +119,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol clien
 
 Expected: FAIL — types don't exist.
 
-- [ ] **Step 3: Add the new types and fields**
+- [x] **Step 3: Add the new types and fields**
 
 In `backend/crates/protocol/src/lib.rs`:
 
@@ -163,7 +165,7 @@ pub struct MobilityDeltaDto {
 
 `#[serde(default)]` makes the fields optional in JSON — old clients that don't send them still parse, and new tests can omit them.
 
-- [ ] **Step 4: Update existing `MobilityDeltaDto` construction sites**
+- [x] **Step 4: Update existing `MobilityDeltaDto` construction sites**
 
 Any existing literal in the workspace that builds `MobilityDeltaDto { ... }` won't compile. Find them:
 
@@ -173,7 +175,7 @@ rg "MobilityDeltaDto \{" backend/
 
 For each hit, add `left_agents: vec![], left_vehicles: vec![]` to the struct literal. (At time of writing the only sites are inside `mobility.rs` `build_mobility_delta_dto` and the protocol test module.)
 
-- [ ] **Step 5: Verify workspace**
+- [x] **Step 5: Verify workspace**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -181,7 +183,7 @@ cargo test --locked --manifest-path backend/Cargo.toml --workspace
 
 Expected: all green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/protocol/src/lib.rs backend/crates/sim-core/src/mobility.rs
@@ -195,7 +197,7 @@ git commit -m "feat: ClientMessageDto subscribe/unsubscribe + left fields on Mob
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Append to mobility.rs test module:
 
@@ -217,7 +219,7 @@ fn chunk_of_handles_negative_coords() {
 }
 ```
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core chunk_of
@@ -225,7 +227,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core chunk_of
 
 Expected: FAIL — function doesn't exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `backend/crates/sim-core/src/mobility.rs`, near the top (after the `use` block) add:
 
@@ -241,7 +243,7 @@ pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
 
 `div_euclid` rounds toward negative infinity, giving the correct chunk for negative coords (`-0.1 / 32 = -1`, not `0`).
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core chunk_of
@@ -249,7 +251,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-core chunk_of
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility.rs
@@ -265,7 +267,7 @@ This task adds the per-connection filter logic as a pure function. No WS code ye
 **Files:**
 - Modify: `backend/crates/sim-core/src/mobility.rs`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Append to mobility.rs test module:
 
@@ -405,7 +407,7 @@ fn filter_emits_join_when_entity_enters_subscription() {
 }
 ```
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core build_filtered_mobility_delta_dto
@@ -415,7 +417,7 @@ Expected: FAIL — function doesn't exist.
 
 Note: tests may also fail to compile because the function is referenced but doesn't exist. Compile errors are the expected first failure.
 
-- [ ] **Step 3: Implement the filter**
+- [x] **Step 3: Implement the filter**
 
 In `backend/crates/sim-core/src/mobility.rs`, add a new public function:
 
@@ -517,7 +519,7 @@ This is a single pure function: subscription + last_visible state in, new DTO ou
 
 (`PROTOCOL_VERSION` is already a const in `protocol/src/lib.rs`. If it's not exported, use `1` literally — check before assuming.)
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-core build_filtered_mobility_delta_dto
@@ -526,7 +528,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml -p sim-core --all-targe
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-core/src/mobility.rs
@@ -542,7 +544,7 @@ git commit -m "feat: per-connection mobility delta filter with entered/left diff
 
 This is the central wiring task. The current `stream_world_deltas` is forward-only; we make it bidirectional.
 
-- [ ] **Step 1: Read the current WS handler**
+- [x] **Step 1: Read the current WS handler**
 
 Read `backend/crates/sim-server/src/app.rs` lines 294–342 to know the current structure. The new structure:
 
@@ -555,7 +557,7 @@ Read `backend/crates/sim-server/src/app.rs` lines 294–342 to know the current 
 - On any send error, return.
 - On `socket.recv()` returning None (close), return.
 
-- [ ] **Step 2: Add the ConnectionState struct**
+- [x] **Step 2: Add the ConnectionState struct**
 
 Inside `app.rs`, above `stream_world_deltas`:
 
@@ -568,7 +570,7 @@ struct ConnectionState {
 }
 ```
 
-- [ ] **Step 3: Rewrite `stream_world_deltas`**
+- [x] **Step 3: Rewrite `stream_world_deltas`**
 
 Replace the existing body:
 
@@ -670,7 +672,7 @@ async fn handle_client_message(
 }
 ```
 
-- [ ] **Step 4: Add the two runtime helpers**
+- [x] **Step 4: Add the two runtime helpers**
 
 In `backend/crates/sim-server/src/runtime.rs`, add to the `impl SimulationRuntime` block:
 
@@ -730,7 +732,7 @@ pub fn synthetic_mobility_delta_for_subscription(
 
 (The `SimulationRuntime` field names — `mobility`, `world_id` — must match what's already in the struct. Read it first to confirm.)
 
-- [ ] **Step 5: Add the `ClientMessageDto` import in app.rs**
+- [x] **Step 5: Add the `ClientMessageDto` import in app.rs**
 
 At the top of `backend/crates/sim-server/src/app.rs`, add to the existing `use abutown_protocol::{...}` line:
 
@@ -738,7 +740,7 @@ At the top of `backend/crates/sim-server/src/app.rs`, add to the existing `use a
 use abutown_protocol::{ClientMessageDto, MobilityDeltaDto, /* ...existing imports... */};
 ```
 
-- [ ] **Step 6: Build + test workspace**
+- [x] **Step 6: Build + test workspace**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml --workspace
@@ -765,7 +767,7 @@ stream.send(tungstenite::Message::Text(text.into())).await.unwrap();
 // Now MobilityDelta arrives (synthetic on subscribe + per-tick).
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/runtime.rs backend/crates/sim-server/tests/websocket.rs
@@ -779,7 +781,7 @@ git commit -m "feat: per-connection mobility AoI filter in WS task"
 **Files:**
 - Modify: `backend/crates/sim-server/tests/websocket.rs`
 
-- [ ] **Step 1: Add the test**
+- [x] **Step 1: Add the test**
 
 Append to `backend/crates/sim-server/tests/websocket.rs`:
 
@@ -852,7 +854,7 @@ use abutown_protocol::{ChunkCoordDto, ChunkSubscribeDto, ClientMessageDto, Mobil
 
 (Adapt to whatever import style the existing tests use.)
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-server --test websocket two_clients
@@ -860,7 +862,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server --test webs
 
 Expected: PASS. If it fails because Client A's chunk (4,4) actually has no seeded entities (tiny_world's hardcoded routes start at chunk (4,4) — the test world's seed places trams at chunk centers (4,4)/(5,4)/(4,5)), pick subscriptions that match the actual seeded entity positions. Use `cargo test ... -- --nocapture` and `println!` debug the entity positions to choose chunks with non-empty content.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/crates/sim-server/tests/websocket.rs
@@ -875,7 +877,7 @@ git commit -m "test: two-client AoI integration verifies disjoint entity sets"
 - Modify: `src/backend/mobilityProtocol.ts`
 - Modify: `tests/backend/mobilityProtocol.test.ts`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 In `tests/backend/mobilityProtocol.test.ts`, append:
 
@@ -939,7 +941,7 @@ it('parses MobilityDelta missing left_*  (backward compat)', () => {
 
 (Adapt the `parseServerMessage` import to whatever's already imported at the top of the test file.)
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 npx vitest run tests/backend/mobilityProtocol.test.ts
@@ -947,7 +949,7 @@ npx vitest run tests/backend/mobilityProtocol.test.ts
 
 Expected: FAIL — `encodeClientMessage` doesn't exist, `left_*` fields missing on the type.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/backend/mobilityProtocol.ts`:
 
@@ -1018,7 +1020,7 @@ case 'mobility_delta': {
 
 (Adapt to the actual existing parser body.)
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 npx vitest run tests/backend/mobilityProtocol.test.ts
@@ -1027,7 +1029,7 @@ npx tsc --noEmit
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/backend/mobilityProtocol.ts tests/backend/mobilityProtocol.test.ts
@@ -1042,7 +1044,7 @@ git commit -m "feat: frontend ClientMessageDto encoder + left_* fields on mobili
 - Modify: `src/backend/mobilityState.ts`
 - Modify: `tests/backend/mobilityState.test.ts`
 
-- [ ] **Step 1: Add failing test**
+- [x] **Step 1: Add failing test**
 
 In `tests/backend/mobilityState.test.ts`, append:
 
@@ -1075,7 +1077,7 @@ it('applyMobilityDelta drops entities listed in left_agents and left_vehicles', 
 });
 ```
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 ```bash
 npx vitest run tests/backend/mobilityState.test.ts
@@ -1083,7 +1085,7 @@ npx vitest run tests/backend/mobilityState.test.ts
 
 Expected: FAIL — `left_*` aren't dropped.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/backend/mobilityState.ts`, find `applyMobilityDelta`. Before the existing apply loops, add:
 
@@ -1104,7 +1106,7 @@ return next;
 
 Match the existing pattern in the file — read it first to confirm mutability convention.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 npx vitest run
@@ -1112,7 +1114,7 @@ npx vitest run
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/backend/mobilityState.ts tests/backend/mobilityState.test.ts
@@ -1128,7 +1130,7 @@ git commit -m "feat: applyMobilityDelta drops entities in left_agents/left_vehic
 - Create: `tests/backend/chunkSubscriptionClient.test.ts`
 - Modify: `src/backend/mobilityClient.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Create `tests/backend/chunkSubscriptionClient.test.ts`:
 
@@ -1157,7 +1159,7 @@ describe('chunkSubscriptionClient', () => {
 });
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 npx vitest run tests/backend/chunkSubscriptionClient.test.ts
@@ -1165,7 +1167,7 @@ npx vitest run tests/backend/chunkSubscriptionClient.test.ts
 
 Expected: FAIL — file doesn't exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/backend/chunkSubscriptionClient.ts`:
 
@@ -1214,7 +1216,7 @@ export function createSubscriptionClient(opts: {
 
 YAGNI: this Phase-4 module only sends the initial full-world subscription. Camera-aware shrinking is a follow-up (Phase 4.5 or Phase 6) once we have measurable bandwidth pressure.
 
-- [ ] **Step 4: Wire into mobilityClient**
+- [x] **Step 4: Wire into mobilityClient**
 
 In `src/backend/mobilityClient.ts`, find where the WebSocket is opened (`new WebSocket(...)` or similar). After the socket reaches `OPEN` state, instantiate and `start()` the subscription client:
 
@@ -1234,7 +1236,7 @@ socket.addEventListener('open', () => {
 
 If the existing `mobilityClient.ts` already has an `open` handler, add the client.start() inside it. Don't break existing reconnect logic.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 npx vitest run
@@ -1244,7 +1246,7 @@ npm run build
 
 Expected: green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/backend/chunkSubscriptionClient.ts tests/backend/chunkSubscriptionClient.test.ts src/backend/mobilityClient.ts
@@ -1258,7 +1260,7 @@ git commit -m "feat: frontend sends initial chunk_subscribe covering full world"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run all gates**
+- [x] **Step 1: Run all gates**
 
 ```bash
 cargo fmt --manifest-path backend/Cargo.toml --all
@@ -1271,7 +1273,7 @@ npm run build
 
 Expected: all green (excluding pre-existing `noRetiredAssets.test.ts` failures, which are unrelated to Phase 4).
 
-- [ ] **Step 2: Append to progress.md**
+- [x] **Step 2: Append to progress.md**
 
 Add one line summarising Phase 4:
 
@@ -1279,7 +1281,7 @@ Add one line summarising Phase 4:
 2026-05-16T<HH:MM:SS>.000Z - Viewport-filtered mobility replication: introduced ClientMessageDto with chunk_subscribe / chunk_unsubscribe; refactored WS task into a select! loop with per-connection ConnectionState; build_filtered_mobility_delta_dto produces per-connection deltas with changed_*/left_* fields. Frontend chunkSubscriptionClient sends an 8×8 initial subscription after Hello. applyMobilityDelta drops left_agents/left_vehicles before applying changes. Phase 4 of the million-agent roadmap; backend can now sustain ~10k entities with per-client viewport-scoped bandwidth.
 ```
 
-- [ ] **Step 3: Verify in browser**
+- [x] **Step 3: Verify in browser**
 
 Restart the stack:
 
@@ -1303,7 +1305,7 @@ Open http://127.0.0.1:5175 in your normal logged-in browser. Confirm:
 
 If walkers/cars disappear: the initial subscribe isn't reaching the backend (check WS messages in DevTools Network tab), OR the chunk-coord math is off (check that the `world_coord` for a known agent falls in a subscribed chunk).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add progress.md backend/ src/ tests/

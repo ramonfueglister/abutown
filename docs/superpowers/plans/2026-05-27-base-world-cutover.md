@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Replace the current split demo world with one canonical versioned Base World Bundle for `zurich-river-city-v1`, remove production fallbacks and seeded demo chunks, and make the backend and frontend consume the same authored world data.
 
 **Architecture:** Generate a versioned bundle under `data/worlds/zurich-river-city-v1/`, load and validate it in Rust at startup, materialize simulation chunks from it, derive routing and initial mobility from its transport/spawn layers, expose the loaded render layers through the backend, and make the frontend render only backend/bundle-derived layers.
@@ -2021,11 +2023,11 @@ Expected:
 
 ## Review Checklist
 
-- [ ] Bundle loading is fail-closed: missing manifest, missing layer, schema mismatch, empty required layers, or out-of-bounds data prevents startup.
-- [ ] Backend world id is `zurich-river-city-v1`.
-- [ ] Backend chunks are materialized from bundle data, not from `SEEDED_CHUNKS`.
-- [ ] Runtime mobility seeds from bundle spawn data, not from `tiny_world()`.
-- [ ] Frontend render layers come from `/base-world`, not from `createZurichRuntimeContext`.
-- [ ] Old Pak/Simutrans/OpenGFX paths are absent from runtime-visible assets and requests.
-- [ ] Snapshot reads are gated by base world id and schema version.
-- [ ] `npm test`, Rust tests, and Playwright smoke pass.
+- [x] Bundle loading is fail-closed: missing manifest, missing layer, schema mismatch, empty required layers, or out-of-bounds data prevents startup.
+- [x] Backend world id is `zurich-river-city-v1`.
+- [x] Backend chunks are materialized from bundle data, not from `SEEDED_CHUNKS`.
+- [x] Runtime mobility seeds from bundle spawn data, not from `tiny_world()`.
+- [x] Frontend render layers come from `/base-world`, not from `createZurichRuntimeContext`.
+- [x] Old Pak/Simutrans/OpenGFX paths are absent from runtime-visible assets and requests.
+- [x] Snapshot reads are gated by base world id and schema version.
+- [x] `npm test`, Rust tests, and Playwright smoke pass.

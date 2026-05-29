@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Add deterministic A* routing, mode-aware route profiles, coordinate-to-node requests, and a bounded path cache on top of the Phase 8b routing graph.
 
 **Architecture:** `sim_core::routing` gains three focused modules: `profile.rs` for mode legality/cost, `pathfinding.rs` for A* and request/result/error types, and `path_cache.rs` for cached successful paths. `routing/plugin.rs` gains `PathfindingPlugin`, which installs only `PathCache`; runtime construction installs it between `RoutingPlugin` and `MobilityPlugin`. Mobility state, proto schema, and JSONB snapshot shape stay unchanged.
@@ -39,7 +41,7 @@
 - Create: `backend/crates/sim-core/src/routing/profile.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Write failing profile tests**
+- [x] **Step 1: Write failing profile tests**
 
 Create `backend/crates/sim-core/src/routing/profile.rs` with the tests first:
 
@@ -125,7 +127,7 @@ Also add the module line to `backend/crates/sim-core/src/routing/mod.rs` so the 
 pub mod profile;
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -136,7 +138,7 @@ cargo test -p sim-core routing::profile -- --nocapture
 
 Expected: compile fails because `RoutingProfileKey`, `RoutingProfile`, and `ModeState` are not defined.
 
-- [ ] **Step 3: Implement profile types**
+- [x] **Step 3: Implement profile types**
 
 Replace `backend/crates/sim-core/src/routing/profile.rs` with:
 
@@ -342,7 +344,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Wire module exports**
+- [x] **Step 4: Wire module exports**
 
 Modify `backend/crates/sim-core/src/routing/mod.rs`:
 
@@ -350,7 +352,7 @@ Modify `backend/crates/sim-core/src/routing/mod.rs`:
 pub use profile::{ModeState, RoutingProfile, RoutingProfileKey};
 ```
 
-- [ ] **Step 5: Verify tests pass**
+- [x] **Step 5: Verify tests pass**
 
 Run:
 
@@ -361,7 +363,7 @@ cargo test -p sim-core routing::profile -- --nocapture
 
 Expected: all `routing::profile` tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -377,7 +379,7 @@ git commit -m "feat(8c): add routing mode profiles"
 - Create: `backend/crates/sim-core/src/routing/pathfinding.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Add failing pathfinding tests**
+- [x] **Step 1: Add failing pathfinding tests**
 
 Create `backend/crates/sim-core/src/routing/pathfinding.rs` with tests that build a small graph:
 
@@ -500,7 +502,7 @@ Also add the module line to `backend/crates/sim-core/src/routing/mod.rs` so the 
 pub mod pathfinding;
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -511,7 +513,7 @@ cargo test -p sim-core routing::pathfinding -- --nocapture
 
 Expected: compile fails because pathfinding types are not implemented.
 
-- [ ] **Step 3: Implement public pathfinding types**
+- [x] **Step 3: Implement public pathfinding types**
 
 At the top of `pathfinding.rs`, above the tests, add:
 
@@ -609,7 +611,7 @@ impl PartialOrd for QueueEntry {
 pub struct AStarRouter;
 ```
 
-- [ ] **Step 4: Implement A* search**
+- [x] **Step 4: Implement A* search**
 
 Add this implementation below the type definitions:
 
@@ -751,7 +753,7 @@ fn reconstruct_path(
 }
 ```
 
-- [ ] **Step 5: Wire module exports**
+- [x] **Step 5: Wire module exports**
 
 Modify `backend/crates/sim-core/src/routing/mod.rs`:
 
@@ -759,7 +761,7 @@ Modify `backend/crates/sim-core/src/routing/mod.rs`:
 pub use pathfinding::{AStarRouter, PathEdge, PathRequest, PlannedPath, RoutingError};
 ```
 
-- [ ] **Step 6: Verify tests pass**
+- [x] **Step 6: Verify tests pass**
 
 Run:
 
@@ -770,7 +772,7 @@ cargo test -p sim-core routing::pathfinding -- --nocapture
 
 Expected: all `routing::pathfinding` tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -785,7 +787,7 @@ git commit -m "feat(8c): add deterministic astar routing"
 **Files:**
 - Modify: `backend/crates/sim-core/src/routing/pathfinding.rs`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Append these tests to the existing `routing::pathfinding::tests` module:
 
@@ -869,7 +871,7 @@ fn request_between_points_errors_on_empty_index() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -880,7 +882,7 @@ cargo test -p sim-core routing::pathfinding -- --nocapture
 
 Expected: compile fails because `request_between_points` is not implemented, or walk-transit assertions fail before the Task 2 implementation is corrected.
 
-- [ ] **Step 3: Implement coordinate request helper**
+- [x] **Step 3: Implement coordinate request helper**
 
 Add this function to `pathfinding.rs`:
 
@@ -913,7 +915,7 @@ pub use pathfinding::{
 };
 ```
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
 Run:
 
@@ -924,7 +926,7 @@ cargo test -p sim-core routing::pathfinding -- --nocapture
 
 Expected: all pathfinding tests pass, including walk-transit transition tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -940,7 +942,7 @@ git commit -m "feat(8c): support point routing and walk transit"
 - Create: `backend/crates/sim-core/src/routing/path_cache.rs`
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 
-- [ ] **Step 1: Write failing cache tests**
+- [x] **Step 1: Write failing cache tests**
 
 Create `backend/crates/sim-core/src/routing/path_cache.rs` with tests:
 
@@ -1044,7 +1046,7 @@ Also add the module line to `backend/crates/sim-core/src/routing/mod.rs` so the 
 pub mod path_cache;
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1055,7 +1057,7 @@ cargo test -p sim-core routing::path_cache -- --nocapture
 
 Expected: compile fails because cache types are not implemented.
 
-- [ ] **Step 3: Implement path cache**
+- [x] **Step 3: Implement path cache**
 
 Add these definitions above the tests in `path_cache.rs`:
 
@@ -1163,7 +1165,7 @@ impl PathCache {
 }
 ```
 
-- [ ] **Step 4: Wire module exports**
+- [x] **Step 4: Wire module exports**
 
 Modify `backend/crates/sim-core/src/routing/mod.rs`:
 
@@ -1171,7 +1173,7 @@ Modify `backend/crates/sim-core/src/routing/mod.rs`:
 pub use path_cache::{PathCache, PathCacheKey, PathCacheStats};
 ```
 
-- [ ] **Step 5: Verify tests pass**
+- [x] **Step 5: Verify tests pass**
 
 Run:
 
@@ -1182,7 +1184,7 @@ cargo test -p sim-core routing::path_cache -- --nocapture
 
 Expected: all path cache tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1199,7 +1201,7 @@ git commit -m "feat(8c): add bounded routing path cache"
 - Modify: `backend/crates/sim-core/src/routing/mod.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Add failing plugin tests**
+- [x] **Step 1: Add failing plugin tests**
 
 In `backend/crates/sim-core/src/routing/plugin.rs`, add this test inside the existing `tests` module:
 
@@ -1216,7 +1218,7 @@ fn pathfinding_plugin_installs_path_cache() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -1227,7 +1229,7 @@ cargo test -p sim-core routing::plugin::tests::pathfinding_plugin_installs_path_
 
 Expected: compile fails because `PathfindingPlugin` is missing.
 
-- [ ] **Step 3: Implement plugin**
+- [x] **Step 3: Implement plugin**
 
 In `backend/crates/sim-core/src/routing/plugin.rs`, add:
 
@@ -1267,7 +1269,7 @@ Modify `backend/crates/sim-core/src/routing/mod.rs`:
 pub use plugin::{PathfindingPlugin, RoutingPlugin};
 ```
 
-- [ ] **Step 4: Install plugin in runtime**
+- [x] **Step 4: Install plugin in runtime**
 
 In `backend/crates/sim-server/src/runtime.rs`, add this immediately after each `sim_core::routing::RoutingPlugin { ... }.install(...)` block:
 
@@ -1277,7 +1279,7 @@ In `backend/crates/sim-server/src/runtime.rs`, add this immediately after each `
 
 There are two runtime construction paths in this file. Install the plugin in both.
 
-- [ ] **Step 5: Verify plugin test passes**
+- [x] **Step 5: Verify plugin test passes**
 
 Run:
 
@@ -1288,7 +1290,7 @@ cargo test -p sim-core routing::plugin::tests::pathfinding_plugin_installs_path_
 
 Expected: one test passes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1303,7 +1305,7 @@ git commit -m "feat(8c): install pathfinding cache plugin"
 **Files:**
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Add runtime resource test**
+- [x] **Step 1: Add runtime resource test**
 
 In the `#[cfg(test)]` module of `backend/crates/sim-server/src/runtime.rs`, add:
 
@@ -1315,7 +1317,7 @@ fn runtime_has_pathfinding_resources() {
 }
 ```
 
-- [ ] **Step 2: Add seeded graph path test**
+- [x] **Step 2: Add seeded graph path test**
 
 In the same test module, add:
 
@@ -1354,7 +1356,7 @@ fn runtime_can_find_seeded_tram_path() {
 }
 ```
 
-- [ ] **Step 3: Run runtime tests**
+- [x] **Step 3: Run runtime tests**
 
 Run:
 
@@ -1365,7 +1367,7 @@ cargo test -p sim-server runtime_ -- --nocapture
 
 Expected: both runtime tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1380,7 +1382,7 @@ git commit -m "test(8c): verify runtime pathfinding resources"
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run targeted backend tests**
+- [x] **Step 1: Run targeted backend tests**
 
 Run:
 
@@ -1392,7 +1394,7 @@ cargo test -p sim-server runtime_ -- --nocapture
 
 Expected: all targeted routing/pathfinding tests pass.
 
-- [ ] **Step 2: Run full backend verification**
+- [x] **Step 2: Run full backend verification**
 
 Run:
 
@@ -1404,7 +1406,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Expected: workspace tests pass; clippy has zero warnings.
 
-- [ ] **Step 3: Run frontend verification**
+- [x] **Step 3: Run frontend verification**
 
 Run:
 
@@ -1416,7 +1418,7 @@ cd /Users/ramonfuglister/Desktop/Coding/abutown
 
 Expected: TypeScript and Vitest pass unchanged.
 
-- [ ] **Step 4: Run smoke and perf gates**
+- [x] **Step 4: Run smoke and perf gates**
 
 Run:
 
@@ -1428,7 +1430,7 @@ cd backend && cargo bench -p sim-core tick_100k_all_active
 
 Expected: smoke remains 9/9 green with binary frames. `tick_100k_all_active` median stays at or below 12.362 ms, the Phase 8b +5% budget.
 
-- [ ] **Step 5: Add progress entry**
+- [x] **Step 5: Add progress entry**
 
 Run:
 
@@ -1442,7 +1444,7 @@ Add a new top entry to `progress.md`. Start the line with the exact timestamp pr
  - Phase 8c Task 7 verification pass: A* routing, mode-aware profiles, point-to-node requests, PathCache, and PathfindingPlugin are implemented on top of the Phase 8b graph. Targeted sim-core routing tests pass, sim-server runtime pathfinding resource tests pass, workspace cargo tests pass, clippy `-D warnings` is clean, tsc is clean, Vitest is clean, browser smoke `scripts/smoke-7b.mjs` is 9/9 green with binary frames, and `tick_100k_all_active` stays within the Phase 8b +5% budget. Wire protocol and `mobility_snapshots` JSONB schema remain unchanged.
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/ramonfuglister/Desktop/Coding/abutown
@@ -1457,7 +1459,7 @@ git commit -m "docs(8c): record pathfinding verification"
 **Files:**
 - No code changes unless a verification command exposes a real defect.
 
-- [ ] **Step 1: Confirm no forbidden surface changed**
+- [x] **Step 1: Confirm no forbidden surface changed**
 
 Run:
 
@@ -1472,7 +1474,7 @@ git diff -- backend/crates/sim-core/src/mobility/persist_snapshot.rs
 
 Expected: proto and mobility persistence/state diffs are empty.
 
-- [ ] **Step 2: Confirm no fallback language landed in routing implementation**
+- [x] **Step 2: Confirm no fallback language landed in routing implementation**
 
 Run:
 
@@ -1483,7 +1485,7 @@ rg -n "fallback|unwrap_or\\(\\(0\\.0, 0\\.0\\)\\)|NoNearestNode.*unwrap|syntheti
 
 Expected: no matches that implement fake paths, fake coordinates, or synthetic link ids. Matches in comments explaining rejected fallback behavior must be removed or rewritten.
 
-- [ ] **Step 3: Confirm branch is clean**
+- [x] **Step 3: Confirm branch is clean**
 
 Run:
 
@@ -1494,7 +1496,7 @@ git status -sb
 
 Expected: clean working tree on the 8c branch.
 
-- [ ] **Step 4: Commit any acceptance-doc cleanup**
+- [x] **Step 4: Commit any acceptance-doc cleanup**
 
 If Task 8 required doc-only cleanup, commit it:
 

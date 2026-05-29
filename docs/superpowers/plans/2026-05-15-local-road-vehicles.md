@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Make rendered road vehicles first-class local vehicle entities, clickable and inspectable, without treating cars as agents.
 
 **Architecture:** Keep people and vehicles separate. `src/render/localRoadVehicles.ts` projects the existing runtime `Car` records into stable `localVehicles`; `src/render/roadVehicleInspector.ts` formats selected vehicle details; `src/main.ts` owns hit testing, selection, canvas feedback, and diagnostics. The old generic population vocabulary is cleaned so `vehicle` no longer appears as an agent kind.
@@ -26,7 +28,7 @@
 - Create: `src/render/localRoadVehicles.ts`
 - Test: `tests/render/localRoadVehicles.test.ts`
 
-- [ ] **Step 1: Write the failing projection tests**
+- [x] **Step 1: Write the failing projection tests**
 
 Create `tests/render/localRoadVehicles.test.ts`:
 
@@ -97,7 +99,7 @@ describe('local road vehicles', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -107,7 +109,7 @@ npm test -- tests/render/localRoadVehicles.test.ts
 
 Expected: FAIL because `src/render/localRoadVehicles.ts` does not exist.
 
-- [ ] **Step 3: Implement the projection module**
+- [x] **Step 3: Implement the projection module**
 
 Create `src/render/localRoadVehicles.ts`:
 
@@ -201,7 +203,7 @@ function lerp(start: number, end: number, t: number): number {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -211,7 +213,7 @@ npm test -- tests/render/localRoadVehicles.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/render/localRoadVehicles.ts tests/render/localRoadVehicles.test.ts
@@ -224,7 +226,7 @@ git commit -m "feat: project cars as local road vehicles"
 - Create: `src/render/roadVehicleInspector.ts`
 - Test: `tests/render/roadVehicleInspector.test.ts`
 
-- [ ] **Step 1: Write the failing inspector tests**
+- [x] **Step 1: Write the failing inspector tests**
 
 Create `tests/render/roadVehicleInspector.test.ts`:
 
@@ -265,7 +267,7 @@ describe('road vehicle inspector', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -275,7 +277,7 @@ npm test -- tests/render/roadVehicleInspector.test.ts
 
 Expected: FAIL because `src/render/roadVehicleInspector.ts` does not exist.
 
-- [ ] **Step 3: Implement the inspector module**
+- [x] **Step 3: Implement the inspector module**
 
 Create `src/render/roadVehicleInspector.ts`:
 
@@ -311,7 +313,7 @@ function formatCoord(coord: { x: number; y: number }): string {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -321,7 +323,7 @@ npm test -- tests/render/roadVehicleInspector.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/render/roadVehicleInspector.ts tests/render/roadVehicleInspector.test.ts
@@ -334,7 +336,7 @@ git commit -m "feat: add road vehicle inspector model"
 - Modify: `src/main.ts`
 - Test: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Write the failing E2E expectations**
+- [x] **Step 1: Write the failing E2E expectations**
 
 In `tests/e2e/render-smoke.spec.ts`, after the existing `localAgents` assertions, add:
 
@@ -382,7 +384,7 @@ expect(vehicleSelectedState.city.vehicleInspector).toEqual(expect.objectContaini
 }));
 ```
 
-- [ ] **Step 2: Run E2E to verify it fails**
+- [x] **Step 2: Run E2E to verify it fails**
 
 Run:
 
@@ -393,7 +395,7 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: FAIL because `state.city.localVehicles` and `state.city.vehicleInspector` are undefined.
 
-- [ ] **Step 3: Wire local vehicles into `src/main.ts`**
+- [x] **Step 3: Wire local vehicles into `src/main.ts`**
 
 Apply these changes:
 
@@ -576,7 +578,7 @@ localVehicles: {
 vehicleInspector: buildRoadVehicleInspector(selectedVehicle),
 ```
 
-- [ ] **Step 4: Run verification for main wiring**
+- [x] **Step 4: Run verification for main wiring**
 
 Run:
 
@@ -588,7 +590,7 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: all commands pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main.ts src/render/localRoadVehicles.ts src/render/roadVehicleInspector.ts tests/render/localRoadVehicles.test.ts tests/render/roadVehicleInspector.test.ts tests/e2e/render-smoke.spec.ts
@@ -603,7 +605,7 @@ git commit -m "feat: make road vehicles selectable"
 - Modify: `tests/agents/generateAgents.test.ts`
 - Modify: `tests/render/agentLod.test.ts`
 
-- [ ] **Step 1: Write failing vocabulary expectations**
+- [x] **Step 1: Write failing vocabulary expectations**
 
 In `tests/agents/generateAgents.test.ts`, rename the describe block and references so it describes a generated population, not agents:
 
@@ -636,7 +638,7 @@ describe('generatePopulation', () => {
 
 Update imports in `tests/render/agentLod.test.ts` from `generateAgents` to `generatePopulation`, and update property names from `agents` to `entities` and `totalAgents` to `totalEntities`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -646,7 +648,7 @@ npm test -- tests/agents/generateAgents.test.ts tests/render/agentLod.test.ts
 
 Expected: FAIL because `generatePopulation`, `entities`, and `totalEntities` are not implemented.
 
-- [ ] **Step 3: Rename the generated population types**
+- [x] **Step 3: Rename the generated population types**
 
 In `src/types.ts`, replace the old agent population types with:
 
@@ -756,7 +758,7 @@ function speedFor(kind: PopulationEntityKind, role: PopulationEntityRole, random
 
 Keep the existing `seededRandom`, `weightRoads`, and `pickWeightedRoad` helpers unchanged.
 
-- [ ] **Step 4: Verify no vehicle-as-agent vocabulary remains in active source**
+- [x] **Step 4: Verify no vehicle-as-agent vocabulary remains in active source**
 
 Run:
 
@@ -767,7 +769,7 @@ npm test -- tests/agents/generateAgents.test.ts tests/render/agentLod.test.ts
 
 Expected: the `rg` command has no hits for old type names or vehicle-as-agent stats; both tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/types.ts src/agents/generateAgents.ts tests/agents/generateAgents.test.ts tests/render/agentLod.test.ts
@@ -779,7 +781,7 @@ git commit -m "refactor: separate generated vehicles from agents"
 **Files:**
 - No planned source changes unless verification exposes a defect.
 
-- [ ] **Step 1: Run full frontend unit suite**
+- [x] **Step 1: Run full frontend unit suite**
 
 Run:
 
@@ -789,7 +791,7 @@ npm test
 
 Expected: all test files pass.
 
-- [ ] **Step 2: Run production build**
+- [x] **Step 2: Run production build**
 
 Run:
 
@@ -799,7 +801,7 @@ npm run build
 
 Expected: TypeScript and Vite build pass.
 
-- [ ] **Step 3: Run browser smoke test**
+- [x] **Step 3: Run browser smoke test**
 
 Run:
 
@@ -809,11 +811,11 @@ npm run test:e2e -- tests/e2e/render-smoke.spec.ts
 
 Expected: Chromium smoke test passes. The city reports `mobility.status === "local-mobility"`, `localAgents.count === pedestrians`, and `localVehicles.count === cars`.
 
-- [ ] **Step 4: Verify live local server**
+- [x] **Step 4: Verify live local server**
 
 Load `http://127.0.0.1:5175/`. Click a visible road vehicle. Confirm a blue vehicle inspector appears and `window.render_game_to_text()` exposes `city.localVehicles.selectedId`.
 
-- [ ] **Step 5: Commit only if verification required fixes**
+- [x] **Step 5: Commit only if verification required fixes**
 
 If Task 5 required source changes, commit them:
 

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Raise backend tick from 1 Hz to 10 Hz and add frontend linear interpolation between the last two server states per mobility entity so the canvas renders smooth 60 fps motion.
 
 **Architecture:** Backend `SIMULATION_TICK_INTERVAL` becomes 100 ms; `WorldSummaryDto` exposes `tick_period_ms: 100`. Frontend mobility state buffers `{prev, current, lastTickAt}` per entity; the drawables projector linearly interpolates `world_coord` between `prev` and `current` using `now()` per render frame. Direction stays discrete.
@@ -45,7 +47,7 @@ Docs:
 **Files:**
 - Modify: `backend/crates/protocol/src/lib.rs`
 
-- [ ] **Step 1: Write the failing protocol test**
+- [x] **Step 1: Write the failing protocol test**
 
 In `backend/crates/protocol/src/lib.rs`, append inside the existing `#[cfg(test)] mod tests`:
 
@@ -66,7 +68,7 @@ fn world_summary_dto_serializes_tick_period_ms() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol world_summary_dto_serializes_tick_period_ms
@@ -74,7 +76,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol world
 
 Expected: FAIL — field does not exist.
 
-- [ ] **Step 3: Add the field**
+- [x] **Step 3: Add the field**
 
 In `backend/crates/protocol/src/lib.rs`, update `WorldSummaryDto`:
 
@@ -89,7 +91,7 @@ pub struct WorldSummaryDto {
 }
 ```
 
-- [ ] **Step 4: Verify protocol crate**
+- [x] **Step 4: Verify protocol crate**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p abutown-protocol
@@ -99,7 +101,7 @@ Expected: green; new test passes.
 
 The workspace will NOT build yet because `runtime.rs` doesn't populate the new field. That's fixed in Task 2.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/protocol/src/lib.rs
@@ -114,7 +116,7 @@ git commit -m "feat: expose tick_period_ms in world summary DTO"
 - Modify: `backend/crates/sim-server/src/app.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Change the tick interval constant**
+- [x] **Step 1: Change the tick interval constant**
 
 In `backend/crates/sim-server/src/app.rs`, find:
 
@@ -130,7 +132,7 @@ const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 Leave `SNAPSHOT_INTERVAL` unchanged at 5 s.
 
-- [ ] **Step 2: Expose tick period via runtime**
+- [x] **Step 2: Expose tick period via runtime**
 
 In `backend/crates/sim-server/src/runtime.rs`, at the top of the impl block (alongside other constants), add:
 
@@ -159,7 +161,7 @@ pub fn world_summary(&self) -> WorldSummaryDto {
 
 (Place `TICK_PERIOD_MS` as a `pub const` inside `impl SimulationRuntime` or as a module-level `const` next to the existing `CHUNK_SIZE` / `WORLD_ID` constants — whichever the file already does.)
 
-- [ ] **Step 3: Verify backend builds**
+- [x] **Step 3: Verify backend builds**
 
 ```bash
 cargo build --locked --manifest-path backend/Cargo.toml -p sim-server
@@ -167,7 +169,7 @@ cargo build --locked --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: compiles.
 
-- [ ] **Step 4: Verify unit + integration tests still pass (timing-sensitive tests will fail)**
+- [x] **Step 4: Verify unit + integration tests still pass (timing-sensitive tests will fail)**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-server
@@ -175,7 +177,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: most pass; `websocket_sends_hello_and_tile_pulse` may fail because of the 500 ms-empty assertion. Move to Task 3 for the test updates.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/crates/sim-server/src/app.rs backend/crates/sim-server/src/runtime.rs
@@ -191,7 +193,7 @@ git commit -m "feat: tick simulation at 10 Hz"
 - Modify: `backend/crates/sim-server/tests/websocket.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs` (its embedded test module)
 
-- [ ] **Step 1: Assert tick_period_ms on the /world endpoint**
+- [x] **Step 1: Assert tick_period_ms on the /world endpoint**
 
 In `backend/crates/sim-server/tests/http.rs`, locate the `health_and_world_summary_are_available` test. Append after the existing `loaded_chunks` assertions:
 
@@ -199,7 +201,7 @@ In `backend/crates/sim-server/tests/http.rs`, locate the `health_and_world_summa
     assert_eq!(json["tick_period_ms"], 100);
 ```
 
-- [ ] **Step 2: Update runtime.rs unit test**
+- [x] **Step 2: Update runtime.rs unit test**
 
 In `backend/crates/sim-server/src/runtime.rs`, the embedded test `runtime_summarizes_multiple_loaded_chunks` builds a `WorldSummaryDto` literal in its assertion. Find the test (search `runtime_summarizes_multiple_loaded_chunks`) and update any explicit `WorldSummaryDto { … }` construction to include `tick_period_ms: 100`. If the test only inspects field-by-field (not struct equality), add an assertion:
 
@@ -209,7 +211,7 @@ In `backend/crates/sim-server/src/runtime.rs`, the embedded test `runtime_summar
 
 If the test uses struct equality on the whole DTO, add the field to the expected literal.
 
-- [ ] **Step 3: Rewrite the websocket cadence assertions**
+- [x] **Step 3: Rewrite the websocket cadence assertions**
 
 In `backend/crates/sim-server/tests/websocket.rs`, locate `websocket_sends_hello_and_tile_pulse`. The current test has two `tokio::time::timeout(Duration::from_millis(500), stream.next()).is_err()` assertions that check "no message arrives within 500 ms." At 10 Hz, that's now false — 5 ticks worth of messages arrive within 500 ms.
 
@@ -258,7 +260,7 @@ If the existing test then expects `let next_delta = read_next_tile_pulse(&mut st
 
 Also: scan the rest of `websocket.rs` for other `Duration::from_millis(150)` / `Duration::from_secs(2)` / `Duration::from_millis(500)` assertions and verify they still make sense at 10 Hz. The only "no message" cadence check I see is in the hello-and-tile-pulse test; the rest are positive waits that scale fine.
 
-- [ ] **Step 4: Run backend tests**
+- [x] **Step 4: Run backend tests**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml -p sim-server
@@ -266,7 +268,7 @@ cargo test --locked --manifest-path backend/Cargo.toml -p sim-server
 
 Expected: all pass. If any test still fails on timing, it likely also expected the 1 Hz cadence — fix the same way (shorter timeout window).
 
-- [ ] **Step 5: Workspace tests + clippy**
+- [x] **Step 5: Workspace tests + clippy**
 
 ```bash
 cargo test --locked --manifest-path backend/Cargo.toml --workspace
@@ -275,7 +277,7 @@ cargo clippy --locked --manifest-path backend/Cargo.toml --workspace --all-targe
 
 Expected: green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sim-server/tests/http.rs backend/crates/sim-server/tests/websocket.rs backend/crates/sim-server/src/runtime.rs
@@ -289,7 +291,7 @@ git commit -m "test: adapt timing-sensitive backend tests to 10 Hz cadence"
 **Files:**
 - Modify: `src/backend/mobilityProtocol.ts` (or wherever `WorldSummaryDto` is typed; verify)
 
-- [ ] **Step 1: Locate the frontend type**
+- [x] **Step 1: Locate the frontend type**
 
 Run:
 
@@ -322,7 +324,7 @@ export function isWorldSummaryDto(value: unknown): value is WorldSummaryDto {
 }
 ```
 
-- [ ] **Step 2: Verify frontend compile**
+- [x] **Step 2: Verify frontend compile**
 
 ```bash
 npx tsc --noEmit
@@ -330,7 +332,7 @@ npx tsc --noEmit
 
 Expected: clean.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/backend/
@@ -345,7 +347,7 @@ git commit -m "feat: type world summary tick_period_ms on frontend"
 - Modify: `src/backend/mobilityState.ts`
 - Modify: `tests/backend/mobilityState.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Append to `tests/backend/mobilityState.test.ts`:
 
@@ -494,7 +496,7 @@ describe('mobility state interpolation buffer', () => {
 });
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 npx vitest run tests/backend/mobilityState.test.ts
@@ -502,7 +504,7 @@ npx vitest run tests/backend/mobilityState.test.ts
 
 Expected: FAIL — `InterpolatedEntry`-shaped map and `interpolatedAgents` don't exist yet.
 
-- [ ] **Step 3: Update mobilityState.ts**
+- [x] **Step 3: Update mobilityState.ts**
 
 Replace `src/backend/mobilityState.ts` with this shape (preserving the existing dispatch in `applyServerMessage`):
 
@@ -729,7 +731,7 @@ export function interpolatedVehicles(
 
 The `roadVehicles` field continues to use `applyRoadVehicleSnapshot` / `applyRoadVehicleDelta` from `roadVehicleState.ts`, which Task 6 updates.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npx vitest run tests/backend/mobilityState.test.ts
@@ -737,7 +739,7 @@ npx vitest run tests/backend/mobilityState.test.ts
 
 Expected: green.
 
-- [ ] **Step 5: Update existing fixtures that read `.world_coord` from the map directly**
+- [x] **Step 5: Update existing fixtures that read `.world_coord` from the map directly**
 
 Run:
 
@@ -747,7 +749,7 @@ grep -rn "state.agents.get\|state.vehicles.get\|\.agents\.get\|\.vehicles\.get" 
 
 Anywhere outside of `mobilityState.ts` reads `.world_coord` directly off `state.agents.get(id)` will need to either use `interpolatedAgents` or read `.current.world_coord`. Existing test in `tests/backend/mobilityClient.test.ts` likely doesn't drill into coords; verify by running the full suite below.
 
-- [ ] **Step 6: Run all frontend tests**
+- [x] **Step 6: Run all frontend tests**
 
 ```bash
 npx vitest run
@@ -755,7 +757,7 @@ npx vitest run
 
 Expected: green. If a test fails because it expected `entry: AgentMobilityDto` instead of `entry: InterpolatedEntry<AgentMobilityDto>`, update the test to read `.current` for the latest DTO (or `interpolatedAgents` for interpolated coords).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/backend/mobilityState.ts tests/backend/mobilityState.test.ts
@@ -770,7 +772,7 @@ git commit -m "feat: buffer prev+current per agent for interpolation"
 - Modify: `src/backend/roadVehicleState.ts`
 - Modify: `tests/backend/roadVehicleState.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Replace the existing test in `tests/backend/roadVehicleState.test.ts` (or append, then drop the obsolete one) with:
 
@@ -847,7 +849,7 @@ describe('road vehicle state interpolation buffer', () => {
 });
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 npx vitest run tests/backend/roadVehicleState.test.ts
@@ -855,7 +857,7 @@ npx vitest run tests/backend/roadVehicleState.test.ts
 
 Expected: FAIL — `InterpolatedEntry`-shaped map and `interpolatedRoadVehicles` don't exist.
 
-- [ ] **Step 3: Update roadVehicleState.ts**
+- [x] **Step 3: Update roadVehicleState.ts**
 
 Replace `src/backend/roadVehicleState.ts`:
 
@@ -949,7 +951,7 @@ export function interpolatedRoadVehicles(
 }
 ```
 
-- [ ] **Step 4: Run to confirm pass**
+- [x] **Step 4: Run to confirm pass**
 
 ```bash
 npx vitest run tests/backend/roadVehicleState.test.ts
@@ -957,7 +959,7 @@ npx vitest run tests/backend/roadVehicleState.test.ts
 
 Expected: green.
 
-- [ ] **Step 5: Run full vitest suite**
+- [x] **Step 5: Run full vitest suite**
 
 ```bash
 npx vitest run
@@ -965,7 +967,7 @@ npx vitest run
 
 Expected: green. If any other test reads `state.vehicles.get(id)` directly and expected a `RoadVehicleDto`, update it to read `.current`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/backend/roadVehicleState.ts tests/backend/roadVehicleState.test.ts
@@ -980,7 +982,7 @@ git commit -m "feat: buffer prev+current per road vehicle for interpolation"
 - Modify: `src/backend/mobilityClient.ts`
 - Modify: `tests/backend/mobilityClient.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `tests/backend/mobilityClient.test.ts`:
 
@@ -1021,7 +1023,7 @@ it('requireMobilitySnapshot surfaces tickPeriodMs from /world', async () => {
 
 (Adjust to match the existing test file's imports/scaffolding.)
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 npx vitest run tests/backend/mobilityClient.test.ts
@@ -1029,7 +1031,7 @@ npx vitest run tests/backend/mobilityClient.test.ts
 
 Expected: FAIL — current `requireMobilitySnapshot` returns just the state, not `{state, tickPeriodMs}`.
 
-- [ ] **Step 3: Update `requireMobilitySnapshot` return type**
+- [x] **Step 3: Update `requireMobilitySnapshot` return type**
 
 In `src/backend/mobilityClient.ts`:
 
@@ -1077,7 +1079,7 @@ Import `WorldSummaryDto` and `isWorldSummaryDto` from wherever they live (Task 4
 
 The existing inner `connect()` function in `connectMobilityBackend` also calls `requestMobilitySnapshot` + `requestRoadVehicleSnapshot` — it does NOT need world summary because the bridge consumer obtained `tickPeriodMs` from the boot path. Leave the bridge's reconnect logic alone.
 
-- [ ] **Step 4: Update boot path in main.ts (preview)**
+- [x] **Step 4: Update boot path in main.ts (preview)**
 
 `src/main.ts` calls `requireMobilitySnapshot({ baseUrl })` and assigns its result. After this task, that assignment needs to destructure:
 
@@ -1089,7 +1091,7 @@ tickPeriodMs = required.tickPeriodMs;
 
 But the actual `tickPeriodMs` usage is Task 9. This task only changes the function signature.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
 npx vitest run
@@ -1107,7 +1109,7 @@ mobilityState = required.state;
 
 Don't read `tickPeriodMs` yet — Task 9 wires it. Just unblock the type check.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/backend/mobilityClient.ts tests/backend/mobilityClient.test.ts src/main.ts
@@ -1122,7 +1124,7 @@ git commit -m "feat: surface tick period from world summary on boot"
 - Modify: `src/render/backendMobilityDrawables.ts`
 - Modify: `tests/render/backendMobilityDrawables.test.ts`
 
-- [ ] **Step 1: Update tests**
+- [x] **Step 1: Update tests**
 
 Replace the existing `tests/render/backendMobilityDrawables.test.ts`:
 
@@ -1247,7 +1249,7 @@ describe('backendMobilityDrawables (interpolated)', () => {
 });
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 ```bash
 npx vitest run tests/render/backendMobilityDrawables.test.ts
@@ -1255,7 +1257,7 @@ npx vitest run tests/render/backendMobilityDrawables.test.ts
 
 Expected: FAIL — `pedestriansFromMobilityState` doesn't yet accept `now` + `tickPeriodMs`.
 
-- [ ] **Step 3: Update the projector**
+- [x] **Step 3: Update the projector**
 
 Replace `src/render/backendMobilityDrawables.ts`:
 
@@ -1373,7 +1375,7 @@ export function carsFromMobilityState(
 }
 ```
 
-- [ ] **Step 4: Run tests to confirm pass**
+- [x] **Step 4: Run tests to confirm pass**
 
 ```bash
 npx vitest run tests/render/backendMobilityDrawables.test.ts
@@ -1386,7 +1388,7 @@ Actually `tsc` will fail because the projector signature now requires `now` and 
 
 Add this small main.ts edit at the end of this task — find every `pedestriansFromMobilityState(mobilityState, pedestrianSprites)` and `carsFromMobilityState(mobilityState, vehicleSprites)` and add `, performance.now(), 100`. (There may be 2–3 call sites — at the render-frame builder, at selection/hit-test, at diagnostics.)
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 npx tsc --noEmit
@@ -1396,7 +1398,7 @@ npm run build
 
 Expected: green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/render/backendMobilityDrawables.ts tests/render/backendMobilityDrawables.test.ts src/main.ts
@@ -1410,7 +1412,7 @@ git commit -m "feat: drawables projector interpolates between server ticks"
 **Files:**
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Cache `tickPeriodMs` at boot**
+- [x] **Step 1: Cache `tickPeriodMs` at boot**
 
 In `src/main.ts`, locate the boot block that called `requireMobilitySnapshot`. Add a module-level state:
 
@@ -1426,7 +1428,7 @@ mobilityState = required.state;
 mobilityTickPeriodMs = required.tickPeriodMs;
 ```
 
-- [ ] **Step 2: Replace the hardcoded 100 at projector call sites**
+- [x] **Step 2: Replace the hardcoded 100 at projector call sites**
 
 Search:
 
@@ -1441,7 +1443,7 @@ const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprite
 const cars = carsFromMobilityState(mobilityState, vehicleSprites, performance.now(), mobilityTickPeriodMs);
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 npx tsc --noEmit
@@ -1451,7 +1453,7 @@ npm run build
 
 Expected: green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/main.ts
@@ -1465,7 +1467,7 @@ git commit -m "feat: thread tick period from world summary into render loop"
 **Files:**
 - Modify: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Add an interpolation assertion**
+- [x] **Step 1: Add an interpolation assertion**
 
 In `tests/e2e/render-smoke.spec.ts`, after the existing block that obtains `state.city.mobilityAgents.agents`, add a new test or extend the existing one:
 
@@ -1489,7 +1491,7 @@ expect(movedX + movedY).toBeGreaterThan(0);
 
 (Adjust the property names to whatever the diagnostics block emits — `coord` is per the Phase-1 shape; `world_coord` may be the actual key. Verify via the local `render_game_to_text` output.)
 
-- [ ] **Step 2: Confirm e2e compiles**
+- [x] **Step 2: Confirm e2e compiles**
 
 ```bash
 npx tsc --noEmit
@@ -1497,7 +1499,7 @@ npx tsc --noEmit
 
 Don't run the e2e itself — it needs both Vite preview and the backend running, which isn't part of the subagent harness.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/e2e/render-smoke.spec.ts
@@ -1511,7 +1513,7 @@ git commit -m "test: render smoke asserts interpolated agent motion between fram
 **Files:**
 - Modify: `progress.md`
 
-- [ ] **Step 1: Run formatter, full test suite, clippy, frontend tests, build**
+- [x] **Step 1: Run formatter, full test suite, clippy, frontend tests, build**
 
 ```bash
 cargo fmt --manifest-path backend/Cargo.toml --all -- --check
@@ -1523,7 +1525,7 @@ npm run build
 
 Expected: all green. If `cargo fmt --check` complains, run `cargo fmt --manifest-path backend/Cargo.toml --all` and stage the changes.
 
-- [ ] **Step 2: Append progress note**
+- [x] **Step 2: Append progress note**
 
 Append to `progress.md`:
 
@@ -1533,7 +1535,7 @@ Append to `progress.md`:
 
 Use the current UTC timestamp.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add progress.md backend/

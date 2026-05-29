@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Archived/closed in the 2026-05-29 documentation cleanup. This checklist is historical; `progress.md` and later plans are authoritative for current implementation status.
+
 **Goal:** Build a client-only Vite/PixiJS isometric graphics demo showing a beautiful river city generated from a simulation-ready city model and rendered with selected real OpenGFX2 Classic 64px source sheets.
 
 **Architecture:** The city model is the source of truth. A deterministic generator produces terrain, river, road graph, districts, parcels, buildings, and landmarks; the PixiJS renderer projects that model into an isometric scene. Rendering, camera state, debug overlays, and future simulation state stay separated.
@@ -66,7 +68,7 @@ Modify these files:
 - Create: `src/app/styles.css`
 - Create: `src/main.ts`
 
-- [ ] **Step 1: Create package and config files**
+- [x] **Step 1: Create package and config files**
 
 Create `package.json`:
 
@@ -259,7 +261,7 @@ if (!appRoot) {
 appRoot.dataset.ready = 'true';
 ```
 
-- [ ] **Step 2: Install dependencies**
+- [x] **Step 2: Install dependencies**
 
 Run:
 
@@ -269,7 +271,7 @@ npm install
 
 Expected: `package-lock.json` is created and dependencies install without errors.
 
-- [ ] **Step 3: Run the initial checks**
+- [x] **Step 3: Run the initial checks**
 
 Run:
 
@@ -280,7 +282,7 @@ npm test
 
 Expected: build passes; Vitest reports no test files or no failing tests depending on Vitest version.
 
-- [ ] **Step 4: Commit scaffold**
+- [x] **Step 4: Commit scaffold**
 
 Run:
 
@@ -298,7 +300,7 @@ git commit -m "chore: scaffold isometric city app"
 - Create: `src/geo/math.ts`
 - Create: `tests/geo/isometric.test.ts`
 
-- [ ] **Step 1: Write failing coordinate tests**
+- [x] **Step 1: Write failing coordinate tests**
 
 Create `tests/geo/isometric.test.ts`:
 
@@ -325,7 +327,7 @@ describe('isometric projection', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -335,7 +337,7 @@ npm test -- tests/geo/isometric.test.ts
 
 Expected: FAIL because `src/geo/isometric.ts` does not exist.
 
-- [ ] **Step 3: Implement geometry and math helpers**
+- [x] **Step 3: Implement geometry and math helpers**
 
 Create `src/geo/isometric.ts`:
 
@@ -399,7 +401,7 @@ export function clamp(value: number, min: number, max: number): number {
 }
 ```
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run:
 
@@ -424,7 +426,7 @@ git commit -m "feat: add isometric geometry helpers"
 - Create: `src/city/types.ts`
 - Create: `src/city/ids.ts`
 
-- [ ] **Step 1: Add city model types**
+- [x] **Step 1: Add city model types**
 
 Create `src/city/types.ts`:
 
@@ -536,7 +538,7 @@ export function makeId(prefix: string, parts: readonly (string | number)[]): str
 }
 ```
 
-- [ ] **Step 2: Run typecheck and commit**
+- [x] **Step 2: Run typecheck and commit**
 
 Run:
 
@@ -562,7 +564,7 @@ git commit -m "feat: define simulation-ready city model"
 - Create: `src/city/generateCity.ts`
 - Create: `tests/city/generateCity.test.ts`
 
-- [ ] **Step 1: Write generator tests**
+- [x] **Step 1: Write generator tests**
 
 Create `tests/city/generateCity.test.ts`:
 
@@ -592,7 +594,7 @@ describe('generateCity', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -602,7 +604,7 @@ npm test -- tests/city/generateCity.test.ts
 
 Expected: FAIL because generator files do not exist.
 
-- [ ] **Step 3: Implement default seed**
+- [x] **Step 3: Implement default seed**
 
 Create `src/city/defaultSeed.ts`:
 
@@ -624,7 +626,7 @@ export const defaultCitySeed: CitySeed = {
 };
 ```
 
-- [ ] **Step 4: Implement deterministic city generator**
+- [x] **Step 4: Implement deterministic city generator**
 
 Create `src/city/generateCity.ts`:
 
@@ -827,7 +829,7 @@ function distance(a: { readonly x: number; readonly y: number }, b: { readonly x
 }
 ```
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run:
 
@@ -855,7 +857,7 @@ git commit -m "feat: generate deterministic river city model"
 - Create: `tests/city/validateCity.test.ts`
 - Create: `tests/render/roadSprites.test.ts`
 
-- [ ] **Step 1: Write validation tests**
+- [x] **Step 1: Write validation tests**
 
 Create `tests/city/validateCity.test.ts`:
 
@@ -902,7 +904,7 @@ describe('resolveRoadSpriteKey', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -912,7 +914,7 @@ npm test -- tests/city/validateCity.test.ts tests/render/roadSprites.test.ts
 
 Expected: FAIL because validation and sprite resolver files do not exist.
 
-- [ ] **Step 3: Implement validation and sprite resolver**
+- [x] **Step 3: Implement validation and sprite resolver**
 
 Create `src/render/roadSprites.ts`:
 
@@ -966,7 +968,7 @@ export function validateCity(city: City): ValidationResult {
 }
 ```
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run:
 
@@ -1008,7 +1010,7 @@ git commit -m "feat: validate city graph and road sprites"
 - Create: `src/render/CityRenderer.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Import selected OpenGFX2 Classic 64px sheets**
+- [x] **Step 1: Import selected OpenGFX2 Classic 64px sheets**
 
 Run:
 
@@ -1036,7 +1038,7 @@ cp /tmp/abutown-opengfx2/graphics/towns/streetfurniture/64/town_tree_32bpp.png p
 
 Expected: selected real OpenGFX2 PNG sheets and license files exist under `public/opengfx2-classic/`.
 
-- [ ] **Step 2: Add atlas manifest**
+- [x] **Step 2: Add atlas manifest**
 
 Create `src/assets/opengfx2-classic/README.md`:
 
@@ -1083,7 +1085,7 @@ Create `src/assets/opengfx2-classic/atlas.json`:
 }
 ```
 
-- [ ] **Step 3: Implement asset loader**
+- [x] **Step 3: Implement asset loader**
 
 Create `src/render/assets.ts`:
 
@@ -1135,7 +1137,7 @@ function loadSheet(source: string): Promise<Texture> {
 }
 ```
 
-- [ ] **Step 4: Implement renderer**
+- [x] **Step 4: Implement renderer**
 
 Create `src/render/CityRenderer.ts`:
 
@@ -1225,7 +1227,7 @@ export class CityRenderer {
 }
 ```
 
-- [ ] **Step 5: Wire renderer into bootstrap**
+- [x] **Step 5: Wire renderer into bootstrap**
 
 Replace `src/main.ts` with:
 
@@ -1268,7 +1270,7 @@ renderer.stage.y = 60;
 renderer.addBackgroundMarker();
 ```
 
-- [ ] **Step 6: Run build and commit**
+- [x] **Step 6: Run build and commit**
 
 Run:
 
@@ -1294,7 +1296,7 @@ git commit -m "feat: render generated city with asset manifest"
 - Create: `src/render/debugOverlay.ts`
 - Modify: `src/main.ts`
 
-- [ ] **Step 1: Implement continuous pan and zoom controller**
+- [x] **Step 1: Implement continuous pan and zoom controller**
 
 Create `src/render/CameraController.ts`:
 
@@ -1362,7 +1364,7 @@ export class CameraController {
 }
 ```
 
-- [ ] **Step 2: Implement keyboard-toggle debug overlay**
+- [x] **Step 2: Implement keyboard-toggle debug overlay**
 
 Create `src/render/debugOverlay.ts`:
 
@@ -1402,7 +1404,7 @@ export function attachDebugToggle(layer: Container): void {
 }
 ```
 
-- [ ] **Step 3: Wire camera and debug overlay**
+- [x] **Step 3: Wire camera and debug overlay**
 
 Modify `src/main.ts`:
 
@@ -1454,7 +1456,7 @@ const camera = new CameraController(renderer.stage, app.canvas);
 camera.attach();
 ```
 
-- [ ] **Step 4: Build and commit**
+- [x] **Step 4: Build and commit**
 
 Run:
 
@@ -1478,7 +1480,7 @@ git commit -m "feat: add continuous camera and hidden debug overlay"
 **Files:**
 - Create: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Write smoke test**
+- [x] **Step 1: Write smoke test**
 
 Create `tests/e2e/render-smoke.spec.ts`:
 
@@ -1517,7 +1519,7 @@ test('renders a non-empty city scene and supports camera input', async ({ page }
 });
 ```
 
-- [ ] **Step 2: Run smoke test**
+- [x] **Step 2: Run smoke test**
 
 Run:
 
@@ -1528,7 +1530,7 @@ npm run test:e2e
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit smoke test**
+- [x] **Step 3: Commit smoke test**
 
 Run:
 
@@ -1544,7 +1546,7 @@ git commit -m "test: add render smoke coverage"
 **Files:**
 - Modify: no files unless verification reveals a defect.
 
-- [ ] **Step 1: Run full verification**
+- [x] **Step 1: Run full verification**
 
 Run:
 
@@ -1556,7 +1558,7 @@ npm run test:e2e
 
 Expected: all commands PASS.
 
-- [ ] **Step 2: Manual browser verification**
+- [x] **Step 2: Manual browser verification**
 
 Run:
 
@@ -1574,7 +1576,7 @@ Verify:
 - Pressing `d` toggles the debug overlay on and off.
 - The scene is non-empty and visually coherent.
 
-- [ ] **Step 3: Commit any verification fixes**
+- [x] **Step 3: Commit any verification fixes**
 
 If no fixes are needed, do not create an empty commit.
 
