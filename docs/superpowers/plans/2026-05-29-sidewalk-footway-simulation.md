@@ -64,7 +64,7 @@ Expected: the branch line names `codex/sidewalk-footway-simulation`, and no file
 - Modify: `backend/crates/sim-core/src/city_network.rs`
 - Modify: `backend/crates/sim-core/src/base_world.rs`
 
-- [ ] **Step 1: Add failing tests for fractional movement points**
+- [x] **Step 1: Add failing tests for fractional movement points**
 
 In `backend/crates/sim-core/src/city_network.rs`, add this test inside the existing `#[cfg(test)] mod tests` block:
 
@@ -190,7 +190,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the focused failing tests**
+- [x] **Step 2: Run the focused failing tests**
 
 Run:
 
@@ -201,7 +201,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: both commands fail because `NetworkPoint` does not exist and `TransportPath.points` still requires integer `NetworkCoord`.
 
-- [ ] **Step 3: Add `NetworkPoint` and update `CityNetwork`**
+- [x] **Step 3: Add `NetworkPoint` and update `CityNetwork`**
 
 In `backend/crates/sim-core/src/city_network.rs`, replace the top structs with:
 
@@ -246,7 +246,7 @@ pub struct CityNetwork {
 
 Update the existing city-network fixture assertions to compare with `NetworkPoint { x: 2.0, y: 3.0 }`.
 
-- [ ] **Step 4: Update `TransportPath` and float bounds validation**
+- [x] **Step 4: Update `TransportPath` and float bounds validation**
 
 In `backend/crates/sim-core/src/base_world.rs`, update the import:
 
@@ -305,7 +305,7 @@ fn point_in_bounds_f32(&self, x: f32, y: f32) -> bool {
 
 Leave road tiles, building footprints, trees, and decoration details on integer `NetworkCoord`.
 
-- [ ] **Step 5: Update Rust constructors that now need `NetworkPoint`**
+- [x] **Step 5: Update Rust constructors that now need `NetworkPoint`**
 
 Run:
 
@@ -332,7 +332,7 @@ arterial_paths: vec![vec![np(0.0, 0.0), np(10.0, 0.0)]],
 pedestrian_corridors: vec![vec![np(0.0, 3.51), np(10.0, 3.51)]],
 ```
 
-- [ ] **Step 6: Re-run focused tests**
+- [x] **Step 6: Re-run focused tests**
 
 Run:
 
@@ -343,7 +343,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: both commands pass.
 
-- [ ] **Step 7: Commit data model change**
+- [x] **Step 7: Commit data model change**
 
 Run:
 
