@@ -35,6 +35,7 @@ const snapshot: MobilitySnapshotDto = {
       world_coord: { x: 0, y: 0 },
       direction: 'e',
       sprite_key: 'pedestrian:0',
+      age_seconds: 0,
     },
   ],
   vehicles: [
@@ -106,6 +107,7 @@ describe('mobility state reducer', () => {
             world_coord: { x: 0, y: 0 },
             direction: 'e',
             sprite_key: 'pedestrian:0',
+            age_seconds: 0,
           },
         ],
         changed_vehicles: [
@@ -199,6 +201,7 @@ describe('mobility state reducer', () => {
           world_coord: { x: 0, y: 0 },
           direction: 'e',
           sprite_key: 'p:0',
+          age_seconds: 0,
         }],
         vehicles: [{
           id: 'vehicle:car:0:0',
@@ -293,6 +296,7 @@ describe('mobility state reducer', () => {
             world_coord: { x: 0, y: 0 },
             direction: 'e',
             sprite_key: 'p:0',
+            age_seconds: 0,
           },
           {
             id: 'agent:chunk10',
@@ -301,6 +305,7 @@ describe('mobility state reducer', () => {
             world_coord: { x: 32, y: 0 },
             direction: 'e',
             sprite_key: 'p:0',
+            age_seconds: 0,
           },
         ],
         vehicles: [],
@@ -324,6 +329,7 @@ describe('mobility state reducer', () => {
         world_coord: { x: 10, y: 10 },
         direction: 'e',
         sprite_key: 'p:0',
+        age_seconds: 0,
       }],
       vehicles: [],
     };
@@ -491,6 +497,7 @@ function agentAt(id: string, x: number, y: number): AgentMobilityDto {
     world_coord: { x, y },
     direction: 'e',
     sprite_key: 'pedestrian:0',
+    age_seconds: 0,
   };
 }
 

@@ -29,6 +29,7 @@ export type BackendPedestrian = {
   laneOffset: number;
   sprite: SimutransPedestrianSpriteLike;
   direction: DirectionDto;
+  ageSeconds: number;
 };
 
 export type BackendCar = {
@@ -85,6 +86,7 @@ export function pedestriansFromMobilityState(
       laneOffset: 0,
       sprite,
       direction: agent.direction,
+      ageSeconds: agent.age_seconds,
     });
   }
   return out;

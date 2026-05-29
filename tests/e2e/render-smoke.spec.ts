@@ -276,3 +276,25 @@ function nearestNeighborDistance(entity: ScreenEntity, entities: ScreenEntity[])
   }
   return nearest;
 }
+
+test('clock advances: the abutopia pedestrian ages over the wire', async ({ page }) => {
+  await page.setViewportSize({ width: 409, height: 519 });
+  await page.goto('/');
+  await expect(page.locator('#game')).toHaveAttribute('data-ready', 'true');
+  await expect
+    .poll(async () => (await readCityState(page)).city.mobilityAgents.agents.length)
+    .toBeGreaterThan(0);
+
+  const first = await readCityState(page);
+  const a0 = first.city.mobilityAgents.agents[0];
+  expect(typeof first.city.simTime).toBe('number');
+  expect(typeof a0.ageSeconds).toBe('number');
+
+  // Several seconds = many backend ticks. The server recomputes each agent's
+  // age every tick and streams it, so the pedestrian must visibly age.
+  await page.waitForTimeout(3000);
+
+  const second = await readCityState(page);
+  const a1 = second.city.mobilityAgents.agents[0];
+  expect(a1.ageSeconds).toBeGreaterThan(a0.ageSeconds);
+});

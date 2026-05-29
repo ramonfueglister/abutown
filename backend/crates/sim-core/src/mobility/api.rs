@@ -72,6 +72,7 @@ pub fn empty_world_and_schedule() -> (World, Schedule) {
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     CorePlugin::default().install(&mut world, &mut schedule);
+    crate::time::TimePlugin.install(&mut world, &mut schedule);
     install_mobility(&mut world, &mut schedule);
     (world, schedule)
 }
@@ -402,6 +403,7 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
         plan,
         plan_cursor,
         walk_speed_per_tick,
+        birth_tick,
         active_route,
     } = record;
     let id = record_id.clone();
@@ -432,6 +434,7 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
                 cursor: plan_cursor,
             },
             WalkSpeed(walk_speed_per_tick),
+            crate::mobility::components::BirthTick(birth_tick),
             Position { x: px, y: py },
             Direction(abutown_protocol::DirectionDto::S),
             SpriteKey(sprite_key),
@@ -494,6 +497,10 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
     let state = world.get::<AgentMobilityStateComponent>(entity)?;
     let plan = world.get::<WalkPlan>(entity)?;
     let speed = world.get::<WalkSpeed>(entity)?;
+    let birth_tick = world
+        .get::<crate::mobility::components::BirthTick>(entity)
+        .map(|b| b.0)
+        .unwrap_or(0);
     let active_route = world
         .get::<ActiveRoute>(entity)
         .map(|route| PersistedActiveRoute {
@@ -517,6 +524,7 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
         plan: plan.stages.clone(),
         plan_cursor: plan.cursor,
         walk_speed_per_tick: speed.0,
+        birth_tick,
         active_route,
     })
 }
@@ -645,6 +653,14 @@ pub fn agent_dto_for(
         direction_for_agent(world, agent_id).unwrap_or(abutown_protocol::DirectionDto::S);
     let sprite_key =
         sprite_key_for_agent(world, agent_id).unwrap_or_else(|| "pedestrian:0".to_string());
+    let current_tick = tick(world);
+    let birth_tick = world
+        .get::<crate::mobility::components::BirthTick>(entity)
+        .map(|b| b.0)
+        .unwrap_or(0);
+    let age_seconds = world
+        .resource::<crate::time::SimClock>()
+        .age_seconds(current_tick, birth_tick);
     Some(abutown_protocol::AgentMobilityDto {
         id: abutown_protocol::EntityId(stable.0.0.clone()),
         state: abutown_protocol::AgentMobilityStateDto::from(&state.0),
@@ -652,6 +668,7 @@ pub fn agent_dto_for(
         world_coord: abutown_protocol::WorldCoordDto { x: cx, y: cy },
         direction,
         sprite_key,
+        age_seconds,
     })
 }
 

@@ -857,6 +857,7 @@ fn agent_dto_to_proto(dto: abutown_protocol::AgentMobilityDto) -> w::AgentMobili
         direction: direction_to_proto(dto.direction) as i32,
         sprite_key: dto.sprite_key,
         plan_cursor: dto.plan_cursor as u32,
+        age_seconds: dto.age_seconds,
     }
 }
 
@@ -904,6 +905,7 @@ fn world_summary_dto_to_proto(s: &abutown_protocol::WorldSummaryDto) -> w::World
             .map(|c| w::ChunkCoord { x: c.x, y: c.y })
             .collect(),
         tick_period_ms: s.tick_period_ms,
+        sim_time: s.sim_time,
     }
 }
 

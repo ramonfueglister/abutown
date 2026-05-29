@@ -1,5 +1,6 @@
 import type { CameraState } from '../cameraController';
 import type { TerrainKind, WorldDetail } from '../city/worldTypes';
+import { formatSimDate } from '../backend/simTime';
 import type {
   RuntimeBuilding,
   RuntimeRailStation,
@@ -75,6 +76,7 @@ export type MinimalMapRendererState = {
   selectedAgentId: string | null;
   selectedVehicleId: string | null;
   now: () => number;
+  simTime: number;
 };
 
 type GridRect = {
@@ -135,6 +137,7 @@ export function renderMinimalMap(state: MinimalMapRendererState): void {
   ctx.restore();
   drawAgentInspectorPanel(state, buildBackendPedestrianInspector(selectedBackendPedestrian(state)));
   drawCarInspectorPanel(state, buildBackendCarInspector(selectedBackendCar(state)));
+  drawWorldDateLabel(state);
 }
 
 function drawScene(state: MinimalMapRendererState, offset: Coord): void {
@@ -596,4 +599,16 @@ function iso(state: MinimalMapRendererState, coord: Coord): Coord {
 
 function worldToGrid(state: MinimalMapRendererState, point: Coord): Coord {
   return mapUnproject(point, state.tileSize);
+}
+
+function drawWorldDateLabel(state: MinimalMapRendererState): void {
+  const { ctx, viewport } = state;
+  const label = formatSimDate(state.simTime);
+  ctx.save();
+  ctx.setTransform(viewport.devicePixelRatio, 0, 0, viewport.devicePixelRatio, 0, 0);
+  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = 'rgba(241, 238, 220, 0.72)';
+  ctx.fillText(label, 12, viewport.height - 8);
+  ctx.restore();
 }

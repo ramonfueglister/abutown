@@ -1380,3 +1380,22 @@ fn incremental_chunk_populations_matches_full_rebuild() {
             .any(|v| v.contains(&moved_entity))
     );
 }
+#[test]
+fn spawned_agent_carries_birth_tick_and_ages() {
+    use crate::mobility::components::BirthTick;
+    use crate::time::SimClock;
+    let (mut world, _schedule) = crate::mobility::api::empty_world_and_schedule();
+
+    let rec = crate::mobility::records::AgentRecord::new_born_at(
+        crate::ids::AgentId("agent:test".into()),
+        crate::mobility::records::AgentMobilityState::AtActivity { activity_id: "a".into() },
+        vec![crate::mobility::records::PlanStage::Activity { activity_id: "a".into() }],
+        0.05,
+        100,
+    );
+    let entity = crate::mobility::api::spawn_agent_from_record(&mut world, rec);
+    assert_eq!(world.get::<BirthTick>(entity).unwrap().0, 100);
+
+    let clock = SimClock { sim_seconds_per_tick: 200 };
+    assert!((clock.age_years(100 + 157_680, 100) - 1.0).abs() < 1e-3);
+}

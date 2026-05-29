@@ -9,6 +9,7 @@ export function formatBackendCoord(coord: Coord): string {
 
 export function buildBackendPedestrianInspector(agent: BackendPedestrian | null): EntityInspector {
   if (!agent) return null;
+  const SIM_SECONDS_PER_YEAR = 31_536_000;
   return {
     title: agent.id,
     rows: [
@@ -16,6 +17,7 @@ export function buildBackendPedestrianInspector(agent: BackendPedestrian | null)
       { label: 'Tile', value: formatBackendCoord(agent.path[0]) },
       { label: 'Next', value: formatBackendCoord(agent.path[1] ?? agent.path[0]) },
       { label: 'Direction', value: agent.direction },
+      { label: 'Age', value: `${(agent.ageSeconds / SIM_SECONDS_PER_YEAR).toFixed(1)} yr` },
       { label: 'Sprite', value: agent.sprite.sheet },
     ],
   };

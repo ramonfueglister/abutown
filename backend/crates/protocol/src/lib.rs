@@ -56,6 +56,7 @@ pub struct WorldSummaryDto {
     pub chunk_size: u16,
     pub loaded_chunks: Vec<ChunkCoordDto>,
     pub tick_period_ms: u32,
+    pub sim_time: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -242,6 +243,7 @@ pub struct AgentMobilityDto {
     pub world_coord: WorldCoordDto,
     pub direction: DirectionDto,
     pub sprite_key: String,
+    pub age_seconds: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -544,6 +546,7 @@ mod proto_roundtrip_tests {
             direction: Direction::E as i32,
             sprite_key: "pedestrian:5".into(),
             plan_cursor: 0,
+            age_seconds: 7_200,
         };
         let msg = ServerMessage {
             body: Some(server_message::Body::MobilityChunkDelta(
@@ -696,6 +699,7 @@ mod proto_roundtrip_tests {
             chunk_size: 32,
             loaded_chunks: vec![sample_chunk(), ChunkCoord { x: 5, y: 4 }],
             tick_period_ms: 100,
+            sim_time: 42_000,
         };
         assert_roundtrip(&msg);
     }

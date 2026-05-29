@@ -24,6 +24,7 @@ function worldSummaryProtoResponse(dto: WorldSummaryDto): Response {
     chunkSize: dto.chunk_size,
     loadedChunks: dto.loaded_chunks.map((c) => ({ x: c.x, y: c.y })),
     tickPeriodMs: dto.tick_period_ms,
+    simTime: BigInt(dto.sim_time),
   });
   return new Response(toBinary(WorldSummarySchema, message), {
     status: 200,
@@ -189,6 +190,7 @@ const worldSummary: WorldSummaryDto = {
   chunk_size: 32,
   loaded_chunks: [],
   tick_period_ms: 100,
+  sim_time: 0,
 };
 
 const snapshot: MobilitySnapshotDto = {
@@ -203,6 +205,7 @@ const snapshot: MobilitySnapshotDto = {
       world_coord: { x: 0, y: 0 },
       direction: 'e',
       sprite_key: 'pedestrian:0',
+      age_seconds: 0,
     },
   ],
   vehicles: [
@@ -310,6 +313,7 @@ describe('mobility backend client', () => {
       chunk_size: 32,
       loaded_chunks: [],
       tick_period_ms: 250,
+      sim_time: 0,
     };
     const mobilitySnapshot: MobilitySnapshotDto = {
       protocol_version: 1,
