@@ -638,16 +638,16 @@ pub fn vehicle_advance_system(
         if !chunk_is_simulated(world_pos, &simulated) {
             continue;
         }
-        if dwell.0 > 0 {
-            dwell.0 -= 1;
-            dirty.0.insert(entity);
-            continue;
-        }
         if (pos.route_id.0 as usize) >= traffic_routes.count() {
             continue;
         }
         let route = traffic_routes.route(pos.route_id);
         if route.edges.is_empty() || pos.edge_index >= route.edges.len() {
+            continue;
+        }
+        if dwell.0 > 0 {
+            dwell.0 -= 1;
+            dirty.0.insert(entity);
             continue;
         }
         if pos.progress >= 1.0 {
@@ -1728,7 +1728,7 @@ mod tests {
     }
 
     #[test]
-    fn vehicle_advance_skips_invalid_route_edge_index_before_progress() {
+    fn vehicle_advance_skips_invalid_route_edge_index_before_state_mutation() {
         use crate::ids::VehicleId;
         use crate::mobility::records::VehicleKind;
 
@@ -1750,7 +1750,7 @@ mod tests {
                 },
                 Capacity(4),
                 Occupants(vec![]),
-                DwellTicksRemaining(0),
+                DwellTicksRemaining(2),
                 Position { x: 0.0, y: 0.0 },
                 Direction(abutown_protocol::DirectionDto::S),
                 SpriteKey(String::new()),
@@ -1766,6 +1766,11 @@ mod tests {
         assert!(
             (pos.progress - 0.4).abs() < 1e-6,
             "invalid route edge index must not advance progress"
+        );
+        assert_eq!(
+            world.get::<DwellTicksRemaining>(entity).unwrap().0,
+            2,
+            "invalid route edge index must not decrement dwell"
         );
         assert!(!world.resource::<DirtyVehicles>().0.contains(&entity));
     }
@@ -2009,6 +2014,53 @@ mod tests {
         assert!(
             (pos.y - 5.0).abs() < 1e-3,
             "edge 1 should resolve through TrafficRoutes instead of stale cached edge 0"
+        );
+    }
+
+    #[test]
+    fn compute_direction_ignores_stale_vehicle_polyline_cache() {
+        use crate::ids::VehicleId;
+        use crate::mobility::records::VehicleKind;
+        use std::sync::Arc;
+
+        let mut world = World::new();
+        insert_test_routing(&mut world);
+        world.insert_resource(all_active());
+        let route_id = crate::routing::TrafficRouteId(0);
+
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:stale-direction-cache".into())),
+                VehicleKindComponent(VehicleKind::Car),
+                RoutePosition {
+                    route_id,
+                    edge_index: 1,
+                    progress: 0.5,
+                    speed: 0.0,
+                },
+                Capacity(4),
+                Occupants(vec![]),
+                DwellTicksRemaining(0),
+                Position { x: 0.0, y: 5.0 },
+                Direction(abutown_protocol::DirectionDto::E),
+                SpriteKey(String::new()),
+                CurrentLinkPolyline {
+                    link_id: "l:vehicle".into(),
+                    points: Arc::new(vec![(0.0, 0.0), (10.0, 0.0)]),
+                },
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(compute_direction_system);
+        schedule.run(&mut world);
+
+        let dir = world.get::<Direction>(entity).unwrap();
+        assert_eq!(
+            dir.0,
+            abutown_protocol::DirectionDto::S,
+            "edge 1 direction should resolve through TrafficRoutes instead of stale cached edge 0"
         );
     }
 
