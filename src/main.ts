@@ -93,6 +93,12 @@ import {
   outwardExits,
   stableHash as hash,
 } from './render/gridMath';
+import {
+  buildingJitter,
+  buildingVectorColor,
+  treeRenderStyle,
+  vehicleVectorColor,
+} from './render/vectorStyle';
 
 type Coord = { x: number; y: number };
 
@@ -132,12 +138,7 @@ const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
 const TRAIN_CORE = '#5f6f75';
 const TREE_COLOR = '#84ad78';
 const DETAIL_COLOR = 'rgba(92, 97, 92, 0.34)';
-const BUILDING_RESIDENTIAL = '#d8cfbf';
-const BUILDING_COMMERCIAL = '#c9d8dc';
-const BUILDING_CIVIC = '#dccb9a';
-const BUILDING_INDUSTRIAL = '#cabed6';
 const AGENT_COLOR = '#343b43';
-const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '#ef7f5a', '#28a6b0'];
 
 const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
 const TERRAIN_SEED_WORLD_ID = 'zurich-river-city-v1';
@@ -522,23 +523,15 @@ function drawBuilding(building: Building): void {
   ctx.restore();
 }
 
-function buildingJitter(building: Building): Coord {
-  return {
-    x: ((hash(`building-jitter-x:${building.district}:${key(building.coord)}`) % 5) - 2) * 0.26,
-    y: ((hash(`building-jitter-y:${building.district}:${key(building.coord)}`) % 5) - 2) * 0.26,
-  };
-}
-
 function drawTree(coord: Coord): void {
-  if (camera.scale < 0.32 && hash(`tree-lod:${key(coord)}`) % 3 !== 0) return;
+  const style = treeRenderStyle({ coord, cameraScale: camera.scale, terrainBase: terrainBaseAt(coord) });
+  if (!style.visible) return;
   const point = iso(coord);
-  const jitterX = ((hash(`tree-x:${key(coord)}`) % 9) - 4) * 0.38;
-  const jitterY = ((hash(`tree-y:${key(coord)}`) % 9) - 4) * 0.38;
   ctx.save();
   ctx.fillStyle = TREE_COLOR;
-  ctx.globalAlpha = terrainBaseAt(coord) === 'Forest' ? 0.72 : 0.54;
+  ctx.globalAlpha = style.alpha;
   ctx.beginPath();
-  ctx.arc(point.x + jitterX, point.y + jitterY, 2.4, 0, Math.PI * 2);
+  ctx.arc(point.x + style.jitter.x, point.y + style.jitter.y, 2.4, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -580,13 +573,6 @@ function drawRoadPass(point: Coord, segments: Coord[], color: string, width: num
     }
   }
   ctx.stroke();
-}
-
-function buildingVectorColor(building: Building): string {
-  if (building.sheet === 'church') return BUILDING_CIVIC;
-  if (building.sheet === 'office' || building.sheet === 'modern' || building.sheet === 'tower') return BUILDING_COMMERCIAL;
-  if (building.district === 'mill-yard') return BUILDING_INDUSTRIAL;
-  return BUILDING_RESIDENTIAL;
 }
 
 function drawCar(car: BackendCar, selected: boolean): void {
@@ -658,10 +644,6 @@ function drawCapsule(point: Coord, angle: number, length: number, width: number,
   ctx.lineTo(length / 2, 0);
   ctx.stroke();
   ctx.restore();
-}
-
-function vehicleVectorColor(id: string): string {
-  return VEHICLE_COLORS[hash(`vehicle-color:${id}`) % VEHICLE_COLORS.length];
 }
 
 function drawPedestrian(pedestrian: BackendPedestrian, selected: boolean): void {
