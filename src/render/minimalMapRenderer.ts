@@ -46,9 +46,7 @@ import {
   distanceOutsideMap,
   isInsideMap,
   maskSegments as gridMaskSegments,
-  movementAngle,
   outwardExits as gridOutwardExits,
-  screenForwardOffset,
   stableHash as hash,
 } from './gridMath';
 import {
@@ -56,6 +54,7 @@ import {
   carVisualWorldPoint,
   pedestrianRenderStyle,
 } from './entityRenderStyle';
+import { trainRenderSegments } from './trainRenderStyle';
 
 export type Coord = { x: number; y: number };
 
@@ -429,20 +428,10 @@ function drawTrain(state: MinimalMapRendererState, tram: BackendTram): void {
   const { ctx } = state;
   const head = iso(state, tram.path[0]);
   const next = iso(state, tram.path[1] ?? tram.path[0]);
-  const segments = [
-    { distance: 0, length: 13.5 },
-    { distance: -9.5, length: 10.5 },
-    { distance: -19, length: 10.5 },
-    { distance: -28.5, length: 10.5 },
-    { distance: -38, length: 10.5 },
-  ];
-  const angle = movementAngle(head, next);
 
-  for (const segment of segments) {
-    const offset = screenForwardOffset(head, next, segment.distance);
-    const point = { x: head.x + offset.x, y: head.y + offset.y };
+  for (const segment of trainRenderSegments(head, next)) {
     ctx.save();
-    drawCapsule(ctx, point, angle, segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
+    drawCapsule(ctx, segment.point, segment.angle, segment.length, segment.width, TRAIN_CORE, RAIL_CASING);
     ctx.restore();
   }
 }
