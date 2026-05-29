@@ -642,7 +642,7 @@ mod tests {
         let c1 = index.cluster_id(ClusterCoord { x: 1, y: 0 }).unwrap();
         let c2 = index.cluster_id(ClusterCoord { x: 0, y: 2 }).unwrap();
         let c3 = index.cluster_id(ClusterCoord { x: 1, y: 2 }).unwrap();
-        let c4 = index.cluster_id(ClusterCoord { x: 2, y: 2 }).unwrap();
+        let _c4 = index.cluster_id(ClusterCoord { x: 2, y: 2 }).unwrap();
 
         assert_eq!(index.adjacent_clusters(c0, RoutingProfileKey::Walk), &[c1]);
         assert!(

@@ -106,6 +106,7 @@ fn expected_base_world_car_routes(
     expected
 }
 
+#[cfg(test)]
 fn expected_base_world_car_count(base_world: &BaseWorldBundle) -> usize {
     expected_base_world_car_routes(base_world).len()
 }

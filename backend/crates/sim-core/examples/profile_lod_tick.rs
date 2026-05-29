@@ -138,11 +138,6 @@ fn main() {
         s.add_systems(walk_advance_system);
         s
     };
-    let mut s_board = {
-        let mut s = Schedule::default();
-        s.add_systems(boarding_alighting_system);
-        s
-    };
     let mut s_arrive = {
         let mut s = Schedule::default();
         s.add_systems(stop_arrival_system);
@@ -178,7 +173,6 @@ fn main() {
         "track_pop",
         "reclassify",
         "walk_adv",
-        "boarding",
         "stop_arrive",
         "veh_adv",
         "warm_flow",
@@ -186,7 +180,7 @@ fn main() {
         "direction",
         "tick_inc",
     ];
-    let mut samples: [Vec<f64>; 10] = Default::default();
+    let mut samples: [Vec<f64>; 9] = Default::default();
     for v in samples.iter_mut() {
         v.reserve(N);
     }
@@ -196,7 +190,6 @@ fn main() {
             &mut s_track,
             &mut s_reclassify,
             &mut s_walk,
-            &mut s_board,
             &mut s_arrive,
             &mut s_vehadv,
             &mut s_warmflow,
