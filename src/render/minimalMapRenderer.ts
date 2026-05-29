@@ -21,13 +21,42 @@ import {
 import { minimalBuildingPlotOffset, minimalBuildingSize } from './minimalBuildingLayout';
 import { screenStableWorldSize } from './minimalGlyphScale';
 import { MINIMAL_MAP_TILE_SIZE, mapProject, mapUnproject } from './minimalMapProjection';
-import { screenRightLaneOffset, type VehicleSprite } from './vehicleSprites';
+import type { VehicleSprite } from './vehicleSprites';
 import type { MinimalPedestrianSprite } from './minimalPedestrianSprites';
+import {
+  drawCapsule,
+  roundedRectPath,
+} from './canvasPrimitives';
+import {
+  buildBackendCarInspector,
+  buildBackendPedestrianInspector,
+  type EntityInspector,
+} from './entityInspector';
+import {
+  AGENT_INSPECTOR_PANEL,
+  VEHICLE_INSPECTOR_PANEL,
+  drawInspectorPanel,
+} from './inspectorPanelPainter';
+import {
+  EAST,
+  NORTH,
+  SOUTH,
+  WEST,
+  coordKey as key,
+  distanceOutsideMap,
+  isInsideMap,
+  maskSegments as gridMaskSegments,
+  outwardExits as gridOutwardExits,
+  stableHash as hash,
+} from './gridMath';
+import {
+  carRenderStyle,
+  carVisualWorldPoint,
+  pedestrianRenderStyle,
+} from './entityRenderStyle';
+import { trainRenderSegments } from './trainRenderStyle';
 
 export type Coord = { x: number; y: number };
-
-export type EntityInspectorRow = { label: string; value: string };
-export type EntityInspector = { title: string; rows: EntityInspectorRow[] } | null;
 
 export type MinimalMapRendererState = {
   ctx: CanvasRenderingContext2D;
@@ -97,10 +126,6 @@ const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '
 const VIEWPORT_GRID_PADDING = 9;
 export const OUTSKIRTS_TILES = 12;
 export const EDGE_EXIT_TILES = 7;
-const NORTH = 1;
-const EAST = 2;
-const SOUTH = 4;
-const WEST = 8;
 
 export function renderMinimalMap(state: MinimalMapRendererState): void {
   const { ctx, camera, viewport } = state;
@@ -200,8 +225,8 @@ function drawOutskirtsTerrain(state: MinimalMapRendererState, visibleGrid: GridR
   for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(world.height - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
     for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(world.width - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
       const coord = { x, y };
-      if (isInsidePlayableMap(state, coord)) continue;
-      const edgeDistance = distanceOutsidePlayableMap(state, coord);
+      if (isInsideMap(coord, world)) continue;
+      const edgeDistance = distanceOutsideMap(coord, world);
       if (edgeDistance > OUTSKIRTS_TILES) continue;
 
       const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
@@ -298,11 +323,11 @@ function drawBuilding(state: MinimalMapRendererState, building: RuntimeBuilding)
   const y = point.y - height / 2 + offset.y + jitter.y;
   ctx.save();
   ctx.fillStyle = 'rgba(108, 97, 77, 0.07)';
-  roundedRect(state, x + 1.5, y + 1.5, width, height, 1.4);
+  roundedRectPath(ctx, x + 1.5, y + 1.5, width, height, 1.4);
   ctx.fill();
   ctx.globalAlpha = 0.66;
   ctx.fillStyle = buildingVectorColor(building);
-  roundedRect(state, x, y, width, height, 1.4);
+  roundedRectPath(ctx, x, y, width, height, 1.4);
   ctx.fill();
   ctx.restore();
 }
@@ -347,7 +372,7 @@ function drawMaskLine(
 ): void {
   const { ctx } = state;
   const point = iso(state, coord);
-  const segments = maskSegments(state, mask);
+  const segments = gridMaskSegments(mask, state.tileSize);
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -372,16 +397,6 @@ function drawRoadPass(state: MinimalMapRendererState, point: Coord, segments: Co
   ctx.stroke();
 }
 
-function maskSegments(state: MinimalMapRendererState, mask: number): Coord[] {
-  const { tileSize } = state;
-  const result: Coord[] = [];
-  if ((mask & NORTH) !== 0) result.push({ x: 0, y: -tileSize.height / 2 });
-  if ((mask & EAST) !== 0) result.push({ x: tileSize.width / 2, y: 0 });
-  if ((mask & SOUTH) !== 0) result.push({ x: 0, y: tileSize.height / 2 });
-  if ((mask & WEST) !== 0) result.push({ x: -tileSize.width / 2, y: 0 });
-  return result;
-}
-
 function buildingVectorColor(building: RuntimeBuilding): string {
   if (building.sheet === 'church') return BUILDING_CIVIC;
   if (building.sheet === 'office' || building.sheet === 'modern' || building.sheet === 'tower') return BUILDING_COMMERCIAL;
@@ -394,11 +409,7 @@ function drawCar(state: MinimalMapRendererState, car: BackendCar, selected: bool
   const point = carVisualWorldPoint(car, camera.scale, tileSize);
   const currentPoint = iso(state, car.path[0]);
   const nextPoint = iso(state, car.path[1] ?? car.path[0]);
-  const angle = movementAngle(currentPoint, nextPoint);
-  const selectX = screenStableWorldSize(14, camera.scale, { minWorld: 8.5, maxWorld: 36 });
-  const selectY = screenStableWorldSize(10, camera.scale, { minWorld: 6.5, maxWorld: 28 });
-  const length = screenStableWorldSize(16, camera.scale, { minWorld: 12.5, maxWorld: 44 });
-  const width = screenStableWorldSize(6.4, camera.scale, { minWorld: 5.2, maxWorld: 19 });
+  const style = carRenderStyle(currentPoint, nextPoint, camera.scale);
   ctx.save();
   ctx.translate(point.x, point.y);
   if (selected) {
@@ -406,101 +417,23 @@ function drawCar(state: MinimalMapRendererState, car: BackendCar, selected: bool
     ctx.strokeStyle = '#166c83';
     ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
     ctx.beginPath();
-    ctx.ellipse(0, 0, selectX, selectY, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, style.selection.x, style.selection.y, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-  drawCapsule(state, { x: 0, y: 0 }, angle, length, width, vehicleVectorColor(car.id));
+  drawCapsule(ctx, { x: 0, y: 0 }, style.angle, style.capsule.length, style.capsule.width, vehicleVectorColor(car.id));
   ctx.restore();
-}
-
-export function carVisualWorldPoint(
-  car: BackendCar,
-  cameraScale: number,
-  tileSize: { width: number; height: number } = MINIMAL_MAP_TILE_SIZE,
-): Coord {
-  const current = car.path[0];
-  const next = car.path[1] ?? current;
-  const currentPoint = mapProject(current, tileSize);
-  const nextPoint = mapProject(next, tileSize);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, screenStableWorldSize(6.8, cameraScale, { minWorld: 6.8, maxWorld: 20 }));
-  const spreadIndex = (hash(car.id) % 9) - 4;
-  const spreadMagnitude = screenStableWorldSize(Math.abs(spreadIndex) * 4.2, cameraScale, { minWorld: 0, maxWorld: 42 });
-  const along = screenForwardOffset(currentPoint, nextPoint, Math.sign(spreadIndex) * spreadMagnitude);
-  return {
-    x: currentPoint.x + lane.x + along.x,
-    y: currentPoint.y + lane.y + along.y,
-  };
-}
-
-function screenForwardOffset(from: Coord, to: Coord, distance: number): Coord {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy);
-  if (length === 0 || distance === 0) return { x: 0, y: 0 };
-  return {
-    x: (dx / length) * distance,
-    y: (dy / length) * distance,
-  };
 }
 
 function drawTrain(state: MinimalMapRendererState, tram: BackendTram): void {
   const { ctx } = state;
   const head = iso(state, tram.path[0]);
   const next = iso(state, tram.path[1] ?? tram.path[0]);
-  const segments = [
-    { distance: 0, length: 13.5 },
-    { distance: -9.5, length: 10.5 },
-    { distance: -19, length: 10.5 },
-    { distance: -28.5, length: 10.5 },
-    { distance: -38, length: 10.5 },
-  ];
-  const angle = movementAngle(head, next);
 
-  for (const segment of segments) {
-    const offset = screenForwardOffset(head, next, segment.distance);
-    const point = { x: head.x + offset.x, y: head.y + offset.y };
+  for (const segment of trainRenderSegments(head, next)) {
     ctx.save();
-    drawCapsule(state, point, angle, segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
+    drawCapsule(ctx, segment.point, segment.angle, segment.length, segment.width, TRAIN_CORE, RAIL_CASING);
     ctx.restore();
   }
-}
-
-function drawCapsule(
-  state: MinimalMapRendererState,
-  point: Coord,
-  angle: number,
-  length: number,
-  width: number,
-  color: string,
-  casing?: string,
-): void {
-  const { ctx } = state;
-  ctx.save();
-  ctx.translate(point.x, point.y);
-  ctx.rotate(angle);
-  ctx.lineCap = 'round';
-  if (casing) {
-    ctx.strokeStyle = casing;
-    ctx.lineWidth = width + 2.6;
-    ctx.beginPath();
-    ctx.moveTo(-length / 2, 0);
-    ctx.lineTo(length / 2, 0);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(-length / 2, 0);
-  ctx.lineTo(length / 2, 0);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function movementAngle(currentPoint: Coord, nextPoint: Coord): number {
-  const dx = nextPoint.x - currentPoint.x;
-  const dy = nextPoint.y - currentPoint.y;
-  if (Math.abs(dx) + Math.abs(dy) < 0.001) return 0;
-  return Math.atan2(dy, dx);
 }
 
 function vehicleVectorColor(id: string): string {
@@ -515,127 +448,36 @@ function drawPedestrian(state: MinimalMapRendererState, pedestrian: BackendPedes
   const point = iso(state, pos);
   const currentPoint = iso(state, current);
   const nextPoint = iso(state, next);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, screenStableWorldSize(4 + pedestrian.laneOffset, camera.scale, { minWorld: 4, maxWorld: 14 }));
-  const selectedRadius = screenStableWorldSize(8, camera.scale, { minWorld: 6.2, maxWorld: 22 });
-  const radius = screenStableWorldSize(3.6, camera.scale, { minWorld: 2.9, maxWorld: 10 });
+  const style = pedestrianRenderStyle(currentPoint, nextPoint, camera.scale, pedestrian.laneOffset);
   ctx.save();
-  ctx.translate(point.x + lane.x, point.y + lane.y);
+  ctx.translate(point.x + style.lane.x, point.y + style.lane.y);
   if (selected) {
     ctx.globalAlpha = 0.92;
     ctx.strokeStyle = '#a87309';
     ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
     ctx.beginPath();
-    ctx.ellipse(0, 0, selectedRadius, selectedRadius, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, style.selectedRadius, style.selectedRadius, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.fillStyle = AGENT_COLOR;
   ctx.globalAlpha *= 0.78;
   ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.arc(0, 0, style.radius, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
-}
-
-function formatBackendCoord(coord: { x: number; y: number }): string {
-  return `${coord.x.toFixed(1)}, ${coord.y.toFixed(1)}`;
-}
-
-export function buildBackendPedestrianInspector(agent: BackendPedestrian | null): EntityInspector {
-  if (!agent) return null;
-  return {
-    title: agent.id,
-    rows: [
-      { label: 'State', value: 'walking' },
-      { label: 'Tile', value: formatBackendCoord(agent.path[0]) },
-      { label: 'Next', value: formatBackendCoord(agent.path[1] ?? agent.path[0]) },
-      { label: 'Direction', value: agent.direction },
-      { label: 'Sprite', value: agent.sprite.sheet },
-    ],
-  };
-}
-
-export function buildBackendCarInspector(vehicle: BackendCar | null): EntityInspector {
-  if (!vehicle) return null;
-  return {
-    title: vehicle.id,
-    rows: [
-      { label: 'State', value: 'driving' },
-      { label: 'Tile', value: formatBackendCoord(vehicle.path[0]) },
-      { label: 'Next', value: formatBackendCoord(vehicle.path[1] ?? vehicle.path[0]) },
-      { label: 'Direction', value: vehicle.direction },
-      { label: 'Sprite', value: vehicle.sprite.role },
-    ],
-  };
 }
 
 function drawAgentInspectorPanel(state: MinimalMapRendererState, inspector: EntityInspector): void {
-  if (!inspector) return;
-  drawInspectorPanel(state, inspector, { x: 12, y: 12, accent: '#f7d76a', stroke: 'rgba(247, 215, 106, 0.8)' });
+  drawInspectorPanel(state.ctx, inspector, AGENT_INSPECTOR_PANEL, state.viewport.devicePixelRatio);
 }
 
 function drawCarInspectorPanel(state: MinimalMapRendererState, inspector: EntityInspector): void {
-  if (!inspector) return;
-  drawInspectorPanel(state, inspector, { x: 12, y: 128, accent: '#75d7ff', stroke: 'rgba(117, 215, 255, 0.8)' });
-}
-
-function drawInspectorPanel(
-  state: MinimalMapRendererState,
-  inspector: { title: string; rows: { label: string; value: string }[] },
-  options: { x: number; y: number; accent: string; stroke: string },
-): void {
-  const { ctx, viewport } = state;
-  const ratio = viewport.devicePixelRatio;
-  const { x, y } = options;
-  const width = 232;
-  const padding = 10;
-  const rowHeight = 17;
-  const titleHeight = 20;
-  const height = padding * 2 + titleHeight + inspector.rows.length * rowHeight;
-
-  ctx.save();
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.fillStyle = 'rgba(7, 10, 9, 0.82)';
-  ctx.strokeStyle = options.stroke;
-  ctx.lineWidth = 1;
-  roundedRect(state, x, y, width, height, 6);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.font = '600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-  ctx.fillStyle = options.accent;
-  ctx.textBaseline = 'top';
-  ctx.fillText(inspector.title, x + padding, y + padding);
-
-  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-  inspector.rows.forEach((row, index) => {
-    const rowY = y + padding + titleHeight + index * rowHeight;
-    ctx.fillStyle = 'rgba(231, 236, 224, 0.72)';
-    ctx.fillText(row.label, x + padding, rowY);
-    ctx.fillStyle = '#f7f7e8';
-    ctx.fillText(row.value, x + 70, rowY);
-  });
-  ctx.restore();
-}
-
-function roundedRect(state: MinimalMapRendererState, x: number, y: number, width: number, height: number, radius: number): void {
-  const { ctx } = state;
-  const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+  drawInspectorPanel(state.ctx, inspector, VEHICLE_INSPECTOR_PANEL, state.viewport.devicePixelRatio);
 }
 
 function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRect): void {
   for (const road of state.roads.values()) {
-    for (const exit of outwardExits(state, road.coord, road.mask)) {
+    for (const exit of gridOutwardExits(road.coord, road.mask, state.world)) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
         const coord = { x: road.coord.x + exit.dx * step, y: road.coord.y + exit.dy * step };
         if (!isCoordVisible(coord, visibleGrid)) continue;
@@ -649,7 +491,7 @@ function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRe
   }
 
   for (const rail of state.rails.values()) {
-    for (const exit of outwardExits(state, rail.coord, rail.mask)) {
+    for (const exit of gridOutwardExits(rail.coord, rail.mask, state.world)) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
         const coord = { x: rail.coord.x + exit.dx * step, y: rail.coord.y + exit.dy * step };
         if (!isCoordVisible(coord, visibleGrid)) continue;
@@ -696,18 +538,9 @@ function isCoordVisible(coord: Coord, rect: GridRect): boolean {
   return coord.x >= rect.minX && coord.x <= rect.maxX && coord.y >= rect.minY && coord.y <= rect.maxY;
 }
 
-function isInsidePlayableMap(state: MinimalMapRendererState, coord: Coord): boolean {
-  return coord.x >= 0 && coord.y >= 0 && coord.x < state.world.width && coord.y < state.world.height;
-}
-
 function isWaterSurface(state: MinimalMapRendererState, coord: Coord): boolean {
   const kind = state.terrain.get(key(coord));
   return kind === 'water' || kind === 'riverbank';
-}
-
-function distanceOutsidePlayableMap(state: MinimalMapRendererState, coord: Coord): number {
-  const { world } = state;
-  return Math.max(0, -coord.x, coord.x - (world.width - 1), -coord.y, coord.y - (world.height - 1));
 }
 
 function drawIsoTile(state: MinimalMapRendererState, point: Coord): void {
@@ -723,16 +556,6 @@ function drawFadingEdgeTile(state: MinimalMapRendererState, step: number, draw: 
   ctx.globalAlpha = 0.68 * (1 - step / (EDGE_EXIT_TILES + 1));
   draw();
   ctx.restore();
-}
-
-function outwardExits(state: MinimalMapRendererState, coord: Coord, mask: number): { dx: number; dy: number; mask: number }[] {
-  const { world } = state;
-  const exits: { dx: number; dy: number; mask: number }[] = [];
-  if (coord.y === 0 && (mask & NORTH) !== 0) exits.push({ dx: 0, dy: -1, mask: NORTH | SOUTH });
-  if (coord.x === world.width - 1 && (mask & EAST) !== 0) exits.push({ dx: 1, dy: 0, mask: EAST | WEST });
-  if (coord.y === world.height - 1 && (mask & SOUTH) !== 0) exits.push({ dx: 0, dy: 1, mask: NORTH | SOUTH });
-  if (coord.x === 0 && (mask & WEST) !== 0) exits.push({ dx: -1, dy: 0, mask: EAST | WEST });
-  return exits;
 }
 
 function compareDrawables(state: MinimalMapRendererState, a: Drawable, b: Drawable): number {
@@ -766,17 +589,4 @@ function iso(state: MinimalMapRendererState, coord: Coord): Coord {
 
 function worldToGrid(state: MinimalMapRendererState, point: Coord): Coord {
   return mapUnproject(point, state.tileSize);
-}
-
-function key(coord: Coord): string {
-  return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
-}
-
-function hash(value: string): number {
-  let result = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    result ^= value.charCodeAt(i);
-    result = Math.imul(result, 16777619);
-  }
-  return result >>> 0;
 }
