@@ -1,12 +1,12 @@
 import type { CameraState } from '../cameraController';
-import type { ZurichDetail, ZurichTerrainKind } from '../city/worldTypes';
+import type { TerrainKind, WorldDetail } from '../city/worldTypes';
 import type {
   RuntimeBuilding,
   RuntimeRailStation,
   RuntimeRailTile,
   RuntimeRoadTile,
   RuntimeTerrain,
-} from '../app/zurichRuntimeContext';
+} from './worldRuntimeTypes';
 import type { MobilityOverlayState } from '../backend/mobilityState';
 import { shouldRenderDetail } from './detailRenderPolicy';
 import { compareDrawableOrder } from './drawOrder';
@@ -62,14 +62,14 @@ export type MinimalMapRendererState = {
   world: { width: number; height: number };
   tileSize: { width: number; height: number };
   terrain: ReadonlyMap<string, RuntimeTerrain>;
-  terrainKinds: ReadonlyMap<string, { kind: ZurichTerrainKind }>;
+  terrainKinds: ReadonlyMap<string, { kind: TerrainKind }>;
   roads: ReadonlyMap<string, RuntimeRoadTile>;
   rails: ReadonlyMap<string, RuntimeRailTile>;
   railPaths: readonly Coord[][];
   railStations: readonly RuntimeRailStation[];
   buildings: readonly RuntimeBuilding[];
   trees: readonly Coord[];
-  details: readonly ZurichDetail[];
+  details: readonly WorldDetail[];
   mobilityState: MobilityOverlayState;
   mobilityTickPeriodMs: number;
   vehicleSprites: readonly VehicleSprite[];
@@ -90,7 +90,7 @@ type StaticDrawable =
   | { type: 'rail'; coord: Coord; rail: RuntimeRailTile }
   | { type: 'road'; coord: Coord; road: RuntimeRoadTile }
   | { type: 'railStation'; coord: Coord; station: RuntimeRailStation }
-  | { type: 'detail'; coord: Coord; detail: ZurichDetail }
+  | { type: 'detail'; coord: Coord; detail: WorldDetail }
   | { type: 'tree'; coord: Coord }
   | { type: 'building'; coord: Coord; building: RuntimeBuilding };
 
@@ -285,7 +285,7 @@ function drawRailStation(state: MinimalMapRendererState, station: RuntimeRailSta
   ctx.restore();
 }
 
-function drawDetail(state: MinimalMapRendererState, detail: ZurichDetail): void {
+function drawDetail(state: MinimalMapRendererState, detail: WorldDetail): void {
   if (!shouldRenderDetail(detail)) return;
   if (detail.category !== 'industry' && detail.category !== 'dock' && detail.category !== 'station') return;
   const { ctx } = state;

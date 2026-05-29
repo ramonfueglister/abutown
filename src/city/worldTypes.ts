@@ -1,6 +1,7 @@
 export type Coord = { x: number; y: number };
 
-export type ZurichTerrainKind = 'grass' | 'water' | 'riverbank' | 'park' | 'forest' | 'reserve' | 'plaza';
+export type TerrainKind = 'grass' | 'water' | 'riverbank' | 'park' | 'forest' | 'reserve' | 'plaza';
+export type ZurichTerrainKind = TerrainKind;
 
 export type ZurichZoneKind =
   | 'river'
@@ -54,7 +55,7 @@ export type ZurichRailTile = {
   mask: number;
 };
 
-export type ZurichBuildingSheet =
+export type BuildingSheet =
   | 'houses'
   | 'oldhouses'
   | 'cottages'
@@ -65,6 +66,7 @@ export type ZurichBuildingSheet =
   | 'modern'
   | 'tower'
   | 'church';
+export type ZurichBuildingSheet = BuildingSheet;
 
 export type ZurichBuilding = {
   coord: Coord;
@@ -73,11 +75,12 @@ export type ZurichBuilding = {
   zoneId: string;
 };
 
-export type ZurichDetail = {
+export type WorldDetail = {
   coord: Coord;
   category: 'tree' | 'park' | 'civic' | 'industry' | 'decor' | 'station' | 'dock' | 'quai' | 'field' | 'yard';
   assetCategory: string;
 };
+export type ZurichDetail = WorldDetail;
 
 export type ZurichValidationResult = {
   valid: boolean;

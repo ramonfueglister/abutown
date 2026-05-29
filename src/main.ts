@@ -13,7 +13,7 @@ import type {
   RuntimeRailTile,
   RuntimeRoadTile,
   RuntimeTerrain,
-} from './app/zurichRuntimeContext';
+} from './render/worldRuntimeTypes';
 import type { BaseWorldResponse, BaseWorldTerrainKind } from './backend/baseWorldClient';
 import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
@@ -46,7 +46,7 @@ import {
   buildBackendPedestrianInspector,
 } from './render/entityInspector';
 import { carVisualWorldPoint } from './render/entityRenderStyle';
-import type { ZurichDetail, ZurichTerrainKind } from './city/worldTypes';
+import type { TerrainKind, WorldDetail } from './city/worldTypes';
 
 type Coord = { x: number; y: number };
 
@@ -60,9 +60,9 @@ const CAMERA_MIN_SCALE = 0.18;
 const CAMERA_MAX_SCALE = 2.8;
 
 const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
-let worldId = 'zurich-river-city-v1';
-let WIDTH = 256;
-let HEIGHT = 256;
+let worldId = 'abutopia';
+let WIDTH = 16;
+let HEIGHT = 8;
 let chunkSize = 32;
 
 const canvasElement = document.querySelector<HTMLCanvasElement>('#game');
@@ -78,7 +78,7 @@ const camera = createCameraState({ x: 0, y: 0, scale: 0.32 });
 let cameraInitialized = false;
 
 let terrain = new Map<string, RuntimeTerrain>();
-let terrainKinds = new Map<string, { kind: ZurichTerrainKind }>();
+let terrainKinds = new Map<string, { kind: TerrainKind }>();
 let roads = new Map<string, RuntimeRoadTile>();
 let rails = new Map<string, RuntimeRailTile>();
 let railCrossings = new Set<string>();
@@ -88,7 +88,7 @@ const railYardPaths: Coord[][] = [];
 const railStations: { coord: Coord; frame: number }[] = [];
 let buildings: RuntimeBuilding[] = [];
 let trees: Coord[] = [];
-let details: ZurichDetail[] = [];
+let details: WorldDetail[] = [];
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: MinimalPedestrianSprite[] = [];
 let previousTime = performance.now();
@@ -301,7 +301,7 @@ function isRuntimeBuildingSheet(value: unknown): value is RuntimeBuilding['sheet
   );
 }
 
-function toDetailCategory(value: string): ZurichDetail['category'] {
+function toDetailCategory(value: string): WorldDetail['category'] {
   if (
     value === 'tree' ||
     value === 'park' ||
@@ -483,7 +483,7 @@ function baseWorldDiagnostics(): StaticRuntimeDiagnostics {
   };
 }
 
-function countTerrainKind(kind: ZurichTerrainKind): number {
+function countTerrainKind(kind: TerrainKind): number {
   let count = 0;
   for (const terrain of terrainKinds.values()) if (terrain.kind === kind) count += 1;
   return count;

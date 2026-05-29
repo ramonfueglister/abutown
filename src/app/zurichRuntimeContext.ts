@@ -19,18 +19,28 @@ import {
   type ZurichValidationResult,
   type ZurichWorld,
 } from '../city/worldTypes';
+import type {
+  RuntimeBuilding,
+  RuntimeRailStation,
+  RuntimeRailTile,
+  RuntimeRoadKind,
+  RuntimeRoadTile,
+  RuntimeTerrain,
+} from '../render/worldRuntimeTypes';
+
+export type {
+  RuntimeBuilding,
+  RuntimeRailStation,
+  RuntimeRailTile,
+  RuntimeRoadKind,
+  RuntimeRoadTile,
+  RuntimeTerrain,
+} from '../render/worldRuntimeTypes';
 
 const NORTH = 1;
 const EAST = 2;
 const SOUTH = 4;
 const WEST = 8;
-
-export type RuntimeTerrain = 'grass' | 'water' | 'riverbank' | 'park';
-export type RuntimeRoadKind = 'street' | 'bridge';
-export type RuntimeRoadTile = { coord: Coord; kind: RuntimeRoadKind; mask: number };
-export type RuntimeRailTile = { coord: Coord; mask: number };
-export type RuntimeRailStation = { coord: Coord; frame: number };
-export type RuntimeBuilding = { coord: Coord; sheet: ZurichBuilding['sheet']; frame: number; district: string };
 
 const finishedRowColumns = {
   houses: 4,

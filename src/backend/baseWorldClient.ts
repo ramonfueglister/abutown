@@ -71,18 +71,18 @@ export async function requireBaseWorld(options: { baseUrl?: string; fetchImpl?: 
 }
 
 function validateBaseWorld(payload: BaseWorldResponse): void {
-  if (payload.world_id !== 'zurich-river-city-v1') {
+  if (payload.world_id !== 'abutopia') {
     throw new Error(`Unexpected base world id: ${payload.world_id}`);
   }
   if (payload.schema_version !== 1) throw new Error(`Unexpected base world schema: ${payload.schema_version}`);
   if (payload.chunk_size !== 32) throw new Error(`Unexpected base world chunk size: ${payload.chunk_size}`);
-  if (payload.world_tiles.width !== 256 || payload.world_tiles.height !== 256) {
+  if (payload.world_tiles.width !== 16 || payload.world_tiles.height !== 8) {
     throw new Error('Unexpected base world dimensions');
   }
-  if (payload.transport.roads.length < 1_800) throw new Error('Base world roads layer is incomplete');
-  if (payload.transport.rails.length !== 256) throw new Error('Base world rails layer is incomplete');
-  if (payload.transport.arterial_paths.length !== 3) throw new Error('Base world arterial layer is incomplete');
-  if (payload.transport.pedestrian_corridors.length !== 160) throw new Error('Base world pedestrian layer is incomplete');
-  if (payload.buildings.footprints.length < 2_250) throw new Error('Base world buildings layer is incomplete');
-  if (payload.decorations.trees.length < 3_000) throw new Error('Base world trees layer is incomplete');
+  if (payload.transport.roads.length !== 10) throw new Error('Base world roads layer is incomplete');
+  if (payload.transport.rails.length !== 0) throw new Error('Base world rails layer is incomplete');
+  if (payload.transport.arterial_paths.length !== 0) throw new Error('Base world arterial layer is incomplete');
+  if (payload.transport.pedestrian_corridors.length !== 1) throw new Error('Base world pedestrian layer is incomplete');
+  if (payload.buildings.footprints.length !== 2) throw new Error('Base world buildings layer is incomplete');
+  if (payload.decorations.trees.length !== 0) throw new Error('Base world trees layer is incomplete');
 }

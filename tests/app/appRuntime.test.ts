@@ -14,20 +14,25 @@ function createBackendStatus() {
 function createBaseWorld() {
   return {
     schema_version: 1,
-    world_id: 'zurich-river-city-v1',
+    world_id: 'abutopia',
     chunk_size: 32,
-    world_tiles: { width: 256, height: 256 },
-    terrain: { tiles: [{ x: 1, y: 1, kind: 'water' as const }] },
+    world_tiles: { width: 16, height: 8 },
+    terrain: { tiles: [] },
     transport: {
-      roads: Array.from({ length: 1800 }, (_, index) => ({ x: index % 256, y: Math.floor(index / 256), kind: 'street' as const, mask: 3 })),
-      rails: Array.from({ length: 256 }, (_, y) => ({ x: 150, y, mask: 5 })),
-      arterial_paths: [0, 1, 2].map((index) => ({ id: `arterial:${index}`, points: [{ x: 0, y: index }, { x: 255, y: index }] })),
-      rail_paths: [{ id: 'rail:0', points: [{ x: 150, y: 0 }, { x: 150, y: 255 }] }],
-      pedestrian_corridors: Array.from({ length: 160 }, (_, index) => ({ id: `pedestrian:${index}`, points: [{ x: 0, y: index }, { x: 10, y: index }] })),
+      roads: Array.from({ length: 10 }, (_, index) => ({ x: index + 3, y: 3, kind: 'street' as const, mask: index === 0 ? 2 : index === 9 ? 8 : 10 })),
+      rails: [],
+      arterial_paths: [],
+      rail_paths: [],
+      pedestrian_corridors: [{ id: 'corridor:main', points: Array.from({ length: 12 }, (_, index) => ({ x: index + 2, y: 3 })) }],
     },
-    buildings: { footprints: Array.from({ length: 2250 }, (_, index) => ({ id: `building:${index}`, tiles: [{ x: index % 256, y: Math.floor(index / 256) }], sheet: 'houses', frame: 0, district: 'test' })) },
+    buildings: {
+      footprints: [
+        { id: 'building:house-a', tiles: [{ x: 2, y: 3 }], sheet: 'oldhouses', frame: 0, district: 'test' },
+        { id: 'building:house-b', tiles: [{ x: 13, y: 3 }], sheet: 'oldhouses', frame: 1, district: 'test' },
+      ],
+    },
     decorations: {
-      trees: Array.from({ length: 3000 }, (_, index) => ({ x: index % 256, y: Math.floor(index / 256) })),
+      trees: [],
       details: [],
     },
   };
