@@ -1,8 +1,9 @@
 use std::{
     collections::{BTreeSet, HashMap},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
+use arc_swap::ArcSwap;
 use axum::http::HeaderMap;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
@@ -195,7 +196,7 @@ struct JwksResponse {
 }
 
 pub struct JwksCache {
-    keys: Arc<RwLock<Vec<(String, Algorithm, DecodingKey)>>>,
+    keys: ArcSwap<Vec<(String, Algorithm, DecodingKey)>>,
     jwks_url: String,
     expected_iss: String,
     http: reqwest::Client,
@@ -204,7 +205,7 @@ pub struct JwksCache {
 impl JwksCache {
     async fn new(supabase_url: &str) -> Self {
         let cache = Self {
-            keys: Arc::new(RwLock::new(Vec::new())),
+            keys: ArcSwap::from_pointee(Vec::new()),
             jwks_url: format!("{}/auth/v1/.well-known/jwks.json", supabase_url),
             expected_iss: format!("{}/auth/v1", supabase_url),
             http: reqwest::Client::new(),
@@ -253,12 +254,12 @@ impl JwksCache {
                 next.push((key.kid, algorithm, decoding_key));
             }
         }
-        *self.keys.write().map_err(|_| CardHandError::InvalidAuth)? = next;
+        self.keys.store(Arc::new(next));
         Ok(())
     }
 
     fn try_validate(&self, token: &str) -> Result<Uuid, CardHandError> {
-        let keys = self.keys.read().map_err(|_| CardHandError::InvalidAuth)?;
+        let keys = self.keys.load();
         for (_, algorithm, decoding_key) in keys.iter() {
             let mut validation = Validation::new(*algorithm);
             validation.set_audience(&["authenticated"]);
