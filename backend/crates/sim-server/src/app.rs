@@ -449,6 +449,10 @@ fn cors_layer(allowed_origins: &[String]) -> anyhow::Result<CorsLayer> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
 
+    // Methods are an explicit allow-list matching the routes this server
+    // exposes (GET reads, POST /commands, PUT /card-hand). DELETE/PATCH are
+    // deliberately omitted — add them here if a future endpoint needs them,
+    // otherwise the browser preflight will block that verb.
     Ok(CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
         .allow_methods([Method::GET, Method::POST, Method::PUT])
