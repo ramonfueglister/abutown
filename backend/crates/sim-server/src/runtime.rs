@@ -1153,6 +1153,23 @@ mod tests {
     }
 
     #[test]
+    fn runtime_uses_sidewalk_footway_geometry_from_base_world() {
+        let network = base_world_fixture().to_city_network();
+        let runtime = SimulationRuntime::new_from_network(&network);
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let edge = graph.edge(
+            graph
+                .edge_by_legacy("link:walk:corridor:1")
+                .expect("south sidewalk footway exists"),
+        );
+
+        assert_eq!(edge.kind, sim_core::routing::EdgeKind::Footway);
+        assert_eq!(edge.polyline.first().copied(), Some((2.0, 3.51)));
+        assert_eq!(edge.polyline.last().copied(), Some((13.0, 3.51)));
+        assert!(edge.polyline.iter().all(|(_, y)| (*y - 3.0).abs() > 0.001));
+    }
+
+    #[test]
     fn set_mobility_for_test_refreshes_hpa_index() {
         let network = base_world_fixture().to_city_network();
         let mut runtime = SimulationRuntime::new_from_network(&network);

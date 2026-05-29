@@ -438,8 +438,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seeded_walks_from_network_preserves_fractional_pedestrian_geometry() {
-        use crate::city_network::{NetworkPoint, WorldTiles};
+    fn seeded_walks_from_network_preserve_fractional_sidewalk_geometry() {
+        use crate::city_network::{CityNetwork, NetworkPoint, WorldTiles};
 
         let network = CityNetwork {
             version: 1,
@@ -449,18 +449,24 @@ mod tests {
                 width: 16,
                 height: 8,
             },
-            arterial_paths: Vec::new(),
-            pedestrian_corridors: vec![vec![
-                NetworkPoint { x: 2.0, y: 2.49 },
-                NetworkPoint { x: 13.0, y: 2.49 },
-            ]],
+            arterial_paths: vec![],
+            pedestrian_corridors: vec![
+                vec![
+                    NetworkPoint { x: 2.0, y: 2.49 },
+                    NetworkPoint { x: 13.0, y: 2.49 },
+                ],
+                vec![
+                    NetworkPoint { x: 2.0, y: 3.51 },
+                    NetworkPoint { x: 13.0, y: 3.51 },
+                ],
+            ],
         };
 
         let walks = seeded_walks_from_network(&network);
 
-        assert_eq!(walks.len(), 1);
-        assert_eq!(walks[0].legacy_link_id, "link:walk:corridor:0");
+        assert_eq!(walks.len(), 2);
         assert_eq!(walks[0].polyline, vec![(2.0, 2.49), (13.0, 2.49)]);
+        assert_eq!(walks[1].polyline, vec![(2.0, 3.51), (13.0, 3.51)]);
     }
 
     fn workspace_root() -> std::path::PathBuf {
@@ -490,5 +496,40 @@ mod tests {
                 .iter()
                 .all(|vehicle| !vehicle.id.0.starts_with(&tram_prefix))
         );
+    }
+
+    #[test]
+    fn from_base_world_bundle_seeds_pedestrian_on_sidewalk_corridor() {
+        use crate::ids::AgentId;
+        use crate::mobility::components::Position;
+        use crate::mobility::resources::AgentIdIndex;
+
+        let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
+            workspace_root().join("data/worlds/abutopia"),
+        )
+        .expect("base world bundle should load");
+
+        let (world, _) = from_base_world_bundle(&bundle).expect("base world should seed");
+        let agents = crate::mobility::api::agents(&world);
+        let agent = agents
+            .iter()
+            .find(|agent| agent.id == AgentId("agent:walk:0".into()))
+            .expect("abutopia pedestrian is seeded");
+
+        assert!(matches!(
+            &agent.state,
+            AgentMobilityState::Walking { link_id, .. } if link_id == "link:walk:corridor:1"
+        ));
+
+        let entity = *world
+            .resource::<AgentIdIndex>()
+            .0
+            .get(&AgentId("agent:walk:0".into()))
+            .expect("agent index contains spawned pedestrian");
+        let position = world
+            .entity(entity)
+            .get::<Position>()
+            .expect("agent has position");
+        assert!((position.y - 3.51).abs() < 0.001);
     }
 }
