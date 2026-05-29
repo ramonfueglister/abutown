@@ -597,8 +597,12 @@ pub fn update_link_polyline_cache_system(
     // works against the existing component shape.
     for (entity, rp, cached) in vehicles.iter_mut() {
         let resolved: Option<(String, Vec<(f32, f32)>)> =
-            traffic_route_edge(&graph, &traffic_routes, rp)
-                .map(|edge| (traffic_route_edge_cache_link_id(edge), edge.polyline.clone()));
+            traffic_route_edge(&graph, &traffic_routes, rp).map(|edge| {
+                (
+                    traffic_route_edge_cache_link_id(edge),
+                    edge.polyline.clone(),
+                )
+            });
         match (resolved, cached) {
             (Some((want_id, points)), Some(mut c)) => {
                 if c.link_id != want_id {
@@ -775,7 +779,8 @@ pub fn compute_world_coord_system(
             current_vehicle_cached_polyline(&graph, &traffic_routes, rp, cached)
         {
             Some(crate::mobility_geometry::world_coord_at_progress_slice(
-                points, rp.progress,
+                points,
+                rp.progress,
             ))
         } else {
             crate::mobility::vehicle_world_coord(rp, &traffic_routes, &graph)

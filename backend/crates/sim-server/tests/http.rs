@@ -775,11 +775,8 @@ fn auth_backdoor_env_var_is_not_referenced_in_source() {
     // Regression guard: the Supabase verifier must never contain a runtime
     // env-var bypass that accepts arbitrary tokens. See
     // docs/superpowers/specs/2026-05-29-security-ci-guardrails-design.md
-    let src = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/card_hand.rs"
-    ))
-    .expect("read card_hand.rs source");
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/card_hand.rs"))
+        .expect("read card_hand.rs source");
     assert!(
         !src.contains("TEST_MODE_ACCEPT_ALL_JWTS"),
         "auth backdoor env var must not be referenced in card_hand.rs"
