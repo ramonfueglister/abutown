@@ -1388,14 +1388,20 @@ fn spawned_agent_carries_birth_tick_and_ages() {
 
     let rec = crate::mobility::records::AgentRecord::new_born_at(
         crate::ids::AgentId("agent:test".into()),
-        crate::mobility::records::AgentMobilityState::AtActivity { activity_id: "a".into() },
-        vec![crate::mobility::records::PlanStage::Activity { activity_id: "a".into() }],
+        crate::mobility::records::AgentMobilityState::AtActivity {
+            activity_id: "a".into(),
+        },
+        vec![crate::mobility::records::PlanStage::Activity {
+            activity_id: "a".into(),
+        }],
         0.05,
         100,
     );
     let entity = crate::mobility::api::spawn_agent_from_record(&mut world, rec);
     assert_eq!(world.get::<BirthTick>(entity).unwrap().0, 100);
 
-    let clock = SimClock { sim_seconds_per_tick: 200 };
+    let clock = SimClock {
+        sim_seconds_per_tick: 200,
+    };
     assert!((clock.age_years(100 + 157_680, 100) - 1.0).abs() < 1e-3);
 }
