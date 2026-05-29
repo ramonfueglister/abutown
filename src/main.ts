@@ -37,7 +37,6 @@ import {
 } from './render/backendMobilityDrawables';
 import { MINIMAL_MAP_TILE_SIZE, mapProject, mapUnproject } from './render/minimalMapProjection';
 import {
-  carVisualWorldPoint,
   EDGE_EXIT_TILES,
   MAP_BACKGROUND,
   OUTSKIRTS_TILES,
@@ -47,6 +46,7 @@ import {
   buildBackendCarInspector,
   buildBackendPedestrianInspector,
 } from './render/entityInspector';
+import { carVisualWorldPoint } from './render/entityRenderStyle';
 import type { ZurichDetail, ZurichTerrainKind } from './city/worldTypes';
 
 type Coord = { x: number; y: number };
