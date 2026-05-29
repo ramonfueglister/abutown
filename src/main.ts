@@ -80,6 +80,19 @@ import {
   buildVisibleTrainDrawables,
   visibleTerrainCoords,
 } from './render/sceneDrawables';
+import {
+  EAST,
+  NORTH,
+  SOUTH,
+  WEST,
+  coordKey as key,
+  distanceOutsideMap,
+  isInsideMap,
+  maskSegments as gridMaskSegments,
+  movementAngle,
+  outwardExits,
+  stableHash as hash,
+} from './render/gridMath';
 
 type Coord = { x: number; y: number };
 
@@ -102,10 +115,6 @@ const CAMERA_MAX_SCALE = 2.8;
 const VIEWPORT_GRID_PADDING = 9;
 const OUTSKIRTS_TILES = 12;
 const EDGE_EXIT_TILES = 7;
-const NORTH = 1;
-const EAST = 2;
-const SOUTH = 4;
-const WEST = 8;
 const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
 const MAP_BACKGROUND = '#f6f0e3';
@@ -411,8 +420,8 @@ function drawOutskirtsTerrain(visibleGrid: GridRect): void {
   for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(HEIGHT - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
     for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(WIDTH - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
       const coord = { x, y };
-      if (isInsidePlayableMap(coord)) continue;
-      const edgeDistance = distanceOutsidePlayableMap(coord);
+      if (isInsideMap(coord, { width: WIDTH, height: HEIGHT })) continue;
+      const edgeDistance = distanceOutsideMap(coord, { width: WIDTH, height: HEIGHT });
       if (edgeDistance > OUTSKIRTS_TILES) continue;
 
       const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
@@ -549,7 +558,7 @@ function drawMaskLine(
   style: { casing: string; core: string; casingWidth: number; coreWidth: number },
 ): void {
   const point = iso(coord);
-  const segments = maskSegments(mask);
+  const segments = gridMaskSegments(mask, tileSize);
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -571,15 +580,6 @@ function drawRoadPass(point: Coord, segments: Coord[], color: string, width: num
     }
   }
   ctx.stroke();
-}
-
-function maskSegments(mask: number): Coord[] {
-  const result: Coord[] = [];
-  if ((mask & NORTH) !== 0) result.push({ x: 0, y: -TILE_H / 2 });
-  if ((mask & EAST) !== 0) result.push({ x: TILE_W / 2, y: 0 });
-  if ((mask & SOUTH) !== 0) result.push({ x: 0, y: TILE_H / 2 });
-  if ((mask & WEST) !== 0) result.push({ x: -TILE_W / 2, y: 0 });
-  return result;
 }
 
 function buildingVectorColor(building: Building): string {
@@ -658,13 +658,6 @@ function drawCapsule(point: Coord, angle: number, length: number, width: number,
   ctx.lineTo(length / 2, 0);
   ctx.stroke();
   ctx.restore();
-}
-
-function movementAngle(currentPoint: Coord, nextPoint: Coord): number {
-  const dx = nextPoint.x - currentPoint.x;
-  const dy = nextPoint.y - currentPoint.y;
-  if (Math.abs(dx) + Math.abs(dy) < 0.001) return 0;
-  return Math.atan2(dy, dx);
 }
 
 function vehicleVectorColor(id: string): string {
@@ -763,7 +756,7 @@ function roundedRect(x: number, y: number, width: number, height: number, radius
 
 function drawEdgeConnections(visibleGrid: GridRect): void {
   for (const road of roads.values()) {
-    for (const exit of outwardExits(road.coord, road.mask)) {
+    for (const exit of outwardExits(road.coord, road.mask, { width: WIDTH, height: HEIGHT })) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
         const coord = { x: road.coord.x + exit.dx * step, y: road.coord.y + exit.dy * step };
         if (!isCoordVisible(coord, visibleGrid)) continue;
@@ -777,7 +770,7 @@ function drawEdgeConnections(visibleGrid: GridRect): void {
   }
 
   for (const rail of rails.values()) {
-    for (const exit of outwardExits(rail.coord, rail.mask)) {
+    for (const exit of outwardExits(rail.coord, rail.mask, { width: WIDTH, height: HEIGHT })) {
       for (let step = 1; step <= EDGE_EXIT_TILES; step += 1) {
         const coord = { x: rail.coord.x + exit.dx * step, y: rail.coord.y + exit.dy * step };
         if (!isCoordVisible(coord, visibleGrid)) continue;
@@ -892,10 +885,6 @@ function isCoordVisible(coord: Coord, rect: GridRect): boolean {
   return isCoordVisibleInGridRect(coord, rect);
 }
 
-function isInsidePlayableMap(coord: Coord): boolean {
-  return coord.x >= 0 && coord.y >= 0 && coord.x < WIDTH && coord.y < HEIGHT;
-}
-
 function waterSurfaceMask(coord: Coord): number {
   return (
     (isWaterSurface({ x: coord.x, y: coord.y - 1 }) ? RIVERBANK_NORTH : 0) |
@@ -910,10 +899,6 @@ function isWaterSurface(coord: Coord): boolean {
   return kind === 'water' || kind === 'riverbank';
 }
 
-function distanceOutsidePlayableMap(coord: Coord): number {
-  return Math.max(0, -coord.x, coord.x - (WIDTH - 1), -coord.y, coord.y - (HEIGHT - 1));
-}
-
 function drawIsoTile(point: Coord): void {
   ctx.beginPath();
   ctx.rect(point.x - TILE_W / 2, point.y - TILE_H / 2, TILE_W, TILE_H);
@@ -925,28 +910,6 @@ function drawFadingEdgeTile(step: number, draw: () => void): void {
   ctx.globalAlpha = 0.68 * (1 - step / (EDGE_EXIT_TILES + 1));
   draw();
   ctx.restore();
-}
-
-function outwardExits(coord: Coord, mask: number): { dx: number; dy: number; mask: number }[] {
-  const exits: { dx: number; dy: number; mask: number }[] = [];
-  if (coord.y === 0 && (mask & NORTH) !== 0) exits.push({ dx: 0, dy: -1, mask: NORTH | SOUTH });
-  if (coord.x === WIDTH - 1 && (mask & EAST) !== 0) exits.push({ dx: 1, dy: 0, mask: EAST | WEST });
-  if (coord.y === HEIGHT - 1 && (mask & SOUTH) !== 0) exits.push({ dx: 0, dy: 1, mask: NORTH | SOUTH });
-  if (coord.x === 0 && (mask & WEST) !== 0) exits.push({ dx: -1, dy: 0, mask: EAST | WEST });
-  return exits;
-}
-
-function key(coord: Coord): string {
-  return `${Math.round(coord.x)}:${Math.round(coord.y)}`;
-}
-
-function hash(value: string): number {
-  let result = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    result ^= value.charCodeAt(i);
-    result = Math.imul(result, 16777619);
-  }
-  return result >>> 0;
 }
 
 function clamp(value: number, min: number, max: number): number {
