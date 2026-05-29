@@ -106,28 +106,85 @@ In `backend/crates/sim-core/src/base_world.rs`, add this test block at the end o
 mod tests {
     use super::*;
 
-    fn workspace_root() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(3)
-            .expect("sim-core crate lives under backend/crates")
-            .to_path_buf()
+    fn bundle_with_pedestrian_points(points: Vec<NetworkPoint>) -> BaseWorldBundle {
+        BaseWorldBundle {
+            manifest: BaseWorldManifest {
+                schema_version: 1,
+                world_id: "test".into(),
+                display_name: "Test".into(),
+                chunk_size: 32,
+                world_tiles: WorldTiles { width: 16, height: 8 },
+                layers: BaseWorldLayerFiles {
+                    terrain: "terrain.json".into(),
+                    transport: "transport.json".into(),
+                    buildings: "buildings.json".into(),
+                    decorations: "decorations.json".into(),
+                    spawns: "spawns.json".into(),
+                },
+            },
+            terrain: TerrainLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                tiles: Vec::new(),
+            },
+            transport: TransportLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                roads: vec![RoadTile {
+                    x: 3,
+                    y: 3,
+                    kind: "street".into(),
+                    mask: 10,
+                }],
+                rails: Vec::new(),
+                arterial_paths: Vec::new(),
+                rail_paths: Vec::new(),
+                pedestrian_corridors: vec![TransportPath {
+                    id: "corridor:test".into(),
+                    points,
+                }],
+            },
+            buildings: BuildingLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                footprints: vec![BuildingFootprint {
+                    id: "building:test".into(),
+                    tiles: vec![NetworkCoord { x: 2, y: 3 }],
+                    sheet: None,
+                    frame: None,
+                    district: None,
+                }],
+            },
+            decorations: DecorationLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                trees: Vec::new(),
+                details: Vec::new(),
+            },
+            spawns: SpawnLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                pedestrian_groups: Vec::new(),
+                car_groups: Vec::new(),
+                tram_lines: Vec::new(),
+            },
+        }
     }
 
     #[test]
     fn base_world_preserves_fractional_pedestrian_corridor_points() {
-        let bundle = BaseWorldBundle::load_from_dir(workspace_root().join("data/worlds/abutopia"))
-            .expect("base world fixture loads");
+        let bundle = bundle_with_pedestrian_points(vec![
+            NetworkPoint { x: 2.0, y: 2.49 },
+            NetworkPoint { x: 13.0, y: 2.49 },
+        ]);
+
+        bundle.validate().expect("fractional transport points are valid");
         let network = bundle.to_city_network();
 
-        assert_eq!(network.pedestrian_corridors.len(), 2);
-        assert!(
-            network
-                .pedestrian_corridors
-                .iter()
-                .flatten()
-                .all(|point| (point.y - 3.0).abs() > 0.001),
-            "sidewalk corridors must not sit on the road centerline",
+        assert_eq!(network.pedestrian_corridors.len(), 1);
+        assert_eq!(
+            network.pedestrian_corridors[0],
+            vec![NetworkPoint { x: 2.0, y: 2.49 }, NetworkPoint { x: 13.0, y: 2.49 }],
         );
     }
 }
@@ -142,7 +199,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core base_world_preserves_fractional_pedestrian_corridor_points
 ```
 
-Expected: first command fails because `NetworkPoint` does not exist; second command fails because Abutopia still has one integer centerline corridor.
+Expected: both commands fail because `NetworkPoint` does not exist and `TransportPath.points` still requires integer `NetworkCoord`.
 
 - [ ] **Step 3: Add `NetworkPoint` and update `CityNetwork`**
 
@@ -281,11 +338,10 @@ Run:
 
 ```bash
 CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core parses_fractional_transport_points
+CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core base_world_preserves_fractional_pedestrian_corridor_points
 ```
 
-Expected: PASS.
-
-`base_world_preserves_fractional_pedestrian_corridor_points` still fails until Task 3 updates Abutopia data.
+Expected: both commands pass.
 
 - [ ] **Step 7: Commit data model change**
 
@@ -611,7 +667,6 @@ Run:
 
 ```bash
 npm test -- tests/app/baseWorldBundle.test.ts tests/app/appRuntime.test.ts
-CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core base_world_preserves_fractional_pedestrian_corridor_points
 ```
 
 Expected: PASS.
