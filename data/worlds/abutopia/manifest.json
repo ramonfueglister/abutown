@@ -4,8 +4,8 @@
   "display_name": "Abutopia",
   "chunk_size": 32,
   "world_tiles": {
-    "width": 16,
-    "height": 8
+    "width": 224,
+    "height": 128
   },
   "layers": {
     "terrain": "layers/terrain.json",

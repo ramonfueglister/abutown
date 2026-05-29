@@ -792,6 +792,6 @@ mod tests {
             .entity(entity)
             .get::<Position>()
             .expect("agent has position");
-        assert!((position.y - 3.51).abs() < 0.001);
+        assert!((position.y - 64.51).abs() < 0.001);
     }
 }

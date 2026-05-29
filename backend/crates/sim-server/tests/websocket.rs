@@ -20,6 +20,10 @@ fn runtime_with_seeded_mobility() -> SimulationRuntime {
     SimulationRuntime::new()
 }
 
+fn seeded_mobility_chunk() -> w::ChunkCoord {
+    w::ChunkCoord { x: 3, y: 2 }
+}
+
 #[tokio::test]
 async fn websocket_sends_hello_and_tile_pulse() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -73,7 +77,7 @@ async fn websocket_sends_hello_and_tile_pulse() {
 }
 
 #[tokio::test]
-async fn websocket_pulses_single_abutopia_chunk() {
+async fn websocket_pulses_loaded_abutopia_chunks_in_order() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -94,8 +98,8 @@ async fn websocket_pulses_single_abutopia_chunk() {
     let third_delta = read_next_tile_pulse(&mut stream).await;
 
     assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
-    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
-    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
+    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 1, y: 0 }));
+    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 2, y: 0 }));
 
     server.abort();
 }
@@ -373,7 +377,7 @@ where
     let subscribe = w::ClientMessage {
         body: Some(w::client_message::Body::ChunkSubscribe(w::ChunkSubscribe {
             protocol_version: u32::from(PROTOCOL_VERSION),
-            coords: vec![w::ChunkCoord { x: 0, y: 0 }],
+            coords: vec![seeded_mobility_chunk()],
         })),
     };
     let bytes = subscribe.encode_to_vec();
@@ -454,11 +458,11 @@ async fn two_clients_subscribed_to_abutopia_chunk_see_the_same_seeded_pedestrian
 
     let (mut client_a, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_a).await; // drain hello
-    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 0, y: 0 }]).await;
+    send_chunk_subscribe(&mut client_a, &[seeded_mobility_chunk()]).await;
 
     let (mut client_b, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_b).await; // drain hello
-    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 0, y: 0 }]).await;
+    send_chunk_subscribe(&mut client_b, &[seeded_mobility_chunk()]).await;
 
     let snap_a = read_next_chunk_snapshot(&mut client_a).await;
     let snap_b = read_next_chunk_snapshot(&mut client_b).await;
@@ -499,15 +503,15 @@ async fn three_clients_subscribed_to_abutopia_chunk_each_receive_snapshot() {
 
     let (mut client_a, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_a).await; // drain hello
-    send_chunk_subscribe(&mut client_a, &[w::ChunkCoord { x: 0, y: 0 }]).await;
+    send_chunk_subscribe(&mut client_a, &[seeded_mobility_chunk()]).await;
 
     let (mut client_b, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_b).await; // drain hello
-    send_chunk_subscribe(&mut client_b, &[w::ChunkCoord { x: 0, y: 0 }]).await;
+    send_chunk_subscribe(&mut client_b, &[seeded_mobility_chunk()]).await;
 
     let (mut client_c, _) = connect_async(&url).await.unwrap();
     let _ = read_server_message(&mut client_c).await; // drain hello
-    send_chunk_subscribe(&mut client_c, &[w::ChunkCoord { x: 0, y: 0 }]).await;
+    send_chunk_subscribe(&mut client_c, &[seeded_mobility_chunk()]).await;
 
     let snap_a = read_next_chunk_snapshot(&mut client_a).await;
     let snap_b = read_next_chunk_snapshot(&mut client_b).await;
@@ -565,7 +569,7 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
     let _ = client.next().await.unwrap().unwrap(); // hello
 
     // Subscribe only to the abutopia chunk with authored base-world mobility.
-    send_chunk_subscribe(&mut client, &[w::ChunkCoord { x: 0, y: 0 }]).await;
+    send_chunk_subscribe(&mut client, &[seeded_mobility_chunk()]).await;
 
     let mut snapshot_seen = false;
     let mut delta_seen = false;

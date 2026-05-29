@@ -11,7 +11,7 @@ export type AttachMapInteractionOptions = {
   camera: CameraState;
   constrainCamera: (allowOverscroll: boolean) => void;
   selectAtScreenPoint: (point: Coord) => void;
-  minScale: number;
+  minScale: number | (() => number);
   maxScale: number;
 };
 
@@ -51,8 +51,9 @@ export function attachMapInteraction(options: AttachMapInteractionOptions): void
 
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
+    const minScale = typeof options.minScale === 'function' ? options.minScale() : options.minScale;
     zoomCameraAt(camera, { x: event.clientX, y: event.clientY }, event.deltaY, event.deltaMode, {
-      minScale: options.minScale,
+      minScale,
       maxScale: options.maxScale,
     });
     options.constrainCamera(false);

@@ -6,8 +6,8 @@
       "id": "building:house-a",
       "tiles": [
         {
-          "x": 2,
-          "y": 3
+          "x": 106,
+          "y": 64
         }
       ],
       "sheet": "oldhouses",
@@ -17,8 +17,8 @@
       "id": "building:house-b",
       "tiles": [
         {
-          "x": 13,
-          "y": 3
+          "x": 117,
+          "y": 64
         }
       ],
       "sheet": "oldhouses",

@@ -1061,6 +1061,22 @@ mod tests {
         cache
     }
 
+    fn expected_abutopia_chunks() -> Vec<ChunkCoordDto> {
+        (0..=3)
+            .flat_map(|y| (0..=6).map(move |x| ChunkCoordDto { x, y }))
+            .collect()
+    }
+
+    fn expected_abutopia_chunk_coords() -> Vec<ChunkCoord> {
+        expected_abutopia_chunks()
+            .into_iter()
+            .map(|coord| ChunkCoord {
+                x: coord.x,
+                y: coord.y,
+            })
+            .collect()
+    }
+
     #[test]
     fn simulation_runtime_holds_world_directly() {
         let runtime = SimulationRuntime::new();
@@ -1079,7 +1095,7 @@ mod tests {
 
         assert_eq!(summary.world_id.0, "abutopia");
         assert_eq!(summary.chunk_size, 32);
-        assert_eq!(summary.loaded_chunks, vec![ChunkCoordDto { x: 0, y: 0 }]);
+        assert_eq!(summary.loaded_chunks, expected_abutopia_chunks());
     }
 
     #[test]
@@ -1118,8 +1134,8 @@ mod tests {
             .push(sim_core::base_world::TransportPath {
                 id: "arterial:test".to_string(),
                 points: vec![
-                    sim_core::city_network::NetworkPoint { x: 2.0, y: 3.0 },
-                    sim_core::city_network::NetworkPoint { x: 13.0, y: 3.0 },
+                    sim_core::city_network::NetworkPoint { x: 106.0, y: 64.0 },
+                    sim_core::city_network::NetworkPoint { x: 117.0, y: 64.0 },
                 ],
             });
         base_world
@@ -1352,9 +1368,9 @@ mod tests {
         );
 
         assert_eq!(edge.kind, sim_core::routing::EdgeKind::Footway);
-        assert_eq!(edge.polyline.first().copied(), Some((2.0, 3.51)));
-        assert_eq!(edge.polyline.last().copied(), Some((13.0, 3.51)));
-        assert!(edge.polyline.iter().all(|(_, y)| (*y - 3.0).abs() > 0.001));
+        assert_eq!(edge.polyline.first().copied(), Some((106.0, 64.51)));
+        assert_eq!(edge.polyline.last().copied(), Some((117.0, 64.51)));
+        assert!(edge.polyline.iter().all(|(_, y)| (*y - 64.0).abs() > 0.001));
     }
 
     #[test]
@@ -1480,12 +1496,11 @@ mod tests {
         let runtime = SimulationRuntime::new();
         let world = &runtime.world;
         let by_coord = world.resource::<sim_core::world::resources::ChunksByCoord>();
-        assert_eq!(by_coord.0.len(), 1);
-        assert!(
-            by_coord
-                .0
-                .contains_key(&sim_core::ids::ChunkCoord { x: 0, y: 0 })
-        );
+        let expected = expected_abutopia_chunk_coords();
+        assert_eq!(by_coord.0.len(), expected.len());
+        for coord in expected {
+            assert!(by_coord.0.contains_key(&coord));
+        }
     }
     use sim_core::persistence::{
         InMemoryChunkSnapshotStore, InMemoryMobilitySnapshotStore, build_chunk_snapshot,
@@ -1506,11 +1521,7 @@ mod tests {
 
         assert_eq!(summary.chunk_size, 32);
         assert_eq!(summary.world_id.0, "abutopia");
-        assert_eq!(summary.loaded_chunks.len(), 1);
-        assert_eq!(
-            summary.loaded_chunks.first(),
-            Some(&ChunkCoordDto { x: 0, y: 0 })
-        );
+        assert_eq!(summary.loaded_chunks, expected_abutopia_chunks());
     }
 
     #[test]
@@ -1523,11 +1534,12 @@ mod tests {
 
         assert_eq!(visible.coord, ChunkCoordDto { x: 0, y: 0 });
         assert!(runtime.chunk_snapshot(ChunkCoord { x: 0, y: 0 }).is_some());
-        assert!(runtime.chunk_snapshot(ChunkCoord { x: 1, y: 0 }).is_none());
+        assert!(runtime.chunk_snapshot(ChunkCoord { x: 1, y: 0 }).is_some());
+        assert!(runtime.chunk_snapshot(ChunkCoord { x: 7, y: 0 }).is_none());
     }
 
     #[test]
-    fn runtime_pulses_the_single_abutopia_chunk() {
+    fn runtime_pulses_loaded_abutopia_chunks_in_order() {
         let mut runtime = SimulationRuntime::new();
 
         let first = tile_pulse(runtime.next_pulse());
@@ -1540,11 +1552,11 @@ mod tests {
         assert_eq!(first.coord, ChunkCoordDto { x: 0, y: 0 });
         assert!(first.local_index < 1024);
         assert_eq!(second.tick, 2);
-        assert_eq!(second.coord, ChunkCoordDto { x: 0, y: 0 });
+        assert_eq!(second.coord, ChunkCoordDto { x: 1, y: 0 });
         assert_eq!(third.tick, 3);
-        assert_eq!(third.coord, ChunkCoordDto { x: 0, y: 0 });
+        assert_eq!(third.coord, ChunkCoordDto { x: 2, y: 0 });
         assert_eq!(fourth.tick, 4);
-        assert_eq!(fourth.coord, ChunkCoordDto { x: 0, y: 0 });
+        assert_eq!(fourth.coord, ChunkCoordDto { x: 3, y: 0 });
     }
 
     #[tokio::test]
@@ -2106,13 +2118,19 @@ mod tests {
                 .edge_by_legacy("link:walk:corridor:1")
                 .expect("current south sidewalk footway is reseeded"),
         );
-        assert_eq!(south_sidewalk.polyline.first().copied(), Some((2.0, 3.51)));
-        assert_eq!(south_sidewalk.polyline.last().copied(), Some((13.0, 3.51)));
+        assert_eq!(
+            south_sidewalk.polyline.first().copied(),
+            Some((106.0, 64.51))
+        );
+        assert_eq!(
+            south_sidewalk.polyline.last().copied(),
+            Some((117.0, 64.51))
+        );
         assert!(
             south_sidewalk
                 .polyline
                 .iter()
-                .all(|(_, y)| (*y - 3.51).abs() < 0.001)
+                .all(|(_, y)| (*y - 64.51).abs() < 0.001)
         );
         let restored_snap = extract_from_world(&runtime.world);
         assert_eq!(
@@ -2170,13 +2188,19 @@ mod tests {
                 .edge_by_legacy("link:walk:corridor:1")
                 .expect("current south sidewalk footway is reseeded"),
         );
-        assert_eq!(south_sidewalk.polyline.first().copied(), Some((2.0, 3.51)));
-        assert_eq!(south_sidewalk.polyline.last().copied(), Some((13.0, 3.51)));
+        assert_eq!(
+            south_sidewalk.polyline.first().copied(),
+            Some((106.0, 64.51))
+        );
+        assert_eq!(
+            south_sidewalk.polyline.last().copied(),
+            Some((117.0, 64.51))
+        );
         assert!(
             south_sidewalk
                 .polyline
                 .iter()
-                .all(|(_, y)| (*y - 3.51).abs() < 0.001)
+                .all(|(_, y)| (*y - 64.51).abs() < 0.001)
         );
         let restored_snap = extract_from_world(&runtime.world);
         assert_eq!(
@@ -2293,6 +2317,6 @@ mod tests {
             .entity(entity)
             .get::<Position>()
             .expect("reseeded pedestrian has a position");
-        assert!((position.y - 3.51).abs() < 0.001);
+        assert!((position.y - 64.51).abs() < 0.001);
     }
 }

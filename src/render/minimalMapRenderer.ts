@@ -98,7 +98,8 @@ type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: stri
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
 type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 
-export const MAP_BACKGROUND = '#91c86f';
+export const MAP_BACKGROUND = '#182018';
+const MAP_GRASS = '#91c86f';
 const MAP_WATER = '#92d8e9';
 const MAP_RIVERBANK = '#bde8df';
 const MAP_PARK = '#cfe5bf';
@@ -121,15 +122,14 @@ const AGENT_COLOR = '#343b43';
 const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '#ef7f5a', '#28a6b0'];
 const VIEWPORT_GRID_PADDING = 9;
 export const OUTSKIRTS_TILES = 0;
-export const EDGE_EXIT_TILES = 7;
+export const EDGE_EXIT_TILES = 0;
 
 export function renderMinimalMap(state: MinimalMapRendererState): void {
   const { ctx, camera, viewport } = state;
   ctx.save();
   ctx.setTransform(viewport.devicePixelRatio, 0, 0, viewport.devicePixelRatio, 0, 0);
   ctx.imageSmoothingEnabled = true;
-  ctx.fillStyle = MAP_BACKGROUND;
-  ctx.fillRect(0, 0, viewport.width, viewport.height);
+  ctx.clearRect(0, 0, viewport.width, viewport.height);
   ctx.translate(camera.x, camera.y);
   ctx.scale(camera.scale, camera.scale);
 
@@ -189,6 +189,7 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
 }
 
 function drawTerrainBase(state: MinimalMapRendererState, coord: Coord): void {
+  drawTileFill(state, coord, MAP_GRASS);
   const kind = state.terrainKinds.get(key(coord))?.kind;
   if (kind === 'park' || kind === 'forest' || kind === 'reserve') {
     drawTileFill(state, coord, MAP_PARK, 0.82);
