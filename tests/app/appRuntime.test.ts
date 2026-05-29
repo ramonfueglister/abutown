@@ -23,7 +23,16 @@ function createBaseWorld() {
       rails: [],
       arterial_paths: [],
       rail_paths: [],
-      pedestrian_corridors: [{ id: 'corridor:main', points: Array.from({ length: 12 }, (_, index) => ({ x: index + 2, y: 3 })) }],
+      pedestrian_corridors: [
+        {
+          id: 'corridor:sidewalk:north',
+          points: Array.from({ length: 12 }, (_, index) => ({ x: index + 2, y: 2.49 })),
+        },
+        {
+          id: 'corridor:sidewalk:south',
+          points: Array.from({ length: 12 }, (_, index) => ({ x: index + 2, y: 3.51 })),
+        },
+      ],
     },
     buildings: {
       footprints: [
