@@ -69,18 +69,42 @@ fn mobility_snapshot_matches_base_world(
     snapshot: &MobilityPersistSnapshot,
     base_world: &BaseWorldBundle,
 ) -> bool {
-    let expected_car_count: usize = base_world
-        .spawns
-        .car_groups
-        .iter()
-        .map(|group| group.cars_per_arterial as usize)
-        .sum();
-    let cars = snapshot
-        .vehicles
-        .values()
-        .filter(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Car)
-        .count();
-    cars == expected_car_count
+    let expected_cars = expected_base_world_car_routes(base_world);
+    snapshot.vehicles.len() == expected_cars.len()
+        && snapshot.vehicles.values().all(|vehicle| {
+            vehicle.kind == sim_core::mobility::VehicleKind::Car
+                && expected_cars
+                    .get(&vehicle.id.0)
+                    .is_some_and(|route_id| route_id == &vehicle.route_id)
+        })
+}
+
+fn expected_base_world_car_routes(
+    base_world: &BaseWorldBundle,
+) -> std::collections::HashMap<String, String> {
+    let mut expected = std::collections::HashMap::new();
+    for group in &base_world.spawns.car_groups {
+        let arterial_index = base_world
+            .transport
+            .arterial_paths
+            .iter()
+            .position(|path| path.id == group.arterial_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "base world car group {} references missing arterial {}",
+                    group.id, group.arterial_id
+                )
+            });
+        let route_id = format!("route:arterial:{arterial_index}");
+        for n in 0..group.cars_per_arterial {
+            expected.insert(format!("vehicle:car:{arterial_index}:{n}"), route_id.clone());
+        }
+    }
+    expected
+}
+
+fn expected_base_world_car_count(base_world: &BaseWorldBundle) -> usize {
+    expected_base_world_car_routes(base_world).len()
 }
 
 pub fn default_base_world_path() -> std::path::PathBuf {
@@ -982,6 +1006,32 @@ mod tests {
     }
 
     #[test]
+    fn mobility_snapshot_base_world_match_rejects_wrong_car_route() {
+        use sim_core::mobility::{extract_from_world, seed};
+
+        let base_world = base_world_fixture();
+        let (authored, _) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+        let mut authored_snap = extract_from_world(&authored);
+        assert!(mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
+
+        let vehicle = authored_snap
+            .vehicles
+            .values_mut()
+            .next()
+            .expect("base world seed contains at least one car");
+        vehicle.route_id = "route:arterial:invalid".to_string();
+
+        assert!(!mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
+    }
+
+    #[test]
     fn runtime_has_populated_routing_graph() {
         let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../data/city/zurich-network.json");
@@ -1765,7 +1815,10 @@ mod tests {
 
         assert_eq!(runtime.mobility_tick_for_test(), 0);
         assert_eq!(runtime.mobility_agent_count_for_test(), 1011);
-        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
+        assert_eq!(
+            runtime.mobility_vehicle_count_for_test(),
+            expected_base_world_car_count(&base_world)
+        );
     }
 
     #[tokio::test]
@@ -1844,7 +1897,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(runtime.mobility_tick_for_test(), 0);
-        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
+        assert_eq!(
+            runtime.mobility_vehicle_count_for_test(),
+            expected_base_world_car_count(&base_world)
+        );
     }
 
     #[tokio::test]
@@ -1884,6 +1940,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(runtime.mobility_tick_for_test(), 0);
-        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
+        assert_eq!(
+            runtime.mobility_vehicle_count_for_test(),
+            expected_base_world_car_count(&base_world)
+        );
     }
 }
