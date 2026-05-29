@@ -101,10 +101,9 @@ const MAP_WATER = '#92d8e9';
 const MAP_RIVERBANK = '#bde8df';
 const MAP_PARK = '#cfe5bf';
 const MAP_PLAZA = '#eadbbd';
-const ROAD_CASING = '#c7d1cf';
-const ROAD_CORE = '#fffdf7';
-const ROAD_BRIDGE_CASING = '#8fc9d7';
-const ROAD_BRIDGE_CORE = '#fff9e9';
+const ROAD_CASING = '#050606';
+const ROAD_CORE = '#101214';
+const ROAD_CENTER_LINE = '#f1c93a';
 const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
 const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
 const TREE_COLOR = '#84ad78';
@@ -199,16 +198,29 @@ function drawRiverSurface(state: MinimalMapRendererState, coord: Coord): void {
 }
 
 function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
-  drawMaskLine(state, road.coord, road.mask, {
-    casing: road.kind === 'bridge' ? ROAD_BRIDGE_CASING : ROAD_CASING,
-    core: road.kind === 'bridge' ? ROAD_BRIDGE_CORE : ROAD_CORE,
-    casingWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(5.5, state.camera.scale, { minWorld: 10.5, maxWorld: 17 })
-      : screenStableWorldSize(4.8, state.camera.scale, { minWorld: 9.2, maxWorld: 16 }),
-    coreWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(3.8, state.camera.scale, { minWorld: 7, maxWorld: 12 })
-      : screenStableWorldSize(3.4, state.camera.scale, { minWorld: 6.4, maxWorld: 10.5 }),
-  });
+  drawRoadBand(state, road.coord, road.mask, ROAD_CASING, screenStableWorldSize(16, state.camera.scale, { minWorld: 18, maxWorld: 28 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CORE, screenStableWorldSize(13, state.camera.scale, { minWorld: 14, maxWorld: 23 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CENTER_LINE, screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }));
+}
+
+function drawRoadBand(state: MinimalMapRendererState, coord: Coord, mask: number, color: string, width: number): void {
+  const { ctx, tileSize } = state;
+  const point = iso(state, coord);
+  const horizontal = (mask & (EAST | WEST)) !== 0;
+  const vertical = (mask & (NORTH | SOUTH)) !== 0;
+  const overlap = 0.8;
+  ctx.save();
+  ctx.fillStyle = color;
+  if (horizontal) {
+    ctx.fillRect(point.x - tileSize.width / 2 - overlap, point.y - width / 2, tileSize.width + overlap * 2, width);
+  }
+  if (vertical) {
+    ctx.fillRect(point.x - width / 2, point.y - tileSize.height / 2 - overlap, width, tileSize.height + overlap * 2);
+  }
+  if (!horizontal && !vertical) {
+    ctx.fillRect(point.x - width / 2, point.y - width / 2, width, width);
+  }
+  ctx.restore();
 }
 
 function drawRail(state: MinimalMapRendererState, rail: RuntimeRailTile): void {
