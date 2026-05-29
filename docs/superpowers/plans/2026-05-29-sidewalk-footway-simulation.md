@@ -539,7 +539,7 @@ Expected: commit succeeds.
 - Modify: `tests/app/baseWorldBundle.test.ts`
 - Modify: `tests/app/appRuntime.test.ts`
 
-- [ ] **Step 1: Add failing frontend/base-world contract tests**
+- [x] **Step 1: Add failing frontend/base-world contract tests**
 
 In `tests/app/baseWorldBundle.test.ts`, change the transport type and assertions:
 
@@ -587,7 +587,7 @@ pedestrian_corridors: [
 ],
 ```
 
-- [ ] **Step 2: Run failing JS tests**
+- [x] **Step 2: Run failing JS tests**
 
 Run:
 
@@ -597,7 +597,7 @@ npm test -- tests/app/baseWorldBundle.test.ts tests/app/appRuntime.test.ts
 
 Expected: `baseWorldBundle` fails because generated Abutopia still has one `corridor:main` at `y: 3`.
 
-- [ ] **Step 3: Generate north and south sidewalk corridors**
+- [x] **Step 3: Generate north and south sidewalk corridors**
 
 In `scripts/generate-abutopia-world.mjs`, replace the current `corridorPoints` block with:
 
@@ -630,7 +630,7 @@ pedestrian_groups: [
 ],
 ```
 
-- [ ] **Step 4: Regenerate Abutopia data**
+- [x] **Step 4: Regenerate Abutopia data**
 
 Run:
 
@@ -640,7 +640,7 @@ npm run generate:abutopia
 
 Expected: `data/worlds/abutopia/layers/transport.json` contains two sidewalk corridors and `data/worlds/abutopia/layers/spawns.json` references `corridor:sidewalk:south`.
 
-- [ ] **Step 5: Update frontend base-world validation**
+- [x] **Step 5: Update frontend base-world validation**
 
 In `src/backend/baseWorldClient.ts`, replace:
 
@@ -661,7 +661,7 @@ if (payload.transport.pedestrian_corridors.some((path) => path.points.some((poin
 }
 ```
 
-- [ ] **Step 6: Run base-world tests**
+- [x] **Step 6: Run base-world tests**
 
 Run:
 
@@ -671,7 +671,7 @@ npm test -- tests/app/baseWorldBundle.test.ts tests/app/appRuntime.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Abutopia sidewalk data**
+- [x] **Step 7: Commit Abutopia sidewalk data**
 
 Run:
 
