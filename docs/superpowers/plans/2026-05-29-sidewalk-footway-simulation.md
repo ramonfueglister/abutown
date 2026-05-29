@@ -1016,7 +1016,7 @@ Expected: worktree is clean and the branch contains the sidewalk commits from Ta
 **Files:**
 - No source changes.
 
-- [ ] **Step 1: Push the branch**
+- [x] **Step 1: Push the branch**
 
 Run:
 
@@ -1026,7 +1026,7 @@ git push -u origin codex/sidewalk-footway-simulation
 
 Expected: push succeeds.
 
-- [ ] **Step 2: Prepare PR summary**
+- [x] **Step 2: Prepare PR summary**
 
 Use this PR body:
 
@@ -1035,6 +1035,7 @@ Use this PR body:
 - add floating-point transport path coordinates for backend movement geometry
 - author Abutopia north/south sidewalk corridors while preserving roads and buildings
 - seed and render pedestrians at backend sidewalk coordinates
+- reject stale/demoted pedestrian mobility snapshots and reseed canonical base-world mobility with no fallback graph path
 - add browser smoke coverage for sidewalk-positioned backend pedestrians
 
 ## Verification
