@@ -362,9 +362,9 @@ mod tests {
 
         assert_eq!(api::tick(&world), 0);
         assert_eq!(
-            world.resource::<crate::routing::TransitLines>().count(),
+            world.resource::<crate::routing::TrafficRoutes>().count(),
             2,
-            "expected 2 lines"
+            "expected 2 traffic routes"
         );
 
         let snapshot = api::snapshot(&world);

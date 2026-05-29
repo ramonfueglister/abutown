@@ -1,4 +1,3 @@
-use crate::ids::{AgentId, VehicleId};
 use crate::mobility::components::*;
 use crate::mobility::records::{AgentMobilityState, PlanStage};
 use crate::mobility::resources::*;
@@ -12,6 +11,19 @@ fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::Di
     crate::mobility_geometry::direction_at_progress_slice(points, progress)
 }
 
+fn traffic_route_edge<'a>(
+    graph: &'a crate::routing::Graph,
+    traffic_routes: &crate::routing::TrafficRoutes,
+    route_position: &RoutePosition,
+) -> Option<&'a crate::routing::Edge> {
+    if (route_position.route_id.0 as usize) >= traffic_routes.count() {
+        return None;
+    }
+    let route = traffic_routes.route(route_position.route_id);
+    let edge_id = *route.edges.get(route_position.edge_index)?;
+    Some(graph.edge(edge_id))
+}
+
 /// Returns true if the chunk containing the entity is Active or Hot.
 /// Asleep/Warm chunks are skipped by the Advance/Output systems so only
 /// hot entities tick at full fidelity. Source of truth: chunk-entity LOD
@@ -20,44 +32,6 @@ fn dir_at_progress(points: &[(f32, f32)], progress: f32) -> abutown_protocol::Di
 fn chunk_is_simulated(pos: &Position, simulated: &SimulatedChunks) -> bool {
     let chunk = crate::mobility::chunk_of(pos.x, pos.y, 32);
     simulated.0.contains(&chunk)
-}
-
-fn edge_progress_for_node(
-    graph: &crate::routing::Graph,
-    edge_id: crate::routing::EdgeId,
-    node_id: crate::routing::NodeId,
-) -> Option<f32> {
-    let edge = graph.edge(edge_id);
-    let node = graph.node(node_id);
-    let mut travelled = 0.0_f32;
-    for win in edge.polyline.windows(2) {
-        if win[0] == node.position {
-            return Some((travelled / edge.length.max(0.001)).clamp(0.0, 1.0));
-        }
-        let dx = win[1].0 - win[0].0;
-        let dy = win[1].1 - win[0].1;
-        travelled += (dx * dx + dy * dy).sqrt();
-    }
-    edge.polyline
-        .last()
-        .filter(|point| **point == node.position)
-        .map(|_| 1.0)
-}
-
-fn line_edge_stops_for_node(
-    graph: &crate::routing::Graph,
-    transit_lines: &crate::routing::TransitLines,
-    node_id: crate::routing::NodeId,
-) -> Vec<(crate::routing::LineId, usize, f32)> {
-    let mut out = Vec::new();
-    for line in transit_lines.iter() {
-        for (edge_index, edge_id) in line.edges.iter().enumerate() {
-            if let Some(progress) = edge_progress_for_node(graph, *edge_id, node_id) {
-                out.push((line.id, edge_index, progress));
-            }
-        }
-    }
-    out
 }
 
 fn current_route_origin(
@@ -224,25 +198,14 @@ pub fn install_systems(schedule: &mut Schedule) {
             .in_set(MobilitySet::LOD)
             .after(consume_chunk_lod_transitions_system),
     ));
-    // Advance set: existing Phase-5 systems + warm flow
-    // Ordering within Advance (each step observes the previous step's
-    // output, but is staged so that "newly waiting" agents are not
-    // immediately boarded in the same tick they arrived at the stop, and
-    // "just alighted" agents do not immediately walk further in the same
-    // tick they got off):
+    // Advance set: route movement + warm flow. Ordering within Advance:
     //
     //   1. route_assignment    — assign graph routes to un-routed walkers.
     //   2. route_advance       — move completed route edges to the next edge.
     //   3. update_link_cache   — refresh edge polylines after route changes.
     //   4. walk_advance        — push Walking agents along their link.
-    //   5. boarding_alighting  — apply Phase-3 boarding + alighting using
-    //                            the PRE-stop_arrival waiting queue. This
-    //                            means an agent that arrived at the stop
-    //                            in step 6 of this same tick won't board
-    //                            until the next tick.
-    //   6. stop_arrival        — convert progress=1.0 walkers into
-    //                            WaitingAtStop / AtActivity.
-    //   7. vehicle_advance     — decrement dwell or push progress.
+    //   5. stop_arrival        — convert progress=1.0 walkers into terminal states.
+    //   6. vehicle_advance     — decrement dwell or push cars along road routes.
     schedule.add_systems((
         route_assignment_system.in_set(MobilitySet::Advance),
         route_advance_system
@@ -254,12 +217,9 @@ pub fn install_systems(schedule: &mut Schedule) {
         walk_advance_system
             .in_set(MobilitySet::Advance)
             .after(update_link_polyline_cache_system),
-        boarding_alighting_system
-            .in_set(MobilitySet::Advance)
-            .after(walk_advance_system),
         stop_arrival_system
             .in_set(MobilitySet::Advance)
-            .after(boarding_alighting_system),
+            .after(walk_advance_system),
         vehicle_advance_system
             .in_set(MobilitySet::Advance)
             .after(stop_arrival_system),
@@ -558,7 +518,7 @@ pub fn update_link_polyline_cache_system(
         (Entity, &RoutePosition, Option<&mut CurrentLinkPolyline>),
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
-    transit_lines: Res<crate::routing::TransitLines>,
+    traffic_routes: Res<crate::routing::TrafficRoutes>,
     graph: Res<crate::routing::Graph>,
     mut commands: Commands,
 ) {
@@ -603,26 +563,19 @@ pub fn update_link_polyline_cache_system(
         }
     }
 
-    // Vehicles: resolve the current edge via TransitLines + Graph (the
-    // single source of truth post-8b). Synthesize a stable link id from
-    // the edge's legacy id (or its numeric EdgeId if the edge has no
-    // legacy ancestry) so the cache-miss / cache-hit comparison still
+    // Vehicles: resolve the current edge via TrafficRoutes + Graph.
+    // Synthesize a stable link id from the edge's legacy id (or its numeric
+    // EdgeId if the edge has no legacy ancestry) so cache comparison still
     // works against the existing component shape.
     for (entity, rp, cached) in vehicles.iter_mut() {
         let resolved: Option<(String, Vec<(f32, f32)>)> =
-            if (rp.line_id.0 as usize) >= transit_lines.count() {
-                None
-            } else {
-                let line = transit_lines.line(rp.line_id);
-                line.edges.get(rp.edge_index).map(|edge_id| {
-                    let edge = graph.edge(*edge_id);
-                    let lid = edge
-                        .legacy_id
-                        .clone()
-                        .unwrap_or_else(|| format!("edge:{}", edge.id.0));
-                    (lid, edge.polyline.clone())
-                })
-            };
+            traffic_route_edge(&graph, &traffic_routes, rp).map(|edge| {
+                let lid = edge
+                    .legacy_id
+                    .clone()
+                    .unwrap_or_else(|| format!("edge:{}", edge.id.0));
+                (lid, edge.polyline.clone())
+            });
         match (resolved, cached) {
             (Some((want_id, points)), Some(mut c)) => {
                 if c.link_id != want_id {
@@ -648,7 +601,6 @@ pub fn vehicle_advance_system(
     mut query: Query<
         (
             Entity,
-            &VehicleKindComponent,
             &Position,
             &mut RoutePosition,
             &mut DwellTicksRemaining,
@@ -656,29 +608,26 @@ pub fn vehicle_advance_system(
         With<VehicleMarker>,
     >,
     simulated: Res<SimulatedChunks>,
-    transit_lines: Res<crate::routing::TransitLines>,
+    traffic_routes: Res<crate::routing::TrafficRoutes>,
     mut dirty: ResMut<DirtyVehicles>,
 ) {
-    for (entity, kind, world_pos, mut pos, mut dwell) in query.iter_mut() {
-        if kind.0 != crate::mobility::records::VehicleKind::Tram
-            && !chunk_is_simulated(world_pos, &simulated)
-        {
+    for (entity, world_pos, mut pos, mut dwell) in query.iter_mut() {
+        if !chunk_is_simulated(world_pos, &simulated) {
             continue;
         }
-        // dwell counts down first
         if dwell.0 > 0 {
             dwell.0 -= 1;
             dirty.0.insert(entity);
             continue;
         }
-        if (pos.line_id.0 as usize) >= transit_lines.count()
-            || transit_lines.line(pos.line_id).edges.is_empty()
+        if (pos.route_id.0 as usize) >= traffic_routes.count()
+            || traffic_routes.route(pos.route_id).edges.is_empty()
         {
             continue;
         }
         if pos.progress >= 1.0 {
-            let line = transit_lines.line(pos.line_id);
-            pos.edge_index = (pos.edge_index + 1) % line.edges.len();
+            let route = traffic_routes.route(pos.route_id);
+            pos.edge_index = (pos.edge_index + 1) % route.edges.len();
             pos.progress = 0.0;
             dirty.0.insert(entity);
             continue;
@@ -766,292 +715,6 @@ pub fn stop_arrival_system(
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
-pub fn boarding_alighting_system(
-    mut sets: ParamSet<(
-        Query<
-            (
-                Entity,
-                &Position,
-                &StableAgentId,
-                &mut AgentMobilityStateComponent,
-                &mut WalkPlan,
-            ),
-            With<AgentMarker>,
-        >,
-        Query<
-            (
-                Entity,
-                &Position,
-                &StableVehicleId,
-                &mut Occupants,
-                &Capacity,
-                &RoutePosition,
-            ),
-            With<VehicleMarker>,
-        >,
-    )>,
-    simulated: Res<SimulatedChunks>,
-    agent_index: Res<crate::mobility::resources::AgentIdIndex>,
-    graph: Res<crate::routing::Graph>,
-    transit_lines: Res<crate::routing::TransitLines>,
-    mut waiting: ResMut<crate::routing::WaitingAgents>,
-    mut dirty_agents: ResMut<DirtyAgents>,
-    mut dirty_vehicles: ResMut<DirtyVehicles>,
-) {
-    // ----- PHASE A: BOARDING -----
-
-    // A.1 — collect (stop node, front agent, line/edge/progress) for each stop
-    // that has at least one waiting agent. Defer the chunk-activity filter to
-    // A.2 so we don't pre-pass over all 100k agents.
-    let mut boarding_candidates: Vec<(
-        crate::routing::NodeId,
-        String,
-        AgentId,
-        crate::routing::LineId,
-        usize,
-        f32,
-    )> = Vec::new();
-    for (node_id, queue) in waiting.iter() {
-        let Some(agent_id) = queue.front() else {
-            continue;
-        };
-        let Some(stop_id) = graph.legacy_node_ids(*node_id).first().cloned() else {
-            continue;
-        };
-        for (line_id, edge_index, progress) in
-            line_edge_stops_for_node(&graph, &transit_lines, *node_id)
-        {
-            boarding_candidates.push((
-                *node_id,
-                stop_id.clone(),
-                agent_id.clone(),
-                line_id,
-                edge_index,
-                progress,
-            ));
-        }
-    }
-
-    // A.2 — find a matching vehicle for each candidate. Both the candidate
-    // agent AND the matched vehicle must live in an Active/Hot chunk.
-    // Two-phase: first lookup candidate agent positions (p0 borrow), then
-    // match against vehicles (p1 borrow) — ParamSet only permits one inner
-    // query borrow at a time.
-    let mut candidates_with_pos: Vec<(
-        crate::routing::NodeId,
-        String,
-        AgentId,
-        crate::routing::LineId,
-        usize,
-        f32,
-    )> = Vec::new();
-    {
-        let agents = sets.p0();
-        for (node_id, stop_id, agent_id, line_id, edge_index, stop_progress) in boarding_candidates
-        {
-            let Some(agent_entity) = agent_index.0.get(&agent_id).copied() else {
-                continue;
-            };
-            let Ok((_, pos, _, _, _)) = agents.get(agent_entity) else {
-                continue;
-            };
-            if !chunk_is_simulated(pos, &simulated) {
-                continue;
-            }
-            candidates_with_pos.push((
-                node_id,
-                stop_id,
-                agent_id,
-                line_id,
-                edge_index,
-                stop_progress,
-            ));
-        }
-    }
-
-    let mut boardings: Vec<(
-        crate::routing::NodeId,
-        String,
-        AgentId,
-        Entity,
-        VehicleId,
-        u16,
-    )> = Vec::new();
-    {
-        let vehicles = sets.p1();
-        for (node_id, stop_id, agent_id, line_id, edge_index, stop_progress) in candidates_with_pos
-        {
-            for (v_entity, v_pos_world, v_stable, v_occ, v_cap, v_pos) in vehicles.iter() {
-                if !chunk_is_simulated(v_pos_world, &simulated) {
-                    continue;
-                }
-                if v_pos.line_id == line_id
-                    && v_pos.edge_index == edge_index
-                    && (v_pos.progress - stop_progress).abs() < 1e-6
-                    && v_occ.0.len() < v_cap.0 as usize
-                {
-                    let seat_index = v_occ.0.len() as u16;
-                    boardings.push((
-                        node_id,
-                        stop_id.clone(),
-                        agent_id.clone(),
-                        v_entity,
-                        v_stable.0.clone(),
-                        seat_index,
-                    ));
-                    break;
-                }
-            }
-        }
-    }
-
-    // A.3 — apply vehicle-side mutations (append occupant).
-    {
-        let mut vehicles = sets.p1();
-        for (_node_id, _stop_id, agent_id, v_entity, _v_id, _seat) in &boardings {
-            if let Ok((_, _, _, mut v_occ, _, _)) = vehicles.get_mut(*v_entity) {
-                v_occ.0.push(agent_id.clone());
-                dirty_vehicles.0.insert(*v_entity);
-            }
-        }
-    }
-
-    // A.4 — pop boarded agents from stop queues.
-    for (node_id, _stop_id, agent_id, _, _, _) in &boardings {
-        if waiting.queue(*node_id).and_then(|queue| queue.front()) == Some(agent_id) {
-            waiting.dequeue(*node_id);
-        }
-    }
-
-    // A.5 — agent-side mutations: state becomes InVehicle. O(1) lookup via index.
-    {
-        let mut agents = sets.p0();
-        for (_node_id, _stop_id, agent_id, _v_entity, v_id, seat_index) in &boardings {
-            let Some(a_entity) = agent_index.0.get(agent_id).copied() else {
-                continue;
-            };
-            if let Ok((_, _, _, mut a_state, _)) = agents.get_mut(a_entity) {
-                a_state.0 = AgentMobilityState::InVehicle {
-                    vehicle_id: v_id.clone(),
-                    seat_index: *seat_index,
-                };
-                dirty_agents.0.insert(a_entity);
-            }
-        }
-    }
-
-    // ----- PHASE B: ALIGHTING -----
-
-    // B.1 — collect (vehicle_entity, vehicle_id, end-of-edge stop node, occupants)
-    // for every vehicle parked at an end-of-link stop in an Active/Hot chunk.
-    let mut end_of_link_stops: std::collections::HashMap<
-        (crate::routing::LineId, usize),
-        crate::routing::NodeId,
-    > = std::collections::HashMap::new();
-    for line in transit_lines.iter() {
-        for (edge_index, edge_id) in line.edges.iter().enumerate() {
-            let to = graph.edge(*edge_id).to;
-            if graph.node(to).kind == crate::routing::NodeKind::TransitStop {
-                end_of_link_stops.insert((line.id, edge_index), to);
-            }
-        }
-    }
-
-    let mut alighting_candidates: Vec<(Entity, VehicleId, crate::routing::NodeId, Vec<AgentId>)> =
-        Vec::new();
-    {
-        let vehicles = sets.p1();
-        for (v_entity, v_pos_world, v_stable, v_occ, _cap, v_pos) in vehicles.iter() {
-            if !chunk_is_simulated(v_pos_world, &simulated) {
-                continue;
-            }
-            if (v_pos.progress - 1.0).abs() >= 1e-6 {
-                continue;
-            }
-            if let Some(node_id) = end_of_link_stops.get(&(v_pos.line_id, v_pos.edge_index)) {
-                alighting_candidates.push((
-                    v_entity,
-                    v_stable.0.clone(),
-                    *node_id,
-                    v_occ.0.clone(),
-                ));
-            }
-        }
-    }
-
-    // B.2 — for each occupant, check plan stage + state. O(1) lookups via index.
-    let mut to_alight: Vec<(Entity, VehicleId, String, AgentId)> = Vec::new();
-    {
-        let agents = sets.p0();
-        for (v_entity, v_id, node_id, occupants) in &alighting_candidates {
-            for agent_id in occupants {
-                let Some(a_entity) = agent_index.0.get(agent_id).copied() else {
-                    continue;
-                };
-                let Ok((_, a_pos, _, a_state, a_plan)) = agents.get(a_entity) else {
-                    continue;
-                };
-                if !chunk_is_simulated(a_pos, &simulated) {
-                    continue;
-                }
-                let stage = a_plan.stages.get(a_plan.cursor);
-                let target_stop_id = match stage {
-                    Some(PlanStage::RideToStop {
-                        stop_id: target, ..
-                    }) if graph.node_by_legacy(target) == Some(*node_id) => Some(target.clone()),
-                    _ => None,
-                };
-                let in_this_vehicle = matches!(
-                    &a_state.0,
-                    AgentMobilityState::InVehicle { vehicle_id, .. } if vehicle_id == v_id
-                );
-                if let (Some(stop_id), true) = (target_stop_id, in_this_vehicle) {
-                    to_alight.push((*v_entity, v_id.clone(), stop_id, agent_id.clone()));
-                }
-            }
-        }
-    }
-
-    // B.3 — apply alighting mutations. O(1) lookup via index.
-    for (v_entity, v_id, stop_id, agent_id) in &to_alight {
-        {
-            let mut vehicles = sets.p1();
-            if let Ok((_, _, _, mut v_occ, _, _)) = vehicles.get_mut(*v_entity) {
-                v_occ.0.retain(|x| x != agent_id);
-                dirty_vehicles.0.insert(*v_entity);
-            }
-        }
-        {
-            let mut agents = sets.p0();
-            let Some(a_entity) = agent_index.0.get(agent_id).copied() else {
-                continue;
-            };
-            if let Ok((_, _, _, mut a_state, mut a_plan)) = agents.get_mut(a_entity) {
-                a_plan.cursor += 1;
-                let next = a_plan.stages.get(a_plan.cursor).cloned();
-                a_state.0 = match next {
-                    Some(PlanStage::WalkToActivity { link_id, .. }) => {
-                        AgentMobilityState::Walking {
-                            link_id,
-                            progress: 0.0,
-                        }
-                    }
-                    Some(PlanStage::Activity { activity_id }) => {
-                        a_plan.cursor += 1;
-                        AgentMobilityState::AtActivity { activity_id }
-                    }
-                    _ => AgentMobilityState::Alighting {
-                        vehicle_id: v_id.clone(),
-                        stop_id: stop_id.clone(),
-                    },
-                };
-                dirty_agents.0.insert(a_entity);
-            }
-        }
-    }
-}
-
 #[allow(clippy::type_complexity)]
 pub fn compute_world_coord_system(
     mut agents: Query<
@@ -1067,7 +730,7 @@ pub fn compute_world_coord_system(
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
     simulated: Res<SimulatedChunks>,
-    transit_lines: Res<crate::routing::TransitLines>,
+    traffic_routes: Res<crate::routing::TrafficRoutes>,
     graph: Res<crate::routing::Graph>,
 ) {
     // Equality-guarded writes: bevy's `Mut<T>` marks the component changed
@@ -1090,7 +753,7 @@ pub fn compute_world_coord_system(
                 rp.progress,
             ))
         } else {
-            crate::mobility::vehicle_world_coord(rp, &transit_lines, &graph)
+            crate::mobility::vehicle_world_coord(rp, &traffic_routes, &graph)
         };
         if let Some((x, y)) = new_xy
             && (pos.x != x || pos.y != y)
@@ -1113,7 +776,7 @@ pub fn compute_world_coord_system(
                     &c.points, *progress,
                 ))
             } else {
-                crate::mobility::agent_world_coord(&state.0, &graph, &transit_lines)
+                crate::mobility::agent_world_coord(&state.0, &graph)
             };
         if let Some((x, y)) = new_xy
             && (pos.x != x || pos.y != y)
@@ -1146,7 +809,7 @@ pub fn compute_direction_system(
         (With<VehicleMarker>, Without<AgentMarker>),
     >,
     simulated: Res<SimulatedChunks>,
-    transit_lines: Res<crate::routing::TransitLines>,
+    traffic_routes: Res<crate::routing::TrafficRoutes>,
     graph: Res<crate::routing::Graph>,
 ) {
     for (pos, rp, mut dir, cached) in vehicles.iter_mut() {
@@ -1157,15 +820,9 @@ pub fn compute_direction_system(
             dir.0 = dir_at_progress(&c.points, rp.progress);
             continue;
         }
-        let Some(line) = ((rp.line_id.0 as usize) < transit_lines.count())
-            .then(|| transit_lines.line(rp.line_id))
-        else {
-            continue;
-        };
-        let Some(edge_id) = line.edges.get(rp.edge_index) else {
-            continue;
-        };
-        dir.0 = dir_at_progress(&graph.edge(*edge_id).polyline, rp.progress);
+        if let Some(edge) = traffic_route_edge(&graph, &traffic_routes, rp) {
+            dir.0 = dir_at_progress(&edge.polyline, rp.progress);
+        }
     }
     for (pos, state, mut dir, cached) in agents.iter_mut() {
         if !chunk_is_simulated(pos, &simulated) {
@@ -1364,7 +1021,6 @@ pub fn promote_warm_to_active_system(
     transitions: Res<ChunkLodTransitions>,
     mut flow_cells: ResMut<FlowCells>,
     graph: Res<crate::routing::Graph>,
-    transit_lines: Res<crate::routing::TransitLines>,
     tick: Res<Tick>,
     mut commands: Commands,
 ) {
@@ -1414,9 +1070,8 @@ pub fn promote_warm_to_active_system(
                 link_id: spawn_link.clone(),
                 progress,
             };
-            let (px, py) =
-                crate::mobility::agent_world_coord(&spawned_state, &graph, &transit_lines)
-                    .expect("LOD promoted walking agent must resolve through routing graph");
+            let (px, py) = crate::mobility::agent_world_coord(&spawned_state, &graph)
+                .expect("LOD promoted walking agent must resolve through routing graph");
             commands.spawn((
                 AgentMarker,
                 StableAgentId(agent_id),
@@ -1444,7 +1099,6 @@ pub fn demote_active_to_warm_system(
     agents: Query<&AgentMobilityStateComponent, With<AgentMarker>>,
     agents_by_chunk: Res<AgentsByChunk>,
     graph: Res<crate::routing::Graph>,
-    transit_lines: Res<crate::routing::TransitLines>,
     mut flow_cells: ResMut<FlowCells>,
     mut commands: Commands,
 ) {
@@ -1471,7 +1125,7 @@ pub fn demote_active_to_warm_system(
             let Ok(state) = agents.get(*entity) else {
                 continue;
             };
-            let dest = agent_destination_chunk(state, &graph, &transit_lines).unwrap_or(*chunk);
+            let dest = agent_destination_chunk(state, &graph).unwrap_or(*chunk);
             despawn_count += 1;
             *outflow_counts.entry(dest).or_insert(0) += 1;
             commands.entity(*entity).despawn();
@@ -1493,14 +1147,13 @@ pub fn demote_active_to_warm_system(
 fn agent_destination_chunk(
     state: &AgentMobilityStateComponent,
     graph: &crate::routing::Graph,
-    transit_lines: &crate::routing::TransitLines,
 ) -> Option<crate::ids::ChunkCoord> {
     if let AgentMobilityState::Walking { link_id, .. } = &state.0 {
         return crate::mobility::api::edge_by_canonical_key(graph, link_id)
             .and_then(|edge_id| graph.edge(edge_id).polyline.last().copied())
             .map(|(x, y)| crate::mobility::chunk_of(x, y, 32));
     }
-    crate::mobility::agent_world_coord(&state.0, graph, transit_lines)
+    crate::mobility::agent_world_coord(&state.0, graph)
         .map(|(x, y)| crate::mobility::chunk_of(x, y, 32))
 }
 
@@ -1572,9 +1225,11 @@ mod tests {
         a
     }
 
-    fn insert_test_routing(world: &mut World) -> crate::routing::LineId {
-        use crate::routing::{Edge, EdgeId, EdgeKind, Graph, LineId, Node, NodeId, NodeKind};
-        use crate::routing::{TransitLine, TransitLines};
+    fn insert_test_routing(world: &mut World) -> crate::routing::TrafficRouteId {
+        use crate::routing::{
+            Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind, TrafficRoute, TrafficRouteId,
+            TrafficRoutes,
+        };
 
         let nodes = vec![
             Node {
@@ -1609,7 +1264,7 @@ mod tests {
                 to: NodeId(1),
                 polyline: vec![(0.0, 0.0), (10.0, 0.0)],
                 length: 10.0,
-                kind: EdgeKind::TramTrack,
+                kind: EdgeKind::Road,
                 speed_limit: 1.0,
                 capacity: 1,
                 legacy_id: Some("l:vehicle".into()),
@@ -1686,7 +1341,7 @@ mod tests {
                 to: NodeId(2),
                 polyline: vec![(0.0, 0.0), (0.0, 10.0)],
                 length: 10.0,
-                kind: EdgeKind::TramTrack,
+                kind: EdgeKind::Road,
                 speed_limit: 1.0,
                 capacity: 1,
                 legacy_id: Some("l:b".into()),
@@ -1695,21 +1350,19 @@ mod tests {
         let mut graph = Graph::new(nodes, edges);
         graph.add_legacy_node_alias("stop:old-town".into(), NodeId(0));
         graph.add_legacy_node_alias("stop:station".into(), NodeId(1));
-        let line_id = LineId(0);
-        let mut lines = TransitLines::new(vec![TransitLine {
-            id: line_id,
+        let route_id = TrafficRouteId(0);
+        let routes = TrafficRoutes::new(vec![TrafficRoute {
+            id: route_id,
             name: "r:1".into(),
             edges: vec![EdgeId(0), EdgeId(7)],
-            stops: vec![NodeId(0), NodeId(1)],
-            legacy_route_id: Some("r:1".into()),
+            legacy_route_id: "r:1".into(),
         }]);
-        lines.add_legacy_route_alias("route:old-town-loop".into(), line_id);
         world.insert_resource(graph);
-        world.insert_resource(lines);
+        world.insert_resource(routes);
         if !world.contains_resource::<crate::routing::WaitingAgents>() {
             world.insert_resource(crate::routing::WaitingAgents::default());
         }
-        line_id
+        route_id
     }
 
     #[test]
@@ -1786,200 +1439,6 @@ mod tests {
             Some(&AgentId("a:1".into()))
         );
         assert!(world.resource::<DirtyAgents>().0.contains(&entity));
-    }
-
-    #[test]
-    fn boarding_system_moves_waiting_agent_into_matching_vehicle() {
-        use crate::ids::{AgentId, VehicleId};
-        use crate::mobility::records::{AgentMobilityState, VehicleKind};
-
-        let mut world = World::new();
-        insert_test_routing(&mut world);
-        world.insert_resource(Tick(0));
-        world.insert_resource(DirtyAgents::default());
-        world.insert_resource(DirtyVehicles::default());
-        world.insert_resource(all_active());
-        insert_test_routing(&mut world);
-        let line_id = crate::routing::LineId(0);
-        world.insert_resource(crate::mobility::resources::AgentIdIndex::default());
-        let node_id = world
-            .resource::<crate::routing::Graph>()
-            .node_by_legacy("s:1")
-            .unwrap();
-        world
-            .resource_mut::<crate::routing::WaitingAgents>()
-            .enqueue(node_id, AgentId("a:1".into()));
-
-        let agent_entity = world
-            .spawn((
-                AgentMarker,
-                StableAgentId(AgentId("a:1".into())),
-                AgentMobilityStateComponent(AgentMobilityState::WaitingAtStop {
-                    stop_id: "s:1".into(),
-                }),
-                WalkPlan {
-                    stages: vec![],
-                    cursor: 0,
-                },
-                WalkSpeed(0.05),
-                Position { x: 0.0, y: 0.0 },
-                Direction(abutown_protocol::DirectionDto::S),
-                SpriteKey(String::new()),
-            ))
-            .id();
-        world
-            .resource_mut::<crate::mobility::resources::AgentIdIndex>()
-            .0
-            .insert(AgentId("a:1".into()), agent_entity);
-        let vehicle_entity = world
-            .spawn((
-                VehicleMarker,
-                StableVehicleId(VehicleId("v:1".into())),
-                VehicleKindComponent(VehicleKind::Tram),
-                RoutePosition {
-                    line_id,
-                    edge_index: 0,
-                    progress: 0.0,
-                    speed: 0.1,
-                },
-                Capacity(4),
-                Occupants(vec![]),
-                DwellTicksRemaining(0),
-                Position { x: 0.0, y: 0.0 },
-                Direction(abutown_protocol::DirectionDto::S),
-                SpriteKey(String::new()),
-            ))
-            .id();
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(boarding_alighting_system);
-        schedule.run(&mut world);
-
-        let agent_state = world
-            .get::<AgentMobilityStateComponent>(agent_entity)
-            .unwrap();
-        match &agent_state.0 {
-            AgentMobilityState::InVehicle {
-                vehicle_id,
-                seat_index,
-            } => {
-                assert_eq!(vehicle_id, &VehicleId("v:1".into()));
-                assert_eq!(*seat_index, 0);
-            }
-            other => panic!("expected InVehicle, got {other:?}"),
-        }
-        let occ = world.get::<Occupants>(vehicle_entity).unwrap();
-        assert_eq!(occ.0, vec![AgentId("a:1".into())]);
-        let node_id = world
-            .resource::<crate::routing::Graph>()
-            .node_by_legacy("s:1")
-            .unwrap();
-        let waiting = world.resource::<crate::routing::WaitingAgents>();
-        assert!(
-            waiting
-                .queue(node_id)
-                .map(|queue| queue.is_empty())
-                .unwrap_or(true)
-        );
-        assert!(world.resource::<DirtyAgents>().0.contains(&agent_entity));
-        assert!(
-            world
-                .resource::<DirtyVehicles>()
-                .0
-                .contains(&vehicle_entity)
-        );
-    }
-
-    #[test]
-    fn alighting_system_drops_occupant_at_end_of_link_destination_stop() {
-        use crate::ids::{AgentId, VehicleId};
-        use crate::mobility::records::{AgentMobilityState, PlanStage, VehicleKind};
-
-        let mut world = World::new();
-        insert_test_routing(&mut world);
-        world.insert_resource(DirtyAgents::default());
-        world.insert_resource(DirtyVehicles::default());
-        world.insert_resource(all_active());
-        insert_test_routing(&mut world);
-        let line_id = crate::routing::LineId(0);
-        world.insert_resource(crate::mobility::resources::AgentIdIndex::default());
-
-        let agent_entity = world
-            .spawn((
-                AgentMarker,
-                StableAgentId(AgentId("a:1".into())),
-                AgentMobilityStateComponent(AgentMobilityState::InVehicle {
-                    vehicle_id: VehicleId("v:1".into()),
-                    seat_index: 0,
-                }),
-                WalkPlan {
-                    stages: vec![
-                        PlanStage::RideToStop {
-                            route_id: "r:1".into(),
-                            stop_id: "s:end".into(),
-                        },
-                        PlanStage::WalkToActivity {
-                            link_id: "l:2".into(),
-                            activity_id: "home".into(),
-                        },
-                    ],
-                    cursor: 0,
-                },
-                WalkSpeed(0.05),
-                Position { x: 0.0, y: 0.0 },
-                Direction(abutown_protocol::DirectionDto::S),
-                SpriteKey(String::new()),
-            ))
-            .id();
-        world
-            .resource_mut::<crate::mobility::resources::AgentIdIndex>()
-            .0
-            .insert(AgentId("a:1".into()), agent_entity);
-        let vehicle_entity = world
-            .spawn((
-                VehicleMarker,
-                StableVehicleId(VehicleId("v:1".into())),
-                VehicleKindComponent(VehicleKind::Tram),
-                RoutePosition {
-                    line_id,
-                    edge_index: 0,
-                    progress: 1.0,
-                    speed: 0.1,
-                },
-                Capacity(4),
-                Occupants(vec![AgentId("a:1".into())]),
-                DwellTicksRemaining(0),
-                Position { x: 0.0, y: 0.0 },
-                Direction(abutown_protocol::DirectionDto::S),
-                SpriteKey(String::new()),
-            ))
-            .id();
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(boarding_alighting_system);
-        schedule.run(&mut world);
-
-        let agent_state = world
-            .get::<AgentMobilityStateComponent>(agent_entity)
-            .unwrap();
-        match &agent_state.0 {
-            AgentMobilityState::Walking { link_id, progress } => {
-                assert_eq!(link_id.as_str(), "l:2");
-                assert!((*progress - 0.0).abs() < 1e-6);
-            }
-            other => panic!("expected Walking after alighting, got {other:?}"),
-        }
-        let plan = world.get::<WalkPlan>(agent_entity).unwrap();
-        assert_eq!(plan.cursor, 1);
-        let occ = world.get::<Occupants>(vehicle_entity).unwrap();
-        assert!(occ.0.is_empty());
-        assert!(world.resource::<DirtyAgents>().0.contains(&agent_entity));
-        assert!(
-            world
-                .resource::<DirtyVehicles>()
-                .0
-                .contains(&vehicle_entity)
-        );
     }
 
     #[test]
@@ -2087,15 +1546,15 @@ mod tests {
         world.insert_resource(DirtyVehicles::default());
         world.insert_resource(all_active());
         insert_test_routing(&mut world);
-        let line_id = crate::routing::LineId(0);
+        let route_id = crate::routing::TrafficRouteId(0);
 
         let entity = world
             .spawn((
                 VehicleMarker,
                 StableVehicleId(VehicleId("v:1".into())),
-                VehicleKindComponent(VehicleKind::Tram),
+                VehicleKindComponent(VehicleKind::Car),
                 RoutePosition {
-                    line_id,
+                    route_id,
                     edge_index: 0,
                     progress: 0.5,
                     speed: 0.1,
@@ -2133,15 +1592,15 @@ mod tests {
         world.insert_resource(all_active());
         insert_test_routing(&mut world);
         world.insert_resource(DirtyVehicles::default());
-        let line_id = crate::routing::LineId(0);
+        let route_id = crate::routing::TrafficRouteId(0);
 
         let entity = world
             .spawn((
                 VehicleMarker,
                 StableVehicleId(VehicleId("v:1".into())),
-                VehicleKindComponent(VehicleKind::Tram),
+                VehicleKindComponent(VehicleKind::Car),
                 RoutePosition {
-                    line_id,
+                    route_id,
                     edge_index: 0,
                     progress: 0.4,
                     speed: 0.1,
@@ -2165,7 +1624,42 @@ mod tests {
     }
 
     #[test]
-    fn vehicle_advance_requires_graph_transit_lines() {
+    fn vehicle_advance_loops_car_over_traffic_route_edges() {
+        use crate::mobility::records::VehicleKind;
+
+        let mut world = World::new();
+        let route_id = insert_test_routing(&mut world);
+        world.insert_resource(SimulatedChunks(
+            std::iter::once(crate::ids::ChunkCoord { x: 0, y: 0 }).collect(),
+        ));
+        world.insert_resource(DirtyVehicles::default());
+
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                VehicleKindComponent(VehicleKind::Car),
+                Position { x: 10.0, y: 0.0 },
+                RoutePosition {
+                    route_id,
+                    edge_index: 0,
+                    progress: 1.0,
+                    speed: 0.1,
+                },
+                DwellTicksRemaining(0),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(vehicle_advance_system);
+        schedule.run(&mut world);
+
+        let pos = world.get::<RoutePosition>(entity).unwrap();
+        assert_eq!(pos.edge_index, 1);
+        assert_eq!(pos.progress, 0.0);
+    }
+
+    #[test]
+    fn vehicle_advance_requires_traffic_routes() {
         use crate::ids::VehicleId;
         use crate::mobility::records::VehicleKind;
 
@@ -2174,15 +1668,15 @@ mod tests {
         world.insert_resource(all_active());
         insert_test_routing(&mut world);
         world.insert_resource(DirtyVehicles::default());
-        world.insert_resource(crate::routing::TransitLines::default());
+        world.insert_resource(crate::routing::TrafficRoutes::default());
 
         let entity = world
             .spawn((
                 VehicleMarker,
                 StableVehicleId(VehicleId("v:legacy".into())),
-                VehicleKindComponent(VehicleKind::Tram),
+                VehicleKindComponent(VehicleKind::Car),
                 RoutePosition {
-                    line_id: crate::routing::LineId(0),
+                    route_id: crate::routing::TrafficRouteId(0),
                     edge_index: 0,
                     progress: 0.4,
                     speed: 0.1,
@@ -2203,7 +1697,7 @@ mod tests {
         let pos = world.get::<RoutePosition>(entity).unwrap();
         assert!(
             (pos.progress - 0.4).abs() < 1e-6,
-            "vehicles must not advance without graph TransitLines"
+            "vehicles must not advance without traffic routes"
         );
         assert!(!world.resource::<DirtyVehicles>().0.contains(&entity));
     }
@@ -2334,9 +1828,9 @@ mod tests {
         world.spawn((
             VehicleMarker,
             StableVehicleId(VehicleId("v:1".into())),
-            VehicleKindComponent(VehicleKind::Tram),
+            VehicleKindComponent(VehicleKind::Car),
             RoutePosition {
-                line_id: crate::routing::LineId(0),
+                route_id: crate::routing::TrafficRouteId(0),
                 edge_index: 0,
                 progress: 0.0,
                 speed: 0.0,
@@ -2368,15 +1862,15 @@ mod tests {
         insert_test_routing(&mut world);
         world.insert_resource(all_active());
         insert_test_routing(&mut world);
-        let line_id = crate::routing::LineId(0);
+        let route_id = crate::routing::TrafficRouteId(0);
 
         let entity = world
             .spawn((
                 VehicleMarker,
                 StableVehicleId(VehicleId("v:1".into())),
-                VehicleKindComponent(VehicleKind::Tram),
+                VehicleKindComponent(VehicleKind::Car),
                 RoutePosition {
-                    line_id,
+                    route_id,
                     edge_index: 0,
                     progress: 0.25,
                     speed: 0.0,
@@ -2563,7 +2057,7 @@ mod tests {
         use crate::mobility::records::VehicleKind;
 
         let mut world = World::new();
-        let line_id = insert_test_routing(&mut world);
+        let route_id = insert_test_routing(&mut world);
         let chunk = ChunkCoord { x: 0, y: 0 };
 
         world.insert_resource(FlowCells::default());
@@ -2579,7 +2073,7 @@ mod tests {
                 StableVehicleId(VehicleId("v:street-car".into())),
                 VehicleKindComponent(VehicleKind::Car),
                 RoutePosition {
-                    line_id,
+                    route_id,
                     edge_index: 0,
                     progress: 0.1,
                     speed: 0.02,
@@ -2985,7 +2479,7 @@ mod tests {
         world.insert_resource(all_active());
         insert_test_routing(&mut world);
 
-        let line_id = crate::routing::LineId(0);
+        let route_id = crate::routing::TrafficRouteId(0);
 
         let entity = world
             .spawn((
@@ -2993,7 +2487,7 @@ mod tests {
                 StableVehicleId(VehicleId("v:1".into())),
                 VehicleKindComponent(VehicleKind::Car),
                 RoutePosition {
-                    line_id,
+                    route_id,
                     edge_index: 0,
                     progress: 0.0,
                     speed: 0.1,
