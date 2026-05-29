@@ -161,16 +161,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   await expect.poll(movementObserver(page, (sample) => sample.city.mobilityTrams.trams), {
     timeout: 10_000,
   }).toBeGreaterThan(0);
-  const interactionState = await readCityState(page);
-  const agentCandidates = rankedVisibleEntities(
-    interactionState.city.mobilityAgents.agents,
-    { width: 409, height: 519 },
-    [
-      ...interactionState.city.mobilityAgents.agents,
-      ...interactionState.city.mobilityVehicles.vehicles,
-      ...interactionState.city.mobilityTrams.trams,
-    ],
-  );
+  const agentCandidates = await visibleAgentCandidates(page, { width: 409, height: 519 });
   expect(agentCandidates.length).toBeGreaterThan(0);
   let selectedState = await readCityState(page);
   for (const { entity: clickableAgent } of agentCandidates.slice(0, 8)) {
@@ -191,13 +182,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
       expect.objectContaining({ label: 'Direction', value: expect.any(String) }),
     ]),
   }));
-  const clickableVehicle = selectedState.city.mobilityVehicles.vehicles.find(
-    (vehicle: ScreenEntity) =>
-      vehicle.screen.x > 16 &&
-      vehicle.screen.x < 393 &&
-      vehicle.screen.y > 16 &&
-      vehicle.screen.y < 503,
-  );
+  const clickableVehicle = await visibleVehicle(page, { width: 409, height: 519 });
   expect(clickableVehicle).toBeTruthy();
   await page.mouse.click(clickableVehicle.screen.x, clickableVehicle.screen.y);
   const vehicleSelectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
@@ -275,6 +260,63 @@ function visibleEntities<T extends ScreenEntity>(
     entity.screen.y > 16 &&
     entity.screen.y < viewport.height - 16
   ));
+}
+
+async function visibleAgentCandidates(
+  page: Page,
+  viewport: { width: number; height: number },
+): Promise<{ entity: ScreenEntity; nearestNeighbor: number }[]> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const state = await readCityState(page);
+    const neighbors = [
+      ...state.city.mobilityAgents.agents,
+      ...state.city.mobilityVehicles.vehicles,
+      ...state.city.mobilityTrams.trams,
+    ];
+    const candidates = rankedVisibleEntities(state.city.mobilityAgents.agents, viewport, neighbors);
+    if (candidates.length > 0) return candidates;
+    await panNearestEntityIntoViewport(page, state.city.mobilityAgents.agents, viewport);
+  }
+  return [];
+}
+
+async function visibleVehicle(
+  page: Page,
+  viewport: { width: number; height: number },
+): Promise<ScreenEntity | undefined> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const state = await readCityState(page);
+    const vehicle = visibleEntities(state.city.mobilityVehicles.vehicles, viewport)[0];
+    if (vehicle) return vehicle;
+    await panNearestEntityIntoViewport(page, state.city.mobilityVehicles.vehicles, viewport);
+  }
+  return undefined;
+}
+
+async function panNearestEntityIntoViewport(
+  page: Page,
+  entities: ScreenEntity[],
+  viewport: { width: number; height: number },
+): Promise<void> {
+  const entity = nearestToViewportCenter(entities, viewport);
+  if (!entity) return;
+  const center = { x: viewport.width / 2, y: viewport.height / 2 };
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + center.x - entity.screen.x, center.y + center.y - entity.screen.y, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+}
+
+function nearestToViewportCenter<T extends ScreenEntity>(
+  entities: T[],
+  viewport: { width: number; height: number },
+): T | undefined {
+  const center = { x: viewport.width / 2, y: viewport.height / 2 };
+  return [...entities].sort((a, b) =>
+    Math.hypot(a.screen.x - center.x, a.screen.y - center.y) -
+    Math.hypot(b.screen.x - center.x, b.screen.y - center.y),
+  )[0];
 }
 
 function maxCoordMovement(
