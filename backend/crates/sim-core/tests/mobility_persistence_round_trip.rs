@@ -355,8 +355,8 @@ fn active_route_hydration_normalizes_transient_destination_node() {
 }
 
 #[test]
-#[should_panic(expected = "cannot traverse TramTrack from Intersection with profile WalkTransit")]
-fn active_route_hydration_rejects_walk_transit_boarding_away_from_stop() {
+#[should_panic(expected = "retired tram mode")]
+fn active_route_hydration_rejects_retired_tram_mode() {
     let mut snap = active_route_snapshot();
     let agent = snap
         .agents

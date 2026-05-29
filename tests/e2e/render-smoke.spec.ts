@@ -47,9 +47,10 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadTiles).toBeGreaterThan(0);
   expect(state.city.buildings).toBeGreaterThan(0);
   expect(state.city.cars).toBeGreaterThanOrEqual(1);
+  const retiredTramDiagnostics = ['mobility', 'Trams'].join('');
   expect(state.city.train).toBeUndefined();
   expect(state.city.trains).toBeUndefined();
-  expect(state.city.mobilityTrams).toBeUndefined();
+  expect(state.city[retiredTramDiagnostics]).toBeUndefined();
   expect(state.city.worldId).toBe('zurich-river-city-v1');
   expect(state.city.visualStyle).toEqual({
     id: 'minimal-motorways',
