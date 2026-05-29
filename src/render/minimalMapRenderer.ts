@@ -13,10 +13,8 @@ import { compareDrawableOrder } from './drawOrder';
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
-  tramsFromMobilityState,
   type BackendCar,
   type BackendPedestrian,
-  type BackendTram,
 } from './backendMobilityDrawables';
 import { minimalBuildingPlotOffset, minimalBuildingSize } from './minimalBuildingLayout';
 import { screenStableWorldSize } from './minimalGlyphScale';
@@ -70,8 +68,7 @@ type StaticDrawable =
 
 type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: string };
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
-type TrainDrawable = { type: 'train'; coord: Coord; tram: BackendTram };
-type Drawable = StaticDrawable | TrainDrawable | CarDrawable | PedestrianDrawable;
+type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 
 export const MAP_BACKGROUND = '#f6f0e3';
 const MAP_OUTSKIRTS = '#eee7d7';
@@ -85,7 +82,6 @@ const ROAD_BRIDGE_CASING = '#8fc9d7';
 const ROAD_BRIDGE_CORE = '#fff9e9';
 const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
 const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
-const TRAIN_CORE = '#5f6f75';
 const TREE_COLOR = '#84ad78';
 const DETAIL_COLOR = 'rgba(92, 97, 92, 0.34)';
 const BUILDING_RESIDENTIAL = '#d8cfbf';
@@ -146,12 +142,6 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
     state.now(),
     state.mobilityTickPeriodMs,
   );
-  const trams: BackendTram[] = tramsFromMobilityState(
-    state.mobilityState,
-    state.vehicleSprites,
-    state.now(),
-    state.mobilityTickPeriodMs,
-  );
   const carDrawables = cars
     .map((car) => ({ type: 'car' as const, coord: car.path[0], car, vehicleId: car.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
@@ -160,11 +150,6 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
     .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort((a, b) => compareDrawables(state, a, b));
-  const trainDrawables = trams
-    .map((tram) => ({ type: 'train' as const, coord: tram.path[0], tram }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort((a, b) => compareDrawables(state, a, b));
-
   for (const road of state.roads.values()) if (isCoordVisible(road.coord, visibleGrid)) drawRoad(state, road);
   for (const path of state.railPaths) drawRailPath(state, path);
   drawEdgeConnections(state, visibleGrid);
@@ -172,7 +157,6 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   for (const detail of state.details) if (isCoordVisible(detail.coord, visibleGrid)) drawDetail(state, detail);
   for (const building of state.buildings) if (isCoordVisible(building.coord, visibleGrid)) drawBuilding(state, building);
   for (const coord of state.trees) if (isCoordVisible(coord, visibleGrid)) drawTree(state, coord);
-  for (const item of trainDrawables) drawTrain(state, item.tram);
   for (const item of carDrawables) drawCar(state, item.car, item.vehicleId === state.selectedVehicleId);
   for (const item of pedestrianDrawables) drawPedestrian(state, item.pedestrian, item.agentId === state.selectedAgentId);
 
@@ -441,28 +425,6 @@ function screenForwardOffset(from: Coord, to: Coord, distance: number): Coord {
     x: (dx / length) * distance,
     y: (dy / length) * distance,
   };
-}
-
-function drawTrain(state: MinimalMapRendererState, tram: BackendTram): void {
-  const { ctx } = state;
-  const head = iso(state, tram.path[0]);
-  const next = iso(state, tram.path[1] ?? tram.path[0]);
-  const segments = [
-    { distance: 0, length: 13.5 },
-    { distance: -9.5, length: 10.5 },
-    { distance: -19, length: 10.5 },
-    { distance: -28.5, length: 10.5 },
-    { distance: -38, length: 10.5 },
-  ];
-  const angle = movementAngle(head, next);
-
-  for (const segment of segments) {
-    const offset = screenForwardOffset(head, next, segment.distance);
-    const point = { x: head.x + offset.x, y: head.y + offset.y };
-    ctx.save();
-    drawCapsule(state, point, angle, segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
-    ctx.restore();
-  }
 }
 
 function drawCapsule(
