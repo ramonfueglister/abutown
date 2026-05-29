@@ -56,12 +56,11 @@ export function pedestrianRenderStyle(
   cameraScale: number,
   laneOffset: number,
 ): PedestrianRenderStyle {
+  const lanePixels = laneOffset <= 0
+    ? 0
+    : screenStableWorldSize(laneOffset, cameraScale, { minWorld: 0, maxWorld: 14 });
   return {
-    lane: screenRightLaneOffset(
-      currentPoint,
-      nextPoint,
-      screenStableWorldSize(4 + laneOffset, cameraScale, { minWorld: 4, maxWorld: 14 }),
-    ),
+    lane: lanePixels === 0 ? { x: 0, y: 0 } : screenRightLaneOffset(currentPoint, nextPoint, lanePixels),
     selectedRadius: screenStableWorldSize(4.5, cameraScale, { minWorld: 3.2, maxWorld: 10 }),
     radius: screenStableWorldSize(1.6, cameraScale, { minWorld: 1.2, maxWorld: 3.2 }),
   };

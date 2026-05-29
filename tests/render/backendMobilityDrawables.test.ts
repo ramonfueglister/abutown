@@ -198,6 +198,28 @@ describe('backendMobilityDrawables (interpolated)', () => {
     expect(peds[0].id).toBe('agent:walker:0');
   });
 
+  it('passes backend pedestrian sidewalk coordinates through without visual lane offset', () => {
+    const state = makeStateWith(
+      [
+        {
+          id: 'agent:walk:0',
+          state: { type: 'walking', link_id: 'link:walk:corridor:1', progress: 0 },
+          plan_cursor: 0,
+          world_coord: { x: 2, y: 3.51 },
+          direction: 'e',
+          sprite_key: 'pedestrian:0',
+        },
+      ],
+      [],
+    );
+
+    const pedestrians = pedestriansFromMobilityState(state, pedestrianSprites, 0, 100);
+
+    expect(pedestrians).toHaveLength(1);
+    expect(pedestrians[0].path[0]).toEqual({ x: 2, y: 3.51 });
+    expect(pedestrians[0].laneOffset).toBe(0);
+  });
+
   it('returns empty arrays when no sprites are available', () => {
     const state = makeStateWith([], []);
     expect(pedestriansFromMobilityState(state, [], 0, 100)).toEqual([]);
