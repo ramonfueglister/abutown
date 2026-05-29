@@ -12,8 +12,6 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "test:e2e": "npm run build && playwright test",
-    "generate:city-network": "node --import tsx/esm scripts/generate-city-network.mjs",
-    "generate:base-world": "node --import tsx/esm scripts/generate-base-world.mjs",
     "generate:abutopia": "node scripts/generate-abutopia-world.mjs",
     "generate:proto": "node scripts/generate-proto-ts.mjs",
     "lint:proto": "buf lint",
