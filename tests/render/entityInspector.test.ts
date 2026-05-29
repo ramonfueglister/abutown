@@ -3,11 +3,20 @@ import {
   buildBackendCarInspector,
   buildBackendPedestrianInspector,
   formatBackendCoord,
+  formatAgentLifetime,
 } from '../../src/render/entityInspector';
 
 describe('entity inspector', () => {
   it('formats backend coordinates with one decimal place', () => {
     expect(formatBackendCoord({ x: 12, y: 3.456 })).toBe('12.0, 3.5');
+  });
+
+  it('formats agent lifetime as days and hours before a full year', () => {
+    expect(formatAgentLifetime(8 * 86_400 + 10 * 3600 + 59 * 60)).toBe('8d 10h');
+  });
+
+  it('formats agent lifetime with years, days, and hours after a full year', () => {
+    expect(formatAgentLifetime(2 * 31_536_000 + 3 * 86_400 + 4 * 3600)).toBe('2yr 3d 4h');
   });
 
   it('builds pedestrian inspector rows', () => {
@@ -27,7 +36,7 @@ describe('entity inspector', () => {
         { label: 'Tile', value: '10.0, 20.0' },
         { label: 'Next', value: '11.0, 20.0' },
         { label: 'Direction', value: 'e' },
-        { label: 'Age', value: '2.0 yr' },
+        { label: 'Age', value: '2yr 0d 0h' },
         { label: 'Sprite', value: 'minimal-peds.0' },
       ],
     });

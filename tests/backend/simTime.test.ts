@@ -183,10 +183,10 @@ describe('buildBackendPedestrianInspector Age row', () => {
     expect(inspector).not.toBeNull();
     const ageRow = inspector?.rows.find((r) => r.label === 'Age');
     expect(ageRow).toBeDefined();
-    expect(ageRow?.value).toBe('2.0 yr');
+    expect(ageRow?.value).toBe('2yr 0d 0h');
   });
 
-  it('shows 0.0 yr for an agent with ageSeconds = 0', () => {
+  it('shows days and hours for an agent with ageSeconds = 0', () => {
     const inspector = buildBackendPedestrianInspector({
       id: 'agent:2',
       path: [{ x: 0, y: 0 }],
@@ -198,6 +198,6 @@ describe('buildBackendPedestrianInspector Age row', () => {
       sprite: { sheet: 'minimal-peds.0' },
     });
     const ageRow = inspector?.rows.find((r) => r.label === 'Age');
-    expect(ageRow?.value).toBe('0.0 yr');
+    expect(ageRow?.value).toBe('0d 0h');
   });
 });
