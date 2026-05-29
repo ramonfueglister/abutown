@@ -27,41 +27,6 @@ pub fn seeded_walks_from_network(network: &CityNetwork) -> Vec<crate::routing::S
     out
 }
 
-pub fn seeded_transit_lines_from_base_world(
-    bundle: &crate::base_world::BaseWorldBundle,
-) -> Result<Vec<crate::routing::SeededTransitLine>, SeedError> {
-    let mut out = Vec::new();
-    for line in &bundle.spawns.tram_lines {
-        if line.rail_path_ids.is_empty() {
-            return Err(SeedError::EmptyTramLine {
-                line_id: line.id.clone(),
-            });
-        }
-        let rail_path_id = &line.rail_path_ids[0];
-        let Some(rail_path) = bundle
-            .transport
-            .rail_paths
-            .iter()
-            .find(|path| &path.id == rail_path_id)
-        else {
-            return Err(SeedError::MissingRailPath {
-                line_id: line.id.clone(),
-                rail_path_id: rail_path_id.clone(),
-            });
-        };
-        out.push(crate::routing::SeededTransitLine {
-            legacy_route_id: line.id.clone(),
-            name: line.id.clone(),
-            polyline: rail_path
-                .points
-                .iter()
-                .map(|point| (point.x as f32, point.y as f32))
-                .collect(),
-        });
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 fn test_seeded_walks(network: &CityNetwork) -> Vec<crate::routing::SeededWalk> {
     let mut out = seeded_walks_from_network(network);
@@ -137,7 +102,6 @@ fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedu
     crate::routing::RoutingPlugin {
         seeded_stops: Vec::new(),
         seeded_walks: seeded_walks_from_network(network),
-        seeded_transit_lines: Vec::new(),
     }
     .install(&mut world, &mut schedule);
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
@@ -155,7 +119,6 @@ fn test_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedul
     crate::routing::RoutingPlugin {
         seeded_stops: test_seeded_stops(),
         seeded_walks: test_seeded_walks(network),
-        seeded_transit_lines: Vec::new(),
     }
     .install(&mut world, &mut schedule);
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
@@ -169,8 +132,8 @@ fn test_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedul
 /// returns equal worlds (by `extract_from_world`).
 #[cfg(test)]
 pub fn test_seed_world() -> (World, Schedule) {
-    let horizontal_route = "route:horizontal".to_string();
-    let vertical_route = "route:vertical".to_string();
+    let horizontal_route = "route:arterial:0".to_string();
+    let vertical_route = "route:arterial:1".to_string();
 
     let horizontal_pickup = "stop:horizontal:pickup".to_string();
     let horizontal_dropoff = "stop:horizontal:dropoff".to_string();
@@ -194,7 +157,7 @@ pub fn test_seed_world() -> (World, Schedule) {
             &mut world,
             VehicleRecord {
                 id: vehicle_id,
-                kind: VehicleKind::Tram,
+                kind: VehicleKind::Car,
                 route_id,
                 link_index: 0,
                 progress: (offset as f32) * 0.25,
@@ -274,13 +237,6 @@ pub enum SeedError {
         group_id: String,
         arterial_id: String,
     },
-    #[error("base world tram line {line_id} references missing rail path {rail_path_id}")]
-    MissingRailPath {
-        line_id: String,
-        rail_path_id: String,
-    },
-    #[error("base world tram line {line_id} has no rail paths")]
-    EmptyTramLine { line_id: String },
 }
 
 pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Schedule) {
@@ -368,14 +324,12 @@ pub fn from_base_world_bundle(
     crate::routing::RoutingPlugin {
         seeded_stops: Vec::new(),
         seeded_walks: seeded_walks_from_network(&bundle.to_city_network()),
-        seeded_transit_lines: seeded_transit_lines_from_base_world(bundle)?,
     }
     .install(&mut world, &mut schedule);
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
 
     seed_pedestrians_from_bundle(&mut world, bundle)?;
     seed_cars_from_bundle(&mut world, bundle)?;
-    seed_trams_from_bundle(&mut world, bundle)?;
 
     Ok((world, schedule))
 }
@@ -481,48 +435,43 @@ fn seed_cars_from_bundle(
     Ok(())
 }
 
-fn seed_trams_from_bundle(
-    world: &mut World,
-    bundle: &crate::base_world::BaseWorldBundle,
-) -> Result<(), SeedError> {
-    for (line_index, line) in bundle.spawns.tram_lines.iter().enumerate() {
-        if line.rail_path_ids.is_empty() {
-            return Err(SeedError::EmptyTramLine {
-                line_id: line.id.clone(),
-            });
-        }
-        let rail_path_id = &line.rail_path_ids[0];
-        if !bundle
-            .transport
-            .rail_paths
-            .iter()
-            .any(|path| &path.id == rail_path_id)
-        {
-            return Err(SeedError::MissingRailPath {
-                line_id: line.id.clone(),
-                rail_path_id: rail_path_id.clone(),
-            });
-        }
-        for n in 0..line.trams {
-            api::spawn_vehicle_from_record(
-                world,
-                VehicleRecord {
-                    id: VehicleId(format!("vehicle:tram:{line_index}:{n}")),
-                    kind: VehicleKind::Tram,
-                    route_id: line.id.clone(),
-                    link_index: 0,
-                    progress: if line.trams > 0 {
-                        (n as f32) / (line.trams as f32)
-                    } else {
-                        0.0
-                    },
-                    speed_per_tick: 0.03,
-                    capacity: 80,
-                    occupants: Vec::new(),
-                    dwell_ticks_remaining: 0,
-                },
-            );
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workspace_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("sim-core crate lives under backend/crates")
+            .to_path_buf()
     }
-    Ok(())
+
+    #[test]
+    fn from_base_world_bundle_seeds_no_trams() {
+        let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
+            workspace_root().join("data/worlds/zurich-river-city-v1"),
+        )
+        .expect("base world bundle should load");
+
+        let (world, _) = from_base_world_bundle(&bundle).expect("base world should seed");
+        let vehicles = crate::mobility::api::vehicles(&world);
+
+        assert!(
+            vehicles
+                .iter()
+                .all(|vehicle| vehicle.kind == VehicleKind::Car)
+        );
+        assert!(
+            vehicles
+                .iter()
+                .any(|vehicle| vehicle.id.0.starts_with("vehicle:car:"))
+        );
+        let tram_prefix = ["vehicle:", "tram:"].concat();
+        assert!(
+            vehicles
+                .iter()
+                .all(|vehicle| !vehicle.id.0.starts_with(&tram_prefix))
+        );
+    }
 }

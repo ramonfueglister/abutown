@@ -39,9 +39,6 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     if !world.contains_resource::<crate::routing::TrafficRoutes>() {
         world.insert_resource(crate::routing::TrafficRoutes::default());
     }
-    if !world.contains_resource::<crate::routing::TransitLines>() {
-        world.insert_resource(crate::routing::TransitLines::default());
-    }
     if !world.contains_resource::<crate::routing::WaitingAgents>() {
         world.insert_resource(crate::routing::WaitingAgents::default());
     }
@@ -212,54 +209,10 @@ pub fn stops(world: &World) -> Vec<StopMobilityRecord> {
 }
 
 fn stop_record_for_node(
-    world: &World,
-    node_id: crate::routing::NodeId,
-    stop_id: String,
+    _world: &World,
+    _node_id: crate::routing::NodeId,
+    _stop_id: String,
 ) -> Option<StopMobilityRecord> {
-    let graph = world.resource::<crate::routing::Graph>();
-    let transit_lines = world.resource::<crate::routing::TransitLines>();
-    let waiting = world.resource::<crate::routing::WaitingAgents>();
-    for line in transit_lines.iter() {
-        for (edge_index, edge_id) in line.edges.iter().enumerate() {
-            let edge = graph.edge(*edge_id);
-            let mut travelled = 0.0_f32;
-            for win in edge.polyline.windows(2) {
-                if win[0] == graph.node(node_id).position {
-                    return Some(StopMobilityRecord {
-                        id: stop_id,
-                        route_id: line
-                            .legacy_route_id
-                            .clone()
-                            .unwrap_or_else(|| line.name.clone()),
-                        link_index: edge_index,
-                        progress: (travelled / edge.length.max(0.001)).clamp(0.0, 1.0),
-                        waiting_agents: waiting
-                            .queue(node_id)
-                            .map(|queue| queue.iter().cloned().collect())
-                            .unwrap_or_default(),
-                    });
-                }
-                let dx = win[1].0 - win[0].0;
-                let dy = win[1].1 - win[0].1;
-                travelled += (dx * dx + dy * dy).sqrt();
-            }
-            if edge.polyline.last().copied() == Some(graph.node(node_id).position) {
-                return Some(StopMobilityRecord {
-                    id: stop_id,
-                    route_id: line
-                        .legacy_route_id
-                        .clone()
-                        .unwrap_or_else(|| line.name.clone()),
-                    link_index: edge_index,
-                    progress: 1.0,
-                    waiting_agents: waiting
-                        .queue(node_id)
-                        .map(|queue| queue.iter().cloned().collect())
-                        .unwrap_or_default(),
-                });
-            }
-        }
-    }
     None
 }
 

@@ -360,7 +360,7 @@ mod tests {
         );
 
         let snapshot = api::snapshot(&world);
-        assert_eq!(snapshot.stops.len(), 4, "expected 4 stops");
+        assert_eq!(snapshot.stops.len(), 0, "runtime stop records are removed");
         assert_eq!(snapshot.vehicles.len(), 4, "expected 4 vehicles");
         assert_eq!(snapshot.agents.len(), 20, "expected 20 agents");
 
@@ -391,7 +391,6 @@ mod tests {
             .expect("sample agent exists");
         let vehicle = api::vehicle(&world, &VehicleId("vehicle:shuttle:0".to_string()))
             .expect("sample vehicle exists");
-        let stop = api::stop(&world, "stop:old-town").expect("sample stop exists");
 
         assert_eq!(agent.plan_cursor, 0);
         assert_eq!(
@@ -403,7 +402,7 @@ mod tests {
         );
         assert_eq!(vehicle.route_id, "route:old-town-loop".to_string());
         assert_eq!(vehicle.capacity, 4);
-        assert_eq!(stop.route_id, "route:old-town-loop".to_string());
+        assert!(api::stop(&world, "stop:old-town").is_none());
     }
 
     #[test]
@@ -431,7 +430,6 @@ mod tests {
 
         let second_map = api::tick_mobility(&mut world, &mut schedule);
         let agent = api::agent(&world, &agent_id).expect("agent exists");
-        let stop = api::stop(&world, "stop:old-town").expect("pickup stop exists");
 
         assert_eq!(
             agent.state,
@@ -440,7 +438,18 @@ mod tests {
             }
         );
         assert_eq!(agent.plan_cursor, 1);
-        assert_eq!(stop.waiting_agents.to_vec(), vec![agent_id]);
+        let graph = world.resource::<crate::routing::Graph>();
+        let waiting = world.resource::<crate::routing::WaitingAgents>();
+        let node_id = graph
+            .node_by_legacy("stop:old-town")
+            .expect("pickup stop node exists");
+        assert_eq!(
+            waiting
+                .queue(node_id)
+                .map(|queue| queue.iter().cloned().collect::<Vec<_>>())
+                .unwrap_or_default(),
+            vec![agent_id]
+        );
         assert_eq!(
             second_map
                 .values()

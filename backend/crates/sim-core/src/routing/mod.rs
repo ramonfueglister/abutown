@@ -9,7 +9,6 @@ pub mod plugin;
 pub mod profile;
 pub mod spatial_index;
 pub mod traffic;
-pub mod transit;
 pub mod waiting;
 
 pub use builder::{SeededStop, SeededWalk, build_graph_from_city_network};
