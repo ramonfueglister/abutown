@@ -114,6 +114,7 @@ import {
   pedestrianRenderStyle,
 } from './render/entityRenderStyle';
 import { trainRenderSegments } from './render/trainRenderStyle';
+import { drawCapsule } from './render/canvasPrimitives';
 
 type Coord = { x: number; y: number };
 
@@ -578,7 +579,7 @@ function drawCar(car: BackendCar, selected: boolean): void {
     ctx.ellipse(0, 0, style.selection.x, style.selection.y, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-  drawCapsule({ x: 0, y: 0 }, style.angle, style.capsule.length, style.capsule.width, vehicleVectorColor(car.id));
+  drawCapsule(ctx, { x: 0, y: 0 }, style.angle, style.capsule.length, style.capsule.width, vehicleVectorColor(car.id));
   ctx.restore();
 }
 
@@ -586,31 +587,9 @@ function drawTrain(train: Train): void {
   for (const segment of trainRenderSegments(train, { height: HEIGHT, project: iso })) {
     ctx.save();
     ctx.globalAlpha *= segment.alpha;
-    drawCapsule(segment.point, segment.angle, segment.length, segment.width, TRAIN_CORE, RAIL_CASING);
+    drawCapsule(ctx, segment.point, segment.angle, segment.length, segment.width, TRAIN_CORE, RAIL_CASING);
     ctx.restore();
   }
-}
-
-function drawCapsule(point: Coord, angle: number, length: number, width: number, color: string, casing?: string): void {
-  ctx.save();
-  ctx.translate(point.x, point.y);
-  ctx.rotate(angle);
-  ctx.lineCap = 'round';
-  if (casing) {
-    ctx.strokeStyle = casing;
-    ctx.lineWidth = width + 2.6;
-    ctx.beginPath();
-    ctx.moveTo(-length / 2, 0);
-    ctx.lineTo(length / 2, 0);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(-length / 2, 0);
-  ctx.lineTo(length / 2, 0);
-  ctx.stroke();
-  ctx.restore();
 }
 
 function drawPedestrian(pedestrian: BackendPedestrian, selected: boolean): void {
