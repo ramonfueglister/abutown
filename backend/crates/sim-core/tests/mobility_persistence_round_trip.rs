@@ -9,38 +9,15 @@ use sim_core::routing::{
     Edge, EdgeId, EdgeKind, Graph, ModeState, Node, NodeId, NodeKind, RoutingProfileKey,
 };
 
-#[test]
-fn phase3_snapshot_round_trips_byte_for_byte() {
-    let fixture = include_str!("fixtures/phase3-mobility-snapshot.json");
-
-    // Parse fixture → persist snapshot, hydrate into a real World, then
-    // re-extract for the byte comparison. This exercises the full
-    // World→snapshot→World round trip the persistence path takes.
-    let snap: MobilityPersistSnapshot = serde_json::from_str(fixture)
-        .expect("phase3 fixture should deserialize into ECS MobilityPersistSnapshot");
-
-    let (mut world, _schedule) = api::empty_world_and_schedule();
-    apply_into_world(&mut world, snap);
-    let reloaded = extract_from_world(&world);
-
-    let reserialized =
-        serde_json::to_string_pretty(&reloaded).expect("re-serialize should not fail");
-
-    let fixture_value: serde_json::Value =
-        serde_json::from_str(fixture).expect("fixture is valid JSON");
-    let reserialized_value: serde_json::Value =
-        serde_json::from_str(&reserialized).expect("our re-serialized output is valid JSON");
-
-    // Byte-identical round trip: every top-level key in the
-    // (serialized) round-tripped value must match the fixture, and vice
-    // versa. The fixture is the canonical persistence shape — if a new
-    // top-level field is added to `MobilityPersistSnapshot`, the fixture
-    // must be extended too, and this assertion catches the drift.
-    assert_eq!(
-        fixture_value, reserialized_value,
-        "round-trip diverged from fixture",
-    );
-}
+// NOTE: the `phase3_snapshot_round_trips_byte_for_byte` test and its
+// `fixtures/phase3-mobility-snapshot.json` were retired on 2026-05-29. That
+// fixture was a pre-tram-retirement transit snapshot (tram vehicles, stops,
+// transit routes, ride-to-stop agent plans). Trams are gone from the runtime
+// (`VehicleKind` is car-only and hydration rejects retired tram modes), so the
+// fixture can no longer deserialize, let alone round-trip byte-for-byte. The
+// live car/walk persistence round-trip is covered by the `active_route_*`
+// tests below; tram rejection is covered by
+// `active_route_hydration_rejects_retired_tram_mode`.
 
 fn active_route_snapshot() -> MobilityPersistSnapshot {
     let mut agents = HashMap::new();
