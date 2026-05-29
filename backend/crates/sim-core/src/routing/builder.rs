@@ -150,7 +150,7 @@ pub fn build_graph_from_city_network(
             let length = polyline_length(&polyline);
             match kind {
                 PolylineKind::Arterial { index } => {
-                    let legacy_key = coord_key(segment[0]);
+                    let legacy_key = road_legacy_coord_key(segment[0]);
                     let fwd_id = EdgeId(edges.len() as u32);
                     edges.push(Edge {
                         id: fwd_id,
@@ -161,10 +161,7 @@ pub fn build_graph_from_city_network(
                         kind: EdgeKind::Road,
                         speed_limit: SPEED_ROAD,
                         capacity: 1,
-                        legacy_id: Some(format!(
-                            "link:road:{index}:{}_{},fwd",
-                            legacy_key.0, legacy_key.1
-                        )),
+                        legacy_id: Some(format!("link:road:{index}:{legacy_key},fwd")),
                     });
                     road_forward_by_arterial
                         .entry(index)
@@ -181,10 +178,7 @@ pub fn build_graph_from_city_network(
                         kind: EdgeKind::Road,
                         speed_limit: SPEED_ROAD,
                         capacity: 1,
-                        legacy_id: Some(format!(
-                            "link:road:{index}:{}_{},rev",
-                            legacy_key.0, legacy_key.1
-                        )),
+                        legacy_id: Some(format!("link:road:{index}:{legacy_key},rev")),
                     });
                     road_reverse_by_arterial
                         .entry(index)
@@ -286,8 +280,31 @@ fn coord_key(point: (f32, f32)) -> CoordKey {
 
 fn remember_point(points: &mut HashMap<CoordKey, (f32, f32)>, point: (f32, f32)) -> CoordKey {
     let key = coord_key(point);
+    // Quantized keys intentionally coalesce near-identical authored coordinates;
+    // the first authored point wins so node positions stay deterministic.
     points.entry(key).or_insert(point);
     key
+}
+
+fn road_legacy_coord_key(point: (f32, f32)) -> String {
+    let key = coord_key(point);
+    format!(
+        "{}_{}",
+        road_legacy_coord_axis(point.0, key.0),
+        road_legacy_coord_axis(point.1, key.1)
+    )
+}
+
+fn road_legacy_coord_axis(value: f32, quantized: i32) -> String {
+    if value.is_finite()
+        && value.fract() == 0.0
+        && value >= i32::MIN as f32
+        && value <= i32::MAX as f32
+    {
+        (value as i32).to_string()
+    } else {
+        format!("q{quantized}")
+    }
 }
 
 fn polyline_length(points: &[(f32, f32)]) -> f32 {
@@ -417,6 +434,10 @@ mod tests {
 
         assert_eq!(north.polyline, vec![(2.0, 2.49), (13.0, 2.49)]);
         assert_eq!(south.polyline, vec![(2.0, 3.51), (13.0, 3.51)]);
+        assert_eq!(graph.node(north.from).position, (2.0, 2.49));
+        assert_eq!(graph.node(north.to).position, (13.0, 2.49));
+        assert_eq!(graph.node(south.from).position, (2.0, 3.51));
+        assert_eq!(graph.node(south.to).position, (13.0, 3.51));
         assert!(
             graph
                 .nodes()
@@ -429,6 +450,16 @@ mod tests {
                 .iter()
                 .any(|node| node.position == (2.0, 3.51))
         );
+    }
+
+    #[test]
+    fn integer_road_legacy_ids_keep_unscaled_format() {
+        let (graph, _, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
+
+        assert!(graph.edge_by_legacy("link:road:0:0_0,fwd").is_some());
+        assert!(graph.edge_by_legacy("link:road:0:5_0,fwd").is_some());
+        assert!(graph.edge_by_legacy("link:road:0:5_0,rev").is_some());
+        assert!(graph.edge_by_legacy("link:road:0:5000_0,fwd").is_none());
     }
 
     #[test]
