@@ -1,5 +1,4 @@
 import './style.css';
-import { pak128AssetPack } from './assets/pak128Catalog';
 import { backendErrorMessage, requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { loadBackendTerrainState } from './backend/backendTerrain';
 import { connectMobilityBackend, requireMobilitySnapshot, type MobilityBackendBridge } from './backend/mobilityClient';
@@ -11,7 +10,6 @@ import {
   type TerrainState,
 } from './backend/terrainState';
 import { mountCardHandView } from './cardHand/cardHandView';
-import type { AssetFrame, AssetRole } from './assets/assetPack';
 import {
   createCameraState,
   dampCamera,
@@ -19,21 +17,14 @@ import {
   screenToWorld as cameraScreenToWorld,
   zoomCameraAt,
 } from './cameraController';
-import { cleanupSpritePixels } from './render/spriteCleanup';
 import { shouldRenderDetail } from './render/detailRenderPolicy';
 import {
   candidateVehicleSprites,
   screenRightLaneOffset,
-  vehicleFrameForGridDelta,
   type VehicleSprite,
 } from './render/vehicleSprites';
 import {
   candidateSimutransPedestrianSprites,
-  SIMUTRANS_PEDESTRIAN_ASSET_PATHS,
-  simutransPedestrianDisplayScale,
-  simutransPedestrianFrameForGridDelta,
-  simutransPedestrianFrameRect,
-  type SimutransDirection,
   type SimutransPedestrianSprite,
 } from './render/simutransPedestrianSprites';
 import {
@@ -82,12 +73,11 @@ import {
   type GridRect,
 } from './render/cameraViewport';
 import { createCityDiagnostics } from './render/cityDiagnostics';
-import { buildRenderGameText, nonPak128AssetPaths } from './render/renderGameText';
+import { buildRenderGameText } from './render/renderGameText';
 import {
   buildVisibleCarDrawables,
   buildVisiblePedestrianDrawables,
   buildVisibleTrainDrawables,
-  compareGridDrawables,
   visibleTerrainCoords,
 } from './render/sceneDrawables';
 
@@ -101,15 +91,6 @@ type Train = {
   carSpacing: number;
 };
 
-type StaticDrawable =
-  | { type: 'rail'; coord: Coord; rail: RailTile }
-  | { type: 'road'; coord: Coord; road: RoadTile }
-  | { type: 'railStation'; coord: Coord; station: RailStation }
-  | { type: 'detail'; coord: Coord; detail: Detail }
-  | { type: 'tree'; coord: Coord }
-  | { type: 'building'; coord: Coord; building: Building };
-
-const activeAssetPack = pak128AssetPack;
 const VISUAL_STYLE_ID = 'minimal-motorways';
 const TILE_W = MINIMAL_MAP_TILE_SIZE.width;
 const TILE_H = MINIMAL_MAP_TILE_SIZE.height;
@@ -170,8 +151,6 @@ let cameraInitialized = false;
 
 const BUILDING_FRAME_VARIANTS = 4;
 
-const images = new Map<string, HTMLCanvasElement>();
-const simutransSourceBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
 let terrain = new Map<string, Terrain>();
 let roads = new Map<string, RoadTile>();
 let rails = new Map<string, RailTile>();
@@ -183,7 +162,6 @@ let railStations: RailStation[] = [];
 let buildings: Building[] = [];
 let trees: Coord[] = [];
 let details: Detail[] = [];
-let staticDrawables: StaticDrawable[] = [];
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: SimutransPedestrianSprite[] = [];
 let trains: Train[] = [];
@@ -251,7 +229,6 @@ function rebuildRenderStateFromTerrain(): void {
   buildings = renderState.buildings;
   trees = renderState.trees;
   details = renderState.details;
-  staticDrawables = buildStaticDrawables();
   trains = buildTrains();
 }
 
@@ -414,13 +391,6 @@ function drawScene(offset: Coord): void {
   drawPerimeterMist();
   ctx.restore();
 }
-
-type AssetDrawOptions = {
-  offsetX?: number;
-  offsetY?: number;
-  scale?: number;
-  alpha?: number;
-};
 
 function drawTerrainBase(coord: Coord): void {
   const base = terrainBaseAt(coord);
@@ -701,71 +671,6 @@ function vehicleVectorColor(id: string): string {
   return VEHICLE_COLORS[hash(`vehicle-color:${id}`) % VEHICLE_COLORS.length];
 }
 
-function drawAssetRole(role: AssetRole, coord: Coord, options: AssetDrawOptions = {}): void {
-  drawAssetFrame(activeAssetPack.require(role), coord, options);
-}
-
-function drawAssetFrame(asset: AssetFrame, coord: Coord, options: AssetDrawOptions = {}): void {
-  drawAssetAt(asset, iso(coord), options);
-}
-
-function drawAssetAt(asset: AssetFrame, point: Coord, options: AssetDrawOptions = {}): void {
-  const image = images.get(asset.path);
-  if (!image) return;
-  const sourceWidth = Math.min(asset.source.width, image.width - asset.source.x);
-  const sourceHeight = Math.min(asset.source.height, image.height - asset.source.y);
-  if (sourceWidth <= 0 || sourceHeight <= 0) return;
-
-  const scale = asset.scale * (options.scale ?? 1);
-  const width = sourceWidth * scale;
-  const height = sourceHeight * scale;
-  ctx.save();
-  ctx.globalAlpha *= options.alpha ?? 1;
-  ctx.drawImage(
-    image,
-    asset.source.x,
-    asset.source.y,
-    sourceWidth,
-    sourceHeight,
-    point.x - asset.anchor.x * scale + (options.offsetX ?? 0),
-    point.y - asset.anchor.y * scale + (options.offsetY ?? 0),
-    width,
-    height,
-  );
-  ctx.restore();
-}
-
-function terrainRole(kind: Terrain): Extract<AssetRole, 'terrain.grass' | 'terrain.water' | 'terrain.riverbank'> {
-  if (kind === 'water') return 'terrain.water';
-  if (kind === 'riverbank') return 'terrain.riverbank';
-  return 'terrain.grass';
-}
-
-function roadRole(road: RoadTile): Extract<AssetRole, 'road.straight' | 'road.curve' | 'road.intersection' | 'road.bridge'> {
-  if (road.kind === 'bridge') return 'road.bridge';
-  const normalized = road.mask & (NORTH | EAST | SOUTH | WEST);
-  const degree = [NORTH, EAST, SOUTH, WEST].filter((direction) => (normalized & direction) !== 0).length;
-  if (degree >= 3) return 'road.intersection';
-  if (degree <= 1 || isStraightEastWest(normalized) || isStraightNorthSouth(normalized)) return 'road.straight';
-  return 'road.curve';
-}
-
-function buildingRole(building: Building): Extract<AssetRole, 'building.residential.low' | 'building.commercial.mid' | 'building.civic' | 'building.industrial'> {
-  if (building.sheet === 'church') return 'building.civic';
-  if (building.district === 'mill-yard' && hash(`industrial:${key(building.coord)}`) % 3 === 0) return 'building.industrial';
-  if (building.sheet === 'houses' || building.sheet === 'oldhouses' || building.sheet === 'cottages' || building.sheet === 'townhouses') {
-    return 'building.residential.low';
-  }
-  return 'building.commercial.mid';
-}
-
-function detailRole(detail: Detail): Extract<AssetRole, 'detail.park' | 'detail.industry' | 'detail.dock' | 'detail.quay'> {
-  if (detail.assetCategory === 'dock') return 'detail.dock';
-  if (detail.assetCategory === 'quay' || detail.assetCategory === 'ship') return 'detail.quay';
-  if (detail.category === 'field' || detail.category === 'park' || detail.category === 'civic' || detail.category === 'decor') return 'detail.park';
-  return 'detail.industry';
-}
-
 function drawPedestrian(pedestrian: BackendPedestrian, selected: boolean): void {
   const current = pedestrian.path[0];
   const next = pedestrian.path[1] ?? current;
@@ -955,31 +860,12 @@ function trainPosition(train: Train): Coord {
   return movingTrainPosition(train.path, train.offset);
 }
 
-function isStraightEastWest(mask: number): boolean {
-  return (mask & (EAST | WEST)) === (EAST | WEST) && (mask & (NORTH | SOUTH)) === 0;
-}
-
-function isStraightNorthSouth(mask: number): boolean {
-  return (mask & (NORTH | SOUTH)) === (NORTH | SOUTH) && (mask & (EAST | WEST)) === 0;
-}
-
 function iso(coord: Coord): Coord {
   return mapProject(coord, tileSize);
 }
 
 function worldToGrid(point: Coord): Coord {
   return mapUnproject(point, tileSize);
-}
-
-function buildStaticDrawables(): StaticDrawable[] {
-  return [
-    ...[...rails.values()].map((rail) => ({ type: 'rail' as const, coord: rail.coord, rail })),
-    ...[...roads.values()].map((road) => ({ type: 'road' as const, coord: road.coord, road })),
-    ...railStations.map((station) => ({ type: 'railStation' as const, coord: station.coord, station })),
-    ...details.map((detail) => ({ type: 'detail' as const, coord: detail.coord, detail })),
-    ...trees.map((coord) => ({ type: 'tree' as const, coord })),
-    ...buildings.map((building) => ({ type: 'building' as const, coord: building.coord, building })),
-  ].sort((a, b) => compareGridDrawables(a, b, iso));
 }
 
 function constrainCamera(allowOverscroll: boolean): void {
@@ -1034,46 +920,6 @@ function drawIsoTile(point: Coord): void {
   ctx.fill();
 }
 
-function streetRoadAssetFrame(road: RoadTile): AssetFrame {
-  const asset = activeAssetPack.require(roadRole(road));
-  return { ...asset, source: roadSourceFromMask(road.mask) };
-}
-
-function bridgeRoadAssetFrames(road: RoadTile): AssetFrame[] {
-  const asset = activeAssetPack.require('road.bridge');
-  const eastWest = isStraightEastWest(road.mask) || (!isStraightNorthSouth(road.mask) && (road.mask & (EAST | WEST)) !== 0);
-  const row = 1;
-  const backCol = eastWest ? 4 : 0;
-  return [
-    { ...asset, source: pak128Cell(row, backCol), anchor: { x: 64, y: 96 }, baseline: 96 },
-    { ...asset, source: pak128Cell(row, backCol + 1), anchor: { x: 64, y: 96 }, baseline: 96 },
-  ];
-}
-
-function roadSourceFromMask(mask: number): AssetFrame['source'] {
-  const normalized = mask & (NORTH | EAST | SOUTH | WEST);
-  if (normalized === 0) return pak128Cell(1, 0);
-  if (normalized === NORTH) return pak128Cell(1, 1);
-  if (normalized === SOUTH) return pak128Cell(1, 2);
-  if (normalized === EAST) return pak128Cell(1, 3);
-  if (normalized === WEST) return pak128Cell(1, 4);
-  if (normalized === (NORTH | SOUTH)) return pak128Cell(1, 5);
-  if (normalized === (EAST | WEST)) return pak128Cell(1, 6);
-  if (normalized === (NORTH | SOUTH | EAST)) return pak128Cell(1, 7);
-  if (normalized === (NORTH | SOUTH | WEST)) return pak128Cell(2, 0);
-  if (normalized === (NORTH | EAST | WEST)) return pak128Cell(2, 1);
-  if (normalized === (SOUTH | EAST | WEST)) return pak128Cell(2, 2);
-  if (normalized === (NORTH | SOUTH | EAST | WEST)) return pak128Cell(2, 3);
-  if (normalized === (NORTH | EAST)) return pak128Cell(2, 4);
-  if (normalized === (SOUTH | EAST)) return pak128Cell(2, 5);
-  if (normalized === (NORTH | WEST)) return pak128Cell(2, 6);
-  return pak128Cell(2, 7);
-}
-
-function pak128Cell(row: number, col: number, height = 128): AssetFrame['source'] {
-  return { x: col * 128, y: row * 128, width: 128, height };
-}
-
 function drawFadingEdgeTile(step: number, draw: () => void): void {
   ctx.save();
   ctx.globalAlpha = 0.68 * (1 - step / (EDGE_EXIT_TILES + 1));
@@ -1103,72 +949,12 @@ function hash(value: string): number {
   return result >>> 0;
 }
 
-function visibleSourceBounds(
-  image: HTMLCanvasElement,
-  sprite: SimutransPedestrianSprite,
-  direction: SimutransDirection,
-  rect: { x: number; y: number; width: number; height: number },
-): { x: number; y: number; width: number; height: number } {
-  const cacheKey = `${sprite.sheet}:${sprite.row}:${direction}`;
-  const cached = simutransSourceBounds.get(cacheKey);
-  if (cached) return cached;
-
-  const context = image.getContext('2d', { willReadFrequently: true });
-  if (!context) return rect;
-  const pixels = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
-  let minX = rect.width;
-  let minY = rect.height;
-  let maxX = -1;
-  let maxY = -1;
-
-  for (let y = 0; y < rect.height; y += 1) {
-    for (let x = 0; x < rect.width; x += 1) {
-      const alpha = pixels[(y * rect.width + x) * 4 + 3];
-      if (alpha === 0) continue;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-  }
-
-  const bounds = maxX < minX
-    ? rect
-    : {
-        x: rect.x + minX,
-        y: rect.y + minY,
-        width: maxX - minX + 1,
-        height: maxY - minY + 1,
-      };
-  simutransSourceBounds.set(cacheKey, bounds);
-  return bounds;
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
-}
-
-async function loadCleanImage(path: string): Promise<HTMLCanvasElement> {
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`Unable to load ${path}`));
-    img.src = path;
-  });
-  const buffer = document.createElement('canvas');
-  buffer.width = image.naturalWidth;
-  buffer.height = image.naturalHeight;
-  const context = buffer.getContext('2d', { willReadFrequently: true });
-  if (!context) throw new Error(`Unable to clean ${path}`);
-  context.drawImage(image, 0, 0);
-  const data = context.getImageData(0, 0, buffer.width, buffer.height);
-  cleanupSpritePixels({ data: data.data, width: buffer.width, height: buffer.height, path });
-  context.putImageData(data, 0, 0);
-  return buffer;
 }
 
 declare global {
@@ -1207,7 +993,7 @@ window.render_game_to_text = () => {
     worldId: TERRAIN_SEED_WORLD_ID,
     visualStyleId: VISUAL_STYLE_ID,
     tileSize,
-    nonPak128AssetPaths: nonPak128AssetPaths(images.keys()),
+    nonPak128AssetPaths: [],
     width: WIDTH,
     height: HEIGHT,
     terrainState,
