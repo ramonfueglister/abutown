@@ -69,51 +69,18 @@ fn mobility_snapshot_matches_base_world(
     snapshot: &MobilityPersistSnapshot,
     base_world: &BaseWorldBundle,
 ) -> bool {
-    let expected_tram_ids = expected_base_world_tram_ids(base_world);
-    if expected_tram_ids.is_empty() {
-        return true;
-    }
-    let trams = snapshot
+    let expected_car_count: usize = base_world
+        .spawns
+        .car_groups
+        .iter()
+        .map(|group| group.cars_per_arterial as usize)
+        .sum();
+    let cars = snapshot
         .vehicles
         .values()
-        .filter(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Tram)
-        .collect::<Vec<_>>();
-    if trams.len() != expected_tram_ids.len() {
-        return false;
-    }
-    if !trams
-        .iter()
-        .all(|vehicle| expected_tram_ids.contains(&vehicle.id.0))
-    {
-        return false;
-    }
-    if expected_tram_ids.len() > 1 {
-        let unique_route_positions = trams
-            .iter()
-            .map(|vehicle| {
-                format!(
-                    "{}:{}:{:.3}",
-                    vehicle.route_id, vehicle.link_index, vehicle.progress
-                )
-            })
-            .collect::<std::collections::HashSet<_>>();
-        if unique_route_positions.len() <= 1 {
-            return false;
-        }
-    }
-    true
-}
-
-fn expected_base_world_tram_ids(base_world: &BaseWorldBundle) -> std::collections::HashSet<String> {
-    base_world
-        .spawns
-        .tram_lines
-        .iter()
-        .enumerate()
-        .flat_map(|(line_index, line)| {
-            (0..line.trams).map(move |n| format!("vehicle:tram:{line_index}:{n}"))
-        })
-        .collect()
+        .filter(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Car)
+        .count();
+    cars == expected_car_count
 }
 
 pub fn default_base_world_path() -> std::path::PathBuf {
@@ -210,9 +177,6 @@ impl SimulationRuntime {
         sim_core::routing::RoutingPlugin {
             seeded_stops,
             seeded_walks,
-            seeded_transit_lines: sim_core::mobility::seed::seeded_transit_lines_from_base_world(
-                &bundle,
-            )?,
         }
         .install(&mut world, &mut schedule);
 
@@ -329,10 +293,6 @@ impl SimulationRuntime {
         sim_core::routing::RoutingPlugin {
             seeded_stops,
             seeded_walks,
-            seeded_transit_lines: sim_core::mobility::seed::seeded_transit_lines_from_base_world(
-                base_world,
-            )
-            .map_err(HydrationError::Seed)?,
         }
         .install(&mut world, &mut schedule);
 
@@ -985,29 +945,25 @@ mod tests {
     }
 
     #[test]
-    fn runtime_seeds_backend_trams_from_base_world() {
+    fn runtime_seeds_backend_cars_from_base_world() {
         let fixture_root = workspace_root().join("data/worlds/zurich-river-city-v1");
         let runtime = SimulationRuntime::new_from_base_world_dir(&fixture_root)
             .expect("base world fixture must load");
-        let snapshot = runtime.mobility_snapshot();
+        let vehicles = sim_core::mobility::api::vehicles(&runtime.world);
 
-        let trams = snapshot
-            .vehicles
+        assert!(
+            vehicles
+                .iter()
+                .all(|vehicle| vehicle.kind == sim_core::mobility::VehicleKind::Car)
+        );
+        assert!(
+            vehicles
+                .iter()
+                .any(|vehicle| vehicle.id.0.starts_with("vehicle:car:"))
+        );
+        assert!(vehicles
             .iter()
-            .filter(|vehicle| vehicle.kind == abutown_protocol::VehicleKindDto::Tram)
-            .collect::<Vec<_>>();
-
-        assert_eq!(trams.len(), 4);
-        assert!(
-            trams
-                .iter()
-                .all(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
-        );
-        assert!(
-            trams
-                .iter()
-                .all(|vehicle| vehicle.sprite_key.starts_with("tram:"))
-        );
+            .all(|vehicle| vehicle.id.0.starts_with("vehicle:car:")));
     }
 
     fn workspace_root() -> std::path::PathBuf {
@@ -1042,8 +998,14 @@ mod tests {
             graph.edge_count() > 0,
             "graph must have edges after hydration"
         );
-        let transit = world.resource::<sim_core::routing::TransitLines>();
-        assert!(transit.count() > 0, "must have at least one transit line");
+        let traffic_routes = world.resource::<sim_core::routing::TrafficRoutes>();
+        assert!(
+            traffic_routes.count() > 0,
+            "must have at least one traffic route"
+        );
+        assert!(traffic_routes.iter().all(|route| route.edges.iter().all(
+            |edge_id| graph.edge(*edge_id).kind == sim_core::routing::EdgeKind::Road
+        )));
         let spatial = world.resource::<sim_core::routing::NodeSpatialIndex>();
         assert_eq!(spatial.size(), graph.node_count());
     }
@@ -1091,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_can_find_seeded_hierarchical_path() {
+    fn runtime_can_find_seeded_hierarchical_car_path() {
         let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../data/city/zurich-network.json");
         let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
@@ -1099,62 +1061,64 @@ mod tests {
         let runtime = SimulationRuntime::new_from_network(&network);
         let graph = runtime.world.resource::<sim_core::routing::Graph>();
         let hpa = runtime.world.resource::<sim_core::routing::HpaIndex>();
-        let transit_lines = runtime.world.resource::<sim_core::routing::TransitLines>();
-        let line = transit_lines
+        let traffic_routes = runtime.world.resource::<sim_core::routing::TrafficRoutes>();
+        let route = traffic_routes
             .iter()
-            .find(|line| !line.edges.is_empty())
-            .expect("seeded runtime should contain a non-empty transit line");
-        let tram_edge = graph.edge(*line.edges.first().expect("line has first edge"));
+            .find(|route| !route.edges.is_empty())
+            .expect("seeded runtime should contain a non-empty traffic route");
+        let road_edge = graph.edge(*route.edges.first().expect("route has first edge"));
+        assert_eq!(road_edge.kind, sim_core::routing::EdgeKind::Road);
 
         let (path, stats) = sim_core::routing::HpaRouter::find_path(
             graph,
             hpa,
             sim_core::routing::PathRequest {
-                from: tram_edge.from,
-                to: tram_edge.to,
-                profile: sim_core::routing::RoutingProfileKey::Tram,
+                from: road_edge.from,
+                to: road_edge.to,
+                profile: sim_core::routing::RoutingProfileKey::Car,
             },
-            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Tram),
+            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Car),
         )
-        .expect("seeded tram edge endpoints should route through HPA");
+        .expect("seeded road edge endpoints should route through HPA");
 
         assert!(!path.edges.is_empty());
         assert!(stats.corridor_cluster_count >= 1);
         assert!(path
             .edges
             .iter()
-            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::TramTrack));
+            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road));
     }
 
     #[test]
-    fn runtime_can_find_seeded_tram_path() {
+    fn runtime_can_find_seeded_car_path() {
         let network_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../data/city/zurich-network.json");
         let network = sim_core::city_network::CityNetwork::load_from_path(&network_path)
             .expect("zurich fixture network must load");
         let runtime = SimulationRuntime::new_from_network(&network);
         let graph = runtime.world.resource::<sim_core::routing::Graph>();
-        let transit_lines = runtime.world.resource::<sim_core::routing::TransitLines>();
-        let line = transit_lines
+        let traffic_routes = runtime.world.resource::<sim_core::routing::TrafficRoutes>();
+        let route = traffic_routes
             .iter()
-            .find(|line| !line.edges.is_empty())
-            .expect("seeded runtime should contain a non-empty transit line");
-        let tram_edge = graph.edge(*line.edges.first().expect("line has first edge"));
+            .find(|route| !route.edges.is_empty())
+            .expect("seeded runtime should contain a non-empty traffic route");
+        let road_edge = graph.edge(*route.edges.first().expect("route has first edge"));
+        assert_eq!(road_edge.kind, sim_core::routing::EdgeKind::Road);
         let path = sim_core::routing::AStarRouter::find_path(
             graph,
             sim_core::routing::PathRequest {
-                from: tram_edge.from,
-                to: tram_edge.to,
-                profile: sim_core::routing::RoutingProfileKey::Tram,
+                from: road_edge.from,
+                to: road_edge.to,
+                profile: sim_core::routing::RoutingProfileKey::Car,
             },
-            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Tram),
+            sim_core::routing::RoutingProfile::for_key(sim_core::routing::RoutingProfileKey::Car),
         )
-        .expect("seeded tram edge endpoints should be connected by the routing graph");
+        .expect("seeded road edge endpoints should be connected by the routing graph");
         assert!(!path.edges.is_empty());
         assert!(path
             .edges
             .iter()
-            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::TramTrack));
+            .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Road));
     }
 
     #[test]
@@ -1841,7 +1805,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hydrate_ignores_snapshot_missing_declared_trams() {
+    async fn hydrate_ignores_snapshot_missing_base_world_cars() {
         use sim_core::mobility::{extract_from_world, seed};
 
         let network = road_test_network();
@@ -1884,21 +1848,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hydrate_ignores_stacked_declared_tram_snapshot() {
-        use sim_core::mobility::{VehicleKind, seed};
+    async fn hydrate_ignores_snapshot_with_wrong_base_world_car_count() {
+        use sim_core::mobility::seed;
 
         let base_world = base_world_fixture();
         let (authored, _) =
             seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
         let mut authored_snap = extract_from_world(&authored);
-        for vehicle in authored_snap
+        let removed = authored_snap
             .vehicles
-            .values_mut()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
-        {
-            vehicle.link_index = 0;
-            vehicle.progress = 0.0;
-        }
+            .keys()
+            .next()
+            .cloned()
+            .expect("base world seed contains at least one car");
+        authored_snap.vehicles.remove(&removed);
 
         let mut mobility_store = InMemoryMobilitySnapshotStore::default();
         MobilitySnapshotStore::write(
@@ -1920,22 +1883,7 @@ mod tests {
         .await
         .unwrap();
 
-        let hydrated_snap = runtime.mobility_persist_snapshot();
-        let unique_tram_positions = hydrated_snap
-            .vehicles
-            .values()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
-            .map(|vehicle| {
-                format!(
-                    "{}:{}:{:.3}",
-                    vehicle.route_id, vehicle.link_index, vehicle.progress
-                )
-            })
-            .collect::<std::collections::HashSet<_>>();
         assert_eq!(runtime.mobility_tick_for_test(), 0);
-        assert!(
-            unique_tram_positions.len() > 1,
-            "stacked persisted trams should be replaced by base-world seed positions"
-        );
+        assert_eq!(runtime.mobility_vehicle_count_for_test(), 55);
     }
 }

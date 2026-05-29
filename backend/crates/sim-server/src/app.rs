@@ -830,7 +830,6 @@ fn vehicle_dto_to_proto(dto: abutown_protocol::VehicleMobilityDto) -> w::Vehicle
     use abutown_protocol::VehicleKindDto;
     let kind = match dto.kind {
         VehicleKindDto::Car => w::VehicleKind::Car,
-        VehicleKindDto::Tram => w::VehicleKind::Tram,
     };
     w::VehicleMobility {
         id: dto.id.0,
