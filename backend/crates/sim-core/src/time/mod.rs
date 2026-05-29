@@ -7,6 +7,7 @@ use bevy_ecs::prelude::Resource;
 pub const SECONDS_PER_DAY: u64 = 86_400;
 pub const DAYS_PER_YEAR: u64 = 365;
 pub const SECONDS_PER_YEAR: u64 = SECONDS_PER_DAY * DAYS_PER_YEAR;
+pub const SECONDS_PER_MONTH: u64 = SECONDS_PER_YEAR / 12;
 
 /// Fixed-rate clock. `sim_seconds_per_tick` is the one tunable time-compression
 /// knob; everything else is derived from the authoritative tick.
@@ -38,6 +39,9 @@ impl SimClock {
     }
     pub fn age_years(&self, now_tick: u64, birth_tick: u64) -> f32 {
         self.age_seconds(now_tick, birth_tick) as f32 / SECONDS_PER_YEAR as f32
+    }
+    pub fn month_index(&self, tick: u64) -> u64 {
+        self.sim_seconds(tick) / SECONDS_PER_MONTH
     }
 }
 

@@ -45,6 +45,8 @@ fn active_route_snapshot() -> MobilityPersistSnapshot {
                     length: 8.0,
                 }],
             }),
+            sex: sim_core::mobility::components::Sex::default(),
+            parent_id: None,
         },
     );
 
@@ -133,6 +135,8 @@ fn multi_step_active_route_snapshot() -> MobilityPersistSnapshot {
                     },
                 ],
             }),
+            sex: sim_core::mobility::components::Sex::default(),
+            parent_id: None,
         },
     );
 
@@ -247,6 +251,8 @@ fn graph_native_active_route_world() -> bevy_ecs::world::World {
                     length: 5.0,
                 }],
             }),
+            sex: sim_core::mobility::components::Sex::default(),
+            parent_id: None,
         },
     );
     world
@@ -409,4 +415,42 @@ fn birth_tick_round_trips() {
         4242,
         "birth_tick must survive extract → JSON → apply round-trip"
     );
+}
+
+#[test]
+fn sex_and_parent_id_round_trip() {
+    use sim_core::mobility::components::Sex;
+    let (mut world, _s) = api::empty_world_and_schedule();
+    let mut rec = AgentRecord::new_born_at(
+        AgentId("agent:child".into()),
+        AgentMobilityState::AtActivity {
+            activity_id: "a".into(),
+        },
+        vec![PlanStage::Activity {
+            activity_id: "a".into(),
+        }],
+        0.05,
+        7,
+    );
+    rec.sex = Sex::Female;
+    rec.parent_id = Some(AgentId("agent:mum".into()));
+    api::spawn_agent_from_record(&mut world, rec);
+
+    let snap = extract_from_world(&world);
+    let json = serde_json::to_string(&snap).unwrap();
+    let back: MobilityPersistSnapshot = serde_json::from_str(&json).unwrap();
+    let r = back
+        .agents
+        .get(&AgentId("agent:child".into()))
+        .expect("agent persisted");
+    assert_eq!(r.sex, Sex::Female);
+    assert_eq!(r.parent_id, Some(AgentId("agent:mum".into())));
+
+    // and survives re-apply
+    let (mut w2, _s2) = api::empty_world_and_schedule();
+    apply_into_world(&mut w2, back);
+    let snap2 = extract_from_world(&w2);
+    let r2 = snap2.agents.get(&AgentId("agent:child".into())).unwrap();
+    assert_eq!(r2.sex, Sex::Female);
+    assert_eq!(r2.parent_id, Some(AgentId("agent:mum".into())));
 }

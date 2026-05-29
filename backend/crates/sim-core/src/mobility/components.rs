@@ -107,6 +107,23 @@ pub struct NearStop;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BirthTick(pub u64);
 
+/// Biological sex of an agent. Durable: mirrors `AgentRecord.sex`.
+#[derive(
+    Component, Default, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+pub enum Sex {
+    #[default]
+    Male,
+    Female,
+}
+
+/// Parent agent id, if this agent was born from another agent. `None` for
+/// agents seeded directly from scenario data. Persists through snapshot
+/// round-trips via the `agent_record_from_entity` / `spawn_agent_from_record`
+/// pair so that parentage survives world serialisation.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct ParentId(pub Option<crate::ids::AgentId>);
+
 /// Cached resolved polyline for the link this entity currently traverses.
 /// Refreshed by `update_link_polyline_cache_system` (runs first in Advance)
 /// when the entity's link changes. Eliminates the per-tick HashMap chain
