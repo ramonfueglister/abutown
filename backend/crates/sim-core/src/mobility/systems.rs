@@ -24,6 +24,34 @@ fn traffic_route_edge<'a>(
     Some(graph.edge(edge_id))
 }
 
+fn traffic_route_edge_cache_link_id(edge: &crate::routing::Edge) -> String {
+    edge.legacy_id
+        .clone()
+        .unwrap_or_else(|| format!("edge:{}", edge.id.0))
+}
+
+fn traffic_route_edge_cache_link_id_matches(edge: &crate::routing::Edge, link_id: &str) -> bool {
+    match edge.legacy_id.as_deref() {
+        Some(legacy_id) => legacy_id == link_id,
+        None => link_id == format!("edge:{}", edge.id.0),
+    }
+}
+
+fn current_vehicle_cached_polyline<'a>(
+    graph: &crate::routing::Graph,
+    traffic_routes: &crate::routing::TrafficRoutes,
+    route_position: &RoutePosition,
+    cached: Option<&'a CurrentLinkPolyline>,
+) -> Option<&'a [(f32, f32)]> {
+    let cached = cached?;
+    let edge = traffic_route_edge(graph, traffic_routes, route_position)?;
+    if traffic_route_edge_cache_link_id_matches(edge, &cached.link_id) {
+        Some(cached.points.as_slice())
+    } else {
+        None
+    }
+}
+
 /// Returns true if the chunk containing the entity is Active or Hot.
 /// Asleep/Warm chunks are skipped by the Advance/Output systems so only
 /// hot entities tick at full fidelity. Source of truth: chunk-entity LOD
@@ -569,13 +597,8 @@ pub fn update_link_polyline_cache_system(
     // works against the existing component shape.
     for (entity, rp, cached) in vehicles.iter_mut() {
         let resolved: Option<(String, Vec<(f32, f32)>)> =
-            traffic_route_edge(&graph, &traffic_routes, rp).map(|edge| {
-                let lid = edge
-                    .legacy_id
-                    .clone()
-                    .unwrap_or_else(|| format!("edge:{}", edge.id.0));
-                (lid, edge.polyline.clone())
-            });
+            traffic_route_edge(&graph, &traffic_routes, rp)
+                .map(|edge| (traffic_route_edge_cache_link_id(edge), edge.polyline.clone()));
         match (resolved, cached) {
             (Some((want_id, points)), Some(mut c)) => {
                 if c.link_id != want_id {
@@ -620,13 +643,14 @@ pub fn vehicle_advance_system(
             dirty.0.insert(entity);
             continue;
         }
-        if (pos.route_id.0 as usize) >= traffic_routes.count()
-            || traffic_routes.route(pos.route_id).edges.is_empty()
-        {
+        if (pos.route_id.0 as usize) >= traffic_routes.count() {
+            continue;
+        }
+        let route = traffic_routes.route(pos.route_id);
+        if route.edges.is_empty() || pos.edge_index >= route.edges.len() {
             continue;
         }
         if pos.progress >= 1.0 {
-            let route = traffic_routes.route(pos.route_id);
             pos.edge_index = (pos.edge_index + 1) % route.edges.len();
             pos.progress = 0.0;
             dirty.0.insert(entity);
@@ -747,10 +771,11 @@ pub fn compute_world_coord_system(
         if !chunk_is_simulated(&pos, &simulated) {
             continue;
         }
-        let new_xy = if let Some(c) = cached {
+        let new_xy = if let Some(points) =
+            current_vehicle_cached_polyline(&graph, &traffic_routes, rp, cached)
+        {
             Some(crate::mobility_geometry::world_coord_at_progress_slice(
-                &c.points,
-                rp.progress,
+                points, rp.progress,
             ))
         } else {
             crate::mobility::vehicle_world_coord(rp, &traffic_routes, &graph)
@@ -816,8 +841,8 @@ pub fn compute_direction_system(
         if !chunk_is_simulated(pos, &simulated) {
             continue;
         }
-        if let Some(c) = cached {
-            dir.0 = dir_at_progress(&c.points, rp.progress);
+        if let Some(points) = current_vehicle_cached_polyline(&graph, &traffic_routes, rp, cached) {
+            dir.0 = dir_at_progress(points, rp.progress);
             continue;
         }
         if let Some(edge) = traffic_route_edge(&graph, &traffic_routes, rp) {
@@ -1703,6 +1728,49 @@ mod tests {
     }
 
     #[test]
+    fn vehicle_advance_skips_invalid_route_edge_index_before_progress() {
+        use crate::ids::VehicleId;
+        use crate::mobility::records::VehicleKind;
+
+        let mut world = World::new();
+        insert_test_routing(&mut world);
+        world.insert_resource(all_active());
+        world.insert_resource(DirtyVehicles::default());
+
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:invalid-edge".into())),
+                VehicleKindComponent(VehicleKind::Car),
+                RoutePosition {
+                    route_id: crate::routing::TrafficRouteId(0),
+                    edge_index: 99,
+                    progress: 0.4,
+                    speed: 0.1,
+                },
+                Capacity(4),
+                Occupants(vec![]),
+                DwellTicksRemaining(0),
+                Position { x: 0.0, y: 0.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(vehicle_advance_system);
+        schedule.run(&mut world);
+
+        let pos = world.get::<RoutePosition>(entity).unwrap();
+        assert_eq!(pos.edge_index, 99);
+        assert!(
+            (pos.progress - 0.4).abs() < 1e-6,
+            "invalid route edge index must not advance progress"
+        );
+        assert!(!world.resource::<DirtyVehicles>().0.contains(&entity));
+    }
+
+    #[test]
     fn compute_world_coord_system_writes_position_for_walking_agent() {
         use crate::ids::AgentId;
         use crate::mobility::records::AgentMobilityState;
@@ -1895,6 +1963,53 @@ mod tests {
             pos.x
         );
         assert!(pos.y.abs() < 1e-3);
+    }
+
+    #[test]
+    fn compute_world_coord_ignores_stale_vehicle_polyline_cache() {
+        use crate::ids::VehicleId;
+        use crate::mobility::records::VehicleKind;
+        use std::sync::Arc;
+
+        let mut world = World::new();
+        insert_test_routing(&mut world);
+        world.insert_resource(all_active());
+        let route_id = crate::routing::TrafficRouteId(0);
+
+        let entity = world
+            .spawn((
+                VehicleMarker,
+                StableVehicleId(VehicleId("v:stale-cache".into())),
+                VehicleKindComponent(VehicleKind::Car),
+                RoutePosition {
+                    route_id,
+                    edge_index: 1,
+                    progress: 0.5,
+                    speed: 0.0,
+                },
+                Capacity(4),
+                Occupants(vec![]),
+                DwellTicksRemaining(0),
+                Position { x: 99.0, y: 99.0 },
+                Direction(abutown_protocol::DirectionDto::S),
+                SpriteKey(String::new()),
+                CurrentLinkPolyline {
+                    link_id: "l:vehicle".into(),
+                    points: Arc::new(vec![(0.0, 0.0), (10.0, 0.0)]),
+                },
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(compute_world_coord_system);
+        schedule.run(&mut world);
+
+        let pos = world.get::<Position>(entity).unwrap();
+        assert!(pos.x.abs() < 1e-3);
+        assert!(
+            (pos.y - 5.0).abs() < 1e-3,
+            "edge 1 should resolve through TrafficRoutes instead of stale cached edge 0"
+        );
     }
 
     #[test]
