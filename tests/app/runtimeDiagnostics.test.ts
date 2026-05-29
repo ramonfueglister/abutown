@@ -16,6 +16,7 @@ function baseOptions(): RuntimeDiagnosticsOptions {
     getBackend: () => ({ required: true, baseUrl: 'http://127.0.0.1:8080', status: null }),
     getMobilityState: () => mobilityState,
     getMobilityTickPeriodMs: () => 100,
+    getSimTime: () => 4242,
     getPedestrianSprites: () => [],
     getVehicleSprites: () => [],
     getCamera: () => ({
@@ -88,6 +89,10 @@ describe('buildRuntimeDiagnosticsPayload', () => {
       tile: { width: 18, height: 18 },
     });
     expect(payload.city.loadedRasterAssetPaths).toEqual([]);
+  });
+
+  it('exposes the world sim time for the clock display', () => {
+    expect(buildRuntimeDiagnosticsPayload(baseOptions()).city.simTime).toBe(4242);
   });
 
   it('reports car traffic diagnostics without tram runtime diagnostics', () => {

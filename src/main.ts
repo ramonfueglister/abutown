@@ -410,6 +410,7 @@ installRuntimeDiagnostics(window, {
   getBackend: () => ({ required: true, baseUrl: backendBaseUrl, status: backendStatus }),
   getMobilityState: () => mobilityState,
   getMobilityTickPeriodMs: () => mobilityTickPeriodMs,
+  getSimTime: () => simTime,
   getPedestrianSprites: () => pedestrianSprites,
   getVehicleSprites: () => vehicleSprites,
   getCamera: () => ({

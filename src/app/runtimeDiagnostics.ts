@@ -61,6 +61,7 @@ export type RuntimeDiagnosticsOptions = {
   getBackend: () => RuntimeBackendDiagnostics;
   getMobilityState: () => MobilityOverlayState;
   getMobilityTickPeriodMs: () => number;
+  getSimTime: () => number;
   getPedestrianSprites: () => readonly MinimalPedestrianSprite[];
   getVehicleSprites: () => readonly VehicleSprite[];
   getCamera: () => RuntimeCameraDiagnostics;
@@ -134,6 +135,7 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       loadedRasterAssetPaths: [],
       width: options.world.width,
       height: options.world.height,
+      simTime: options.getSimTime(),
       roadTiles: counts.roadTiles,
       railTiles: counts.railTiles,
       bridges: counts.bridges,
@@ -206,6 +208,7 @@ function mobilityAgentEntry(agent: BackendPedestrian, options: RuntimeDiagnostic
     screen: options.projectEntityScreen(agent.path[0]),
     direction: agent.direction,
     spriteSheet: agent.sprite.sheet,
+    ageSeconds: agent.ageSeconds,
   };
 }
 
