@@ -85,22 +85,24 @@ function mobilitySnapshotProtoResponse(dto: MobilitySnapshotDto): Response {
   });
 }
 
-function agentStateToProto(state: MobilitySnapshotDto['agents'][number]['state']): {
-  state: { case: string; value: unknown };
-} {
+function agentStateToProto(state: MobilitySnapshotDto['agents'][number]['state']) {
   switch (state.type) {
     case 'walking':
-      return { state: { case: 'walking', value: { linkId: state.link_id, progress: state.progress } } };
+      return { state: { case: 'walking' as const, value: { linkId: state.link_id, progress: state.progress } } };
     case 'waiting_at_stop':
-      return { state: { case: 'waitingAtStop', value: { stopId: state.stop_id } } };
+      return { state: { case: 'waitingAtStop' as const, value: { stopId: state.stop_id } } };
     case 'in_vehicle':
-      return { state: { case: 'inVehicle', value: { vehicleId: state.vehicle_id, seatIndex: state.seat_index } } };
+      return { state: { case: 'inVehicle' as const, value: { vehicleId: state.vehicle_id, seatIndex: state.seat_index } } };
     case 'boarding':
-      return { state: { case: 'boarding', value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
+      return { state: { case: 'boarding' as const, value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
     case 'alighting':
-      return { state: { case: 'alighting', value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
+      return { state: { case: 'alighting' as const, value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
     case 'at_activity':
-      return { state: { case: 'atActivity', value: { activityId: state.activity_id } } };
+      return { state: { case: 'atActivity' as const, value: { activityId: state.activity_id } } };
+    default: {
+      const _exhaustive: never = state;
+      throw new Error(`unhandled agent state ${JSON.stringify(_exhaustive)}`);
+    }
   }
 }
 type ScreenToTile = (screen: { x: number; y: number }) => { x: number; y: number };
@@ -352,7 +354,7 @@ describe('mobility backend client', () => {
   });
 
   it('schedules the subscription poll at SUBSCRIPTION_POLL_INTERVAL_MS', async () => {
-    const setIntervalImpl = vi.fn<typeof setInterval>(() => 1 as unknown as ReturnType<typeof setInterval>);
+    const setIntervalImpl = vi.fn((..._args: Parameters<typeof setInterval>) => 1 as unknown as ReturnType<typeof setInterval>);
     const { Impl, sockets } = mockWebSocketImpl();
 
     const bridge = connectMobilityBackend({
@@ -407,8 +409,8 @@ describe('mobility backend client', () => {
 
   it('calls injected clearIntervalImpl when the socket closes and when stop() runs', async () => {
     const intervalToken = Symbol('interval') as unknown as ReturnType<typeof setInterval>;
-    const setIntervalImpl = vi.fn<typeof setInterval>(() => intervalToken);
-    const clearIntervalImpl = vi.fn<typeof clearInterval>();
+    const setIntervalImpl = vi.fn((..._args: Parameters<typeof setInterval>) => intervalToken);
+    const clearIntervalImpl = vi.fn((..._args: Parameters<typeof clearInterval>) => undefined);
     const { Impl, sockets } = mockWebSocketImpl();
 
     const bridge = connectMobilityBackend({
@@ -433,7 +435,7 @@ describe('mobility backend client', () => {
 
   it('pollSubscription is a silent no-op when getScreenToTile() returns null', async () => {
     const { Impl, sockets } = mockWebSocketImpl();
-    const setIntervalImpl = vi.fn<typeof setInterval>(() => 1 as unknown as ReturnType<typeof setInterval>);
+    const setIntervalImpl = vi.fn((..._args: Parameters<typeof setInterval>) => 1 as unknown as ReturnType<typeof setInterval>);
 
     const bridge = connectMobilityBackend({
       fetchImpl: snapshotFetch as unknown as typeof fetch,
@@ -453,7 +455,7 @@ describe('mobility backend client', () => {
 
   it('pollSubscription is a silent no-op when getViewport() returns null', async () => {
     const { Impl, sockets } = mockWebSocketImpl();
-    const setIntervalImpl = vi.fn<typeof setInterval>(() => 1 as unknown as ReturnType<typeof setInterval>);
+    const setIntervalImpl = vi.fn((..._args: Parameters<typeof setInterval>) => 1 as unknown as ReturnType<typeof setInterval>);
 
     const bridge = connectMobilityBackend({
       fetchImpl: snapshotFetch as unknown as typeof fetch,
@@ -472,9 +474,11 @@ describe('mobility backend client', () => {
 
   it('viewport-size changes between polls emit a chunk_subscribe diff', async () => {
     const { Impl, sockets } = mockWebSocketImpl();
-    let pollFn: (() => void) | null = null;
-    const setIntervalImpl = vi.fn<typeof setInterval>((fn) => {
-      pollFn = fn as () => void;
+    // Use a container so TS 6 CFA doesn't narrow `captured.pollFn` to `never`
+    // (direct `let pollFn` assignments inside closures narrow to `never` in TS 6).
+    const captured: { pollFn: (() => void) | null } = { pollFn: null };
+    const setIntervalImpl = vi.fn((fn: TimerHandler, ..._rest: unknown[]) => {
+      captured.pollFn = fn as () => void;
       return 1 as unknown as ReturnType<typeof setInterval>;
     });
 
@@ -498,7 +502,7 @@ describe('mobility backend client', () => {
 
     // Simulate window resize → more chunks become visible.
     viewport = { width: 512, height: 512 };
-    pollFn?.();
+    captured.pollFn?.();
 
     expect(sockets[0].sent.length).toBeGreaterThan(sendsBefore);
     const lastBytes = sockets[0].sent[sockets[0].sent.length - 1];

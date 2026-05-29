@@ -183,7 +183,7 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     expect(selectedState.city.agentInspector).toBeNull();
   }
   const clickableVehicle = await visibleVehicle(page, { width: 409, height: 519 });
-  expect(clickableVehicle).toBeTruthy();
+  if (!clickableVehicle) throw new Error('expected a clickable vehicle in the viewport');
   await page.mouse.click(clickableVehicle.screen.x, clickableVehicle.screen.y);
   const vehicleSelectedState = JSON.parse(await page.evaluate(() => window.render_game_to_text?.() ?? ''));
   expect(vehicleSelectedState.city.mobilityVehicles.selectedId).toBe(clickableVehicle.id);
