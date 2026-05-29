@@ -84,7 +84,6 @@ import {
   WEST,
   coordKey as key,
   maskSegments as gridMaskSegments,
-  movementAngle,
   outwardExits,
 } from './render/gridMath';
 import {
@@ -114,6 +113,7 @@ import {
   carRenderStyle,
   pedestrianRenderStyle,
 } from './render/entityRenderStyle';
+import { trainRenderSegments } from './render/trainRenderStyle';
 
 type Coord = { x: number; y: number };
 
@@ -583,23 +583,10 @@ function drawCar(car: BackendCar, selected: boolean): void {
 }
 
 function drawTrain(train: Train): void {
-  const segments = [
-    { offset: train.offset, length: 13.5 },
-    { offset: train.offset - train.carSpacing, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 2, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 3, length: 10.5 },
-    { offset: train.offset - train.carSpacing * 4, length: 10.5 },
-  ];
-
-  for (const segment of segments) {
-    const pos = movingTrainPosition(train.path, segment.offset);
-    const alpha = trainFadeAlpha(pos, { height: HEIGHT, fadeTiles: train.fadeTiles });
-    if (alpha <= 0) continue;
-    const point = iso(pos);
-    const nextPoint = iso(movingTrainPosition(train.path, segment.offset + 0.2));
+  for (const segment of trainRenderSegments(train, { height: HEIGHT, project: iso })) {
     ctx.save();
-    ctx.globalAlpha *= alpha;
-    drawCapsule(point, movementAngle(point, nextPoint), segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
+    ctx.globalAlpha *= segment.alpha;
+    drawCapsule(segment.point, segment.angle, segment.length, segment.width, TRAIN_CORE, RAIL_CASING);
     ctx.restore();
   }
 }
