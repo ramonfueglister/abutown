@@ -217,10 +217,6 @@ impl JwksCache {
         if let Ok(user_id) = self.try_validate(token) {
             return Ok(user_id);
         }
-        if std::env::var("TEST_MODE_ACCEPT_ALL_JWTS").ok().as_deref() == Some("1") {
-            return Uuid::parse_str(token).map_err(|_| CardHandError::InvalidAuth);
-        }
-
         self.refresh().await?;
         self.try_validate(token)
     }
