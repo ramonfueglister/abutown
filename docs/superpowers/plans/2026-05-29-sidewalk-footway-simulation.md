@@ -819,7 +819,7 @@ Expected: commit succeeds.
 - Modify: `tests/render/entityRenderStyle.test.ts`
 - Modify: `tests/render/backendMobilityDrawables.test.ts`
 
-- [ ] **Step 1: Add failing render-style tests**
+- [x] **Step 1: Add failing render-style tests**
 
 In `tests/render/entityRenderStyle.test.ts`, replace the pedestrian lane test with:
 
@@ -867,7 +867,7 @@ it('passes backend pedestrian sidewalk coordinates through without visual lane o
 });
 ```
 
-- [ ] **Step 2: Run failing render tests**
+- [x] **Step 2: Run failing render tests**
 
 Run:
 
@@ -877,7 +877,7 @@ npm test -- tests/render/entityRenderStyle.test.ts tests/render/backendMobilityD
 
 Expected: `entityRenderStyle.test.ts` fails because `laneOffset: 0` still produces a hard-coded lane offset.
 
-- [ ] **Step 3: Remove default pedestrian lane nudge**
+- [x] **Step 3: Remove default pedestrian lane nudge**
 
 In `src/render/entityRenderStyle.ts`, replace `pedestrianRenderStyle` with:
 
@@ -899,7 +899,7 @@ export function pedestrianRenderStyle(
 }
 ```
 
-- [ ] **Step 4: Run render tests**
+- [x] **Step 4: Run render tests**
 
 Run:
 
@@ -909,7 +909,7 @@ npm test -- tests/render/entityRenderStyle.test.ts tests/render/backendMobilityD
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit frontend render change**
+- [x] **Step 5: Commit frontend render change**
 
 Run:
 
