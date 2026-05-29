@@ -101,8 +101,10 @@ const MAP_WATER = '#92d8e9';
 const MAP_RIVERBANK = '#bde8df';
 const MAP_PARK = '#cfe5bf';
 const MAP_PLAZA = '#eadbbd';
-const ROAD_CASING = '#050606';
-const ROAD_CORE = '#101214';
+const ROAD_SIDEWALK = '#d8d3c5';
+const ROAD_CURB = '#aaa69c';
+const ROAD_CASING = '#565d61';
+const ROAD_CORE = '#71797d';
 const ROAD_CENTER_LINE = '#f1c93a';
 const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
 const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
@@ -198,8 +200,10 @@ function drawRiverSurface(state: MinimalMapRendererState, coord: Coord): void {
 }
 
 function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
-  drawRoadBand(state, road.coord, road.mask, ROAD_CASING, screenStableWorldSize(16, state.camera.scale, { minWorld: 18, maxWorld: 28 }));
-  drawRoadBand(state, road.coord, road.mask, ROAD_CORE, screenStableWorldSize(13, state.camera.scale, { minWorld: 14, maxWorld: 23 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_SIDEWALK, screenStableWorldSize(24, state.camera.scale, { minWorld: 24, maxWorld: 36 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CURB, screenStableWorldSize(18, state.camera.scale, { minWorld: 18, maxWorld: 29 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CASING, screenStableWorldSize(16, state.camera.scale, { minWorld: 16, maxWorld: 26 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CORE, screenStableWorldSize(13, state.camera.scale, { minWorld: 13, maxWorld: 22 }));
   drawRoadBand(state, road.coord, road.mask, ROAD_CENTER_LINE, screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }));
 }
 
