@@ -39,8 +39,8 @@ describe('entityRenderStyle', () => {
   it('computes pedestrian lane, selection radius, and body radius from projected points', () => {
     expect(pedestrianRenderStyle({ x: 0, y: 0 }, { x: 10, y: 0 }, 0.5, 2)).toEqual({
       lane: { x: 0, y: 12 },
-      selectedRadius: 16,
-      radius: 7.2,
+      selectedRadius: 9,
+      radius: 3.2,
     });
   });
 

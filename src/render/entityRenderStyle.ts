@@ -62,7 +62,7 @@ export function pedestrianRenderStyle(
       nextPoint,
       screenStableWorldSize(4 + laneOffset, cameraScale, { minWorld: 4, maxWorld: 14 }),
     ),
-    selectedRadius: screenStableWorldSize(8, cameraScale, { minWorld: 6.2, maxWorld: 22 }),
-    radius: screenStableWorldSize(3.6, cameraScale, { minWorld: 2.9, maxWorld: 10 }),
+    selectedRadius: screenStableWorldSize(4.5, cameraScale, { minWorld: 3.2, maxWorld: 10 }),
+    radius: screenStableWorldSize(1.6, cameraScale, { minWorld: 1.2, maxWorld: 3.2 }),
   };
 }

@@ -11,10 +11,10 @@ function roads(coords: Array<[number, number]>): Map<string, { coord: { x: numbe
 
 describe('minimal building layout', () => {
   it('pulls plots flush toward adjacent streets in top-down screen space', () => {
-    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[5, 4]]))).toEqual({ x: 3, y: 0 });
-    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[3, 4]]))).toEqual({ x: -3, y: 0 });
-    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[4, 5]]))).toEqual({ x: 0, y: 3 });
-    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[4, 3]]))).toEqual({ x: 0, y: -3 });
+    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[5, 4]]))).toEqual({ x: 1.5, y: 0 });
+    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[3, 4]]))).toEqual({ x: -1.5, y: 0 });
+    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[4, 5]]))).toEqual({ x: 0, y: 1.5 });
+    expect(minimalBuildingPlotOffset({ x: 4, y: 4 }, roads([[4, 3]]))).toEqual({ x: 0, y: -1.5 });
   });
 
   it('pulls corner plots diagonally toward connected frontage roads', () => {
@@ -23,8 +23,8 @@ describe('minimal building layout', () => {
   });
 
   it('uses restrained top-down building footprints', () => {
-    expect(minimalBuildingSize({ sheet: 'houses', district: 'old-town' })).toEqual({ width: 12, height: 10.8 });
-    expect(minimalBuildingSize({ sheet: 'oldhouses', district: 'old-town' })).toEqual({ width: 12, height: 10.8 });
+    expect(minimalBuildingSize({ sheet: 'houses', district: 'old-town' })).toEqual({ width: 15, height: 13.2 });
+    expect(minimalBuildingSize({ sheet: 'oldhouses', district: 'old-town' })).toEqual({ width: 15, height: 13.2 });
     expect(minimalBuildingSize({ sheet: 'office', district: 'market' })).toEqual({ width: 6.6, height: 6.2 });
     expect(minimalBuildingSize({ sheet: 'shops', district: 'mill-yard' })).toEqual({ width: 6.2, height: 5.8 });
   });

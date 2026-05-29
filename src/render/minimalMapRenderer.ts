@@ -110,7 +110,8 @@ const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
 const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
 const TREE_COLOR = '#84ad78';
 const DETAIL_COLOR = 'rgba(92, 97, 92, 0.34)';
-const BUILDING_RESIDENTIAL = '#d8cfbf';
+const BUILDING_RESIDENTIAL = '#c9a16e';
+const BUILDING_RESIDENTIAL_ROOF = '#8b5c3c';
 const BUILDING_COMMERCIAL = '#c9d8dc';
 const BUILDING_CIVIC = '#dccb9a';
 const BUILDING_INDUSTRIAL = '#cabed6';
@@ -357,10 +358,16 @@ function drawBuilding(state: MinimalMapRendererState, building: RuntimeBuilding)
   const x = point.x - width / 2 + offset.x + jitter.x;
   const y = point.y - height / 2 + offset.y + jitter.y;
   ctx.save();
-  ctx.globalAlpha = 0.66;
   ctx.fillStyle = buildingVectorColor(building);
   roundedRectPath(ctx, x, y, width, height, 1.4);
   ctx.fill();
+  if (building.sheet === 'oldhouses' || building.sheet === 'houses') {
+    ctx.fillStyle = BUILDING_RESIDENTIAL_ROOF;
+    roundedRectPath(ctx, x + 1.6, y + 1.5, width - 3.2, height * 0.44, 1.2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 246, 214, 0.76)';
+    ctx.fillRect(x + width * 0.68, y + height * 0.62, width * 0.16, height * 0.22);
+  }
   ctx.restore();
 }
 

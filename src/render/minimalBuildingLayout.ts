@@ -9,7 +9,7 @@ export type MinimalBuildingLike = {
   district: string;
 };
 
-const STREET_PULL = 3.0;
+const STREET_PULL = 1.5;
 const CORNER_PULL = 2.0;
 
 export function minimalBuildingPlotOffset(coord: Coord, roads: ReadonlyMap<string, RoadLike>): Coord {
@@ -41,7 +41,7 @@ export function minimalBuildingSize(building: MinimalBuildingLike): { width: num
   if (building.district === 'mill-yard') return { width: 6.2, height: 5.8 };
   if (building.sheet === 'tower' || building.sheet === 'office') return { width: 6.6, height: 6.2 };
   if (building.sheet === 'modern' || building.sheet === 'flats' || building.sheet === 'shops') return { width: 6.0, height: 5.8 };
-  if (building.sheet === 'oldhouses' || building.sheet === 'houses') return { width: 12.0, height: 10.8 };
+  if (building.sheet === 'oldhouses' || building.sheet === 'houses') return { width: 15.0, height: 13.2 };
   return { width: 5.4, height: 5.4 };
 }
 
