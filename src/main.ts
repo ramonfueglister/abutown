@@ -20,7 +20,6 @@ import {
 import { shouldRenderDetail } from './render/detailRenderPolicy';
 import {
   candidateVehicleSprites,
-  screenRightLaneOffset,
   type VehicleSprite,
 } from './render/vehicleSprites';
 import {
@@ -41,7 +40,6 @@ import {
   type BackendPedestrian,
 } from './render/backendMobilityDrawables';
 import { MINIMAL_MAP_TILE_SIZE, mapProject, mapUnproject } from './render/minimalMapProjection';
-import { screenStableWorldSize } from './render/minimalGlyphScale';
 import { minimalBuildingPlotOffset, minimalBuildingSize } from './render/minimalBuildingLayout';
 import {
   buildNorthboundTrainPath,
@@ -112,6 +110,10 @@ import {
   VEHICLE_INSPECTOR_PANEL,
   drawInspectorPanel,
 } from './render/inspectorPanelPainter';
+import {
+  carRenderStyle,
+  pedestrianRenderStyle,
+} from './render/entityRenderStyle';
 
 type Coord = { x: number; y: number };
 
@@ -565,23 +567,18 @@ function drawCar(car: BackendCar, selected: boolean): void {
   const point = iso(pos);
   const currentPoint = iso(current);
   const nextPoint = iso(next);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, screenStableWorldSize(6.8, camera.scale, { minWorld: 6.8, maxWorld: 20 }));
-  const angle = movementAngle(currentPoint, nextPoint);
-  const selectX = screenStableWorldSize(14, camera.scale, { minWorld: 8.5, maxWorld: 36 });
-  const selectY = screenStableWorldSize(10, camera.scale, { minWorld: 6.5, maxWorld: 28 });
-  const length = screenStableWorldSize(16, camera.scale, { minWorld: 12.5, maxWorld: 44 });
-  const width = screenStableWorldSize(6.4, camera.scale, { minWorld: 5.2, maxWorld: 19 });
+  const style = carRenderStyle(currentPoint, nextPoint, camera.scale);
   ctx.save();
-  ctx.translate(point.x + lane.x, point.y + lane.y);
+  ctx.translate(point.x + style.lane.x, point.y + style.lane.y);
   if (selected) {
     ctx.globalAlpha = 0.94;
     ctx.strokeStyle = '#166c83';
     ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
     ctx.beginPath();
-    ctx.ellipse(0, 0, selectX, selectY, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, style.selection.x, style.selection.y, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-  drawCapsule({ x: 0, y: 0 }, angle, length, width, vehicleVectorColor(car.id));
+  drawCapsule({ x: 0, y: 0 }, style.angle, style.capsule.length, style.capsule.width, vehicleVectorColor(car.id));
   ctx.restore();
 }
 
@@ -636,23 +633,21 @@ function drawPedestrian(pedestrian: BackendPedestrian, selected: boolean): void 
   const point = iso(pos);
   const currentPoint = iso(current);
   const nextPoint = iso(next);
-  const lane = screenRightLaneOffset(currentPoint, nextPoint, screenStableWorldSize(4 + pedestrian.laneOffset, camera.scale, { minWorld: 4, maxWorld: 14 }));
-  const selectedRadius = screenStableWorldSize(8, camera.scale, { minWorld: 6.2, maxWorld: 22 });
-  const radius = screenStableWorldSize(3.6, camera.scale, { minWorld: 2.9, maxWorld: 10 });
+  const style = pedestrianRenderStyle(currentPoint, nextPoint, camera.scale, pedestrian.laneOffset);
   ctx.save();
-  ctx.translate(point.x + lane.x, point.y + lane.y);
+  ctx.translate(point.x + style.lane.x, point.y + style.lane.y);
   if (selected) {
     ctx.globalAlpha = 0.92;
     ctx.strokeStyle = '#a87309';
     ctx.lineWidth = 2 / Math.max(0.75, camera.scale);
     ctx.beginPath();
-    ctx.ellipse(0, 0, selectedRadius, selectedRadius, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, style.selectedRadius, style.selectedRadius, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.fillStyle = AGENT_COLOR;
   ctx.globalAlpha *= 0.78;
   ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.arc(0, 0, style.radius, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
