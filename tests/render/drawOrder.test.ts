@@ -9,9 +9,9 @@ describe('draw order', () => {
     )).toBeGreaterThan(0);
   });
 
-  it('always renders rails before trains so the train sits on top of the track', () => {
+  it('always renders rails before cars so vehicles sit on top of the track', () => {
     expect(compareDrawableOrder(
-      { type: 'train', isoY: 10, x: 0 },
+      { type: 'car', isoY: 10, x: 0 },
       { type: 'rail', isoY: 100, x: 0 },
     )).toBeGreaterThan(0);
   });

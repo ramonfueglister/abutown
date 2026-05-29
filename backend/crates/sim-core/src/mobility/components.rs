@@ -8,7 +8,7 @@ use std::sync::Arc;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentMarker;
 
-/// Marker component for vehicles (cars + trams).
+/// Marker component for vehicles.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VehicleMarker;
 
@@ -67,19 +67,16 @@ pub struct RouteStep {
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct WalkSpeed(pub f32);
 
-/// Vehicle class discriminator (car vs tram).
+/// Vehicle class discriminator.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VehicleKindComponent(pub VehicleKind);
 
-/// Vehicle position along its current transit line edge. Written by
-/// `vehicle_advance_system`. Phase 8b T10 migrated this from string-keyed
-/// string route id + `link_index` to integer-keyed `LineId` + `edge_index`. The
-/// wire shape (`VehicleRecord`, `VehicleMobilityDto`) still uses the legacy
-/// `route_id: String` + `link_index: usize`; conversion happens at the
-/// emission boundary via `TransitLines::line(line_id).legacy_route_id`.
+/// Vehicle position along its current road traffic route edge. The wire shape
+/// still uses `route_id: String` + `link_index: usize`; conversion happens at
+/// the emission boundary through `TrafficRoutes::route(route_id)`.
 #[derive(Component, Debug, Copy, Clone, PartialEq)]
 pub struct RoutePosition {
-    pub line_id: crate::routing::LineId,
+    pub route_id: crate::routing::TrafficRouteId,
     pub edge_index: usize,
     pub progress: f32,
     pub speed: f32,

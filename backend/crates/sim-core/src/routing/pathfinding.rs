@@ -500,9 +500,9 @@ mod tests {
     }
 
     #[test]
-    fn walk_transit_combines_walk_tram_walk() {
+    fn walk_transit_does_not_cross_rail_edges() {
         let graph = walk_transit_graph();
-        let path = AStarRouter::find_path(
+        let err = AStarRouter::find_path(
             &graph,
             PathRequest {
                 from: NodeId(0),
@@ -511,23 +511,23 @@ mod tests {
             },
             RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
         )
-        .expect("walk-transit route should exist");
+        .expect_err("retired transit routing must not use rail edges");
         assert_eq!(
-            path.edges.iter().map(|e| e.edge_id).collect::<Vec<_>>(),
-            vec![EdgeId(0), EdgeId(1), EdgeId(2)]
-        );
-        assert_eq!(
-            path.edges.iter().map(|e| e.mode).collect::<Vec<_>>(),
-            vec![ModeState::Walking, ModeState::OnTram, ModeState::Walking]
+            err,
+            RoutingError::NoPath {
+                from: NodeId(0),
+                to: NodeId(3),
+                profile: RoutingProfileKey::WalkTransit,
+            }
         );
     }
 
     #[test]
-    fn walk_transit_cannot_board_at_intersection() {
+    fn walk_transit_cannot_cross_rail_edge_between_stops() {
         let graph = Graph::new(
             vec![
-                node(0, 0.0, 0.0, NodeKind::Intersection),
-                node(1, 10.0, 0.0, NodeKind::Intersection),
+                node(0, 0.0, 0.0, NodeKind::TransitStop),
+                node(1, 10.0, 0.0, NodeKind::TransitStop),
             ],
             vec![edge(0, 0, 1, EdgeKind::TramTrack, 10.0)],
         );
@@ -540,7 +540,7 @@ mod tests {
             },
             RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
         )
-        .expect_err("boarding at intersection must be illegal");
+        .expect_err("retired transit routing must not use rail edges");
         assert_eq!(
             err,
             RoutingError::NoPath {

@@ -1,4 +1,4 @@
-export type DrawableType = 'rail' | 'road' | 'railStation' | 'detail' | 'tree' | 'building' | 'train' | 'car' | 'pedestrian';
+export type DrawableType = 'rail' | 'road' | 'railStation' | 'detail' | 'tree' | 'building' | 'car' | 'pedestrian';
 
 export type DrawableOrderInput = {
   type: DrawableType;
@@ -25,10 +25,9 @@ export function drawPriority(type: DrawableType): number {
   if (type === 'road') return 0;
   if (type === 'rail') return 1;
   if (type === 'railStation') return 2;
-  if (type === 'train') return 3;
-  if (type === 'car') return 4;
-  if (type === 'pedestrian') return 5;
-  if (type === 'detail') return 6;
+  if (type === 'car') return 3;
+  if (type === 'pedestrian') return 4;
+  if (type === 'detail') return 5;
   if (type === 'tree') return 7;
   return 7;
 }
@@ -44,5 +43,5 @@ function isFlatInfrastructure(type: DrawableType): boolean {
 }
 
 function isActor(type: DrawableType): boolean {
-  return type === 'train' || type === 'car' || type === 'pedestrian';
+  return type === 'car' || type === 'pedestrian';
 }

@@ -81,7 +81,7 @@ impl From<&VehicleRecord> for VehicleMobilityDto {
             dwell_ticks_remaining: value.dwell_ticks_remaining,
             world_coord: abutown_protocol::WorldCoordDto { x: 0.0, y: 0.0 },
             direction: abutown_protocol::DirectionDto::S,
-            sprite_key: String::from("tram:0"),
+            sprite_key: String::from("vehicle:0"),
         }
     }
 }

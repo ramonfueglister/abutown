@@ -5,7 +5,7 @@ use bevy_ecs::prelude::*;
 
 use crate::routing::pathfinding::EdgeConstraint;
 use crate::routing::{
-    AStarRouter, Edge, EdgeKind, Graph, NodeId, NodeKind, PathRequest, PlannedPath, RoutingError,
+    AStarRouter, Edge, EdgeKind, Graph, NodeId, PathRequest, PlannedPath, RoutingError,
     RoutingProfile, RoutingProfileKey,
 };
 
@@ -472,7 +472,7 @@ fn cluster_for_node(
         .ok_or(HierarchicalRoutingError::MissingNode(node))
 }
 
-fn profiles_for_cross_cluster_edge(graph: &Graph, edge: &Edge) -> Vec<RoutingProfileKey> {
+fn profiles_for_cross_cluster_edge(_graph: &Graph, edge: &Edge) -> Vec<RoutingProfileKey> {
     let mut profiles = Vec::new();
     match edge.kind {
         EdgeKind::Footway => {
@@ -482,14 +482,7 @@ fn profiles_for_cross_cluster_edge(graph: &Graph, edge: &Edge) -> Vec<RoutingPro
         EdgeKind::Road => {
             profiles.push(RoutingProfileKey::Car);
         }
-        EdgeKind::TramTrack => {
-            profiles.push(RoutingProfileKey::Tram);
-            let from_is_stop = graph.node(edge.from).kind == NodeKind::TransitStop;
-            let to_is_stop = graph.node(edge.to).kind == NodeKind::TransitStop;
-            if from_is_stop || to_is_stop {
-                profiles.push(RoutingProfileKey::WalkTransit);
-            }
-        }
+        EdgeKind::TramTrack => {}
     }
     profiles
 }
@@ -497,7 +490,7 @@ fn profiles_for_cross_cluster_edge(graph: &Graph, edge: &Edge) -> Vec<RoutingPro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::routing::{EdgeId, Node};
+    use crate::routing::{EdgeId, Node, NodeKind};
 
     fn node(id: u32, x: f32, y: f32, kind: NodeKind) -> Node {
         Node {
@@ -658,19 +651,20 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(index.adjacent_clusters(c2, RoutingProfileKey::Car), &[c3]);
-        assert_eq!(index.adjacent_clusters(c3, RoutingProfileKey::Tram), &[c4]);
-        assert_eq!(
-            index.adjacent_clusters(c3, RoutingProfileKey::WalkTransit),
-            &[c4]
+        assert!(index.adjacent_clusters(c3, RoutingProfileKey::Tram).is_empty());
+        assert!(
+            index
+                .adjacent_clusters(c3, RoutingProfileKey::WalkTransit)
+                .is_empty()
         );
     }
 
     #[test]
-    fn walk_transit_tram_adjacency_requires_stop_endpoint() {
+    fn rail_edges_are_not_route_adjacencies() {
         let graph = Graph::new(
             vec![
-                node(0, 0.0, 0.0, NodeKind::Intersection),
-                node(1, 12.0, 0.0, NodeKind::Intersection),
+                node(0, 0.0, 0.0, NodeKind::TransitStop),
+                node(1, 12.0, 0.0, NodeKind::TransitStop),
             ],
             vec![edge(0, 0, 1, EdgeKind::TramTrack, 12.0)],
         );
@@ -684,10 +678,7 @@ mod tests {
         .expect("index builds");
 
         let c0 = index.cluster_id(ClusterCoord { x: 0, y: 0 }).unwrap();
-        assert_eq!(
-            index.adjacent_clusters(c0, RoutingProfileKey::Tram),
-            &[ClusterId(1)]
-        );
+        assert!(index.adjacent_clusters(c0, RoutingProfileKey::Tram).is_empty());
         assert!(
             index
                 .adjacent_clusters(c0, RoutingProfileKey::WalkTransit)

@@ -47,17 +47,17 @@ const snapshot: MobilitySnapshotDto = {
   ],
   vehicles: [
     {
-      id: 'vehicle:shuttle:0',
-      kind: 'tram' as const,
-      route_id: 'route:old-town-loop',
+      id: 'vehicle:car:0:0',
+      kind: 'car' as const,
+      route_id: 'route:arterial:0',
       link_index: 0,
       progress: 0.25,
-      capacity: 4,
+      capacity: 1,
       occupants: [],
-      dwell_ticks_remaining: 1,
+      dwell_ticks_remaining: 0,
       world_coord: { x: 0, y: 0 },
       direction: 'e',
-      sprite_key: 'tram:0',
+      sprite_key: 'vehicle:0',
     },
   ],
   stops: [
@@ -304,45 +304,63 @@ describe('proto ↔ DTO converters', () => {
   it('vehicleMobilityFromProto converts proto VehicleMobility → snake_case DTO', () => {
     const proto = create(VehicleMobilitySchema, {
       id: 'vehicle:proto:0',
-      kind: VehicleKind.TRAM,
-      routeId: 'route:0',
+      kind: VehicleKind.CAR,
+      routeId: 'route:arterial:0',
       linkIndex: 1,
       progress: 0.25,
-      capacity: 4,
+      capacity: 1,
       occupants: ['agent:0'],
-      dwellTicksRemaining: 3,
+      dwellTicksRemaining: 0,
       worldCoord: create(WorldCoordSchema, { x: 30, y: 40 }),
       direction: Direction.S,
-      spriteKey: 'tram:0',
+      spriteKey: 'vehicle:0',
     });
     const dto = vehicleMobilityFromProto(proto);
     expect(dto).toMatchObject({
       id: 'vehicle:proto:0',
-      kind: 'tram',
-      route_id: 'route:0',
+      kind: 'car',
+      route_id: 'route:arterial:0',
       link_index: 1,
       progress: 0.25,
-      capacity: 4,
+      capacity: 1,
       occupants: ['agent:0'],
-      dwell_ticks_remaining: 3,
+      dwell_ticks_remaining: 0,
       world_coord: { x: 30, y: 40 },
       direction: 's',
-      sprite_key: 'tram:0',
+      sprite_key: 'vehicle:0',
     });
+  });
+
+  it('rejects tram vehicle proto values at the DTO boundary', () => {
+    const proto = create(VehicleMobilitySchema, {
+      id: 'vehicle:unsupported:0',
+      kind: VehicleKind.TRAM,
+      routeId: 'route:unsupported:0',
+      linkIndex: 0,
+      progress: 0.5,
+      capacity: 80,
+      occupants: [],
+      dwellTicksRemaining: 0,
+      worldCoord: create(WorldCoordSchema, { x: 1, y: 2 }),
+      direction: Direction.E,
+      spriteKey: 'vehicle:unsupported',
+    });
+
+    expect(() => vehicleMobilityFromProto(proto)).toThrow(/unsupported vehicle kind/);
   });
 
   it('rejects missing vehicle world coord', () => {
     const proto = create(VehicleMobilitySchema, {
       id: 'vehicle:bad',
-      kind: VehicleKind.TRAM,
-      routeId: 'route:0',
+      kind: VehicleKind.CAR,
+      routeId: 'route:arterial:0',
       linkIndex: 1,
       progress: 0.25,
-      capacity: 4,
+      capacity: 1,
       occupants: [],
-      dwellTicksRemaining: 3,
+      dwellTicksRemaining: 0,
       direction: Direction.S,
-      spriteKey: 'tram:0',
+      spriteKey: 'vehicle:0',
     });
 
     expect(() => vehicleMobilityFromProto(proto)).toThrow(/missing world_coord/);

@@ -31,7 +31,6 @@ function baseOptions(): RuntimeDiagnosticsOptions {
       bridges: 1,
       buildings: 4,
       trees: 5,
-      trains: 0,
       railStations: 6,
       railYardTracks: 7,
       reserveTiles: 8,
@@ -70,7 +69,6 @@ function baseOptions(): RuntimeDiagnosticsOptions {
     }),
     projectEntityScreen: (coord) => ({ x: coord.x + 100, y: coord.y + 200 }),
     carVisualWorldPoint: (vehicle) => vehicle.path[0],
-    getTrain: () => null,
     now: () => 1234,
     advanceTime: () => {},
   };
@@ -90,6 +88,23 @@ describe('buildRuntimeDiagnosticsPayload', () => {
       tile: { width: 18, height: 18 },
     });
     expect(payload.city.loadedRasterAssetPaths).toEqual([]);
+  });
+
+  it('reports car traffic diagnostics without tram runtime diagnostics', () => {
+    const payload = buildRuntimeDiagnosticsPayload(baseOptions());
+    const city = payload.city as Record<string, unknown>;
+    const retiredTramDiagnostics = ['mobility', 'Trams'].join('');
+
+    expect(city[retiredTramDiagnostics]).toBeUndefined();
+    expect(city.train).toBeUndefined();
+    expect(city.trains).toBeUndefined();
+    expect(payload.city.traffic).toEqual({
+      routes: 0,
+      cars: 0,
+      movingCars: 0,
+      stuckCars: 0,
+      invalidRouteCars: 0,
+    });
   });
 });
 

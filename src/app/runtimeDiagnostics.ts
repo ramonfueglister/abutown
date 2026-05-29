@@ -1,11 +1,9 @@
-import { mobilityDiagnostics, type MobilityOverlayState } from '../backend/mobilityState';
+import { mobilityDiagnostics, trafficDiagnostics, type MobilityOverlayState } from '../backend/mobilityState';
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
-  tramsFromMobilityState,
   type BackendCar,
   type BackendPedestrian,
-  type BackendTram,
 } from '../render/backendMobilityDrawables';
 import type { MinimalPedestrianSprite } from '../render/minimalPedestrianSprites';
 import type { VehicleSprite } from '../render/vehicleSprites';
@@ -42,7 +40,6 @@ type RuntimeCounts = {
   bridges: number;
   buildings: number;
   trees: number;
-  trains: number;
   railStations: number;
   railYardTracks: number;
   reserveTiles: number;
@@ -54,15 +51,6 @@ type RuntimeValidationDiagnostics = {
   railCrossings: number;
   invalidBuildings: number;
   treeBuildingOverlap: number;
-};
-
-type RuntimeTrainDiagnostics = {
-  id?: string;
-  position: Coord;
-  alpha: number;
-  speed: number;
-  fadeTiles: number;
-  direction: string;
 };
 
 export type RuntimeDiagnosticsOptions = {
@@ -88,7 +76,6 @@ export type RuntimeDiagnosticsOptions = {
   };
   projectEntityScreen: (coord: Coord) => Coord;
   carVisualWorldPoint: (vehicle: BackendCar) => Coord;
-  getTrain: () => RuntimeTrainDiagnostics | null;
   now: () => number;
   advanceTime: (ms: number) => void;
 };
@@ -108,6 +95,7 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
   const detailCounts = options.getDetails();
   const mobilityState = options.getMobilityState();
   const backendMobility = mobilityDiagnostics(mobilityState);
+  const traffic = trafficDiagnostics(mobilityState);
   const now = options.now();
   const tickPeriodMs = options.getMobilityTickPeriodMs();
   const pedestrianSprites = options.getPedestrianSprites();
@@ -124,16 +112,9 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
     now,
     tickPeriodMs,
   );
-  const projectedTrams = tramsFromMobilityState(
-    mobilityState,
-    vehicleSprites,
-    now,
-    tickPeriodMs,
-  );
   const selected = options.getSelected();
   const mobilityAgentEntries = projectedPedestrians.map((agent) => mobilityAgentEntry(agent, options));
   const mobilityVehicleEntries = projectedCars.map((vehicle) => mobilityVehicleEntry(vehicle, options));
-  const mobilityTramEntries = projectedTrams.map((tram) => mobilityTramEntry(tram, options));
   const selectedMobilityAgentEntry = selected.agentId === null
     ? null
     : mobilityAgentEntries.find((entry) => entry.id === selected.agentId) ?? null;
@@ -159,8 +140,6 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       buildings: counts.buildings,
       trees: counts.trees,
       cars: projectedCars.length,
-      trains: projectedTrams.length,
-      train: options.getTrain(),
       pedestrians: projectedPedestrians.length,
       pedestrianSprites: pedestrianSprites.length,
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
@@ -177,6 +156,7 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
         invalidMessages: backendMobility.invalidMessages,
         lastError: backendMobility.lastError,
       },
+      traffic,
       mobilityAgents: {
         count: mobilityAgentEntries.length,
         selectedId: selected.agentId,
@@ -188,12 +168,6 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
         selectedId: selected.vehicleId,
         selected: selectedMobilityVehicleEntry,
         vehicles: mobilityVehicleEntries,
-      },
-      mobilityTrams: {
-        count: mobilityTramEntries.length,
-        selectedId: null,
-        selected: null,
-        trams: mobilityTramEntries,
       },
       agentInspector: selected.agentInspector,
       vehicleInspector: selected.vehicleInspector,
@@ -244,17 +218,5 @@ function mobilityVehicleEntry(vehicle: BackendCar, options: RuntimeDiagnosticsOp
     screen: options.projectEntityScreen(options.carVisualWorldPoint(vehicle)),
     direction: vehicle.direction,
     spriteSheet: vehicle.sprite.sheet,
-  };
-}
-
-function mobilityTramEntry(tram: BackendTram, options: RuntimeDiagnosticsOptions) {
-  return {
-    id: tram.id,
-    kind: 'tram' as const,
-    state: 'driving' as const,
-    coord: tram.path[0],
-    screen: options.projectEntityScreen(tram.path[0]),
-    direction: tram.direction,
-    spriteSheet: tram.sprite.sheet,
   };
 }

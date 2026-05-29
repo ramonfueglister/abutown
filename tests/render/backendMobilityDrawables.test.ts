@@ -131,14 +131,14 @@ describe('backendMobilityDrawables (interpolated)', () => {
     expect(cars[0].path[0].x).toBeCloseTo(50, 5);
   });
 
-  it('cars source filters vehicles by kind=car (excludes trams)', () => {
+  it('sorts backend cars by stable id', () => {
     const state = makeStateWith(
       [],
       [
         {
-          id: 'vehicle:car:0',
+          id: 'vehicle:car:b',
           kind: 'car',
-          route_id: 'route:car-loop',
+          route_id: 'route:arterial:0',
           link_index: 0,
           progress: 0,
           capacity: 1,
@@ -149,23 +149,22 @@ describe('backendMobilityDrawables (interpolated)', () => {
           sprite_key: 'vehicle:0',
         },
         {
-          id: 'vehicle:tram:0',
-          kind: 'tram',
-          route_id: 'route:tram-loop',
+          id: 'vehicle:car:a',
+          kind: 'car',
+          route_id: 'route:arterial:1',
           link_index: 0,
           progress: 0,
-          capacity: 24,
+          capacity: 1,
           occupants: [],
           dwell_ticks_remaining: 0,
           world_coord: { x: 60, y: 60 },
           direction: 'e',
-          sprite_key: 'tram:0',
+          sprite_key: 'vehicle:1',
         },
       ],
     );
     const cars = carsFromMobilityState(state, vehicleSprites, 0, 100);
-    expect(cars).toHaveLength(1);
-    expect(cars[0].id).toBe('vehicle:car:0');
+    expect(cars.map((car) => car.id)).toEqual(['vehicle:car:a', 'vehicle:car:b']);
   });
 
   it('pedestrians exclude in_vehicle agents', () => {

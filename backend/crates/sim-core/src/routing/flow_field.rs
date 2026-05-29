@@ -361,7 +361,7 @@ impl FlowFieldRouter {
                 }
 
                 let from_node = graph.node(edge.from);
-                for prior_mode in [ModeState::Walking, ModeState::Driving, ModeState::OnTram] {
+                for prior_mode in [ModeState::Walking, ModeState::Driving] {
                     let Some((next_mode, edge_cost)) =
                         profile.transition(prior_mode, from_node.kind, edge)
                     else {
@@ -437,8 +437,8 @@ fn terminal_destination_modes(profile: RoutingProfileKey) -> &'static [ModeState
     match profile {
         RoutingProfileKey::Walk => &[ModeState::Walking],
         RoutingProfileKey::Car => &[ModeState::Driving],
-        RoutingProfileKey::Tram => &[ModeState::OnTram],
-        RoutingProfileKey::WalkTransit => &[ModeState::Walking, ModeState::OnTram],
+        RoutingProfileKey::Tram => &[],
+        RoutingProfileKey::WalkTransit => &[ModeState::Walking],
     }
 }
 
@@ -639,13 +639,13 @@ mod tests {
     }
 
     #[test]
-    fn walk_transit_field_allows_tram_terminal_arrival() {
+    fn walk_transit_field_rejects_rail_terminal_arrival() {
         let graph = Graph::new(
             vec![
                 typed_node(0, 0.0, 0.0, NodeKind::TransitStop),
                 typed_node(1, 1.0, 0.0, NodeKind::TransitStop),
             ],
-            vec![edge(0, 0, 1, EdgeKind::TramTrack, "tram:0")],
+            vec![edge(0, 0, 1, EdgeKind::TramTrack, "rail:0")],
         );
 
         let field = FlowFieldRouter::build(
@@ -656,13 +656,7 @@ mod tests {
         )
         .expect("walk-transit field should build");
 
-        assert_eq!(
-            field
-                .entry(NodeId(0), ModeState::Walking)
-                .unwrap()
-                .next_edge,
-            Some(EdgeId(0))
-        );
+        assert!(field.entry(NodeId(0), ModeState::Walking).is_none());
     }
 
     #[test]

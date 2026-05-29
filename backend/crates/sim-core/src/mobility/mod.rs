@@ -51,7 +51,6 @@ pub fn chunk_of(x: f32, y: f32, chunk_size: u16) -> crate::ids::ChunkCoord {
 pub fn agent_world_coord(
     state: &AgentMobilityState,
     graph: &crate::routing::Graph,
-    _transit_lines: &crate::routing::TransitLines,
 ) -> Option<(f32, f32)> {
     match state {
         AgentMobilityState::Walking { link_id, progress } => {
@@ -73,22 +72,17 @@ pub fn agent_world_coord(
 }
 
 /// World coord for a vehicle given its route position. Returns `None` if
-/// the line or edge is not registered.
-///
-/// Phase 8b T10 (fixed): the graph is the single source of truth.
-/// `RoutePosition` is `LineId`+`edge_index`-keyed; we look up the edge
-/// directly via `TransitLines::line(line).edges[edge_index]` and read its
-/// geometry from `Graph`.
+/// the traffic route or edge is not registered.
 pub fn vehicle_world_coord(
     route_position: &components::RoutePosition,
-    transit_lines: &crate::routing::TransitLines,
+    traffic_routes: &crate::routing::TrafficRoutes,
     graph: &crate::routing::Graph,
 ) -> Option<(f32, f32)> {
-    if (route_position.line_id.0 as usize) >= transit_lines.count() {
+    if (route_position.route_id.0 as usize) >= traffic_routes.count() {
         return None;
     }
-    let line = transit_lines.line(route_position.line_id);
-    let edge_id = *line.edges.get(route_position.edge_index)?;
+    let route = traffic_routes.route(route_position.route_id);
+    let edge_id = *route.edges.get(route_position.edge_index)?;
     let edge = graph.edge(edge_id);
     Some(crate::mobility_geometry::world_coord_at_progress_slice(
         &edge.polyline,
@@ -104,19 +98,13 @@ mod tests {
     use abutown_protocol::WorldId;
     use bevy_ecs::schedule::Schedule;
     use bevy_ecs::world::World;
-    use std::collections::{HashMap, HashSet};
-
-    fn workspace_root() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(3)
-            .expect("sim-core crate lives under backend/crates/sim-core")
-            .to_path_buf()
-    }
+    use std::collections::HashMap;
 
     fn install_test_routing(world: &mut World) {
-        use crate::routing::{Edge, EdgeId, EdgeKind, Graph, LineId, Node, NodeId, NodeKind};
-        use crate::routing::{TransitLine, TransitLines};
+        use crate::routing::{
+            Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind, TrafficRoute, TrafficRouteId,
+            TrafficRoutes,
+        };
 
         let nodes = vec![
             Node {
@@ -199,7 +187,7 @@ mod tests {
                 to: NodeId(1),
                 polyline: vec![(10.0, 0.0), (20.0, 0.0)],
                 length: 10.0,
-                kind: EdgeKind::TramTrack,
+                kind: EdgeKind::Road,
                 speed_limit: 1.0,
                 capacity: 1,
                 legacy_id: Some("link:old-town-to-station".into()),
@@ -210,7 +198,7 @@ mod tests {
                 to: NodeId(5),
                 polyline: vec![(100.0, 200.0), (300.0, 400.0)],
                 length: 282.8427,
-                kind: EdgeKind::TramTrack,
+                kind: EdgeKind::Road,
                 speed_limit: 1.0,
                 capacity: 1,
                 legacy_id: Some("v".into()),
@@ -221,7 +209,7 @@ mod tests {
                 to: NodeId(3),
                 polyline: vec![(10.0, 20.0), (30.0, 20.0)],
                 length: 20.0,
-                kind: EdgeKind::TramTrack,
+                kind: EdgeKind::Road,
                 speed_limit: 1.0,
                 capacity: 1,
                 legacy_id: Some("link:horizontal:main".into()),
@@ -305,32 +293,28 @@ mod tests {
             },
         ];
         let graph = Graph::new(nodes, edges);
-        let mut lines = TransitLines::new(vec![
-            TransitLine {
-                id: LineId(0),
+        let traffic_routes = TrafficRoutes::new(vec![
+            TrafficRoute {
+                id: TrafficRouteId(0),
                 name: "old-town-loop".into(),
                 edges: vec![EdgeId(0)],
-                stops: vec![NodeId(0), NodeId(1)],
-                legacy_route_id: Some("route:old-town-loop".into()),
+                legacy_route_id: "route:old-town-loop".into(),
             },
-            TransitLine {
-                id: LineId(1),
+            TrafficRoute {
+                id: TrafficRouteId(1),
                 name: "r".into(),
                 edges: vec![EdgeId(1)],
-                stops: Vec::new(),
-                legacy_route_id: Some("r".into()),
+                legacy_route_id: "r".into(),
             },
-            TransitLine {
-                id: LineId(2),
+            TrafficRoute {
+                id: TrafficRouteId(2),
                 name: "horizontal".into(),
                 edges: vec![EdgeId(2)],
-                stops: vec![NodeId(2), NodeId(3)],
-                legacy_route_id: Some("route:horizontal".into()),
+                legacy_route_id: "route:horizontal".into(),
             },
         ]);
-        lines.add_legacy_route_alias("r:1".into(), LineId(1));
         world.insert_resource(graph);
-        world.insert_resource(lines);
+        world.insert_resource(traffic_routes);
         if !world.contains_resource::<crate::routing::WaitingAgents>() {
             world.insert_resource(crate::routing::WaitingAgents::default());
         }
@@ -343,18 +327,40 @@ mod tests {
     }
 
     #[test]
+    fn vehicle_world_coord_resolves_traffic_route_edges() {
+        let mut world = World::new();
+        install_test_routing(&mut world);
+        let traffic_routes = world.resource::<crate::routing::TrafficRoutes>();
+        let graph = world.resource::<crate::routing::Graph>();
+        let route_id = traffic_routes
+            .route_by_legacy("route:old-town-loop")
+            .unwrap();
+        let rp = components::RoutePosition {
+            route_id,
+            edge_index: 0,
+            progress: 0.5,
+            speed: 0.1,
+        };
+
+        assert_eq!(
+            vehicle_world_coord(&rp, traffic_routes, graph),
+            Some((15.0, 0.0))
+        );
+    }
+
+    #[test]
     fn test_seed_world_seeds_expected_population() {
         let (world, _) = seed::test_seed_world();
 
         assert_eq!(api::tick(&world), 0);
         assert_eq!(
-            world.resource::<crate::routing::TransitLines>().count(),
+            world.resource::<crate::routing::TrafficRoutes>().count(),
             2,
-            "expected 2 lines"
+            "expected 2 traffic routes"
         );
 
         let snapshot = api::snapshot(&world);
-        assert_eq!(snapshot.stops.len(), 4, "expected 4 stops");
+        assert_eq!(snapshot.stops.len(), 0, "runtime stop records are removed");
         assert_eq!(snapshot.vehicles.len(), 4, "expected 4 vehicles");
         assert_eq!(snapshot.agents.len(), 20, "expected 20 agents");
 
@@ -385,7 +391,6 @@ mod tests {
             .expect("sample agent exists");
         let vehicle = api::vehicle(&world, &VehicleId("vehicle:shuttle:0".to_string()))
             .expect("sample vehicle exists");
-        let stop = api::stop(&world, "stop:old-town").expect("sample stop exists");
 
         assert_eq!(agent.plan_cursor, 0);
         assert_eq!(
@@ -397,7 +402,7 @@ mod tests {
         );
         assert_eq!(vehicle.route_id, "route:old-town-loop".to_string());
         assert_eq!(vehicle.capacity, 4);
-        assert_eq!(stop.route_id, "route:old-town-loop".to_string());
+        assert!(api::stop(&world, "stop:old-town").is_none());
     }
 
     #[test]
@@ -425,7 +430,6 @@ mod tests {
 
         let second_map = api::tick_mobility(&mut world, &mut schedule);
         let agent = api::agent(&world, &agent_id).expect("agent exists");
-        let stop = api::stop(&world, "stop:old-town").expect("pickup stop exists");
 
         assert_eq!(
             agent.state,
@@ -434,7 +438,18 @@ mod tests {
             }
         );
         assert_eq!(agent.plan_cursor, 1);
-        assert_eq!(stop.waiting_agents.to_vec(), vec![agent_id]);
+        let graph = world.resource::<crate::routing::Graph>();
+        let waiting = world.resource::<crate::routing::WaitingAgents>();
+        let node_id = graph
+            .node_by_legacy("stop:old-town")
+            .expect("pickup stop node exists");
+        assert_eq!(
+            waiting
+                .queue(node_id)
+                .map(|queue| queue.iter().cloned().collect::<Vec<_>>())
+                .unwrap_or_default(),
+            vec![agent_id]
+        );
         assert_eq!(
             second_map
                 .values()
@@ -540,65 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_boards_rides_alights_and_walks_to_activity() {
-        let (mut world, mut schedule) = sample_world();
-        api::force_all_chunks_active_for_test(&mut world);
-        let agent_id = AgentId("agent:pedestrian:0".to_string());
-        let vehicle_id = VehicleId("vehicle:shuttle:0".to_string());
-
-        api::tick_mobility(&mut world, &mut schedule);
-        api::tick_mobility(&mut world, &mut schedule);
-
-        let waiting = api::agent(&world, &agent_id).expect("agent exists");
-        assert_eq!(
-            waiting.state,
-            AgentMobilityState::WaitingAtStop {
-                stop_id: "stop:old-town".to_string()
-            }
-        );
-
-        api::tick_mobility(&mut world, &mut schedule);
-        let boarded = api::agent(&world, &agent_id).expect("agent exists");
-        let vehicle = api::vehicle(&world, &vehicle_id).expect("vehicle exists");
-        assert_eq!(
-            boarded.state,
-            AgentMobilityState::InVehicle {
-                vehicle_id: vehicle_id.clone(),
-                seat_index: 0
-            }
-        );
-        assert_eq!(vehicle.occupants, vec![agent_id.clone()]);
-
-        api::tick_mobility(&mut world, &mut schedule);
-        let riding = api::agent(&world, &agent_id).expect("agent exists");
-        assert!(matches!(riding.state, AgentMobilityState::InVehicle { .. }));
-
-        api::tick_mobility(&mut world, &mut schedule);
-        let alighted = api::agent(&world, &agent_id).expect("agent exists");
-        let vehicle = api::vehicle(&world, &vehicle_id).expect("vehicle exists");
-        assert_eq!(vehicle.occupants, Vec::<AgentId>::new());
-        assert_eq!(
-            alighted.state,
-            AgentMobilityState::Walking {
-                link_id: "link:station-to-work".to_string(),
-                progress: 0.0
-            }
-        );
-        assert_eq!(alighted.plan_cursor, 2);
-
-        api::tick_mobility(&mut world, &mut schedule);
-        api::tick_mobility(&mut world, &mut schedule);
-        let arrived = api::agent(&world, &agent_id).expect("agent exists");
-        assert_eq!(
-            arrived.state,
-            AgentMobilityState::AtActivity {
-                activity_id: "activity:work".to_string()
-            }
-        );
-        assert_eq!(arrived.plan_cursor, 3);
-    }
-
-    #[test]
     fn mobility_world_serde_round_trip_preserves_state() {
         let (world, _) = sample_world();
         let snap = extract_from_world(&world);
@@ -653,7 +609,7 @@ mod tests {
             vehicle_id.clone(),
             VehicleRecord {
                 id: vehicle_id,
-                kind: VehicleKind::Tram,
+                kind: VehicleKind::Car,
                 route_id,
                 link_index: 0,
                 progress: 0.0,
@@ -754,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn world_coord_for_transit_vehicle_interpolates_route() {
+    fn world_coord_for_car_vehicle_interpolates_traffic_route() {
         let (mut world, _) = empty_world();
         let route_id = "route:horizontal".to_string();
         let vehicle_id = VehicleId("vehicle:test".to_string());
@@ -762,7 +718,7 @@ mod tests {
             &mut world,
             VehicleRecord {
                 id: vehicle_id.clone(),
-                kind: VehicleKind::Tram,
+                kind: VehicleKind::Car,
                 route_id,
                 link_index: 0,
                 progress: 0.5,
@@ -800,10 +756,10 @@ mod tests {
     }
 
     #[test]
-    fn seeded_world_vehicles_default_to_tram_kind() {
+    fn seeded_world_vehicles_default_to_car_kind() {
         let (world, _) = seed::test_seed_world();
         for vehicle in api::vehicles(&world) {
-            assert_eq!(vehicle.kind, VehicleKind::Tram);
+            assert_eq!(vehicle.kind, VehicleKind::Car);
         }
     }
 
@@ -848,139 +804,10 @@ mod tests {
             .into_iter()
             .filter(|v| v.kind == VehicleKind::Car)
             .count();
-        let trams = api::vehicles(&world)
-            .into_iter()
-            .filter(|v| v.kind == VehicleKind::Tram)
-            .count();
 
         assert_eq!(walking_agents, 18, "3 corridors x 6 = 18 walkers");
         assert_eq!(cars, 8, "2 arterials x 4 = 8 cars");
         assert_eq!(driving_agents, 8, "one driver per car");
-        assert_eq!(
-            trams, 0,
-            "network seeding no longer creates fixed tiny trams"
-        );
-    }
-
-    #[test]
-    fn from_base_world_bundle_spawns_declared_trams() {
-        let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
-            workspace_root().join("data/worlds/zurich-river-city-v1"),
-        )
-        .expect("base world fixture loads");
-
-        let expected_trams: usize = bundle
-            .spawns
-            .tram_lines
-            .iter()
-            .map(|line| line.trams as usize)
-            .sum();
-        assert!(expected_trams > 0, "fixture declares backend tram spawns");
-
-        let (mut world, mut schedule) =
-            seed::from_base_world_bundle(&bundle).expect("bundle seeding succeeds");
-        let trams = api::vehicles(&world)
-            .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
-            .collect::<Vec<_>>();
-
-        assert_eq!(trams.len(), expected_trams);
-        assert!(
-            trams
-                .iter()
-                .all(|vehicle| vehicle.id.0.starts_with("vehicle:tram:"))
-        );
-        assert!(
-            trams
-                .iter()
-                .all(|vehicle| vehicle.route_id.starts_with("tram:"))
-        );
-        let unique_positions = trams
-            .iter()
-            .map(|vehicle| {
-                let (x, y) = api::world_coord_for_vehicle(&world, &vehicle.id)
-                    .expect("tram has a resolvable world coord");
-                format!("{x:.2}:{y:.2}")
-            })
-            .collect::<HashSet<_>>();
-        assert!(
-            unique_positions.len() > 1,
-            "declared trams should not spawn stacked at one route position"
-        );
-
-        api::force_all_chunks_active_for_test(&mut world);
-        for _ in 0..400 {
-            let _ = api::tick_mobility(&mut world, &mut schedule);
-        }
-        let trams_after = api::vehicles(&world)
-            .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
-            .collect::<Vec<_>>();
-        let unique_positions_after = trams_after
-            .iter()
-            .map(|vehicle| {
-                let (x, y) = api::world_coord_for_vehicle(&world, &vehicle.id)
-                    .expect("tram has a resolvable world coord after ticks");
-                format!("{x:.2}:{y:.2}")
-            })
-            .collect::<HashSet<_>>();
-        assert!(
-            unique_positions_after.len() > 1,
-            "declared trams should not collapse into one route position while ticking"
-        );
-    }
-
-    #[test]
-    fn from_base_world_bundle_rejects_missing_tram_rail_path() {
-        let mut bundle = crate::base_world::BaseWorldBundle::load_from_dir(
-            workspace_root().join("data/worlds/zurich-river-city-v1"),
-        )
-        .expect("base world fixture loads");
-        bundle.spawns.tram_lines[0].rail_path_ids = vec!["rail:missing".to_string()];
-
-        let err = match seed::from_base_world_bundle(&bundle) {
-            Ok(_) => panic!("missing rail path should be fatal"),
-            Err(err) => err,
-        };
-        assert!(err.to_string().contains("rail:missing"));
-    }
-
-    #[test]
-    fn from_base_world_bundle_trams_tick_without_viewport_subscription() {
-        let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
-            workspace_root().join("data/worlds/zurich-river-city-v1"),
-        )
-        .expect("base world fixture loads");
-        let (mut world, mut schedule) =
-            seed::from_base_world_bundle(&bundle).expect("bundle seeding succeeds");
-        let before = api::vehicles(&world)
-            .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
-            .map(|vehicle| {
-                let coord = api::world_coord_for_vehicle(&world, &vehicle.id)
-                    .expect("tram has initial world coord");
-                (vehicle.id, coord)
-            })
-            .collect::<HashMap<_, _>>();
-
-        for _ in 0..5 {
-            let _ = api::tick_mobility(&mut world, &mut schedule);
-        }
-
-        let moved = api::vehicles(&world)
-            .into_iter()
-            .filter(|vehicle| vehicle.kind == VehicleKind::Tram)
-            .filter(|vehicle| {
-                let Some((before_x, before_y)) = before.get(&vehicle.id) else {
-                    return false;
-                };
-                let (after_x, after_y) = api::world_coord_for_vehicle(&world, &vehicle.id)
-                    .expect("tram has world coord after ticks");
-                (after_x - before_x).abs() + (after_y - before_y).abs() > 0.0
-            })
-            .count();
-
-        assert_eq!(moved, before.len());
     }
 
     #[test]
@@ -1327,7 +1154,7 @@ mod tests {
             &mut world,
             VehicleRecord {
                 id: VehicleId("v1".into()),
-                kind: VehicleKind::Tram,
+                kind: VehicleKind::Car,
                 route_id: "r".into(),
                 link_index: 0,
                 progress: 0.0,
@@ -1390,7 +1217,7 @@ mod tests {
             VehicleRecord {
                 id: id_v.clone(),
                 kind: VehicleKind::Car,
-                route_id: "r:1".into(),
+                route_id: "r".into(),
                 link_index: 0,
                 progress: 0.0,
                 speed_per_tick: 0.1,

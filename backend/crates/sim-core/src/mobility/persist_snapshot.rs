@@ -30,8 +30,8 @@ use crate::mobility::records::{
 };
 use crate::mobility::resources::{FlowCells, Tick};
 use crate::routing::{
-    Edge, EdgeId, EdgeKind, Graph, LineId, ModeState, Node, NodeId, NodeKind, NodeSpatialIndex,
-    RoutingProfile, RoutingProfileKey, TransitLine, TransitLines, WaitingAgents,
+    Edge, EdgeId, EdgeKind, Graph, ModeState, Node, NodeId, NodeKind, NodeSpatialIndex,
+    RoutingProfile, RoutingProfileKey, TrafficRoute, TrafficRouteId, TrafficRoutes, WaitingAgents,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -199,29 +199,19 @@ pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
 
 fn graph_routes_for_persist(world: &World) -> HashMap<String, PersistedRoute> {
     let graph = world.resource::<Graph>();
-    let transit_lines = world.resource::<TransitLines>();
-    transit_lines
+    let traffic_routes = world.resource::<TrafficRoutes>();
+    traffic_routes
         .iter()
-        .map(|line| {
-            let route_id = line
-                .legacy_route_id
-                .clone()
-                .unwrap_or_else(|| line.name.clone());
-            let links = line
+        .map(|route| {
+            let route_id = route.legacy_route_id.clone();
+            let links = route
                 .edges
                 .iter()
                 .map(|edge_id| {
-                    graph
-                        .edge(*edge_id)
-                        .legacy_id
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "extract_from_world: route {} edge {:?} has no legacy link id",
-                                route_id, edge_id
-                            )
-                        })
+                    let edge = graph.edge(*edge_id);
+                    edge.legacy_id
+                        .clone()
+                        .unwrap_or_else(|| format!("edge:{}", edge.id.0))
                 })
                 .collect();
             (
@@ -449,7 +439,9 @@ fn edge_kind_for_mode(mode: ModeState) -> EdgeKind {
     match mode {
         ModeState::Walking => EdgeKind::Footway,
         ModeState::Driving => EdgeKind::Road,
-        ModeState::OnTram => EdgeKind::TramTrack,
+        ModeState::OnTram => {
+            panic!("apply_into_world: persisted active_route contains retired tram mode")
+        }
     }
 }
 
@@ -521,7 +513,7 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
                 &mut edges,
                 link_id.clone(),
                 polyline,
-                EdgeKind::TramTrack,
+                EdgeKind::Road,
             );
             edge_by_link.insert(link_id.clone(), edge_id);
         }
@@ -545,7 +537,6 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
 
     let mut waiting = WaitingAgents::default();
     let mut stop_aliases: Vec<(String, NodeId)> = Vec::new();
-    let mut stops_by_route: HashMap<String, Vec<NodeId>> = HashMap::new();
     let mut stops: Vec<_> = snap.stops.values().collect();
     stops.sort_by(|a, b| a.id.cmp(&b.id));
     for stop in stops {
@@ -594,10 +585,6 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
         } else {
             stop_aliases.push((stop.id.clone(), node_id));
         }
-        stops_by_route
-            .entry(stop.route_id.clone())
-            .or_default()
-            .push(node_id);
         for agent_id in &stop.waiting_agents {
             waiting.enqueue(node_id, agent_id.clone());
         }
@@ -608,11 +595,11 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
         graph.add_legacy_node_alias(legacy_id, node_id);
     }
 
-    let lines = routes
+    let traffic_routes = routes
         .into_iter()
         .enumerate()
-        .map(|(index, route)| TransitLine {
-            id: LineId(index as u32),
+        .map(|(index, route)| TrafficRoute {
+            id: TrafficRouteId(index as u32),
             name: route.id.clone(),
             edges: route
                 .links
@@ -626,15 +613,14 @@ fn install_snapshot_routing(world: &mut World, snap: &MobilityPersistSnapshot) {
                     })
                 })
                 .collect(),
-            stops: stops_by_route.remove(&route.id).unwrap_or_default(),
-            legacy_route_id: Some(route.id.clone()),
+            legacy_route_id: route.id.clone(),
         })
         .collect();
 
     let spatial_index = NodeSpatialIndex::from_nodes(graph.nodes());
     world.insert_resource(graph);
     world.insert_resource(spatial_index);
-    world.insert_resource(TransitLines::new(lines));
+    world.insert_resource(TrafficRoutes::new(traffic_routes));
     world.insert_resource(waiting);
 }
 
@@ -701,7 +687,9 @@ fn initial_mode_for_profile(profile: RoutingProfileKey) -> ModeState {
     match profile {
         RoutingProfileKey::Walk | RoutingProfileKey::WalkTransit => ModeState::Walking,
         RoutingProfileKey::Car => ModeState::Driving,
-        RoutingProfileKey::Tram => ModeState::OnTram,
+        RoutingProfileKey::Tram => {
+            panic!("apply_into_world: persisted active_route contains retired tram profile")
+        }
     }
 }
 
@@ -820,5 +808,22 @@ pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
     // to live. Production hydration always installs CorePlugin first.
     for (coord, activity) in &snap.chunk_activities {
         crate::mobility::api::seed_chunk_activity(world, *coord, *activity);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "retired tram mode")]
+    fn snapshot_restore_rejects_retired_tram_active_route_mode() {
+        let _ = edge_kind_for_mode(ModeState::OnTram);
+    }
+
+    #[test]
+    #[should_panic(expected = "retired tram profile")]
+    fn snapshot_restore_rejects_retired_tram_active_route_profile() {
+        let _ = initial_mode_for_profile(RoutingProfileKey::Tram);
     }
 }

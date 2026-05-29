@@ -19,7 +19,7 @@ export type AgentMobilityDto = {
   sprite_key: string;
 };
 
-export type VehicleKindDto = 'car' | 'tram';
+export type VehicleKindDto = 'car';
 
 export type VehicleMobilityDto = {
   id: string;
@@ -231,7 +231,7 @@ function isAgentMobilityStateDto(value: unknown): value is AgentMobilityStateDto
   return false;
 }
 
-const VEHICLE_KINDS: ReadonlySet<VehicleKindDto> = new Set(['car', 'tram']);
+const VEHICLE_KINDS: ReadonlySet<VehicleKindDto> = new Set(['car']);
 
 function isVehicleKindDto(value: unknown): value is VehicleKindDto {
   return typeof value === 'string' && VEHICLE_KINDS.has(value as VehicleKindDto);
@@ -369,8 +369,8 @@ export function directionFromProto(value: DirectionProto): DirectionDto {
 }
 
 function vehicleKindFromProto(value: VehicleKindProto): VehicleKindDto {
-  if (value === VehicleKindProto.TRAM) return 'tram';
-  return 'car';
+  if (value === VehicleKindProto.CAR) return 'car';
+  throw new Error('unsupported vehicle kind');
 }
 
 function chunkCoordFromProto(chunk: ChunkCoordProto | undefined): ChunkCoordDto {

@@ -31,7 +31,6 @@ import {
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
-  tramsFromMobilityState,
   type BackendCar,
   type BackendPedestrian,
 } from './render/backendMobilityDrawables';
@@ -431,7 +430,6 @@ installRuntimeDiagnostics(window, {
     bridges: [...roads.values()].filter((road) => road.kind === 'bridge').length,
     buildings: buildings.length,
     trees: trees.length,
-    trains: tramsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs).length,
     railStations: railStations.length,
     railYardTracks: Math.max(0, railPaths.length - 2),
     reserveTiles: countTerrainKind('reserve'),
@@ -456,19 +454,6 @@ installRuntimeDiagnostics(window, {
     y: camera.y + iso(coord).y * camera.scale,
   }),
   carVisualWorldPoint: (vehicle) => worldToGrid(carVisualWorldPoint(vehicle, camera.scale, tileSize)),
-  getTrain: () => {
-    const tram = tramsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs)[0];
-    return tram
-      ? {
-          id: tram.id,
-          position: tram.path[0],
-          alpha: 1,
-          speed: 0,
-          fadeTiles: 0,
-          direction: tram.direction,
-        }
-      : null;
-  },
   now: Date.now,
   advanceTime: (ms) => {
     void ms;

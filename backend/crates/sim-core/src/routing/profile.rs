@@ -21,9 +21,6 @@ pub struct RoutingProfile {
     pub key: RoutingProfileKey,
     pub walk_speed: f32,
     pub car_speed_factor: f32,
-    pub tram_speed_factor: f32,
-    pub board_tram_penalty: f32,
-    pub alight_tram_penalty: f32,
 }
 
 impl RoutingProfile {
@@ -32,9 +29,6 @@ impl RoutingProfile {
             key,
             walk_speed: 1.0,
             car_speed_factor: 1.0,
-            tram_speed_factor: 1.0,
-            board_tram_penalty: 10.0,
-            alight_tram_penalty: 5.0,
         }
     }
 
@@ -50,8 +44,7 @@ impl RoutingProfile {
         match self.key {
             RoutingProfileKey::Walk => self.walk_speed,
             RoutingProfileKey::Car => 6.0 * self.car_speed_factor,
-            RoutingProfileKey::Tram => 4.0 * self.tram_speed_factor,
-            RoutingProfileKey::WalkTransit => (4.0 * self.tram_speed_factor).max(self.walk_speed),
+            RoutingProfileKey::Tram | RoutingProfileKey::WalkTransit => self.walk_speed,
         }
         .max(0.001)
     }
@@ -59,7 +52,7 @@ impl RoutingProfile {
     pub fn transition(
         self,
         mode: ModeState,
-        current_node_kind: NodeKind,
+        _current_node_kind: NodeKind,
         edge: &Edge,
     ) -> Option<(ModeState, f32)> {
         let next = match self.key {
@@ -80,48 +73,16 @@ impl RoutingProfile {
                     None
                 }
             }
-            RoutingProfileKey::Tram => {
-                if mode == ModeState::OnTram && edge.kind == EdgeKind::TramTrack {
-                    Some((
-                        ModeState::OnTram,
-                        edge.length / (edge.speed_limit * self.tram_speed_factor).max(0.001),
-                    ))
+            RoutingProfileKey::Tram => None,
+            RoutingProfileKey::WalkTransit => {
+                if mode == ModeState::Walking && edge.kind == EdgeKind::Footway {
+                    Some((ModeState::Walking, edge.length / self.walk_speed.max(0.001)))
                 } else {
                     None
                 }
             }
-            RoutingProfileKey::WalkTransit => {
-                self.walk_transit_transition(mode, current_node_kind, edge)
-            }
         }?;
         next.1.is_finite().then_some(next)
-    }
-
-    fn walk_transit_transition(
-        self,
-        mode: ModeState,
-        current_node_kind: NodeKind,
-        edge: &Edge,
-    ) -> Option<(ModeState, f32)> {
-        match (mode, current_node_kind, edge.kind) {
-            (ModeState::Walking, _, EdgeKind::Footway) => {
-                Some((ModeState::Walking, edge.length / self.walk_speed.max(0.001)))
-            }
-            (ModeState::Walking, NodeKind::TransitStop, EdgeKind::TramTrack) => Some((
-                ModeState::OnTram,
-                edge.length / (edge.speed_limit * self.tram_speed_factor).max(0.001)
-                    + self.board_tram_penalty,
-            )),
-            (ModeState::OnTram, _, EdgeKind::TramTrack) => Some((
-                ModeState::OnTram,
-                edge.length / (edge.speed_limit * self.tram_speed_factor).max(0.001),
-            )),
-            (ModeState::OnTram, NodeKind::TransitStop, EdgeKind::Footway) => Some((
-                ModeState::Walking,
-                edge.length / self.walk_speed.max(0.001) + self.alight_tram_penalty,
-            )),
-            _ => None,
-        }
     }
 }
 
@@ -209,35 +170,24 @@ mod tests {
     }
 
     #[test]
-    fn walk_transit_boards_only_at_stops() {
+    fn retired_transit_profiles_do_not_use_tram_tracks() {
         let profile = RoutingProfile::for_key(RoutingProfileKey::WalkTransit);
-        let tram = edge(EdgeKind::TramTrack, 20.0, 4.0);
+        let rail = edge(EdgeKind::TramTrack, 20.0, 4.0);
         assert!(
             profile
-                .transition(ModeState::Walking, NodeKind::Intersection, &tram)
+                .transition(ModeState::Walking, NodeKind::Intersection, &rail)
                 .is_none()
         );
-        let (mode, cost) = profile
-            .transition(ModeState::Walking, NodeKind::TransitStop, &tram)
-            .expect("boarding at stop is legal");
-        assert_eq!(mode, ModeState::OnTram);
-        assert!(cost > 0.0);
-    }
-
-    #[test]
-    fn walk_transit_alights_only_at_stops() {
-        let profile = RoutingProfile::for_key(RoutingProfileKey::WalkTransit);
-        let foot = edge(EdgeKind::Footway, 5.0, 1.0);
         assert!(
             profile
-                .transition(ModeState::OnTram, NodeKind::Intersection, &foot)
+                .transition(ModeState::Walking, NodeKind::TransitStop, &rail)
                 .is_none()
         );
-        let (mode, cost) = profile
-            .transition(ModeState::OnTram, NodeKind::TransitStop, &foot)
-            .expect("alighting at stop is legal");
-        assert_eq!(mode, ModeState::Walking);
-        assert!(cost > 5.0);
+        assert!(
+            RoutingProfile::for_key(RoutingProfileKey::Tram)
+                .transition(ModeState::OnTram, NodeKind::TransitStop, &rail)
+                .is_none()
+        );
     }
 
     #[test]

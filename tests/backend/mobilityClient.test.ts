@@ -60,7 +60,7 @@ function mobilitySnapshotProtoResponse(dto: MobilitySnapshotDto): Response {
     })),
     vehicles: dto.vehicles.map((v) => ({
       id: v.id,
-      kind: v.kind === 'tram' ? VehicleKindProto.TRAM : VehicleKindProto.CAR,
+      kind: VehicleKindProto.CAR,
       routeId: v.route_id,
       linkIndex: v.link_index,
       progress: v.progress,
@@ -206,16 +206,16 @@ const snapshot: MobilitySnapshotDto = {
   vehicles: [
     {
       id: 'vehicle-1',
-      kind: 'tram',
-      route_id: 'route-1',
+      kind: 'car',
+      route_id: 'route:arterial:0',
       link_index: 1,
       progress: 0.5,
-      capacity: 20,
+      capacity: 1,
       occupants: ['agent-1'],
       dwell_ticks_remaining: 0,
       world_coord: { x: 0, y: 0 },
       direction: 'e',
-      sprite_key: 'tram:0',
+      sprite_key: 'vehicle:0',
     },
   ],
   stops: [
@@ -370,15 +370,15 @@ describe('mobility backend client', () => {
     bridge.stop();
   });
 
-  it('keeps backend tram chunks in the subscription interest set', async () => {
+  it('subscribes only to visible viewport chunks', async () => {
     const { Impl, sockets } = mockWebSocketImpl();
-    const tramSnapshot: MobilitySnapshotDto = {
+    const offscreenSnapshot: MobilitySnapshotDto = {
       ...snapshot,
       vehicles: [
         {
           ...snapshot.vehicles[0],
-          id: 'vehicle:tram:outside-viewport',
-          kind: 'tram',
+          id: 'vehicle:car:outside-viewport',
+          kind: 'car',
           world_coord: { x: 150, y: 224 },
         },
       ],
@@ -386,7 +386,7 @@ describe('mobility backend client', () => {
     const fetchImpl = ((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/world')) return Promise.resolve(worldSummaryProtoResponse(worldSummary));
-      return Promise.resolve(mobilitySnapshotProtoResponse(tramSnapshot));
+      return Promise.resolve(mobilitySnapshotProtoResponse(offscreenSnapshot));
     }) as typeof fetch;
 
     const bridge = connectMobilityBackend({
@@ -401,7 +401,7 @@ describe('mobility backend client', () => {
     const firstMsg = fromBinary(ClientMessageSchema, sockets[0].sent[0]);
     expect(firstMsg.body.case).toBe('chunkSubscribe');
     if (firstMsg.body.case !== 'chunkSubscribe') throw new Error('expected chunkSubscribe');
-    expect(firstMsg.body.value.coords.map((coord) => `${coord.x},${coord.y}`)).toContain('4,7');
+    expect(firstMsg.body.value.coords.map((coord) => `${coord.x},${coord.y}`)).not.toContain('4,7');
     bridge.stop();
   });
 
