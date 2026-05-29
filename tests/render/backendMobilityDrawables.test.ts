@@ -208,6 +208,7 @@ describe('backendMobilityDrawables (interpolated)', () => {
           world_coord: { x: 2, y: 3.51 },
           direction: 'e',
           sprite_key: 'pedestrian:0',
+          age_seconds: 0,
         },
       ],
       [],
