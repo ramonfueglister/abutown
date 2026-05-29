@@ -1,6 +1,6 @@
 //! Shared infrastructure for the `mobility_tick*` benches.
 
-use sim_core::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+use sim_core::city_network::{CityNetwork, NetworkPoint, WorldTiles};
 
 pub struct SyntheticNetwork {
     pub world_id: &'static str,
@@ -19,29 +19,21 @@ impl SyntheticNetwork {
     /// Build a deterministic CityNetwork laid out as a horizontal lattice of
     /// pedestrian corridors crossed by a few long arterials.
     pub fn build(&self) -> CityNetwork {
+        let np = |x: i32, y: i32| NetworkPoint {
+            x: x as f32,
+            y: y as f32,
+        };
         let corridors = (0..self.corridor_count)
             .map(|i| {
                 let y = ((i % self.corridor_rows) * 2) as i32;
                 let x_start = (i / self.corridor_rows) as i32 * self.corridor_x_step;
-                vec![
-                    NetworkCoord { x: x_start, y },
-                    NetworkCoord {
-                        x: x_start + self.corridor_len,
-                        y,
-                    },
-                ]
+                vec![np(x_start, y), np(x_start + self.corridor_len, y)]
             })
             .collect();
         let arterials = (0..self.arterial_count)
             .map(|i| {
                 let y = i as i32 * self.arterial_y_step;
-                vec![
-                    NetworkCoord { x: 0, y },
-                    NetworkCoord {
-                        x: self.arterial_len,
-                        y,
-                    },
-                ]
+                vec![np(0, y), np(self.arterial_len, y)]
             })
             .collect();
         CityNetwork {

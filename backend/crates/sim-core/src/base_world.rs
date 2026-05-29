@@ -582,4 +582,38 @@ mod tests {
             ],
         );
     }
+
+    #[test]
+    fn base_world_rejects_invalid_float_transport_points() {
+        let cases = [
+            NetworkPoint {
+                x: f32::NAN,
+                y: 2.0,
+            },
+            NetworkPoint {
+                x: f32::INFINITY,
+                y: 2.0,
+            },
+            NetworkPoint { x: -0.1, y: 2.0 },
+            NetworkPoint { x: 2.0, y: -0.1 },
+            NetworkPoint { x: 16.0, y: 2.0 },
+            NetworkPoint { x: 2.0, y: 8.0 },
+        ];
+
+        for point in cases {
+            let bundle = bundle_with_pedestrian_points(vec![point]);
+            assert!(
+                matches!(
+                    bundle.validate(),
+                    Err(BaseWorldError::OutOfBounds {
+                        x: _,
+                        y: _,
+                        width: 16,
+                        height: 8,
+                    })
+                ),
+                "expected point {point:?} to be out of bounds"
+            );
+        }
+    }
 }

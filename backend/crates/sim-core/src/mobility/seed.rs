@@ -437,6 +437,32 @@ fn seed_cars_from_bundle(
 mod tests {
     use super::*;
 
+    #[test]
+    fn seeded_walks_from_network_preserves_fractional_pedestrian_geometry() {
+        use crate::city_network::{NetworkPoint, WorldTiles};
+
+        let network = CityNetwork {
+            version: 1,
+            world_id: "test".into(),
+            chunk_size: 32,
+            world_tiles: WorldTiles {
+                width: 16,
+                height: 8,
+            },
+            arterial_paths: Vec::new(),
+            pedestrian_corridors: vec![vec![
+                NetworkPoint { x: 2.0, y: 2.49 },
+                NetworkPoint { x: 13.0, y: 2.49 },
+            ]],
+        };
+
+        let walks = seeded_walks_from_network(&network);
+
+        assert_eq!(walks.len(), 1);
+        assert_eq!(walks[0].legacy_link_id, "link:walk:corridor:0");
+        assert_eq!(walks[0].polyline, vec![(2.0, 2.49), (13.0, 2.49)]);
+    }
+
     fn workspace_root() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
