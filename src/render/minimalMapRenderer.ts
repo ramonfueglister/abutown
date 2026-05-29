@@ -27,11 +27,18 @@ import {
   drawCapsule,
   roundedRectPath,
 } from './canvasPrimitives';
+import {
+  buildBackendCarInspector,
+  buildBackendPedestrianInspector,
+  type EntityInspector,
+} from './entityInspector';
+import {
+  AGENT_INSPECTOR_PANEL,
+  VEHICLE_INSPECTOR_PANEL,
+  drawInspectorPanel,
+} from './inspectorPanelPainter';
 
 export type Coord = { x: number; y: number };
-
-export type EntityInspectorRow = { label: string; value: string };
-export type EntityInspector = { title: string; rows: EntityInspectorRow[] } | null;
 
 export type MinimalMapRendererState = {
   ctx: CanvasRenderingContext2D;
@@ -509,85 +516,12 @@ function drawPedestrian(state: MinimalMapRendererState, pedestrian: BackendPedes
   ctx.restore();
 }
 
-function formatBackendCoord(coord: { x: number; y: number }): string {
-  return `${coord.x.toFixed(1)}, ${coord.y.toFixed(1)}`;
-}
-
-export function buildBackendPedestrianInspector(agent: BackendPedestrian | null): EntityInspector {
-  if (!agent) return null;
-  return {
-    title: agent.id,
-    rows: [
-      { label: 'State', value: 'walking' },
-      { label: 'Tile', value: formatBackendCoord(agent.path[0]) },
-      { label: 'Next', value: formatBackendCoord(agent.path[1] ?? agent.path[0]) },
-      { label: 'Direction', value: agent.direction },
-      { label: 'Sprite', value: agent.sprite.sheet },
-    ],
-  };
-}
-
-export function buildBackendCarInspector(vehicle: BackendCar | null): EntityInspector {
-  if (!vehicle) return null;
-  return {
-    title: vehicle.id,
-    rows: [
-      { label: 'State', value: 'driving' },
-      { label: 'Tile', value: formatBackendCoord(vehicle.path[0]) },
-      { label: 'Next', value: formatBackendCoord(vehicle.path[1] ?? vehicle.path[0]) },
-      { label: 'Direction', value: vehicle.direction },
-      { label: 'Sprite', value: vehicle.sprite.role },
-    ],
-  };
-}
-
 function drawAgentInspectorPanel(state: MinimalMapRendererState, inspector: EntityInspector): void {
-  if (!inspector) return;
-  drawInspectorPanel(state, inspector, { x: 12, y: 12, accent: '#f7d76a', stroke: 'rgba(247, 215, 106, 0.8)' });
+  drawInspectorPanel(state.ctx, inspector, AGENT_INSPECTOR_PANEL, state.viewport.devicePixelRatio);
 }
 
 function drawCarInspectorPanel(state: MinimalMapRendererState, inspector: EntityInspector): void {
-  if (!inspector) return;
-  drawInspectorPanel(state, inspector, { x: 12, y: 128, accent: '#75d7ff', stroke: 'rgba(117, 215, 255, 0.8)' });
-}
-
-function drawInspectorPanel(
-  state: MinimalMapRendererState,
-  inspector: { title: string; rows: { label: string; value: string }[] },
-  options: { x: number; y: number; accent: string; stroke: string },
-): void {
-  const { ctx, viewport } = state;
-  const ratio = viewport.devicePixelRatio;
-  const { x, y } = options;
-  const width = 232;
-  const padding = 10;
-  const rowHeight = 17;
-  const titleHeight = 20;
-  const height = padding * 2 + titleHeight + inspector.rows.length * rowHeight;
-
-  ctx.save();
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.fillStyle = 'rgba(7, 10, 9, 0.82)';
-  ctx.strokeStyle = options.stroke;
-  ctx.lineWidth = 1;
-  roundedRectPath(ctx, x, y, width, height, 6);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.font = '600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-  ctx.fillStyle = options.accent;
-  ctx.textBaseline = 'top';
-  ctx.fillText(inspector.title, x + padding, y + padding);
-
-  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-  inspector.rows.forEach((row, index) => {
-    const rowY = y + padding + titleHeight + index * rowHeight;
-    ctx.fillStyle = 'rgba(231, 236, 224, 0.72)';
-    ctx.fillText(row.label, x + padding, rowY);
-    ctx.fillStyle = '#f7f7e8';
-    ctx.fillText(row.value, x + 70, rowY);
-  });
-  ctx.restore();
+  drawInspectorPanel(state.ctx, inspector, VEHICLE_INSPECTOR_PANEL, state.viewport.devicePixelRatio);
 }
 
 function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRect): void {
