@@ -99,6 +99,12 @@ test('renders abutopia with one backend-driven pedestrian', async ({ page }) => 
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
   }));
+  const agent = state.city.mobilityAgents.agents[0];
+  expect(agent.coord.x).toBeGreaterThanOrEqual(2);
+  expect(agent.coord.x).toBeLessThanOrEqual(13);
+  expect(agent.coord.y).toBeGreaterThan(3.45);
+  expect(agent.coord.y).toBeLessThan(3.57);
+  expect(agent.coord.y).not.toBe(3);
   expect(state.city.mobilityVehicles.count).toBe(0);
   expect(state.city.mobilityVehicles.selectedId).toBeNull();
   expect(state.city.mobilityVehicles.vehicles).toEqual([]);
