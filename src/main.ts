@@ -86,12 +86,9 @@ import {
   SOUTH,
   WEST,
   coordKey as key,
-  distanceOutsideMap,
-  isInsideMap,
   maskSegments as gridMaskSegments,
   movementAngle,
   outwardExits,
-  stableHash as hash,
 } from './render/gridMath';
 import {
   buildingJitter,
@@ -99,6 +96,11 @@ import {
   treeRenderStyle,
   vehicleVectorColor,
 } from './render/vectorStyle';
+import {
+  outskirtsTileStyle,
+  riverSurfaceFill,
+  terrainBaseFill,
+} from './render/terrainStyle';
 
 type Coord = { x: number; y: number };
 
@@ -124,11 +126,6 @@ const EDGE_EXIT_TILES = 7;
 const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
 const MAP_BACKGROUND = '#f6f0e3';
-const MAP_OUTSKIRTS = '#eee7d7';
-const MAP_WATER = '#92d8e9';
-const MAP_RIVERBANK = '#bde8df';
-const MAP_PARK = '#cfe5bf';
-const MAP_PLAZA = '#eadbbd';
 const ROAD_CASING = '#c7d1cf';
 const ROAD_CORE = '#fffdf7';
 const ROAD_BRIDGE_CASING = '#8fc9d7';
@@ -403,34 +400,28 @@ function drawScene(offset: Coord): void {
 }
 
 function drawTerrainBase(coord: Coord): void {
-  const base = terrainBaseAt(coord);
-  if (base === 'Park' || base === 'Forest' || base === 'Reserve') {
-    drawTileFill(coord, MAP_PARK, 0.82);
-  } else if (base === 'Plaza') {
-    drawTileFill(coord, MAP_PLAZA, 0.72);
-  }
+  const fill = terrainBaseFill(terrainBaseAt(coord));
+  if (fill) drawTileFill(coord, fill.color, fill.alpha);
 }
 
 function drawRiverSurface(coord: Coord): void {
   if (!isWaterSurface(coord)) return;
-  const base = terrainBaseAt(coord);
-  drawTileFill(coord, base === 'Riverbank' ? MAP_RIVERBANK : MAP_WATER, 0.96);
+  const fill = riverSurfaceFill(terrainBaseAt(coord));
+  drawTileFill(coord, fill.color, fill.alpha);
 }
 
 function drawOutskirtsTerrain(visibleGrid: GridRect): void {
   for (let y = Math.max(-OUTSKIRTS_TILES, visibleGrid.minY); y <= Math.min(HEIGHT - 1 + OUTSKIRTS_TILES, visibleGrid.maxY); y += 1) {
     for (let x = Math.max(-OUTSKIRTS_TILES, visibleGrid.minX); x <= Math.min(WIDTH - 1 + OUTSKIRTS_TILES, visibleGrid.maxX); x += 1) {
       const coord = { x, y };
-      if (isInsideMap(coord, { width: WIDTH, height: HEIGHT })) continue;
-      const edgeDistance = distanceOutsideMap(coord, { width: WIDTH, height: HEIGHT });
-      if (edgeDistance > OUTSKIRTS_TILES) continue;
+      const style = outskirtsTileStyle(coord, { width: WIDTH, height: HEIGHT }, OUTSKIRTS_TILES);
+      if (!style) continue;
 
-      const fade = 1 - edgeDistance / (OUTSKIRTS_TILES + 1);
       ctx.save();
-      drawTileFill(coord, MAP_OUTSKIRTS, 0.05 + fade * 0.16);
-      if (hash(`outskirts-shadow:${x}:${y}`) % 11 === 0) {
+      drawTileFill(coord, style.fill.color, style.fill.alpha);
+      if (style.shadowAlpha !== null) {
         const point = iso(coord);
-        ctx.fillStyle = `rgba(151, 133, 103, ${0.025 + (1 - fade) * 0.035})`;
+        ctx.fillStyle = `rgba(151, 133, 103, ${style.shadowAlpha})`;
         drawIsoTile(point);
       }
       ctx.restore();
