@@ -23,6 +23,10 @@ import { screenStableWorldSize } from './minimalGlyphScale';
 import { MINIMAL_MAP_TILE_SIZE, mapProject, mapUnproject } from './minimalMapProjection';
 import { screenRightLaneOffset, type VehicleSprite } from './vehicleSprites';
 import type { MinimalPedestrianSprite } from './minimalPedestrianSprites';
+import {
+  drawCapsule,
+  roundedRectPath,
+} from './canvasPrimitives';
 
 export type Coord = { x: number; y: number };
 
@@ -298,11 +302,11 @@ function drawBuilding(state: MinimalMapRendererState, building: RuntimeBuilding)
   const y = point.y - height / 2 + offset.y + jitter.y;
   ctx.save();
   ctx.fillStyle = 'rgba(108, 97, 77, 0.07)';
-  roundedRect(state, x + 1.5, y + 1.5, width, height, 1.4);
+  roundedRectPath(ctx, x + 1.5, y + 1.5, width, height, 1.4);
   ctx.fill();
   ctx.globalAlpha = 0.66;
   ctx.fillStyle = buildingVectorColor(building);
-  roundedRect(state, x, y, width, height, 1.4);
+  roundedRectPath(ctx, x, y, width, height, 1.4);
   ctx.fill();
   ctx.restore();
 }
@@ -409,7 +413,7 @@ function drawCar(state: MinimalMapRendererState, car: BackendCar, selected: bool
     ctx.ellipse(0, 0, selectX, selectY, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-  drawCapsule(state, { x: 0, y: 0 }, angle, length, width, vehicleVectorColor(car.id));
+  drawCapsule(ctx, { x: 0, y: 0 }, angle, length, width, vehicleVectorColor(car.id));
   ctx.restore();
 }
 
@@ -460,40 +464,9 @@ function drawTrain(state: MinimalMapRendererState, tram: BackendTram): void {
     const offset = screenForwardOffset(head, next, segment.distance);
     const point = { x: head.x + offset.x, y: head.y + offset.y };
     ctx.save();
-    drawCapsule(state, point, angle, segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
+    drawCapsule(ctx, point, angle, segment.length, 4.8, TRAIN_CORE, RAIL_CASING);
     ctx.restore();
   }
-}
-
-function drawCapsule(
-  state: MinimalMapRendererState,
-  point: Coord,
-  angle: number,
-  length: number,
-  width: number,
-  color: string,
-  casing?: string,
-): void {
-  const { ctx } = state;
-  ctx.save();
-  ctx.translate(point.x, point.y);
-  ctx.rotate(angle);
-  ctx.lineCap = 'round';
-  if (casing) {
-    ctx.strokeStyle = casing;
-    ctx.lineWidth = width + 2.6;
-    ctx.beginPath();
-    ctx.moveTo(-length / 2, 0);
-    ctx.lineTo(length / 2, 0);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(-length / 2, 0);
-  ctx.lineTo(length / 2, 0);
-  ctx.stroke();
-  ctx.restore();
 }
 
 function movementAngle(currentPoint: Coord, nextPoint: Coord): number {
@@ -597,7 +570,7 @@ function drawInspectorPanel(
   ctx.fillStyle = 'rgba(7, 10, 9, 0.82)';
   ctx.strokeStyle = options.stroke;
   ctx.lineWidth = 1;
-  roundedRect(state, x, y, width, height, 6);
+  roundedRectPath(ctx, x, y, width, height, 6);
   ctx.fill();
   ctx.stroke();
 
@@ -615,22 +588,6 @@ function drawInspectorPanel(
     ctx.fillText(row.value, x + 70, rowY);
   });
   ctx.restore();
-}
-
-function roundedRect(state: MinimalMapRendererState, x: number, y: number, width: number, height: number, radius: number): void {
-  const { ctx } = state;
-  const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
 }
 
 function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRect): void {
