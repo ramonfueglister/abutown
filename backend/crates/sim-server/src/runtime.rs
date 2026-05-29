@@ -70,13 +70,44 @@ fn mobility_snapshot_matches_base_world(
     base_world: &BaseWorldBundle,
 ) -> bool {
     let expected_cars = expected_base_world_car_routes(base_world);
-    snapshot.vehicles.len() == expected_cars.len()
-        && snapshot.vehicles.values().all(|vehicle| {
+    if snapshot.vehicles.len() != expected_cars.len()
+        || !snapshot.vehicles.values().all(|vehicle| {
             vehicle.kind == sim_core::mobility::VehicleKind::Car
                 && expected_cars
                     .get(&vehicle.id.0)
                     .is_some_and(|route_id| route_id == &vehicle.route_id)
         })
+    {
+        return false;
+    }
+
+    let expected_pedestrians = expected_base_world_pedestrian_walks(base_world);
+    let expected_drivers = expected_base_world_driver_vehicles(base_world);
+    if snapshot.agents.len() != expected_pedestrians.len() + expected_drivers.len() {
+        return false;
+    }
+
+    snapshot.agents.values().all(|agent| {
+        if let Some(vehicle_id) = expected_drivers.get(&agent.id.0) {
+            return matches!(
+                &agent.state,
+                sim_core::mobility::AgentMobilityState::InVehicle { vehicle_id: actual, .. }
+                    if actual.0 == *vehicle_id
+            );
+        }
+
+        let Some(expected) = expected_pedestrians.get(&agent.id.0) else {
+            return false;
+        };
+        let sim_core::mobility::AgentMobilityState::Walking { link_id, .. } = &agent.state else {
+            return false;
+        };
+        link_id == &expected.link_id
+            && snapshot
+                .link_polylines
+                .get(link_id)
+                .is_none_or(|polyline| polylines_match(polyline, &expected.polyline))
+    })
 }
 
 fn expected_base_world_car_routes(
@@ -104,6 +135,87 @@ fn expected_base_world_car_routes(
         }
     }
     expected
+}
+
+fn expected_base_world_driver_vehicles(
+    base_world: &BaseWorldBundle,
+) -> std::collections::HashMap<String, String> {
+    let mut expected = std::collections::HashMap::new();
+    let mut driver_index = 0u32;
+    for group in &base_world.spawns.car_groups {
+        let arterial_index = base_world
+            .transport
+            .arterial_paths
+            .iter()
+            .position(|path| path.id == group.arterial_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "base world car group {} references missing arterial {}",
+                    group.id, group.arterial_id
+                )
+            });
+        for n in 0..group.cars_per_arterial {
+            expected.insert(
+                format!("agent:driver:{driver_index}"),
+                format!("vehicle:car:{arterial_index}:{n}"),
+            );
+            driver_index += 1;
+        }
+    }
+    expected
+}
+
+struct ExpectedPedestrianWalk {
+    link_id: String,
+    polyline: Vec<(f32, f32)>,
+}
+
+fn expected_base_world_pedestrian_walks(
+    base_world: &BaseWorldBundle,
+) -> std::collections::HashMap<String, ExpectedPedestrianWalk> {
+    let mut expected = std::collections::HashMap::new();
+    let mut agent_index = 0u32;
+    for group in &base_world.spawns.pedestrian_groups {
+        let corridor_index = base_world
+            .transport
+            .pedestrian_corridors
+            .iter()
+            .position(|path| path.id == group.corridor_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "base world pedestrian group {} references missing corridor {}",
+                    group.id, group.corridor_id
+                )
+            });
+        let corridor = &base_world.transport.pedestrian_corridors[corridor_index];
+        let polyline: Vec<(f32, f32)> = corridor
+            .points
+            .iter()
+            .map(|point| (point.x, point.y))
+            .collect();
+        for _ in 0..group.agents_per_corridor {
+            expected.insert(
+                format!("agent:walk:{agent_index}"),
+                ExpectedPedestrianWalk {
+                    link_id: format!("link:walk:corridor:{corridor_index}"),
+                    polyline: polyline.clone(),
+                },
+            );
+            agent_index += 1;
+        }
+    }
+    expected
+}
+
+fn polylines_match(actual: &[(f32, f32)], expected: &[(f32, f32)]) -> bool {
+    const EPSILON: f32 = 0.001;
+    actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected.iter())
+            .all(|(actual, expected)| {
+                (actual.0 - expected.0).abs() <= EPSILON && (actual.1 - expected.1).abs() <= EPSILON
+            })
 }
 
 #[cfg(test)]
@@ -998,6 +1110,29 @@ mod tests {
         .expect("base world fixture loads")
     }
 
+    fn base_world_fixture_with_car_route() -> sim_core::base_world::BaseWorldBundle {
+        let mut base_world = base_world_fixture();
+        base_world
+            .transport
+            .arterial_paths
+            .push(sim_core::base_world::TransportPath {
+                id: "arterial:test".to_string(),
+                points: vec![
+                    sim_core::city_network::NetworkPoint { x: 2.0, y: 3.0 },
+                    sim_core::city_network::NetworkPoint { x: 13.0, y: 3.0 },
+                ],
+            });
+        base_world
+            .spawns
+            .car_groups
+            .push(sim_core::base_world::CarSpawnGroup {
+                id: "spawn:car:test".to_string(),
+                arterial_id: "arterial:test".to_string(),
+                cars_per_arterial: 1,
+            });
+        base_world
+    }
+
     #[test]
     fn mobility_snapshot_base_world_match_rejects_stale_vehicle() {
         use sim_core::mobility::{extract_from_world, seed};
@@ -1024,6 +1159,59 @@ mod tests {
                 occupants: Vec::new(),
                 dwell_ticks_remaining: 0,
             },
+        );
+
+        assert!(!mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
+    }
+
+    #[test]
+    fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_link() {
+        use sim_core::ids::AgentId;
+        use sim_core::mobility::{AgentMobilityState, extract_from_world, seed};
+
+        let base_world = base_world_fixture();
+        let (authored, _) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+        let mut authored_snap = extract_from_world(&authored);
+        assert!(mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
+
+        authored_snap
+            .agents
+            .get_mut(&AgentId("agent:walk:0".to_string()))
+            .expect("authored snapshot contains the seeded pedestrian")
+            .state = AgentMobilityState::Walking {
+            link_id: "link:walk:corridor:0".to_string(),
+            progress: 0.0,
+        };
+
+        assert!(!mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
+    }
+
+    #[test]
+    fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_polyline() {
+        use sim_core::mobility::{extract_from_world, seed};
+
+        let base_world = base_world_fixture();
+        let (authored, _) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+        let mut authored_snap = extract_from_world(&authored);
+        assert!(mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
+
+        authored_snap.link_polylines.insert(
+            "link:walk:corridor:1".to_string(),
+            vec![(2.0, 3.0), (13.0, 3.0)],
         );
 
         assert!(!mobility_snapshot_matches_base_world(
@@ -1150,6 +1338,23 @@ mod tests {
                 .iter()
                 .all(|edge| graph.edge(edge.edge_id).kind == sim_core::routing::EdgeKind::Footway)
         );
+    }
+
+    #[test]
+    fn runtime_uses_sidewalk_footway_geometry_from_base_world() {
+        let network = base_world_fixture().to_city_network();
+        let runtime = SimulationRuntime::new_from_network(&network);
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let edge = graph.edge(
+            graph
+                .edge_by_legacy("link:walk:corridor:1")
+                .expect("south sidewalk footway exists"),
+        );
+
+        assert_eq!(edge.kind, sim_core::routing::EdgeKind::Footway);
+        assert_eq!(edge.polyline.first().copied(), Some((2.0, 3.51)));
+        assert_eq!(edge.polyline.last().copied(), Some((13.0, 3.51)));
+        assert!(edge.polyline.iter().all(|(_, y)| (*y - 3.0).abs() > 0.001));
     }
 
     #[test]
@@ -1752,16 +1957,60 @@ mod tests {
 
     #[tokio::test]
     async fn hydrate_restores_mobility_from_store_when_present() {
+        use sim_core::mobility::{extract_from_world, seed};
+
+        let base_world = base_world_fixture();
+        let (authored, _) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+        let mut authored_snap = extract_from_world(&authored);
+        authored_snap.tick = 7;
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(
+            &mut mobility_store,
+            "abutopia",
+            authored_snap.tick,
+            &authored_snap,
+            &base_world.snapshot_compatibility(),
+        )
+        .await
+        .unwrap();
+
+        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+            &base_world,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), 7);
+    }
+
+    #[tokio::test]
+    async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_sidewalk_graph() {
         use sim_core::mobility::api::tick_mobility as api_tick;
         use sim_core::mobility::{extract_from_world, seed};
 
         let base_world = base_world_fixture();
         let (mut authored, mut sched) =
             seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-        // Advance one tick so the persisted state differs from a fresh seed.
         let _ = api_tick(&mut authored, &mut sched);
         let persisted_tick = sim_core::mobility::api::tick(&authored);
-        let authored_snap = extract_from_world(&authored);
+        let mut authored_snap = extract_from_world(&authored);
+        assert!(
+            authored_snap.agents.is_empty(),
+            "the fixture snapshot should represent demoted LOD state"
+        );
+        authored_snap.link_polylines.insert(
+            "link:walk:corridor:1".to_string(),
+            vec![(2.0, 3.0), (13.0, 3.0)],
+        );
+        assert!(!mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
 
         let mut mobility_store = InMemoryMobilitySnapshotStore::default();
         MobilitySnapshotStore::write(
@@ -1783,7 +2032,90 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(runtime.mobility_tick_for_test(), persisted_tick);
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let south_sidewalk = graph.edge(
+            graph
+                .edge_by_legacy("link:walk:corridor:1")
+                .expect("current south sidewalk footway is reseeded"),
+        );
+        assert_eq!(south_sidewalk.polyline.first().copied(), Some((2.0, 3.51)));
+        assert_eq!(south_sidewalk.polyline.last().copied(), Some((13.0, 3.51)));
+        assert!(
+            south_sidewalk
+                .polyline
+                .iter()
+                .all(|(_, y)| (*y - 3.51).abs() < 0.001)
+        );
+        let restored_snap = extract_from_world(&runtime.world);
+        assert_eq!(
+            restored_snap.link_polylines.get("link:walk:corridor:1"),
+            Some(&south_sidewalk.polyline)
+        );
+    }
+
+    #[tokio::test]
+    async fn hydrate_rejects_routing_snapshot_with_demoted_pedestrians_and_reseeds() {
+        use sim_core::ids::AgentId;
+        use sim_core::mobility::{extract_from_world, seed};
+
+        let base_world = base_world_fixture_with_car_route();
+        let (authored, _) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+        let mut authored_snap = extract_from_world(&authored);
+        authored_snap
+            .agents
+            .remove(&AgentId("agent:walk:0".to_string()));
+        authored_snap.link_polylines.insert(
+            "link:walk:corridor:1".to_string(),
+            vec![(2.0, 3.0), (13.0, 3.0)],
+        );
+        authored_snap.tick = 17;
+        assert!(!mobility_snapshot_matches_base_world(
+            &authored_snap,
+            &base_world
+        ));
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(
+            &mut mobility_store,
+            "abutopia",
+            17,
+            &authored_snap,
+            &base_world.snapshot_compatibility(),
+        )
+        .await
+        .unwrap();
+
+        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+            &base_world,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        let graph = runtime.world.resource::<sim_core::routing::Graph>();
+        let south_sidewalk = graph.edge(
+            graph
+                .edge_by_legacy("link:walk:corridor:1")
+                .expect("current south sidewalk footway is reseeded"),
+        );
+        assert_eq!(south_sidewalk.polyline.first().copied(), Some((2.0, 3.51)));
+        assert_eq!(south_sidewalk.polyline.last().copied(), Some((13.0, 3.51)));
+        assert!(
+            south_sidewalk
+                .polyline
+                .iter()
+                .all(|(_, y)| (*y - 3.51).abs() < 0.001)
+        );
+        let restored_snap = extract_from_world(&runtime.world);
+        assert_eq!(
+            restored_snap.link_polylines.get("link:walk:corridor:1"),
+            Some(&south_sidewalk.polyline)
+        );
     }
 
     #[tokio::test]
@@ -1834,5 +2166,66 @@ mod tests {
             runtime.mobility_vehicle_count_for_test(),
             expected_base_world_car_count(&base_world)
         );
+    }
+
+    #[tokio::test]
+    async fn hydrate_ignores_snapshot_with_stale_pedestrian_polyline_for_abutopia() {
+        use sim_core::ids::AgentId;
+        use sim_core::mobility::components::Position;
+        use sim_core::mobility::resources::AgentIdIndex;
+        use sim_core::mobility::{AgentMobilityState, seed};
+
+        let base_world = base_world_fixture();
+        let (authored, _) =
+            seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+        let mut authored_snap = extract_from_world(&authored);
+        authored_snap.link_polylines.insert(
+            "link:walk:corridor:1".to_string(),
+            vec![(2.0, 3.0), (13.0, 3.0)],
+        );
+
+        let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+        MobilitySnapshotStore::write(
+            &mut mobility_store,
+            "abutopia",
+            99,
+            &authored_snap,
+            &base_world.snapshot_compatibility(),
+        )
+        .await
+        .unwrap();
+
+        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(mobility_store),
+            &base_world,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(runtime.mobility_tick_for_test(), 0);
+        let agent_id = AgentId("agent:walk:0".to_string());
+        let agent = sim_core::mobility::api::agents(&runtime.world)
+            .into_iter()
+            .find(|agent| agent.id == agent_id)
+            .expect("runtime reseeds the authored pedestrian");
+        assert!(matches!(
+            agent.state,
+            AgentMobilityState::Walking { ref link_id, .. } if link_id == "link:walk:corridor:1"
+        ));
+
+        let entity = *runtime
+            .world
+            .resource::<AgentIdIndex>()
+            .0
+            .get(&agent_id)
+            .expect("runtime has an entity for the reseeded pedestrian");
+        let position = runtime
+            .world
+            .entity(entity)
+            .get::<Position>()
+            .expect("reseeded pedestrian has a position");
+        assert!((position.y - 3.51).abs() < 0.001);
     }
 }

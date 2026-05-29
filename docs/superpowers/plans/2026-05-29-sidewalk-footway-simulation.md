@@ -64,7 +64,7 @@ Expected: the branch line names `codex/sidewalk-footway-simulation`, and no file
 - Modify: `backend/crates/sim-core/src/city_network.rs`
 - Modify: `backend/crates/sim-core/src/base_world.rs`
 
-- [ ] **Step 1: Add failing tests for fractional movement points**
+- [x] **Step 1: Add failing tests for fractional movement points**
 
 In `backend/crates/sim-core/src/city_network.rs`, add this test inside the existing `#[cfg(test)] mod tests` block:
 
@@ -106,34 +106,91 @@ In `backend/crates/sim-core/src/base_world.rs`, add this test block at the end o
 mod tests {
     use super::*;
 
-    fn workspace_root() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(3)
-            .expect("sim-core crate lives under backend/crates")
-            .to_path_buf()
+    fn bundle_with_pedestrian_points(points: Vec<NetworkPoint>) -> BaseWorldBundle {
+        BaseWorldBundle {
+            manifest: BaseWorldManifest {
+                schema_version: 1,
+                world_id: "test".into(),
+                display_name: "Test".into(),
+                chunk_size: 32,
+                world_tiles: WorldTiles { width: 16, height: 8 },
+                layers: BaseWorldLayerFiles {
+                    terrain: "terrain.json".into(),
+                    transport: "transport.json".into(),
+                    buildings: "buildings.json".into(),
+                    decorations: "decorations.json".into(),
+                    spawns: "spawns.json".into(),
+                },
+            },
+            terrain: TerrainLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                tiles: Vec::new(),
+            },
+            transport: TransportLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                roads: vec![RoadTile {
+                    x: 3,
+                    y: 3,
+                    kind: "street".into(),
+                    mask: 10,
+                }],
+                rails: Vec::new(),
+                arterial_paths: Vec::new(),
+                rail_paths: Vec::new(),
+                pedestrian_corridors: vec![TransportPath {
+                    id: "corridor:test".into(),
+                    points,
+                }],
+            },
+            buildings: BuildingLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                footprints: vec![BuildingFootprint {
+                    id: "building:test".into(),
+                    tiles: vec![NetworkCoord { x: 2, y: 3 }],
+                    sheet: None,
+                    frame: None,
+                    district: None,
+                }],
+            },
+            decorations: DecorationLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                trees: Vec::new(),
+                details: Vec::new(),
+            },
+            spawns: SpawnLayer {
+                schema_version: 1,
+                world_id: "test".into(),
+                pedestrian_groups: Vec::new(),
+                car_groups: Vec::new(),
+                tram_lines: Vec::new(),
+            },
+        }
     }
 
     #[test]
     fn base_world_preserves_fractional_pedestrian_corridor_points() {
-        let bundle = BaseWorldBundle::load_from_dir(workspace_root().join("data/worlds/abutopia"))
-            .expect("base world fixture loads");
+        let bundle = bundle_with_pedestrian_points(vec![
+            NetworkPoint { x: 2.0, y: 2.49 },
+            NetworkPoint { x: 13.0, y: 2.49 },
+        ]);
+
+        bundle.validate().expect("fractional transport points are valid");
         let network = bundle.to_city_network();
 
-        assert_eq!(network.pedestrian_corridors.len(), 2);
-        assert!(
-            network
-                .pedestrian_corridors
-                .iter()
-                .flatten()
-                .all(|point| (point.y - 3.0).abs() > 0.001),
-            "sidewalk corridors must not sit on the road centerline",
+        assert_eq!(network.pedestrian_corridors.len(), 1);
+        assert_eq!(
+            network.pedestrian_corridors[0],
+            vec![NetworkPoint { x: 2.0, y: 2.49 }, NetworkPoint { x: 13.0, y: 2.49 }],
         );
     }
 }
 ```
 
-- [ ] **Step 2: Run the focused failing tests**
+- [x] **Step 2: Run the focused failing tests**
 
 Run:
 
@@ -142,9 +199,9 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core base_world_preserves_fractional_pedestrian_corridor_points
 ```
 
-Expected: first command fails because `NetworkPoint` does not exist; second command fails because Abutopia still has one integer centerline corridor.
+Expected: both commands fail because `NetworkPoint` does not exist and `TransportPath.points` still requires integer `NetworkCoord`.
 
-- [ ] **Step 3: Add `NetworkPoint` and update `CityNetwork`**
+- [x] **Step 3: Add `NetworkPoint` and update `CityNetwork`**
 
 In `backend/crates/sim-core/src/city_network.rs`, replace the top structs with:
 
@@ -189,7 +246,7 @@ pub struct CityNetwork {
 
 Update the existing city-network fixture assertions to compare with `NetworkPoint { x: 2.0, y: 3.0 }`.
 
-- [ ] **Step 4: Update `TransportPath` and float bounds validation**
+- [x] **Step 4: Update `TransportPath` and float bounds validation**
 
 In `backend/crates/sim-core/src/base_world.rs`, update the import:
 
@@ -248,7 +305,7 @@ fn point_in_bounds_f32(&self, x: f32, y: f32) -> bool {
 
 Leave road tiles, building footprints, trees, and decoration details on integer `NetworkCoord`.
 
-- [ ] **Step 5: Update Rust constructors that now need `NetworkPoint`**
+- [x] **Step 5: Update Rust constructors that now need `NetworkPoint`**
 
 Run:
 
@@ -275,19 +332,18 @@ arterial_paths: vec![vec![np(0.0, 0.0), np(10.0, 0.0)]],
 pedestrian_corridors: vec![vec![np(0.0, 3.51), np(10.0, 3.51)]],
 ```
 
-- [ ] **Step 6: Re-run focused tests**
+- [x] **Step 6: Re-run focused tests**
 
 Run:
 
 ```bash
 CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core parses_fractional_transport_points
+CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core base_world_preserves_fractional_pedestrian_corridor_points
 ```
 
-Expected: PASS.
+Expected: both commands pass.
 
-`base_world_preserves_fractional_pedestrian_corridor_points` still fails until Task 3 updates Abutopia data.
-
-- [ ] **Step 7: Commit data model change**
+- [x] **Step 7: Commit data model change**
 
 Run:
 
@@ -305,7 +361,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `backend/crates/sim-core/src/routing/builder.rs`
 
-- [ ] **Step 1: Add a failing routing-builder test**
+- [x] **Step 1: Add a failing routing-builder test**
 
 In `backend/crates/sim-core/src/routing/builder.rs`, add this test inside the existing `#[cfg(test)] mod tests` block:
 
@@ -342,7 +398,7 @@ fn builder_preserves_fractional_seeded_walk_nodes() {
 }
 ```
 
-- [ ] **Step 2: Run the failing routing test**
+- [x] **Step 2: Run the failing routing test**
 
 Run:
 
@@ -352,7 +408,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: FAIL because walk endpoint nodes are still rounded to integer coordinates.
 
-- [ ] **Step 3: Add quantized graph-node keys**
+- [x] **Step 3: Add quantized graph-node keys**
 
 In `backend/crates/sim-core/src/routing/builder.rs`, add these helpers near `polyline_length`:
 
@@ -374,7 +430,7 @@ fn remember_point(points: &mut HashMap<CoordKey, (f32, f32)>, point: (f32, f32))
 }
 ```
 
-- [ ] **Step 4: Replace rounded integer node collection**
+- [x] **Step 4: Replace rounded integer node collection**
 
 Inside `build_graph_from_city_network`, use `CoordKey` for node identity and keep the original `(f32, f32)` for node positions:
 
@@ -450,7 +506,7 @@ let legacy_key = coord_key(segment[0]);
 legacy_id: Some(format!("link:road:{index}:{}_{},fwd", legacy_key.0, legacy_key.1)),
 ```
 
-- [ ] **Step 5: Run routing tests**
+- [x] **Step 5: Run routing tests**
 
 Run:
 
@@ -460,7 +516,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit routing graph change**
+- [x] **Step 6: Commit routing graph change**
 
 Run:
 
@@ -483,7 +539,7 @@ Expected: commit succeeds.
 - Modify: `tests/app/baseWorldBundle.test.ts`
 - Modify: `tests/app/appRuntime.test.ts`
 
-- [ ] **Step 1: Add failing frontend/base-world contract tests**
+- [x] **Step 1: Add failing frontend/base-world contract tests**
 
 In `tests/app/baseWorldBundle.test.ts`, change the transport type and assertions:
 
@@ -531,7 +587,7 @@ pedestrian_corridors: [
 ],
 ```
 
-- [ ] **Step 2: Run failing JS tests**
+- [x] **Step 2: Run failing JS tests**
 
 Run:
 
@@ -541,7 +597,7 @@ npm test -- tests/app/baseWorldBundle.test.ts tests/app/appRuntime.test.ts
 
 Expected: `baseWorldBundle` fails because generated Abutopia still has one `corridor:main` at `y: 3`.
 
-- [ ] **Step 3: Generate north and south sidewalk corridors**
+- [x] **Step 3: Generate north and south sidewalk corridors**
 
 In `scripts/generate-abutopia-world.mjs`, replace the current `corridorPoints` block with:
 
@@ -574,7 +630,7 @@ pedestrian_groups: [
 ],
 ```
 
-- [ ] **Step 4: Regenerate Abutopia data**
+- [x] **Step 4: Regenerate Abutopia data**
 
 Run:
 
@@ -584,7 +640,7 @@ npm run generate:abutopia
 
 Expected: `data/worlds/abutopia/layers/transport.json` contains two sidewalk corridors and `data/worlds/abutopia/layers/spawns.json` references `corridor:sidewalk:south`.
 
-- [ ] **Step 5: Update frontend base-world validation**
+- [x] **Step 5: Update frontend base-world validation**
 
 In `src/backend/baseWorldClient.ts`, replace:
 
@@ -605,18 +661,17 @@ if (payload.transport.pedestrian_corridors.some((path) => path.points.some((poin
 }
 ```
 
-- [ ] **Step 6: Run base-world tests**
+- [x] **Step 6: Run base-world tests**
 
 Run:
 
 ```bash
 npm test -- tests/app/baseWorldBundle.test.ts tests/app/appRuntime.test.ts
-CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core base_world_preserves_fractional_pedestrian_corridor_points
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Abutopia sidewalk data**
+- [x] **Step 7: Commit Abutopia sidewalk data**
 
 Run:
 
@@ -635,7 +690,7 @@ Expected: commit succeeds.
 - Modify: `backend/crates/sim-core/src/mobility/seed.rs`
 - Modify: `backend/crates/sim-server/src/runtime.rs`
 
-- [ ] **Step 1: Add failing seed tests**
+- [x] **Step 1: Add failing seed tests**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`, add these tests inside the existing `#[cfg(test)] mod tests` block:
 
@@ -699,7 +754,7 @@ fn from_base_world_bundle_seeds_pedestrian_on_sidewalk_corridor() {
 }
 ```
 
-- [ ] **Step 2: Update `seeded_walks_from_network` implementation**
+- [x] **Step 2: Update `seeded_walks_from_network` implementation**
 
 In `backend/crates/sim-core/src/mobility/seed.rs`, replace the integer mapping in `seeded_walks_from_network` with:
 
@@ -709,7 +764,7 @@ let polyline: Vec<(f32, f32)> = corridor.iter().map(|point| (point.x, point.y)).
 
 Remove the now-unused local `use crate::city_network::NetworkCoord;`.
 
-- [ ] **Step 3: Add runtime footway geometry test**
+- [x] **Step 3: Add runtime footway geometry test**
 
 In `backend/crates/sim-server/src/runtime.rs`, add this test near `runtime_can_find_seeded_walk_path`:
 
@@ -732,7 +787,7 @@ fn runtime_uses_sidewalk_footway_geometry_from_base_world() {
 }
 ```
 
-- [ ] **Step 4: Run backend seed/runtime tests**
+- [x] **Step 4: Run backend seed/runtime tests**
 
 Run:
 
@@ -744,7 +799,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit backend sidewalk seeding**
+- [x] **Step 5: Commit backend sidewalk seeding**
 
 Run:
 
@@ -764,7 +819,7 @@ Expected: commit succeeds.
 - Modify: `tests/render/entityRenderStyle.test.ts`
 - Modify: `tests/render/backendMobilityDrawables.test.ts`
 
-- [ ] **Step 1: Add failing render-style tests**
+- [x] **Step 1: Add failing render-style tests**
 
 In `tests/render/entityRenderStyle.test.ts`, replace the pedestrian lane test with:
 
@@ -812,7 +867,7 @@ it('passes backend pedestrian sidewalk coordinates through without visual lane o
 });
 ```
 
-- [ ] **Step 2: Run failing render tests**
+- [x] **Step 2: Run failing render tests**
 
 Run:
 
@@ -822,7 +877,7 @@ npm test -- tests/render/entityRenderStyle.test.ts tests/render/backendMobilityD
 
 Expected: `entityRenderStyle.test.ts` fails because `laneOffset: 0` still produces a hard-coded lane offset.
 
-- [ ] **Step 3: Remove default pedestrian lane nudge**
+- [x] **Step 3: Remove default pedestrian lane nudge**
 
 In `src/render/entityRenderStyle.ts`, replace `pedestrianRenderStyle` with:
 
@@ -844,7 +899,7 @@ export function pedestrianRenderStyle(
 }
 ```
 
-- [ ] **Step 4: Run render tests**
+- [x] **Step 4: Run render tests**
 
 Run:
 
@@ -854,7 +909,7 @@ npm test -- tests/render/entityRenderStyle.test.ts tests/render/backendMobilityD
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit frontend render change**
+- [x] **Step 5: Commit frontend render change**
 
 Run:
 
@@ -872,7 +927,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `tests/e2e/render-smoke.spec.ts`
 
-- [ ] **Step 1: Add sidewalk assertion to browser smoke**
+- [x] **Step 1: Add sidewalk assertion to browser smoke**
 
 In `tests/e2e/render-smoke.spec.ts`, after the existing mobility agent object expectation block, add:
 
@@ -885,7 +940,7 @@ expect(agent.coord.y).toBeLessThan(3.57);
 expect(agent.coord.y).not.toBe(3);
 ```
 
-- [ ] **Step 2: Run TypeScript and unit tests**
+- [x] **Step 2: Run TypeScript and unit tests**
 
 Run:
 
@@ -897,7 +952,7 @@ npm run build
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Run Rust formatting, clippy, and tests**
+- [x] **Step 3: Run Rust formatting, clippy, and tests**
 
 Run:
 
@@ -909,7 +964,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target scripts/cargo-serial.sh test --man
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Stop existing local dev servers before Playwright**
+- [x] **Step 4: Stop existing local dev servers before Playwright**
 
 Run:
 
@@ -922,7 +977,7 @@ done
 
 Expected: ports `8080` and `5173` are free for Playwright web servers.
 
-- [ ] **Step 5: Run mandatory browser smoke**
+- [x] **Step 5: Run mandatory browser smoke**
 
 Run:
 
@@ -932,7 +987,7 @@ CARGO_TARGET_DIR=/tmp/abutown-sidewalk-target npx playwright test tests/e2e/rend
 
 Expected: PASS. The smoke must confirm one backend-driven pedestrian, no retired transit assets, no rail/tram diagnostics, and `coord.y` in the sidewalk band around `3.51`.
 
-- [ ] **Step 6: Commit e2e assertion**
+- [x] **Step 6: Commit e2e assertion**
 
 Run:
 
@@ -943,7 +998,7 @@ git commit -m "test(e2e): assert pedestrians render on sidewalks"
 
 Expected: commit succeeds.
 
-- [ ] **Step 7: Final branch status**
+- [x] **Step 7: Final branch status**
 
 Run:
 
@@ -961,7 +1016,7 @@ Expected: worktree is clean and the branch contains the sidewalk commits from Ta
 **Files:**
 - No source changes.
 
-- [ ] **Step 1: Push the branch**
+- [x] **Step 1: Push the branch**
 
 Run:
 
@@ -971,7 +1026,7 @@ git push -u origin codex/sidewalk-footway-simulation
 
 Expected: push succeeds.
 
-- [ ] **Step 2: Prepare PR summary**
+- [x] **Step 2: Prepare PR summary**
 
 Use this PR body:
 
@@ -980,6 +1035,7 @@ Use this PR body:
 - add floating-point transport path coordinates for backend movement geometry
 - author Abutopia north/south sidewalk corridors while preserving roads and buildings
 - seed and render pedestrians at backend sidewalk coordinates
+- reject stale/demoted pedestrian mobility snapshots and reseed canonical base-world mobility with no fallback graph path
 - add browser smoke coverage for sidewalk-positioned backend pedestrians
 
 ## Verification

@@ -12,7 +12,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-backend/target}"; scripts/cargo-serial.sh build --manifest-path backend/Cargo.toml -p sim-server --bin e2e_server && exec "$CARGO_TARGET_DIR/debug/e2e_server"',
+      command: 'export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-backend/target}"; export CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"; scripts/cargo-serial.sh build --manifest-path backend/Cargo.toml -p sim-server --bin e2e_server && exec "$CARGO_TARGET_DIR/debug/e2e_server"',
       url: 'http://127.0.0.1:8080/health',
       reuseExistingServer: false,
       timeout: 120_000,

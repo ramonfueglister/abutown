@@ -22,7 +22,15 @@ fn loads_abutopia_base_world_fixture() {
     assert!(bundle.transport.rails.is_empty());
     assert!(bundle.transport.arterial_paths.is_empty());
     assert!(bundle.transport.rail_paths.is_empty());
-    assert_eq!(bundle.transport.pedestrian_corridors.len(), 1);
+    assert_eq!(bundle.transport.pedestrian_corridors.len(), 2);
+    let sidewalk_ids = bundle
+        .transport
+        .pedestrian_corridors
+        .iter()
+        .map(|corridor| corridor.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(sidewalk_ids.contains(&"corridor:sidewalk:north"));
+    assert!(sidewalk_ids.contains(&"corridor:sidewalk:south"));
     assert_eq!(bundle.buildings.footprints.len(), 2);
     assert!(bundle.decorations.trees.is_empty());
     assert!(bundle.decorations.details.is_empty());

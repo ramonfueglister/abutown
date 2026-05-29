@@ -24,8 +24,15 @@ for (let x = roadX0; x <= roadX1; x += 1) {
   roads.push({ x, y: roadY, kind: 'street', mask });
 }
 
-const corridorPoints = [];
-for (let x = houseAX; x <= houseBX; x += 1) corridorPoints.push({ x, y: roadY });
+const sidewalkOffset = 0.51;
+const sidewalkNorthY = Number((roadY - sidewalkOffset).toFixed(2));
+const sidewalkSouthY = Number((roadY + sidewalkOffset).toFixed(2));
+
+function corridorPointsFor(y) {
+  const points = [];
+  for (let x = houseAX; x <= houseBX; x += 1) points.push({ x, y });
+  return points;
+}
 
 const manifest = {
   schema_version: schemaVersion,
@@ -51,7 +58,10 @@ const transport = {
   rails: [],
   arterial_paths: [],
   rail_paths: [],
-  pedestrian_corridors: [{ id: 'corridor:main', points: corridorPoints }],
+  pedestrian_corridors: [
+    { id: 'corridor:sidewalk:north', points: corridorPointsFor(sidewalkNorthY) },
+    { id: 'corridor:sidewalk:south', points: corridorPointsFor(sidewalkSouthY) },
+  ],
 };
 
 const buildings = {
@@ -67,7 +77,7 @@ const spawns = {
   schema_version: schemaVersion,
   world_id: worldId,
   pedestrian_groups: [
-    { id: 'spawn:ped:main', corridor_id: 'corridor:main', agents_per_corridor: 1 },
+    { id: 'spawn:ped:sidewalk-south', corridor_id: 'corridor:sidewalk:south', agents_per_corridor: 1 },
   ],
   car_groups: [],
   tram_lines: [],

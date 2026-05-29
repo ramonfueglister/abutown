@@ -9,7 +9,7 @@
 //! Run with: `cargo run --release -p sim-core --example profile_lod_tick`.
 
 use bevy_ecs::schedule::Schedule;
-use sim_core::city_network::{CityNetwork, NetworkCoord, WorldTiles};
+use sim_core::city_network::{CityNetwork, NetworkPoint, WorldTiles};
 use sim_core::ids::ChunkCoord;
 use sim_core::mobility::api;
 use sim_core::mobility::seed::{SeedDensity, from_network};
@@ -27,27 +27,22 @@ fn very_big_network() -> CityNetwork {
     let arterial_count: u32 = 100;
     let arterial_y_step: i32 = 5;
     let arterial_len: i32 = 500;
+    let np = |x: i32, y: i32| NetworkPoint {
+        x: x as f32,
+        y: y as f32,
+    };
 
     let corridors = (0..corridor_count)
         .map(|i| {
             let y = ((i % corridor_rows) * 2) as i32;
             let x_start = (i / corridor_rows) as i32 * corridor_x_step;
-            vec![
-                NetworkCoord { x: x_start, y },
-                NetworkCoord {
-                    x: x_start + corridor_len,
-                    y,
-                },
-            ]
+            vec![np(x_start, y), np(x_start + corridor_len, y)]
         })
         .collect();
     let arterials = (0..arterial_count)
         .map(|i| {
             let y = i as i32 * arterial_y_step;
-            vec![
-                NetworkCoord { x: 0, y },
-                NetworkCoord { x: arterial_len, y },
-            ]
+            vec![np(0, y), np(arterial_len, y)]
         })
         .collect();
     CityNetwork {

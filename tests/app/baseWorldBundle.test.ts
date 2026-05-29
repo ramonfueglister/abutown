@@ -6,6 +6,11 @@ function loadJson<T>(path: string): T {
   return JSON.parse(readFileSync(join(process.cwd(), path), 'utf8')) as T;
 }
 
+type TransportPath = {
+  id: string;
+  points: { x: number; y: number }[];
+};
+
 describe('generated base world bundle', () => {
   it('contains the authored abutopia layers', () => {
     const manifest = loadJson<{
@@ -22,7 +27,7 @@ describe('generated base world bundle', () => {
       rails: unknown[];
       arterial_paths: unknown[];
       rail_paths: unknown[];
-      pedestrian_corridors: unknown[];
+      pedestrian_corridors: TransportPath[];
     }>(`data/worlds/abutopia/${manifest.layers.transport}`);
     const buildings = loadJson<{ footprints: unknown[] }>(
       `data/worlds/abutopia/${manifest.layers.buildings}`,
@@ -39,7 +44,19 @@ describe('generated base world bundle', () => {
     expect(transport.rails.length).toBe(0);
     expect(transport.arterial_paths.length).toBe(0);
     expect(transport.rail_paths.length).toBe(0);
-    expect(transport.pedestrian_corridors.length).toBe(1);
+    expect(transport.pedestrian_corridors.map((path) => path.id)).toEqual([
+      'corridor:sidewalk:north',
+      'corridor:sidewalk:south',
+    ]);
+    expect(transport.pedestrian_corridors[0].points).toHaveLength(12);
+    expect(transport.pedestrian_corridors[1].points).toHaveLength(12);
+    expect(transport.pedestrian_corridors[0].points[0]).toEqual({ x: 2, y: 2.49 });
+    expect(transport.pedestrian_corridors[1].points[0]).toEqual({ x: 2, y: 3.51 });
+    expect(
+      transport.pedestrian_corridors
+        .flatMap((path) => path.points)
+        .some((point) => point.y === 3),
+    ).toBe(false);
     expect(buildings.footprints.length).toBe(2);
     expect(decorations.trees.length).toBe(0);
     expect(decorations.details.length).toBe(0);

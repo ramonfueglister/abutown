@@ -3,8 +3,8 @@
   "world_id": "abutopia",
   "pedestrian_groups": [
     {
-      "id": "spawn:ped:main",
-      "corridor_id": "corridor:main",
+      "id": "spawn:ped:sidewalk-south",
+      "corridor_id": "corridor:sidewalk:south",
       "agents_per_corridor": 1
     }
   ],

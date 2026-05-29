@@ -82,7 +82,14 @@ function validateBaseWorld(payload: BaseWorldResponse): void {
   if (payload.transport.roads.length !== 10) throw new Error('Base world roads layer is incomplete');
   if (payload.transport.rails.length !== 0) throw new Error('Base world rails layer is incomplete');
   if (payload.transport.arterial_paths.length !== 0) throw new Error('Base world arterial layer is incomplete');
-  if (payload.transport.pedestrian_corridors.length !== 1) throw new Error('Base world pedestrian layer is incomplete');
+  if (payload.transport.pedestrian_corridors.length !== 2) throw new Error('Base world pedestrian layer is incomplete');
+  const pedestrianIds = payload.transport.pedestrian_corridors.map((path) => path.id);
+  if (!pedestrianIds.includes('corridor:sidewalk:north') || !pedestrianIds.includes('corridor:sidewalk:south')) {
+    throw new Error('Base world pedestrian sidewalks are incomplete');
+  }
+  if (payload.transport.pedestrian_corridors.some((path) => path.points.some((point) => point.y === 3))) {
+    throw new Error('Base world pedestrian sidewalks must not use the road centerline');
+  }
   if (payload.buildings.footprints.length !== 2) throw new Error('Base world buildings layer is incomplete');
   if (payload.decorations.trees.length !== 0) throw new Error('Base world trees layer is incomplete');
 }
