@@ -116,6 +116,9 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.mobilityVehicles.count).toBe(state.city.cars);
   expect(state.city.mobilityVehicles.selectedId).toBeNull();
   expect(state.city.mobilityVehicles.vehicles.length).toBe(state.city.cars);
+  expect(
+    state.city.mobilityVehicles.vehicles.every((vehicle: { kind: string }) => vehicle.kind === 'car'),
+  ).toBe(true);
   const visibleVehicles = visibleEntities(state.city.mobilityVehicles.vehicles, { width: 409, height: 519 });
   expect(visibleVehicles.length).toBeGreaterThanOrEqual(1);
   const uniqueVehicleScreens = new Set(
