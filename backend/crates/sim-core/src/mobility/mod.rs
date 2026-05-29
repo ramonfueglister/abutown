@@ -1404,7 +1404,7 @@ mod tests {
             VehicleRecord {
                 id: id_v.clone(),
                 kind: VehicleKind::Car,
-                route_id: "r:1".into(),
+                route_id: "r".into(),
                 link_index: 0,
                 progress: 0.0,
                 speed_per_tick: 0.1,

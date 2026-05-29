@@ -39,6 +39,9 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     if !world.contains_resource::<crate::routing::TrafficRoutes>() {
         world.insert_resource(crate::routing::TrafficRoutes::default());
     }
+    if !world.contains_resource::<crate::routing::TransitLines>() {
+        world.insert_resource(crate::routing::TransitLines::default());
+    }
     if !world.contains_resource::<crate::routing::WaitingAgents>() {
         world.insert_resource(crate::routing::WaitingAgents::default());
     }
