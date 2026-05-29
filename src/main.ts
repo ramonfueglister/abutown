@@ -101,6 +101,13 @@ import {
   riverSurfaceFill,
   terrainBaseFill,
 } from './render/terrainStyle';
+import {
+  RAIL_CASING,
+  RAIL_CORE,
+  TRAIN_CORE,
+  railLineStyle,
+  roadLineStyle,
+} from './render/transportStyle';
 
 type Coord = { x: number; y: number };
 
@@ -126,13 +133,6 @@ const EDGE_EXIT_TILES = 7;
 const TRAIN_FADE_TILES = 12;
 const TRAIN_SPEED = 8.5;
 const MAP_BACKGROUND = '#f6f0e3';
-const ROAD_CASING = '#c7d1cf';
-const ROAD_CORE = '#fffdf7';
-const ROAD_BRIDGE_CASING = '#8fc9d7';
-const ROAD_BRIDGE_CORE = '#fff9e9';
-const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
-const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
-const TRAIN_CORE = '#5f6f75';
 const TREE_COLOR = '#84ad78';
 const DETAIL_COLOR = 'rgba(92, 97, 92, 0.34)';
 const AGENT_COLOR = '#343b43';
@@ -430,25 +430,11 @@ function drawOutskirtsTerrain(visibleGrid: GridRect): void {
 }
 
 function drawRoad(road: RoadTile): void {
-  drawMaskLine(road.coord, road.mask, {
-    casing: road.kind === 'bridge' ? ROAD_BRIDGE_CASING : ROAD_CASING,
-    core: road.kind === 'bridge' ? ROAD_BRIDGE_CORE : ROAD_CORE,
-    casingWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(5.5, camera.scale, { minWorld: 10.5, maxWorld: 17 })
-      : screenStableWorldSize(4.8, camera.scale, { minWorld: 9.2, maxWorld: 16 }),
-    coreWidth: road.kind === 'bridge'
-      ? screenStableWorldSize(3.8, camera.scale, { minWorld: 7, maxWorld: 12 })
-      : screenStableWorldSize(3.4, camera.scale, { minWorld: 6.4, maxWorld: 10.5 }),
-  });
+  drawMaskLine(road.coord, road.mask, roadLineStyle(road.kind, camera.scale));
 }
 
 function drawRail(_rail: RailTile): void {
-  drawMaskLine(_rail.coord, _rail.mask, {
-    casing: RAIL_CASING,
-    core: RAIL_CORE,
-    casingWidth: screenStableWorldSize(2.8, camera.scale, { minWorld: 4.8, maxWorld: 9 }),
-    coreWidth: screenStableWorldSize(1.2, camera.scale, { minWorld: 1.8, maxWorld: 4 }),
-  });
+  drawMaskLine(_rail.coord, _rail.mask, railLineStyle(camera.scale));
 }
 
 function drawRailPath(path: Coord[]): void {
@@ -456,8 +442,9 @@ function drawRailPath(path: Coord[]): void {
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  drawPolyline(path, RAIL_CASING, screenStableWorldSize(2.8, camera.scale, { minWorld: 4.8, maxWorld: 9 }));
-  drawPolyline(path, RAIL_CORE, screenStableWorldSize(1.2, camera.scale, { minWorld: 1.8, maxWorld: 4 }));
+  const style = railLineStyle(camera.scale);
+  drawPolyline(path, style.casing, style.casingWidth);
+  drawPolyline(path, style.core, style.coreWidth);
   ctx.restore();
 }
 
