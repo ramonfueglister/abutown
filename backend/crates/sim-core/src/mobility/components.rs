@@ -102,6 +102,11 @@ pub struct DwellTicksRemaining(pub u16);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NearStop;
 
+/// Simulation tick at which this agent was born (spawned). Age is derived from
+/// it via `SimClock`. Durable: mirrors `AgentRecord.birth_tick`.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BirthTick(pub u64);
+
 /// Cached resolved polyline for the link this entity currently traverses.
 /// Refreshed by `update_link_polyline_cache_system` (runs first in Advance)
 /// when the entity's link changes. Eliminates the per-tick HashMap chain

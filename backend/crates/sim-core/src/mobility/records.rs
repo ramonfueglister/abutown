@@ -84,6 +84,8 @@ pub struct AgentRecord {
     pub plan: Vec<PlanStage>,
     pub plan_cursor: usize,
     pub walk_speed_per_tick: f32,
+    #[serde(default)]
+    pub birth_tick: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_route: Option<PersistedActiveRoute>,
 }
@@ -98,12 +100,24 @@ impl AgentRecord {
         plan: Vec<PlanStage>,
         walk_speed_per_tick: f32,
     ) -> Self {
+        Self::new_born_at(id, state, plan, walk_speed_per_tick, 0)
+    }
+
+    /// Construct an agent with an explicit birth tick for age derivation.
+    pub fn new_born_at(
+        id: AgentId,
+        state: AgentMobilityState,
+        plan: Vec<PlanStage>,
+        walk_speed_per_tick: f32,
+        birth_tick: u64,
+    ) -> Self {
         Self {
             id,
             state,
             plan,
             plan_cursor: 0,
             walk_speed_per_tick,
+            birth_tick,
             active_route: None,
         }
     }

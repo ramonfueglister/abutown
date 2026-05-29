@@ -33,6 +33,7 @@ fn active_route_snapshot() -> MobilityPersistSnapshot {
             }],
             plan_cursor: 0,
             walk_speed_per_tick: 1.0,
+            birth_tick: 0,
             active_route: Some(PersistedActiveRoute {
                 destination_node: 1,
                 profile: RoutingProfileKey::Walk,
@@ -112,6 +113,7 @@ fn multi_step_active_route_snapshot() -> MobilityPersistSnapshot {
             }],
             plan_cursor: 0,
             walk_speed_per_tick: 1.0,
+            birth_tick: 0,
             active_route: Some(PersistedActiveRoute {
                 destination_node: 2,
                 profile: RoutingProfileKey::Walk,
@@ -233,6 +235,7 @@ fn graph_native_active_route_world() -> bevy_ecs::world::World {
             }],
             plan_cursor: 0,
             walk_speed_per_tick: 1.0,
+            birth_tick: 0,
             active_route: Some(PersistedActiveRoute {
                 destination_node: 1,
                 profile: RoutingProfileKey::Walk,
