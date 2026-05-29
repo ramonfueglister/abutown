@@ -326,6 +326,7 @@ impl SimulationRuntime {
         sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
+        sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: bundle.world_id().to_owned(),
         }
@@ -443,6 +444,7 @@ impl SimulationRuntime {
         sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
+        sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: world_id.0.clone(),
         }

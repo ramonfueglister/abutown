@@ -73,6 +73,7 @@ pub fn empty_world_and_schedule() -> (World, Schedule) {
     use crate::world::schedule::SimPlugin;
     CorePlugin::default().install(&mut world, &mut schedule);
     crate::time::TimePlugin.install(&mut world, &mut schedule);
+    crate::population::PopulationPlugin.install(&mut world, &mut schedule);
     install_mobility(&mut world, &mut schedule);
     (world, schedule)
 }
