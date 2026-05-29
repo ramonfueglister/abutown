@@ -365,3 +365,48 @@ fn active_route_hydration_rejects_cursor_past_steps() {
     let (mut world, _schedule) = api::empty_world_and_schedule();
     apply_into_world(&mut world, snap);
 }
+
+#[test]
+fn birth_tick_round_trips() {
+    // Spawn an agent with birth_tick = 4242, extract → JSON → deserialize,
+    // assert the persisted record carries birth_tick. Then re-apply into a
+    // fresh world and confirm the live entity still has birth_tick == 4242.
+    let (mut world, _schedule) = api::empty_world_and_schedule();
+    let rec = AgentRecord::new_born_at(
+        AgentId("agent:born".into()),
+        AgentMobilityState::AtActivity {
+            activity_id: "activity:home".into(),
+        },
+        vec![PlanStage::Activity {
+            activity_id: "activity:home".into(),
+        }],
+        0.05,
+        4242,
+    );
+    api::spawn_agent_from_record(&mut world, rec);
+
+    let snap = extract_from_world(&world);
+    let json = serde_json::to_string(&snap).unwrap();
+    let back: MobilityPersistSnapshot = serde_json::from_str(&json).unwrap();
+
+    // The persisted record must carry birth_tick through JSON serialization.
+    let agent = back
+        .agents
+        .get(&AgentId("agent:born".into()))
+        .expect("agent was persisted in snapshot");
+    assert_eq!(agent.birth_tick, 4242);
+
+    // Re-applying into a fresh world must preserve birth_tick on the live entity.
+    let (mut w2, _s2) = api::empty_world_and_schedule();
+    apply_into_world(&mut w2, back);
+    let snap2 = extract_from_world(&w2);
+    assert_eq!(
+        snap2
+            .agents
+            .get(&AgentId("agent:born".into()))
+            .expect("agent present after re-apply")
+            .birth_tick,
+        4242,
+        "birth_tick must survive extract → JSON → apply round-trip"
+    );
+}
