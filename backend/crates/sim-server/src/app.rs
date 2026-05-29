@@ -26,7 +26,7 @@ use sim_core::{
 use tokio::sync::{Mutex, broadcast};
 use tokio_stream::StreamMap;
 use tokio_stream::wrappers::BroadcastStream;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::{
     card_hand::{
@@ -413,7 +413,8 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         card_hands,
         auth,
     );
-    Ok(build_router_from_state(state))
+    let cors = cors_layer(&config.cors_allowed_origins)?;
+    Ok(build_router_from_state(state, cors))
 }
 
 pub fn build_app_with_runtime(runtime: SimulationRuntime) -> Router {
@@ -430,10 +431,31 @@ pub fn build_app_with_runtime_and_card_hands(
     auth: AuthVerifier,
 ) -> Router {
     let state = AppState::new_with_card_hands(runtime, card_hands, auth);
-    build_router_from_state(state)
+    let cors = cors_layer(&[]).expect("empty origin list is always valid");
+    build_router_from_state(state, cors)
 }
 
-fn build_router_from_state(state: AppState) -> Router {
+/// Build a fail-closed CORS layer from an explicit allow-list. An empty list
+/// allows no cross-origin requests. Malformed origins are a startup error.
+fn cors_layer(allowed_origins: &[String]) -> anyhow::Result<CorsLayer> {
+    use axum::http::{HeaderValue, Method, header};
+
+    let origins = allowed_origins
+        .iter()
+        .map(|origin| {
+            origin
+                .parse::<HeaderValue>()
+                .map_err(|err| anyhow::anyhow!("invalid CORS origin {origin:?}: {err}"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::PUT])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]))
+}
+
+fn build_router_from_state(state: AppState, cors: CorsLayer) -> Router {
     // tick_loop is already running (spawned in new_with_stores). Only the
     // periodic persist loop needs to be spawned here, since it depends on the
     // AppState clone (view + mutations).
@@ -450,7 +472,7 @@ fn build_router_from_state(state: AppState) -> Router {
         .route("/mobility", get(mobility))
         .route("/ws", get(websocket))
         .with_state(state)
-        .layer(CorsLayer::permissive())
+        .layer(cors)
 }
 
 async fn health(State(state): State<AppState>) -> Response {
@@ -1803,5 +1825,75 @@ mod tests {
             !payload.chunk_snapshots.is_empty(),
             "snapshot write failure must not mark chunks persisted (snapshots remain dirty)"
         );
+    }
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn router_with_origins(origins: &[&str]) -> axum::Router {
+        let owned: Vec<String> = origins.iter().map(|o| o.to_string()).collect();
+        let cors = cors_layer(&owned).expect("valid origins");
+        axum::Router::new()
+            .route("/health", axum::routing::get(|| async { "ok" }))
+            .layer(cors)
+    }
+
+    #[tokio::test]
+    async fn allowed_origin_is_reflected() {
+        let app = router_with_origins(&["http://127.0.0.1:5173"]);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .header("origin", "http://127.0.0.1:5173")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers()
+                .get("access-control-allow-origin")
+                .map(|v| v.to_str().unwrap().to_string()),
+            Some("http://127.0.0.1:5173".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn disallowed_origin_gets_no_cors_header() {
+        let app = router_with_origins(&["http://127.0.0.1:5173"]);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .header("origin", "https://evil.example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.headers().get("access-control-allow-origin").is_none());
+    }
+
+    #[tokio::test]
+    async fn empty_allow_list_is_fail_closed() {
+        let app = router_with_origins(&[]);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .header("origin", "http://127.0.0.1:5173")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.headers().get("access-control-allow-origin").is_none());
     }
 }
