@@ -35,10 +35,6 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     const state = await readCityState(page);
     return visibleEntities(state.city.mobilityVehicles.vehicles, { width: 409, height: 519 }).length;
   }, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
-  await expect.poll(async () => {
-    const state = await readCityState(page);
-    return state.city.mobilityTrams.trams.length;
-  }, { timeout: 10_000 }).toBe(4);
   const state = await readCityState(page);
   const oldResourceRequests = await page.evaluate((patternSource) =>
     performance
@@ -51,7 +47,9 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   expect(state.city.roadTiles).toBeGreaterThan(0);
   expect(state.city.buildings).toBeGreaterThan(0);
   expect(state.city.cars).toBeGreaterThanOrEqual(1);
-  expect(state.city.trains).toBe(4);
+  expect(state.city.train).toBeUndefined();
+  expect(state.city.trains).toBeUndefined();
+  expect(state.city.mobilityTrams).toBeUndefined();
   expect(state.city.worldId).toBe('zurich-river-city-v1');
   expect(state.city.visualStyle).toEqual({
     id: 'minimal-motorways',
@@ -137,18 +135,16 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
   }));
-  expect(state.city.mobilityTrams.count).toBe(4);
-  expect(state.city.mobilityTrams.trams[0]).toEqual(expect.objectContaining({
-    id: expect.stringMatching(/^vehicle:tram:/),
-    kind: 'tram',
-    state: 'driving',
-    coord: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
-    screen: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+  expect(state.city.traffic).toEqual(expect.objectContaining({
+    routes: expect.any(Number),
+    cars: state.city.cars,
+    movingCars: expect.any(Number),
+    stuckCars: expect.any(Number),
+    invalidRouteCars: 0,
   }));
-  expect(state.city.train).toEqual(expect.objectContaining({
-    id: expect.stringMatching(/^vehicle:tram:/),
-    position: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
-  }));
+  expect(state.city.traffic.routes).toBeGreaterThanOrEqual(1);
+  expect(state.city.traffic.cars).toBe(state.city.mobilityVehicles.count);
+  expect(state.city.traffic.movingCars + state.city.traffic.stuckCars).toBe(state.city.traffic.cars);
   // Backend-driven movement: compare consecutive subscribed samples. The HTTP
   // full snapshot can be replaced by chunk snapshots once the WebSocket
   // subscription opens, so anchoring to a pre-subscribe set is flaky.
@@ -158,9 +154,6 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
   await expect.poll(movementObserver(page, (sample) => sample.city.mobilityVehicles.vehicles), {
     timeout: 10_000,
   }).toBeGreaterThan(0);
-  await expect.poll(movementObserver(page, (sample) => sample.city.mobilityTrams.trams), {
-    timeout: 10_000,
-  }).toBeGreaterThan(0);
   const interactionState = await readCityState(page);
   const agentCandidates = rankedVisibleEntities(
     interactionState.city.mobilityAgents.agents,
@@ -168,7 +161,6 @@ test('renders the city with a bounded fixed-map camera', async ({ page }) => {
     [
       ...interactionState.city.mobilityAgents.agents,
       ...interactionState.city.mobilityVehicles.vehicles,
-      ...interactionState.city.mobilityTrams.trams,
     ],
   );
   expect(agentCandidates.length).toBeGreaterThan(0);
