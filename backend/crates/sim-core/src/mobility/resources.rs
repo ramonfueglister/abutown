@@ -120,3 +120,9 @@ pub struct RouteAssignmentStats {
     pub skipped: u64,
     pub failed: u64,
 }
+
+/// World-derived coordinates for resolvable activities (e.g. round-trip
+/// home/destination), populated at seed time from the loaded world's geometry.
+/// Authoritative over the static `mobility_geometry::activity_geometry` fallback.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ActivityWaypoints(pub HashMap<String, (f32, f32)>);
