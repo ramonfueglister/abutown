@@ -145,6 +145,7 @@ pub(crate) fn health_dto_to_proto(h: &abutown_protocol::HealthResponse) -> w::He
         service: h.service.clone(),
         world_id: h.world_id.0.clone(),
         ok: h.ok,
+        persistence: None,
     }
 }
 
