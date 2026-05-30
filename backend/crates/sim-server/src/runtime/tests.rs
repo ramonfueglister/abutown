@@ -285,9 +285,21 @@ fn runtime_installs_flow_field_cache() {
 #[test]
 fn runtime_installs_economy_plugin() {
     let runtime = SimulationRuntime::new();
-    assert!(runtime.world.contains_resource::<sim_core::economy::AccountBook>());
-    assert!(runtime.world.contains_resource::<sim_core::economy::OrderBook>());
-    assert!(runtime.world.contains_resource::<sim_core::economy::TradeLedger>());
+    assert!(
+        runtime
+            .world
+            .contains_resource::<sim_core::economy::AccountBook>()
+    );
+    assert!(
+        runtime
+            .world
+            .contains_resource::<sim_core::economy::OrderBook>()
+    );
+    assert!(
+        runtime
+            .world
+            .contains_resource::<sim_core::economy::TradeLedger>()
+    );
 }
 
 #[test]
