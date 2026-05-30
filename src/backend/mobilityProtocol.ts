@@ -137,6 +137,19 @@ export type WorldSummaryDto = {
   sim_time: number;
 };
 
+export type BackendPersistenceStatusDto = 'starting' | 'healthy' | 'degraded' | 'stale';
+
+export type BackendPersistenceHealthDto = {
+  status: BackendPersistenceStatusDto;
+  world_id: string;
+  mobility_tick: number;
+  last_attempt_unix_ms: number | null;
+  last_success_unix_ms: number | null;
+  consecutive_failures: number;
+  last_error: string | null;
+  freshness_ms: number | null;
+};
+
 export function isMobilitySnapshotDto(value: unknown): value is MobilitySnapshotDto {
   if (!isObject(value)) return false;
   return (
@@ -349,7 +362,7 @@ import type {
   VehicleMobility as VehicleMobilityProto,
   WorldSummary as WorldSummaryProto,
 } from './proto/abutown_pb';
-import { Direction as DirectionProto, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
+import { Direction as DirectionProto, PersistenceHealthStatus, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
 
 const DIRECTION_PROTO_TO_DTO: Record<number, DirectionDto> = {
   [DirectionProto.N]: 'n',
@@ -479,13 +492,39 @@ export function healthResponseFromProto(p: HealthResponseProto): {
   world_id: string;
   ok: boolean;
   protocol_version: number;
+  persistence?: BackendPersistenceHealthDto;
 } {
   return {
     service: p.service,
     world_id: p.worldId,
     ok: p.ok,
     protocol_version: p.protocolVersion,
+    persistence: p.persistence
+      ? {
+          status: persistenceStatusFromProto(p.persistence.status),
+          world_id: p.persistence.worldId,
+          mobility_tick: Number(p.persistence.mobilityTick),
+          last_attempt_unix_ms: positiveNumberOrNull(p.persistence.lastAttemptUnixMs),
+          last_success_unix_ms: positiveNumberOrNull(p.persistence.lastSuccessUnixMs),
+          consecutive_failures: p.persistence.consecutiveFailures,
+          last_error: p.persistence.lastError.length > 0 ? p.persistence.lastError : null,
+          freshness_ms: positiveNumberOrNull(p.persistence.freshnessMs),
+        }
+      : undefined,
   };
+}
+
+function persistenceStatusFromProto(value: PersistenceHealthStatus): BackendPersistenceStatusDto {
+  if (value === PersistenceHealthStatus.STARTING) return 'starting';
+  if (value === PersistenceHealthStatus.HEALTHY) return 'healthy';
+  if (value === PersistenceHealthStatus.DEGRADED) return 'degraded';
+  if (value === PersistenceHealthStatus.STALE) return 'stale';
+  throw new Error('unsupported persistence health status');
+}
+
+function positiveNumberOrNull(value: bigint | number): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export function worldSummaryFromProto(p: WorldSummaryProto): WorldSummaryDto {

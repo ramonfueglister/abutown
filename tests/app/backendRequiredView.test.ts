@@ -110,4 +110,26 @@ describe('backendRequiredView', () => {
     expect(dom.currentPanel()?.innerHTML).not.toContain('old');
     expect(dom.currentPanel()?.innerHTML).toContain('Backend required');
   });
+
+  it('shows persistence health errors in the backend-required panel', () => {
+    const dom = installFakeDom();
+    const canvas = createCanvas();
+    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+
+    renderBackendRequired({
+      canvas,
+      ctx,
+      baseUrl: 'http://127.0.0.1:8080',
+      background: '#6abf69',
+      error: new Error('Backend health not OK: persistence degraded: db <down>'),
+      viewport: { width: 800, height: 600, devicePixelRatio: 1 },
+      logError: vi.fn(),
+    });
+
+    expect(canvas.dataset.ready).toBe('false');
+    expect(dom.currentPanel()?.innerHTML).toContain('Backend required');
+    expect(dom.currentPanel()?.innerHTML).toContain(
+      'Backend health not OK: persistence degraded: db &lt;down&gt;',
+    );
+  });
 });

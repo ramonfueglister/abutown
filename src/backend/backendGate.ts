@@ -1,13 +1,16 @@
 import { fromBinary } from '@bufbuild/protobuf';
 import { HealthResponseSchema } from './proto/abutown_pb';
-import { healthResponseFromProto } from './mobilityProtocol';
+import { healthResponseFromProto, type BackendPersistenceHealthDto } from './mobilityProtocol';
 
-export type BackendHealthDto = {
+export type BackendHealthResponseDto = {
   service: 'abutown-sim';
   world_id: string;
-  ok: true;
+  ok: boolean;
   protocol_version: number;
+  persistence?: BackendPersistenceHealthDto;
 };
+
+export type BackendHealthDto = BackendHealthResponseDto & { ok: true };
 
 export type BackendGateOptions = {
   baseUrl?: string;
@@ -20,14 +23,30 @@ export function resolveBackendBaseUrl(envUrl?: unknown): string {
   return typeof envUrl === 'string' && envUrl.length > 0 ? envUrl : DEFAULT_BACKEND_BASE_URL;
 }
 
-export function isBackendHealthDto(value: unknown): value is BackendHealthDto {
+export function isBackendHealthResponseDto(value: unknown): value is BackendHealthResponseDto {
   if (!isObject(value)) return false;
   return (
     value.service === 'abutown-sim' &&
     isString(value.world_id) &&
-    value.ok === true &&
-    isNumber(value.protocol_version)
+    typeof value.ok === 'boolean' &&
+    isNumber(value.protocol_version) &&
+    (value.persistence === undefined || isBackendPersistenceHealthDto(value.persistence))
   );
+}
+
+export function isBackendHealthDto(value: unknown): value is BackendHealthDto {
+  return (
+    isBackendHealthResponseDto(value) &&
+    value.ok === true &&
+    isAcceptableBackendPersistenceHealth(value.persistence)
+  );
+}
+
+export class BackendHealthError extends Error {
+  constructor(readonly health: BackendHealthResponseDto) {
+    super(formatBackendHealthError(health));
+    this.name = 'BackendHealthError';
+  }
 }
 
 export async function requireBackend(options: BackendGateOptions = {}): Promise<BackendHealthDto> {
@@ -42,7 +61,8 @@ export async function requireBackend(options: BackendGateOptions = {}): Promise<
   const bytes = new Uint8Array(await response.arrayBuffer());
   const proto = fromBinary(HealthResponseSchema, bytes);
   const payload = healthResponseFromProto(proto);
-  if (!isBackendHealthDto(payload)) throw new Error('Invalid backend health payload');
+  if (!isBackendHealthResponseDto(payload)) throw new Error('Invalid backend health payload');
+  if (!isBackendHealthDto(payload)) throw new BackendHealthError(payload);
   return payload;
 }
 
@@ -66,4 +86,32 @@ function isString(value: unknown): value is string {
 
 function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function formatBackendHealthError(health: BackendHealthResponseDto): string {
+  const persistence = health.persistence;
+  if (!persistence) return 'Backend health not OK';
+  const base = `Backend health not OK: persistence ${persistence.status}`;
+  return persistence.last_error ? `${base}: ${persistence.last_error}` : base;
+}
+
+function isAcceptableBackendPersistenceHealth(value: BackendPersistenceHealthDto | undefined): boolean {
+  return value === undefined || value.status === 'starting' || value.status === 'healthy';
+}
+
+function isBackendPersistenceHealthDto(value: unknown): value is BackendPersistenceHealthDto {
+  if (!isObject(value)) return false;
+  return (
+    (value.status === 'starting' ||
+      value.status === 'healthy' ||
+      value.status === 'degraded' ||
+      value.status === 'stale') &&
+    isString(value.world_id) &&
+    isNumber(value.mobility_tick) &&
+    (value.last_attempt_unix_ms === null || isNumber(value.last_attempt_unix_ms)) &&
+    (value.last_success_unix_ms === null || isNumber(value.last_success_unix_ms)) &&
+    isNumber(value.consecutive_failures) &&
+    (value.last_error === null || isString(value.last_error)) &&
+    (value.freshness_ms === null || isNumber(value.freshness_ms))
+  );
 }
