@@ -787,7 +787,7 @@ mod tests {
         let agents = crate::mobility::api::agents(&world);
         let vehicles = crate::mobility::api::vehicles(&world);
 
-        assert_eq!(agents.len(), 1);
+        assert_eq!(agents.len(), 300);
         assert!(vehicles.is_empty());
         let tram_prefix = ["vehicle:", "tram:"].concat();
         assert!(

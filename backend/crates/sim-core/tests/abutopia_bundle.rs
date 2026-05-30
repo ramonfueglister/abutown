@@ -21,7 +21,7 @@ fn loads_abutopia_base_world() {
     assert_eq!(bundle.buildings.footprints.len(), 2);
     assert_eq!(bundle.transport.pedestrian_corridors.len(), 2);
     assert_eq!(bundle.spawns.pedestrian_groups.len(), 1);
-    assert_eq!(bundle.spawns.pedestrian_groups[0].agents_per_corridor, 1);
+    assert_eq!(bundle.spawns.pedestrian_groups[0].agents_per_corridor, 300);
     assert!(bundle.transport.rails.is_empty());
     assert!(bundle.transport.arterial_paths.is_empty());
     assert!(bundle.spawns.car_groups.is_empty());
@@ -48,7 +48,7 @@ fn abutopia_authors_sidewalk_pedestrian_corridors() {
     let group = &bundle.spawns.pedestrian_groups[0];
     assert_eq!(group.id, "spawn:ped:sidewalk-south");
     assert_eq!(group.corridor_id, "corridor:sidewalk:south");
-    assert_eq!(group.agents_per_corridor, 1);
+    assert_eq!(group.agents_per_corridor, 300);
 
     assert!(
         bundle

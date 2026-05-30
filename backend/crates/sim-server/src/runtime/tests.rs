@@ -105,8 +105,9 @@ fn runtime_seeds_backend_pedestrian_from_base_world() {
     let agents = sim_core::mobility::api::agents(&runtime.world);
     let vehicles = sim_core::mobility::api::vehicles(&runtime.world);
 
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0].id.0, "agent:walk:0");
+    assert_eq!(agents.len(), 300);
+    assert!(agents.iter().any(|agent| agent.id.0 == "agent:walk:0"));
+    assert!(agents.iter().any(|agent| agent.id.0 == "agent:walk:299"));
     assert!(vehicles.is_empty());
 }
 
@@ -1046,7 +1047,10 @@ async fn hydrate_seeds_fresh_mobility_when_store_is_empty() {
     .unwrap();
 
     assert_eq!(runtime.mobility_tick_for_test(), 0);
-    assert_eq!(runtime.mobility_agent_count_for_test(), 1);
+    assert_eq!(
+        runtime.mobility_agent_count_for_test(),
+        expected_base_world_agent_count(&base_world)
+    );
     assert_eq!(
         runtime.mobility_vehicle_count_for_test(),
         expected_base_world_car_count(&base_world)
