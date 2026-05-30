@@ -3,6 +3,10 @@ use crate::economy::{
     Ask, Bid, EconomicActorId, GOOD_FOOD, MarketGoodKey, MarketId, Money, OrderId, Quantity,
     build_clearing_plan,
 };
+use crate::economy::{
+    AccountBook, DirtyMarketGoods, GOOD_FOOD as FOOD, InventoryBook, MarketGoodState, MarketGoods,
+    NextOrderId, OrderBook, TradeLedger, clear_market_good, create_ask, create_bid,
+};
 
 fn rbid(id: u64, max_price: Money, qty: Quantity, created_tick: u64) -> Bid {
     Bid {
@@ -204,4 +208,50 @@ fn fills_balance_quantity_per_side() {
     assert_eq!(total, 1_500, "matched quantity = min(2000 demand, 1500 supply)");
     assert_eq!(filled_for_ask(&plan, 3) + filled_for_ask(&plan, 4), 1_500);
     assert_eq!(filled_for_bid(&plan, 1) + filled_for_bid(&plan, 2), 1_500);
+}
+
+#[test]
+fn contested_clearing_conserves_and_rations() {
+    let buyer_a = EconomicActorId(1);
+    let buyer_b = EconomicActorId(2);
+    let seller = EconomicActorId(3);
+    let market = MarketId(1);
+    let k = MarketGoodKey { market, good: FOOD };
+
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut goods = MarketGoods::default();
+    let mut state = MarketGoodState::new(k);
+    state.last_settlement_price = Money(1_000);
+    state.dirty = true;
+    goods.0.insert(k, state);
+
+    accounts.deposit(buyer_a, Money(10_000)).unwrap();
+    accounts.deposit(buyer_b, Money(10_000)).unwrap();
+    inventory.deposit(seller, FOOD, Quantity(1_000)).unwrap();
+
+    // Two equal bids @1000 x1000 each, one ask @1000 x1000 -> 500/500 rationed.
+    create_bid(&mut accounts, &mut orders, &mut ledger, &mut dirty, &mut next, 1,
+        buyer_a, market, FOOD, Quantity(1_000), Money(1_000), 10).unwrap();
+    create_bid(&mut accounts, &mut orders, &mut ledger, &mut dirty, &mut next, 1,
+        buyer_b, market, FOOD, Quantity(1_000), Money(1_000), 10).unwrap();
+    create_ask(&mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next, 1,
+        seller, market, FOOD, Quantity(1_000), Money(1_000), 10).unwrap();
+
+    let money_before = accounts.total_money().unwrap();
+    let goods_before = inventory.total_good(FOOD).unwrap();
+
+    clear_market_good(&mut accounts, &mut inventory, &mut orders, &mut ledger,
+        &mut goods, k, 2).unwrap();
+
+    assert_eq!(accounts.total_money().unwrap(), money_before, "money conserved");
+    assert_eq!(inventory.total_good(FOOD).unwrap(), goods_before, "goods conserved");
+    // Each buyer received a proportional 500 of FOOD.
+    assert_eq!(inventory.balance(buyer_a, FOOD).available, Quantity(500));
+    assert_eq!(inventory.balance(buyer_b, FOOD).available, Quantity(500));
+    assert_eq!(inventory.balance(seller, FOOD).available, Quantity(0));
 }
