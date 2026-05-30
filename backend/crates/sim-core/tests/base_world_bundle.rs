@@ -16,8 +16,8 @@ fn loads_abutopia_base_world_fixture() {
 
     assert_eq!(bundle.world_id(), "abutopia");
     assert_eq!(bundle.chunk_size(), 32);
-    assert_eq!(bundle.world_tiles().width, 16);
-    assert_eq!(bundle.world_tiles().height, 8);
+    assert_eq!(bundle.world_tiles().width, 224);
+    assert_eq!(bundle.world_tiles().height, 128);
     assert_eq!(bundle.transport.roads.len(), 10);
     assert!(bundle.transport.rails.is_empty());
     assert!(bundle.transport.arterial_paths.is_empty());
@@ -34,7 +34,7 @@ fn loads_abutopia_base_world_fixture() {
     assert_eq!(bundle.buildings.footprints.len(), 2);
     assert!(bundle.decorations.trees.is_empty());
     assert!(bundle.decorations.details.is_empty());
-    assert_eq!(bundle.chunk_coords().len(), 1);
+    assert_eq!(bundle.chunk_coords().len(), 28);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn missing_manifest_fails_closed() {
 #[test]
 fn materializes_chunk_tiles_from_bundle_layers() {
     let bundle = BaseWorldBundle::load_from_dir(fixture_root()).expect("bundle loads");
-    let chunk = bundle.tiles_for_chunk(sim_core::ids::ChunkCoord { x: 0, y: 0 }, 7);
+    let chunk = bundle.tiles_for_chunk(sim_core::ids::ChunkCoord { x: 3, y: 2 }, 7);
 
     assert_eq!(chunk.len(), 32 * 32);
     assert!(chunk.iter().any(|tile| tile.kind == TileKind::Road));

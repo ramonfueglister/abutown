@@ -19,7 +19,6 @@ import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendG
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, type MobilityOverlayState } from './backend/mobilityState';
 import {
-  constrainCameraTargetToGrid,
   createCameraState,
   dampCamera,
 } from './cameraController';
@@ -54,15 +53,13 @@ const VISUAL_STYLE_ID = 'minimal-motorways';
 const TILE_W = MINIMAL_MAP_TILE_SIZE.width;
 const TILE_H = MINIMAL_MAP_TILE_SIZE.height;
 const tileSize = { width: TILE_W, height: TILE_H };
-const CAMERA_EDGE_MARGIN = 8;
-const CAMERA_EDGE_SOFTNESS = 4;
 const CAMERA_MIN_SCALE = 0.18;
 const CAMERA_MAX_SCALE = 2.8;
 
 const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
 let worldId = 'abutopia';
-let WIDTH = 16;
-let HEIGHT = 8;
+let WIDTH = 224;
+let HEIGHT = 128;
 let chunkSize = 32;
 
 const canvasElement = document.querySelector<HTMLCanvasElement>('#game');
@@ -168,6 +165,9 @@ function resize(): void {
   canvas.style.height = `${window.innerHeight}px`;
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.imageSmoothingEnabled = true;
+  const minScale = minCameraScaleForViewport();
+  camera.targetScale = Math.max(camera.targetScale, minScale);
+  camera.scale = Math.max(camera.scale, minScale);
   if (!cameraInitialized) {
     const focus = iso(initialCameraFocusCoord());
     camera.targetX = window.innerWidth / 2 - focus.x * camera.targetScale;
@@ -186,7 +186,7 @@ function attachCamera(): void {
     camera,
     constrainCamera,
     selectAtScreenPoint: selectMobilityEntityAtScreenPoint,
-    minScale: CAMERA_MIN_SCALE,
+    minScale: minCameraScaleForViewport,
     maxScale: CAMERA_MAX_SCALE,
   });
 }
@@ -196,6 +196,7 @@ function frame(now: number): void {
   previousTime = now;
   if (!camera.dragging) constrainCamera(false);
   dampCamera(camera, dt, 18);
+  constrainCamera(false);
   render();
   requestAnimationFrame(frame);
 }
@@ -379,20 +380,37 @@ function worldToGrid(point: Coord): Coord {
 }
 
 function constrainCamera(allowOverscroll: boolean): void {
-  constrainCameraTargetToGrid(
-    camera,
-    { width: window.innerWidth, height: window.innerHeight },
-    worldToGrid,
-    iso,
-    {
-      minX: -CAMERA_EDGE_MARGIN,
-      maxX: WIDTH - 1 + CAMERA_EDGE_MARGIN,
-      minY: -CAMERA_EDGE_MARGIN,
-      maxY: HEIGHT - 1 + CAMERA_EDGE_MARGIN,
-      softness: CAMERA_EDGE_SOFTNESS,
-      allowOverscroll,
-    }
+  void allowOverscroll;
+  const minScale = minCameraScaleForViewport();
+  camera.targetScale = Math.max(camera.targetScale, minScale);
+  camera.scale = Math.max(camera.scale, minScale);
+  camera.targetX = clampCameraOffset(
+    camera.targetX,
+    WIDTH * TILE_W * camera.targetScale,
+    window.innerWidth,
   );
+  camera.targetY = clampCameraOffset(
+    camera.targetY,
+    HEIGHT * TILE_H * camera.targetScale,
+    window.innerHeight,
+  );
+  camera.x = clampCameraOffset(camera.x, WIDTH * TILE_W * camera.scale, window.innerWidth);
+  camera.y = clampCameraOffset(camera.y, HEIGHT * TILE_H * camera.scale, window.innerHeight);
+}
+
+function minCameraScaleForViewport(): number {
+  return Math.max(
+    CAMERA_MIN_SCALE,
+    window.innerWidth / (WIDTH * TILE_W),
+    window.innerHeight / (HEIGHT * TILE_H),
+  );
+}
+
+function clampCameraOffset(offset: number, scaledWorldSize: number, viewportSize: number): number {
+  if (scaledWorldSize <= viewportSize) {
+    return (viewportSize - scaledWorldSize) / 2;
+  }
+  return Math.max(viewportSize - scaledWorldSize, Math.min(0, offset));
 }
 
 declare global {
@@ -418,10 +436,10 @@ installRuntimeDiagnostics(window, {
     target: { x: camera.targetX, y: camera.targetY, scale: camera.targetScale },
     dragging: camera.dragging,
     bounds: {
-      minX: -CAMERA_EDGE_MARGIN,
-      maxX: WIDTH - 1 + CAMERA_EDGE_MARGIN,
-      minY: -CAMERA_EDGE_MARGIN,
-      maxY: HEIGHT - 1 + CAMERA_EDGE_MARGIN,
+      minX: 0,
+      maxX: WIDTH - 1,
+      minY: 0,
+      maxY: HEIGHT - 1,
     },
     edgeTreatment: {
       outskirtsTiles: OUTSKIRTS_TILES,

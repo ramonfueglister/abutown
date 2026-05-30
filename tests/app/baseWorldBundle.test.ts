@@ -38,7 +38,7 @@ describe('generated base world bundle', () => {
 
     expect(manifest.world_id).toBe('abutopia');
     expect(manifest.chunk_size).toBe(32);
-    expect(manifest.world_tiles).toEqual({ width: 16, height: 8 });
+    expect(manifest.world_tiles).toEqual({ width: 224, height: 128 });
     expect(terrain.tiles.length).toBe(0);
     expect(transport.roads.length).toBe(10);
     expect(transport.rails.length).toBe(0);
@@ -50,12 +50,12 @@ describe('generated base world bundle', () => {
     ]);
     expect(transport.pedestrian_corridors[0].points).toHaveLength(12);
     expect(transport.pedestrian_corridors[1].points).toHaveLength(12);
-    expect(transport.pedestrian_corridors[0].points[0]).toEqual({ x: 2, y: 2.49 });
-    expect(transport.pedestrian_corridors[1].points[0]).toEqual({ x: 2, y: 3.51 });
+    expect(transport.pedestrian_corridors[0].points[0]).toEqual({ x: 106, y: 63.49 });
+    expect(transport.pedestrian_corridors[1].points[0]).toEqual({ x: 106, y: 64.51 });
     expect(
       transport.pedestrian_corridors
         .flatMap((path) => path.points)
-        .some((point) => point.y === 3),
+        .some((point) => point.y === 64),
     ).toBe(false);
     expect(buildings.footprints.length).toBe(2);
     expect(decorations.trees.length).toBe(0);

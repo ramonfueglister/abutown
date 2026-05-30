@@ -76,7 +76,7 @@ function validateBaseWorld(payload: BaseWorldResponse): void {
   }
   if (payload.schema_version !== 1) throw new Error(`Unexpected base world schema: ${payload.schema_version}`);
   if (payload.chunk_size !== 32) throw new Error(`Unexpected base world chunk size: ${payload.chunk_size}`);
-  if (payload.world_tiles.width !== 16 || payload.world_tiles.height !== 8) {
+  if (payload.world_tiles.width !== 224 || payload.world_tiles.height !== 128) {
     throw new Error('Unexpected base world dimensions');
   }
   if (payload.transport.roads.length !== 10) throw new Error('Base world roads layer is incomplete');
@@ -87,7 +87,7 @@ function validateBaseWorld(payload: BaseWorldResponse): void {
   if (!pedestrianIds.includes('corridor:sidewalk:north') || !pedestrianIds.includes('corridor:sidewalk:south')) {
     throw new Error('Base world pedestrian sidewalks are incomplete');
   }
-  if (payload.transport.pedestrian_corridors.some((path) => path.points.some((point) => point.y === 3))) {
+  if (payload.transport.pedestrian_corridors.some((path) => path.points.some((point) => point.y === 64))) {
     throw new Error('Base world pedestrian sidewalks must not use the road centerline');
   }
   if (payload.buildings.footprints.length !== 2) throw new Error('Base world buildings layer is incomplete');

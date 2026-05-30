@@ -12,32 +12,38 @@ function createBackendStatus() {
 }
 
 function createBaseWorld() {
+  const width = 224;
+  const height = 128;
+  const roadY = 64;
+  const roadX0 = 107;
+  const houseAX = 106;
+  const houseBX = 117;
   return {
     schema_version: 1,
     world_id: 'abutopia',
     chunk_size: 32,
-    world_tiles: { width: 16, height: 8 },
+    world_tiles: { width, height },
     terrain: { tiles: [] },
     transport: {
-      roads: Array.from({ length: 10 }, (_, index) => ({ x: index + 3, y: 3, kind: 'street' as const, mask: index === 0 ? 2 : index === 9 ? 8 : 10 })),
+      roads: Array.from({ length: 10 }, (_, index) => ({ x: index + roadX0, y: roadY, kind: 'street' as const, mask: index === 0 ? 2 : index === 9 ? 8 : 10 })),
       rails: [],
       arterial_paths: [],
       rail_paths: [],
       pedestrian_corridors: [
         {
           id: 'corridor:sidewalk:north',
-          points: Array.from({ length: 12 }, (_, index) => ({ x: index + 2, y: 2.49 })),
+          points: Array.from({ length: 12 }, (_, index) => ({ x: index + houseAX, y: 63.49 })),
         },
         {
           id: 'corridor:sidewalk:south',
-          points: Array.from({ length: 12 }, (_, index) => ({ x: index + 2, y: 3.51 })),
+          points: Array.from({ length: 12 }, (_, index) => ({ x: index + houseAX, y: 64.51 })),
         },
       ],
     },
     buildings: {
       footprints: [
-        { id: 'building:house-a', tiles: [{ x: 2, y: 3 }], sheet: 'oldhouses', frame: 0, district: 'test' },
-        { id: 'building:house-b', tiles: [{ x: 13, y: 3 }], sheet: 'oldhouses', frame: 1, district: 'test' },
+        { id: 'building:house-a', tiles: [{ x: houseAX, y: roadY }], sheet: 'oldhouses', frame: 0, district: 'test' },
+        { id: 'building:house-b', tiles: [{ x: houseBX, y: roadY }], sheet: 'oldhouses', frame: 1, district: 'test' },
       ],
     },
     decorations: {

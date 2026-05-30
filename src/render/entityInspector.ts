@@ -1,15 +1,26 @@
 import type { BackendCar, BackendPedestrian, Coord } from './backendMobilityDrawables';
+import { SIM_SECONDS_PER_DAY, SIM_SECONDS_PER_YEAR } from '../backend/simTime';
 
 export type EntityInspectorRow = { label: string; value: string };
 export type EntityInspector = { title: string; rows: EntityInspectorRow[] } | null;
+const SIM_SECONDS_PER_HOUR = 3600;
 
 export function formatBackendCoord(coord: Coord): string {
   return `${coord.x.toFixed(1)}, ${coord.y.toFixed(1)}`;
 }
 
+export function formatAgentLifetime(ageSeconds: number): string {
+  const safeAgeSeconds = Number.isFinite(ageSeconds) ? Math.max(0, Math.floor(ageSeconds)) : 0;
+  const years = Math.floor(safeAgeSeconds / SIM_SECONDS_PER_YEAR);
+  const remainderAfterYears = safeAgeSeconds % SIM_SECONDS_PER_YEAR;
+  const days = Math.floor(remainderAfterYears / SIM_SECONDS_PER_DAY);
+  const hours = Math.floor((remainderAfterYears % SIM_SECONDS_PER_DAY) / SIM_SECONDS_PER_HOUR);
+  if (years > 0) return `${years}yr ${days}d ${hours}h`;
+  return `${days}d ${hours}h`;
+}
+
 export function buildBackendPedestrianInspector(agent: BackendPedestrian | null): EntityInspector {
   if (!agent) return null;
-  const SIM_SECONDS_PER_YEAR = 31_536_000;
   return {
     title: agent.id,
     rows: [
@@ -17,7 +28,7 @@ export function buildBackendPedestrianInspector(agent: BackendPedestrian | null)
       { label: 'Tile', value: formatBackendCoord(agent.path[0]) },
       { label: 'Next', value: formatBackendCoord(agent.path[1] ?? agent.path[0]) },
       { label: 'Direction', value: agent.direction },
-      { label: 'Age', value: `${(agent.ageSeconds / SIM_SECONDS_PER_YEAR).toFixed(1)} yr` },
+      { label: 'Age', value: formatAgentLifetime(agent.ageSeconds) },
       { label: 'Sprite', value: agent.sprite.sheet },
     ],
   };

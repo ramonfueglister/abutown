@@ -93,6 +93,12 @@ fn base_world_fixture() -> sim_core::base_world::BaseWorldBundle {
     .expect("base world fixture loads")
 }
 
+fn expected_abutopia_proto_chunks() -> Vec<w::ChunkCoord> {
+    (0..=3)
+        .flat_map(|y| (0..=6).map(move |x| w::ChunkCoord { x, y }))
+        .collect()
+}
+
 #[tokio::test]
 async fn health_and_world_summary_are_available() {
     let app = build_app();
@@ -140,8 +146,7 @@ async fn health_and_world_summary_are_available() {
     assert_eq!(world.protocol_version, u32::from(PROTOCOL_VERSION));
     assert_eq!(world.world_id, "abutopia");
     assert_eq!(world.chunk_size, 32);
-    assert_eq!(world.loaded_chunks.len(), 1);
-    assert_eq!(world.loaded_chunks[0], w::ChunkCoord { x: 0, y: 0 });
+    assert_eq!(world.loaded_chunks, expected_abutopia_proto_chunks());
     assert_eq!(world.tick_period_ms, 100);
 }
 
@@ -267,7 +272,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/chunks/0/0")
+                .uri("/chunks/3/2")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -279,7 +284,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let snap = w::ChunkSnapshot::decode(body.as_ref()).unwrap();
 
     assert_eq!(snap.world_id, "abutopia");
-    assert_eq!(snap.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
+    assert_eq!(snap.coord, Some(w::ChunkCoord { x: 3, y: 2 }));
     assert_eq!(snap.tile_count, 1024);
     assert_eq!(snap.chunk_state, w::ChunkState::Warm as i32);
 
@@ -295,7 +300,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
 async fn every_loaded_chunk_snapshot_is_available() {
     let app = build_app();
 
-    for (x, y) in [(0, 0)] {
+    for w::ChunkCoord { x, y } in expected_abutopia_proto_chunks() {
         let response = app
             .clone()
             .oneshot(
