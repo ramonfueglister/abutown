@@ -141,8 +141,10 @@ mod tests {
         let mut store = PostgresEconomySnapshotStore::connect(&database_url)
             .await
             .unwrap();
-        let mut snap = EconomyPersistSnapshot::default();
-        snap.next_order_id = 7;
+        let snap = EconomyPersistSnapshot {
+            next_order_id: 7,
+            ..Default::default()
+        };
         let world_id = format!("test:economy:{}", uuid::Uuid::now_v7());
         let compatibility = SnapshotCompatibility::new(&world_id, 1);
 

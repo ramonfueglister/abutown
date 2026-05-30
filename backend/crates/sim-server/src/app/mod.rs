@@ -529,11 +529,9 @@ async fn economy(State(state): State<AppState>) -> Response {
     }
     match rx.await {
         Ok(snap) => match serde_json::to_vec(&snap) {
-            Ok(bytes) => (
-                [(http::header::CONTENT_TYPE, "application/json")],
-                bytes,
-            )
-                .into_response(),
+            Ok(bytes) => {
+                ([(http::header::CONTENT_TYPE, "application/json")], bytes).into_response()
+            }
             Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         },
         Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),

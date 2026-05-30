@@ -671,7 +671,9 @@ async fn persist_writes_economy_snapshot_to_store() {
     let store = store.lock().await;
     let compat = SnapshotCompatibility::new(
         base_world.world_id().to_string(),
-        base_world.snapshot_compatibility().base_world_schema_version,
+        base_world
+            .snapshot_compatibility()
+            .base_world_schema_version,
     );
     let got = store.read(base_world.world_id(), &compat).await.unwrap();
     assert!(got.is_some(), "economy snapshot persisted");

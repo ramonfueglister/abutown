@@ -477,8 +477,10 @@ mod tests {
         use crate::economy::EconomyPersistSnapshot;
         let mut store = InMemoryEconomySnapshotStore::default();
         let compat = SnapshotCompatibility::new("abutopia", 1);
-        let mut snap = EconomyPersistSnapshot::default();
-        snap.next_order_id = 99;
+        let snap = EconomyPersistSnapshot {
+            next_order_id: 99,
+            ..Default::default()
+        };
 
         store.write("w1", 7, &snap, &compat).await.unwrap();
         let got = store.read("w1", &compat).await.unwrap();

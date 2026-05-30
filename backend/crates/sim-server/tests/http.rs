@@ -562,16 +562,15 @@ async fn postgres_world_state_survives_runtime_restart() {
         let economy_snapshot_store = PostgresEconomySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres economy snapshot store");
-        let (mut runtime, mut snapshot_store_box, _, _) =
-            SimulationRuntime::hydrate_from_stores(
-                Box::new(event_store),
-                Box::new(snapshot_store),
-                Box::new(mobility_snapshot_store),
-                Box::new(economy_snapshot_store),
-                &base_world,
-            )
-            .await
-            .expect("hydrate first runtime");
+        let (mut runtime, mut snapshot_store_box, _, _) = SimulationRuntime::hydrate_from_stores(
+            Box::new(event_store),
+            Box::new(snapshot_store),
+            Box::new(mobility_snapshot_store),
+            Box::new(economy_snapshot_store),
+            &base_world,
+        )
+        .await
+        .expect("hydrate first runtime");
 
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
