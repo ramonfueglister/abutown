@@ -213,3 +213,87 @@ fn dormant_trader_is_frozen_and_conserves() {
         "frozen trader keeps its state",
     );
 }
+
+use crate::economy::EconomyPlugin;
+use crate::world::plugin::CorePlugin;
+use crate::world::schedule::SimPlugin;
+use crate::mobility::resources::Tick;
+
+// Build a world with Core + Mobility + Economy, one supply pool selling FOOD at
+// `market`, the trader/markets un-touched. Anchor `market` to `coord`, and spawn a
+// chunk entity at `coord` with the given marker. Returns the assembled world+schedule.
+fn lod_world(market: MarketId, coord: ChunkCoord, asleep: bool) -> (World, bevy_ecs::schedule::Schedule) {
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    let supplier = EconomicActorId(50);
+    {
+        let mut inv = world.resource_mut::<InventoryBook>();
+        inv.deposit(supplier, GOOD_FOOD, Quantity(1_000_000)).unwrap();
+    }
+    {
+        let mut supply = world.resource_mut::<SupplyPools>();
+        supply.0.insert(
+            supplier,
+            SupplyPool {
+                actor: supplier,
+                market,
+                good: GOOD_FOOD,
+                offered_qty_per_tick: Quantity(10),
+                min_price: Money(1_000),
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+    }
+    {
+        let mut anchors = world.resource_mut::<MarketChunks>();
+        anchors.0.insert(market, coord);
+    }
+    if asleep {
+        world.spawn((ChunkCoordComp(coord), AsleepChunk));
+    } else {
+        world.spawn((ChunkCoordComp(coord), ActiveChunk));
+    }
+    world.insert_resource(Tick(0));
+    (world, schedule)
+}
+
+#[test]
+fn asleep_anchored_market_stays_frozen_end_to_end() {
+    let market = MarketId(99);
+    let coord = ChunkCoord { x: 5, y: 5 };
+    let (mut world, mut schedule) = lod_world(market, coord, /*asleep=*/ true);
+
+    for _ in 0..10 {
+        schedule.run(&mut world);
+        let mut t = world.resource_mut::<Tick>();
+        t.0 += 1;
+    }
+    // No asks were ever placed because the supplier's market is dormant.
+    assert!(world.resource::<OrderBook>().asks.is_empty());
+    // Plugin installed the two new resources.
+    assert!(world.contains_resource::<MarketChunks>());
+    assert!(world.contains_resource::<DormantMarkets>());
+}
+
+#[test]
+fn active_anchored_market_trades_end_to_end() {
+    let market = MarketId(99);
+    let coord = ChunkCoord { x: 5, y: 5 };
+    let (mut world, mut schedule) = lod_world(market, coord, /*asleep=*/ false);
+
+    let mut saw_ask = false;
+    for _ in 0..10 {
+        schedule.run(&mut world);
+        if !world.resource::<OrderBook>().asks.is_empty() {
+            saw_ask = true;
+        }
+        let mut t = world.resource_mut::<Tick>();
+        t.0 += 1;
+    }
+    assert!(saw_ask, "active market must place asks");
+}

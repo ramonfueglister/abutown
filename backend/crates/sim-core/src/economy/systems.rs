@@ -15,6 +15,7 @@ use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
+    RefreshLod,
     ExpireOrders,
     Production,
     Traders,
@@ -47,6 +48,7 @@ impl Default for EconomyConfig {
 pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.configure_sets(
         (
+            EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
             EconomySet::Production,
             EconomySet::Traders,
@@ -58,6 +60,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
     schedule.add_systems(
         (
+            refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
             run_production_system.in_set(EconomySet::Production),
             run_traders_system.in_set(EconomySet::Traders),
