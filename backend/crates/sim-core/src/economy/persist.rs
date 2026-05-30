@@ -16,7 +16,7 @@ use crate::economy::{
 use crate::ids::ChunkCoord;
 use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EconomyPersistSnapshot {
     pub accounts: Vec<(EconomicActorId, MoneyAccount)>,
     pub inventory: Vec<((EconomicActorId, GoodId), InventoryBalance)>,
