@@ -1,6 +1,6 @@
 use crate::economy::{
-    build_clearing_plan, settlement_price, Ask, Bid, EconomicActorId, GOOD_FOOD, MarketGoodKey,
-    MarketId, Money, OrderId, Quantity,
+    Ask, Bid, EconomicActorId, GOOD_FOOD, MarketGoodKey, MarketId, Money, OrderId, Quantity,
+    build_clearing_plan, settlement_price,
 };
 
 fn bid(id: u64, max_price: Money, qty: Quantity, created_tick: u64) -> Bid {
@@ -34,7 +34,10 @@ fn ask(id: u64, min_price: Money, qty: Quantity, created_tick: u64) -> Ask {
 #[test]
 fn no_trade_without_price_overlap() {
     let plan = build_clearing_plan(
-        MarketGoodKey { market: MarketId(1), good: GOOD_FOOD },
+        MarketGoodKey {
+            market: MarketId(1),
+            good: GOOD_FOOD,
+        },
         &[bid(1, Money(800), Quantity(1_000), 1)],
         &[ask(2, Money(1_000), Quantity(1_000), 1)],
         Money(900),
@@ -46,7 +49,10 @@ fn no_trade_without_price_overlap() {
 #[test]
 fn trade_happens_with_price_overlap() {
     let plan = build_clearing_plan(
-        MarketGoodKey { market: MarketId(1), good: GOOD_FOOD },
+        MarketGoodKey {
+            market: MarketId(1),
+            good: GOOD_FOOD,
+        },
         &[bid(1, Money(1_200), Quantity(1_000), 1)],
         &[ask(2, Money(1_000), Quantity(1_000), 1)],
         Money(1_100),
@@ -58,7 +64,16 @@ fn trade_happens_with_price_overlap() {
 
 #[test]
 fn settlement_price_is_within_bid_ask_bounds() {
-    assert_eq!(settlement_price(Money(500), Money(1_200), Money(1_000)), Money(1_000));
-    assert_eq!(settlement_price(Money(1_500), Money(1_200), Money(1_000)), Money(1_200));
-    assert_eq!(settlement_price(Money(1_100), Money(1_200), Money(1_000)), Money(1_100));
+    assert_eq!(
+        settlement_price(Money(500), Money(1_200), Money(1_000)),
+        Money(1_000)
+    );
+    assert_eq!(
+        settlement_price(Money(1_500), Money(1_200), Money(1_000)),
+        Money(1_200)
+    );
+    assert_eq!(
+        settlement_price(Money(1_100), Money(1_200), Money(1_000)),
+        Money(1_100)
+    );
 }

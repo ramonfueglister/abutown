@@ -1,6 +1,6 @@
 use crate::economy::{
-    build_clearing_plan, Ask, Bid, EconomicActorId, GOOD_FOOD, MarketGoodKey, MarketId, Money,
-    OrderId, Quantity,
+    Ask, Bid, EconomicActorId, GOOD_FOOD, MarketGoodKey, MarketId, Money, OrderId, Quantity,
+    build_clearing_plan,
 };
 
 fn bid(id: u64, created_tick: u64) -> Bid {
@@ -33,7 +33,10 @@ fn ask(id: u64, created_tick: u64) -> Ask {
 
 #[test]
 fn same_inputs_same_trades() {
-    let key = MarketGoodKey { market: MarketId(1), good: GOOD_FOOD };
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
     let bids = vec![bid(2, 1), bid(1, 1)];
     let asks = vec![ask(4, 1), ask(3, 1)];
     let a = build_clearing_plan(key, &bids, &asks, Money(1_200)).unwrap();
@@ -43,7 +46,10 @@ fn same_inputs_same_trades() {
 
 #[test]
 fn tie_break_uses_created_tick_then_order_id() {
-    let key = MarketGoodKey { market: MarketId(1), good: GOOD_FOOD };
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
     let bids = vec![bid(2, 5), bid(1, 5)];
     let asks = vec![ask(4, 5), ask(3, 5)];
     let plan = build_clearing_plan(key, &bids, &asks, Money(1_200)).unwrap();

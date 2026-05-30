@@ -1,4 +1,5 @@
 mod auction;
+mod conservation;
 mod determinism;
 mod expiry;
 mod locking;
