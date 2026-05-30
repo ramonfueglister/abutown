@@ -196,4 +196,30 @@ describe('startAppRuntime', () => {
     expect(handle.mobilityBackendBridge).toBeNull();
     expect(() => handle.stop()).not.toThrow();
   });
+
+  it('fails closed when backend health rejects persistence', async () => {
+    const persistenceError = new Error('Backend health not OK: persistence stale');
+    const { dependencies } = createDependencies({
+      requireBackend: vi.fn(async () => {
+        throw persistenceError;
+      }),
+    });
+
+    const handle = await startAppRuntime({
+      backendBaseUrl: 'http://127.0.0.1:8080',
+      viewport: {
+        getScreenToTile: () => null,
+        getViewport: () => null,
+        getWorldDims: () => ({ widthTiles: 1, heightTiles: 1, chunkSize: 1 }),
+      },
+      onInitialState: vi.fn(),
+      onMobilityState: vi.fn(),
+      dependencies,
+    });
+
+    expect(dependencies.renderBackendRequired).toHaveBeenCalledWith(persistenceError);
+    expect(dependencies.boot).not.toHaveBeenCalled();
+    expect(dependencies.connectMobilityBackend).not.toHaveBeenCalled();
+    expect(handle.mobilityBackendBridge).toBeNull();
+  });
 });

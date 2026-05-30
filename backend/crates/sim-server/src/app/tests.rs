@@ -1,7 +1,9 @@
 use super::*;
 use abutown_protocol::ChunkSnapshotDto;
 use sim_core::ids::ChunkCoord;
-use sim_core::persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError};
+use sim_core::persistence::{
+    ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore, MobilitySnapshotStoreError,
+};
 use std::time::Duration;
 
 /// Wait long enough for the spawned tick_loop to advance the published
@@ -117,6 +119,115 @@ async fn persist_snapshots_once_writes_runtime_snapshots() {
         .expect("visible snapshot stored");
     assert_eq!(snapshot.coord.x, 0);
     assert_eq!(snapshot.coord.y, 0);
+}
+
+#[tokio::test]
+async fn healthy_mobility_persistence_keeps_health_ok() {
+    use sim_core::persistence::InMemoryMobilitySnapshotStore;
+
+    let mut runtime = SimulationRuntime::new();
+    mutate_runtime_tile(&mut runtime, "command:app-persist-health:1").await;
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let state = AppState::new_with_stores(
+        runtime,
+        &base_world,
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    );
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    assert_eq!(persist_snapshots_once(&state).await.unwrap(), 1);
+
+    let health = health_response_for_state(&state);
+    let persistence = health.persistence.expect("persistence health present");
+    assert!(health.ok, "healthy persistence should keep /health OK");
+    assert_eq!(
+        persistence.status,
+        w::PersistenceHealthStatus::Healthy as i32
+    );
+    assert_eq!(persistence.world_id, "abutopia");
+    assert!(persistence.mobility_tick > 0);
+    assert!(persistence.last_attempt_unix_ms > 0);
+    assert!(persistence.last_success_unix_ms > 0);
+    assert_eq!(persistence.consecutive_failures, 0);
+    assert_eq!(persistence.last_error, "");
+    assert!(persistence.freshness_ms <= 15_000);
+}
+
+#[derive(Debug, Default)]
+struct FailingMobilitySnapshotStore;
+
+#[async_trait::async_trait]
+impl MobilitySnapshotStore for FailingMobilitySnapshotStore {
+    async fn write(
+        &mut self,
+        _world_id: &str,
+        _tick: u64,
+        _snapshot: &sim_core::mobility::MobilityPersistSnapshot,
+        _compatibility: &sim_core::persistence::SnapshotCompatibility,
+    ) -> Result<(), MobilitySnapshotStoreError> {
+        Err(MobilitySnapshotStoreError::unavailable(
+            "postgres://user:password@db.example/abutown sb_secret_test failed",
+        ))
+    }
+
+    async fn read(
+        &self,
+        _world_id: &str,
+        _compatibility: &sim_core::persistence::SnapshotCompatibility,
+    ) -> Result<
+        Option<(u64, sim_core::mobility::MobilityPersistSnapshot)>,
+        MobilitySnapshotStoreError,
+    > {
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn failing_mobility_write_marks_health_degraded_with_redacted_error() {
+    let mut runtime = SimulationRuntime::new();
+    mutate_runtime_tile(&mut runtime, "command:app-persist-health-fail:1").await;
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let state = AppState::new_with_stores(
+        runtime,
+        &base_world,
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(FailingMobilitySnapshotStore),
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    );
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    assert_eq!(
+        persist_snapshots_once(&state).await.unwrap(),
+        1,
+        "mobility write failures should not fail chunk persistence"
+    );
+
+    let health = health_response_for_state(&state);
+    let persistence = health.persistence.expect("persistence health present");
+    assert!(
+        !health.ok,
+        "degraded persistence should make /health unhealthy"
+    );
+    assert_eq!(
+        persistence.status,
+        w::PersistenceHealthStatus::Degraded as i32
+    );
+    assert_eq!(persistence.world_id, "abutopia");
+    assert!(persistence.mobility_tick > 0);
+    assert_eq!(persistence.consecutive_failures, 1);
+    assert!(persistence.last_attempt_unix_ms > 0);
+    assert_eq!(persistence.last_success_unix_ms, 0);
+    assert!(persistence.last_error.contains("<redacted>"));
+    assert!(!persistence.last_error.contains("password"));
+    assert!(!persistence.last_error.contains("sb_secret_test"));
 }
 
 /// A snapshot store that sleeps during writes to simulate slow DB I/O.
@@ -333,6 +444,9 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
         base_world: Arc::new(BaseWorldResponse::from(
             &BaseWorldBundle::load_from_dir(resolve_base_world_path())
                 .expect("base world fixture loads"),
+        )),
+        mobility_liveness: Arc::new(MobilityPersistenceLiveness::new(
+            MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
         )),
     }
 }
