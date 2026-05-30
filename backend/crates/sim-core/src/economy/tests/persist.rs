@@ -152,3 +152,27 @@ fn empty_economy_round_trips() {
     apply_into_world(&mut fresh, &snap);
     assert_eq!(snap, extract_from_world(&fresh));
 }
+
+use crate::economy::EconomySnapshotProvider;
+use crate::world::persistence::SnapshotProvider;
+
+#[test]
+fn provider_collects_single_economy_item() {
+    let mut world = install_economy();
+    seed(&mut world);
+
+    let provider = EconomySnapshotProvider { world_id: "w1".to_string() };
+    assert_eq!(provider.name(), "economy");
+    assert_eq!(provider.schema_version(), 1);
+
+    let items = provider.collect(&world);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].key.kind, "economy");
+    assert_eq!(items[0].key.identifier, "full");
+    assert_eq!(items[0].key.world_id, "w1");
+    assert_eq!(items[0].schema_version, 1);
+    assert!(!items[0].payload.is_empty());
+
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&items[0].payload).unwrap();
+    assert_eq!(decoded, extract_from_world(&world));
+}
