@@ -41,12 +41,33 @@ pub enum TileKindDto {
     BuildingFootprint,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistenceHealthStatusDto {
+    Starting,
+    Healthy,
+    Degraded,
+    Stale,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistenceHealthDto {
+    pub status: PersistenceHealthStatusDto,
+    pub world_id: WorldId,
+    pub mobility_tick: u64,
+    pub last_attempt_unix_ms: Option<u64>,
+    pub last_success_unix_ms: Option<u64>,
+    pub consecutive_failures: u32,
+    pub last_error: Option<String>,
+    pub freshness_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct HealthResponse {
     pub service: String,
     pub world_id: WorldId,
     pub ok: bool,
     pub protocol_version: u16,
+    pub persistence: Option<PersistenceHealthDto>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -729,6 +750,16 @@ mod proto_roundtrip_tests {
             service: "abutown-sim".into(),
             world_id: "abutopia".into(),
             ok: true,
+            persistence: Some(PersistenceHealth {
+                status: PersistenceHealthStatus::Healthy as i32,
+                world_id: "abutopia".into(),
+                mobility_tick: 42,
+                last_attempt_unix_ms: 1_775_000_000_000,
+                last_success_unix_ms: 1_774_999_990_000,
+                consecutive_failures: 0,
+                last_error: String::new(),
+                freshness_ms: 10_000,
+            }),
         };
         assert_roundtrip(&msg);
     }

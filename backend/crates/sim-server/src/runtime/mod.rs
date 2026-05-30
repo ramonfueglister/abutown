@@ -399,6 +399,7 @@ impl SimulationRuntime {
             world_id: self.world_id.clone(),
             ok: true,
             protocol_version: PROTOCOL_VERSION,
+            persistence: None,
         }
     }
 

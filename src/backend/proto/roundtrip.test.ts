@@ -7,8 +7,10 @@ import {
   ChunkSubscribeSchema,
   ClientMessageSchema,
   Direction,
+  HealthResponseSchema,
   HelloSchema,
   MobilityChunkDeltaSchema,
+  PersistenceHealthStatus,
   ServerMessageSchema,
   WalkingSchema,
   WorldCoordSchema,
@@ -144,5 +146,31 @@ describe('proto roundtrip (TS @bufbuild/protobuf v2 API)', () => {
     const bytes = toBinary(ServerMessageSchema, msg);
     expect(bytes.byteLength).toBeLessThan(200);
     expect(bytes.byteLength).toBeGreaterThan(0);
+  });
+
+  it('round-trips health persistence status', () => {
+    const message = create(HealthResponseSchema, {
+      protocolVersion: 1,
+      service: 'abutown-sim',
+      worldId: 'abutopia',
+      ok: false,
+      persistence: {
+        status: PersistenceHealthStatus.DEGRADED,
+        worldId: 'abutopia',
+        mobilityTick: BigInt(42),
+        lastAttemptUnixMs: BigInt(1_775_000_000_000),
+        lastSuccessUnixMs: BigInt(1_774_999_990_000),
+        consecutiveFailures: 2,
+        lastError: 'database unavailable',
+        freshnessMs: BigInt(10_000),
+      },
+    });
+
+    const decoded = fromBinary(HealthResponseSchema, toBinary(HealthResponseSchema, message));
+
+    expect(decoded.persistence?.status).toBe(PersistenceHealthStatus.DEGRADED);
+    expect(decoded.persistence?.worldId).toBe('abutopia');
+    expect(Number(decoded.persistence?.mobilityTick)).toBe(42);
+    expect(decoded.ok).toBe(false);
   });
 });
