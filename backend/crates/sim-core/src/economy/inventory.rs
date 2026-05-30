@@ -88,6 +88,24 @@ impl InventoryBook {
         Ok(())
     }
 
+    pub fn consume(
+        &mut self,
+        actor: EconomicActorId,
+        good: GoodId,
+        qty: Quantity,
+    ) -> Result<(), EconomyError> {
+        if qty.0 < 0 {
+            return Err(EconomyError::NegativeQuantity);
+        }
+        let mut balance = self.balance(actor, good);
+        if balance.available < qty {
+            return Err(EconomyError::InsufficientGoods);
+        }
+        balance.available = balance.available.checked_sub(qty)?;
+        self.balances.insert((actor, good), balance);
+        Ok(())
+    }
+
     pub fn total_good(&self, good: GoodId) -> Result<Quantity, EconomyError> {
         self.balances
             .iter()

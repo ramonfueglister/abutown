@@ -2,14 +2,16 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, EconomyError, EconomyEvent, InventoryBook,
-    MarketGoods, NextOrderId, OrderBook, SupplyPools, TradeLedger, clear_market_good,
-    expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma,
+    MarketGoods, NextOrderId, OrderBook, ProductionPools, SupplyPools, TradeLedger,
+    clear_market_good, expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma,
+    run_production_at_tick,
 };
 use crate::mobility::resources::Tick;
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
     ExpireOrders,
+    Production,
     GeneratePoolOrders,
     ClearMarkets,
     Telemetry,
@@ -34,6 +36,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.configure_sets(
         (
             EconomySet::ExpireOrders,
+            EconomySet::Production,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::Telemetry,
@@ -43,6 +46,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.add_systems(
         (
             expire_orders_system.in_set(EconomySet::ExpireOrders),
+            run_production_system.in_set(EconomySet::Production),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
@@ -125,6 +129,15 @@ pub fn clear_dirty_markets_system(
             });
         }
     }
+}
+
+pub fn run_production_system(
+    tick: Res<Tick>,
+    mut inventory: ResMut<InventoryBook>,
+    mut ledger: ResMut<TradeLedger>,
+    mut production: ResMut<ProductionPools>,
+) {
+    let _ = run_production_at_tick(&mut inventory, &mut ledger, &mut production, tick.0);
 }
 
 pub fn update_market_telemetry(

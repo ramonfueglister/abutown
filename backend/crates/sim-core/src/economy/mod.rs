@@ -8,6 +8,7 @@ pub mod market;
 pub mod money;
 pub mod orders;
 pub mod pools;
+pub mod production;
 pub mod systems;
 
 pub use accounts::*;
@@ -20,6 +21,7 @@ pub use market::*;
 pub use money::*;
 pub use orders::*;
 pub use pools::*;
+pub use production::*;
 pub use systems::*;
 
 use bevy_ecs::prelude::*;
@@ -42,6 +44,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(DirtyMarketGoods::default());
         world.insert_resource(DemandPools::default());
         world.insert_resource(SupplyPools::default());
+        world.insert_resource(ProductionPools::default());
         world.insert_resource(NextOrderId::default());
         world.insert_resource(EconomyConfig::default());
         install_systems(schedule);

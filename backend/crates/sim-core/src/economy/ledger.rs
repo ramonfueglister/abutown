@@ -43,6 +43,16 @@ pub enum EconomyEvent {
         good: GoodId,
         qty: Quantity,
     },
+    Produced {
+        actor: EconomicActorId,
+        good: GoodId,
+        qty: Quantity,
+    },
+    Consumed {
+        actor: EconomicActorId,
+        good: GoodId,
+        qty: Quantity,
+    },
     OrderRejected {
         actor: EconomicActorId,
         market: MarketId,
