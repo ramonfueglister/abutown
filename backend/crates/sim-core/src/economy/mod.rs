@@ -10,6 +10,7 @@ pub mod orders;
 pub mod pools;
 pub mod production;
 pub mod systems;
+pub mod traders;
 pub mod transport;
 
 pub use accounts::*;
@@ -24,6 +25,7 @@ pub use orders::*;
 pub use pools::*;
 pub use production::*;
 pub use systems::*;
+pub use traders::*;
 pub use transport::*;
 
 use bevy_ecs::prelude::*;
