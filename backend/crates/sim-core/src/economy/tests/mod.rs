@@ -5,6 +5,7 @@ mod expiry;
 mod locking;
 mod lod;
 mod overflow;
+mod persist;
 mod plugin;
 mod pools;
 mod production;
