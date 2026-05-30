@@ -173,6 +173,8 @@ fn telemetry_updates_ewma_with_basis_points() {
         ewma_alpha_bps: 2_500,
         default_order_ttl_ticks: 10,
         transport_cost_per_tile_unit: Money(5),
+        trader_tiles_per_tick: 4,
+        trader_default_ref_price: Money(1_000),
     };
     crate::economy::update_market_telemetry(&mut goods, config).unwrap();
 
@@ -233,5 +235,112 @@ fn production_runs_through_schedule() {
             .balance(actor, GOOD_WOOD)
             .available,
         Quantity(0)
+    );
+}
+
+#[test]
+fn trader_arbitrages_between_markets_end_to_end() {
+    use crate::economy::{
+        DemandPool, DemandPools, SupplyPool, SupplyPools, TRANSPORT_OPERATOR, Trader, TraderState,
+        Traders,
+    };
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    let trader = EconomicActorId(1);
+    let supplier = EconomicActorId(2); // sells cheap at source M1
+    let consumer = EconomicActorId(3); // buys dear at dest M2
+    let src = MarketId(1);
+    let dst = MarketId(2);
+
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(trader, Money(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(consumer, Money(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(supplier, GOOD_TOOLS, Quantity(100_000))
+        .unwrap();
+    // supplier offers TOOLS cheap at M1
+    world.resource_mut::<SupplyPools>().0.insert(
+        supplier,
+        SupplyPool {
+            actor: supplier,
+            market: src,
+            good: GOOD_TOOLS,
+            offered_qty_per_tick: Quantity(1_000),
+            min_price: Money(800),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    // consumer demands TOOLS dear at M2
+    world.resource_mut::<DemandPools>().0.insert(
+        consumer,
+        DemandPool {
+            actor: consumer,
+            market: dst,
+            good: GOOD_TOOLS,
+            desired_qty_per_tick: Quantity(1_000),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<Traders>().0.insert(
+        trader,
+        Trader {
+            actor: trader,
+            good: GOOD_TOOLS,
+            source: src,
+            dest: dst,
+            distance_tiles: 4,
+            batch_qty: Quantity(1_000),
+            buy_premium_bps: 5_000,
+            sell_discount_bps: 5_000,
+            order_ttl_ticks: 50,
+            state: TraderState::Buying { order: None },
+        },
+    );
+
+    let total_money_before = {
+        let a = world.resource::<AccountBook>();
+        a.total_money().unwrap()
+    };
+    for _ in 0..40 {
+        schedule.run(&mut world);
+    }
+
+    // The trader paid transport at least once (completed a buy->travel leg).
+    assert!(
+        world
+            .resource::<AccountBook>()
+            .account(TRANSPORT_OPERATOR)
+            .available
+            .0
+            > 0
+    );
+    // A trade happened at the destination (trader sold to consumer): consumer holds TOOLS.
+    assert!(
+        world
+            .resource::<InventoryBook>()
+            .balance(consumer, GOOD_TOOLS)
+            .available
+            .0
+            > 0
+    );
+    // Money conserved across all accounts (incl. operator).
+    assert_eq!(
+        world.resource::<AccountBook>().total_money().unwrap(),
+        total_money_before
     );
 }
