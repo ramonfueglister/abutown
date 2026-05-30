@@ -448,6 +448,7 @@ fn build_router_from_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/chunks/{x}/{y}", get(chunk))
         .route("/commands", post(command))
         .route("/mobility", get(mobility))
+        .route("/economy", get(economy))
         .route("/ws", get(websocket))
         .with_state(state)
         .layer(cors)
@@ -514,6 +515,29 @@ async fn world(State(state): State<AppState>) -> Response {
 
 async fn mobility(State(state): State<AppState>) -> Response {
     proto_response(state.view().load().mobility_full_dto.clone())
+}
+
+/// Backend-only debug view: returns the live economy snapshot as JSON.
+async fn economy(State(state): State<AppState>) -> Response {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if state
+        .mutations
+        .send(crate::runtime_view::Mutation::CollectEconomySnapshot { reply: tx })
+        .is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    match rx.await {
+        Ok(snap) => match serde_json::to_vec(&snap) {
+            Ok(bytes) => (
+                [(http::header::CONTENT_TYPE, "application/json")],
+                bytes,
+            )
+                .into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        },
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
 }
 
 async fn base_world(State(state): State<AppState>) -> Json<BaseWorldResponse> {
@@ -932,6 +956,9 @@ async fn apply_mutation_owned(
                 economy_world: economy_world.unwrap_or_default(),
             };
             let _ = reply.send(payload);
+        }
+        Mutation::CollectEconomySnapshot { reply } => {
+            let _ = reply.send(runtime.economy_snapshot());
         }
     }
 }

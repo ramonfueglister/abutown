@@ -34,6 +34,10 @@ pub enum Mutation {
     CollectPersistData {
         reply: oneshot::Sender<PersistPayload>,
     },
+    /// On-demand snapshot of the live economy for the debug endpoint.
+    CollectEconomySnapshot {
+        reply: oneshot::Sender<sim_core::economy::EconomyPersistSnapshot>,
+    },
 }
 
 /// Everything the snapshot persist loop needs to issue DB writes without

@@ -682,6 +682,42 @@ async fn persist_writes_economy_snapshot_to_store() {
     );
 }
 
+#[tokio::test]
+async fn economy_endpoint_returns_json_snapshot() {
+    use sim_core::economy::{
+        AccountBook, EconomicActorId, EconomyPersistSnapshot, Money, MoneyAccount,
+    };
+
+    let mut runtime = SimulationRuntime::new();
+    runtime.world.resource_mut::<AccountBook>().accounts.insert(
+        EconomicActorId(5),
+        MoneyAccount {
+            available: Money(1234),
+            locked: Money(0),
+        },
+    );
+    let state = AppState::new(runtime);
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    // Call the handler via the mutation round-trip (app/tests.rs is a child
+    // module of app/mod.rs, so the private `mutations` field is in scope).
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .mutations
+        .send(crate::runtime_view::Mutation::CollectEconomySnapshot { reply: tx })
+        .unwrap();
+    let snap = rx.await.unwrap();
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        decoded
+            .accounts
+            .iter()
+            .any(|(a, acc)| *a == EconomicActorId(5) && acc.available == Money(1234))
+    );
+}
+
 #[cfg(test)]
 mod cors_tests {
     use super::*;
