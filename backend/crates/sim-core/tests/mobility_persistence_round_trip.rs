@@ -47,6 +47,7 @@ fn active_route_snapshot() -> MobilityPersistSnapshot {
             }),
             sex: sim_core::mobility::components::Sex::default(),
             parent_id: None,
+            cyclic: false,
         },
     );
 
@@ -137,6 +138,7 @@ fn multi_step_active_route_snapshot() -> MobilityPersistSnapshot {
             }),
             sex: sim_core::mobility::components::Sex::default(),
             parent_id: None,
+            cyclic: false,
         },
     );
 
@@ -253,6 +255,7 @@ fn graph_native_active_route_world() -> bevy_ecs::world::World {
             }),
             sex: sim_core::mobility::components::Sex::default(),
             parent_id: None,
+            cyclic: false,
         },
     );
     world

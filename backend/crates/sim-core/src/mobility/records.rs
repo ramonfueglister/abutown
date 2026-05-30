@@ -92,6 +92,8 @@ pub struct AgentRecord {
     pub sex: crate::mobility::components::Sex,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<AgentId>,
+    #[serde(default)]
+    pub cyclic: bool,
 }
 
 impl AgentRecord {
@@ -125,6 +127,7 @@ impl AgentRecord {
             active_route: None,
             sex: crate::mobility::components::Sex::default(),
             parent_id: None,
+            cyclic: false,
         }
     }
 }

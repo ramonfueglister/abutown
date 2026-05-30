@@ -439,6 +439,7 @@ mod tests {
                 WalkPlan {
                     stages: plan,
                     cursor: 0,
+                    cyclic: false,
                 },
                 WalkSpeed(1.0),
                 crate::mobility::components::Position { x: 16.0, y: 16.0 },

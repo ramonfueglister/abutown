@@ -86,6 +86,7 @@ fn complete_walk_stage_at_destination(
     state: &mut AgentMobilityStateComponent,
     plan: &mut WalkPlan,
     stage: PlanStage,
+    arrival_link_id: &str,
     destination: crate::routing::NodeId,
     waiting: &mut crate::routing::WaitingAgents,
     dirty: &mut DirtyAgents,
@@ -93,7 +94,7 @@ fn complete_walk_stage_at_destination(
 ) -> bool {
     match stage {
         PlanStage::WalkToStop { stop_id, .. } => {
-            plan.cursor += 1;
+            crate::mobility::systems::advance_cursor(plan);
             state.0 = AgentMobilityState::WaitingAtStop { stop_id };
             let already_waiting = waiting
                 .queue(destination)
@@ -107,8 +108,19 @@ fn complete_walk_stage_at_destination(
             true
         }
         PlanStage::WalkToActivity { activity_id, .. } => {
-            plan.cursor += 1;
-            state.0 = AgentMobilityState::AtActivity { activity_id };
+            crate::mobility::systems::advance_cursor(plan);
+            // Cyclic plans never settle at an activity: the agent must depart
+            // again toward the next (wrapped) stage. Re-anchor it as Walking at
+            // the arrival edge (progress saturated) so route_assignment routes
+            // it onward next tick. Non-cyclic plans terminate at the activity.
+            state.0 = if plan.cyclic {
+                AgentMobilityState::Walking {
+                    link_id: arrival_link_id.to_string(),
+                    progress: 1.0,
+                }
+            } else {
+                AgentMobilityState::AtActivity { activity_id }
+            };
             commands.entity(entity).remove::<(ActiveRoute, NearStop)>();
             dirty.0.insert(entity);
             true
@@ -204,6 +216,7 @@ pub fn route_assignment_system(
                     &mut state,
                     &mut plan,
                     stage,
+                    &link_id,
                     destination,
                     &mut waiting,
                     &mut dirty,
@@ -416,6 +429,7 @@ pub fn route_advance_system(
             &mut state,
             &mut plan,
             stage,
+            &current_step.canonical_edge_key,
             route.destination,
             &mut waiting,
             &mut dirty,

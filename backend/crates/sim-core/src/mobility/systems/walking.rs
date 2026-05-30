@@ -177,7 +177,7 @@ pub fn stop_arrival_system(
         let stage = plan.stages.get(plan.cursor).cloned();
         match stage {
             Some(PlanStage::WalkToStop { stop_id, .. }) => {
-                plan.cursor += 1;
+                crate::mobility::systems::advance_cursor(&mut plan);
                 state.0 = AgentMobilityState::WaitingAtStop {
                     stop_id: stop_id.clone(),
                 };
@@ -193,8 +193,23 @@ pub fn stop_arrival_system(
                 dirty.0.insert(entity);
             }
             Some(PlanStage::WalkToActivity { activity_id, .. }) => {
-                plan.cursor += 1;
-                state.0 = AgentMobilityState::AtActivity { activity_id };
+                // Preserve the arrival link before mutating state so a cyclic
+                // agent can be re-anchored there and depart again.
+                let arrival_link_id = match &state.0 {
+                    AgentMobilityState::Walking { link_id, .. } => Some(link_id.clone()),
+                    _ => None,
+                };
+                crate::mobility::systems::advance_cursor(&mut plan);
+                // Cyclic plans never settle at an activity: resume Walking at the
+                // arrival edge so route_assignment routes the agent onward toward
+                // the next (wrapped) stage. Non-cyclic plans terminate here.
+                state.0 = match (plan.cyclic, arrival_link_id) {
+                    (true, Some(link_id)) => AgentMobilityState::Walking {
+                        link_id,
+                        progress: 1.0,
+                    },
+                    _ => AgentMobilityState::AtActivity { activity_id },
+                };
                 dirty.0.insert(entity);
             }
             _ => {}

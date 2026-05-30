@@ -45,6 +45,9 @@ pub struct AgentMobilityStateComponent(pub AgentMobilityState);
 pub struct WalkPlan {
     pub stages: Vec<PlanStage>,
     pub cursor: usize,
+    /// When `true` the cursor wraps back to 0 after the last stage so the
+    /// agent repeats its plan indefinitely. Defaults to `false` (linear).
+    pub cyclic: bool,
 }
 
 #[derive(Component, Debug, Clone, PartialEq)]

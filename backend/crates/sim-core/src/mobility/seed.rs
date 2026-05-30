@@ -442,6 +442,12 @@ pub fn from_base_world_bundle(
         seeded_walks: seeded_walks_from_base_world(bundle),
     }
     .install(&mut world, &mut schedule);
+    // Walkers follow purposeful WalkToActivity routes, which require the
+    // hierarchical index + flow-field cache (mirrors the server runtime
+    // wiring). Without these the returned schedule cannot assign routes.
+    crate::routing::PathfindingPlugin::default().install(&mut world, &mut schedule);
+    crate::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
+    crate::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
 
     seed_pedestrians_from_bundle(&mut world, bundle)?;
@@ -478,12 +484,25 @@ fn seed_pedestrians_from_bundle(
             };
             let mut rec = AgentRecord::new(
                 agent_id.clone(),
-                AgentMobilityState::Walking { link_id, progress },
-                vec![PlanStage::Activity {
-                    activity_id: format!("activity:wander:{corridor_index}"),
-                }],
+                AgentMobilityState::Walking {
+                    link_id: link_id.clone(),
+                    progress,
+                },
+                vec![
+                    // abutopia round-trip waypoints (south-sidewalk ends). Per-corridor
+                    // waypoint derivation is deferred; abutopia is the only base world.
+                    PlanStage::WalkToActivity {
+                        link_id: link_id.clone(),
+                        activity_id: "activity:home".to_string(),
+                    },
+                    PlanStage::WalkToActivity {
+                        link_id,
+                        activity_id: "activity:destination".to_string(),
+                    },
+                ],
                 0.05,
             );
+            rec.cyclic = true;
             rec.sex = sex_from_id(&agent_id.0);
             api::spawn_agent_from_record(world, rec);
         }
@@ -803,5 +822,26 @@ mod tests {
             .get::<Position>()
             .expect("agent has position");
         assert!((position.y - 64.51).abs() < 0.001);
+    }
+
+    #[test]
+    fn from_base_world_bundle_installs_routing_resources() {
+        // The seeded world must be routable: WalkToActivity stages need the
+        // hierarchical index and flow-field cache, or route_assignment can
+        // never assign a route and walkers ride their seed link forever.
+        let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
+            workspace_root().join("data/worlds/abutopia"),
+        )
+        .expect("base world bundle should load");
+
+        let (world, _) = from_base_world_bundle(&bundle).expect("base world should seed");
+        assert!(
+            world.contains_resource::<crate::routing::HpaIndex>(),
+            "seed must install the hierarchical routing index"
+        );
+        assert!(
+            world.contains_resource::<crate::routing::FlowFieldCache>(),
+            "seed must install the flow-field cache"
+        );
     }
 }

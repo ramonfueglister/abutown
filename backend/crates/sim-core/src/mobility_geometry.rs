@@ -108,6 +108,17 @@ pub fn activity_geometry(activity_id: &str) -> Option<ActivityGeometry> {
         "activity:work" => Some(ActivityGeometry {
             coord: chunk_center(5, 4),
         }),
+        // abutopia south-sidewalk corridor endpoints (the round-trip waypoints).
+        // These track `data/worlds/abutopia/layers/transport.json`
+        // (corridor:sidewalk:south first/last points) and MUST be updated if the
+        // world is regenerated. The round_trip_movement integration test reads
+        // the live corridor ends from the bundle, so a drift here fails loudly.
+        "activity:home" => Some(ActivityGeometry {
+            coord: (106.0, 64.51),
+        }),
+        "activity:destination" => Some(ActivityGeometry {
+            coord: (117.0, 64.51),
+        }),
         _ => Some(ActivityGeometry {
             coord: chunk_center(4, 4),
         }),
@@ -189,6 +200,19 @@ mod tests {
         };
         assert_eq!(geom.direction_at_progress(0.25), DirectionDto::E);
         assert_eq!(geom.direction_at_progress(0.75), DirectionDto::N);
+    }
+
+    #[test]
+    fn home_and_destination_resolve_to_south_corridor_ends() {
+        let home = activity_geometry("activity:home")
+            .expect("home activity defined")
+            .coord;
+        let dest = activity_geometry("activity:destination")
+            .expect("destination activity defined")
+            .coord;
+        assert_eq!(home, (106.0, 64.51));
+        assert_eq!(dest, (117.0, 64.51));
+        assert_ne!(home, dest);
     }
 
     #[test]
