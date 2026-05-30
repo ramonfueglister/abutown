@@ -2,7 +2,8 @@ use super::*;
 use abutown_protocol::ChunkSnapshotDto;
 use sim_core::ids::ChunkCoord;
 use sim_core::persistence::{
-    ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore, MobilitySnapshotStoreError,
+    ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryEconomySnapshotStore,
+    MobilitySnapshotStore, MobilitySnapshotStoreError,
 };
 use std::time::Duration;
 
@@ -134,6 +135,7 @@ async fn healthy_mobility_persistence_keeps_health_ok() {
         &base_world,
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );
@@ -198,6 +200,7 @@ async fn failing_mobility_write_marks_health_degraded_with_redacted_error() {
         &base_world,
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(FailingMobilitySnapshotStore),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );
@@ -308,6 +311,9 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
         auth: AuthVerifier::local_bearer_uuid(),
         snapshot_store: Arc::new(Mutex::new(Box::new(InMemoryChunkSnapshotStore::default()))),
         mobility_snapshot_store: Arc::new(Mutex::new(Box::new(counted_store))),
+        economy_snapshot_store: Arc::new(Mutex::new(Box::new(
+            InMemoryEconomySnapshotStore::default(),
+        ))),
         chunk_channels: Arc::new(DashMap::new()),
         view: Arc::new(arc_swap::ArcSwap::from_pointee(
             build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0),
@@ -380,6 +386,7 @@ async fn concurrent_reads_proceed_during_snapshot_persist() {
             write_delay_ms: 100,
         }),
         Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );
@@ -545,6 +552,9 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
         mobility_snapshot_store: Arc::new(Mutex::new(Box::new(
             InMemoryMobilitySnapshotStore::default(),
         ))),
+        economy_snapshot_store: Arc::new(Mutex::new(Box::new(
+            InMemoryEconomySnapshotStore::default(),
+        ))),
         chunk_channels: Arc::new(DashMap::new()),
         view: Arc::new(arc_swap::ArcSwap::from_pointee(initial_view)),
         mutations: mutation_tx,
@@ -593,6 +603,7 @@ async fn snapshot_write_failure_preserves_dirty_state() {
         &base_world,
         Box::new(FailingSnapshotStore),
         Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );

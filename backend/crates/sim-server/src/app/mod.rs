@@ -22,8 +22,9 @@ use sim_core::{
     base_world::BaseWorldBundle,
     ids::ChunkCoord,
     persistence::{
-        ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore,
-        InMemoryMobilitySnapshotStore, MobilitySnapshotStore,
+        ChunkSnapshotStore, ChunkSnapshotStoreError, EconomySnapshotStore,
+        InMemoryChunkSnapshotStore, InMemoryEconomySnapshotStore, InMemoryMobilitySnapshotStore,
+        MobilitySnapshotStore,
     },
 };
 use tokio::sync::{Mutex, broadcast};
@@ -38,6 +39,7 @@ use crate::{
     },
     config::ServerConfig,
     persistence_liveness::{MobilityPersistenceHealthStatus, MobilityPersistenceLiveness},
+    postgres_economy::PostgresEconomySnapshotStore,
     postgres_events::PostgresWorldEventStore,
     postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
@@ -76,6 +78,7 @@ pub struct AppState {
     auth: AuthVerifier,
     snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
+    economy_snapshot_store: Arc<Mutex<Box<dyn EconomySnapshotStore + Send + Sync>>>,
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
@@ -93,6 +96,7 @@ impl AppState {
             &base_world,
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryEconomySnapshotStore::default()),
             CardHandStore::memory(),
             AuthVerifier::local_bearer_uuid(),
         )
@@ -110,6 +114,7 @@ impl AppState {
             &base_world,
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryEconomySnapshotStore::default()),
             card_hands,
             auth,
         )
@@ -120,6 +125,7 @@ impl AppState {
         base_world: &BaseWorldBundle,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
+        economy_snapshot_store: Box<dyn EconomySnapshotStore + Send + Sync>,
         card_hands: CardHandStore,
         auth: AuthVerifier,
     ) -> Self {
@@ -141,6 +147,7 @@ impl AppState {
             auth,
             snapshot_store: Arc::new(Mutex::new(snapshot_store)),
             mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
+            economy_snapshot_store: Arc::new(Mutex::new(economy_snapshot_store)),
             chunk_channels: Arc::clone(&chunk_channels),
             view: Arc::clone(&view),
             mutations: mutation_tx,
@@ -199,6 +206,10 @@ impl AppState {
 
     fn mobility_snapshot_store(&self) -> Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>> {
         Arc::clone(&self.mobility_snapshot_store)
+    }
+
+    fn economy_snapshot_store(&self) -> Arc<Mutex<Box<dyn EconomySnapshotStore + Send + Sync>>> {
+        Arc::clone(&self.economy_snapshot_store)
     }
 
     pub(crate) fn mobility_liveness(&self) -> Arc<MobilityPersistenceLiveness> {
@@ -351,14 +362,17 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     .await?;
     let mobility_snapshot_store =
         PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
+    let economy_snapshot_store =
+        PostgresEconomySnapshotStore::connect(&config.database_url).await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
-    let (runtime, snapshot_store, mobility_snapshot_store) =
+    let (runtime, snapshot_store, mobility_snapshot_store, economy_snapshot_store) =
         SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(economy_snapshot_store),
             &base_world,
         )
         .await?;
@@ -368,6 +382,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         &base_world,
         snapshot_store,
         mobility_snapshot_store,
+        economy_snapshot_store,
         card_hands,
         auth,
     );

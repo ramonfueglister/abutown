@@ -523,7 +523,8 @@ fn hydration_spawns_chunk_entity_per_loaded_chunk() {
     }
 }
 use sim_core::persistence::{
-    InMemoryChunkSnapshotStore, InMemoryMobilitySnapshotStore, build_chunk_snapshot,
+    InMemoryChunkSnapshotStore, InMemoryEconomySnapshotStore, InMemoryMobilitySnapshotStore,
+    build_chunk_snapshot,
 };
 
 fn tile_pulse(message: ServerMessageDto) -> TilePulseDeltaDto {
@@ -830,10 +831,11 @@ async fn hydrate_from_stores_restores_chunk_from_snapshot_and_replays_tail_event
         .await
         .unwrap();
 
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(event_store),
         Box::new(snapshot_store),
         Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
@@ -854,10 +856,11 @@ async fn hydrate_from_stores_restores_chunk_from_snapshot_and_replays_tail_event
 #[tokio::test]
 async fn hydrate_from_stores_seeds_when_no_snapshot() {
     let base_world = base_world_fixture();
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
@@ -1037,10 +1040,11 @@ async fn race_handler_returns_winner_when_append_reports_duplicate() {
 #[tokio::test]
 async fn hydrate_seeds_fresh_mobility_when_store_is_empty() {
     let base_world = base_world_fixture();
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
@@ -1078,10 +1082,11 @@ async fn hydrate_restores_mobility_from_store_when_present() {
     .await
     .unwrap();
 
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
@@ -1125,10 +1130,11 @@ async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_sidewalk_graph() {
     .await
     .unwrap();
 
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
@@ -1195,10 +1201,11 @@ async fn hydrate_rejects_routing_snapshot_with_demoted_pedestrians_and_reseeds()
     .await
     .unwrap();
 
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
@@ -1266,10 +1273,11 @@ async fn hydrate_ignores_snapshot_with_stale_vehicle_for_carless_abutopia() {
     .await
     .unwrap();
 
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
@@ -1309,10 +1317,11 @@ async fn hydrate_ignores_snapshot_with_stale_pedestrian_polyline_for_abutopia() 
     .await
     .unwrap();
 
-    let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
         &base_world,
     )
     .await
