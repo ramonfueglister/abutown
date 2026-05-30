@@ -19,9 +19,13 @@ fn bid_locks_cash() {
 fn ask_locks_goods() {
     let actor = EconomicActorId(2);
     let mut inventory = InventoryBook::default();
-    inventory.deposit(actor, GOOD_FOOD, Quantity(5_000)).unwrap();
+    inventory
+        .deposit(actor, GOOD_FOOD, Quantity(5_000))
+        .unwrap();
 
-    inventory.lock_goods(actor, GOOD_FOOD, Quantity(2_000)).unwrap();
+    inventory
+        .lock_goods(actor, GOOD_FOOD, Quantity(2_000))
+        .unwrap();
 
     let balance = inventory.balance(actor, GOOD_FOOD);
     assert_eq!(balance.available, Quantity(3_000));
@@ -69,8 +73,12 @@ fn cannot_double_lock_cash() {
 fn cannot_double_lock_goods() {
     let actor = EconomicActorId(2);
     let mut inventory = InventoryBook::default();
-    inventory.deposit(actor, GOOD_FOOD, Quantity(1_000)).unwrap();
-    inventory.lock_goods(actor, GOOD_FOOD, Quantity(700)).unwrap();
+    inventory
+        .deposit(actor, GOOD_FOOD, Quantity(1_000))
+        .unwrap();
+    inventory
+        .lock_goods(actor, GOOD_FOOD, Quantity(700))
+        .unwrap();
 
     assert_eq!(
         inventory.lock_goods(actor, GOOD_FOOD, Quantity(400)),

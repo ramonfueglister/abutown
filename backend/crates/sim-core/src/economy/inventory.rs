@@ -17,7 +17,10 @@ pub struct InventoryBook {
 
 impl InventoryBook {
     pub fn balance(&self, actor: EconomicActorId, good: GoodId) -> InventoryBalance {
-        self.balances.get(&(actor, good)).copied().unwrap_or_default()
+        self.balances
+            .get(&(actor, good))
+            .copied()
+            .unwrap_or_default()
     }
 
     pub fn deposit(
@@ -91,7 +94,8 @@ impl InventoryBook {
             .filter(|((_, item_good), _)| *item_good == good)
             .map(|(_, balance)| *balance)
             .try_fold(Quantity::ZERO, |sum, balance| {
-                sum.checked_add(balance.available)?.checked_add(balance.locked)
+                sum.checked_add(balance.available)?
+                    .checked_add(balance.locked)
             })
     }
 }

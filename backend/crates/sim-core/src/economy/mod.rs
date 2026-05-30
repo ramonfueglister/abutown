@@ -33,6 +33,10 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         "economy"
     }
 
+    // Skeleton stubs (Orders/Ledger/Markets/Pools) are still unit structs; the
+    // `default_constructed_unit_structs` lint fires here. Suppress until Tasks 4-5
+    // replace them with real BTreeMap-backed structs.
+    #[allow(clippy::default_constructed_unit_structs)]
     fn install(&self, world: &mut World, schedule: &mut Schedule) {
         world.insert_resource(AccountBook::default());
         world.insert_resource(InventoryBook::default());

@@ -1,5 +1,5 @@
 use crate::economy::{
-    checked_order_value, integer_ewma, EconomyError, Money, Quantity, ECONOMY_SCALE,
+    ECONOMY_SCALE, EconomyError, Money, Quantity, checked_order_value, integer_ewma,
 };
 
 #[test]
@@ -45,5 +45,8 @@ fn negative_quantity_is_rejected() {
 
 #[test]
 fn integer_ewma_uses_basis_points_without_float() {
-    assert_eq!(integer_ewma(Money(1_000), Money(2_000), 2_500), Ok(Money(1_250)));
+    assert_eq!(
+        integer_ewma(Money(1_000), Money(2_000), 2_500),
+        Ok(Money(1_250))
+    );
 }

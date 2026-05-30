@@ -74,8 +74,11 @@ impl AccountBook {
     }
 
     pub fn total_money(&self) -> Result<Money, EconomyError> {
-        self.accounts.values().try_fold(Money::ZERO, |sum, account| {
-            sum.checked_add(account.available)?.checked_add(account.locked)
-        })
+        self.accounts
+            .values()
+            .try_fold(Money::ZERO, |sum, account| {
+                sum.checked_add(account.available)?
+                    .checked_add(account.locked)
+            })
     }
 }

@@ -1,8 +1,8 @@
 use bevy_ecs::prelude::*;
 
 use crate::economy::{
-    AccountBook, DirtyMarketGoods, EconomyConfig, EconomyPlugin, MarketGoods, Markets,
-    NextOrderId, OrderBook, TradeLedger,
+    AccountBook, DirtyMarketGoods, EconomyConfig, EconomyPlugin, MarketGoods, Markets, NextOrderId,
+    OrderBook, TradeLedger,
 };
 use crate::world::plugin::CorePlugin;
 use crate::world::schedule::SimPlugin;
