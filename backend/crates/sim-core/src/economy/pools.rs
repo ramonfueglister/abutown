@@ -38,7 +38,7 @@ pub struct DemandPools(pub BTreeMap<EconomicActorId, DemandPool>);
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct SupplyPools(pub BTreeMap<EconomicActorId, SupplyPool>);
 
-fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ticks: u64) -> bool {
+pub(crate) fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ticks: u64) -> bool {
     match last {
         None => true,
         Some(last_tick) => current_tick.saturating_sub(last_tick) >= interval_ticks,
