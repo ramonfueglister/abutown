@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, EconomyError, EconomyEvent, InventoryBook,
-    MarketGoods, NextOrderId, OrderBook, ProductionPools, SupplyPools, TradeLedger,
+    MarketGoods, Money, NextOrderId, OrderBook, ProductionPools, SupplyPools, TradeLedger,
     clear_market_good, expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma,
     run_production_at_tick,
 };
@@ -21,6 +21,7 @@ pub enum EconomySet {
 pub struct EconomyConfig {
     pub ewma_alpha_bps: u16,
     pub default_order_ttl_ticks: u64,
+    pub transport_cost_per_tile_unit: Money,
 }
 
 impl Default for EconomyConfig {
@@ -28,6 +29,7 @@ impl Default for EconomyConfig {
         Self {
             ewma_alpha_bps: 2_000,
             default_order_ttl_ticks: 10,
+            transport_cost_per_tile_unit: Money(5),
         }
     }
 }

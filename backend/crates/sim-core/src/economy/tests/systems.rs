@@ -172,10 +172,19 @@ fn telemetry_updates_ewma_with_basis_points() {
     let config = EconomyConfig {
         ewma_alpha_bps: 2_500,
         default_order_ttl_ticks: 10,
+        transport_cost_per_tile_unit: Money(5),
     };
     crate::economy::update_market_telemetry(&mut goods, config).unwrap();
 
     assert_eq!(goods.0[&key].ewma_reference_price, Money(1_250));
+}
+
+#[test]
+fn economy_config_default_transport_cost_per_tile_unit() {
+    assert_eq!(
+        EconomyConfig::default().transport_cost_per_tile_unit,
+        Money(5)
+    );
 }
 
 #[test]
