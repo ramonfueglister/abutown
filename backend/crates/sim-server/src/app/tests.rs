@@ -230,6 +230,113 @@ async fn failing_mobility_write_marks_health_degraded_with_redacted_error() {
     assert!(!persistence.last_error.contains("sb_secret_test"));
 }
 
+#[tokio::test]
+async fn health_degrades_when_base_world_agents_are_missing_from_published_mobility() {
+    let state = AppState::new(SimulationRuntime::new());
+    let mut view = state.view().load().as_ref().clone();
+    view.mobility_full_dto.agents.clear();
+    state.view().store(Arc::new(view));
+
+    let health = health_response_for_state(&state);
+
+    assert!(
+        !health.ok,
+        "health must fail when the published mobility view has fewer concrete agents than base-world spawns"
+    );
+}
+
+#[derive(Debug, Default)]
+struct CountingMobilitySnapshotStore {
+    writes: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl MobilitySnapshotStore for CountingMobilitySnapshotStore {
+    async fn write(
+        &mut self,
+        _world_id: &str,
+        _tick: u64,
+        _snapshot: &sim_core::mobility::MobilityPersistSnapshot,
+        _compatibility: &sim_core::persistence::SnapshotCompatibility,
+    ) -> Result<(), MobilitySnapshotStoreError> {
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn read(
+        &self,
+        _world_id: &str,
+        _compatibility: &sim_core::persistence::SnapshotCompatibility,
+    ) -> Result<
+        Option<(u64, sim_core::mobility::MobilityPersistSnapshot)>,
+        MobilitySnapshotStoreError,
+    > {
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agents() {
+    let runtime = SimulationRuntime::new();
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let mut invalid_mobility =
+        crate::runtime::initial_mobility_snapshot_for_base_world(&base_world)
+            .expect("base-world mobility seeds");
+    invalid_mobility.agents.clear();
+
+    let (mutation_tx, mut mutation_rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(mutation) = mutation_rx.recv().await {
+            if let crate::runtime_view::Mutation::CollectPersistData { reply } = mutation {
+                let _ = reply.send(crate::runtime_view::PersistPayload {
+                    chunk_snapshots: Vec::new(),
+                    world_id: abutown_protocol::WorldId("abutopia".to_string()),
+                    mobility_tick: 42,
+                    mobility_world: invalid_mobility.clone(),
+                });
+            }
+        }
+    });
+
+    let counted_store = CountingMobilitySnapshotStore::default();
+    let write_count = Arc::clone(&counted_store.writes);
+    let state = AppState {
+        deltas: tokio::sync::broadcast::channel(DELTA_BROADCAST_CAPACITY).0,
+        card_hands: CardHandStore::memory(),
+        auth: AuthVerifier::local_bearer_uuid(),
+        snapshot_store: Arc::new(Mutex::new(Box::new(InMemoryChunkSnapshotStore::default()))),
+        mobility_snapshot_store: Arc::new(Mutex::new(Box::new(counted_store))),
+        chunk_channels: Arc::new(DashMap::new()),
+        view: Arc::new(arc_swap::ArcSwap::from_pointee(
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0),
+        )),
+        mutations: mutation_tx,
+        base_world: Arc::new(BaseWorldResponse::from(&base_world)),
+        mobility_liveness: Arc::new(MobilityPersistenceLiveness::new(
+            MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
+        )),
+        expected_base_world_agents: crate::runtime::expected_base_world_agent_count(&base_world),
+    };
+
+    assert_eq!(persist_snapshots_once(&state).await.unwrap(), 0);
+
+    assert_eq!(
+        write_count.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "invalid mobility snapshots must not be written"
+    );
+    let health = health_response_for_state(&state);
+    let persistence = health.persistence.expect("persistence health present");
+    assert!(!health.ok);
+    assert_eq!(
+        persistence.status,
+        w::PersistenceHealthStatus::Degraded as i32
+    );
+    assert!(persistence.last_error.contains("expected at least 1"));
+}
+
 /// A snapshot store that sleeps during writes to simulate slow DB I/O.
 #[derive(Debug, Default)]
 struct SlowSnapshotStore {
@@ -448,6 +555,7 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
         mobility_liveness: Arc::new(MobilityPersistenceLiveness::new(
             MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
         )),
+        expected_base_world_agents: 1,
     }
 }
 

@@ -81,6 +81,7 @@ pub struct AppState {
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
     base_world: Arc<BaseWorldResponse>,
     mobility_liveness: Arc<MobilityPersistenceLiveness>,
+    expected_base_world_agents: usize,
 }
 
 impl AppState {
@@ -131,6 +132,8 @@ impl AppState {
         let mobility_liveness = Arc::new(MobilityPersistenceLiveness::new(
             MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
         ));
+        let expected_base_world_agents =
+            crate::runtime::expected_base_world_agent_count(base_world);
 
         let state = Self {
             deltas: deltas.clone(),
@@ -143,6 +146,7 @@ impl AppState {
             mutations: mutation_tx,
             base_world: Arc::new(BaseWorldResponse::from(base_world)),
             mobility_liveness,
+            expected_base_world_agents,
         };
 
         // Panic supervisor: if tick_loop panics, every reader is stuck on
@@ -439,9 +443,12 @@ async fn health(State(state): State<AppState>) -> Response {
 }
 
 fn health_response_for_state(state: &AppState) -> w::HealthResponse {
-    let mut health = state.view().load().health.clone();
+    let view = state.view().load();
+    let mut health = view.health.clone();
     let persistence = state.mobility_liveness().snapshot();
+    let runtime_agents_ok = view.mobility_full_dto.agents.len() >= state.expected_base_world_agents;
     health.ok = health.ok
+        && runtime_agents_ok
         && !matches!(
             persistence.status,
             MobilityPersistenceHealthStatus::Degraded | MobilityPersistenceHealthStatus::Stale
@@ -1195,6 +1202,17 @@ async fn persist_snapshots_once(
 
     // Phase 2b: mobility DB write — store-mutex only, no runtime lock held.
     {
+        if mobility_world.agents.len() < state.expected_base_world_agents {
+            let error = format!(
+                "mobility snapshot has {} agents, expected at least {} for base world",
+                mobility_world.agents.len(),
+                state.expected_base_world_agents
+            );
+            mobility_liveness.record_failure(mobility_attempt, error.clone(), SystemTime::now());
+            tracing::warn!(%error, "refusing to persist invalid mobility snapshot");
+            return Ok(written);
+        }
+
         let mob_store = state.mobility_snapshot_store();
         let mut mob_store = mob_store.lock().await;
         if let Err(error) = mob_store

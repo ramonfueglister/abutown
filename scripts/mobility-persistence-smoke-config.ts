@@ -22,6 +22,17 @@ export interface PersistedSnapshotCheck {
   snapshotFreshnessMs: number;
 }
 
+export interface ExpectedAgentCheck {
+  expectedAgents: number;
+  runtimeAgents: number;
+  persistedAgents: number;
+}
+
+interface BaseWorldSpawns {
+  pedestrian_groups?: Array<{ agents_per_corridor?: unknown }>;
+  car_groups?: Array<{ cars_per_arterial?: unknown }>;
+}
+
 export function createPgClientConfig(
   connectionString: string,
   env: MobilityPersistenceSmokeEnv = process.env,
@@ -59,6 +70,34 @@ export function countPersistedAgents(payload: unknown): number {
   if (agents && typeof agents === 'object') return Object.keys(agents).length;
 
   return -1;
+}
+
+export function expectedConcreteAgentsFromSpawns(spawns: unknown): number {
+  if (!spawns || typeof spawns !== 'object') {
+    throw new Error('base-world spawns must be an object');
+  }
+
+  const typed = spawns as BaseWorldSpawns;
+  const pedestrianAgents = sumNonNegativeIntegerField(
+    typed.pedestrian_groups,
+    'agents_per_corridor',
+    'pedestrian_groups',
+  );
+  const driverAgents = sumNonNegativeIntegerField(typed.car_groups, 'cars_per_arterial', 'car_groups');
+
+  return pedestrianAgents + driverAgents;
+}
+
+export function assertRuntimeAndPersistedAgentsMeetExpectation(check: ExpectedAgentCheck): void {
+  if (!Number.isInteger(check.expectedAgents) || check.expectedAgents < 0) {
+    throw new Error(`invalid expected agent count ${check.expectedAgents}`);
+  }
+  if (check.runtimeAgents < check.expectedAgents) {
+    throw new Error(`runtime mobility has ${check.runtimeAgents} agents, expected at least ${check.expectedAgents}`);
+  }
+  if (check.persistedAgents < check.expectedAgents) {
+    throw new Error(`persisted mobility has ${check.persistedAgents} agents, expected at least ${check.expectedAgents}`);
+  }
 }
 
 export function assertPersistedSnapshotMatchesHealth(check: PersistedSnapshotCheck): void {
@@ -111,4 +150,23 @@ function readRootCertificate(path: string): string {
   } catch {
     throw new Error('Supabase server root certificate could not be read from PGSSLROOTCERT/DATABASE_SSL_CA_FILE');
   }
+}
+
+function sumNonNegativeIntegerField(
+  rows: Array<Record<string, unknown>> | undefined,
+  field: string,
+  groupName: string,
+): number {
+  if (rows === undefined) return 0;
+  if (!Array.isArray(rows)) {
+    throw new Error(`base-world spawns ${groupName} must be an array`);
+  }
+
+  return rows.reduce((sum, row, index) => {
+    const value = row[field];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      throw new Error(`base-world spawns ${groupName}[${index}].${field} must be a non-negative integer`);
+    }
+    return sum + value;
+  }, 0);
 }

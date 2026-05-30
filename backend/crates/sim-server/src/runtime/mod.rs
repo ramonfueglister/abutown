@@ -60,6 +60,9 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
 
 mod base_world_expectations;
 use base_world_expectations::*;
+pub(crate) use base_world_expectations::{
+    expected_base_world_agent_count, initial_mobility_snapshot_for_base_world,
+};
 
 pub fn default_base_world_path() -> std::path::PathBuf {
     std::env::var("ABUTOWN_BASE_WORLD_PATH")
