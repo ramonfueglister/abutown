@@ -7,7 +7,7 @@ test-results/
 artifacts/
 .DS_Store
 .env
-.certs/
+.certs
 .superpowers
 .superpowers/
 .worktrees
