@@ -44,27 +44,3 @@ export type City = {
   roadEdges: RoadEdge[];
   buildings: Building[];
 };
-
-export type PopulationEntityKind = 'person' | 'vehicle';
-export type PopulationEntityRole = 'resident' | 'worker' | 'visitor' | 'service';
-
-export type PopulationEntity = {
-  id: string;
-  kind: PopulationEntityKind;
-  role: PopulationEntityRole;
-  roadEdgeId: string;
-  progress: number;
-  laneOffset: number;
-  speedTilesPerSecond: number;
-  colorIndex: number;
-};
-
-export type GeneratedPopulation = {
-  entities: PopulationEntity[];
-  segmentBuckets: Map<string, PopulationEntity[]>;
-  stats: {
-    totalEntities: number;
-    people: number;
-    vehicles: number;
-  };
-};
