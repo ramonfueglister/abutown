@@ -1,5 +1,6 @@
 use crate::economy::{
-    AccountBook, EconomicActorId, EconomyError, GOOD_FOOD, InventoryBook, Money, Quantity,
+    AccountBook, EconomicActorId, EconomyError, GOOD_FOOD, GOOD_WOOD, InventoryBook, Money,
+    Quantity,
 };
 
 #[test]
@@ -83,5 +84,35 @@ fn cannot_double_lock_goods() {
     assert_eq!(
         inventory.lock_goods(actor, GOOD_FOOD, Quantity(400)),
         Err(EconomyError::InsufficientGoods)
+    );
+}
+
+#[test]
+fn consume_debits_available() {
+    let actor = EconomicActorId(3);
+    let mut inv = InventoryBook::default();
+    inv.deposit(actor, GOOD_WOOD, Quantity(5_000)).unwrap();
+    inv.consume(actor, GOOD_WOOD, Quantity(2_000)).unwrap();
+    assert_eq!(inv.balance(actor, GOOD_WOOD).available, Quantity(3_000));
+    assert_eq!(inv.balance(actor, GOOD_WOOD).locked, Quantity(0));
+}
+
+#[test]
+fn cannot_consume_more_than_available() {
+    let actor = EconomicActorId(3);
+    let mut inv = InventoryBook::default();
+    inv.deposit(actor, GOOD_WOOD, Quantity(1_000)).unwrap();
+    assert_eq!(
+        inv.consume(actor, GOOD_WOOD, Quantity(2_000)),
+        Err(EconomyError::InsufficientGoods)
+    );
+}
+
+#[test]
+fn cannot_consume_negative() {
+    let mut inv = InventoryBook::default();
+    assert_eq!(
+        inv.consume(EconomicActorId(3), GOOD_WOOD, Quantity(-1)),
+        Err(EconomyError::NegativeQuantity)
     );
 }
