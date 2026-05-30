@@ -40,6 +40,12 @@ pub enum BaseWorldError {
         width: u32,
         height: u32,
     },
+    #[error("base world spawn group {group} references missing arterial {arterial_id}")]
+    MissingArterialRef { group: String, arterial_id: String },
+    #[error("base world spawn group {group} references missing corridor {corridor_id}")]
+    MissingCorridorRef { group: String, corridor_id: String },
+    #[error("base world dimensions {width}x{height} are too large to index")]
+    WorldTooLarge { width: u32, height: u32 },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -234,6 +240,15 @@ impl BaseWorldBundle {
         self.validate_world_id(&self.decorations.world_id)?;
         self.validate_world_id(&self.spawns.world_id)?;
 
+        if i32::try_from(self.manifest.world_tiles.width).is_err()
+            || i32::try_from(self.manifest.world_tiles.height).is_err()
+        {
+            return Err(BaseWorldError::WorldTooLarge {
+                width: self.manifest.world_tiles.width,
+                height: self.manifest.world_tiles.height,
+            });
+        }
+
         if self.transport.roads.is_empty() {
             return Err(BaseWorldError::EmptyLayer("transport.roads"));
         }
@@ -276,6 +291,33 @@ impl BaseWorldBundle {
             self.require_in_bounds(detail.x, detail.y)?;
         }
 
+        for group in &self.spawns.car_groups {
+            if !self
+                .transport
+                .arterial_paths
+                .iter()
+                .any(|p| p.id == group.arterial_id)
+            {
+                return Err(BaseWorldError::MissingArterialRef {
+                    group: group.id.clone(),
+                    arterial_id: group.arterial_id.clone(),
+                });
+            }
+        }
+        for group in &self.spawns.pedestrian_groups {
+            if !self
+                .transport
+                .pedestrian_corridors
+                .iter()
+                .any(|c| c.id == group.corridor_id)
+            {
+                return Err(BaseWorldError::MissingCorridorRef {
+                    group: group.id.clone(),
+                    corridor_id: group.corridor_id.clone(),
+                });
+            }
+        }
+
         Ok(())
     }
 
@@ -303,8 +345,8 @@ impl BaseWorldBundle {
         (0..chunks_y)
             .flat_map(|y| {
                 (0..chunks_x).map(move |x| ChunkCoord {
-                    x: i32::try_from(x).expect("chunk x fits i32"),
-                    y: i32::try_from(y).expect("chunk y fits i32"),
+                    x: i32::try_from(x).expect("world dims fit i32 — enforced by validate()"),
+                    y: i32::try_from(y).expect("world dims fit i32 — enforced by validate()"),
                 })
             })
             .collect()
@@ -331,9 +373,9 @@ impl BaseWorldBundle {
         for local_y in 0..chunk_size {
             for local_x in 0..chunk_size {
                 let x = coord.x * i32::from(self.manifest.chunk_size)
-                    + i32::try_from(local_x).expect("local x fits i32");
+                    + i32::try_from(local_x).expect("world dims fit i32 — enforced by validate()");
                 let y = coord.y * i32::from(self.manifest.chunk_size)
-                    + i32::try_from(local_y).expect("local y fits i32");
+                    + i32::try_from(local_y).expect("world dims fit i32 — enforced by validate()");
                 tiles.push(TileRecord {
                     kind: self.tile_kind_at(x, y),
                     version,
@@ -492,6 +534,57 @@ fn water_like(kind: TerrainKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn load_abutopia() -> BaseWorldBundle {
+        BaseWorldBundle::load_from_dir(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(3)
+                .unwrap()
+                .join("data/worlds/abutopia"),
+        )
+        .expect("abutopia loads")
+    }
+
+    #[test]
+    fn validate_accepts_real_abutopia() {
+        assert!(load_abutopia().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_car_group_with_missing_arterial() {
+        let mut b = load_abutopia();
+        // abutopia has no car_groups, so push a dangling one
+        b.spawns.car_groups.push(CarSpawnGroup {
+            id: "spawn:car:dangling".into(),
+            arterial_id: "arterial:does-not-exist".into(),
+            cars_per_arterial: 1,
+        });
+        assert!(matches!(
+            b.validate(),
+            Err(BaseWorldError::MissingArterialRef { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_pedestrian_group_with_missing_corridor() {
+        let mut b = load_abutopia();
+        b.spawns.pedestrian_groups[0].corridor_id = "corridor:nope".into();
+        assert!(matches!(
+            b.validate(),
+            Err(BaseWorldError::MissingCorridorRef { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_world_dimensions_that_overflow_i32() {
+        let mut b = load_abutopia();
+        b.manifest.world_tiles.width = u32::MAX;
+        assert!(matches!(
+            b.validate(),
+            Err(BaseWorldError::WorldTooLarge { .. })
+        ));
+    }
 
     fn bundle_with_pedestrian_points(points: Vec<NetworkPoint>) -> BaseWorldBundle {
         BaseWorldBundle {

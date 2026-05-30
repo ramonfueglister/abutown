@@ -115,17 +115,14 @@ fn expected_base_world_car_routes(
 ) -> std::collections::HashMap<String, String> {
     let mut expected = std::collections::HashMap::new();
     for group in &base_world.spawns.car_groups {
-        let arterial_index = base_world
+        let Some(arterial_index) = base_world
             .transport
             .arterial_paths
             .iter()
             .position(|path| path.id == group.arterial_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "base world car group {} references missing arterial {}",
-                    group.id, group.arterial_id
-                )
-            });
+        else {
+            continue; // unreachable after validate(); skip defensively rather than abort
+        };
         let route_id = format!("route:arterial:{arterial_index}");
         for n in 0..group.cars_per_arterial {
             expected.insert(
@@ -143,17 +140,14 @@ fn expected_base_world_driver_vehicles(
     let mut expected = std::collections::HashMap::new();
     let mut driver_index = 0u32;
     for group in &base_world.spawns.car_groups {
-        let arterial_index = base_world
+        let Some(arterial_index) = base_world
             .transport
             .arterial_paths
             .iter()
             .position(|path| path.id == group.arterial_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "base world car group {} references missing arterial {}",
-                    group.id, group.arterial_id
-                )
-            });
+        else {
+            continue; // unreachable after validate(); skip defensively rather than abort
+        };
         for n in 0..group.cars_per_arterial {
             expected.insert(
                 format!("agent:driver:{driver_index}"),
@@ -176,17 +170,14 @@ fn expected_base_world_pedestrian_walks(
     let mut expected = std::collections::HashMap::new();
     let mut agent_index = 0u32;
     for group in &base_world.spawns.pedestrian_groups {
-        let corridor_index = base_world
+        let Some(corridor_index) = base_world
             .transport
             .pedestrian_corridors
             .iter()
             .position(|path| path.id == group.corridor_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "base world pedestrian group {} references missing corridor {}",
-                    group.id, group.corridor_id
-                )
-            });
+        else {
+            continue; // unreachable after validate(); skip defensively rather than abort
+        };
         let corridor = &base_world.transport.pedestrian_corridors[corridor_index];
         let polyline: Vec<(f32, f32)> = corridor
             .points
@@ -2320,5 +2311,24 @@ mod tests {
             .get::<Position>()
             .expect("reseeded pedestrian has a position");
         assert!((position.y - 64.51).abs() < 0.001);
+    }
+
+    #[test]
+    fn expected_car_routes_skips_dangling_arterial_without_panicking() {
+        let mut b = base_world_fixture(); // loads abutopia (has no car_groups)
+        b.spawns
+            .car_groups
+            .push(sim_core::base_world::CarSpawnGroup {
+                id: "spawn:car:dangling".into(),
+                arterial_id: "arterial:missing".into(),
+                cars_per_arterial: 3,
+            });
+        // Must not panic; the dangling group contributes nothing.
+        let routes = super::expected_base_world_car_routes(&b);
+        assert!(
+            routes
+                .keys()
+                .all(|k| !k.contains("dangling") && !k.contains("missing"))
+        );
     }
 }
