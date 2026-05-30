@@ -173,6 +173,8 @@ fn telemetry_updates_ewma_with_basis_points() {
         ewma_alpha_bps: 2_500,
         default_order_ttl_ticks: 10,
         transport_cost_per_tile_unit: Money(5),
+        trader_tiles_per_tick: 4,
+        trader_default_ref_price: Money(1_000),
     };
     crate::economy::update_market_telemetry(&mut goods, config).unwrap();
 

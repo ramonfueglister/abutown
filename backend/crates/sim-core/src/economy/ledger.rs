@@ -64,6 +64,10 @@ pub enum EconomyEvent {
         good: GoodId,
         reason: EconomyError,
     },
+    TransportPaid {
+        actor: EconomicActorId,
+        amount: Money,
+    },
 }
 
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]

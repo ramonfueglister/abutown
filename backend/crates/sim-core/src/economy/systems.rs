@@ -22,6 +22,8 @@ pub struct EconomyConfig {
     pub ewma_alpha_bps: u16,
     pub default_order_ttl_ticks: u64,
     pub transport_cost_per_tile_unit: Money,
+    pub trader_tiles_per_tick: u64,
+    pub trader_default_ref_price: Money,
 }
 
 impl Default for EconomyConfig {
@@ -30,6 +32,8 @@ impl Default for EconomyConfig {
             ewma_alpha_bps: 2_000,
             default_order_ttl_ticks: 10,
             transport_cost_per_tile_unit: Money(5),
+            trader_tiles_per_tick: 4,
+            trader_default_ref_price: Money(1_000),
         }
     }
 }
