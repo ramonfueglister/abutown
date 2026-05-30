@@ -283,6 +283,14 @@ fn runtime_installs_flow_field_cache() {
 }
 
 #[test]
+fn runtime_installs_economy_plugin() {
+    let runtime = SimulationRuntime::new();
+    assert!(runtime.world.contains_resource::<sim_core::economy::AccountBook>());
+    assert!(runtime.world.contains_resource::<sim_core::economy::OrderBook>());
+    assert!(runtime.world.contains_resource::<sim_core::economy::TradeLedger>());
+}
+
+#[test]
 fn runtime_installs_hpa_index_for_seeded_graph() {
     let network = base_world_fixture().to_city_network();
     let runtime = SimulationRuntime::new_from_network(&network);
