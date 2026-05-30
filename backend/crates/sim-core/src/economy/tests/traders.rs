@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::economy::{
     AccountBook, DirtyMarketGoods, EconomicActorId, EconomyEvent, GOOD_TOOLS, InventoryBook,
     MarketGoods, MarketId, Money, NextOrderId, OrderBook, Quantity, TRANSPORT_OPERATOR,
@@ -62,6 +64,7 @@ fn buying_places_a_bid_when_short() {
         &mut traders,
         &cfg,
         0,
+        &BTreeSet::new(),
     )
     .unwrap();
 
@@ -106,6 +109,7 @@ fn acquired_goods_trigger_travel_and_transport_payment() {
         &mut traders,
         &cfg,
         0,
+        &BTreeSet::new(),
     )
     .unwrap();
 
@@ -150,7 +154,17 @@ fn travel_counts_down_then_sells() {
                      traders: &mut Traders,
                      cfg: &crate::economy::EconomyConfig| {
         run_traders_at_tick(
-            accounts, inventory, orders, ledger, dirty, next, goods, traders, cfg, 0,
+            accounts,
+            inventory,
+            orders,
+            ledger,
+            dirty,
+            next,
+            goods,
+            traders,
+            cfg,
+            0,
+            &BTreeSet::new(),
         )
         .unwrap()
     };
@@ -226,6 +240,7 @@ fn traders_are_deterministic() {
             &mut traders,
             &cfg,
             0,
+            &BTreeSet::new(),
         )
         .unwrap();
         ledger.0

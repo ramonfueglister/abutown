@@ -1,15 +1,21 @@
+use std::collections::BTreeSet;
+
 use bevy_ecs::prelude::*;
+use bevy_ecs::query::Or;
 
 use crate::economy::{
-    AccountBook, DemandPools, DirtyMarketGoods, EconomyError, EconomyEvent, InventoryBook,
-    MarketGoods, Money, NextOrderId, OrderBook, ProductionPools, SupplyPools, TradeLedger, Traders,
-    clear_market_good, expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma,
-    run_production_at_tick, run_traders_at_tick,
+    AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
+    InventoryBook, MarketChunks, MarketGoods, Money, NextOrderId, OrderBook, ProductionPools,
+    SupplyPools, TradeLedger, Traders, clear_market_good, expire_orders_at_tick,
+    generate_pool_orders_at_tick, integer_ewma, run_production_at_tick, run_traders_at_tick,
 };
+use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
+use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
+    RefreshLod,
     ExpireOrders,
     Production,
     Traders,
@@ -42,6 +48,7 @@ impl Default for EconomyConfig {
 pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.configure_sets(
         (
+            EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
             EconomySet::Production,
             EconomySet::Traders,
@@ -53,6 +60,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
     schedule.add_systems(
         (
+            refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
             run_production_system.in_set(EconomySet::Production),
             run_traders_system.in_set(EconomySet::Traders),
@@ -62,6 +70,25 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
         )
             .before(crate::mobility::systems::tick_increment_system),
     );
+}
+
+/// Bridge: derive `DormantMarkets` from chunk LOD. A market anchored (in
+/// `MarketChunks`) to a chunk that is not Active/Hot is dormant; everything else
+/// runs at full fidelity. Cheap: one pass over active chunk coords + one over the
+/// anchor map. Deterministic (BTree iteration, set membership).
+#[allow(clippy::type_complexity)]
+pub fn refresh_dormant_markets_system(
+    anchors: Res<MarketChunks>,
+    active_chunks: Query<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>,
+    mut dormant: ResMut<DormantMarkets>,
+) {
+    let active: BTreeSet<ChunkCoord> = active_chunks.iter().map(|c| c.0).collect();
+    dormant.0 = anchors
+        .0
+        .iter()
+        .filter(|(_, coord)| !active.contains(coord))
+        .map(|(market, _)| *market)
+        .collect();
 }
 
 pub fn expire_orders_system(
@@ -86,6 +113,7 @@ pub fn expire_orders_system(
 pub fn generate_pool_orders_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
+    dormant: Res<DormantMarkets>,
     mut accounts: ResMut<AccountBook>,
     mut inventory: ResMut<InventoryBook>,
     mut orders: ResMut<OrderBook>,
@@ -106,6 +134,7 @@ pub fn generate_pool_orders_system(
         &mut supply,
         tick.0,
         config.default_order_ttl_ticks,
+        &dormant.0,
     );
 }
 
@@ -171,6 +200,7 @@ pub fn update_market_telemetry_system(config: Res<EconomyConfig>, mut goods: Res
 pub fn run_traders_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
+    dormant: Res<DormantMarkets>,
     mut accounts: ResMut<AccountBook>,
     mut inventory: ResMut<InventoryBook>,
     mut orders: ResMut<OrderBook>,
@@ -191,5 +221,6 @@ pub fn run_traders_system(
         &mut traders,
         &config,
         tick.0,
+        &dormant.0,
     );
 }

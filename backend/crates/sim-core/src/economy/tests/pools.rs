@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyEvent,
     GOOD_FOOD, InventoryBook, MarketId, Money, NextOrderId, OrderBook, Quantity, SupplyPool,
@@ -43,6 +45,7 @@ fn demand_pool_caps_order_to_affordable_quantity() {
         &mut supply,
         10,
         5,
+        &BTreeSet::new(),
     )
     .unwrap();
 
@@ -90,6 +93,7 @@ fn supply_pool_caps_order_to_available_inventory() {
         &mut supply,
         10,
         5,
+        &BTreeSet::new(),
     )
     .unwrap();
 
@@ -136,6 +140,7 @@ fn rejected_pool_order_leaves_books_unchanged() {
         &mut supply,
         1,
         5,
+        &BTreeSet::new(),
     )
     .unwrap();
 
