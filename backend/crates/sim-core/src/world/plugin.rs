@@ -14,7 +14,7 @@ pub struct CorePlugin {
 impl Default for CorePlugin {
     fn default() -> Self {
         Self {
-            world_id: "abutown-main".to_string(),
+            world_id: "abutopia".to_string(),
             chunk_size: 32,
             world_dimensions: (256, 256),
         }

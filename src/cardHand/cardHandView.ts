@@ -200,10 +200,10 @@ export function resolveCardHandBaseUrl(envUrl?: unknown): string {
 
 function createConfiguredSupabaseClient(): SupabaseClient | null {
   const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   if (typeof url !== 'string' || url.length === 0) return null;
-  if (typeof anonKey !== 'string' || anonKey.length === 0) return null;
-  return createClient(url, anonKey);
+  if (typeof publishableKey !== 'string' || publishableKey.length === 0) return null;
+  return createClient(url, publishableKey);
 }
 
 export function buildOtpLoginPayload(emailValue: string, redirectTo: string): {

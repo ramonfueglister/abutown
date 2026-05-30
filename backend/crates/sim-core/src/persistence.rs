@@ -248,7 +248,7 @@ mod tests {
             .expect("tile exists");
         chunk.set_tile_kind(9, TileKind::Road).expect("tile exists");
 
-        let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
+        let snapshot = build_chunk_snapshot("abutopia", &chunk, ChunkActivity::Active);
 
         assert_eq!(snapshot.tiles.len(), 2);
         assert_eq!(snapshot.tiles[0].local_index, 3);
@@ -268,7 +268,7 @@ mod tests {
             .set_tile_kind(42, TileKind::BuildingFootprint)
             .unwrap();
 
-        let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
+        let snapshot = build_chunk_snapshot("abutopia", &chunk, ChunkActivity::Active);
 
         let indices: Vec<u16> = snapshot.tiles.iter().map(|t| t.local_index).collect();
         assert_eq!(
@@ -292,11 +292,11 @@ mod tests {
             .expect("tile exists");
 
         store.write_snapshot(
-            build_chunk_snapshot("abutown-main", &east, ChunkActivity::Warm),
+            build_chunk_snapshot("abutopia", &east, ChunkActivity::Warm),
             &compatibility,
         );
         store.write_snapshot(
-            build_chunk_snapshot("abutown-main", &visible, ChunkActivity::Active),
+            build_chunk_snapshot("abutopia", &visible, ChunkActivity::Active),
             &compatibility,
         );
 
@@ -312,7 +312,7 @@ mod tests {
         let mut store = InMemoryChunkSnapshotStore::default();
         let mut chunk = Chunk::new(ChunkCoord { x: 4, y: 4 }, 32);
         chunk.set_tile_kind(0, TileKind::Road).expect("tile exists");
-        let snapshot = build_chunk_snapshot("abutown-main", &chunk, ChunkActivity::Active);
+        let snapshot = build_chunk_snapshot("abutopia", &chunk, ChunkActivity::Active);
         let compatibility = SnapshotCompatibility::new("abutopia", 1);
 
         ChunkSnapshotStore::write_snapshot(&mut store, snapshot.clone(), &compatibility)
@@ -358,11 +358,11 @@ mod tests {
         let snap = extract_from_world(&world);
         let compatibility = SnapshotCompatibility::new("abutopia", 1);
 
-        MobilitySnapshotStore::write(&mut store, "abutown-main", 42, &snap, &compatibility)
+        MobilitySnapshotStore::write(&mut store, "abutopia", 42, &snap, &compatibility)
             .await
             .unwrap();
 
-        let (tick, restored) = MobilitySnapshotStore::read(&store, "abutown-main", &compatibility)
+        let (tick, restored) = MobilitySnapshotStore::read(&store, "abutopia", &compatibility)
             .await
             .unwrap()
             .expect("snapshot exists");
@@ -379,7 +379,7 @@ mod tests {
         let (world, _) = seed::test_seed_world();
         let snap = extract_from_world(&world);
         let current = SnapshotCompatibility::new("abutopia", 1);
-        let stale = SnapshotCompatibility::new("abutown-main", 1);
+        let stale = SnapshotCompatibility::new("legacy-world", 1);
 
         MobilitySnapshotStore::write(&mut store, "abutopia", 42, &snap, &stale)
             .await

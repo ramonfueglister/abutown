@@ -409,7 +409,7 @@ mod tests {
     fn client_set_tile_kind_command_serializes_with_type_tag() {
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             command_id: "command:test:1".to_string(),
             coord: ChunkCoordDto { x: 4, y: 4 },
             local_index: 11,
@@ -420,7 +420,7 @@ mod tests {
 
         assert_eq!(
             json,
-            r#"{"type":"set_tile_kind","protocol_version":1,"world_id":"abutown-main","command_id":"command:test:1","coord":{"x":4,"y":4},"local_index":11,"kind":"water"}"#
+            r#"{"type":"set_tile_kind","protocol_version":1,"world_id":"abutopia","command_id":"command:test:1","coord":{"x":4,"y":4},"local_index":11,"kind":"water"}"#
         );
     }
 
@@ -433,7 +433,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:1".to_string(),
             command_id: "command:test:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 0,
             version: 1,
             coord: ChunkCoordDto { x: 4, y: 4 },
@@ -452,7 +452,7 @@ mod tests {
         // ChunkSnapshotDto is persisted as JSONB in the snapshots table.
         let dto = ChunkSnapshotDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             coord: ChunkCoordDto { x: 1, y: 2 },
             chunk_state: ChunkStateDto::Active,
             chunk_version: 7,
@@ -510,7 +510,7 @@ mod proto_roundtrip_tests {
         let msg = ServerMessage {
             body: Some(server_message::Body::Hello(Hello {
                 protocol_version: 16,
-                world_id: "abutown-main".into(),
+                world_id: "abutopia".into(),
                 chunk_size: 32,
             })),
         };
@@ -522,7 +522,7 @@ mod proto_roundtrip_tests {
         let msg = ServerMessage {
             body: Some(server_message::Body::TilePulse(TilePulse {
                 protocol_version: 16,
-                world_id: "abutown-main".into(),
+                world_id: "abutopia".into(),
                 tick: 1234,
                 version: 5678,
                 coord: Some(sample_chunk()),
@@ -552,7 +552,7 @@ mod proto_roundtrip_tests {
             body: Some(server_message::Body::MobilityChunkDelta(
                 MobilityChunkDelta {
                     protocol_version: 16,
-                    world_id: "abutown-main".into(),
+                    world_id: "abutopia".into(),
                     tick: 100,
                     chunk: Some(sample_chunk()),
                     changed_agents: vec![agent],
@@ -571,7 +571,7 @@ mod proto_roundtrip_tests {
             body: Some(server_message::Body::MobilityChunkSnapshot(
                 MobilityChunkSnapshot {
                     protocol_version: 16,
-                    world_id: "abutown-main".into(),
+                    world_id: "abutopia".into(),
                     tick: 100,
                     chunk: Some(sample_chunk()),
                     agents: vec![],
@@ -590,7 +590,7 @@ mod proto_roundtrip_tests {
                     protocol_version: 16,
                     event_id: "evt:1".into(),
                     command_id: "cmd:1".into(),
-                    world_id: "abutown-main".into(),
+                    world_id: "abutopia".into(),
                     tick: 100,
                     version: 1,
                     coord: Some(sample_chunk()),
@@ -629,7 +629,7 @@ mod proto_roundtrip_tests {
         let msg = ClientCommand {
             command: Some(client_command::Command::SetTileKind(SetTileKindCommand {
                 protocol_version: 16,
-                world_id: "abutown-main".into(),
+                world_id: "abutopia".into(),
                 command_id: "cmd:1".into(),
                 coord: Some(sample_chunk()),
                 local_index: 11,
@@ -644,14 +644,14 @@ mod proto_roundtrip_tests {
         let msg = CommandResponse {
             outcome: Some(command_response::Outcome::Accepted(CommandAccepted {
                 protocol_version: 16,
-                world_id: "abutown-main".into(),
+                world_id: "abutopia".into(),
                 command_id: "cmd:1".into(),
                 event: Some(WorldEvent {
                     event: Some(world_event::Event::TileKindSet(TileKindSetEvent {
                         protocol_version: 16,
                         event_id: "evt:1".into(),
                         command_id: "cmd:1".into(),
-                        world_id: "abutown-main".into(),
+                        world_id: "abutopia".into(),
                         tick: 100,
                         version: 1,
                         coord: Some(sample_chunk()),
@@ -669,7 +669,7 @@ mod proto_roundtrip_tests {
         let msg = CommandResponse {
             outcome: Some(command_response::Outcome::Rejected(CommandRejected {
                 protocol_version: 16,
-                world_id: "abutown-main".into(),
+                world_id: "abutopia".into(),
                 command_id: "cmd:1".into(),
                 code: "invalid_coord".into(),
                 message: "coord out of range".into(),
@@ -683,7 +683,7 @@ mod proto_roundtrip_tests {
         let msg = ServerMessage {
             body: Some(server_message::Body::Error(ServerError {
                 protocol_version: 16,
-                world_id: "abutown-main".into(),
+                world_id: "abutopia".into(),
                 code: "internal".into(),
                 message: "tick task gone".into(),
             })),
@@ -695,7 +695,7 @@ mod proto_roundtrip_tests {
     fn roundtrip_world_summary() {
         let msg = WorldSummary {
             protocol_version: 16,
-            world_id: "abutown-main".into(),
+            world_id: "abutopia".into(),
             chunk_size: 32,
             loaded_chunks: vec![sample_chunk(), ChunkCoord { x: 5, y: 4 }],
             tick_period_ms: 100,
@@ -708,7 +708,7 @@ mod proto_roundtrip_tests {
     fn roundtrip_chunk_snapshot() {
         let msg = ChunkSnapshot {
             protocol_version: 16,
-            world_id: "abutown-main".into(),
+            world_id: "abutopia".into(),
             coord: Some(sample_chunk()),
             chunk_version: 5,
             chunk_state: ChunkState::Active as i32,
@@ -727,7 +727,7 @@ mod proto_roundtrip_tests {
         let msg = HealthResponse {
             protocol_version: 16,
             service: "abutown-sim".into(),
-            world_id: "abutown-main".into(),
+            world_id: "abutopia".into(),
             ok: true,
         };
         assert_roundtrip(&msg);
@@ -741,7 +741,7 @@ mod proto_roundtrip_tests {
         // unknown to Hello and prost must silently skip them.
         let delta = MobilityChunkDelta {
             protocol_version: 16,
-            world_id: "abutown-main".into(),
+            world_id: "abutopia".into(),
             tick: 100,
             chunk: Some(sample_chunk()),
             changed_agents: vec![],
@@ -752,7 +752,7 @@ mod proto_roundtrip_tests {
         let bytes = delta.encode_to_vec();
         let back = Hello::decode(bytes.as_slice()).expect("decode tolerates unknown fields");
         assert_eq!(back.protocol_version, 16);
-        assert_eq!(back.world_id, "abutown-main");
+        assert_eq!(back.world_id, "abutopia");
         assert_eq!(back.chunk_size, 100);
     }
 }

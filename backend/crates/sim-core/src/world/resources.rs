@@ -41,7 +41,7 @@ pub struct WorldIdRes(pub String);
 
 impl Default for WorldIdRes {
     fn default() -> Self {
-        Self("abutown-main".to_string())
+        Self("abutopia".to_string())
     }
 }
 
@@ -77,12 +77,12 @@ mod tests {
 
     #[test]
     fn deterministic_rng_is_seeded_from_world_id() {
-        let mut a = DeterministicRng::from_world_id("abutown-main");
-        let mut b = DeterministicRng::from_world_id("abutown-main");
+        let mut a = DeterministicRng::from_world_id("abutopia");
+        let mut b = DeterministicRng::from_world_id("abutopia");
         assert_eq!(a.next_u64(), b.next_u64());
 
         let mut c = DeterministicRng::from_world_id("other-world");
-        let mut d = DeterministicRng::from_world_id("abutown-main");
+        let mut d = DeterministicRng::from_world_id("abutopia");
         assert_ne!(c.next_u64(), d.next_u64());
     }
 

@@ -29,7 +29,7 @@ import {
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
-  world_id: 'abutown-main',
+  world_id: 'abutopia',
   tick: 3,
   agents: [
     {
@@ -81,7 +81,7 @@ describe('mobility protocol guards', () => {
     const message = {
       type: 'mobility_chunk_delta',
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       tick: 4,
       chunk: { x: 4, y: 4 },
       changed_agents: snapshot.agents,
@@ -97,7 +97,7 @@ describe('mobility protocol guards', () => {
     const message = {
       type: 'mobility_chunk_snapshot',
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       tick: 4,
       chunk: { x: 4, y: 4 },
       agents: snapshot.agents,
@@ -121,7 +121,7 @@ describe('isWorldSummaryDto', () => {
   it('accepts a valid payload with tick_period_ms', () => {
     const payload = {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       chunk_size: 32,
       loaded_chunks: [{ x: 4, y: 4 }, { x: 5, y: 4 }],
       tick_period_ms: 100,
@@ -132,7 +132,7 @@ describe('isWorldSummaryDto', () => {
   it('rejects payloads missing tick_period_ms', () => {
     const payload = {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       chunk_size: 32,
       loaded_chunks: [],
     };
@@ -142,7 +142,7 @@ describe('isWorldSummaryDto', () => {
   it('rejects payloads with non-positive tick_period_ms', () => {
     const payload = {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       chunk_size: 32,
       loaded_chunks: [],
       tick_period_ms: 0,
@@ -153,7 +153,7 @@ describe('isWorldSummaryDto', () => {
   it('rejects payloads with malformed loaded_chunks entries', () => {
     const payload = {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       chunk_size: 32,
       loaded_chunks: [{ x: 'nope', y: 4 }],
       tick_period_ms: 100,
@@ -370,7 +370,7 @@ describe('proto ↔ DTO converters', () => {
   it('mobilityChunkDeltaFromProto converts proto delta → snake_case DTO with bigint→number tick', () => {
     const proto = create(MobilityChunkDeltaSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 5n,
       chunk: create(ChunkCoordSchema, { x: 4, y: 4 }),
       changedAgents: [],
@@ -380,7 +380,7 @@ describe('proto ↔ DTO converters', () => {
     });
     const dto = mobilityChunkDeltaFromProto(proto);
     expect(dto.type).toBe('mobility_chunk_delta');
-    expect(dto.world_id).toBe('abutown-main');
+    expect(dto.world_id).toBe('abutopia');
     expect(dto.tick).toBe(5);
     expect(dto.chunk).toEqual({ x: 4, y: 4 });
     expect(dto.left_agents).toEqual(['agent:gone']);
@@ -389,7 +389,7 @@ describe('proto ↔ DTO converters', () => {
   it('mobilityChunkDeltaFromProto rejects missing chunk', () => {
     const proto = create(MobilityChunkDeltaSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 5n,
       changedAgents: [],
       changedVehicles: [],
@@ -403,7 +403,7 @@ describe('proto ↔ DTO converters', () => {
   it('mobilityChunkSnapshotFromProto converts proto snapshot → snake_case DTO', () => {
     const proto = create(MobilityChunkSnapshotSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 7n,
       chunk: create(ChunkCoordSchema, { x: 1, y: 2 }),
       agents: [],
@@ -418,7 +418,7 @@ describe('proto ↔ DTO converters', () => {
   it('mobilityChunkSnapshotFromProto rejects missing chunk', () => {
     const proto = create(MobilityChunkSnapshotSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 7n,
       agents: [],
       vehicles: [],

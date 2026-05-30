@@ -218,7 +218,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: event_id.to_string(),
             command_id: format!("command:{event_id}"),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: version,
             version,
             coord: ChunkCoordDto { x: 4, y: 4 },

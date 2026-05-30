@@ -226,7 +226,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: event_id.to_string(),
             command_id: format!("command:{event_id}"),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: version,
             version,
             coord: ChunkCoordDto { x: 4, y: 4 },
@@ -269,7 +269,7 @@ mod tests {
         let metadata = WorldEventMetadata::from_event(&tile_event("event:7", 7));
 
         assert_eq!(metadata.event_id, "event:7");
-        assert_eq!(metadata.world_id, "abutown-main");
+        assert_eq!(metadata.world_id, "abutopia");
         assert_eq!(metadata.command_id, "command:event:7");
         assert_eq!(metadata.event_type, "tile_kind_set");
         assert_eq!(metadata.tick, 7);
@@ -286,16 +286,14 @@ mod tests {
             .await
             .unwrap();
 
-        let found =
-            WorldEventStore::find_event_by_command(&store, "abutown-main", "command:event:1")
-                .await
-                .unwrap();
+        let found = WorldEventStore::find_event_by_command(&store, "abutopia", "command:event:1")
+            .await
+            .unwrap();
         assert_eq!(found, Some(tile_event("event:1", 1)));
 
-        let missing =
-            WorldEventStore::find_event_by_command(&store, "abutown-main", "command:nope")
-                .await
-                .unwrap();
+        let missing = WorldEventStore::find_event_by_command(&store, "abutopia", "command:nope")
+            .await
+            .unwrap();
         assert_eq!(missing, None);
     }
 
@@ -314,7 +312,7 @@ mod tests {
 
         let events = WorldEventStore::read_chunk_events_since(
             &store,
-            "abutown-main",
+            "abutopia",
             ChunkCoordDto { x: 4, y: 4 },
             1,
         )
@@ -335,7 +333,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:other".to_string(),
             command_id: "command:event:other".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 4,
             version: 4,
             coord: ChunkCoordDto { x: 9, y: 9 },
@@ -368,7 +366,7 @@ mod tests {
 
         let events = WorldEventStore::read_chunk_events_since(
             &store,
-            "abutown-main",
+            "abutopia",
             ChunkCoordDto { x: 4, y: 4 },
             0,
         )
@@ -386,13 +384,11 @@ mod tests {
     async fn event_store_reports_max_tick_and_version() {
         let mut store = InMemoryWorldEventStore::default();
         assert_eq!(
-            WorldEventStore::max_tick(&store, "abutown-main")
-                .await
-                .unwrap(),
+            WorldEventStore::max_tick(&store, "abutopia").await.unwrap(),
             None
         );
         assert_eq!(
-            WorldEventStore::max_version(&store, "abutown-main")
+            WorldEventStore::max_version(&store, "abutopia")
                 .await
                 .unwrap(),
             None
@@ -406,13 +402,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            WorldEventStore::max_tick(&store, "abutown-main")
-                .await
-                .unwrap(),
+            WorldEventStore::max_tick(&store, "abutopia").await.unwrap(),
             Some(9)
         );
         assert_eq!(
-            WorldEventStore::max_version(&store, "abutown-main")
+            WorldEventStore::max_version(&store, "abutopia")
                 .await
                 .unwrap(),
             Some(9)

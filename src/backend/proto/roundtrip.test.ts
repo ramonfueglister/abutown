@@ -18,7 +18,7 @@ describe('proto roundtrip (TS @bufbuild/protobuf v2 API)', () => {
   it('roundtrips ServerMessage carrying Hello', () => {
     const hello = create(HelloSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       chunkSize: 32,
     });
     const msg = create(ServerMessageSchema, {
@@ -30,7 +30,7 @@ describe('proto roundtrip (TS @bufbuild/protobuf v2 API)', () => {
 
     expect(back.body.case).toBe('hello');
     if (back.body.case !== 'hello') throw new Error('unreachable');
-    expect(back.body.value.worldId).toBe('abutown-main');
+    expect(back.body.value.worldId).toBe('abutopia');
     expect(back.body.value.chunkSize).toBe(32);
     expect(back.body.value.protocolVersion).toBe(16);
   });
@@ -77,7 +77,7 @@ describe('proto roundtrip (TS @bufbuild/protobuf v2 API)', () => {
     });
     const delta = create(MobilityChunkDeltaSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 1234n,
       chunk: create(ChunkCoordSchema, { x: 1, y: -2 }),
       changedAgents: [agent],
@@ -95,7 +95,7 @@ describe('proto roundtrip (TS @bufbuild/protobuf v2 API)', () => {
     expect(back.body.case).toBe('mobilityChunkDelta');
     if (back.body.case !== 'mobilityChunkDelta') throw new Error('unreachable');
     const d = back.body.value;
-    expect(d.worldId).toBe('abutown-main');
+    expect(d.worldId).toBe('abutopia');
     expect(d.tick).toBe(1234n);
     expect(d.chunk?.x).toBe(1);
     expect(d.chunk?.y).toBe(-2);
@@ -133,7 +133,7 @@ describe('proto roundtrip (TS @bufbuild/protobuf v2 API)', () => {
     });
     const delta = create(MobilityChunkDeltaSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 1234n,
       chunk: create(ChunkCoordSchema, { x: 1, y: -2 }),
       changedAgents: [agent],

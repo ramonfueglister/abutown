@@ -27,7 +27,7 @@ fn sample_delta_proto(n_agents: usize) -> ServerMessage {
         body: Some(server_message::Body::MobilityChunkDelta(
             MobilityChunkDelta {
                 protocol_version: 16,
-                world_id: "abutown-main".into(),
+                world_id: "abutopia".into(),
                 tick: 1234,
                 chunk: Some(ChunkCoord { x: 4, y: 4 }),
                 changed_agents: agents,
@@ -59,7 +59,7 @@ fn json_equivalent_for_delta(n_agents: usize) -> String {
     let payload = serde_json::json!({
         "type": "mobility_chunk_delta",
         "protocol_version": 16,
-        "world_id": "abutown-main",
+        "world_id": "abutopia",
         "tick": 1234,
         "chunk": { "x": 4, "y": 4 },
         "changed_agents": agents,

@@ -25,7 +25,7 @@ import {
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
-  world_id: 'abutown-main',
+  world_id: 'abutopia',
   tick: 2,
   agents: [
     {
@@ -96,7 +96,7 @@ describe('mobility state reducer', () => {
       {
         type: 'mobility_chunk_delta',
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 3,
         chunk: { x: 0, y: 0 },
         changed_agents: [
@@ -141,7 +141,7 @@ describe('mobility state reducer', () => {
     const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
     const delta = create(MobilityChunkDeltaSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 3n,
       chunk: create(ChunkCoordSchema, { x: 0, y: 0 }),
       changedAgents: [
@@ -172,7 +172,7 @@ describe('mobility state reducer', () => {
     const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
     const snap = create(MobilityChunkSnapshotSchema, {
       protocolVersion: 16,
-      worldId: 'abutown-main',
+      worldId: 'abutopia',
       tick: 4n,
       chunk: create(ChunkCoordSchema, { x: 0, y: 0 }),
       agents: [],
@@ -505,7 +505,7 @@ describe('mobility state interpolation buffer', () => {
   it('initial snapshot sets prev == current for each agent', () => {
     const snapshot: MobilitySnapshotDto = {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       tick: 1,
       agents: [agentAt('agent:seed:0', 100, 200)],
       vehicles: [],
@@ -523,7 +523,7 @@ describe('mobility state interpolation buffer', () => {
       createMobilityOverlayState(),
       {
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 1,
         agents: [agentAt('agent:seed:0', 100, 200)],
         vehicles: [],
@@ -534,7 +534,7 @@ describe('mobility state interpolation buffer', () => {
     const delta: MobilityChunkDeltaDto = {
       type: 'mobility_chunk_delta',
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       tick: 2,
       chunk: { x: 3, y: 6 },
       changed_agents: [agentAt('agent:seed:0', 110, 200)],
@@ -556,7 +556,7 @@ describe('mobility state interpolation buffer', () => {
       {
         type: 'mobility_chunk_delta',
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 1,
         chunk: { x: 1, y: 1 },
         changed_agents: [agentAt('agent:seed:0', 50, 60)],
@@ -576,7 +576,7 @@ describe('mobility state interpolation buffer', () => {
       createMobilityOverlayState(),
       {
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 1,
         agents: [agentAt('agent:seed:0', 100, 200)],
         vehicles: [],
@@ -589,7 +589,7 @@ describe('mobility state interpolation buffer', () => {
       {
         type: 'mobility_chunk_delta',
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 2,
         chunk: { x: 3, y: 6 },
         changed_agents: [agentAt('agent:seed:0', 110, 200)],
@@ -610,7 +610,7 @@ describe('mobility state interpolation buffer', () => {
       createMobilityOverlayState(),
       {
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 1,
         agents: [agentAt('agent:seed:0', 0, 0)],
         vehicles: [],
@@ -623,7 +623,7 @@ describe('mobility state interpolation buffer', () => {
       {
         type: 'mobility_chunk_delta',
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 2,
         chunk: { x: 0, y: 0 },
         changed_agents: [agentAt('agent:seed:0', 100, 0)],

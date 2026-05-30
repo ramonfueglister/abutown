@@ -1,6 +1,6 @@
 # Abutown Backend
 
-Rust authoritative simulation foundation for the single always-on `abutown-main` aquarium world.
+Rust authoritative simulation foundation for the current always-on Abutopia world.
 
 Common commands:
 
@@ -13,19 +13,36 @@ cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D 
 Run the authority server:
 
 ```bash
-cargo run --manifest-path backend/Cargo.toml -p sim-server
+cargo run --manifest-path backend/Cargo.toml -p sim-server --bin sim-server
 ```
 
 The server entrypoint loads the repository-root `.env` and requires:
 
 - `DATABASE_URL`: SQLx Postgres/Supabase connection string for `world_events`, `chunk_snapshots`, and `user_card_hands`.
 - `SUPABASE_URL`: Supabase project URL used for JWT/JWKS authentication.
+- `CORS_ALLOWED_ORIGINS`: comma-separated browser origins allowed to call the API. Local Vite uses `http://127.0.0.1:5173`.
 
 Other root `.env` keys currently have narrower ownership:
 
-- `SUPABASE_ANON_KEY`: frontend login/client key; Rust persistence does not use it.
-- `SUPABASE_SERVICE_ROLE_KEY`: intentionally unused by this Rust slice.
-- `SUPABASE_JWKS_X` and `SUPABASE_JWKS_Y`: local key material present in the env file; Rust auth currently fetches JWKS from `SUPABASE_URL`.
+- `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`: frontend login/client config. Only a low-privilege publishable key belongs here.
+- `VITE_ABUTOWN_BACKEND_URL`: optional frontend backend URL; defaults to `http://127.0.0.1:8080`.
+
+Do not add non-Vite publishable keys, service-role keys, or copied JWKS material
+to the local `.env`; this backend reads only the keys listed above.
+
+## Supabase Setup
+
+Local secrets live in the repository-root `.env`. The file is ignored by Git and should be mode `0600`. Do not commit `.env`, `supabase/.temp/`, database passwords, `sb_secret_*`, or service-role keys.
+
+Use Supabase's session-pooler connection string for `DATABASE_URL` when running the persistent local backend:
+
+```bash
+DATABASE_URL=postgresql://postgres.<project-ref>:<db-password>@aws-1-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+```
+
+Session pooler mode supports IPv4 and keeps prepared statements available for SQLx. Avoid transaction-pooler URLs for this server unless SQLx prepared statements are explicitly disabled. Direct database URLs are fine only where IPv6 to `db.<project-ref>.supabase.co` works.
+
+The repo includes `supabase/config.toml` for local Supabase CLI configuration. The link metadata in `supabase/.temp/` is local state and ignored.
 
 ## Runtime Surface
 
@@ -39,12 +56,13 @@ The server exposes the current backend runtime directly:
 - `GET /ws` streams a hello message, tile pulses, and mobility deltas.
 
 ```bash
-cargo run --manifest-path backend/Cargo.toml -p sim-server
+cargo run --manifest-path backend/Cargo.toml -p sim-server --bin sim-server
 ```
 
-The runtime currently loads three chunks (`4:4`, `5:4`, and `4:5`) and rotates tile pulses across them. `/ws` ticking is driven by one server-side scheduler and broadcast to connected clients.
-
-The old frontend bridge described in the visible-slice plan is not present in this branch. The current Vite client still renders the local canvas world without consuming these backend endpoints.
+The runtime loads the authored Abutopia base-world chunks and broadcasts
+mobility/world deltas from one server-side scheduler. The Vite client requires
+the backend and consumes `/world`, `/mobility`, and `/ws`; there is no production
+frontend fallback world.
 
 ## Command Event Boundary
 
@@ -100,11 +118,10 @@ cargo test --manifest-path backend/Cargo.toml -p sim-server websocket_sends_mobi
 
 Frontend agent mode:
 
-- The Vite client no longer renders the seeded backend demo mobility marker.
-- Existing Simutrans pedestrians are the local frontend agents and can be
-  selected directly on the canvas.
-- Backend mobility endpoints remain available for later authoritative
-  simulation slices, but the current browser agent mode is pedestrian-driven.
+- The Vite client renders authoritative backend mobility from `/mobility` and
+  `/ws`.
+- The current Abutopia seed exposes one walking agent and no vehicles.
+- Browser smoke must start the backend; there is no local canvas fallback world.
 
 ## Snapshot Loop
 

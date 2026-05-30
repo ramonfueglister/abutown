@@ -24,7 +24,7 @@ function makeStateWith(agents: AgentMobilityDto[], vehicles: VehicleMobilityDto[
     createMobilityOverlayState(),
     {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       tick: 1,
       agents,
       vehicles,
@@ -55,7 +55,7 @@ describe('backendMobilityDrawables (interpolated)', () => {
       {
         type: 'mobility_chunk_delta',
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 2,
         chunk: { x: 0, y: 0 },
         changed_agents: [
@@ -104,7 +104,7 @@ describe('backendMobilityDrawables (interpolated)', () => {
       {
         type: 'mobility_chunk_delta',
         protocol_version: 1,
-        world_id: 'abutown-main',
+        world_id: 'abutopia',
         tick: 2,
         chunk: { x: 0, y: 0 },
         changed_agents: [],

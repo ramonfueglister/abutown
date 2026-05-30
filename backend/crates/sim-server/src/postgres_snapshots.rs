@@ -219,15 +219,15 @@ mod tests {
 
     #[test]
     fn sql_record_extracts_snapshot_metadata_and_json_payload() {
-        let snapshot = snapshot(WorldId("abutown-main".to_string()));
+        let snapshot = snapshot(WorldId("abutopia".to_string()));
         let record = SqlChunkSnapshotRecord::from_snapshot(&snapshot).unwrap();
 
-        assert_eq!(record.world_id, "abutown-main");
+        assert_eq!(record.world_id, "abutopia");
         assert_eq!(record.coord, ChunkCoord { x: 4, y: 4 });
         assert_eq!(record.chunk_state, "active");
         assert_eq!(record.chunk_version, 7);
         assert_eq!(record.tile_count, 1024);
-        assert_eq!(record.payload["world_id"], "abutown-main");
+        assert_eq!(record.payload["world_id"], "abutopia");
         assert_eq!(record.payload["coord"]["x"], 4);
         assert_eq!(record.payload["chunk_state"], "active");
     }

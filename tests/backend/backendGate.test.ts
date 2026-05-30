@@ -38,7 +38,7 @@ describe('backend startup gate', () => {
   it('accepts a healthy backend response', () => {
     expect(isBackendHealthDto({
       service: 'abutown-sim',
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       ok: true,
       protocol_version: 1,
     })).toBe(true);
@@ -47,7 +47,7 @@ describe('backend startup gate', () => {
   it('rejects invalid health payloads', () => {
     expect(isBackendHealthDto({
       service: 'abutown-sim',
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       ok: false,
       protocol_version: 1,
     })).toBe(false);
@@ -69,7 +69,7 @@ describe('backend startup gate', () => {
       fetchImpl: async () =>
         healthProtoResponse({
           service: 'abutown-sim',
-          world_id: 'abutown-main',
+          world_id: 'abutopia',
           ok: false,
           protocol_version: 1,
         }),
@@ -82,7 +82,7 @@ describe('backend startup gate', () => {
         expect(String(input)).toBe('http://127.0.0.1:8080/health');
         return healthProtoResponse({
           service: 'abutown-sim',
-          world_id: 'abutown-main',
+          world_id: 'abutopia',
           ok: true,
           protocol_version: 1,
         });
@@ -91,7 +91,7 @@ describe('backend startup gate', () => {
 
     expect(status).toEqual({
       service: 'abutown-sim',
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       ok: true,
       protocol_version: 1,
     });

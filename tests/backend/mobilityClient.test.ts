@@ -186,7 +186,7 @@ function stubViewport(opts: {
 
 const worldSummary: WorldSummaryDto = {
   protocol_version: 1,
-  world_id: 'abutown-main',
+  world_id: 'abutopia',
   chunk_size: 32,
   loaded_chunks: [],
   tick_period_ms: 100,
@@ -195,7 +195,7 @@ const worldSummary: WorldSummaryDto = {
 
 const snapshot: MobilitySnapshotDto = {
   protocol_version: 1,
-  world_id: 'abutown-main',
+  world_id: 'abutopia',
   tick: 42,
   agents: [
     {
@@ -309,7 +309,7 @@ describe('mobility backend client', () => {
   it('requireMobilitySnapshot surfaces tickPeriodMs from /world', async () => {
     const customWorldSummary: WorldSummaryDto = {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       chunk_size: 32,
       loaded_chunks: [],
       tick_period_ms: 250,
@@ -317,7 +317,7 @@ describe('mobility backend client', () => {
     };
     const mobilitySnapshot: MobilitySnapshotDto = {
       protocol_version: 1,
-      world_id: 'abutown-main',
+      world_id: 'abutopia',
       tick: 1,
       agents: [],
       vehicles: [],

@@ -300,7 +300,7 @@ mod tests {
             .set_tile_kind(42, TileKind::BuildingFootprint)
             .unwrap();
 
-        let snapshot = build_chunk_snapshot("abutown-main", &original, ChunkActivity::Active);
+        let snapshot = build_chunk_snapshot("abutopia", &original, ChunkActivity::Active);
         let restored = Chunk::from_snapshot(&snapshot).unwrap();
 
         assert_eq!(restored.coord(), original.coord());
@@ -323,7 +323,7 @@ mod tests {
 
         let snapshot = ChunkSnapshotDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             coord: ChunkCoordDto { x: 4, y: 4 },
             chunk_state: ChunkActivity::Active.into(),
             chunk_version: 1,
@@ -349,7 +349,7 @@ mod tests {
 
         let snapshot = ChunkSnapshotDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             coord: ChunkCoordDto { x: 0, y: 0 },
             chunk_state: ChunkActivity::Active.into(),
             chunk_version: 0,
@@ -376,7 +376,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:1".to_string(),
             command_id: "command:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 1,
             version: 1,
             coord: ChunkCoordDto { x: 4, y: 4 },
@@ -402,7 +402,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:1".to_string(),
             command_id: "command:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 1,
             version: 1,
             coord: ChunkCoordDto { x: 9, y: 9 },
@@ -426,7 +426,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:1".to_string(),
             command_id: "command:1".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 1,
             version: 1,
             coord: ChunkCoordDto { x: 4, y: 4 },
@@ -458,7 +458,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 event_id: format!("event:{chunk_version}"),
                 command_id: format!("command:{chunk_version}"),
-                world_id: WorldId("abutown-main".to_string()),
+                world_id: WorldId("abutopia".to_string()),
                 tick: chunk_version,
                 version: chunk_version,
                 coord: ChunkCoordDto { x: 4, y: 4 },
@@ -496,7 +496,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:5".to_string(),
             command_id: "command:5".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 5,
             version: 5,
             coord: ChunkCoordDto { x: 4, y: 4 },
@@ -529,7 +529,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             event_id: "event:oob".to_string(),
             command_id: "command:oob".to_string(),
-            world_id: WorldId("abutown-main".to_string()),
+            world_id: WorldId("abutopia".to_string()),
             tick: 1,
             version: 1,
             coord: ChunkCoordDto { x: 4, y: 4 },
