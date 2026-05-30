@@ -51,6 +51,7 @@ fn resolve_base_world_path() -> PathBuf {
         .unwrap_or_else(|_| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .ancestors()
+                // infallible: fixed crate layout — sim-server always sits 3 levels under the repo root
                 .nth(3)
                 .expect("sim-server crate lives under backend/crates/sim-server")
                 .join(BASE_WORLD_DEFAULT_PATH)
@@ -153,8 +154,11 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(runtime: SimulationRuntime) -> Self {
+        let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+            .expect("base world bundle present (test/dev convenience; production uses build_app_from_config which propagates errors)");
         Self::new_with_stores(
             runtime,
+            &base_world,
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             CardHandStore::memory(),
@@ -167,8 +171,11 @@ impl AppState {
         card_hands: CardHandStore,
         auth: AuthVerifier,
     ) -> Self {
+        let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+            .expect("base world bundle present (test/dev convenience; production uses build_app_from_config which propagates errors)");
         Self::new_with_stores(
             runtime,
+            &base_world,
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             card_hands,
@@ -178,6 +185,7 @@ impl AppState {
 
     pub fn new_with_stores(
         runtime: SimulationRuntime,
+        base_world: &BaseWorldBundle,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
         card_hands: CardHandStore,
@@ -186,8 +194,6 @@ impl AppState {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         let initial_view =
             build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0);
-        let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
-            .expect("base world bundle is required for app state");
         let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
         let view = Arc::new(arc_swap::ArcSwap::from_pointee(initial_view));
         let chunk_channels: Arc<DashMap<_, _>> = Arc::new(DashMap::new());
@@ -201,7 +207,7 @@ impl AppState {
             chunk_channels: Arc::clone(&chunk_channels),
             view: Arc::clone(&view),
             mutations: mutation_tx,
-            base_world: Arc::new(BaseWorldResponse::from(&base_world)),
+            base_world: Arc::new(BaseWorldResponse::from(base_world)),
         };
 
         // Panic supervisor: if tick_loop panics, every reader is stuck on
@@ -372,14 +378,14 @@ fn build_read_view_from_runtime(
 }
 
 pub fn build_app() -> Router {
+    // dev/test entry; production boots via build_app_from_config which propagates errors
     let runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())
         .expect("base world bundle is required for app startup");
     build_app_with_runtime(runtime)
 }
 
 pub fn build_app_with_allowed_origins(allowed_origins: &[String]) -> anyhow::Result<Router> {
-    let runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())
-        .expect("base world bundle is required for app startup");
+    let runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())?;
     let state = AppState::new(runtime);
     let cors = cors_layer(allowed_origins)?;
     Ok(build_router_from_state(state, cors))
@@ -416,6 +422,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
 
     let state = AppState::new_with_stores(
         runtime,
+        &base_world,
         snapshot_store,
         mobility_snapshot_store,
         card_hands,
@@ -439,6 +446,7 @@ pub fn build_app_with_runtime_and_card_hands(
     auth: AuthVerifier,
 ) -> Router {
     let state = AppState::new_with_card_hands(runtime, card_hands, auth);
+    // infallible: hardcoded empty origin slice can never contain a malformed origin
     let cors = cors_layer(&[]).expect("empty origin list is always valid");
     build_router_from_state(state, cors)
 }
@@ -1599,8 +1607,11 @@ mod tests {
         // Build AppState with a slow snapshot store (100 ms per write, 3 chunks = 300 ms total).
         let mut runtime = SimulationRuntime::new();
         mutate_runtime_tile(&mut runtime, "command:app-persist-fail:1").await;
+        let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+            .expect("base world bundle present for test");
         let state = AppState::new_with_stores(
             runtime,
+            &base_world,
             Box::new(SlowSnapshotStore {
                 write_delay_ms: 100,
             }),
@@ -1810,8 +1821,11 @@ mod tests {
 
         let mut runtime = SimulationRuntime::new();
         mutate_runtime_tile(&mut runtime, "command:app-persist-failure:1").await;
+        let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+            .expect("base world bundle present for test");
         let state = AppState::new_with_stores(
             runtime,
+            &base_world,
             Box::new(FailingSnapshotStore),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             CardHandStore::memory(),
