@@ -1370,3 +1370,62 @@ fn expected_car_routes_skips_dangling_arterial_without_panicking() {
             .all(|k| !k.contains("dangling") && !k.contains("missing"))
     );
 }
+
+#[tokio::test]
+async fn hydrate_restores_economy_snapshot() {
+    use sim_core::economy::{EconomicActorId, EconomyPersistSnapshot, Money, MoneyAccount};
+
+    let base_world = base_world_fixture();
+    let compat = base_world.snapshot_compatibility();
+
+    // Pre-load an economy store with a snapshot carrying one account.
+    let mut snap = EconomyPersistSnapshot::default();
+    snap.accounts.push((
+        EconomicActorId(1),
+        MoneyAccount {
+            available: Money(777),
+            locked: Money(0),
+        },
+    ));
+    let mut econ_store = InMemoryEconomySnapshotStore::default();
+    econ_store
+        .write(base_world.world_id(), 1, &snap, &compat)
+        .await
+        .unwrap();
+
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
+        Box::new(InMemoryWorldEventStore::default()),
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(econ_store),
+        &base_world,
+    )
+    .await
+    .unwrap();
+
+    let restored = runtime.economy_snapshot();
+    assert_eq!(
+        restored
+            .accounts
+            .iter()
+            .find(|(a, _)| *a == EconomicActorId(1))
+            .map(|(_, acc)| acc.available),
+        Some(Money(777)),
+        "economy account restored from snapshot store"
+    );
+}
+
+#[tokio::test]
+async fn hydrate_with_empty_economy_store_yields_default_economy() {
+    let base_world = base_world_fixture();
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
+        Box::new(InMemoryWorldEventStore::default()),
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        &base_world,
+    )
+    .await
+    .unwrap();
+    assert!(runtime.economy_snapshot().accounts.is_empty());
+}
