@@ -33,5 +33,5 @@
   - `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml --workspace`
   - If credentials and ports are available, run `npm run smoke:mobility-persistence` against the local stack.
 
-- [ ] **Step 6: Finish branch**
+- [x] **Step 6: Finish branch**
   - Commit intentionally, push to GitHub, open/merge PR, and clean up the isolated worktree.
