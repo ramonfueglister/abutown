@@ -143,6 +143,19 @@ fn round_trip_is_deterministic() {
 }
 
 #[test]
+fn seed_populates_activity_waypoints_from_corridor() {
+    // home/destination are derived from the loaded world's corridor ends, read
+    // from the bundle — NOT hardcoded. Asserting against the bundle's own points
+    // means a world regeneration can never silently drift this out of sync.
+    let bundle = BaseWorldBundle::load_from_dir(abutopia_root()).expect("bundle loads");
+    let (home, dest) = south_corridor_ends(&bundle);
+    let (world, _s) = seed::from_base_world_bundle(&bundle).expect("seed ok");
+    let wp = world.resource::<sim_core::mobility::resources::ActivityWaypoints>();
+    assert_eq!(wp.0.get("activity:home").copied(), Some(home));
+    assert_eq!(wp.0.get("activity:destination").copied(), Some(dest));
+}
+
+#[test]
 fn cyclic_round_trip_survives_snapshot_extract_apply() {
     // Production never steps the seed world: it seeds, extracts a
     // MobilityPersistSnapshot, then hydrates the live world from that snapshot

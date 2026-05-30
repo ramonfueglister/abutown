@@ -31,12 +31,15 @@ fn destination_for_stage(
     graph: &crate::routing::Graph,
     stage: &PlanStage,
     spatial: Option<&crate::routing::NodeSpatialIndex>,
+    waypoints: &crate::mobility::resources::ActivityWaypoints,
 ) -> Option<crate::routing::NodeId> {
     match stage {
         PlanStage::WalkToStop { stop_id, .. } => graph.node_by_legacy(stop_id),
         PlanStage::WalkToActivity { activity_id, .. } => {
             graph.node_by_legacy(activity_id).or_else(|| {
-                let coord = crate::mobility_geometry::activity_geometry(activity_id)?.coord;
+                let coord = waypoints.0.get(activity_id).copied().or_else(|| {
+                    crate::mobility_geometry::activity_geometry(activity_id).map(|g| g.coord)
+                })?;
                 spatial?.nearest(coord)
             })
         }
@@ -162,6 +165,7 @@ pub fn route_assignment_system(
     mut waiting: ResMut<crate::routing::WaitingAgents>,
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
+    waypoints: Res<crate::mobility::resources::ActivityWaypoints>,
 ) {
     for (entity, pos, stable, mut state, mut plan) in query.iter_mut() {
         let AgentMobilityState::Walking { link_id, progress } = &state.0 else {
@@ -199,7 +203,9 @@ pub fn route_assignment_system(
             stats.skipped += 1;
             continue;
         };
-        let Some(destination) = destination_for_stage(&graph, &stage, spatial.as_deref()) else {
+        let Some(destination) =
+            destination_for_stage(&graph, &stage, spatial.as_deref(), &waypoints)
+        else {
             stats.failed += 1;
             continue;
         };
@@ -356,6 +362,7 @@ pub fn route_advance_system(
     mut stats: ResMut<RouteAssignmentStats>,
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
+    waypoints: Res<crate::mobility::resources::ActivityWaypoints>,
 ) {
     for (entity, pos, stable, mut state, mut plan, mut route) in query.iter_mut() {
         if !chunk_is_simulated(pos, &simulated) {
@@ -419,7 +426,9 @@ pub fn route_advance_system(
             invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         };
-        if destination_for_stage(&graph, &stage, spatial.as_deref()) != Some(route.destination) {
+        if destination_for_stage(&graph, &stage, spatial.as_deref(), &waypoints)
+            != Some(route.destination)
+        {
             invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
             continue;
         }
@@ -437,5 +446,58 @@ pub fn route_advance_system(
         ) {
             invalidate_active_route(entity, &mut stats, &mut dirty, &mut commands);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routing::{Edge, EdgeId, EdgeKind, Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
+
+    fn minimal_graph_with_node_at_5_5() -> (Graph, NodeSpatialIndex) {
+        let graph = Graph::new(
+            vec![
+                Node {
+                    id: NodeId(0),
+                    position: (0.0, 0.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(1),
+                    position: (5.0, 5.0),
+                    kind: NodeKind::ActivityLocation,
+                    legacy_id: None,
+                },
+            ],
+            vec![Edge {
+                id: EdgeId(0),
+                from: NodeId(0),
+                to: NodeId(1),
+                polyline: vec![(0.0, 0.0), (5.0, 5.0)],
+                length: 7.07,
+                kind: EdgeKind::Footway,
+                speed_limit: 1.0,
+                capacity: 1,
+                legacy_id: Some("walk:test".into()),
+            }],
+        );
+        let spatial = NodeSpatialIndex::from_nodes(graph.nodes());
+        (graph, spatial)
+    }
+
+    #[test]
+    fn destination_for_activity_prefers_waypoints_over_static_geometry() {
+        let (graph, spatial) = minimal_graph_with_node_at_5_5();
+        let mut wp = crate::mobility::resources::ActivityWaypoints::default();
+        wp.0.insert("activity:home".to_string(), (5.0, 5.0));
+        let stage = PlanStage::WalkToActivity {
+            link_id: "walk:test".into(),
+            activity_id: "activity:home".into(),
+        };
+        assert_eq!(
+            destination_for_stage(&graph, &stage, Some(&spatial), &wp),
+            spatial.nearest((5.0, 5.0)),
+        );
     }
 }

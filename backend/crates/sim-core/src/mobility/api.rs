@@ -59,6 +59,7 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     world.insert_resource(PreviousFlowCellContrib::default());
     world.insert_resource(PendingPerChunkDeltas::default());
     world.insert_resource(RouteAssignmentStats::default());
+    world.insert_resource(crate::mobility::resources::ActivityWaypoints::default());
 
     crate::mobility::systems::install_systems(schedule);
 }

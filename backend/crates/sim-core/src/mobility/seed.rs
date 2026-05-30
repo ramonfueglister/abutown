@@ -473,6 +473,14 @@ fn seed_pedestrians_from_bundle(
                 corridor_id: group.corridor_id.clone(),
             });
         };
+        // Data-driven round-trip waypoints: derive home/destination from this
+        // corridor's actual endpoints in the loaded world (no hardcoded coords).
+        let corridor = &bundle.transport.pedestrian_corridors[corridor_index];
+        if let (Some(first), Some(last)) = (corridor.points.first(), corridor.points.last()) {
+            let mut wp = world.resource_mut::<crate::mobility::resources::ActivityWaypoints>();
+            wp.0.insert("activity:home".to_string(), (first.x, first.y));
+            wp.0.insert("activity:destination".to_string(), (last.x, last.y));
+        }
         for n in 0..group.agents_per_corridor {
             let agent_id = AgentId(format!("agent:walk:{agent_index}"));
             agent_index += 1;

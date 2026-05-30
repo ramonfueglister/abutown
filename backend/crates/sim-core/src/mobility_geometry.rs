@@ -108,17 +108,11 @@ pub fn activity_geometry(activity_id: &str) -> Option<ActivityGeometry> {
         "activity:work" => Some(ActivityGeometry {
             coord: chunk_center(5, 4),
         }),
-        // abutopia south-sidewalk corridor endpoints (the round-trip waypoints).
-        // These track `data/worlds/abutopia/layers/transport.json`
-        // (corridor:sidewalk:south first/last points) and MUST be updated if the
-        // world is regenerated. The round_trip_movement integration test reads
-        // the live corridor ends from the bundle, so a drift here fails loudly.
-        "activity:home" => Some(ActivityGeometry {
-            coord: (106.0, 64.51),
-        }),
-        "activity:destination" => Some(ActivityGeometry {
-            coord: (117.0, 64.51),
-        }),
+        // NOTE: round-trip waypoints (activity:home / activity:destination) are
+        // NOT hardcoded here. They are world-derived via the `ActivityWaypoints`
+        // resource (populated at seed time from the corridor ends) and resolved
+        // ahead of this fallback in `destination_for_stage`. Hardcoding them here
+        // caused a world-drift bug; do not reintroduce.
         _ => Some(ActivityGeometry {
             coord: chunk_center(4, 4),
         }),
@@ -203,16 +197,16 @@ mod tests {
     }
 
     #[test]
-    fn home_and_destination_resolve_to_south_corridor_ends() {
-        let home = activity_geometry("activity:home")
-            .expect("home activity defined")
-            .coord;
-        let dest = activity_geometry("activity:destination")
-            .expect("destination activity defined")
-            .coord;
-        assert_eq!(home, (106.0, 64.51));
-        assert_eq!(dest, (117.0, 64.51));
-        assert_ne!(home, dest);
+    fn activity_geometry_does_not_hardcode_round_trip_waypoints() {
+        // home/destination are world-derived via the ActivityWaypoints resource,
+        // NOT hardcoded here (hardcoding them caused a world-drift bug). They must
+        // fall through to the default, identical to any unknown activity.
+        let default = activity_geometry("activity:unknown").unwrap().coord;
+        assert_eq!(activity_geometry("activity:home").unwrap().coord, default);
+        assert_eq!(
+            activity_geometry("activity:destination").unwrap().coord,
+            default
+        );
     }
 
     #[test]
