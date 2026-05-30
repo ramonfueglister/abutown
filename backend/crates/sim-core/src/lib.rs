@@ -1,3 +1,4 @@
+pub mod economy;
 pub mod base_world;
 pub mod chunk;
 pub mod city_network;
