@@ -298,6 +298,8 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
                     world_id: abutown_protocol::WorldId("abutopia".to_string()),
                     mobility_tick: 42,
                     mobility_world: invalid_mobility.clone(),
+                    economy_tick: 0,
+                    economy_world: sim_core::economy::EconomyPersistSnapshot::default(),
                 });
             }
         }
@@ -628,6 +630,55 @@ async fn snapshot_write_failure_preserves_dirty_state() {
     assert!(
         !payload.chunk_snapshots.is_empty(),
         "snapshot write failure must not mark chunks persisted (snapshots remain dirty)"
+    );
+}
+
+#[tokio::test]
+async fn persist_writes_economy_snapshot_to_store() {
+    use sim_core::economy::{AccountBook, EconomicActorId, Money, MoneyAccount};
+    use sim_core::persistence::{
+        InMemoryChunkSnapshotStore, InMemoryMobilitySnapshotStore, SnapshotCompatibility,
+    };
+
+    let mut runtime = SimulationRuntime::new();
+    mutate_runtime_tile(&mut runtime, "command:econ-persist:1").await;
+    // Seed an account so the economy snapshot is non-trivial.
+    runtime.world.resource_mut::<AccountBook>().accounts.insert(
+        EconomicActorId(1),
+        MoneyAccount {
+            available: Money(500),
+            locked: Money(0),
+        },
+    );
+
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let state = AppState::new_with_stores(
+        runtime,
+        &base_world,
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    );
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    persist_snapshots_once(&state).await.unwrap();
+
+    let store = state.economy_snapshot_store();
+    let store = store.lock().await;
+    let compat = SnapshotCompatibility::new(
+        base_world.world_id().to_string(),
+        base_world.snapshot_compatibility().base_world_schema_version,
+    );
+    let got = store.read(base_world.world_id(), &compat).await.unwrap();
+    assert!(got.is_some(), "economy snapshot persisted");
+    let (_tick, snap) = got.unwrap();
+    assert!(
+        snap.accounts.iter().any(|(a, _)| *a == EconomicActorId(1)),
+        "seeded account present in persisted economy snapshot"
     );
 }
 

@@ -876,6 +876,7 @@ async fn apply_mutation_owned(
             let items = runtime.collect_provider_items();
             let mut chunk_snapshots: Vec<abutown_protocol::ChunkSnapshotDto> = Vec::new();
             let mut mobility_world: Option<sim_core::mobility::MobilityPersistSnapshot> = None;
+            let mut economy_world: Option<sim_core::economy::EconomyPersistSnapshot> = None;
             for item in items {
                 match item.key.kind {
                     "chunk" => match serde_json::from_slice::<abutown_protocol::ChunkSnapshotDto>(
@@ -901,6 +902,18 @@ async fn apply_mutation_owned(
                             "provider emitted mobility payload that failed to deserialize",
                         ),
                     },
+                    "economy" => match serde_json::from_slice::<
+                        sim_core::economy::EconomyPersistSnapshot,
+                    >(&item.payload)
+                    {
+                        Ok(snap) => economy_world = Some(snap),
+                        Err(error) => tracing::warn!(
+                            %error,
+                            kind = item.key.kind,
+                            identifier = %item.key.identifier,
+                            "provider emitted economy payload that failed to deserialize",
+                        ),
+                    },
                     other => {
                         tracing::warn!(kind = other, "ignoring SnapshotItem with unknown kind",)
                     }
@@ -915,6 +928,8 @@ async fn apply_mutation_owned(
                 mobility_tick: runtime.mobility_tick(),
                 mobility_world: mobility_world
                     .unwrap_or_else(|| runtime.mobility_persist_snapshot()),
+                economy_tick: runtime.mobility_tick(),
+                economy_world: economy_world.unwrap_or_default(),
             };
             let _ = reply.send(payload);
         }
@@ -1181,6 +1196,8 @@ async fn persist_snapshots_once(
         world_id,
         mobility_tick,
         mobility_world,
+        economy_tick,
+        economy_world,
     } = payload;
     let compatibility = sim_core::persistence::SnapshotCompatibility::new(
         state.base_world.world_id.clone(),
@@ -1242,6 +1259,18 @@ async fn persist_snapshots_once(
             tracing::warn!(%error, "failed to persist mobility snapshot");
         } else {
             mobility_liveness.record_success(mobility_attempt, SystemTime::now());
+        }
+    }
+
+    // Phase 2c: economy DB write — store-mutex only, no runtime lock held.
+    {
+        let econ_store = state.economy_snapshot_store();
+        let mut econ_store = econ_store.lock().await;
+        if let Err(error) = econ_store
+            .write(&world_id.0, economy_tick, &economy_world, &compatibility)
+            .await
+        {
+            tracing::warn!(%error, "failed to persist economy snapshot");
         }
     }
 
