@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bevy_ecs::prelude::*;
 
 use crate::economy::{GoodId, MarketId, Money, Quantity};
+use crate::ids::ChunkCoord;
 
 pub struct MarketSite {
     pub id: MarketId,
@@ -53,3 +54,16 @@ pub struct MarketGoods(pub BTreeMap<MarketGoodKey, MarketGoodState>);
 
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct DirtyMarketGoods(pub BTreeSet<MarketGoodKey>);
+
+/// MarketId -> the chunk that contains its market node. Populated by the spatial
+/// seeder (which owns the routing `Graph`) so the economy core needs no per-tick
+/// `Graph` dependency. Markets absent from this map are un-anchored and ALWAYS
+/// simulated — this is what keeps pure-economy tests at full fidelity.
+#[derive(Resource, Default)]
+pub struct MarketChunks(pub BTreeMap<MarketId, ChunkCoord>);
+
+/// The set of currently DORMANT markets: anchored (present in `MarketChunks`) to
+/// a chunk that is NOT Active/Hot. Recomputed every tick by
+/// `refresh_dormant_markets_system`. Anything not in this set runs full fidelity.
+#[derive(Resource, Default)]
+pub struct DormantMarkets(pub BTreeSet<MarketId>);
