@@ -124,6 +124,12 @@ async fn health_and_world_summary_are_available() {
     assert_eq!(health.protocol_version, u32::from(PROTOCOL_VERSION));
     assert_eq!(health.world_id, "abutopia");
     assert!(health.ok);
+    let persistence = health.persistence.expect("persistence health present");
+    assert_eq!(
+        persistence.status,
+        w::PersistenceHealthStatus::Starting as i32
+    );
+    assert_eq!(persistence.world_id, "");
 
     let world_response = app
         .oneshot(

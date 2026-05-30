@@ -1,4 +1,8 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use abutown_protocol::ChunkSnapshotDto;
 use abutown_protocol::v1 as w;
@@ -33,6 +37,7 @@ use crate::{
         card_definitions,
     },
     config::ServerConfig,
+    persistence_liveness::{MobilityPersistenceHealthStatus, MobilityPersistenceLiveness},
     postgres_events::PostgresWorldEventStore,
     postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
@@ -48,6 +53,7 @@ use proto_convert::*;
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
+const MOBILITY_PERSISTENCE_FRESHNESS_WINDOW: Duration = Duration::from_secs(15);
 const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/abutopia";
 
 fn resolve_base_world_path() -> PathBuf {
@@ -74,6 +80,7 @@ pub struct AppState {
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
     base_world: Arc<BaseWorldResponse>,
+    mobility_liveness: Arc<MobilityPersistenceLiveness>,
 }
 
 impl AppState {
@@ -121,6 +128,9 @@ impl AppState {
         let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
         let view = Arc::new(arc_swap::ArcSwap::from_pointee(initial_view));
         let chunk_channels: Arc<DashMap<_, _>> = Arc::new(DashMap::new());
+        let mobility_liveness = Arc::new(MobilityPersistenceLiveness::new(
+            MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
+        ));
 
         let state = Self {
             deltas: deltas.clone(),
@@ -132,6 +142,7 @@ impl AppState {
             view: Arc::clone(&view),
             mutations: mutation_tx,
             base_world: Arc::new(BaseWorldResponse::from(base_world)),
+            mobility_liveness,
         };
 
         // Panic supervisor: if tick_loop panics, every reader is stuck on
@@ -184,6 +195,10 @@ impl AppState {
 
     fn mobility_snapshot_store(&self) -> Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>> {
         Arc::clone(&self.mobility_snapshot_store)
+    }
+
+    pub(crate) fn mobility_liveness(&self) -> Arc<MobilityPersistenceLiveness> {
+        Arc::clone(&self.mobility_liveness)
     }
 
     fn base_world(&self) -> Arc<BaseWorldResponse> {
@@ -420,7 +435,55 @@ fn build_router_from_state(state: AppState, cors: CorsLayer) -> Router {
 }
 
 async fn health(State(state): State<AppState>) -> Response {
-    proto_response(state.view().load().health.clone())
+    proto_response(health_response_for_state(&state))
+}
+
+fn health_response_for_state(state: &AppState) -> w::HealthResponse {
+    let mut health = state.view().load().health.clone();
+    let persistence = state.mobility_liveness().snapshot();
+    health.ok = health.ok
+        && !matches!(
+            persistence.status,
+            MobilityPersistenceHealthStatus::Degraded | MobilityPersistenceHealthStatus::Stale
+        );
+    health.persistence = Some(persistence_health_to_proto(persistence));
+    health
+}
+
+fn persistence_health_to_proto(
+    health: crate::persistence_liveness::MobilityPersistenceHealth,
+) -> w::PersistenceHealth {
+    w::PersistenceHealth {
+        status: match health.status {
+            MobilityPersistenceHealthStatus::Starting => {
+                w::PersistenceHealthStatus::Starting as i32
+            }
+            MobilityPersistenceHealthStatus::Healthy => w::PersistenceHealthStatus::Healthy as i32,
+            MobilityPersistenceHealthStatus::Degraded => {
+                w::PersistenceHealthStatus::Degraded as i32
+            }
+            MobilityPersistenceHealthStatus::Stale => w::PersistenceHealthStatus::Stale as i32,
+        },
+        world_id: health.world_id.unwrap_or_default(),
+        mobility_tick: health.mobility_tick.unwrap_or_default(),
+        last_attempt_unix_ms: system_time_to_unix_ms(health.last_attempt),
+        last_success_unix_ms: system_time_to_unix_ms(health.last_success),
+        consecutive_failures: health.consecutive_failures,
+        last_error: health.last_error.unwrap_or_default(),
+        freshness_ms: duration_to_ms(health.freshness),
+    }
+}
+
+fn system_time_to_unix_ms(time: Option<SystemTime>) -> u64 {
+    time.and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration_to_ms(Some(duration)))
+        .unwrap_or_default()
+}
+
+fn duration_to_ms(duration: Option<Duration>) -> u64 {
+    duration
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or_default()
 }
 
 async fn world(State(state): State<AppState>) -> Response {
@@ -1101,6 +1164,9 @@ async fn persist_snapshots_once(
         state.base_world.world_id.clone(),
         state.base_world.schema_version,
     );
+    let mobility_liveness = state.mobility_liveness();
+    let mobility_attempt =
+        mobility_liveness.begin_attempt(world_id.0.clone(), mobility_tick, SystemTime::now());
 
     let coords: Vec<ChunkCoord> = snapshots
         .iter()
@@ -1116,7 +1182,14 @@ async fn persist_snapshots_once(
         let store = state.snapshot_store();
         let mut store = store.lock().await;
         for snapshot in snapshots {
-            store.write_snapshot(snapshot, &compatibility).await?;
+            if let Err(error) = store.write_snapshot(snapshot, &compatibility).await {
+                mobility_liveness.record_failure(
+                    mobility_attempt,
+                    error.to_string(),
+                    SystemTime::now(),
+                );
+                return Err(error);
+            }
         }
     }
 
@@ -1128,7 +1201,14 @@ async fn persist_snapshots_once(
             .write(&world_id.0, mobility_tick, &mobility_world, &compatibility)
             .await
         {
+            mobility_liveness.record_failure(
+                mobility_attempt,
+                error.to_string(),
+                SystemTime::now(),
+            );
             tracing::warn!(%error, "failed to persist mobility snapshot");
+        } else {
+            mobility_liveness.record_success(mobility_attempt, SystemTime::now());
         }
     }
 
