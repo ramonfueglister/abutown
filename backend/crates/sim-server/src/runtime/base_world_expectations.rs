@@ -77,6 +77,11 @@ pub(crate) fn expected_base_world_car_routes(
     expected
 }
 
+pub(crate) fn expected_base_world_agent_count(base_world: &BaseWorldBundle) -> usize {
+    expected_base_world_pedestrian_walks(base_world).len()
+        + expected_base_world_driver_vehicles(base_world).len()
+}
+
 fn expected_base_world_driver_vehicles(
     base_world: &BaseWorldBundle,
 ) -> std::collections::HashMap<String, String> {

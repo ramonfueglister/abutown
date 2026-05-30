@@ -13,8 +13,10 @@ import {
 } from '../src/backend/mobilityProtocol.ts';
 import {
   assertPersistedSnapshotMatchesHealth,
+  assertRuntimeAndPersistedAgentsMeetExpectation,
   countPersistedAgents,
   createPgClientConfig,
+  expectedConcreteAgentsFromSpawns,
 } from './mobility-persistence-smoke-config.ts';
 
 let backendBaseUrl = process.env.VITE_ABUTOWN_BACKEND_URL ?? 'http://127.0.0.1:8080';
@@ -32,6 +34,10 @@ async function main() {
   if (!databaseUrl) {
     throw new Error('DATABASE_URL missing in ignored .env');
   }
+  const baseWorldPath = process.env.ABUTOWN_BASE_WORLD_PATH ?? 'data/worlds/abutopia';
+  const expectedAgents = expectedConcreteAgentsFromSpawns(
+    readJsonFile(resolve(process.cwd(), baseWorldPath, 'layers/spawns.json')),
+  );
 
   const health = await readProto(`${backendBaseUrl}/health`, HealthResponseSchema, healthResponseFromProto);
   if (health.world_id !== 'abutopia') {
@@ -82,11 +88,17 @@ async function main() {
     if (payloadAgentCount !== mobility.agents.length) {
       throw new Error(`payload agent count ${payloadAgentCount} differs from /mobility ${mobility.agents.length}`);
     }
+    assertRuntimeAndPersistedAgentsMeetExpectation({
+      expectedAgents,
+      runtimeAgents: mobility.agents.length,
+      persistedAgents: payloadAgentCount,
+    });
 
     console.log(
       JSON.stringify({
         ok: true,
         world_id: health.world_id,
+        expected_agents: expectedAgents,
         health_persistence: health.persistence?.status ?? null,
         health_tick: health.persistence?.mobility_tick ?? null,
         mobility_tick: mobility.tick,
@@ -97,6 +109,14 @@ async function main() {
     );
   } finally {
     await client.end();
+  }
+}
+
+function readJsonFile(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`could not read base-world spawns from ${path}: ${error?.message ?? error}`);
   }
 }
 

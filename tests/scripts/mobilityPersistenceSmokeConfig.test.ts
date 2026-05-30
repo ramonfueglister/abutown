@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   assertPersistedSnapshotMatchesHealth,
+  assertRuntimeAndPersistedAgentsMeetExpectation,
   countPersistedAgents,
   createPgClientConfig,
+  expectedConcreteAgentsFromSpawns,
 } from '../../scripts/mobility-persistence-smoke-config';
 
 let tempDir: string | null = null;
@@ -48,6 +50,36 @@ describe('createPgClientConfig', () => {
 });
 
 describe('mobility persistence smoke checks', () => {
+  test('derives expected concrete agents from base-world spawns', () => {
+    expect(
+      expectedConcreteAgentsFromSpawns({
+        pedestrian_groups: [
+          { id: 'spawn:ped:1', corridor_id: 'corridor:1', agents_per_corridor: 2 },
+          { id: 'spawn:ped:2', corridor_id: 'corridor:2', agents_per_corridor: 3 },
+        ],
+        car_groups: [{ id: 'spawn:car:1', arterial_id: 'arterial:1', cars_per_arterial: 4 }],
+      }),
+    ).toBe(9);
+  });
+
+  test('rejects runtime and persisted mobility below the expected base-world agents', () => {
+    expect(() =>
+      assertRuntimeAndPersistedAgentsMeetExpectation({
+        expectedAgents: 1,
+        runtimeAgents: 0,
+        persistedAgents: 0,
+      }),
+    ).toThrow('runtime mobility has 0 agents, expected at least 1');
+
+    expect(() =>
+      assertRuntimeAndPersistedAgentsMeetExpectation({
+        expectedAgents: 1,
+        runtimeAgents: 1,
+        persistedAgents: 0,
+      }),
+    ).toThrow('persisted mobility has 0 agents, expected at least 1');
+  });
+
   test('counts persisted agents from the map-shaped mobility payload', () => {
     expect(
       countPersistedAgents({
