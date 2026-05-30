@@ -22,8 +22,9 @@ use sim_core::{
     base_world::BaseWorldBundle,
     ids::ChunkCoord,
     persistence::{
-        ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryChunkSnapshotStore,
-        InMemoryMobilitySnapshotStore, MobilitySnapshotStore,
+        ChunkSnapshotStore, ChunkSnapshotStoreError, EconomySnapshotStore,
+        InMemoryChunkSnapshotStore, InMemoryEconomySnapshotStore, InMemoryMobilitySnapshotStore,
+        MobilitySnapshotStore,
     },
 };
 use tokio::sync::{Mutex, broadcast};
@@ -38,6 +39,7 @@ use crate::{
     },
     config::ServerConfig,
     persistence_liveness::{MobilityPersistenceHealthStatus, MobilityPersistenceLiveness},
+    postgres_economy::PostgresEconomySnapshotStore,
     postgres_events::PostgresWorldEventStore,
     postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
@@ -76,6 +78,7 @@ pub struct AppState {
     auth: AuthVerifier,
     snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
+    economy_snapshot_store: Arc<Mutex<Box<dyn EconomySnapshotStore + Send + Sync>>>,
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
@@ -93,6 +96,7 @@ impl AppState {
             &base_world,
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryEconomySnapshotStore::default()),
             CardHandStore::memory(),
             AuthVerifier::local_bearer_uuid(),
         )
@@ -110,6 +114,7 @@ impl AppState {
             &base_world,
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryEconomySnapshotStore::default()),
             card_hands,
             auth,
         )
@@ -120,6 +125,7 @@ impl AppState {
         base_world: &BaseWorldBundle,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
+        economy_snapshot_store: Box<dyn EconomySnapshotStore + Send + Sync>,
         card_hands: CardHandStore,
         auth: AuthVerifier,
     ) -> Self {
@@ -141,6 +147,7 @@ impl AppState {
             auth,
             snapshot_store: Arc::new(Mutex::new(snapshot_store)),
             mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
+            economy_snapshot_store: Arc::new(Mutex::new(economy_snapshot_store)),
             chunk_channels: Arc::clone(&chunk_channels),
             view: Arc::clone(&view),
             mutations: mutation_tx,
@@ -199,6 +206,10 @@ impl AppState {
 
     fn mobility_snapshot_store(&self) -> Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>> {
         Arc::clone(&self.mobility_snapshot_store)
+    }
+
+    fn economy_snapshot_store(&self) -> Arc<Mutex<Box<dyn EconomySnapshotStore + Send + Sync>>> {
+        Arc::clone(&self.economy_snapshot_store)
     }
 
     pub(crate) fn mobility_liveness(&self) -> Arc<MobilityPersistenceLiveness> {
@@ -351,14 +362,17 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
     .await?;
     let mobility_snapshot_store =
         PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
+    let economy_snapshot_store =
+        PostgresEconomySnapshotStore::connect(&config.database_url).await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
-    let (runtime, snapshot_store, mobility_snapshot_store) =
+    let (runtime, snapshot_store, mobility_snapshot_store, economy_snapshot_store) =
         SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(economy_snapshot_store),
             &base_world,
         )
         .await?;
@@ -368,6 +382,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         &base_world,
         snapshot_store,
         mobility_snapshot_store,
+        economy_snapshot_store,
         card_hands,
         auth,
     );
@@ -433,6 +448,7 @@ fn build_router_from_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/chunks/{x}/{y}", get(chunk))
         .route("/commands", post(command))
         .route("/mobility", get(mobility))
+        .route("/economy", get(economy))
         .route("/ws", get(websocket))
         .with_state(state)
         .layer(cors)
@@ -499,6 +515,27 @@ async fn world(State(state): State<AppState>) -> Response {
 
 async fn mobility(State(state): State<AppState>) -> Response {
     proto_response(state.view().load().mobility_full_dto.clone())
+}
+
+/// Backend-only debug view: returns the live economy snapshot as JSON.
+async fn economy(State(state): State<AppState>) -> Response {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if state
+        .mutations
+        .send(crate::runtime_view::Mutation::CollectEconomySnapshot { reply: tx })
+        .is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    match rx.await {
+        Ok(snap) => match serde_json::to_vec(&snap) {
+            Ok(bytes) => {
+                ([(http::header::CONTENT_TYPE, "application/json")], bytes).into_response()
+            }
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        },
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
 }
 
 async fn base_world(State(state): State<AppState>) -> Json<BaseWorldResponse> {
@@ -861,6 +898,7 @@ async fn apply_mutation_owned(
             let items = runtime.collect_provider_items();
             let mut chunk_snapshots: Vec<abutown_protocol::ChunkSnapshotDto> = Vec::new();
             let mut mobility_world: Option<sim_core::mobility::MobilityPersistSnapshot> = None;
+            let mut economy_world: Option<sim_core::economy::EconomyPersistSnapshot> = None;
             for item in items {
                 match item.key.kind {
                     "chunk" => match serde_json::from_slice::<abutown_protocol::ChunkSnapshotDto>(
@@ -886,6 +924,18 @@ async fn apply_mutation_owned(
                             "provider emitted mobility payload that failed to deserialize",
                         ),
                     },
+                    "economy" => match serde_json::from_slice::<
+                        sim_core::economy::EconomyPersistSnapshot,
+                    >(&item.payload)
+                    {
+                        Ok(snap) => economy_world = Some(snap),
+                        Err(error) => tracing::warn!(
+                            %error,
+                            kind = item.key.kind,
+                            identifier = %item.key.identifier,
+                            "provider emitted economy payload that failed to deserialize",
+                        ),
+                    },
                     other => {
                         tracing::warn!(kind = other, "ignoring SnapshotItem with unknown kind",)
                     }
@@ -900,8 +950,13 @@ async fn apply_mutation_owned(
                 mobility_tick: runtime.mobility_tick(),
                 mobility_world: mobility_world
                     .unwrap_or_else(|| runtime.mobility_persist_snapshot()),
+                economy_tick: runtime.mobility_tick(),
+                economy_world: economy_world.unwrap_or_default(),
             };
             let _ = reply.send(payload);
+        }
+        Mutation::CollectEconomySnapshot { reply } => {
+            let _ = reply.send(runtime.economy_snapshot());
         }
     }
 }
@@ -1166,6 +1221,8 @@ async fn persist_snapshots_once(
         world_id,
         mobility_tick,
         mobility_world,
+        economy_tick,
+        economy_world,
     } = payload;
     let compatibility = sim_core::persistence::SnapshotCompatibility::new(
         state.base_world.world_id.clone(),
@@ -1227,6 +1284,18 @@ async fn persist_snapshots_once(
             tracing::warn!(%error, "failed to persist mobility snapshot");
         } else {
             mobility_liveness.record_success(mobility_attempt, SystemTime::now());
+        }
+    }
+
+    // Phase 2c: economy DB write — store-mutex only, no runtime lock held.
+    {
+        let econ_store = state.economy_snapshot_store();
+        let mut econ_store = econ_store.lock().await;
+        if let Err(error) = econ_store
+            .write(&world_id.0, economy_tick, &economy_world, &compatibility)
+            .await
+        {
+            tracing::warn!(%error, "failed to persist economy snapshot");
         }
     }
 

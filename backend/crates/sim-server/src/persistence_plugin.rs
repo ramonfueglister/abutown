@@ -25,6 +25,11 @@ impl SimPlugin for PersistencePlugin {
                 world_id: self.world_id.clone(),
             },
         ));
+        providers
+            .0
+            .push(Box::new(sim_core::economy::EconomySnapshotProvider {
+                world_id: self.world_id.clone(),
+            }));
     }
 }
 
@@ -44,9 +49,10 @@ mod tests {
         }
         .install(&mut world, &mut schedule);
         let providers = world.resource::<SnapshotProviders>();
-        assert_eq!(providers.0.len(), 2);
+        assert_eq!(providers.0.len(), 3);
         let names: Vec<&str> = providers.0.iter().map(|p| p.name()).collect();
         assert!(names.contains(&"chunk"));
         assert!(names.contains(&"mobility"));
+        assert!(names.contains(&"economy"));
     }
 }

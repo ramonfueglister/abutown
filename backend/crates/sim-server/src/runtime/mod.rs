@@ -13,7 +13,7 @@ use sim_core::{
         build_mobility_snapshot_dto, extract_from_world,
     },
     persistence::{
-        ChunkSnapshotStore, ChunkSnapshotStoreError, MobilitySnapshotStore,
+        ChunkSnapshotStore, ChunkSnapshotStoreError, EconomySnapshotStore, MobilitySnapshotStore,
         build_chunk_snapshot_from_parts,
     },
     scheduler::ChunkActivity,
@@ -41,6 +41,8 @@ pub enum HydrationError {
     Chunk(ChunkError),
     #[error("mobility store error: {0}")]
     Mobility(sim_core::persistence::MobilitySnapshotStoreError),
+    #[error("economy store error: {0}")]
+    Economy(sim_core::persistence::EconomySnapshotStoreError),
     #[error("mobility seed error: {0}")]
     Seed(sim_core::mobility::seed::SeedError),
 }
@@ -243,18 +245,21 @@ impl SimulationRuntime {
 
     /// Hydrate a runtime from the given stores.
     ///
-    /// Returns `(runtime, snapshot_store, mobility_snapshot_store)` so the
-    /// caller (AppState) can place the stores under its own `Arc<Mutex<…>>`.
+    /// Returns `(runtime, snapshot_store, mobility_snapshot_store,
+    /// economy_snapshot_store)` so the caller (AppState) can place the stores
+    /// under its own `Arc<Mutex<…>>`.
     pub async fn hydrate_from_stores(
         event_store: Box<dyn WorldEventStore + Send + Sync>,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
+        economy_snapshot_store: Box<dyn EconomySnapshotStore + Send + Sync>,
         base_world: &BaseWorldBundle,
     ) -> Result<
         (
             Self,
             Box<dyn ChunkSnapshotStore + Send + Sync>,
             Box<dyn MobilitySnapshotStore + Send + Sync>,
+            Box<dyn EconomySnapshotStore + Send + Sync>,
         ),
         HydrationError,
     > {
@@ -307,6 +312,16 @@ impl SimulationRuntime {
                 .map_err(HydrationError::Seed)?,
         };
         apply_into_world(&mut world, mobility_snap);
+
+        // Restore the economy from a current base-world snapshot if present.
+        if let Some((_tick, econ_snap)) = economy_snapshot_store
+            .read(&world_id.0, &snapshot_compatibility)
+            .await
+            .map_err(HydrationError::Economy)?
+        {
+            sim_core::economy::apply_into_world(&mut world, &econ_snap);
+        }
+
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
         refresh_flow_field_resources(&mut world);
 
@@ -395,7 +410,12 @@ impl SimulationRuntime {
             tick: global_tick,
             version: global_version,
         };
-        Ok((runtime, snapshot_store, mobility_snapshot_store))
+        Ok((
+            runtime,
+            snapshot_store,
+            mobility_snapshot_store,
+            economy_snapshot_store,
+        ))
     }
 
     pub fn health(&self) -> HealthResponse {
@@ -545,6 +565,11 @@ impl SimulationRuntime {
     /// release the runtime read-lock before performing DB writes.
     pub fn mobility_persist_snapshot(&self) -> MobilityPersistSnapshot {
         extract_from_world(&self.world)
+    }
+
+    /// Live economy snapshot for the debug endpoint.
+    pub fn economy_snapshot(&self) -> sim_core::economy::EconomyPersistSnapshot {
+        sim_core::economy::extract_from_world(&self.world)
     }
 
     /// Collect snapshot items from every registered `SnapshotProvider`.

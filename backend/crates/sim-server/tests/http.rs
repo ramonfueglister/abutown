@@ -521,6 +521,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
 async fn postgres_world_state_survives_runtime_restart() {
     use abutown_protocol::{ChunkCoordDto, ClientCommandDto, SetTileKindCommandDto};
     use sim_core::ids::ChunkCoord;
+    use sim_server::postgres_economy::PostgresEconomySnapshotStore;
     use sim_server::postgres_events::PostgresWorldEventStore;
     use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
     use sim_server::postgres_snapshots::PostgresChunkSnapshotStore;
@@ -558,10 +559,14 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store");
-        let (mut runtime, mut snapshot_store_box, _) = SimulationRuntime::hydrate_from_stores(
+        let economy_snapshot_store = PostgresEconomySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres economy snapshot store");
+        let (mut runtime, mut snapshot_store_box, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(economy_snapshot_store),
             &base_world,
         )
         .await
@@ -618,10 +623,14 @@ async fn postgres_world_state_survives_runtime_restart() {
         let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
             .await
             .expect("connect postgres mobility snapshot store (restart)");
-        let (runtime, _, _) = SimulationRuntime::hydrate_from_stores(
+        let economy_snapshot_store = PostgresEconomySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect postgres economy snapshot store (restart)");
+        let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
             Box::new(mobility_snapshot_store),
+            Box::new(economy_snapshot_store),
             &base_world,
         )
         .await

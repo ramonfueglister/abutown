@@ -6,6 +6,7 @@
 
 use abutown_protocol::v1 as w;
 use abutown_protocol::{ChunkSnapshotDto, WorldId};
+use sim_core::economy::EconomyPersistSnapshot;
 use sim_core::ids::ChunkCoord;
 use sim_core::mobility::MobilityPersistSnapshot;
 use std::collections::HashMap;
@@ -33,6 +34,10 @@ pub enum Mutation {
     CollectPersistData {
         reply: oneshot::Sender<PersistPayload>,
     },
+    /// On-demand snapshot of the live economy for the debug endpoint.
+    CollectEconomySnapshot {
+        reply: oneshot::Sender<sim_core::economy::EconomyPersistSnapshot>,
+    },
 }
 
 /// Everything the snapshot persist loop needs to issue DB writes without
@@ -45,6 +50,8 @@ pub struct PersistPayload {
     pub world_id: WorldId,
     pub mobility_tick: u64,
     pub mobility_world: MobilityPersistSnapshot,
+    pub economy_tick: u64,
+    pub economy_world: EconomyPersistSnapshot,
 }
 
 /// Lock-free read view of the runtime, published once per tick.

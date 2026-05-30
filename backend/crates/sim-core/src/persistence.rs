@@ -4,6 +4,7 @@ use abutown_protocol::{ChunkSnapshotDto, PROTOCOL_VERSION, TileMutationDto, Worl
 use async_trait::async_trait;
 
 use crate::chunk::Chunk;
+use crate::economy::EconomyPersistSnapshot;
 use crate::ids::ChunkCoord;
 use crate::mobility::MobilityPersistSnapshot;
 use crate::scheduler::ChunkActivity;
@@ -232,6 +233,70 @@ impl MobilitySnapshotStore for InMemoryMobilitySnapshotStore {
     }
 }
 
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct EconomySnapshotStoreError {
+    message: String,
+}
+
+impl EconomySnapshotStoreError {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+#[async_trait]
+pub trait EconomySnapshotStore: std::fmt::Debug + Send + Sync {
+    async fn write(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        snapshot: &EconomyPersistSnapshot,
+        compatibility: &SnapshotCompatibility,
+    ) -> Result<(), EconomySnapshotStoreError>;
+
+    async fn read(
+        &self,
+        world_id: &str,
+        compatibility: &SnapshotCompatibility,
+    ) -> Result<Option<(u64, EconomyPersistSnapshot)>, EconomySnapshotStoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct InMemoryEconomySnapshotStore {
+    snapshots: HashMap<(String, SnapshotCompatibility), (u64, EconomyPersistSnapshot)>,
+}
+
+#[async_trait]
+impl EconomySnapshotStore for InMemoryEconomySnapshotStore {
+    async fn write(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        snapshot: &EconomyPersistSnapshot,
+        compatibility: &SnapshotCompatibility,
+    ) -> Result<(), EconomySnapshotStoreError> {
+        self.snapshots.insert(
+            (world_id.to_string(), compatibility.clone()),
+            (tick, snapshot.clone()),
+        );
+        Ok(())
+    }
+
+    async fn read(
+        &self,
+        world_id: &str,
+        compatibility: &SnapshotCompatibility,
+    ) -> Result<Option<(u64, EconomyPersistSnapshot)>, EconomySnapshotStoreError> {
+        Ok(self
+            .snapshots
+            .get(&(world_id.to_string(), compatibility.clone()))
+            .cloned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,5 +470,24 @@ mod tests {
         .await
         .unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn in_memory_economy_store_round_trips() {
+        use crate::economy::EconomyPersistSnapshot;
+        let mut store = InMemoryEconomySnapshotStore::default();
+        let compat = SnapshotCompatibility::new("abutopia", 1);
+        let snap = EconomyPersistSnapshot {
+            next_order_id: 99,
+            ..Default::default()
+        };
+
+        store.write("w1", 7, &snap, &compat).await.unwrap();
+        let got = store.read("w1", &compat).await.unwrap();
+        assert_eq!(got, Some((7, snap.clone())));
+
+        // Compatibility mismatch -> miss.
+        let other = SnapshotCompatibility::new("abutopia", 2);
+        assert_eq!(store.read("w1", &other).await.unwrap(), None);
     }
 }
