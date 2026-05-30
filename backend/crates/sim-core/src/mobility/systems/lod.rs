@@ -111,6 +111,7 @@ pub fn promote_warm_to_active_system(
                         activity_id: format!("activity:lod:{}:{}:{}", chunk.x, chunk.y, n),
                     }],
                     cursor: 0,
+                    cyclic: false,
                 },
                 WalkSpeed(0.05),
                 crate::mobility::components::BirthTick(tick.0),

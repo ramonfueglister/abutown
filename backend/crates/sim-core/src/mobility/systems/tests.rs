@@ -190,6 +190,7 @@ fn stop_arrival_transitions_walking_agent_to_waiting_at_stop() {
                     stop_id: "s:1".into(),
                 }],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.1),
             Position { x: 0.0, y: 0.0 },
@@ -242,6 +243,7 @@ fn walk_advance_advances_progress_by_walk_speed() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.1),
             Position { x: 0.0, y: 0.0 },
@@ -284,6 +286,7 @@ fn walk_advance_clamps_at_one_and_marks_dirty() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.1),
             Position { x: 0.0, y: 0.0 },
@@ -514,6 +517,7 @@ fn compute_world_coord_system_writes_position_for_walking_agent() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.0),
             Position { x: 99.0, y: 99.0 },
@@ -551,6 +555,7 @@ fn compute_direction_system_writes_direction_for_walking_agent() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.0),
             Position { x: 0.0, y: 0.0 },
@@ -599,6 +604,7 @@ fn track_chunk_populations_sums_agents_vehicles_and_flow_cells() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.0),
             Position { x: 40.0, y: 16.0 },
@@ -857,6 +863,7 @@ fn demote_active_to_warm_collapses_agents_into_flow_cell() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.05),
             Position {
@@ -1060,6 +1067,7 @@ fn walk_advance_skips_agents_in_asleep_chunks() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.1),
             Position { x: 100.0, y: 100.0 },
@@ -1107,6 +1115,7 @@ fn walk_advance_advances_agents_in_active_chunks() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.1),
             Position { x: 100.0, y: 100.0 },
@@ -1145,6 +1154,7 @@ fn walk_advance_inserts_near_stop_marker_when_progress_saturates() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.05),
             Position { x: 0.0, y: 0.0 },
@@ -1182,6 +1192,7 @@ fn stop_arrival_removes_near_stop_marker_after_transition() {
                     stop_id: "s:1".into(),
                 }],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.05),
             Position { x: 0.0, y: 0.0 },
@@ -1217,6 +1228,7 @@ fn current_link_polyline_invalidates_on_walker_link_change() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.05),
             Position { x: 0.0, y: 0.0 },
@@ -1333,6 +1345,7 @@ fn incremental_chunk_populations_matches_full_rebuild() {
             WalkPlan {
                 stages: vec![],
                 cursor: 0,
+                cyclic: false,
             },
             WalkSpeed(0.05),
             Position { x, y },
@@ -1399,6 +1412,33 @@ fn spawned_agent_carries_sex_and_parent() {
     rec.parent_id = Some(crate::ids::AgentId("agent:mum".into()));
     let e = crate::mobility::api::spawn_agent_from_record(&mut world, rec);
     assert_eq!(*world.get::<Sex>(e).unwrap(), Sex::Female);
+}
+#[test]
+fn cyclic_plan_cursor_wraps_to_zero_at_end() {
+    use crate::mobility::components::WalkPlan;
+    use crate::mobility::records::PlanStage;
+    let stages = vec![
+        PlanStage::Activity {
+            activity_id: "a".into(),
+        },
+        PlanStage::Activity {
+            activity_id: "b".into(),
+        },
+    ];
+    let mut p = WalkPlan {
+        stages: stages.clone(),
+        cursor: 1,
+        cyclic: true,
+    };
+    crate::mobility::systems::advance_cursor(&mut p);
+    assert_eq!(p.cursor, 0);
+    let mut q = WalkPlan {
+        stages,
+        cursor: 1,
+        cyclic: false,
+    };
+    crate::mobility::systems::advance_cursor(&mut q);
+    assert_eq!(q.cursor, 2);
 }
 #[test]
 fn spawned_agent_carries_birth_tick_and_ages() {

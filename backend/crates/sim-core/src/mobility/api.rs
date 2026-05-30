@@ -408,6 +408,7 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
         active_route,
         sex,
         parent_id,
+        cyclic,
     } = record;
     let id = record_id.clone();
     let sprite_key = compute_agent_sprite_key(&id);
@@ -435,6 +436,7 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
             WalkPlan {
                 stages: plan,
                 cursor: plan_cursor,
+                cyclic,
             },
             WalkSpeed(walk_speed_per_tick),
             crate::mobility::components::BirthTick(birth_tick),
@@ -540,6 +542,7 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
         active_route,
         sex,
         parent_id,
+        cyclic: plan.cyclic,
     })
 }
 

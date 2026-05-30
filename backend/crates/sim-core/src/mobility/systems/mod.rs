@@ -96,6 +96,14 @@ pub fn install_systems(schedule: &mut Schedule) {
     ));
 }
 
+/// Advance a plan cursor by one; cyclic, non-empty plans wrap back to the start.
+pub fn advance_cursor(plan: &mut crate::mobility::components::WalkPlan) {
+    plan.cursor += 1;
+    if plan.cyclic && !plan.stages.is_empty() && plan.cursor >= plan.stages.len() {
+        plan.cursor = 0;
+    }
+}
+
 #[cfg(test)]
 mod route_execution_tests;
 #[cfg(test)]

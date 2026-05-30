@@ -547,6 +547,63 @@ fn route_advance_completes_final_activity_route() {
     ));
 }
 #[test]
+fn route_advance_resumes_walking_for_cyclic_activity_route() {
+    let (mut world, mut schedule, entity) = world_schedule_and_agent();
+    // A cyclic two-stage plan: after completing the final stage the cursor
+    // wraps to 0 and the agent must depart again (resume Walking), not park
+    // in a terminal AtActivity state — otherwise it never returns.
+    {
+        let mut plan = world.get_mut::<WalkPlan>(entity).unwrap();
+        plan.cyclic = true;
+        plan.stages = vec![
+            PlanStage::WalkToActivity {
+                link_id: "walk:b".into(),
+                activity_id: "activity:home".into(),
+            },
+            PlanStage::WalkToActivity {
+                link_id: "walk:b".into(),
+                activity_id: "activity:work".into(),
+            },
+        ];
+        plan.cursor = 1;
+    }
+    world.get_mut::<WalkSpeed>(entity).unwrap().0 = 0.0;
+    world
+        .get_mut::<AgentMobilityStateComponent>(entity)
+        .unwrap()
+        .0 = AgentMobilityState::Walking {
+        link_id: "walk:b".into(),
+        progress: 1.0,
+    };
+    world.entity_mut(entity).insert(ActiveRoute {
+        destination: NodeId(2),
+        profile: crate::routing::RoutingProfileKey::Walk,
+        steps: vec![RouteStep {
+            edge_id: EdgeId(1),
+            mode: crate::routing::ModeState::Walking,
+            canonical_edge_key: "walk:b".into(),
+            length: 1.0,
+        }],
+        cursor: 0,
+    });
+    schedule.run(&mut world);
+    assert!(world.get::<ActiveRoute>(entity).is_none());
+    // Cursor wrapped back to the first stage.
+    assert_eq!(world.get::<WalkPlan>(entity).unwrap().cursor, 0);
+    // The agent resumed Walking (anchored at the arrival edge, ready to be
+    // re-routed toward the next stage) rather than parking in AtActivity.
+    let state = world.get::<AgentMobilityStateComponent>(entity).unwrap();
+    assert!(
+        matches!(
+            &state.0,
+            AgentMobilityState::Walking { link_id, progress }
+                if link_id == "walk:b" && *progress >= 1.0
+        ),
+        "cyclic agent should resume Walking, got {:?}",
+        state.0
+    );
+}
+#[test]
 fn route_advance_completes_final_stop_route() {
     let (mut world, mut schedule, entity) = world_schedule_and_agent();
     world.get_mut::<WalkPlan>(entity).unwrap().stages = vec![PlanStage::WalkToStop {
