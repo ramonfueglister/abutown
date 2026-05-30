@@ -11,6 +11,7 @@ import {
   healthResponseFromProto,
   mobilitySnapshotFromProto,
 } from '../src/backend/mobilityProtocol.ts';
+import { createPgClientConfig } from './mobility-persistence-smoke-config.ts';
 
 let backendBaseUrl = process.env.VITE_ABUTOWN_BACKEND_URL ?? 'http://127.0.0.1:8080';
 const snapshotFreshnessMs = 15_000;
@@ -46,7 +47,7 @@ async function main() {
     throw new Error(`mobility world_id ${mobility.world_id} differs from health ${health.world_id}`);
   }
 
-  const client = new pg.Client({ connectionString: databaseUrl });
+  const client = new pg.Client(createPgClientConfig(databaseUrl));
   try {
     await client.connect();
     const result = await client.query(
