@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
-import { createPgClientConfig } from '../../scripts/mobility-persistence-smoke-config';
+import {
+  assertPersistedSnapshotMatchesHealth,
+  countPersistedAgents,
+  createPgClientConfig,
+} from '../../scripts/mobility-persistence-smoke-config';
 
 let tempDir: string | null = null;
 
@@ -40,5 +44,30 @@ describe('createPgClientConfig', () => {
         PGSSLROOTCERT: '/tmp/unused-cert.pem',
       }),
     ).toThrow('DATABASE_URL must use sslmode=verify-full');
+  });
+});
+
+describe('mobility persistence smoke checks', () => {
+  test('counts persisted agents from the map-shaped mobility payload', () => {
+    expect(
+      countPersistedAgents({
+        agents: {
+          agent_1: { id: 'agent_1' },
+          agent_2: { id: 'agent_2' },
+        },
+      }),
+    ).toBe(2);
+  });
+
+  test('matches persisted tick to health persistence tick instead of live mobility tick', () => {
+    expect(() =>
+      assertPersistedSnapshotMatchesHealth({
+        healthPersistenceTick: 100,
+        mobilityTick: 108,
+        persistedTick: 100,
+        persistedUpdatedAgeMs: 500,
+        snapshotFreshnessMs: 15_000,
+      }),
+    ).not.toThrow();
   });
 });

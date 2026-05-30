@@ -14,6 +14,14 @@ export interface PgClientConfig {
   };
 }
 
+export interface PersistedSnapshotCheck {
+  healthPersistenceTick: number | null | undefined;
+  mobilityTick: number;
+  persistedTick: number;
+  persistedUpdatedAgeMs: number;
+  snapshotFreshnessMs: number;
+}
+
 export function createPgClientConfig(
   connectionString: string,
   env: MobilityPersistenceSmokeEnv = process.env,
@@ -41,6 +49,42 @@ export function createPgClientConfig(
       servername: url.hostname,
     },
   };
+}
+
+export function countPersistedAgents(payload: unknown): number {
+  if (!payload || typeof payload !== 'object') return -1;
+
+  const agents = (payload as { agents?: unknown }).agents;
+  if (Array.isArray(agents)) return agents.length;
+  if (agents && typeof agents === 'object') return Object.keys(agents).length;
+
+  return -1;
+}
+
+export function assertPersistedSnapshotMatchesHealth(check: PersistedSnapshotCheck): void {
+  if (!Number.isFinite(check.persistedTick) || check.persistedTick < 0) {
+    throw new Error(`invalid persisted tick ${check.persistedTick}`);
+  }
+  if (!Number.isFinite(check.healthPersistenceTick)) {
+    throw new Error(`invalid health persistence tick ${check.healthPersistenceTick}`);
+  }
+  if (check.persistedTick !== check.healthPersistenceTick) {
+    throw new Error(
+      `persisted tick ${check.persistedTick} differs from health persistence tick ${check.healthPersistenceTick}`,
+    );
+  }
+  if (check.mobilityTick < check.persistedTick) {
+    throw new Error(`mobility tick ${check.mobilityTick} is behind persisted tick ${check.persistedTick}`);
+  }
+  if (
+    !Number.isFinite(check.persistedUpdatedAgeMs) ||
+    check.persistedUpdatedAgeMs < 0 ||
+    check.persistedUpdatedAgeMs > check.snapshotFreshnessMs
+  ) {
+    throw new Error(
+      `mobility_snapshots.updated_at age ${check.persistedUpdatedAgeMs}ms outside 0..${check.snapshotFreshnessMs}ms`,
+    );
+  }
 }
 
 function parsePostgresUrl(connectionString: string): URL {

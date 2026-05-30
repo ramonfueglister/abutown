@@ -11,11 +11,14 @@ import {
   healthResponseFromProto,
   mobilitySnapshotFromProto,
 } from '../src/backend/mobilityProtocol.ts';
-import { createPgClientConfig } from './mobility-persistence-smoke-config.ts';
+import {
+  assertPersistedSnapshotMatchesHealth,
+  countPersistedAgents,
+  createPgClientConfig,
+} from './mobility-persistence-smoke-config.ts';
 
 let backendBaseUrl = process.env.VITE_ABUTOWN_BACKEND_URL ?? 'http://127.0.0.1:8080';
 const snapshotFreshnessMs = 15_000;
-const allowedTickLag = 3;
 
 main().catch((error) => {
   console.error(`[mobility-persistence-smoke] ${redact(String(error?.message ?? error))}`);
@@ -67,24 +70,15 @@ async function main() {
     const persistedTick = Number(row.tick);
     const updatedAtMs = new Date(row.updated_at).getTime();
     const persistedUpdatedAgeMs = Date.now() - updatedAtMs;
-    const payloadAgentCount = Array.isArray(row.payload?.agents) ? row.payload.agents.length : -1;
-    const tickLag = mobility.tick - persistedTick;
+    const payloadAgentCount = countPersistedAgents(row.payload);
 
-    if (!Number.isFinite(persistedTick) || persistedTick < 0) {
-      throw new Error(`invalid persisted tick ${row.tick}`);
-    }
-    if (tickLag < 0 || tickLag > allowedTickLag) {
-      throw new Error(`persisted tick lag ${tickLag} exceeds allowed lag ${allowedTickLag}`);
-    }
-    if (
-      !Number.isFinite(persistedUpdatedAgeMs) ||
-      persistedUpdatedAgeMs < 0 ||
-      persistedUpdatedAgeMs > snapshotFreshnessMs
-    ) {
-      throw new Error(
-        `mobility_snapshots.updated_at age ${persistedUpdatedAgeMs}ms outside 0..${snapshotFreshnessMs}ms`,
-      );
-    }
+    assertPersistedSnapshotMatchesHealth({
+      healthPersistenceTick: health.persistence?.mobility_tick,
+      mobilityTick: mobility.tick,
+      persistedTick,
+      persistedUpdatedAgeMs,
+      snapshotFreshnessMs,
+    });
     if (payloadAgentCount !== mobility.agents.length) {
       throw new Error(`payload agent count ${payloadAgentCount} differs from /mobility ${mobility.agents.length}`);
     }
