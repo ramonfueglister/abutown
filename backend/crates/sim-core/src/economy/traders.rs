@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_ecs::prelude::*;
 
@@ -84,10 +84,14 @@ pub fn run_traders_at_tick(
     traders: &mut Traders,
     config: &EconomyConfig,
     current_tick: u64,
+    dormant: &BTreeSet<MarketId>,
 ) -> Result<(), EconomyError> {
     let actors: Vec<EconomicActorId> = traders.0.keys().copied().collect();
     for actor in actors {
         let mut trader = traders.0[&actor].clone();
+        if dormant.contains(&trader.source) {
+            continue; // source region unobserved: hibernate, state frozen
+        }
         match trader.state {
             TraderState::Buying { order } => {
                 let held = inventory.balance(actor, trader.good).available;

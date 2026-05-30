@@ -196,6 +196,7 @@ pub fn update_market_telemetry_system(config: Res<EconomyConfig>, mut goods: Res
 pub fn run_traders_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
+    dormant: Res<DormantMarkets>,
     mut accounts: ResMut<AccountBook>,
     mut inventory: ResMut<InventoryBook>,
     mut orders: ResMut<OrderBook>,
@@ -216,5 +217,6 @@ pub fn run_traders_system(
         &mut traders,
         &config,
         tick.0,
+        &dormant.0,
     );
 }
