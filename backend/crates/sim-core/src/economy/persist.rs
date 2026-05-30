@@ -14,6 +14,7 @@ use crate::economy::{
     SupplyPool, SupplyPools, Trader, Traders,
 };
 use crate::ids::ChunkCoord;
+use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EconomyPersistSnapshot {
@@ -53,7 +54,11 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
         asks: orders.asks.iter().map(|(k, v)| (*k, v.clone())).collect(),
         next_order_id: next.0,
         markets: markets.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
-        market_goods: market_goods.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
+        market_goods: market_goods
+            .0
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect(),
         demand_pools: demand.0.iter().map(|(k, v)| (*k, *v)).collect(),
         supply_pools: supply.0.iter().map(|(k, v)| (*k, *v)).collect(),
         production_pools: production.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
@@ -87,8 +92,6 @@ pub fn apply_into_world(world: &mut World, snap: &EconomyPersistSnapshot) {
     world.insert_resource(Traders(snap.traders.iter().cloned().collect()));
     world.insert_resource(MarketChunks(snap.market_chunks.iter().cloned().collect()));
 }
-
-use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
 
 /// A `SnapshotProvider` emitting the full economy state as one JSON item. The
 /// persist loop (slice 6b) dispatches by `key.kind == "economy"` to the economy

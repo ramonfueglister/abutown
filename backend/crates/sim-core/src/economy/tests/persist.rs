@@ -19,6 +19,7 @@ fn value_types_are_serde_serializable() {
 
 use bevy_ecs::prelude::*;
 
+use crate::economy::InventoryBalance;
 use crate::economy::{
     AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyPersistSnapshot,
     EconomyPlugin, GOOD_TOOLS, InventoryBook, MarketChunks, MarketGoodKey, MarketGoodState,
@@ -26,7 +27,6 @@ use crate::economy::{
     ProductionPools, Quantity, Recipe, SupplyPool, SupplyPools, Trader, TraderState, Traders,
     apply_into_world, extract_from_world,
 };
-use crate::economy::{InventoryBalance};
 use crate::ids::ChunkCoord;
 use crate::world::schedule::SimPlugin;
 
@@ -44,36 +44,61 @@ fn seed(world: &mut World) {
 
     world.resource_mut::<AccountBook>().accounts.insert(
         a,
-        MoneyAccount { available: crate::economy::Money(5_000), locked: crate::economy::Money(250) },
+        MoneyAccount {
+            available: crate::economy::Money(5_000),
+            locked: crate::economy::Money(250),
+        },
     );
-    world
-        .resource_mut::<InventoryBook>()
-        .balances
-        .insert((b, GOOD_FOOD), InventoryBalance { available: Quantity(40), locked: Quantity(5) });
+    world.resource_mut::<InventoryBook>().balances.insert(
+        (b, GOOD_FOOD),
+        InventoryBalance {
+            available: Quantity(40),
+            locked: Quantity(5),
+        },
+    );
 
     world.resource_mut::<OrderBook>().bids.insert(
         OrderId(1),
         Bid {
-            id: OrderId(1), owner: a, market: m, good: GOOD_FOOD,
-            qty_remaining: Quantity(10), max_price: crate::economy::Money(1_200),
-            cash_locked_remaining: crate::economy::Money(12), created_tick: 1, expires_tick: 100,
+            id: OrderId(1),
+            owner: a,
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            max_price: crate::economy::Money(1_200),
+            cash_locked_remaining: crate::economy::Money(12),
+            created_tick: 1,
+            expires_tick: 100,
         },
     );
     world.resource_mut::<OrderBook>().asks.insert(
         OrderId(2),
         Ask {
-            id: OrderId(2), owner: b, market: m, good: GOOD_FOOD,
-            qty_remaining: Quantity(10), min_price: crate::economy::Money(1_000),
-            goods_locked_remaining: Quantity(10), created_tick: 1, expires_tick: 100,
+            id: OrderId(2),
+            owner: b,
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            min_price: crate::economy::Money(1_000),
+            goods_locked_remaining: Quantity(10),
+            created_tick: 1,
+            expires_tick: 100,
         },
     );
     world.resource_mut::<NextOrderId>().0 = 3;
 
     world.resource_mut::<Markets>().0.insert(
         m,
-        crate::economy::MarketSite { id: m, node_id: crate::routing::NodeId(9), name: "M1".to_string() },
+        crate::economy::MarketSite {
+            id: m,
+            node_id: crate::routing::NodeId(9),
+            name: "M1".to_string(),
+        },
     );
-    let key = MarketGoodKey { market: m, good: GOOD_FOOD };
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
     let mut gs = MarketGoodState::new(key);
     gs.last_settlement_price = crate::economy::Money(1_100);
     gs.last_cleared_tick = 7;
@@ -82,16 +107,27 @@ fn seed(world: &mut World) {
     world.resource_mut::<DemandPools>().0.insert(
         a,
         DemandPool {
-            actor: a, market: m, good: GOOD_FOOD, desired_qty_per_tick: Quantity(5),
-            max_price: crate::economy::Money(1_300), urgency_bps: 0, elasticity_bps: 0,
-            interval_ticks: 1, last_generated_tick: Some(3),
+            actor: a,
+            market: m,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(5),
+            max_price: crate::economy::Money(1_300),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: Some(3),
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
         b,
         SupplyPool {
-            actor: b, market: m, good: GOOD_FOOD, offered_qty_per_tick: Quantity(5),
-            min_price: crate::economy::Money(900), interval_ticks: 1, last_generated_tick: Some(3),
+            actor: b,
+            market: m,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(5),
+            min_price: crate::economy::Money(900),
+            interval_ticks: 1,
+            last_generated_tick: Some(3),
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
@@ -102,15 +138,23 @@ fn seed(world: &mut World) {
                 inputs: vec![(GOOD_FOOD, Quantity(2))],
                 outputs: vec![(GOOD_TOOLS, Quantity(1))],
             },
-            interval_ticks: 4, last_generated_tick: None,
+            interval_ticks: 4,
+            last_generated_tick: None,
         },
     );
     world.resource_mut::<Traders>().0.insert(
         a,
         Trader {
-            actor: a, good: GOOD_TOOLS, source: m, dest: crate::economy::MarketId(2),
-            distance_tiles: 4, batch_qty: Quantity(100), buy_premium_bps: 500,
-            sell_discount_bps: 500, order_ttl_ticks: 10, state: TraderState::Buying { order: None },
+            actor: a,
+            good: GOOD_TOOLS,
+            source: m,
+            dest: crate::economy::MarketId(2),
+            distance_tiles: 4,
+            batch_qty: Quantity(100),
+            buy_premium_bps: 500,
+            sell_discount_bps: 500,
+            order_ttl_ticks: 10,
+            state: TraderState::Buying { order: None },
         },
     );
     world
@@ -132,7 +176,10 @@ fn economy_snapshot_round_trips() {
     apply_into_world(&mut fresh, &decoded);
     let snap2 = extract_from_world(&fresh);
 
-    assert_eq!(snap, snap2, "extract->serialize->deserialize->apply->extract is identity");
+    assert_eq!(
+        snap, snap2,
+        "extract->serialize->deserialize->apply->extract is identity"
+    );
 }
 
 #[test]
@@ -161,7 +208,9 @@ fn provider_collects_single_economy_item() {
     let mut world = install_economy();
     seed(&mut world);
 
-    let provider = EconomySnapshotProvider { world_id: "w1".to_string() };
+    let provider = EconomySnapshotProvider {
+        world_id: "w1".to_string(),
+    };
     assert_eq!(provider.name(), "economy");
     assert_eq!(provider.schema_version(), 1);
 

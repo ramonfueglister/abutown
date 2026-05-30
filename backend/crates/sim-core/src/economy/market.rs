@@ -12,7 +12,9 @@ pub struct MarketSite {
     pub name: String,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct MarketGoodKey {
     pub market: MarketId,
     pub good: GoodId,
