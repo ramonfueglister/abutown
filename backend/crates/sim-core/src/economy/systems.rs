@@ -76,6 +76,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
 /// `MarketChunks`) to a chunk that is not Active/Hot is dormant; everything else
 /// runs at full fidelity. Cheap: one pass over active chunk coords + one over the
 /// anchor map. Deterministic (BTree iteration, set membership).
+#[allow(clippy::type_complexity)]
 pub fn refresh_dormant_markets_system(
     anchors: Res<MarketChunks>,
     active_chunks: Query<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>,

@@ -154,7 +154,16 @@ fn travel_counts_down_then_sells() {
                      traders: &mut Traders,
                      cfg: &crate::economy::EconomyConfig| {
         run_traders_at_tick(
-            accounts, inventory, orders, ledger, dirty, next, goods, traders, cfg, 0,
+            accounts,
+            inventory,
+            orders,
+            ledger,
+            dirty,
+            next,
+            goods,
+            traders,
+            cfg,
+            0,
             &BTreeSet::new(),
         )
         .unwrap()

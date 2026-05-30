@@ -84,14 +84,30 @@ fn dormant_market_generates_no_orders() {
 
     let dormant: BTreeSet<MarketId> = [market].into_iter().collect();
     generate_pool_orders_at_tick(
-        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
-        &mut demand, &mut supply, 0, 5, &dormant,
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut demand,
+        &mut supply,
+        0,
+        5,
+        &dormant,
     )
     .unwrap();
 
     assert!(orders.bids.is_empty(), "dormant market must not place bids");
-    assert!(dirty.0.is_empty(), "dormant market must not dirty any market-good");
-    assert_eq!(accounts.total_money(), before, "no cash locked while dormant");
+    assert!(
+        dirty.0.is_empty(),
+        "dormant market must not dirty any market-good"
+    );
+    assert_eq!(
+        accounts.total_money(),
+        before,
+        "no cash locked while dormant"
+    );
 }
 
 #[test]
@@ -111,8 +127,17 @@ fn awake_market_still_generates_orders() {
 
     let dormant: BTreeSet<MarketId> = BTreeSet::new();
     generate_pool_orders_at_tick(
-        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
-        &mut demand, &mut supply, 0, 5, &dormant,
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut demand,
+        &mut supply,
+        0,
+        5,
+        &dormant,
     )
     .unwrap();
 
@@ -138,8 +163,17 @@ fn market_resumes_with_single_order_no_burst() {
     // Dormant for 100 ticks: no orders accrue.
     for tick in 0..100 {
         generate_pool_orders_at_tick(
-            &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
-            &mut demand, &mut supply, tick, 5, &dormant,
+            &mut accounts,
+            &mut inventory,
+            &mut orders,
+            &mut ledger,
+            &mut dirty,
+            &mut next,
+            &mut demand,
+            &mut supply,
+            tick,
+            5,
+            &dormant,
         )
         .unwrap();
     }
@@ -148,15 +182,24 @@ fn market_resumes_with_single_order_no_burst() {
     // Wake on tick 100: exactly ONE order, not a 100-order backlog burst.
     let awake: BTreeSet<MarketId> = BTreeSet::new();
     generate_pool_orders_at_tick(
-        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
-        &mut demand, &mut supply, 100, 5, &awake,
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut demand,
+        &mut supply,
+        100,
+        5,
+        &awake,
     )
     .unwrap();
     assert_eq!(orders.bids.len(), 1, "wake emits exactly one order");
 }
 
 use crate::economy::{
-    GOOD_TOOLS, Trader, TraderState, Traders, run_traders_at_tick, EconomyConfig, MarketGoods,
+    EconomyConfig, GOOD_TOOLS, MarketGoods, Trader, TraderState, Traders, run_traders_at_tick,
 };
 
 #[test]
@@ -199,30 +242,46 @@ fn dormant_trader_is_frozen_and_conserves() {
     let dormant: BTreeSet<MarketId> = [source].into_iter().collect();
     for tick in 0..20 {
         run_traders_at_tick(
-            &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
-            &goods, &mut traders, &cfg, tick, &dormant,
+            &mut accounts,
+            &mut inventory,
+            &mut orders,
+            &mut ledger,
+            &mut dirty,
+            &mut next,
+            &goods,
+            &mut traders,
+            &cfg,
+            tick,
+            &dormant,
         )
         .unwrap();
     }
 
     assert!(orders.bids.is_empty(), "frozen trader places no bids");
-    assert_eq!(accounts.total_money(), money_before, "money conserved while frozen");
     assert_eq!(
-        traders.0[&trader_actor].state,
-        trader_before.state,
+        accounts.total_money(),
+        money_before,
+        "money conserved while frozen"
+    );
+    assert_eq!(
+        traders.0[&trader_actor].state, trader_before.state,
         "frozen trader keeps its state",
     );
 }
 
 use crate::economy::EconomyPlugin;
+use crate::mobility::resources::Tick;
 use crate::world::plugin::CorePlugin;
 use crate::world::schedule::SimPlugin;
-use crate::mobility::resources::Tick;
 
 // Build a world with Core + Mobility + Economy, one supply pool selling FOOD at
 // `market`, the trader/markets un-touched. Anchor `market` to `coord`, and spawn a
 // chunk entity at `coord` with the given marker. Returns the assembled world+schedule.
-fn lod_world(market: MarketId, coord: ChunkCoord, asleep: bool) -> (World, bevy_ecs::schedule::Schedule) {
+fn lod_world(
+    market: MarketId,
+    coord: ChunkCoord,
+    asleep: bool,
+) -> (World, bevy_ecs::schedule::Schedule) {
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     CorePlugin::default().install(&mut world, &mut schedule);
@@ -232,7 +291,8 @@ fn lod_world(market: MarketId, coord: ChunkCoord, asleep: bool) -> (World, bevy_
     let supplier = EconomicActorId(50);
     {
         let mut inv = world.resource_mut::<InventoryBook>();
-        inv.deposit(supplier, GOOD_FOOD, Quantity(1_000_000)).unwrap();
+        inv.deposit(supplier, GOOD_FOOD, Quantity(1_000_000))
+            .unwrap();
     }
     {
         let mut supply = world.resource_mut::<SupplyPools>();
