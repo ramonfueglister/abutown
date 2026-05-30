@@ -51,6 +51,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(ProductionPools::default());
         world.insert_resource(NextOrderId::default());
         world.insert_resource(EconomyConfig::default());
+        world.insert_resource(Traders::default());
         install_systems(schedule);
     }
 }
