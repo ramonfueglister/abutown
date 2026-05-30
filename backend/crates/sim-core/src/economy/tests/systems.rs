@@ -2,8 +2,8 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyConfig, EconomyEvent,
-    EconomyPlugin, GOOD_FOOD, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId,
-    Money, Quantity, SupplyPool, SupplyPools, TradeLedger,
+    EconomyPlugin, GOOD_FOOD, GOOD_IRON, GOOD_TOOLS, GOOD_WOOD, InventoryBook, MarketGoodKey,
+    MarketGoodState, MarketGoods, MarketId, Money, Quantity, SupplyPool, SupplyPools, TradeLedger,
 };
 use crate::world::plugin::CorePlugin;
 use crate::world::schedule::SimPlugin;
@@ -176,4 +176,53 @@ fn telemetry_updates_ewma_with_basis_points() {
     crate::economy::update_market_telemetry(&mut goods, config).unwrap();
 
     assert_eq!(goods.0[&key].ewma_reference_price, Money(1_250));
+}
+
+#[test]
+fn production_runs_through_schedule() {
+    use crate::economy::{ProductionPool, ProductionPools, Recipe};
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    let actor = EconomicActorId(7);
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(actor, GOOD_WOOD, Quantity(2_000))
+        .unwrap();
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(actor, GOOD_IRON, Quantity(1_000))
+        .unwrap();
+    world.resource_mut::<ProductionPools>().0.insert(
+        actor,
+        ProductionPool {
+            actor,
+            recipe: Recipe {
+                inputs: vec![(GOOD_WOOD, Quantity(2_000)), (GOOD_IRON, Quantity(1_000))],
+                outputs: vec![(GOOD_TOOLS, Quantity(1_000))],
+            },
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+
+    schedule.run(&mut world);
+
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(actor, GOOD_TOOLS)
+            .available,
+        Quantity(1_000)
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(actor, GOOD_WOOD)
+            .available,
+        Quantity(0)
+    );
 }
