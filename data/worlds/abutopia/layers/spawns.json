@@ -5,7 +5,7 @@
     {
       "id": "spawn:ped:sidewalk-south",
       "corridor_id": "corridor:sidewalk:south",
-      "agents_per_corridor": 1
+      "agents_per_corridor": 300
     }
   ],
   "car_groups": [],

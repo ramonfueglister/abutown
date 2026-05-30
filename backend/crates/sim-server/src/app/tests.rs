@@ -334,7 +334,7 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
         persistence.status,
         w::PersistenceHealthStatus::Degraded as i32
     );
-    assert!(persistence.last_error.contains("expected at least 1"));
+    assert!(persistence.last_error.contains("expected at least 300"));
 }
 
 /// A snapshot store that sleeps during writes to simulate slow DB I/O.

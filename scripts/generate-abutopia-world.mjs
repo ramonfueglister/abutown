@@ -13,6 +13,7 @@ const roadX0 = Math.floor(width / 2) - 5;
 const roadX1 = roadX0 + 9;
 const houseAX = roadX0 - 1;
 const houseBX = roadX1 + 1;
+const pedestrianAgentsPerCorridor = 300;
 
 const E = 2;
 const W = 8;
@@ -77,7 +78,11 @@ const spawns = {
   schema_version: schemaVersion,
   world_id: worldId,
   pedestrian_groups: [
-    { id: 'spawn:ped:sidewalk-south', corridor_id: 'corridor:sidewalk:south', agents_per_corridor: 1 },
+    {
+      id: 'spawn:ped:sidewalk-south',
+      corridor_id: 'corridor:sidewalk:south',
+      agents_per_corridor: pedestrianAgentsPerCorridor,
+    },
   ],
   car_groups: [],
   tram_lines: [],

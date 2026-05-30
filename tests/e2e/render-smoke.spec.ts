@@ -14,7 +14,7 @@ async function readCityState(page: Page): Promise<any> {
   return JSON.parse(raw);
 }
 
-test('renders abutopia with one backend-driven pedestrian', async ({ page }) => {
+test('renders abutopia with 300 backend-driven pedestrians', async ({ page }) => {
   await page.setViewportSize({ width: 409, height: 519 });
   const consoleErrors: string[] = [];
   page.on('console', (message) => {
@@ -26,7 +26,7 @@ test('renders abutopia with one backend-driven pedestrian', async ({ page }) => 
   await expect.poll(async () => {
     const state = await readCityState(page);
     return state.city.mobilityAgents.agents.length;
-  }, { timeout: 10_000 }).toBe(1);
+  }, { timeout: 10_000 }).toBe(300);
 
   const state = await readCityState(page);
   const oldResourceRequests = await page.evaluate((patternSource) =>
@@ -48,7 +48,7 @@ test('renders abutopia with one backend-driven pedestrian', async ({ page }) => 
   expect(state.city.details.total).toBe(0);
   expect(state.city.reserveTiles).toBe(0);
   expect(state.city.cars).toBe(0);
-  expect(state.city.pedestrians).toBe(1);
+  expect(state.city.pedestrians).toBe(300);
   expect(state.city.train).toBeUndefined();
   expect(state.city.trains).toBeUndefined();
   expect(state.city[['mobility', 'Trams'].join('')]).toBeUndefined();
@@ -83,15 +83,15 @@ test('renders abutopia with one backend-driven pedestrian', async ({ page }) => 
     source: 'backend',
     status: 'connected',
     tick: expect.any(Number),
-    agents: 1,
+    agents: 300,
     vehicles: 0,
     stops: 0,
     invalidMessages: 0,
     lastError: null,
   }));
-  expect(state.city.mobilityAgents.count).toBe(1);
+  expect(state.city.mobilityAgents.count).toBe(300);
   expect(state.city.mobilityAgents.selectedId).toBeNull();
-  expect(state.city.mobilityAgents.agents).toHaveLength(1);
+  expect(state.city.mobilityAgents.agents).toHaveLength(300);
   expect(state.city.mobilityAgents.agents[0]).toEqual(expect.objectContaining({
     id: expect.any(String),
     kind: 'pedestrian',
@@ -119,20 +119,27 @@ test('renders abutopia with one backend-driven pedestrian', async ({ page }) => 
     timeout: 10_000,
   }).toBeGreaterThan(0);
 
-  const agentCandidates = await visibleAgentCandidates(page, { width: 409, height: 519 });
   let selectedState = await readCityState(page);
   let selectedAgentId: string | null = null;
-  expect(agentCandidates.length).toBeGreaterThan(0);
-  for (const { entity: clickableAgent } of agentCandidates.slice(0, 8)) {
-    await page.mouse.click(clickableAgent.screen.x, clickableAgent.screen.y);
-    selectedState = await readCityState(page);
-    if (selectedState.city.mobilityAgents.selectedId === clickableAgent.id) {
-      selectedAgentId = clickableAgent.id;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const agentCandidates = await visibleAgentCandidates(page, { width: 409, height: 519 });
+    expect(agentCandidates.length).toBeGreaterThan(0);
+    for (const { entity: clickableAgent } of agentCandidates.slice(0, 8)) {
+      await page.mouse.click(clickableAgent.screen.x, clickableAgent.screen.y);
+      selectedState = await readCityState(page);
+      if (typeof selectedState.city.mobilityAgents.selectedId === 'string') {
+        selectedAgentId = selectedState.city.mobilityAgents.selectedId;
+        break;
+      }
+    }
+    if (selectedAgentId) {
       break;
     }
+    await page.waitForTimeout(100);
   }
   expect(selectedAgentId).toEqual(expect.any(String));
   expect(selectedState.city.mobilityAgents.selectedId).toBe(selectedAgentId);
+  expect(selectedState.city.mobilityAgents.agents.some((entry: { id: string }) => entry.id === selectedAgentId)).toBe(true);
   expect(selectedState.city.mobilityAgents.selected).toEqual(expect.objectContaining({
     id: selectedAgentId,
     state: 'walking',
@@ -309,7 +316,7 @@ function nearestNeighborDistance(entity: ScreenEntity, entities: ScreenEntity[])
   return nearest;
 }
 
-test('clock advances: the abutopia pedestrian ages over the wire', async ({ page }) => {
+test('clock advances: abutopia pedestrians age over the wire', async ({ page }) => {
   await page.setViewportSize({ width: 409, height: 519 });
   await page.goto('/');
   await expect(page.locator('#game')).toHaveAttribute('data-ready', 'true');
@@ -322,11 +329,9 @@ test('clock advances: the abutopia pedestrian ages over the wire', async ({ page
   expect(typeof first.city.simTime).toBe('number');
   expect(typeof a0.ageSeconds).toBe('number');
 
-  // Several seconds = many backend ticks. The server recomputes each agent's
-  // age every tick and streams it, so the pedestrian must visibly age.
-  await page.waitForTimeout(3000);
-
-  const second = await readCityState(page);
-  const a1 = second.city.mobilityAgents.agents[0];
-  expect(a1.ageSeconds).toBeGreaterThan(a0.ageSeconds);
+  await expect.poll(async () => {
+    const second = await readCityState(page);
+    const a1 = second.city.mobilityAgents.agents.find((agent: { id: string }) => agent.id === a0.id);
+    return a1?.ageSeconds ?? a0.ageSeconds;
+  }, { timeout: 10_000 }).toBeGreaterThan(a0.ageSeconds);
 });

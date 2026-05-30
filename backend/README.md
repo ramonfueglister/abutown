@@ -120,7 +120,7 @@ Frontend agent mode:
 
 - The Vite client renders authoritative backend mobility from `/mobility` and
   `/ws`.
-- The current Abutopia seed exposes one walking agent and no vehicles.
+- The current Abutopia seed exposes 300 walking agents and no vehicles.
 - Browser smoke must start the backend; there is no local canvas fallback world.
 
 ## Snapshot Loop

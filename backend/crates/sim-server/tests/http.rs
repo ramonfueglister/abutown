@@ -364,7 +364,7 @@ async fn mobility_snapshot_is_available() {
     assert_eq!(mobility.protocol_version, u32::from(PROTOCOL_VERSION));
     assert_eq!(mobility.world_id, "abutopia");
     assert_eq!(mobility.tick, 0);
-    assert_eq!(mobility.agents.len(), 1);
+    assert_eq!(mobility.agents.len(), 300);
     assert!(mobility.vehicles.is_empty());
 }
 
