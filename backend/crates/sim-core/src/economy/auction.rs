@@ -27,6 +27,44 @@ pub fn settlement_price(last: Money, marginal_bid: Money, marginal_ask: Money) -
     }
 }
 
+/// Largest-remainder (Hamilton) integer apportionment. Distributes `total` units
+/// across `weights` proportionally to each weight; leftover units from flooring
+/// are assigned one-by-one to the largest fractional remainders, ties broken by
+/// ascending index (callers pass weights in a deterministic order). Returns a Vec
+/// the same length as `weights`. When `total <= sum(weights)` each output is
+/// `<= its weight`; when `total >= sum(weights)` each output equals its weight.
+/// All inputs are treated as non-negative.
+pub fn prorata_distribute(weights: &[i64], total: i64) -> Vec<i64> {
+    let n = weights.len();
+    let sum: i128 = weights.iter().map(|w| (*w).max(0) as i128).sum();
+    if sum <= 0 || total <= 0 {
+        return vec![0; n];
+    }
+    let total = (total as i128).min(sum);
+    let mut alloc = vec![0i64; n];
+    let mut remainders: Vec<(i128, usize)> = Vec::with_capacity(n);
+    let mut distributed: i128 = 0;
+    for (idx, &w) in weights.iter().enumerate() {
+        let w = w.max(0) as i128;
+        let num = total * w;
+        let base = num / sum;
+        alloc[idx] = base as i64;
+        distributed += base;
+        remainders.push((num % sum, idx));
+    }
+    let mut leftover = (total - distributed) as usize;
+    // Largest remainder first; ties by ascending index for determinism.
+    remainders.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    for &(_, idx) in &remainders {
+        if leftover == 0 {
+            break;
+        }
+        alloc[idx] += 1;
+        leftover -= 1;
+    }
+    alloc
+}
+
 pub fn build_clearing_plan(
     key: MarketGoodKey,
     bids: &[Bid],
