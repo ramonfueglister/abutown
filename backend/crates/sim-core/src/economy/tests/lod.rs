@@ -45,3 +45,112 @@ fn unanchored_market_is_never_dormant() {
 
     assert!(world.resource::<DormantMarkets>().0.is_empty());
 }
+
+use crate::economy::{
+    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, GOOD_FOOD,
+    InventoryBook, Money, NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools, TradeLedger,
+    generate_pool_orders_at_tick,
+};
+
+fn seeded_demand_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {
+    DemandPool {
+        actor,
+        market,
+        good: GOOD_FOOD,
+        desired_qty_per_tick: Quantity(5),
+        max_price: Money(1_000),
+        urgency_bps: 0,
+        elasticity_bps: 0,
+        interval_ticks: 1,
+        last_generated_tick: None,
+    }
+}
+
+#[test]
+fn dormant_market_generates_no_orders() {
+    let actor = EconomicActorId(1);
+    let market = MarketId(7);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    demand.0.insert(actor, seeded_demand_pool(actor, market));
+    let before = accounts.total_money();
+
+    let dormant: BTreeSet<MarketId> = [market].into_iter().collect();
+    generate_pool_orders_at_tick(
+        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
+        &mut demand, &mut supply, 0, 5, &dormant,
+    )
+    .unwrap();
+
+    assert!(orders.bids.is_empty(), "dormant market must not place bids");
+    assert!(dirty.0.is_empty(), "dormant market must not dirty any market-good");
+    assert_eq!(accounts.total_money(), before, "no cash locked while dormant");
+}
+
+#[test]
+fn awake_market_still_generates_orders() {
+    let actor = EconomicActorId(1);
+    let market = MarketId(7);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    demand.0.insert(actor, seeded_demand_pool(actor, market));
+
+    let dormant: BTreeSet<MarketId> = BTreeSet::new();
+    generate_pool_orders_at_tick(
+        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
+        &mut demand, &mut supply, 0, 5, &dormant,
+    )
+    .unwrap();
+
+    assert_eq!(orders.bids.len(), 1, "awake market places its bid");
+}
+
+#[test]
+fn market_resumes_with_single_order_no_burst() {
+    let actor = EconomicActorId(1);
+    let market = MarketId(7);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    demand.0.insert(actor, seeded_demand_pool(actor, market));
+
+    let dormant: BTreeSet<MarketId> = [market].into_iter().collect();
+    // Dormant for 100 ticks: no orders accrue.
+    for tick in 0..100 {
+        generate_pool_orders_at_tick(
+            &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
+            &mut demand, &mut supply, tick, 5, &dormant,
+        )
+        .unwrap();
+    }
+    assert!(orders.bids.is_empty());
+
+    // Wake on tick 100: exactly ONE order, not a 100-order backlog burst.
+    let awake: BTreeSet<MarketId> = BTreeSet::new();
+    generate_pool_orders_at_tick(
+        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
+        &mut demand, &mut supply, 100, 5, &awake,
+    )
+    .unwrap();
+    assert_eq!(orders.bids.len(), 1, "wake emits exactly one order");
+}

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_ecs::prelude::*;
 
@@ -71,10 +71,14 @@ pub fn generate_pool_orders_at_tick(
     supply: &mut SupplyPools,
     current_tick: u64,
     ttl_ticks: u64,
+    dormant: &BTreeSet<MarketId>,
 ) -> Result<(), EconomyError> {
     let demand_ids: Vec<_> = demand.0.keys().copied().collect();
     for actor in demand_ids {
         let mut pool = demand.0[&actor];
+        if dormant.contains(&pool.market) {
+            continue; // dormant market: no orders, last_generated_tick untouched
+        }
         if !interval_elapsed(pool.last_generated_tick, current_tick, pool.interval_ticks) {
             continue;
         }
@@ -111,6 +115,9 @@ pub fn generate_pool_orders_at_tick(
     let supply_ids: Vec<_> = supply.0.keys().copied().collect();
     for actor in supply_ids {
         let mut pool = supply.0[&actor];
+        if dormant.contains(&pool.market) {
+            continue; // dormant market: no orders, last_generated_tick untouched
+        }
         if !interval_elapsed(pool.last_generated_tick, current_tick, pool.interval_ticks) {
             continue;
         }
