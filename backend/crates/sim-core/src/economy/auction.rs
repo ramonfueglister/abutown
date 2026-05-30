@@ -78,7 +78,6 @@ pub fn build_clearing_plan(
             .then(a.created_tick.cmp(&b.created_tick))
             .then(a.id.cmp(&b.id))
     });
-
     let mut sorted_asks = asks.to_vec();
     sorted_asks.sort_by(|a, b| {
         a.min_price
@@ -87,64 +86,136 @@ pub fn build_clearing_plan(
             .then(a.id.cmp(&b.id))
     });
 
+    // Phase 1: clearing quantity + marginal prices (unchanged price-time greedy).
     let mut i = 0;
     let mut j = 0;
-    let mut fills = Vec::new();
-    let mut marginal_bid = None;
-    let mut marginal_ask = None;
-
-    while i < sorted_bids.len() && j < sorted_asks.len() {
-        if sorted_bids[i].max_price < sorted_asks[j].min_price {
-            break;
-        }
-        let qty = Quantity(
-            sorted_bids[i]
-                .qty_remaining
-                .0
-                .min(sorted_asks[j].qty_remaining.0),
-        );
-        if qty.0 <= 0 {
-            return Err(EconomyError::InvalidOrder);
-        }
-        fills.push(Fill {
-            bid: sorted_bids[i].id,
-            ask: sorted_asks[j].id,
-            qty,
-        });
-        marginal_bid = Some(sorted_bids[i].max_price);
-        marginal_ask = Some(sorted_asks[j].min_price);
-        sorted_bids[i].qty_remaining = sorted_bids[i].qty_remaining.checked_sub(qty)?;
-        sorted_asks[j].qty_remaining = sorted_asks[j].qty_remaining.checked_sub(qty)?;
-        if sorted_bids[i].qty_remaining.0 == 0 {
-            i += 1;
-        }
-        if sorted_asks[j].qty_remaining.0 == 0 {
-            j += 1;
+    let mut total_q: i64 = 0;
+    let mut marginal_bid: Option<Money> = None;
+    let mut marginal_ask: Option<Money> = None;
+    {
+        let mut bid_rem: Vec<i64> = sorted_bids.iter().map(|b| b.qty_remaining.0).collect();
+        let mut ask_rem: Vec<i64> = sorted_asks.iter().map(|a| a.qty_remaining.0).collect();
+        while i < sorted_bids.len() && j < sorted_asks.len() {
+            if sorted_bids[i].max_price < sorted_asks[j].min_price {
+                break;
+            }
+            let q = bid_rem[i].min(ask_rem[j]);
+            if q <= 0 {
+                return Err(EconomyError::InvalidOrder);
+            }
+            total_q = total_q.checked_add(q).ok_or(EconomyError::Overflow)?;
+            marginal_bid = Some(sorted_bids[i].max_price);
+            marginal_ask = Some(sorted_asks[j].min_price);
+            bid_rem[i] -= q;
+            ask_rem[j] -= q;
+            if bid_rem[i] == 0 {
+                i += 1;
+            }
+            if ask_rem[j] == 0 {
+                j += 1;
+            }
         }
     }
 
-    let settlement = match (marginal_bid, marginal_ask) {
-        (Some(bid), Some(ask)) => Some(settlement_price(last_settlement_price, bid, ask)),
-        _ => None,
+    let total_bid_qty: i64 = sorted_bids.iter().map(|b| b.qty_remaining.0).sum();
+    let total_ask_qty: i64 = sorted_asks.iter().map(|a| a.qty_remaining.0).sum();
+
+    let (Some(m_bid), Some(m_ask)) = (marginal_bid, marginal_ask) else {
+        return Ok(ClearingPlan {
+            key,
+            fills: Vec::new(),
+            settlement_price: None,
+            unmet_demand: Quantity(total_bid_qty),
+            unsold_supply: Quantity(total_ask_qty),
+        });
     };
-    let unmet_demand = sorted_bids[i..]
-        .iter()
-        .try_fold(Quantity::ZERO, |sum, bid| {
-            sum.checked_add(bid.qty_remaining)
-        })?;
-    let unsold_supply = sorted_asks[j..]
-        .iter()
-        .try_fold(Quantity::ZERO, |sum, ask| {
-            sum.checked_add(ask.qty_remaining)
-        })?;
+    let settlement = settlement_price(last_settlement_price, m_bid, m_ask);
+
+    // Phase 2: per-side allocation (infra-marginal full; marginal tier pro-rata).
+    let bid_prices: Vec<i64> = sorted_bids.iter().map(|b| b.max_price.0).collect();
+    let bid_qtys: Vec<i64> = sorted_bids.iter().map(|b| b.qty_remaining.0).collect();
+    let bid_alloc = allocate_side(&bid_prices, &bid_qtys, m_bid.0, total_q, true);
+
+    let ask_prices: Vec<i64> = sorted_asks.iter().map(|a| a.min_price.0).collect();
+    let ask_qtys: Vec<i64> = sorted_asks.iter().map(|a| a.qty_remaining.0).collect();
+    let ask_alloc = allocate_side(&ask_prices, &ask_qtys, m_ask.0, total_q, false);
+
+    // Phase 3: pair allocations into fills (north-west corner).
+    let fills = pair_fills(&sorted_bids, &bid_alloc, &sorted_asks, &ask_alloc);
 
     Ok(ClearingPlan {
         key,
         fills,
-        settlement_price: settlement,
-        unmet_demand,
-        unsold_supply,
+        settlement_price: Some(settlement),
+        unmet_demand: Quantity(total_bid_qty - total_q),
+        unsold_supply: Quantity(total_ask_qty - total_q),
     })
+}
+
+/// Allocate `total_q` units across one side. Orders strictly better than
+/// `marginal` (higher for bids when `better_is_higher`, lower for asks) are filled
+/// in full; orders priced exactly at `marginal` share the remainder pro-rata;
+/// worse-priced orders get 0. Indexed parallel to `prices`/`qtys`.
+fn allocate_side(
+    prices: &[i64],
+    qtys: &[i64],
+    marginal: i64,
+    total_q: i64,
+    better_is_higher: bool,
+) -> Vec<i64> {
+    let n = prices.len();
+    let mut alloc = vec![0i64; n];
+    let mut infra_sum: i64 = 0;
+    let mut marginal_idx: Vec<usize> = Vec::new();
+    for (idx, &p) in prices.iter().enumerate() {
+        let is_infra = if better_is_higher {
+            p > marginal
+        } else {
+            p < marginal
+        };
+        if is_infra {
+            alloc[idx] = qtys[idx];
+            infra_sum += qtys[idx];
+        } else if p == marginal {
+            marginal_idx.push(idx);
+        }
+    }
+    let to_ration = (total_q - infra_sum).max(0);
+    let weights: Vec<i64> = marginal_idx.iter().map(|&k| qtys[k]).collect();
+    let shares = prorata_distribute(&weights, to_ration);
+    for (s, &k) in shares.iter().zip(marginal_idx.iter()) {
+        alloc[k] = *s;
+    }
+    alloc
+}
+
+/// Pair per-bid and per-ask allocations (both summing to the same total) into
+/// fills via a north-west-corner walk over the already-sorted orders.
+fn pair_fills(bids: &[Bid], bid_alloc: &[i64], asks: &[Ask], ask_alloc: &[i64]) -> Vec<Fill> {
+    let mut fills = Vec::new();
+    let mut brem = bid_alloc.to_vec();
+    let mut arem = ask_alloc.to_vec();
+    let mut bi = 0;
+    let mut aj = 0;
+    while bi < bids.len() && aj < asks.len() {
+        if brem[bi] == 0 {
+            bi += 1;
+            continue;
+        }
+        if arem[aj] == 0 {
+            aj += 1;
+            continue;
+        }
+        let q = brem[bi].min(arem[aj]);
+        fills.push(Fill {
+            bid: bids[bi].id,
+            ask: asks[aj].id,
+            qty: Quantity(q),
+        });
+        brem[bi] -= q;
+        arem[aj] -= q;
+    }
+    fills
 }
 
 use crate::economy::{
