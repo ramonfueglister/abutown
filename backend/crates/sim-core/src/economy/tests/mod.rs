@@ -7,6 +7,7 @@ mod lod;
 mod overflow;
 mod plugin;
 mod pools;
+mod persist;
 mod production;
 mod rationing;
 mod systems;

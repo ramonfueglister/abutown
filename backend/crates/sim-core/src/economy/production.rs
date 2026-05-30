@@ -7,13 +7,13 @@ use crate::economy::{
     pools::interval_elapsed,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Recipe {
     pub inputs: Vec<(GoodId, Quantity)>,
     pub outputs: Vec<(GoodId, Quantity)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProductionPool {
     pub actor: EconomicActorId,
     pub recipe: Recipe,

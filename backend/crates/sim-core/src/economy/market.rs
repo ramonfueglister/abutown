@@ -5,18 +5,20 @@ use bevy_ecs::prelude::*;
 use crate::economy::{GoodId, MarketId, Money, Quantity};
 use crate::ids::ChunkCoord;
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MarketSite {
     pub id: MarketId,
     pub node_id: crate::routing::NodeId,
     pub name: String,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, serde::Serialize, serde::Deserialize)]
 pub struct MarketGoodKey {
     pub market: MarketId,
     pub good: GoodId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MarketGoodState {
     pub key: MarketGoodKey,
     pub last_settlement_price: Money,

@@ -1,7 +1,8 @@
 use bevy_ecs::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Component, Copy, Clone, Hash, Eq, PartialEq, Debug)]
+#[derive(Component, Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct NodeId(pub u32);
 
 #[derive(Component, Copy, Clone, Hash, Eq, PartialEq, Debug)]

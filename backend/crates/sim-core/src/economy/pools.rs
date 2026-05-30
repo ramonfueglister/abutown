@@ -8,7 +8,7 @@ use crate::economy::{
     create_ask, create_bid,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DemandPool {
     pub actor: EconomicActorId,
     pub market: MarketId,
@@ -21,7 +21,7 @@ pub struct DemandPool {
     pub last_generated_tick: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SupplyPool {
     pub actor: EconomicActorId,
     pub market: MarketId,

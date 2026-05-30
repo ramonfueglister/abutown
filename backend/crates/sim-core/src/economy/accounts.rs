@@ -4,7 +4,7 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::{EconomicActorId, EconomyError, Money};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MoneyAccount {
     pub available: Money,
     pub locked: Money,

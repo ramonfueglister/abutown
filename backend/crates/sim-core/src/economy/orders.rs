@@ -20,7 +20,7 @@ impl NextOrderId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Bid {
     pub id: OrderId,
     pub owner: EconomicActorId,
@@ -33,7 +33,7 @@ pub struct Bid {
     pub expires_tick: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ask {
     pub id: OrderId,
     pub owner: EconomicActorId,

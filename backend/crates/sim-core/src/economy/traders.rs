@@ -11,7 +11,7 @@ use crate::economy::{
 /// Reserved account that receives transport-cost payments (keeps money conserved).
 pub const TRANSPORT_OPERATOR: EconomicActorId = EconomicActorId(u64::MAX);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TraderState {
     Buying { order: Option<OrderId> },
     ToDest { remaining: u64 },
@@ -19,7 +19,7 @@ pub enum TraderState {
     ToSource { remaining: u64 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Trader {
     pub actor: EconomicActorId,
     pub good: GoodId,
