@@ -1,7 +1,7 @@
 use crate::economy::{
-    create_ask, create_bid, expire_orders_at_tick, AccountBook, DirtyMarketGoods,
-    EconomicActorId, GOOD_FOOD, InventoryBook, MarketGoodKey, MarketId, Money, NextOrderId,
-    OrderBook, Quantity, TradeLedger,
+    AccountBook, DirtyMarketGoods, EconomicActorId, GOOD_FOOD, InventoryBook, MarketGoodKey,
+    MarketId, Money, NextOrderId, OrderBook, Quantity, TradeLedger, create_ask, create_bid,
+    expire_orders_at_tick,
 };
 
 #[test]
@@ -32,13 +32,23 @@ fn expired_bid_releases_remaining_cash() {
     )
     .unwrap();
 
-    expire_orders_at_tick(&mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, 8)
-        .unwrap();
+    expire_orders_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        8,
+    )
+    .unwrap();
 
     assert!(!orders.bids.contains_key(&order));
     assert_eq!(accounts.account(buyer).available, Money(10_000));
     assert_eq!(accounts.account(buyer).locked, Money(0));
-    assert!(dirty.0.contains(&MarketGoodKey { market, good: GOOD_FOOD }));
+    assert!(dirty.0.contains(&MarketGoodKey {
+        market,
+        good: GOOD_FOOD
+    }));
 }
 
 #[test]
@@ -51,7 +61,9 @@ fn expired_ask_releases_remaining_goods() {
     let mut ledger = TradeLedger::default();
     let mut dirty = DirtyMarketGoods::default();
     let mut next = NextOrderId::default();
-    inventory.deposit(seller, GOOD_FOOD, Quantity(5_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(5_000))
+        .unwrap();
 
     let order = create_ask(
         &mut inventory,
@@ -69,11 +81,21 @@ fn expired_ask_releases_remaining_goods() {
     )
     .unwrap();
 
-    expire_orders_at_tick(&mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, 8)
-        .unwrap();
+    expire_orders_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        8,
+    )
+    .unwrap();
 
     assert!(!orders.asks.contains_key(&order));
-    assert_eq!(inventory.balance(seller, GOOD_FOOD).available, Quantity(5_000));
+    assert_eq!(
+        inventory.balance(seller, GOOD_FOOD).available,
+        Quantity(5_000)
+    );
     assert_eq!(inventory.balance(seller, GOOD_FOOD).locked, Quantity(0));
 }
 
@@ -106,8 +128,21 @@ fn expired_order_marks_market_good_dirty() {
     .unwrap();
     dirty.0.clear();
 
-    expire_orders_at_tick(&mut accounts, &mut inventory, &mut orders, &mut ledger, &mut dirty, 2)
-        .unwrap();
+    expire_orders_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        2,
+    )
+    .unwrap();
 
-    assert_eq!(dirty.0.iter().copied().collect::<Vec<_>>(), vec![MarketGoodKey { market, good: GOOD_FOOD }]);
+    assert_eq!(
+        dirty.0.iter().copied().collect::<Vec<_>>(),
+        vec![MarketGoodKey {
+            market,
+            good: GOOD_FOOD
+        }]
+    );
 }

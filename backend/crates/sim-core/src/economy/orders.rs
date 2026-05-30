@@ -3,15 +3,17 @@ use std::collections::BTreeMap;
 use bevy_ecs::prelude::*;
 
 use crate::economy::{
-    checked_order_value, AccountBook, DirtyMarketGoods, EconomicActorId, EconomyError,
-    EconomyEvent, GoodId, InventoryBook, MarketGoodKey, MarketId, Money, OrderId, Quantity,
-    TradeLedger,
+    AccountBook, DirtyMarketGoods, EconomicActorId, EconomyError, EconomyEvent, GoodId,
+    InventoryBook, MarketGoodKey, MarketId, Money, OrderId, Quantity, TradeLedger,
+    checked_order_value,
 };
 
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NextOrderId(pub u64);
 
 impl NextOrderId {
+    // Not an Iterator; `next` is an ID counter. Suppress iterator-trait confusion lint.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> OrderId {
         self.0 += 1;
         OrderId(self.0)
@@ -50,6 +52,9 @@ pub struct OrderBook {
     pub asks: BTreeMap<OrderId, Ask>,
 }
 
+// All parameters are distinct resources — cannot bundle further without introducing a
+// builder struct that is out of scope for v0. Filled in Task 6/8.
+#[allow(clippy::too_many_arguments)]
 pub fn create_bid(
     accounts: &mut AccountBook,
     orders: &mut OrderBook,
@@ -82,11 +87,20 @@ pub fn create_bid(
         },
     );
     dirty.0.insert(MarketGoodKey { market, good });
-    ledger.0.push(EconomyEvent::OrderCreated { order: id, actor: owner, market, good });
-    ledger.0.push(EconomyEvent::CashLocked { actor: owner, amount: locked });
+    ledger.0.push(EconomyEvent::OrderCreated {
+        order: id,
+        actor: owner,
+        market,
+        good,
+    });
+    ledger.0.push(EconomyEvent::CashLocked {
+        actor: owner,
+        amount: locked,
+    });
     Ok(id)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_ask(
     inventory: &mut InventoryBook,
     orders: &mut OrderBook,
@@ -121,8 +135,17 @@ pub fn create_ask(
         },
     );
     dirty.0.insert(MarketGoodKey { market, good });
-    ledger.0.push(EconomyEvent::OrderCreated { order: id, actor: owner, market, good });
-    ledger.0.push(EconomyEvent::GoodsLocked { actor: owner, good, qty });
+    ledger.0.push(EconomyEvent::OrderCreated {
+        order: id,
+        actor: owner,
+        market,
+        good,
+    });
+    ledger.0.push(EconomyEvent::GoodsLocked {
+        actor: owner,
+        good,
+        qty,
+    });
     Ok(id)
 }
 
@@ -141,9 +164,20 @@ pub fn expire_orders_at_tick(
         .collect();
     for (id, bid) in expired_bids {
         accounts.release_cash(bid.owner, bid.cash_locked_remaining)?;
-        dirty.0.insert(MarketGoodKey { market: bid.market, good: bid.good });
-        ledger.0.push(EconomyEvent::OrderExpired { order: id, actor: bid.owner, market: bid.market, good: bid.good });
-        ledger.0.push(EconomyEvent::CashReleased { actor: bid.owner, amount: bid.cash_locked_remaining });
+        dirty.0.insert(MarketGoodKey {
+            market: bid.market,
+            good: bid.good,
+        });
+        ledger.0.push(EconomyEvent::OrderExpired {
+            order: id,
+            actor: bid.owner,
+            market: bid.market,
+            good: bid.good,
+        });
+        ledger.0.push(EconomyEvent::CashReleased {
+            actor: bid.owner,
+            amount: bid.cash_locked_remaining,
+        });
         orders.bids.remove(&id);
     }
 
@@ -154,9 +188,21 @@ pub fn expire_orders_at_tick(
         .collect();
     for (id, ask) in expired_asks {
         inventory.release_goods(ask.owner, ask.good, ask.goods_locked_remaining)?;
-        dirty.0.insert(MarketGoodKey { market: ask.market, good: ask.good });
-        ledger.0.push(EconomyEvent::OrderExpired { order: id, actor: ask.owner, market: ask.market, good: ask.good });
-        ledger.0.push(EconomyEvent::GoodsReleased { actor: ask.owner, good: ask.good, qty: ask.goods_locked_remaining });
+        dirty.0.insert(MarketGoodKey {
+            market: ask.market,
+            good: ask.good,
+        });
+        ledger.0.push(EconomyEvent::OrderExpired {
+            order: id,
+            actor: ask.owner,
+            market: ask.market,
+            good: ask.good,
+        });
+        ledger.0.push(EconomyEvent::GoodsReleased {
+            actor: ask.owner,
+            good: ask.good,
+            qty: ask.goods_locked_remaining,
+        });
         orders.asks.remove(&id);
     }
 
