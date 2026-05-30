@@ -116,3 +116,33 @@ fn cannot_consume_negative() {
         Err(EconomyError::NegativeQuantity)
     );
 }
+
+#[test]
+fn transfer_moves_available_and_conserves_total() {
+    let a = EconomicActorId(1);
+    let b = EconomicActorId(2);
+    let mut acc = AccountBook::default();
+    acc.deposit(a, Money(1_000)).unwrap();
+    let before = acc.total_money().unwrap();
+    acc.transfer(a, b, Money(400)).unwrap();
+    assert_eq!(acc.account(a).available, Money(600));
+    assert_eq!(acc.account(b).available, Money(400));
+    assert_eq!(acc.total_money().unwrap(), before);
+}
+#[test]
+fn cannot_transfer_more_than_available() {
+    let mut acc = AccountBook::default();
+    acc.deposit(EconomicActorId(1), Money(100)).unwrap();
+    assert_eq!(
+        acc.transfer(EconomicActorId(1), EconomicActorId(2), Money(200)),
+        Err(EconomyError::InsufficientFunds)
+    );
+}
+#[test]
+fn cannot_transfer_negative() {
+    let mut acc = AccountBook::default();
+    assert_eq!(
+        acc.transfer(EconomicActorId(1), EconomicActorId(2), Money(-1)),
+        Err(EconomyError::NegativeMoney)
+    );
+}

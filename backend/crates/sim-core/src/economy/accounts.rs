@@ -73,6 +73,27 @@ impl AccountBook {
         Ok(())
     }
 
+    pub fn transfer(
+        &mut self,
+        from: EconomicActorId,
+        to: EconomicActorId,
+        amount: Money,
+    ) -> Result<(), EconomyError> {
+        if amount.0 < 0 {
+            return Err(EconomyError::NegativeMoney);
+        }
+        let mut f = self.account(from);
+        if f.available < amount {
+            return Err(EconomyError::InsufficientFunds);
+        }
+        f.available = f.available.checked_sub(amount)?;
+        let mut t = self.account(to);
+        t.available = t.available.checked_add(amount)?;
+        self.accounts.insert(from, f);
+        self.accounts.insert(to, t);
+        Ok(())
+    }
+
     pub fn total_money(&self) -> Result<Money, EconomyError> {
         self.accounts
             .values()
