@@ -122,7 +122,24 @@ function rectOperations(ctx: { operations: RenderOperation[] }): Array<{ type: '
   );
 }
 
+function translateOperations(ctx: { operations: RenderOperation[] }): Array<{ type: 'translate'; x: number; y: number }> {
+  return ctx.operations.filter(
+    (operation): operation is { type: 'translate'; x: number; y: number } =>
+      operation.type === 'translate',
+  );
+}
+
 describe('minimal map renderer', () => {
+  it('does not add a scene-origin offset after the camera transform', () => {
+    const ctx = createContext();
+
+    renderMinimalMap(createState(ctx));
+
+    expect(translateOperations(ctx)).toEqual([
+      { type: 'translate', x: 0, y: 0 },
+    ]);
+  });
+
   it('draws grass as one continuous base layer to avoid zoomed-out tile seams', () => {
     const ctx = createContext();
 

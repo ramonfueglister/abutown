@@ -136,18 +136,16 @@ export function renderMinimalMap(state: MinimalMapRendererState): void {
   ctx.translate(camera.x, camera.y);
   ctx.scale(camera.scale, camera.scale);
 
-  drawScene(state, { x: 0, y: 0 });
+  drawScene(state);
   ctx.restore();
   drawAgentInspectorPanel(state, buildBackendPedestrianInspector(selectedBackendPedestrian(state)));
   drawCarInspectorPanel(state, buildBackendCarInspector(selectedBackendCar(state)));
   drawWorldDateLabel(state);
 }
 
-function drawScene(state: MinimalMapRendererState, offset: Coord): void {
+function drawScene(state: MinimalMapRendererState): void {
   const { ctx, world } = state;
   ctx.save();
-  const sceneOffset = iso(state, offset);
-  ctx.translate(sceneOffset.x, sceneOffset.y);
   const visibleGrid = visibleGridRect(state);
 
   const visibleTerrainTiles: Coord[] = [];
