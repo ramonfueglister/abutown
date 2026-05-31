@@ -237,7 +237,17 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
 /// and apply the render mutations. Routes are computed into an owned map first
 /// (releasing the routing borrows) so the apply phase has clean `&mut World`.
 pub fn materialize_traders_system(world: &mut World) {
-    let tick = world.resource::<Tick>().0;
+    // The render bridge needs the spatial world (graph + routing indices). In
+    // pure-economy schedules (no RoutingPlugin) there is nothing to route, so the
+    // bridge is a no-op — keeping the economy schedule runnable without a graph
+    // (the economy-lod-v0 "economy core stays graph-free" invariant).
+    if world.get_resource::<Graph>().is_none()
+        || world.get_resource::<HpaIndex>().is_none()
+        || world.get_resource::<FlowFieldCache>().is_none()
+    {
+        return;
+    }
+    let tick = world.get_resource::<Tick>().map(|t| t.0).unwrap_or(0);
 
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
         world.resource_scope(|world: &mut World, mut cache: Mut<FlowFieldCache>| {
