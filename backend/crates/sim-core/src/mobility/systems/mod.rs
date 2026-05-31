@@ -21,6 +21,7 @@ pub use lod::{
 };
 pub use output::{compute_direction_system, compute_world_coord_system};
 pub use routing::{route_advance_system, route_assignment_system};
+pub(crate) use routing::materialize_route_steps;
 pub use vehicles::vehicle_advance_system;
 pub use walking::{stop_arrival_system, update_link_polyline_cache_system, walk_advance_system};
 

@@ -4,6 +4,7 @@ mod determinism;
 mod expiry;
 mod locking;
 mod lod;
+mod materialize;
 mod overflow;
 mod persist;
 mod plugin;

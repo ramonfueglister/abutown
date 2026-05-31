@@ -48,7 +48,7 @@ fn destination_for_stage(
     }
 }
 
-fn materialize_route_steps(
+pub(crate) fn materialize_route_steps(
     graph: &crate::routing::Graph,
     field: &crate::routing::FlowField,
     origin: crate::routing::NodeId,
