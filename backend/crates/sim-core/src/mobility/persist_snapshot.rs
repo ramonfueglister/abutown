@@ -60,6 +60,7 @@ struct PersistedLinkPolylineMetadata(HashMap<String, Vec<(f32, f32)>>);
 #[derive(Debug, Clone, PartialEq)]
 pub struct MobilityPersistSnapshot {
     pub tick: u64,
+    pub last_processed_month: u64,
     pub agents: HashMap<AgentId, AgentRecord>,
     pub vehicles: HashMap<VehicleId, VehicleRecord>,
     pub stops: HashMap<String, PersistedStop>,
@@ -74,6 +75,7 @@ impl Serialize for MobilityPersistSnapshot {
         #[derive(Serialize)]
         struct WorldRepr<'a> {
             tick: u64,
+            last_processed_month: u64,
             agents: &'a HashMap<AgentId, AgentRecord>,
             vehicles: &'a HashMap<VehicleId, VehicleRecord>,
             stops: &'a HashMap<String, PersistedStop>,
@@ -95,6 +97,7 @@ impl Serialize for MobilityPersistSnapshot {
 
         WorldRepr {
             tick: self.tick,
+            last_processed_month: self.last_processed_month,
             agents: &self.agents,
             vehicles: &self.vehicles,
             stops: &self.stops,
@@ -112,6 +115,7 @@ impl<'de> Deserialize<'de> for MobilityPersistSnapshot {
         #[derive(Deserialize)]
         struct WorldRepr {
             tick: u64,
+            last_processed_month: u64,
             agents: HashMap<AgentId, AgentRecord>,
             vehicles: HashMap<VehicleId, VehicleRecord>,
             stops: HashMap<String, PersistedStop>,
@@ -125,6 +129,7 @@ impl<'de> Deserialize<'de> for MobilityPersistSnapshot {
         let repr = WorldRepr::deserialize(de)?;
         Ok(Self {
             tick: repr.tick,
+            last_processed_month: repr.last_processed_month,
             agents: repr.agents,
             vehicles: repr.vehicles,
             stops: repr.stops,
@@ -187,6 +192,9 @@ pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
 
     MobilityPersistSnapshot {
         tick: world.resource::<Tick>().0,
+        last_processed_month: world
+            .resource::<crate::population::LastProcessedMonth>()
+            .0,
         agents: agents_map,
         vehicles: vehicles_map,
         stops,
@@ -834,6 +842,9 @@ fn normalize_persisted_active_routes(
 /// resolve real positions from the routing graph.
 pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
     world.resource_mut::<Tick>().0 = snap.tick;
+    world
+        .resource_mut::<crate::population::LastProcessedMonth>()
+        .0 = snap.last_processed_month;
     install_snapshot_routing(world, &snap);
     let agents = {
         let graph = world.resource::<Graph>();
