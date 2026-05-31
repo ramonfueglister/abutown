@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_ecs::prelude::*;
 
@@ -6,6 +6,7 @@ use crate::economy::materialize::{MaterializedTraders, apply_mutations, plan_mut
 use crate::economy::{
     EconomicActorId, EconomyConfig, GOOD_TOOLS, MarketId, Quantity, Trader, TraderState, Traders,
 };
+use crate::ids::ChunkCoord;
 use crate::mobility::components::{Position, StableAgentId, TraderAgent};
 use crate::mobility::resources::{AgentIdIndex, DirtyAgents};
 
@@ -36,14 +37,22 @@ fn seed(state: TraderState) -> (World, EconomicActorId) {
     (world, actor)
 }
 
-fn run(world: &mut World, routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>) {
+fn run(
+    world: &mut World,
+    routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
+    observed: &BTreeSet<ChunkCoord>,
+) {
     let muts = {
         let traders = world.resource::<Traders>();
         let config = world.resource::<EconomyConfig>();
         let materialized = world.resource::<MaterializedTraders>();
-        plan_mutations(traders, config, materialized, routes)
+        plan_mutations(traders, config, materialized, routes, observed)
     };
     apply_mutations(world, 0, muts);
+}
+
+fn observed_origin() -> BTreeSet<ChunkCoord> {
+    [ChunkCoord { x: 0, y: 0 }].into_iter().collect()
 }
 
 #[test]
@@ -53,7 +62,7 @@ fn materialize_spawns_trader_agent_at_route_start_and_feeds_delta() {
         [(actor, vec![(1.0, 1.0), (5.0, 1.0)])]
             .into_iter()
             .collect();
-    run(&mut world, &routes);
+    run(&mut world, &routes, &observed_origin());
 
     let mut q = world.query_filtered::<(Entity, &Position, &StableAgentId), With<TraderAgent>>();
     let hits: Vec<(Entity, (f32, f32), String)> = q
@@ -80,7 +89,7 @@ fn materialize_despawns_when_trader_removed_from_economy() {
     let (mut world, actor) = seed(TraderState::Buying { order: None });
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
         [(actor, vec![(1.0, 1.0)])].into_iter().collect();
-    run(&mut world, &routes);
+    run(&mut world, &routes, &observed_origin());
     assert!(
         world
             .resource::<MaterializedTraders>()
@@ -88,9 +97,8 @@ fn materialize_despawns_when_trader_removed_from_economy() {
             .contains_key(&actor)
     );
 
-    // Trader leaves the economy -> its render agent is despawned and dropped.
     world.resource_mut::<Traders>().0.remove(&actor);
-    run(&mut world, &BTreeMap::new());
+    run(&mut world, &BTreeMap::new(), &observed_origin());
 
     let mut q = world.query_filtered::<Entity, With<TraderAgent>>();
     assert_eq!(q.iter(&world).count(), 0, "trader-agent despawned");
@@ -111,6 +119,54 @@ fn materialize_despawns_when_trader_removed_from_economy() {
 }
 
 #[test]
+fn materialize_despawns_when_trader_leaves_observed_chunks() {
+    let (mut world, actor) = seed(TraderState::Buying { order: None });
+    let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
+        [(actor, vec![(1.0, 1.0)])].into_iter().collect();
+    let none: BTreeSet<ChunkCoord> = BTreeSet::new();
+
+    // Observed -> spawned.
+    run(&mut world, &routes, &observed_origin());
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&actor)
+    );
+
+    // First unobserved tick: kept ALIVE + marked dirty at its position so the
+    // delta emits left_agents for the chunk it left (ghost-free client removal).
+    run(&mut world, &routes, &none);
+    let entity = world
+        .resource::<MaterializedTraders>()
+        .0
+        .get(&actor)
+        .map(|m| m.entity)
+        .expect("kept alive one tick to emit the leave");
+    assert!(
+        world.resource::<DirtyAgents>().0.contains(&entity),
+        "marked dirty on the leaving tick"
+    );
+
+    // Second unobserved tick: despawned (LOD).
+    run(&mut world, &routes, &none);
+    let count = world
+        .query_filtered::<Entity, With<TraderAgent>>()
+        .iter(&world)
+        .count();
+    assert_eq!(
+        count, 0,
+        "despawned once unobserved (after the leave emitted)"
+    );
+    assert!(
+        !world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&actor)
+    );
+}
+
+#[test]
 fn materialize_does_not_touch_money_or_goods() {
     use crate::economy::{AccountBook, InventoryBook, Money};
     let (mut world, actor) = seed(TraderState::ToDest { remaining: 2 });
@@ -126,7 +182,7 @@ fn materialize_does_not_touch_money_or_goods() {
             .into_iter()
             .collect();
     for _ in 0..5 {
-        run(&mut world, &routes);
+        run(&mut world, &routes, &observed_origin());
     }
 
     assert_eq!(
