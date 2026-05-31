@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-31
 **Branch context:** `plan/persistence-liveness`
-**Status:** design, awaiting implementation plan
+**Status:** implemented
 
 ## Problem
 
@@ -16,8 +16,8 @@ duplicate agent entities.
 `LastProcessedMonth` (the resource that records which sim-month the population
 system last advanced through) is **not part of the persisted snapshot**:
 
-- `PopulationPlugin::install` (`population/mod.rs`) inserts
-  `LastProcessedMonth::default()` (= 0) every time the world is built.
+- `PopulationPlugin::install` inserts `LastProcessedMonth::default()` (= 0)
+  every time the world is built.
 - `MobilityPersistSnapshot` (`mobility/persist_snapshot.rs`) persists `Tick`
   but not `LastProcessedMonth`; `apply_into_world` restores `Tick` and never
   touches `LastProcessedMonth`.
@@ -33,23 +33,19 @@ So after a reload, `Tick` is restored to its saved (large) value while
    one tick).
 2. **Duplicate child entities.** Child id is deterministic
    (`agent:born:{mother}:{m}`). A child already persisted from the original run
-   is "re-born" during replay; `spawn_agent_from_record` (`mobility/api.rs:454`)
-   does a blank `AgentIdIndex.insert`, overwriting the index entry **without
-   despawning** the previously-mapped entity → orphaned/duplicate entity.
+   is "re-born" during replay; `spawn_agent_from_record` does a blank
+   `AgentIdIndex.insert`, overwriting the index entry without despawning the
+   previously-mapped entity → orphaned/duplicate entity.
 3. **Non-idempotent reload** — the same snapshot loaded twice yields different
    populations, breaking the "Deterministic + replay-safe" promise in the
    module docstring.
 
-### Secondary defects (in the catch-up loop itself)
+### Secondary defect (in the catch-up loop itself)
 
 - **Age uses `now_tick`, not the processed month `m`.** Mortality/fertility
-  thresholds are computed from the agent's age at the current tick
-  (`population/mod.rs` ~137 and ~176) while the random draw is keyed to month
-  `m`. For multi-month catch-up every month wrongly uses the agent's *final*
-  age.
-- **Newborns are invisible to the same catch-up call.** `agent_entries` is
-  snapshotted once before the month loop; agents born in month `m` are not
-  reconsidered in months `m+1..` of the same call. (See "Accepted limitations".)
+  thresholds are computed from the agent's age at the current tick while the
+  random draw is keyed to month `m`. For any multi-month span every month
+  wrongly uses the agent's *final* age.
 
 The `unit_draw` salt machinery, the Gompertz–Makeham / ASFR math, and the
 display-side age calculation are all correct — they are **not** changed by this
@@ -69,8 +65,7 @@ purely a bug.
   replay, no die-off/birth burst, no duplicate entities.
 - Idempotent reload: loading the same snapshot any number of times yields the
   same population.
-- Existing (pre-fix) snapshots on disk load without a replay storm.
-- The catch-up loop is made correct for arbitrary month spans (even though, in
+- The catch-up loop is age-correct for arbitrary month spans (even though, in
   the frozen model, it runs ≤ 1 month per tick in practice).
 - Regression coverage that would have caught the original bug.
 
@@ -80,55 +75,57 @@ purely a bug.
 - No change to the salt/PRNG, Gompertz–Makeham, or ASFR math.
 - No change to the frontend or the frontend↔backend boundary (pure backend) —
   no browser smoke required.
+- **No legacy-snapshot compatibility.** `last_processed_month` is a required
+  field; pre-fix snapshots without it are intentionally not supported (frozen
+  worlds are regenerated; no `#[serde(default)]` shim).
+- **No defensive fallback guards.** The fix removes the root cause; no
+  belt-and-suspenders guards are added for states that can no longer occur
+  (specifically, no double-spawn guard — a persisted cursor means each
+  `(mother, month)` is processed exactly once, so the duplicate child id is
+  unreachable).
 - `PopulationConfig` is **not** persisted in this work (it is a deterministic
-  default today). Noted as a future item if it ever becomes per-world tunable.
+  default today). A future item if it ever becomes per-world tunable.
 
 ## Design
 
-### 1. Persist `LastProcessedMonth` with a replay-guard on restore
+### 1. Persist `last_processed_month` and restore it directly
 
-All three edits live in `backend/crates/sim-core/src/mobility/persist_snapshot.rs`.
+All edits live in `backend/crates/sim-core/src/mobility/persist_snapshot.rs`.
 
 1. **Struct + wire format.** Add `pub last_processed_month: u64` to
-   `MobilityPersistSnapshot`. Add the field to the `WorldRepr` serialize and
-   deserialize structs; on deserialize mark it `#[serde(default)]` so existing
-   JSON (without the field) still loads. Place it next to `tick` for clarity.
+   `MobilityPersistSnapshot`, next to `tick`. Add the field to the `WorldRepr`
+   serialize and deserialize structs. The field is **required** on both sides
+   (no serde default — legacy snapshots are not supported).
 2. **Extract.** In `extract_from_world`, set
    `last_processed_month: world.resource::<crate::population::LastProcessedMonth>().0`.
-3. **Restore (replay-guard).** In `apply_into_world`, after restoring `Tick`:
+3. **Restore.** In `apply_into_world`, after restoring `Tick`, restore the
+   cursor directly:
 
    ```rust
-   let restored_month = snapshot
-       .last_processed_month
-       .max(world.resource::<crate::time::SimClock>().month_index(snapshot.tick));
-   world.resource_mut::<crate::population::LastProcessedMonth>().0 = restored_month;
+   world.resource_mut::<Tick>().0 = snap.tick;
+   world
+       .resource_mut::<crate::population::LastProcessedMonth>()
+       .0 = snap.last_processed_month;
    ```
 
-   Rationale for `max(field, month_index(tick))`:
-   - **Valid snapshot:** the invariant after every tick is
-     `LastProcessedMonth == month_index(tick)` (the system runs every tick and
-     sets `LastProcessedMonth = current_month` at the end), so the `max` is a
-     no-op and the exact persisted value is used.
-   - **Legacy snapshot (field absent → default 0):** `max(0, month_index(tick))`
-     derives the correct resume month from the already-persisted `Tick`, so no
-     replay storm ever occurs — including for spielstände created before this
-     fix.
+   No guard, no derivation. The system's invariant is that after every tick
+   `LastProcessedMonth == month_index(tick)` (it runs each tick and sets
+   `LastProcessedMonth = current_month` at the end), and a snapshot is taken
+   between ticks — so the persisted value is exactly the resume point.
+   Frozen-time: sim-time resumes from the saved tick, there is no catch-up.
 
-   The guard relies only on `month_index(tick)` never *exceeding* the true last
-   processed month for a valid snapshot. That holds because the system never
-   skips a crossed month boundary.
-
-`LastProcessedMonth` lives in `crate::population`; `apply_into_world` already
-takes `&mut World` and the world has `SimClock` + `LastProcessedMonth` installed
-(PopulationPlugin runs before snapshot apply), so both resources are reachable.
+`LastProcessedMonth` lives in `crate::population`; both `Tick` and
+`LastProcessedMonth` are guaranteed installed before `apply_into_world` runs
+(`empty_world_and_schedule` for tests, `PopulationPlugin` before snapshot apply
+in `sim-server/src/runtime/mod.rs`), matching how `apply_into_world` already
+assumes `Tick`/`FlowCells` exist.
 
 ### 2. Per-month age in the catch-up loop
 
-Make the catch-up loop month-accurate so that, when it ever processes more than
-one month (e.g. a future cadence change), each month uses the agent's age *as of
-that month*, consistent with the month-keyed random draw.
+Make the catch-up loop month-accurate so each processed month uses the agent's
+age *as of that month*, consistent with the month-keyed random draw.
 
-Add a small, tested helper to `SimClock` (`backend/crates/sim-core/src/time/mod.rs`):
+Two pure helpers on `SimClock` (`backend/crates/sim-core/src/time/mod.rs`):
 
 ```rust
 /// Absolute sim-seconds at the start of `month`.
@@ -143,8 +140,8 @@ pub fn age_years_at(&self, at_sim_second: u64, birth_tick: u64) -> f32 {
 }
 ```
 
-In `population_monthly_system`, replace both
-`clock.age_years(now_tick, birth_tick.0)` calls (mortality and fertility) with:
+In `population_monthly_system`, both
+`clock.age_years(now_tick, birth_tick.0)` calls (mortality and fertility) become:
 
 ```rust
 let age = clock.age_years_at(clock.month_start_seconds(m), birth_tick.0);
@@ -153,60 +150,46 @@ let age = clock.age_years_at(clock.month_start_seconds(m), birth_tick.0);
 `now_tick` is still used to stamp `birth_tick` on newborns; only the
 probability-threshold age changes.
 
-### 3. Double-spawn guard (defense in depth)
+## Accepted limitation (explicit, by design)
 
-In the fertility birth loop in `population_monthly_system`, skip a birth whose
-deterministic `child_id` already exists in `AgentIdIndex`:
-
-```rust
-if world.resource::<AgentIdIndex>().0.contains_key(&child_id) {
-    continue;
-}
-```
-
-This prevents the orphaned-entity class entirely, independent of the persistence
-fix. Keep the guard in the population module (the caller owns the birth
-semantics), leaving `spawn_agent_from_record` unchanged.
-
-## Accepted limitations (explicit, by design)
-
-- **Newborns born mid-catch-up are not reconsidered within the same call.**
-  `agent_entries` is collected once per call. In the frozen model the catch-up
-  loop processes ≤ 1 month per tick, and newborns are age 0 with effectively
-  zero mortality/fertility that month, so the gap has no observable effect.
-  Documented here as a conscious boundary rather than fixed, to keep the change
-  focused. Revisit only if true multi-month catch-up is ever introduced.
+Newborns born mid-catch-up are not reconsidered within the same call
+(`agent_entries` is collected once). In the frozen model the loop processes
+≤ 1 month per tick and newborns are age 0 with ~zero mortality/fertility that
+month, so this has no observable effect. A conscious scope boundary, not a bug.
 
 ## Testing
 
 All cargo via `scripts/cargo-serial.sh` (per CLAUDE.md). Pure backend change →
 no browser smoke.
 
-1. **Reload regression test (would have caught the bug).** Build a world, age it
-   several sim-months (so agents age and `LastProcessedMonth` advances), record
-   the population count, `extract_from_world` → serialize → deserialize →
-   `apply_into_world` into a fresh world, run one tick. Assert: population count
-   unchanged (no mass die-off/birth), `LastProcessedMonth == month_index(tick)`,
-   no duplicate agent ids.
-2. **Round-trip.** `LastProcessedMonth` survives
-   extract→serialize→deserialize→apply with its exact value.
-3. **Legacy snapshot.** Deserialize a JSON string without `last_processed_month`,
-   apply, assert `LastProcessedMonth == month_index(tick)` and no replay.
-4. **Per-month age helper.** Unit-test `month_start_seconds` and `age_years_at`
-   (including birth after the queried month → 0 via saturating sub).
-5. **Double-spawn guard.** Force the birth path to produce an already-existing
-   child id; assert no duplicate entity and the index still maps to the original.
-6. **Existing `population_lifecycle` and persistence round-trip tests stay green.**
+1. **Reload regression (would have caught the bug).** Age a world several
+   sim-months, record the living set and `LastProcessedMonth`,
+   `extract_from_world` → JSON → deserialize → `apply_into_world` into a fresh
+   world, run one population tick. Assert: `LastProcessedMonth` restored to its
+   pre-reload value (not 0) and the living-agent set is unchanged. Uses only the
+   public API, so it compiles against the pre-fix code and fails there (replay
+   storm) — true red→green.
+2. **Value round-trip.** `last_processed_month` survives
+   extract→serialize→deserialize with its exact value.
+3. **Per-month age helpers.** Unit-test `month_start_seconds` and `age_years_at`
+   (including birth after the queried instant → 0 via saturating sub).
+4. **Per-month catch-up age.** A forced multi-month catch-up where the mother is
+   past `fertile_max` at `now_tick` but fertile in the early processed months:
+   she gives birth only when age is computed per-month. Red→green for the loop
+   change.
+5. **Existing `population_lifecycle`, `mobility_persistence_round_trip`, and the
+   in-crate round-trip/determinism tests stay green** (new field round-trips, so
+   equality holds).
 
 ## Affected files
 
-- `backend/crates/sim-core/src/mobility/persist_snapshot.rs` — snapshot field,
-  extract, restore guard.
 - `backend/crates/sim-core/src/time/mod.rs` — `month_start_seconds`,
   `age_years_at` helpers + tests.
-- `backend/crates/sim-core/src/population/mod.rs` — per-month age, double-spawn
-  guard.
-- Tests: helper unit tests inline in `time/mod.rs` and the double-spawn-guard
-  test inline in `population/mod.rs` (`#[cfg(test)]`); reload-regression,
-  round-trip, and legacy-snapshot tests in a new
-  `backend/crates/sim-core/tests/population_persistence_reload.rs`.
+- `backend/crates/sim-core/src/mobility/persist_snapshot.rs` — required snapshot
+  field, extract, direct restore.
+- `backend/crates/sim-core/src/population/mod.rs` — per-month age in the
+  catch-up loop + per-month-age test.
+- `backend/crates/sim-core/tests/mobility_persistence_round_trip.rs` — the two
+  snapshot fixtures gain the required field.
+- `backend/crates/sim-core/tests/population_persistence_reload.rs` *(new)* —
+  reload-regression + value round-trip tests.
