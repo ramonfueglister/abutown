@@ -216,6 +216,9 @@ impl SimulationRuntime {
         MobilityPlugin.install(&mut world, &mut schedule);
         sim_core::mobility::seed::insert_activity_waypoints_from_base_world(&mut world, &bundle)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
+        // Fresh-world only: seed a small visible demo economy (markets + a trader).
+        // The economy persists, so the hydrate path restores it instead of re-seeding.
+        sim_core::economy::seed::seed_demo_economy(&mut world);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: bundle.world_id().to_owned(),

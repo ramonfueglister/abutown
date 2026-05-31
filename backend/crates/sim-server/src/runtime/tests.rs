@@ -1510,3 +1510,12 @@ async fn hydrate_with_empty_economy_store_yields_default_economy() {
     .unwrap();
     assert!(runtime.economy_snapshot().accounts.is_empty());
 }
+
+#[test]
+fn live_runtime_seeds_demo_markets_and_trader() {
+    let runtime = SimulationRuntime::new();
+    let markets = runtime.world.resource::<sim_core::economy::Markets>();
+    assert_eq!(markets.0.len(), 2, "fresh world seeds two demo markets");
+    let traders = runtime.world.resource::<sim_core::economy::Traders>();
+    assert_eq!(traders.0.len(), 1, "fresh world seeds one demo trader");
+}
