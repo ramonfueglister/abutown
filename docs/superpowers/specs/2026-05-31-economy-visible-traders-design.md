@@ -103,38 +103,42 @@ through terrain.
 
 ### C. The materialization bridge (`materialize_traders_system`)
 
-A new system in a new `EconomySet::Materialize` (after `WarmFlow`, before
-`Telemetry`: `… ClearMarkets → WarmFlow → Materialize → Telemetry`). It reads
-`Traders`, `Markets`, `MarketChunks`, the routing `Graph`, the Active/Hot chunk
-set (the same `Query<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>`
-the LOD bridge uses), `EconomyConfig`, the `Tick`; and owns a new resource
-`MaterializedTraders(BTreeMap<EconomicActorId, Entity>)` via `Commands`.
+An **exclusive** system (`fn(&mut World)`) in a new `EconomySet::Materialize`
+(after `WarmFlow`, before `Telemetry`). It reads `Traders`, `Markets`, the routing
+`Graph` + `HpaIndex` + `FlowFieldCache`, `EconomyConfig`, the `Tick`; and owns a
+new resource `MaterializedTraders(BTreeMap<EconomicActorId, Entity>)`. It **no-ops
+when no routing graph is present** (pure-economy test schedules), keeping the
+economy schedule runnable without a graph.
 
-Per trader, each tick:
-1. Compute current world position from `TraderState` + route (§B).
-2. `chunk = chunk_of(pos, CHUNK_SIZE)`.
-3. If `chunk ∈ Active∪Hot`: **materialize/update** — spawn the trader-agent if
-   absent (else write its `Position`/`Direction`), and **insert its entity into
-   `DirtyAgents`** so it flows through the existing per-tick delta builder
-   (`tick_mobility` in `mobility/api.rs:761` drains `DirtyAgents` → per-chunk
-   `MobilityChunkDelta.changed_agents` → WebSocket). **This — feeding the
-   per-tick *delta*, not only the subscribe-time *snapshot* — is what makes the
-   trader move smoothly on the client** (the prior attempt only touched the
-   snapshot, so it jumped on resubscribe and never walked).
-4. Else (current chunk unobserved): **despawn** the agent if present and drop it
-   from `MaterializedTraders` (the delta's chunk-departure handling via
-   `PreviousAgentChunks` emits the `left_agents` removal so the client clears it).
+It runs in two borrow-clean phases:
+1. **Route phase** — compute each trader's current-leg footway route polyline
+   (§B) into an owned `BTreeMap<actor, polyline>` (releasing the routing borrows).
+2. **Plan + apply phase** — a pure `plan_mutations` samples each route at the
+   trader's authoritative progress (`leg_progress`) and decides Spawn (new) /
+   Update (`Position`+`Direction`) / Despawn (trader left `Traders`).
+   `apply_mutations` performs them and — critically — **inserts each live
+   trader-agent into `DirtyAgents` every tick**, so it flows through the existing
+   per-tick delta builder (`tick_mobility` drains `DirtyAgents` →
+   `MobilityChunkDelta.changed_agents` → WebSocket). **Feeding the per-tick
+   *delta* (not only the subscribe-time *snapshot*) is what makes the trader move
+   smoothly on the client** — the prior attempt only touched the snapshot, so it
+   jumped on resubscribe and never walked.
 
-The system is **strictly render-only**: it never touches
-accounts/inventory/orders/ledger/`Traders` state, so it cannot affect money/goods
-conservation. It only mirrors authoritative trader progress into a visible walker.
+**Client visibility uses the standard machinery, not a special chunk gate.** The
+trader-agent is kept alive and dirtied at its real position every tick (exactly
+like a normal agent); when it crosses out of a client's subscribed chunk the
+delta's `left_agents` (computed from `PreviousAgentChunks` on chunk change) clears
+it client-side — no ghost. (An earlier "despawn when the current chunk is
+unobserved" idea was dropped: a despawned entity makes `agent_record_from_entity`
+return `None`, so **no** `left_agents` would be emitted and the agent would ghost
+on the client.) Per-chunk LOD *despawn* of unobserved trader-agents is a deferred
+optimization; the economy's dormant gate already bounds how many traders advance.
 
-> Render materialization gates on the trader's **current-position** chunk (so a
-> trader walking through an observed chunk is visible there), while the economy's
-> existing **dormancy** gates compute on the **source** chunk (`economy-lod-v0`,
-> unchanged). For the demo, the seed places the whole route inside the default
-> observed view so the trader is visible end-to-end without panning; cross-LOD
-> materialize/dematerialize mid-walk is handled by the same current-chunk gate.
+The system is **strictly render-only**: it never touches accounts/inventory/
+orders/ledger/`Traders`, so it cannot affect conservation. Trader-agents are also
+**excluded from mobility persistence** (`extract_from_world` skips `TraderAgent`):
+they are a projection of the persisted economy, re-created on hydrate by the
+bridge — never double-persisted, never counted as base-world agents.
 
 ### D. Distinct trader sprite (zero protobuf change)
 
@@ -148,17 +152,21 @@ new DTO** — the existing `sprite_key` string channel carries the kind.
 
 ### E. Live demo economy seed (data-driven)
 
-`EconomyPlugin` is already installed in the live runtime
-(`sim-server/src/runtime/mod.rs:217` fresh path and `:340` hydrate path) but **no
-markets/traders/pools are seeded**, so the live economy is currently inert. A new
-`economy::seed::seed_demo_economy(world)` runs **only on the fresh-world path**
-(after the line-217 install). The economy fully persists (`EconomyPersistSnapshot`
-round-trips Markets, MarketChunks, pools, Traders, accounts, inventory), so a
-hydrated world restores the demo economy from persistence — the seed is **not**
-run on the hydrate path, and there is **no double-seed guard / heal-on-restore
-shim** (re-seeding would duplicate markets and reset trader progress — the
-demographic-replay failure class). **Data-driven — no hardcoded coordinates**
-(world-drift lesson): it picks
+`EconomyPlugin` is already installed in the live runtime but **no markets/traders/
+pools are seeded**, so the live economy is currently inert. A new
+`economy::seed::seed_demo_economy(world)` is an **idempotent bootstrap**: its first
+act is `if !Markets.is_empty() { return; }`, so it seeds only a world that has no
+economy yet (brand-new, or created before the economy existed) and no-ops once a
+world already has markets. It is called on **both** runtime paths — the fresh path
+**and**, crucially, the hydrate path (after the economy snapshot is restored),
+because the production server **always hydrates** (`build_app_from_config` →
+`hydrate_from_stores`); a fresh-path-only seed would never run live. The economy
+fully persists (`EconomyPersistSnapshot` round-trips Markets, MarketChunks, pools,
+Traders, accounts, inventory), so once seeded the bootstrap skips on every
+subsequent hydrate — it never duplicates markets or resets trader progress (the
+demographic-replay failure class). This idempotent demo-content bootstrap is **not**
+a heal-on-restore shim. **Data-driven — no hardcoded coordinates** (world-drift
+lesson): it picks
 two footway-reachable base-world graph nodes near the default abutopia view
 (deterministically), creates two `MarketSite`s anchored to them, adds their
 `MarketChunks` entries via `chunk_of(node.position)`, seeds a supplier pool
@@ -194,22 +202,32 @@ countdown represents at the Warm/Asleep tier).
 
 ## Testing
 
-**Backend (sim-core, headless):**
-1. `materialize_spawns_trader_agent_in_active_chunk` — trader Buying, source market
-   in an Active chunk → exactly one `TraderAgent` at the source node position; its
-   DTO `world_coord` equals the node position.
-2. `materialize_follows_footway_route_during_travel` — trader `ToDest{remaining}`
-   → agent position lies **on the computed footway route** at the expected
-   progress (not the straight-line midpoint), and the entity is in `DirtyAgents`.
-3. `materialize_despawns_when_current_chunk_unobserved` — current chunk Warm/Asleep
-   → trader-agent despawned/absent.
-4. `materialization_does_not_touch_money_or_goods` — full schedule N ticks with a
-   seeded trading economy → total money + goods conserved.
-5. `trader_agent_untouched_by_mobility_systems` — a chunk demote / a mobility tick
-   does not move, despawn, or rebucket a `TraderAgent` (no `AgentMarker`).
-6. `seed_demo_economy_creates_reachable_markets_and_trader` — seed yields 2 markets
-   with `MarketChunks` entries, finite node positions, a **walking route exists**
-   between them, and one trader.
+**As built — backend (sim-core, headless):**
+1. `trader_render::*` (pure) — `route_polyline` concatenates+dedupes edge
+   polylines; `leg_progress` maps the countdown to `[0,1]`; `is_outbound`.
+2. `trader_agent_world_coord_reads_position_verbatim` — `world_coord_for_agent`
+   returns a `TraderAgent`'s authoritative `Position`.
+3. `materialize_spawns_trader_agent_at_route_start_and_feeds_delta` — Buying →
+   one `TraderAgent` at the route start, namespaced `trader:` id, **in
+   `DirtyAgents`** (delta-fed).
+4. `materialize_despawns_when_trader_removed_from_economy` — trader leaves
+   `Traders` → its agent is despawned + dropped from index/`MaterializedTraders`.
+5. `materialize_does_not_touch_money_or_goods` — N runs → balances unchanged
+   (render-only).
+6. `seed_demo_economy_creates_two_markets_and_one_trader` — seed yields 2 anchored
+   markets at distinct finite nodes + one trader.
+
+**As built — backend (sim-server, real routing):**
+7. `live_runtime_seeds_demo_markets_and_trader` — a fresh runtime seeds 2 markets
+   + 1 trader.
+8. `hydrate_with_empty_economy_store_bootstraps_demo_economy` — hydrating a world
+   with no persisted economy bootstraps the demo economy (the live-server path).
+9. `seeded_trader_walks_the_footway_route_and_conserves` — subscribe to the demo
+   chunks, tick the full schedule: the trader is fed into the per-tick delta, its
+   `world_coord` changes (walks the real route), money + goods conserved.
+
+**As built — frontend (vitest):** `isTraderSpriteKey` + a tagging test
+(`trader:`-keyed agents → `kind: 'trader'`).
 
 **Browser smoke (MANDATORY — `scripts/smoke-visible-traders.mjs`, adapted from
 `smoke-7b.mjs`):** launch the dev stack (backend + vite), open headless chromium,
