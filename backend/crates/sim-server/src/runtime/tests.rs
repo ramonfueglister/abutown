@@ -1519,3 +1519,68 @@ fn live_runtime_seeds_demo_markets_and_trader() {
     let traders = runtime.world.resource::<sim_core::economy::Traders>();
     assert_eq!(traders.0.len(), 1, "fresh world seeds one demo trader");
 }
+
+#[test]
+fn seeded_trader_walks_the_footway_route_and_conserves() {
+    use sim_core::economy::EconomyPersistSnapshot;
+    let total_money = |s: &EconomyPersistSnapshot| -> i64 {
+        s.accounts.iter().map(|(_, a)| a.available.0 + a.locked.0).sum()
+    };
+    let total_goods = |s: &EconomyPersistSnapshot| -> i64 {
+        s.inventory.iter().map(|(_, b)| b.available.0 + b.locked.0).sum()
+    };
+
+    let mut runtime = SimulationRuntime::new();
+    // Subscribe to the demo market chunks (as a viewing client would): this makes
+    // them Active so the economy is not dormant and the trader actually trades +
+    // travels. Without an observer, the economy-LOD dormant gate freezes traders.
+    let market_chunks: Vec<sim_core::ids::ChunkCoord> = runtime
+        .economy_snapshot()
+        .market_chunks
+        .iter()
+        .map(|(_, c)| *c)
+        .collect();
+    runtime.apply_subscription_diff(&market_chunks, &[]);
+
+    let money0 = total_money(&runtime.economy_snapshot());
+    let goods0 = total_goods(&runtime.economy_snapshot());
+    let trader_actor = runtime
+        .economy_snapshot()
+        .traders
+        .first()
+        .map(|(a, _)| a.0)
+        .expect("seeded trader");
+    let trader_id = sim_core::ids::AgentId(format!("trader:{trader_actor}"));
+
+    let mut positions: Vec<(f32, f32)> = Vec::new();
+    let mut seen_in_delta = false;
+    for _ in 0..120 {
+        let deltas = runtime.tick_world_mobility();
+        if deltas
+            .values()
+            .any(|d| d.changed_agents.iter().any(|a| a.id.0.starts_with("trader:")))
+        {
+            seen_in_delta = true;
+        }
+        if let Some(p) = sim_core::mobility::api::world_coord_for_agent(&runtime.world, &trader_id) {
+            positions.push(p);
+        }
+    }
+
+    let snap = runtime.economy_snapshot();
+    assert_eq!(total_money(&snap), money0, "money conserved across the run");
+    assert_eq!(total_goods(&snap), goods0, "goods conserved across the run");
+    assert!(seen_in_delta, "trader-agent fed into the per-tick mobility delta");
+    assert!(
+        positions.len() >= 5,
+        "trader materialized over time (got {})",
+        positions.len()
+    );
+    let first = positions[0];
+    assert!(
+        positions
+            .iter()
+            .any(|p| (p.0 - first.0).abs() + (p.1 - first.1).abs() > 0.5),
+        "trader's world_coord changes — it walks the route (positions: {positions:?})"
+    );
+}
