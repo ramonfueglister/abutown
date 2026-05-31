@@ -71,3 +71,9 @@ pub struct MarketChunks(pub BTreeMap<MarketId, ChunkCoord>);
 /// `refresh_dormant_markets_system`. Anything not in this set runs full fidelity.
 #[derive(Resource, Default)]
 pub struct DormantMarkets(pub BTreeSet<MarketId>);
+
+/// Markets anchored (in `MarketChunks`) to a WARM chunk — they run the cheap
+/// aggregate warm-flow update instead of the full auction. Subset of
+/// `DormantMarkets`. Recomputed each tick by `refresh_dormant_markets_system`.
+#[derive(Resource, Default)]
+pub struct WarmMarkets(pub BTreeSet<MarketId>);

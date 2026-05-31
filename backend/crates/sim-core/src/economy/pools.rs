@@ -45,7 +45,7 @@ pub(crate) fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ti
     }
 }
 
-fn affordable_qty(cash: Money, price: Money) -> Result<Quantity, EconomyError> {
+pub(crate) fn affordable_qty(cash: Money, price: Money) -> Result<Quantity, EconomyError> {
     if price.0 <= 0 {
         return Err(EconomyError::ZeroPrice);
     }

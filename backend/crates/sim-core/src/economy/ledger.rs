@@ -68,6 +68,12 @@ pub enum EconomyEvent {
         actor: EconomicActorId,
         amount: Money,
     },
+    WarmMarketFlow {
+        market: MarketId,
+        good: GoodId,
+        qty: Quantity,
+        price: Money,
+    },
 }
 
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]

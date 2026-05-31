@@ -13,6 +13,7 @@ pub mod production;
 pub mod systems;
 pub mod traders;
 pub mod transport;
+pub mod warm_flow;
 
 pub use accounts::*;
 pub use auction::*;
@@ -29,6 +30,7 @@ pub use production::*;
 pub use systems::*;
 pub use traders::*;
 pub use transport::*;
+pub use warm_flow::*;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::Schedule;
@@ -56,6 +58,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(Traders::default());
         world.insert_resource(MarketChunks::default());
         world.insert_resource(DormantMarkets::default());
+        world.insert_resource(WarmMarkets::default());
         install_systems(schedule);
     }
 }
