@@ -45,5 +45,8 @@ fn seed_demo_economy_creates_two_markets_and_one_trader() {
         assert!(p.0.is_finite() && p.1.is_finite());
         node_ids.push(site.node_id);
     }
-    assert_ne!(node_ids[0], node_ids[1], "source and dest are distinct nodes");
+    assert_ne!(
+        node_ids[0], node_ids[1],
+        "source and dest are distinct nodes"
+    );
 }

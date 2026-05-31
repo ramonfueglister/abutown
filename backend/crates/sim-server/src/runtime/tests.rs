@@ -1497,7 +1497,10 @@ async fn hydrate_restores_economy_snapshot() {
 }
 
 #[tokio::test]
-async fn hydrate_with_empty_economy_store_yields_default_economy() {
+async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
+    // A world with no persisted economy (brand-new, or created before the economy
+    // existed) gets the demo economy bootstrapped on hydrate — this is what makes
+    // the trader visible in the always-hydrated live server.
     let base_world = base_world_fixture();
     let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
@@ -1508,7 +1511,9 @@ async fn hydrate_with_empty_economy_store_yields_default_economy() {
     )
     .await
     .unwrap();
-    assert!(runtime.economy_snapshot().accounts.is_empty());
+    let snap = runtime.economy_snapshot();
+    assert_eq!(snap.markets.len(), 2, "demo markets bootstrapped on empty hydrate");
+    assert_eq!(snap.traders.len(), 1, "demo trader bootstrapped on empty hydrate");
 }
 
 #[test]
@@ -1524,10 +1529,16 @@ fn live_runtime_seeds_demo_markets_and_trader() {
 fn seeded_trader_walks_the_footway_route_and_conserves() {
     use sim_core::economy::EconomyPersistSnapshot;
     let total_money = |s: &EconomyPersistSnapshot| -> i64 {
-        s.accounts.iter().map(|(_, a)| a.available.0 + a.locked.0).sum()
+        s.accounts
+            .iter()
+            .map(|(_, a)| a.available.0 + a.locked.0)
+            .sum()
     };
     let total_goods = |s: &EconomyPersistSnapshot| -> i64 {
-        s.inventory.iter().map(|(_, b)| b.available.0 + b.locked.0).sum()
+        s.inventory
+            .iter()
+            .map(|(_, b)| b.available.0 + b.locked.0)
+            .sum()
     };
 
     let mut runtime = SimulationRuntime::new();
@@ -1556,13 +1567,15 @@ fn seeded_trader_walks_the_footway_route_and_conserves() {
     let mut seen_in_delta = false;
     for _ in 0..120 {
         let deltas = runtime.tick_world_mobility();
-        if deltas
-            .values()
-            .any(|d| d.changed_agents.iter().any(|a| a.id.0.starts_with("trader:")))
-        {
+        if deltas.values().any(|d| {
+            d.changed_agents
+                .iter()
+                .any(|a| a.id.0.starts_with("trader:"))
+        }) {
             seen_in_delta = true;
         }
-        if let Some(p) = sim_core::mobility::api::world_coord_for_agent(&runtime.world, &trader_id) {
+        if let Some(p) = sim_core::mobility::api::world_coord_for_agent(&runtime.world, &trader_id)
+        {
             positions.push(p);
         }
     }
@@ -1570,7 +1583,10 @@ fn seeded_trader_walks_the_footway_route_and_conserves() {
     let snap = runtime.economy_snapshot();
     assert_eq!(total_money(&snap), money0, "money conserved across the run");
     assert_eq!(total_goods(&snap), goods0, "goods conserved across the run");
-    assert!(seen_in_delta, "trader-agent fed into the per-tick mobility delta");
+    assert!(
+        seen_in_delta,
+        "trader-agent fed into the per-tick mobility delta"
+    );
     assert!(
         positions.len() >= 5,
         "trader materialized over time (got {})",

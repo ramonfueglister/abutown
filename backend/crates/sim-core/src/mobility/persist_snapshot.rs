@@ -148,8 +148,21 @@ impl<'de> Deserialize<'de> for MobilityPersistSnapshot {
 /// entities spawned solely to track subscriptions count as Asleep here.
 pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
     use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk, WarmChunk};
+    // Trader-agents are a render-only projection of the economy `Traders` (which
+    // is persisted separately). Exclude them from mobility persistence so they are
+    // not double-persisted and don't inflate base-world agent counts; on hydrate
+    // the materialize bridge re-creates them from the restored economy.
+    let index = world.resource::<crate::mobility::resources::AgentIdIndex>();
     let agents_map: HashMap<AgentId, AgentRecord> = crate::mobility::api::agents(world)
         .into_iter()
+        .filter(|rec| {
+            let Some(&entity) = index.0.get(&rec.id) else {
+                return true;
+            };
+            world
+                .get::<crate::mobility::components::TraderAgent>(entity)
+                .is_none()
+        })
         .map(|rec| (rec.id.clone(), rec))
         .collect();
     let vehicles_map: HashMap<VehicleId, VehicleRecord> = crate::mobility::api::vehicles(world)

@@ -9,9 +9,9 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::transport::manhattan_tiles;
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, InventoryBook, MarketChunks, MarketId,
-    MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools, Trader, TraderState, Traders,
-    GOOD_TOOLS,
+    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_TOOLS, InventoryBook, MarketChunks,
+    MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools, Trader, TraderState,
+    Traders,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
 
@@ -26,6 +26,14 @@ const REF_B: (f32, f32) = (13.0, 3.0);
 /// after `RoutingPlugin`). No-ops only if the graph is too small to host two
 /// distinct reachable nodes.
 pub fn seed_demo_economy(world: &mut World) {
+    // Idempotent bootstrap: seed only when the world has no economy yet — a
+    // brand-new world, or one created before the economy existed. Once seeded it
+    // persists, so subsequent hydrates find markets and skip. This (not a heal-on-
+    // restore shim) is what puts the demo trader into the always-hydrated live
+    // server; re-seeding would duplicate markets and reset trader progress.
+    if !world.resource::<Markets>().0.is_empty() {
+        return;
+    }
     let (node_a, node_b) = {
         let spatial = world.resource::<NodeSpatialIndex>();
         match (spatial.nearest(REF_A), spatial.nearest(REF_B)) {

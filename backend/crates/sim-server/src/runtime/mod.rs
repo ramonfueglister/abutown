@@ -216,8 +216,9 @@ impl SimulationRuntime {
         MobilityPlugin.install(&mut world, &mut schedule);
         sim_core::mobility::seed::insert_activity_waypoints_from_base_world(&mut world, &bundle)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
-        // Fresh-world only: seed a small visible demo economy (markets + a trader).
-        // The economy persists, so the hydrate path restores it instead of re-seeding.
+        // Seed a small visible demo economy (markets + a trader). Idempotent: it
+        // no-ops once a world already has markets (so it never duplicates). The
+        // hydrate path seeds the same way for already-persisted worlds.
         sim_core::economy::seed::seed_demo_economy(&mut world);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -374,6 +375,11 @@ impl SimulationRuntime {
         {
             sim_core::economy::apply_into_world(&mut world, &econ_snap);
         }
+
+        // Bootstrap the demo economy into a world that has none yet (idempotent:
+        // no-ops when an economy was restored above). This is what makes the demo
+        // trader visible in the always-hydrated live server.
+        sim_core::economy::seed::seed_demo_economy(&mut world);
 
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
         refresh_flow_field_resources(&mut world);

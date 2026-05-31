@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use bevy_ecs::prelude::*;
 
-use crate::economy::materialize::{apply_mutations, plan_mutations, MaterializedTraders};
+use crate::economy::materialize::{MaterializedTraders, apply_mutations, plan_mutations};
 use crate::economy::{
-    EconomicActorId, EconomyConfig, MarketId, Quantity, Trader, TraderState, Traders, GOOD_TOOLS,
+    EconomicActorId, EconomyConfig, GOOD_TOOLS, MarketId, Quantity, Trader, TraderState, Traders,
 };
 use crate::mobility::components::{Position, StableAgentId, TraderAgent};
 use crate::mobility::resources::{AgentIdIndex, DirtyAgents};
@@ -50,13 +50,15 @@ fn run(world: &mut World, routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>) {
 fn materialize_spawns_trader_agent_at_route_start_and_feeds_delta() {
     let (mut world, actor) = seed(TraderState::Buying { order: None });
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
-        [(actor, vec![(1.0, 1.0), (5.0, 1.0)])].into_iter().collect();
+        [(actor, vec![(1.0, 1.0), (5.0, 1.0)])]
+            .into_iter()
+            .collect();
     run(&mut world, &routes);
 
     let mut q = world.query_filtered::<(Entity, &Position, &StableAgentId), With<TraderAgent>>();
     let hits: Vec<(Entity, (f32, f32), String)> = q
         .iter(&world)
-        .map(|(e, p, s)| (e, (p.x, p.y), s.0 .0.clone()))
+        .map(|(e, p, s)| (e, (p.x, p.y), s.0.0.clone()))
         .collect();
     assert_eq!(hits.len(), 1, "exactly one trader-agent");
     assert_eq!(hits[0].1, (1.0, 1.0), "Buying => progress 0 => route start");
@@ -65,7 +67,12 @@ fn materialize_spawns_trader_agent_at_route_start_and_feeds_delta() {
         world.resource::<DirtyAgents>().0.contains(&hits[0].0),
         "trader-agent fed into DirtyAgents (the per-tick delta path)"
     );
-    assert!(world.resource::<MaterializedTraders>().0.contains_key(&actor));
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&actor)
+    );
 }
 
 #[test]
@@ -74,7 +81,12 @@ fn materialize_despawns_when_trader_removed_from_economy() {
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
         [(actor, vec![(1.0, 1.0)])].into_iter().collect();
     run(&mut world, &routes);
-    assert!(world.resource::<MaterializedTraders>().0.contains_key(&actor));
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&actor)
+    );
 
     // Trader leaves the economy -> its render agent is despawned and dropped.
     world.resource_mut::<Traders>().0.remove(&actor);
@@ -82,7 +94,12 @@ fn materialize_despawns_when_trader_removed_from_economy() {
 
     let mut q = world.query_filtered::<Entity, With<TraderAgent>>();
     assert_eq!(q.iter(&world).count(), 0, "trader-agent despawned");
-    assert!(!world.resource::<MaterializedTraders>().0.contains_key(&actor));
+    assert!(
+        !world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&actor)
+    );
     assert!(
         !world
             .resource::<AgentIdIndex>()
@@ -105,7 +122,9 @@ fn materialize_does_not_touch_money_or_goods() {
     world.insert_resource(inv);
 
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
-        [(actor, vec![(1.0, 1.0), (9.0, 1.0)])].into_iter().collect();
+        [(actor, vec![(1.0, 1.0), (9.0, 1.0)])]
+            .into_iter()
+            .collect();
     for _ in 0..5 {
         run(&mut world, &routes);
     }

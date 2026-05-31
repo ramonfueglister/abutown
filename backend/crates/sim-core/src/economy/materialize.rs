@@ -16,11 +16,11 @@ use bevy_ecs::prelude::*;
 use crate::economy::trader_render::{is_outbound, leg_progress, route_polyline, trader_travel};
 use crate::economy::{EconomicActorId, EconomyConfig, Markets, Trader, Traders};
 use crate::ids::AgentId;
+use crate::mobility::AgentMobilityState;
 use crate::mobility::components::{
     AgentMobilityStateComponent, BirthTick, Direction, Position, SpriteKey, StableAgentId,
     TraderAgent, WalkPlan, WalkSpeed,
 };
-use crate::mobility::AgentMobilityState;
 use crate::mobility::resources::{AgentIdIndex, DirtyAgents, Tick};
 use crate::mobility_geometry::world_coord_at_progress_slice;
 use crate::routing::{
@@ -94,7 +94,9 @@ fn leg_polyline(
     if from == to {
         return Some(vec![graph.node(from).position]);
     }
-    let corridor = hpa.corridor_between(from, to, RoutingProfileKey::Walk).ok()?;
+    let corridor = hpa
+        .corridor_between(from, to, RoutingProfileKey::Walk)
+        .ok()?;
     let mut corridor_key: Vec<_> = corridor.iter().copied().collect();
     corridor_key.sort_unstable();
     let key = FlowFieldCacheKey::new(to, RoutingProfileKey::Walk, 0, &corridor_key);
@@ -103,12 +105,8 @@ fn leg_polyline(
     let field = cache
         .get_or_build_with_cluster_lookup(graph, key, profile, scope, |n| hpa.cluster_of_node(n))
         .ok()?;
-    let steps = crate::mobility::systems::materialize_route_steps(
-        graph,
-        &field,
-        from,
-        ModeState::Walking,
-    )?;
+    let steps =
+        crate::mobility::systems::materialize_route_steps(graph, &field, from, ModeState::Walking)?;
     let edges: Vec<EdgeId> = steps.iter().map(|s| s.edge_id).collect();
     let poly = route_polyline(graph, &edges);
     if poly.is_empty() { None } else { Some(poly) }
@@ -196,7 +194,10 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                         SpriteKey(sprite),
                     ))
                     .id();
-                world.resource_mut::<AgentIdIndex>().0.insert(agent_id, entity);
+                world
+                    .resource_mut::<AgentIdIndex>()
+                    .0
+                    .insert(agent_id, entity);
                 world.resource_mut::<DirtyAgents>().0.insert(entity);
                 world
                     .resource_mut::<MaterializedTraders>()
@@ -204,7 +205,11 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                     .insert(actor, entity);
             }
             TraderMutation::Update { actor, x, y, dir } => {
-                let Some(entity) = world.resource::<MaterializedTraders>().0.get(&actor).copied()
+                let Some(entity) = world
+                    .resource::<MaterializedTraders>()
+                    .0
+                    .get(&actor)
+                    .copied()
                 else {
                     continue;
                 };
@@ -218,7 +223,11 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                 world.resource_mut::<DirtyAgents>().0.insert(entity);
             }
             TraderMutation::Despawn { actor } => {
-                let Some(entity) = world.resource::<MaterializedTraders>().0.get(&actor).copied()
+                let Some(entity) = world
+                    .resource::<MaterializedTraders>()
+                    .0
+                    .get(&actor)
+                    .copied()
                 else {
                     continue;
                 };
@@ -276,7 +285,7 @@ pub fn materialize_traders_system(world: &mut World) {
         let traders = world.resource::<Traders>();
         let config = world.resource::<EconomyConfig>();
         let materialized = world.resource::<MaterializedTraders>();
-        plan_mutations(&traders, &config, &materialized, &routes)
+        plan_mutations(traders, config, materialized, &routes)
     };
     apply_mutations(world, tick, muts);
 }

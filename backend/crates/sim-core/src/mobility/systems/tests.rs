@@ -1500,7 +1500,10 @@ fn trader_agent_world_coord_reads_position_verbatim() {
             SpriteKey("trader:3".to_string()),
         ))
         .id();
-    world.resource_mut::<AgentIdIndex>().0.insert(id.clone(), entity);
+    world
+        .resource_mut::<AgentIdIndex>()
+        .0
+        .insert(id.clone(), entity);
 
     assert_eq!(world_coord_for_agent(&world, &id), Some((12.5, 34.0)));
 }
