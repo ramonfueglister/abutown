@@ -44,7 +44,10 @@ pub fn run_warm_market_flow_at_tick(
     for pool in demand.0.values() {
         if warm_markets.contains(&pool.market) {
             buckets
-                .entry(MarketGoodKey { market: pool.market, good: pool.good })
+                .entry(MarketGoodKey {
+                    market: pool.market,
+                    good: pool.good,
+                })
                 .or_default()
                 .0
                 .push((pool.actor, pool.desired_qty_per_tick.0));
@@ -53,7 +56,10 @@ pub fn run_warm_market_flow_at_tick(
     for pool in supply.0.values() {
         if warm_markets.contains(&pool.market) {
             buckets
-                .entry(MarketGoodKey { market: pool.market, good: pool.good })
+                .entry(MarketGoodKey {
+                    market: pool.market,
+                    good: pool.good,
+                })
                 .or_default()
                 .1
                 .push((pool.actor, pool.offered_qty_per_tick.0));

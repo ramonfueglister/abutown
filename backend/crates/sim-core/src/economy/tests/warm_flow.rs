@@ -13,20 +13,33 @@ use crate::world::components::{ActiveChunk, AsleepChunk, ChunkCoordComp, WarmChu
 
 fn dp(actor: u64, market: MarketId, qty: i64) -> DemandPool {
     DemandPool {
-        actor: EconomicActorId(actor), market, good: GOOD_FOOD,
-        desired_qty_per_tick: Quantity(qty), max_price: Money(10_000),
-        urgency_bps: 0, elasticity_bps: 0, interval_ticks: 1, last_generated_tick: None,
+        actor: EconomicActorId(actor),
+        market,
+        good: GOOD_FOOD,
+        desired_qty_per_tick: Quantity(qty),
+        max_price: Money(10_000),
+        urgency_bps: 0,
+        elasticity_bps: 0,
+        interval_ticks: 1,
+        last_generated_tick: None,
     }
 }
 fn sp(actor: u64, market: MarketId, qty: i64) -> SupplyPool {
     SupplyPool {
-        actor: EconomicActorId(actor), market, good: GOOD_FOOD,
-        offered_qty_per_tick: Quantity(qty), min_price: Money(1),
-        interval_ticks: 1, last_generated_tick: None,
+        actor: EconomicActorId(actor),
+        market,
+        good: GOOD_FOOD,
+        offered_qty_per_tick: Quantity(qty),
+        min_price: Money(1),
+        interval_ticks: 1,
+        last_generated_tick: None,
     }
 }
 fn with_ref_price(market: MarketId, price: Money) -> MarketGoods {
-    let key = MarketGoodKey { market, good: GOOD_FOOD };
+    let key = MarketGoodKey {
+        market,
+        good: GOOD_FOOD,
+    };
     let mut mg = MarketGoods::default();
     let mut st = MarketGoodState::new(key);
     st.last_settlement_price = price;
@@ -55,7 +68,12 @@ fn bridge_classifies_warm_dormant_and_active() {
 
     let dormant = &world.resource::<DormantMarkets>().0;
     let warm = &world.resource::<WarmMarkets>().0;
-    assert_eq!(*dormant, [MarketId(10), MarketId(11)].into_iter().collect::<BTreeSet<_>>());
+    assert_eq!(
+        *dormant,
+        [MarketId(10), MarketId(11)]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+    );
     assert_eq!(*warm, [MarketId(11)].into_iter().collect::<BTreeSet<_>>());
 }
 
@@ -68,7 +86,9 @@ fn warm_flow_trades_min_at_reference_price() {
     let mut inventory = InventoryBook::default();
     let mut ledger = TradeLedger::default();
     accounts.deposit(buyer, Money(1_000_000)).unwrap();
-    inventory.deposit(seller, GOOD_FOOD, Quantity(1_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(1_000))
+        .unwrap();
     let mut demand = DemandPools::default();
     demand.0.insert(buyer, dp(1, market, 100));
     let mut supply = SupplyPools::default();
@@ -82,12 +102,23 @@ fn warm_flow_trades_min_at_reference_price() {
 
     // tick 0 is a multiple of interval (10).
     run_warm_market_flow_at_tick(
-        &mut accounts, &mut inventory, &mut ledger,
-        &demand, &supply, &mg, &warm, &cfg, 0,
-    ).unwrap();
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mg,
+        &warm,
+        &cfg,
+        0,
+    )
+    .unwrap();
 
     assert_eq!(inventory.balance(buyer, GOOD_FOOD).available, Quantity(60));
-    assert_eq!(inventory.balance(seller, GOOD_FOOD).available, Quantity(940));
+    assert_eq!(
+        inventory.balance(seller, GOOD_FOOD).available,
+        Quantity(940)
+    );
     // ref price 1000, scale 1000 -> 1 money per unit -> 60 moved.
     assert_eq!(accounts.account(seller).available, Money(60));
     assert_eq!(accounts.total_money().unwrap(), money_before);
@@ -100,10 +131,18 @@ fn warm_flow_conserves_with_two_sided_pro_rata() {
     let mut accounts = AccountBook::default();
     let mut inventory = InventoryBook::default();
     let mut ledger = TradeLedger::default();
-    accounts.deposit(EconomicActorId(1), Money(1_000_000)).unwrap();
-    accounts.deposit(EconomicActorId(2), Money(1_000_000)).unwrap();
-    inventory.deposit(EconomicActorId(3), GOOD_FOOD, Quantity(1_000)).unwrap();
-    inventory.deposit(EconomicActorId(4), GOOD_FOOD, Quantity(1_000)).unwrap();
+    accounts
+        .deposit(EconomicActorId(1), Money(1_000_000))
+        .unwrap();
+    accounts
+        .deposit(EconomicActorId(2), Money(1_000_000))
+        .unwrap();
+    inventory
+        .deposit(EconomicActorId(3), GOOD_FOOD, Quantity(1_000))
+        .unwrap();
+    inventory
+        .deposit(EconomicActorId(4), GOOD_FOOD, Quantity(1_000))
+        .unwrap();
     let mut demand = DemandPools::default();
     demand.0.insert(EconomicActorId(1), dp(1, market, 100));
     demand.0.insert(EconomicActorId(2), dp(2, market, 100));
@@ -117,12 +156,27 @@ fn warm_flow_conserves_with_two_sided_pro_rata() {
     let g0 = inventory.total_good(GOOD_FOOD).unwrap();
 
     run_warm_market_flow_at_tick(
-        &mut accounts, &mut inventory, &mut ledger, &demand, &supply, &mg, &warm, &cfg, 0,
-    ).unwrap();
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mg,
+        &warm,
+        &cfg,
+        0,
+    )
+    .unwrap();
 
     // demand 200, supply 100 -> Q=100; buyers split 50/50, sellers 50/50.
-    assert_eq!(inventory.balance(EconomicActorId(1), GOOD_FOOD).available, Quantity(50));
-    assert_eq!(inventory.balance(EconomicActorId(2), GOOD_FOOD).available, Quantity(50));
+    assert_eq!(
+        inventory.balance(EconomicActorId(1), GOOD_FOOD).available,
+        Quantity(50)
+    );
+    assert_eq!(
+        inventory.balance(EconomicActorId(2), GOOD_FOOD).available,
+        Quantity(50)
+    );
     assert_eq!(accounts.total_money().unwrap(), m0);
     assert_eq!(inventory.total_good(GOOD_FOOD).unwrap(), g0);
 }
@@ -133,8 +187,12 @@ fn warm_flow_only_fires_on_interval() {
     let mut accounts = AccountBook::default();
     let mut inventory = InventoryBook::default();
     let mut ledger = TradeLedger::default();
-    accounts.deposit(EconomicActorId(1), Money(1_000_000)).unwrap();
-    inventory.deposit(EconomicActorId(2), GOOD_FOOD, Quantity(1_000)).unwrap();
+    accounts
+        .deposit(EconomicActorId(1), Money(1_000_000))
+        .unwrap();
+    inventory
+        .deposit(EconomicActorId(2), GOOD_FOOD, Quantity(1_000))
+        .unwrap();
     let mut demand = DemandPools::default();
     demand.0.insert(EconomicActorId(1), dp(1, market, 100));
     let mut supply = SupplyPools::default();
@@ -144,9 +202,21 @@ fn warm_flow_only_fires_on_interval() {
     let cfg = EconomyConfig::default(); // interval 10
 
     run_warm_market_flow_at_tick(
-        &mut accounts, &mut inventory, &mut ledger, &demand, &supply, &mg, &warm, &cfg, 3,
-    ).unwrap();
-    assert_eq!(inventory.balance(EconomicActorId(1), GOOD_FOOD).available, Quantity(0));
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mg,
+        &warm,
+        &cfg,
+        3,
+    )
+    .unwrap();
+    assert_eq!(
+        inventory.balance(EconomicActorId(1), GOOD_FOOD).available,
+        Quantity(0)
+    );
 }
 
 #[test]
@@ -155,8 +225,12 @@ fn non_warm_market_does_not_flow() {
     let mut accounts = AccountBook::default();
     let mut inventory = InventoryBook::default();
     let mut ledger = TradeLedger::default();
-    accounts.deposit(EconomicActorId(1), Money(1_000_000)).unwrap();
-    inventory.deposit(EconomicActorId(2), GOOD_FOOD, Quantity(1_000)).unwrap();
+    accounts
+        .deposit(EconomicActorId(1), Money(1_000_000))
+        .unwrap();
+    inventory
+        .deposit(EconomicActorId(2), GOOD_FOOD, Quantity(1_000))
+        .unwrap();
     let mut demand = DemandPools::default();
     demand.0.insert(EconomicActorId(1), dp(1, market, 100));
     let mut supply = SupplyPools::default();
@@ -166,9 +240,21 @@ fn non_warm_market_does_not_flow() {
     let cfg = EconomyConfig::default();
 
     run_warm_market_flow_at_tick(
-        &mut accounts, &mut inventory, &mut ledger, &demand, &supply, &mg, &warm, &cfg, 0,
-    ).unwrap();
-    assert_eq!(inventory.balance(EconomicActorId(1), GOOD_FOOD).available, Quantity(0));
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mg,
+        &warm,
+        &cfg,
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        inventory.balance(EconomicActorId(1), GOOD_FOOD).available,
+        Quantity(0)
+    );
 }
 
 #[test]
@@ -192,8 +278,17 @@ fn warm_flow_caps_by_affordability_and_availability() {
     let g0 = inventory.total_good(GOOD_FOOD).unwrap();
 
     run_warm_market_flow_at_tick(
-        &mut accounts, &mut inventory, &mut ledger, &demand, &supply, &mg, &warm, &cfg, 0,
-    ).unwrap();
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mg,
+        &warm,
+        &cfg,
+        0,
+    )
+    .unwrap();
 
     // min(affordable 30, stock 20) = 20 traded; conserved; no overdraw.
     assert_eq!(inventory.balance(buyer, GOOD_FOOD).available, Quantity(20));
@@ -209,9 +304,15 @@ fn warm_flow_is_deterministic() {
         let mut accounts = AccountBook::default();
         let mut inventory = InventoryBook::default();
         let mut ledger = TradeLedger::default();
-        accounts.deposit(EconomicActorId(1), Money(1_000_000)).unwrap();
-        accounts.deposit(EconomicActorId(2), Money(1_000_000)).unwrap();
-        inventory.deposit(EconomicActorId(3), GOOD_FOOD, Quantity(1_000)).unwrap();
+        accounts
+            .deposit(EconomicActorId(1), Money(1_000_000))
+            .unwrap();
+        accounts
+            .deposit(EconomicActorId(2), Money(1_000_000))
+            .unwrap();
+        inventory
+            .deposit(EconomicActorId(3), GOOD_FOOD, Quantity(1_000))
+            .unwrap();
         let mut demand = DemandPools::default();
         demand.0.insert(EconomicActorId(1), dp(1, market, 70));
         demand.0.insert(EconomicActorId(2), dp(2, market, 30));
@@ -220,9 +321,17 @@ fn warm_flow_is_deterministic() {
         let mg = with_ref_price(market, Money(1_000));
         let warm: BTreeSet<MarketId> = [market].into_iter().collect();
         run_warm_market_flow_at_tick(
-            &mut accounts, &mut inventory, &mut ledger,
-            &demand, &supply, &mg, &warm, &EconomyConfig::default(), 0,
-        ).unwrap();
+            &mut accounts,
+            &mut inventory,
+            &mut ledger,
+            &demand,
+            &supply,
+            &mg,
+            &warm,
+            &EconomyConfig::default(),
+            0,
+        )
+        .unwrap();
         ledger.0
     };
     assert_eq!(build(), build());
@@ -253,7 +362,10 @@ fn warm_market_flows_through_the_schedule_and_conserves() {
     }
     {
         let mut mg = world.resource_mut::<MarketGoods>();
-        let key = MarketGoodKey { market, good: GOOD_FOOD };
+        let key = MarketGoodKey {
+            market,
+            good: GOOD_FOOD,
+        };
         let mut st = MarketGoodState::new(key);
         st.last_settlement_price = Money(1_000);
         mg.0.insert(key, st);
@@ -270,13 +382,28 @@ fn warm_market_flows_through_the_schedule_and_conserves() {
     world.insert_resource(Tick(0));
 
     let m0 = world.resource::<AccountBook>().total_money().unwrap();
-    let g0 = world.resource::<InventoryBook>().total_good(GOOD_FOOD).unwrap();
+    let g0 = world
+        .resource::<InventoryBook>()
+        .total_good(GOOD_FOOD)
+        .unwrap();
 
     // tick 0 fires the warm flow (multiple of 10).
     schedule.run(&mut world);
 
-    assert_eq!(world.resource::<InventoryBook>().balance(buyer, GOOD_FOOD).available, Quantity(50));
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(buyer, GOOD_FOOD)
+            .available,
+        Quantity(50)
+    );
     assert_eq!(world.resource::<AccountBook>().total_money().unwrap(), m0);
-    assert_eq!(world.resource::<InventoryBook>().total_good(GOOD_FOOD).unwrap(), g0);
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .total_good(GOOD_FOOD)
+            .unwrap(),
+        g0
+    );
     assert!(world.contains_resource::<crate::economy::WarmMarkets>());
 }
