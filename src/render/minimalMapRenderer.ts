@@ -121,6 +121,7 @@ const BUILDING_INDUSTRIAL = '#cabed6';
 const AGENT_COLOR = '#343b43';
 const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '#ef7f5a', '#28a6b0'];
 const VIEWPORT_GRID_PADDING = 9;
+const TERRAIN_TILE_OVERLAP = 0.6;
 export const OUTSKIRTS_TILES = 0;
 export const EDGE_EXIT_TILES = 0;
 
@@ -152,7 +153,8 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
     for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(world.width - 1, visibleGrid.maxX); x += 1) visibleTerrainTiles.push({ x, y });
   }
   visibleTerrainTiles.sort((a, b) => iso(state, a).y - iso(state, b).y || a.x - b.x);
-  for (const coord of visibleTerrainTiles) drawTerrainBase(state, coord);
+  drawGrassBaseLayer(state);
+  for (const coord of visibleTerrainTiles) drawTerrainOverlay(state, coord);
   for (const coord of visibleTerrainTiles) drawRiverSurface(state, coord);
 
   const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(
@@ -188,8 +190,20 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   ctx.restore();
 }
 
-function drawTerrainBase(state: MinimalMapRendererState, coord: Coord): void {
-  drawTileFill(state, coord, MAP_GRASS);
+function drawGrassBaseLayer(state: MinimalMapRendererState): void {
+  const { ctx, tileSize, world } = state;
+  ctx.save();
+  ctx.fillStyle = MAP_GRASS;
+  ctx.fillRect(
+    -TERRAIN_TILE_OVERLAP,
+    -TERRAIN_TILE_OVERLAP,
+    world.width * tileSize.width + TERRAIN_TILE_OVERLAP * 2,
+    world.height * tileSize.height + TERRAIN_TILE_OVERLAP * 2,
+  );
+  ctx.restore();
+}
+
+function drawTerrainOverlay(state: MinimalMapRendererState, coord: Coord): void {
   const kind = state.terrainKinds.get(key(coord))?.kind;
   if (kind === 'park' || kind === 'forest' || kind === 'reserve') {
     drawTileFill(state, coord, MAP_PARK, 0.82);
@@ -403,7 +417,12 @@ function drawTileFill(state: MinimalMapRendererState, coord: Coord, color: strin
   ctx.save();
   ctx.globalAlpha *= alpha;
   ctx.fillStyle = color;
-  ctx.fillRect(point.x - tileSize.width / 2 - 0.6, point.y - tileSize.height / 2 - 0.6, tileSize.width + 1.2, tileSize.height + 1.2);
+  ctx.fillRect(
+    point.x - tileSize.width / 2 - TERRAIN_TILE_OVERLAP,
+    point.y - tileSize.height / 2 - TERRAIN_TILE_OVERLAP,
+    tileSize.width + TERRAIN_TILE_OVERLAP * 2,
+    tileSize.height + TERRAIN_TILE_OVERLAP * 2,
+  );
   ctx.restore();
 }
 
