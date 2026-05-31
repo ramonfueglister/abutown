@@ -1,8 +1,9 @@
 use bevy_ecs::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::economy::{EconomicActorId, EconomyError, GoodId, MarketId, Money, OrderId, Quantity};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EconomyEvent {
     OrderCreated {
         order: OrderId,

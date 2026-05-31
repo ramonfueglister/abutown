@@ -225,3 +225,48 @@ fn provider_collects_single_economy_item() {
     let decoded: EconomyPersistSnapshot = serde_json::from_slice(&items[0].payload).unwrap();
     assert_eq!(decoded, extract_from_world(&world));
 }
+
+#[test]
+fn ledger_tail_is_capped_and_round_trips() {
+    use crate::economy::{EconomyEvent, GoodId, PERSISTED_LEDGER_TAIL, Quantity, TradeLedger};
+
+    let mut world = install_economy();
+    let overflow = PERSISTED_LEDGER_TAIL as u64 + 50;
+    {
+        let mut ledger = world.resource_mut::<TradeLedger>();
+        for i in 0..overflow {
+            ledger.0.push(EconomyEvent::Produced {
+                actor: EconomicActorId(1),
+                good: GoodId(1),
+                qty: Quantity(i as i64),
+            });
+        }
+    }
+
+    let snap = extract_from_world(&world);
+    assert_eq!(
+        snap.ledger_tail.len(),
+        PERSISTED_LEDGER_TAIL,
+        "tail is capped"
+    );
+    // The newest event is preserved; the oldest 50 are dropped.
+    assert_eq!(
+        snap.ledger_tail.last(),
+        world.resource::<TradeLedger>().0.last()
+    );
+    assert_eq!(
+        snap.ledger_tail.first(),
+        Some(&EconomyEvent::Produced {
+            actor: EconomicActorId(1),
+            good: GoodId(1),
+            qty: Quantity(50),
+        })
+    );
+
+    // Serialize round-trip + apply restores the tail verbatim.
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+    assert_eq!(fresh.resource::<TradeLedger>().0, snap.ledger_tail);
+}
