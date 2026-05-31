@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 
 use bevy_ecs::prelude::*;
 
-use crate::economy::{DormantMarkets, MarketChunks, MarketId, WarmMarkets, refresh_dormant_markets_system};
+use crate::economy::{
+    DormantMarkets, MarketChunks, MarketId, WarmMarkets, refresh_dormant_markets_system,
+};
 use crate::ids::ChunkCoord;
 use crate::world::components::{ActiveChunk, AsleepChunk, ChunkCoordComp, HotChunk, WarmChunk};
 

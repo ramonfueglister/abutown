@@ -83,6 +83,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
 /// dormant markets anchored to a WarmChunk are also added to `WarmMarkets`.
 /// Cheap: one pass over active/warm chunk coords + one over the anchor map.
 /// Deterministic (BTree iteration, set membership).
+#[allow(clippy::type_complexity)]
 pub fn refresh_dormant_markets_system(
     anchors: Res<MarketChunks>,
     active_chunks: Query<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>,
