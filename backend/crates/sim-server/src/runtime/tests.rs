@@ -1512,8 +1512,16 @@ async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
     .await
     .unwrap();
     let snap = runtime.economy_snapshot();
-    assert_eq!(snap.markets.len(), 2, "demo markets bootstrapped on empty hydrate");
-    assert_eq!(snap.traders.len(), 1, "demo trader bootstrapped on empty hydrate");
+    assert_eq!(
+        snap.markets.len(),
+        2,
+        "demo markets bootstrapped on empty hydrate"
+    );
+    assert_eq!(
+        snap.traders.len(),
+        1,
+        "demo trader bootstrapped on empty hydrate"
+    );
 }
 
 #[test]
