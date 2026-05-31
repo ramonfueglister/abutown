@@ -36,12 +36,13 @@ fn destination_for_stage(
     match stage {
         PlanStage::WalkToStop { stop_id, .. } => graph.node_by_legacy(stop_id),
         PlanStage::WalkToActivity { activity_id, .. } => {
-            graph.node_by_legacy(activity_id).or_else(|| {
-                let coord = waypoints.0.get(activity_id).copied().or_else(|| {
-                    crate::mobility_geometry::activity_geometry(activity_id).map(|g| g.coord)
-                })?;
-                spatial?.nearest(coord)
-            })
+            if let Some(node) = graph.node_by_legacy(activity_id) {
+                return Some(node);
+            }
+            let coord = waypoints.0.get(activity_id).copied().or_else(|| {
+                crate::mobility_geometry::activity_geometry(activity_id).map(|g| g.coord)
+            })?;
+            spatial?.nearest(coord)
         }
         _ => None,
     }
@@ -498,6 +499,20 @@ mod tests {
         assert_eq!(
             destination_for_stage(&graph, &stage, Some(&spatial), &wp),
             spatial.nearest((5.0, 5.0)),
+        );
+    }
+
+    #[test]
+    fn destination_for_activity_without_declared_geometry_returns_none() {
+        let (graph, spatial) = minimal_graph_with_node_at_5_5();
+        let wp = crate::mobility::resources::ActivityWaypoints::default();
+        let stage = PlanStage::WalkToActivity {
+            link_id: "walk:test".into(),
+            activity_id: "activity:home".into(),
+        };
+        assert_eq!(
+            destination_for_stage(&graph, &stage, Some(&spatial), &wp),
+            None
         );
     }
 }

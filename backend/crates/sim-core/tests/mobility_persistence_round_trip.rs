@@ -19,6 +19,21 @@ use sim_core::routing::{
 // tests below; tram rejection is covered by
 // `active_route_hydration_rejects_retired_tram_mode`.
 
+fn empty_world_with_activity(
+    activity_id: &str,
+) -> (bevy_ecs::world::World, bevy_ecs::schedule::Schedule) {
+    let (mut world, schedule) = api::empty_world_and_schedule();
+    insert_activity_waypoint(&mut world, activity_id);
+    (world, schedule)
+}
+
+fn insert_activity_waypoint(world: &mut bevy_ecs::world::World, activity_id: &str) {
+    world
+        .resource_mut::<sim_core::mobility::resources::ActivityWaypoints>()
+        .0
+        .insert(activity_id.to_string(), (0.0, 0.0));
+}
+
 fn active_route_snapshot() -> MobilityPersistSnapshot {
     let mut agents = HashMap::new();
     agents.insert(
@@ -69,7 +84,7 @@ fn active_route_snapshot() -> MobilityPersistSnapshot {
 #[test]
 fn active_route_round_trip_preserves_valid_graph_ids() {
     let snap = active_route_snapshot();
-    let (mut world, _schedule) = api::empty_world_and_schedule();
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
 
     apply_into_world(&mut world, snap);
     let extracted = extract_from_world(&world);
@@ -95,7 +110,7 @@ fn active_route_round_trip_preserves_valid_graph_ids() {
         &vec![(10.0, 10.0), (18.0, 10.0)]
     );
 
-    let (mut reloaded_world, _schedule) = api::empty_world_and_schedule();
+    let (mut reloaded_world, _schedule) = empty_world_with_activity("activity:home");
     apply_into_world(&mut reloaded_world, extracted.clone());
     assert_eq!(extract_from_world(&reloaded_world), extracted);
 }
@@ -183,6 +198,7 @@ fn multi_step_active_route_round_trips_through_shared_endpoints() {
 
 fn graph_native_active_route_world() -> bevy_ecs::world::World {
     let (mut world, _schedule) = api::empty_world_and_schedule();
+    insert_activity_waypoint(&mut world, "activity:home");
     world.insert_resource(Graph::new(
         vec![
             Node {
@@ -287,7 +303,7 @@ fn graph_native_active_route_edge_key_round_trips_with_matching_raw_id() {
         &vec![(0.0, 0.0), (5.0, 0.0)]
     );
 
-    let (mut reloaded_world, _schedule) = api::empty_world_and_schedule();
+    let (mut reloaded_world, _schedule) = empty_world_with_activity("activity:home");
     apply_into_world(&mut reloaded_world, extracted);
     let reloaded = extract_from_world(&reloaded_world);
     let reloaded_route = reloaded
@@ -317,7 +333,7 @@ fn active_route_hydration_rejects_missing_canonical_key() {
         .steps[0]
         .canonical_edge_key = "edge:999".to_string();
 
-    let (mut world, _schedule) = api::empty_world_and_schedule();
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
     apply_into_world(&mut world, snap);
 }
 
@@ -332,7 +348,7 @@ fn active_route_hydration_normalizes_transient_destination_node() {
         .unwrap()
         .destination_node = 999;
 
-    let (mut world, _schedule) = api::empty_world_and_schedule();
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
     apply_into_world(&mut world, snap);
     let extracted = extract_from_world(&world);
     let route = extracted
@@ -355,7 +371,7 @@ fn active_route_hydration_rejects_retired_tram_mode() {
     route.profile = RoutingProfileKey::WalkTransit;
     route.steps[0].mode = ModeState::OnTram;
 
-    let (mut world, _schedule) = api::empty_world_and_schedule();
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
     apply_into_world(&mut world, snap);
 }
 
@@ -371,7 +387,7 @@ fn active_route_hydration_rejects_cursor_past_steps() {
         .unwrap()
         .cursor = 1;
 
-    let (mut world, _schedule) = api::empty_world_and_schedule();
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
     apply_into_world(&mut world, snap);
 }
 
@@ -380,7 +396,7 @@ fn birth_tick_round_trips() {
     // Spawn an agent with birth_tick = 4242, extract → JSON → deserialize,
     // assert the persisted record carries birth_tick. Then re-apply into a
     // fresh world and confirm the live entity still has birth_tick == 4242.
-    let (mut world, _schedule) = api::empty_world_and_schedule();
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
     let rec = AgentRecord::new_born_at(
         AgentId("agent:born".into()),
         AgentMobilityState::AtActivity {
@@ -406,7 +422,7 @@ fn birth_tick_round_trips() {
     assert_eq!(agent.birth_tick, 4242);
 
     // Re-applying into a fresh world must preserve birth_tick on the live entity.
-    let (mut w2, _s2) = api::empty_world_and_schedule();
+    let (mut w2, _s2) = empty_world_with_activity("activity:home");
     apply_into_world(&mut w2, back);
     let snap2 = extract_from_world(&w2);
     assert_eq!(
@@ -423,7 +439,7 @@ fn birth_tick_round_trips() {
 #[test]
 fn sex_and_parent_id_round_trip() {
     use sim_core::mobility::components::Sex;
-    let (mut world, _s) = api::empty_world_and_schedule();
+    let (mut world, _s) = empty_world_with_activity("a");
     let mut rec = AgentRecord::new_born_at(
         AgentId("agent:child".into()),
         AgentMobilityState::AtActivity {
@@ -450,7 +466,7 @@ fn sex_and_parent_id_round_trip() {
     assert_eq!(r.parent_id, Some(AgentId("agent:mum".into())));
 
     // and survives re-apply
-    let (mut w2, _s2) = api::empty_world_and_schedule();
+    let (mut w2, _s2) = empty_world_with_activity("a");
     apply_into_world(&mut w2, back);
     let snap2 = extract_from_world(&w2);
     let r2 = snap2.agents.get(&AgentId("agent:child".into())).unwrap();

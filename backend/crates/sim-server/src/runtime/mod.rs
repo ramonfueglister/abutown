@@ -214,6 +214,7 @@ impl SimulationRuntime {
         sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
+        sim_core::mobility::seed::insert_activity_waypoints_from_base_world(&mut world, &bundle)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
@@ -337,6 +338,8 @@ impl SimulationRuntime {
         sim_core::routing::FlowFieldPlugin::default().install(&mut world, &mut schedule);
 
         MobilityPlugin.install(&mut world, &mut schedule);
+        sim_core::mobility::seed::insert_activity_waypoints_from_base_world(&mut world, base_world)
+            .map_err(HydrationError::Seed)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {

@@ -349,6 +349,11 @@ pub enum SeedError {
         group_id: String,
         corridor_id: String,
     },
+    #[error("base world pedestrian group {group_id} references empty corridor {corridor_id}")]
+    EmptyPedestrianCorridor {
+        group_id: String,
+        corridor_id: String,
+    },
     #[error("base world car group {group_id} references missing arterial path {arterial_id}")]
     MissingArterialPath {
         group_id: String,
@@ -456,10 +461,52 @@ pub fn from_base_world_bundle(
     Ok((world, schedule))
 }
 
+pub fn insert_activity_waypoints_from_base_world(
+    world: &mut World,
+    bundle: &crate::base_world::BaseWorldBundle,
+) -> Result<(), SeedError> {
+    for group in &bundle.spawns.pedestrian_groups {
+        let Some(corridor) = bundle
+            .transport
+            .pedestrian_corridors
+            .iter()
+            .find(|path| path.id == group.corridor_id)
+        else {
+            return Err(SeedError::MissingPedestrianCorridor {
+                group_id: group.id.clone(),
+                corridor_id: group.corridor_id.clone(),
+            });
+        };
+        let Some(first) = corridor.points.first() else {
+            return Err(SeedError::EmptyPedestrianCorridor {
+                group_id: group.id.clone(),
+                corridor_id: group.corridor_id.clone(),
+            });
+        };
+        let Some(last) = corridor.points.last() else {
+            return Err(SeedError::EmptyPedestrianCorridor {
+                group_id: group.id.clone(),
+                corridor_id: group.corridor_id.clone(),
+            });
+        };
+
+        let mut waypoints = world.resource_mut::<crate::mobility::resources::ActivityWaypoints>();
+        waypoints
+            .0
+            .insert("activity:home".to_string(), (first.x, first.y));
+        waypoints
+            .0
+            .insert("activity:destination".to_string(), (last.x, last.y));
+    }
+    Ok(())
+}
+
 fn seed_pedestrians_from_bundle(
     world: &mut World,
     bundle: &crate::base_world::BaseWorldBundle,
 ) -> Result<(), SeedError> {
+    insert_activity_waypoints_from_base_world(world, bundle)?;
+
     let mut agent_index = 0u32;
     for group in &bundle.spawns.pedestrian_groups {
         let Some(corridor_index) = bundle
@@ -473,14 +520,6 @@ fn seed_pedestrians_from_bundle(
                 corridor_id: group.corridor_id.clone(),
             });
         };
-        // Data-driven round-trip waypoints: derive home/destination from this
-        // corridor's actual endpoints in the loaded world (no hardcoded coords).
-        let corridor = &bundle.transport.pedestrian_corridors[corridor_index];
-        if let (Some(first), Some(last)) = (corridor.points.first(), corridor.points.last()) {
-            let mut wp = world.resource_mut::<crate::mobility::resources::ActivityWaypoints>();
-            wp.0.insert("activity:home".to_string(), (first.x, first.y));
-            wp.0.insert("activity:destination".to_string(), (last.x, last.y));
-        }
         for n in 0..group.agents_per_corridor {
             let agent_id = AgentId(format!("agent:walk:{agent_index}"));
             agent_index += 1;
@@ -497,8 +536,6 @@ fn seed_pedestrians_from_bundle(
                     progress,
                 },
                 vec![
-                    // abutopia round-trip waypoints (south-sidewalk ends). Per-corridor
-                    // waypoint derivation is deferred; abutopia is the only base world.
                     PlanStage::WalkToActivity {
                         link_id: link_id.clone(),
                         activity_id: "activity:home".to_string(),

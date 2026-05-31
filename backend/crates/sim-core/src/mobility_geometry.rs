@@ -108,14 +108,7 @@ pub fn activity_geometry(activity_id: &str) -> Option<ActivityGeometry> {
         "activity:work" => Some(ActivityGeometry {
             coord: chunk_center(5, 4),
         }),
-        // NOTE: round-trip waypoints (activity:home / activity:destination) are
-        // NOT hardcoded here. They are world-derived via the `ActivityWaypoints`
-        // resource (populated at seed time from the corridor ends) and resolved
-        // ahead of this fallback in `destination_for_stage`. Hardcoding them here
-        // caused a world-drift bug; do not reintroduce.
-        _ => Some(ActivityGeometry {
-            coord: chunk_center(4, 4),
-        }),
+        _ => None,
     }
 }
 
@@ -145,12 +138,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn activity_geometry_uses_default_when_unknown() {
+    fn activity_geometry_returns_none_for_unknown_activity() {
         let known = activity_geometry("activity:work").expect("work activity defined");
         assert!(known.coord.0 >= 0.0);
         assert!(
-            activity_geometry("activity:unknown").is_some(),
-            "unknown activities must still resolve to a default coord"
+            activity_geometry("activity:unknown").is_none(),
+            "unknown activities must be declared by the loaded world"
         );
     }
 
@@ -197,15 +190,14 @@ mod tests {
     }
 
     #[test]
-    fn activity_geometry_does_not_hardcode_round_trip_waypoints() {
-        // home/destination are world-derived via the ActivityWaypoints resource,
-        // NOT hardcoded here (hardcoding them caused a world-drift bug). They must
-        // fall through to the default, identical to any unknown activity.
-        let default = activity_geometry("activity:unknown").unwrap().coord;
-        assert_eq!(activity_geometry("activity:home").unwrap().coord, default);
-        assert_eq!(
-            activity_geometry("activity:destination").unwrap().coord,
-            default
+    fn activity_geometry_requires_world_derived_round_trip_waypoints() {
+        assert!(
+            activity_geometry("activity:home").is_none(),
+            "home must come from ActivityWaypoints"
+        );
+        assert!(
+            activity_geometry("activity:destination").is_none(),
+            "destination must come from ActivityWaypoints"
         );
     }
 

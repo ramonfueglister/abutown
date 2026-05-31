@@ -60,7 +60,7 @@ function spriteIndexFromKey(key: string, modulus: number): number {
   return ((n % modulus) + modulus) % modulus;
 }
 
-function syntheticPath(start: Coord, direction: DirectionDto): Coord[] {
+function directionalPath(start: Coord, direction: DirectionDto): Coord[] {
   const vec = DIRECTION_VECTORS[direction];
   return [start, { x: start.x + vec.x, y: start.y + vec.y }];
 }
@@ -80,7 +80,7 @@ export function pedestriansFromMobilityState(
     const sprite = sprites[spriteIndexFromKey(agent.sprite_key, sprites.length)];
     out.push({
       id: agent.id,
-      path: syntheticPath(agent.world_coord, agent.direction),
+      path: directionalPath(agent.world_coord, agent.direction),
       offset: 0,
       speed: 0,
       laneOffset: 0,
@@ -107,7 +107,7 @@ export function carsFromMobilityState(
     const sprite = sprites[spriteIndexFromKey(vehicle.sprite_key, sprites.length)];
     out.push({
       id: vehicle.id,
-      path: syntheticPath(vehicle.world_coord, vehicle.direction),
+      path: directionalPath(vehicle.world_coord, vehicle.direction),
       offset: 0,
       speed: 0,
       sprite,

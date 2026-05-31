@@ -223,10 +223,8 @@ pub fn population_monthly_system(world: &mut World) {
                 crate::mobility::components::Sex::Male
             };
 
-            // Build child record.  We use the mother's current mobility state
-            // and plan so that `initial_agent_position` in
-            // `spawn_agent_from_record` resolves without panicking (the
-            // activity / edge already exists because the mother is there).
+            // Build child record from the mother's mobility state and place it
+            // at the mother's current authoritative world coordinate.
             let mut child_record = crate::mobility::AgentRecord::new_born_at(
                 child_id,
                 candidate.mother_state.clone(),
@@ -238,16 +236,11 @@ pub fn population_monthly_system(world: &mut World) {
             child_record.sex = child_sex;
             child_record.parent_id = Some(candidate.mother_id.clone());
 
-            let child_entity = crate::mobility::api::spawn_agent_from_record(world, child_record);
-
-            // Override position to the mother's exact position regardless of
-            // what initial_agent_position computed (the activity coord may
-            // differ slightly from the mother's real position).
-            if let Some(mut pos) =
-                world.get_mut::<crate::mobility::components::Position>(child_entity)
-            {
-                *pos = candidate.mother_pos;
-            }
+            crate::mobility::api::spawn_agent_from_record_at_position(
+                world,
+                child_record,
+                (candidate.mother_pos.x, candidate.mother_pos.y),
+            );
         }
     }
 

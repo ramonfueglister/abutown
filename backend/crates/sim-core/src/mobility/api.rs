@@ -94,15 +94,21 @@ fn compute_vehicle_sprite_key(id: &VehicleId) -> String {
     format!("vehicle:{}", stable_index(&id.0) % 8)
 }
 
+fn activity_world_coord(world: &World, activity_id: &str) -> Option<(f32, f32)> {
+    world
+        .get_resource::<crate::mobility::resources::ActivityWaypoints>()
+        .and_then(|waypoints| waypoints.0.get(activity_id).copied())
+        .or_else(|| {
+            crate::mobility_geometry::activity_geometry(activity_id).map(|geometry| geometry.coord)
+        })
+}
+
 fn initial_agent_position(world: &World, state: &AgentMobilityState) -> (f32, f32) {
     match state {
-        AgentMobilityState::AtActivity { activity_id } => {
-            crate::mobility_geometry::activity_geometry(activity_id)
-                .map(|geometry| geometry.coord)
-                .unwrap_or_else(|| {
-                    panic!("spawn_agent_from_record: unknown activity_id {activity_id}")
-                })
-        }
+        AgentMobilityState::AtActivity { activity_id } => activity_world_coord(world, activity_id)
+            .unwrap_or_else(|| {
+                panic!("spawn_agent_from_record: unknown activity_id {activity_id}")
+            }),
         AgentMobilityState::InVehicle { vehicle_id, .. } => {
             world_coord_for_vehicle(world, vehicle_id).unwrap_or_else(|| {
                 panic!(
@@ -399,6 +405,24 @@ pub fn chunk_subscriber_counts_snapshot(world: &World) -> HashMap<crate::ids::Ch
 
 /// Spawn an agent entity from a record. Updates `AgentIdIndex`.
 pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity {
+    spawn_agent_from_record_with_position(world, record, None)
+}
+
+/// Spawn an agent entity at an already authoritative world coordinate.
+/// Updates `AgentIdIndex`.
+pub fn spawn_agent_from_record_at_position(
+    world: &mut World,
+    record: AgentRecord,
+    position: (f32, f32),
+) -> Entity {
+    spawn_agent_from_record_with_position(world, record, Some(position))
+}
+
+fn spawn_agent_from_record_with_position(
+    world: &mut World,
+    record: AgentRecord,
+    position: Option<(f32, f32)>,
+) -> Entity {
     let AgentRecord {
         id: record_id,
         state,
@@ -413,7 +437,7 @@ pub fn spawn_agent_from_record(world: &mut World, record: AgentRecord) -> Entity
     } = record;
     let id = record_id.clone();
     let sprite_key = compute_agent_sprite_key(&id);
-    let (px, py) = initial_agent_position(world, &state);
+    let (px, py) = position.unwrap_or_else(|| initial_agent_position(world, &state));
     let active_route = active_route.map(|route| ActiveRoute {
         destination: crate::routing::NodeId(route.destination_node),
         profile: route.profile,
@@ -587,14 +611,11 @@ fn resolve_link_polyline(
 }
 
 pub fn world_coord_for_agent(world: &World, agent_id: &AgentId) -> Option<(f32, f32)> {
-    use crate::mobility_geometry::activity_geometry;
     let entity = *world.resource::<AgentIdIndex>().0.get(agent_id)?;
     let state = world.get::<AgentMobilityStateComponent>(entity)?;
     let graph = world.resource::<crate::routing::Graph>();
     match &state.0 {
-        AgentMobilityState::AtActivity { activity_id } => {
-            activity_geometry(activity_id).map(|g| g.coord)
-        }
+        AgentMobilityState::AtActivity { activity_id } => activity_world_coord(world, activity_id),
         AgentMobilityState::InVehicle { vehicle_id, .. } => {
             world_coord_for_vehicle(world, vehicle_id)
         }
