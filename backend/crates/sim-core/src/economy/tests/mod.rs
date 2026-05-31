@@ -10,6 +10,7 @@ mod plugin;
 mod pools;
 mod production;
 mod rationing;
+mod settlement_policy;
 mod systems;
 mod traders;
 mod transport;

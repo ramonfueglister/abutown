@@ -176,6 +176,7 @@ fn telemetry_updates_ewma_with_basis_points() {
         trader_tiles_per_tick: 4,
         trader_default_ref_price: Money(1_000),
         warm_flow_interval_ticks: 10,
+        settlement_policy: crate::economy::SettlementPolicy::Anchored,
     };
     crate::economy::update_market_telemetry(&mut goods, config).unwrap();
 

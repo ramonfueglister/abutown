@@ -6,9 +6,9 @@ use bevy_ecs::query::Or;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     InventoryBook, MarketChunks, MarketGoods, Money, NextOrderId, OrderBook, ProductionPools,
-    SupplyPools, TradeLedger, Traders, WarmMarkets, clear_market_good, expire_orders_at_tick,
-    generate_pool_orders_at_tick, integer_ewma, run_production_at_tick, run_traders_at_tick,
-    run_warm_market_flow_at_tick,
+    SettlementPolicy, SupplyPools, TradeLedger, Traders, WarmMarkets,
+    clear_market_good_with_policy, expire_orders_at_tick, generate_pool_orders_at_tick,
+    integer_ewma, run_production_at_tick, run_traders_at_tick, run_warm_market_flow_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -34,6 +34,7 @@ pub struct EconomyConfig {
     pub trader_tiles_per_tick: u64,
     pub trader_default_ref_price: Money,
     pub warm_flow_interval_ticks: u64,
+    pub settlement_policy: SettlementPolicy,
 }
 
 impl Default for EconomyConfig {
@@ -45,6 +46,7 @@ impl Default for EconomyConfig {
             trader_tiles_per_tick: 4,
             trader_default_ref_price: Money(1_000),
             warm_flow_interval_ticks: 10,
+            settlement_policy: SettlementPolicy::Anchored,
         }
     }
 }
@@ -157,6 +159,7 @@ pub fn generate_pool_orders_system(
 #[allow(clippy::too_many_arguments)]
 pub fn clear_dirty_markets_system(
     tick: Res<Tick>,
+    config: Res<EconomyConfig>,
     mut accounts: ResMut<AccountBook>,
     mut inventory: ResMut<InventoryBook>,
     mut orders: ResMut<OrderBook>,
@@ -167,7 +170,7 @@ pub fn clear_dirty_markets_system(
     let keys: Vec<_> = dirty.0.iter().copied().collect();
     dirty.0.clear();
     for key in keys {
-        if let Err(reason) = clear_market_good(
+        if let Err(reason) = clear_market_good_with_policy(
             &mut accounts,
             &mut inventory,
             &mut orders,
@@ -175,6 +178,7 @@ pub fn clear_dirty_markets_system(
             &mut goods,
             key,
             tick.0,
+            config.settlement_policy,
         ) {
             ledger.0.push(EconomyEvent::MarketClearFailed {
                 market: key.market,
