@@ -179,6 +179,7 @@ describe('buildBackendPedestrianInspector Age row', () => {
       direction: 'e',
       ageSeconds: 2 * 31_536_000, // 2 years
       sprite: { sheet: 'minimal-peds.0', frameWidth: 16, frameHeight: 32 },
+      kind: 'pedestrian',
     });
     expect(inspector).not.toBeNull();
     const ageRow = inspector?.rows.find((r) => r.label === 'Age');
@@ -196,6 +197,7 @@ describe('buildBackendPedestrianInspector Age row', () => {
       direction: 'n',
       ageSeconds: 0,
       sprite: { sheet: 'minimal-peds.0' },
+      kind: 'pedestrian',
     });
     const ageRow = inspector?.rows.find((r) => r.label === 'Age');
     expect(ageRow?.value).toBe('0d 0h');

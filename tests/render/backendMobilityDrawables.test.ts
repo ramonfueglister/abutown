@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { pedestriansFromMobilityState, carsFromMobilityState } from '../../src/render/backendMobilityDrawables';
+import {
+  pedestriansFromMobilityState,
+  carsFromMobilityState,
+  isTraderSpriteKey,
+} from '../../src/render/backendMobilityDrawables';
 import {
   applyMobilityChunkDelta,
   applyMobilitySnapshot,
@@ -225,5 +229,42 @@ describe('backendMobilityDrawables (interpolated)', () => {
     const state = makeStateWith([], []);
     expect(pedestriansFromMobilityState(state, [], 0, 100)).toEqual([]);
     expect(carsFromMobilityState(state, [], 0, 100)).toEqual([]);
+  });
+});
+
+describe('trader sprite tagging', () => {
+  it('isTraderSpriteKey detects the trader: prefix', () => {
+    expect(isTraderSpriteKey('trader:3')).toBe(true);
+    expect(isTraderSpriteKey('pedestrian:3')).toBe(false);
+  });
+
+  it('tags trader-keyed agents as kind=trader, others as pedestrian', () => {
+    const state = makeStateWith(
+      [
+        {
+          id: 'trader:8003',
+          state: { type: 'walking', link_id: 'link:walk:default', progress: 0 },
+          plan_cursor: 0,
+          world_coord: { x: 1, y: 1 },
+          direction: 'e',
+          sprite_key: 'trader:2',
+          age_seconds: 0,
+        },
+        {
+          id: 'agent:ped:0',
+          state: { type: 'walking', link_id: 'link:walk:default', progress: 0 },
+          plan_cursor: 0,
+          world_coord: { x: 2, y: 2 },
+          direction: 'e',
+          sprite_key: 'pedestrian:0',
+          age_seconds: 0,
+        },
+      ],
+      [],
+    );
+    const peds = pedestriansFromMobilityState(state, pedestrianSprites, 0, 100);
+    const kindById = Object.fromEntries(peds.map((p) => [p.id, p.kind]));
+    expect(kindById['trader:8003']).toBe('trader');
+    expect(kindById['agent:ped:0']).toBe('pedestrian');
   });
 });

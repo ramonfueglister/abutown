@@ -29,6 +29,7 @@ describe('entity inspector', () => {
       direction: 'e',
       ageSeconds: 2 * 31_536_000,
       sprite: { sheet: 'minimal-peds.0', frameWidth: 16, frameHeight: 32 },
+      kind: 'pedestrian',
     })).toEqual({
       title: 'agent:1',
       rows: [
