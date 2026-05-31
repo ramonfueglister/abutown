@@ -27,6 +27,34 @@ pub fn settlement_price(last: Money, marginal_bid: Money, marginal_ask: Money) -
     }
 }
 
+/// Server-authoritative uniform-price settlement policy. `Anchored` (default)
+/// clamps the previous settlement price into `[marginal_ask, marginal_bid]`
+/// (price stability); `Midpoint` settles at the band midpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettlementPolicy {
+    #[default]
+    Anchored,
+    Midpoint,
+}
+
+/// Settlement price under the chosen `policy`. `Midpoint` is the integer-floored
+/// midpoint of the marginal band (always within `[ask, bid]`); the i128 sum
+/// avoids overflow.
+pub fn settlement_price_with_policy(
+    last: Money,
+    marginal_bid: Money,
+    marginal_ask: Money,
+    policy: SettlementPolicy,
+) -> Money {
+    match policy {
+        SettlementPolicy::Anchored => settlement_price(last, marginal_bid, marginal_ask),
+        SettlementPolicy::Midpoint => {
+            debug_assert!(marginal_bid.0 >= marginal_ask.0);
+            Money(((marginal_bid.0 as i128 + marginal_ask.0 as i128) / 2) as i64)
+        }
+    }
+}
+
 /// Largest-remainder (Hamilton) integer apportionment. Distributes `total` units
 /// across `weights` proportionally to each weight; leftover units from flooring
 /// are assigned one-by-one to the largest fractional remainders, ties broken by
@@ -70,6 +98,22 @@ pub fn build_clearing_plan(
     bids: &[Bid],
     asks: &[Ask],
     last_settlement_price: Money,
+) -> Result<ClearingPlan, EconomyError> {
+    build_clearing_plan_with_policy(
+        key,
+        bids,
+        asks,
+        last_settlement_price,
+        SettlementPolicy::Anchored,
+    )
+}
+
+pub fn build_clearing_plan_with_policy(
+    key: MarketGoodKey,
+    bids: &[Bid],
+    asks: &[Ask],
+    last_settlement_price: Money,
+    policy: SettlementPolicy,
 ) -> Result<ClearingPlan, EconomyError> {
     let mut sorted_bids = bids.to_vec();
     sorted_bids.sort_by(|a, b| {
@@ -129,7 +173,7 @@ pub fn build_clearing_plan(
             unsold_supply: Quantity(total_ask_qty),
         });
     };
-    let settlement = settlement_price(last_settlement_price, m_bid, m_ask);
+    let settlement = settlement_price_with_policy(last_settlement_price, m_bid, m_ask, policy);
 
     // Phase 2: per-side allocation (infra-marginal full; marginal tier pro-rata).
     let bid_prices: Vec<i64> = sorted_bids.iter().map(|b| b.max_price.0).collect();
@@ -232,6 +276,29 @@ pub fn clear_market_good(
     key: MarketGoodKey,
     current_tick: u64,
 ) -> Result<(), EconomyError> {
+    clear_market_good_with_policy(
+        accounts,
+        inventory,
+        orders,
+        ledger,
+        market_goods,
+        key,
+        current_tick,
+        SettlementPolicy::Anchored,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn clear_market_good_with_policy(
+    accounts: &mut AccountBook,
+    inventory: &mut InventoryBook,
+    orders: &mut OrderBook,
+    ledger: &mut TradeLedger,
+    market_goods: &mut MarketGoods,
+    key: MarketGoodKey,
+    current_tick: u64,
+    policy: SettlementPolicy,
+) -> Result<(), EconomyError> {
     // Get-or-create the market-good state so a freshly-dirtied key (the system
     // path) clears instead of failing with InvalidOrder. A never-traded market
     // starts at `last_settlement_price = ZERO`.
@@ -252,7 +319,7 @@ pub fn clear_market_good(
         .filter(|ask| ask.market == key.market && ask.good == key.good)
         .cloned()
         .collect();
-    let plan = build_clearing_plan(key, &bids, &asks, last_settlement_price)?;
+    let plan = build_clearing_plan_with_policy(key, &bids, &asks, last_settlement_price, policy)?;
     let Some(price) = plan.settlement_price else {
         if let Some(state) = market_goods.0.get_mut(&key) {
             state.traded_qty_last_tick = Quantity::ZERO;
