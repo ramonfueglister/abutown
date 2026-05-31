@@ -361,15 +361,6 @@ fn polyline_length(polyline: &[(f32, f32)]) -> f32 {
         .sum()
 }
 
-fn legacy_seed_polyline(link_id: &str) -> Option<Vec<(f32, f32)>> {
-    match link_id {
-        "link:horizontal:main" => Some(vec![(144.0, 144.0), (176.0, 144.0)]),
-        "link:vertical:main" => Some(vec![(144.0, 144.0), (144.0, 176.0)]),
-        "link:walk:default" => Some(vec![(144.0, 144.0), (176.0, 144.0)]),
-        _ => None,
-    }
-}
-
 fn resolve_snapshot_polyline(
     world: &World,
     link_id: &str,
@@ -379,7 +370,6 @@ fn resolve_snapshot_polyline(
         .get(link_id)
         .cloned()
         .or_else(|| existing_graph_polyline(world, link_id))
-        .or_else(|| legacy_seed_polyline(link_id))
         .unwrap_or_else(|| {
             panic!(
                 "apply_into_world: no graph polyline available for persisted link {}",

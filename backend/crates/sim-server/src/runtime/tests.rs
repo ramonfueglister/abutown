@@ -1133,6 +1133,50 @@ async fn hydrate_restores_mobility_from_store_when_present() {
 }
 
 #[tokio::test]
+async fn hydrate_restores_activity_waypoints_for_persisted_base_world_mobility() {
+    use sim_core::mobility::{extract_from_world, seed};
+
+    let base_world = base_world_fixture();
+    let (authored, _) =
+        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+    let mut authored_snap = extract_from_world(&authored);
+    authored_snap.tick = 7;
+
+    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+    MobilitySnapshotStore::write(
+        &mut mobility_store,
+        "abutopia",
+        authored_snap.tick,
+        &authored_snap,
+        &base_world.snapshot_compatibility(),
+    )
+    .await
+    .unwrap();
+
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
+        Box::new(InMemoryWorldEventStore::default()),
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        &base_world,
+    )
+    .await
+    .unwrap();
+
+    let waypoints = runtime
+        .world
+        .resource::<sim_core::mobility::resources::ActivityWaypoints>();
+    assert_eq!(
+        waypoints.0.get("activity:home").copied(),
+        Some((106.0, 64.51))
+    );
+    assert_eq!(
+        waypoints.0.get("activity:destination").copied(),
+        Some((117.0, 64.51))
+    );
+}
+
+#[tokio::test]
 async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_sidewalk_graph() {
     use sim_core::mobility::api::tick_mobility as api_tick;
     use sim_core::mobility::{extract_from_world, seed};

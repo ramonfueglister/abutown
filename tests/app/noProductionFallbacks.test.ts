@@ -28,6 +28,18 @@ const checks = [
     ],
   },
   {
+    path: 'backend/crates/sim-core/src/mobility',
+    patterns: ['legacy_seed_polyline', 'fallback'],
+  },
+  {
+    path: 'backend/crates/sim-core/src/mobility_geometry.rs',
+    patterns: ['fallback'],
+  },
+  {
+    path: 'src/render/backendMobilityDrawables.ts',
+    patterns: ['syntheticPath'],
+  },
+  {
     path: 'src/main.ts',
     patterns: [
       'buildNorthboundTrainPath(',

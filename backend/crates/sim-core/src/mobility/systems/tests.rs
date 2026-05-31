@@ -1410,7 +1410,7 @@ fn spawned_agent_carries_sex_and_parent() {
     );
     rec.sex = Sex::Female;
     rec.parent_id = Some(crate::ids::AgentId("agent:mum".into()));
-    let e = crate::mobility::api::spawn_agent_from_record(&mut world, rec);
+    let e = crate::mobility::api::spawn_agent_from_record_at_position(&mut world, rec, (0.0, 0.0));
     assert_eq!(*world.get::<Sex>(e).unwrap(), Sex::Female);
 }
 #[test]
@@ -1457,7 +1457,8 @@ fn spawned_agent_carries_birth_tick_and_ages() {
         0.05,
         100,
     );
-    let entity = crate::mobility::api::spawn_agent_from_record(&mut world, rec);
+    let entity =
+        crate::mobility::api::spawn_agent_from_record_at_position(&mut world, rec, (0.0, 0.0));
     assert_eq!(world.get::<BirthTick>(entity).unwrap().0, 100);
 
     let clock = SimClock {

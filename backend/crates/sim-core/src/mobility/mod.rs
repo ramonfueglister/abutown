@@ -1194,7 +1194,7 @@ mod tests {
         let (mut world, _) = empty_world();
         let id_a = AgentId("a:1".into());
         let id_b = AgentId("a:2".into());
-        api::spawn_agent_from_record(
+        api::spawn_agent_from_record_at_position(
             &mut world,
             AgentRecord::new(
                 id_a.clone(),
@@ -1204,8 +1204,9 @@ mod tests {
                 vec![],
                 0.05,
             ),
+            (0.0, 0.0),
         );
-        api::spawn_agent_from_record(
+        api::spawn_agent_from_record_at_position(
             &mut world,
             AgentRecord::new(
                 id_b.clone(),
@@ -1215,6 +1216,7 @@ mod tests {
                 vec![],
                 0.05,
             ),
+            (0.0, 0.0),
         );
 
         let index = world.resource::<AgentIdIndex>();

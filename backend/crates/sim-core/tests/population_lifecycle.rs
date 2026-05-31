@@ -61,6 +61,10 @@ fn build_world_with_cohort() -> (bevy_ecs::world::World, HashSet<String>, u64) {
 
     // Override config.
     world.insert_resource(aggressive_config());
+    world
+        .resource_mut::<sim_core::mobility::resources::ActivityWaypoints>()
+        .0
+        .insert("home".to_string(), (0.0, 0.0));
 
     let clock = *world.resource::<SimClock>();
     let tpm = ticks_per_month(&clock);
