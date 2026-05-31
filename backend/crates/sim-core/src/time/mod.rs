@@ -43,6 +43,17 @@ impl SimClock {
     pub fn month_index(&self, tick: u64) -> u64 {
         self.sim_seconds(tick) / SECONDS_PER_MONTH
     }
+
+    /// Absolute sim-seconds at the start of `month` (month 0 begins at second 0).
+    pub fn month_start_seconds(&self, month: u64) -> u64 {
+        month.saturating_mul(SECONDS_PER_MONTH)
+    }
+
+    /// Age in years at an absolute sim-second `at_sim_second`, for an agent born
+    /// at `birth_tick`. Saturates to 0 if the agent is born after that instant.
+    pub fn age_years_at(&self, at_sim_second: u64, birth_tick: u64) -> f32 {
+        at_sim_second.saturating_sub(self.sim_seconds(birth_tick)) as f32 / SECONDS_PER_YEAR as f32
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,5 +130,37 @@ mod tests {
         let years = clock.age_years(157_680, 0);
         assert!((years - 1.0).abs() < 1e-3, "got {years}");
         assert!(clock.age_years(157_680, 78_840) < clock.age_years(157_680, 0));
+    }
+
+    #[test]
+    fn month_start_seconds_is_month_times_month_length() {
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
+        assert_eq!(clock.month_start_seconds(0), 0);
+        assert_eq!(clock.month_start_seconds(1), SECONDS_PER_MONTH);
+        // 12 months is exactly one year (SECONDS_PER_MONTH = SECONDS_PER_YEAR / 12, exact).
+        assert_eq!(clock.month_start_seconds(12), SECONDS_PER_YEAR);
+    }
+
+    #[test]
+    fn age_years_at_uses_the_given_instant_not_now() {
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
+        // Agent born at tick 0. Age queried at the 1-year and 2-year marks.
+        let one_year = clock.age_years_at(SECONDS_PER_YEAR, 0);
+        assert!((one_year - 1.0).abs() < 1e-3, "got {one_year}");
+        let two_years = clock.age_years_at(2 * SECONDS_PER_YEAR, 0);
+        assert!((two_years - 2.0).abs() < 1e-3, "got {two_years}");
+    }
+
+    #[test]
+    fn age_years_at_saturates_to_zero_before_birth() {
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
+        // Born at tick 1000 (sim-second 200_000); queried at sim-second 0 → not yet born.
+        assert_eq!(clock.age_years_at(0, 1000), 0.0);
     }
 }

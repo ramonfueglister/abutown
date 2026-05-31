@@ -7,6 +7,12 @@ use std::collections::{HashMap, HashSet};
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Tick(pub u64);
 
+/// Cursor recording the last sim-month the population system advanced through.
+/// Persisted in the mobility snapshot alongside `Tick`; the behaviour that reads
+/// and writes it lives in the `population` module (which re-exports this type).
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LastProcessedMonth(pub u64);
+
 /// Entities marked dirty by advance systems this tick. Read & drained by
 /// `MobilityWorld::tick_mobility` to build the per-tick delta.
 #[derive(Resource, Debug, Default, Clone)]
