@@ -68,6 +68,7 @@ fn active_route_snapshot() -> MobilityPersistSnapshot {
 
     MobilityPersistSnapshot {
         tick: 7,
+        last_processed_month: 0,
         agents,
         vehicles: HashMap::new(),
         stops: HashMap::new(),
@@ -159,6 +160,7 @@ fn multi_step_active_route_snapshot() -> MobilityPersistSnapshot {
 
     MobilityPersistSnapshot {
         tick: 9,
+        last_processed_month: 0,
         agents,
         vehicles: HashMap::new(),
         stops: HashMap::new(),

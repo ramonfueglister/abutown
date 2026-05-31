@@ -2,6 +2,12 @@
 //! and tracked-lineage are later slices. Deterministic + replay-safe.
 use bevy_ecs::prelude::*;
 
+/// The persisted cursor recording the last sim-month this system advanced
+/// through. Defined in `mobility::resources` next to `Tick` (both are persisted
+/// in the mobility snapshot and installed by `install_mobility`); re-exported
+/// here because the population system owns its semantics.
+pub use crate::mobility::resources::LastProcessedMonth;
+
 /// Order-independent, reproducible unit draw in [0,1) for one event.
 /// Keyed by a stable agent hash, the sim-month, and a salt (0=death, 1=birth, 2=child sex).
 pub fn unit_draw(agent_hash: u64, month: u64, salt: u64) -> f32 {
@@ -86,9 +92,6 @@ impl Default for PopulationConfig {
     }
 }
 
-#[derive(Resource, Debug, Default, Clone, Copy)]
-pub struct LastProcessedMonth(pub u64);
-
 /// Combined monthly population system: mortality then fertility, one cadence.
 ///
 /// Implemented as an exclusive system (`&mut World`) so that it has full
@@ -134,7 +137,7 @@ pub fn population_monthly_system(world: &mut World) {
             else {
                 continue; // already despawned
             };
-            let age = clock.age_years(now_tick, birth_tick.0);
+            let age = clock.age_years_at(clock.month_start_seconds(m), birth_tick.0);
             let draw = unit_draw(stable_agent_hash(agent_id), m, 0);
             if draw < death_probability_month(age, &cfg) {
                 victims.push((*entity, agent_id.clone()));
@@ -173,7 +176,7 @@ pub fn population_monthly_system(world: &mut World) {
             if *sex != crate::mobility::components::Sex::Female {
                 continue;
             }
-            let age = clock.age_years(now_tick, birth_tick.0);
+            let age = clock.age_years_at(clock.month_start_seconds(m), birth_tick.0);
             if age < cfg.fertile_min || age > cfg.fertile_max {
                 continue;
             }
@@ -264,7 +267,8 @@ impl crate::world::schedule::SimPlugin for PopulationPlugin {
         schedule: &mut bevy_ecs::schedule::Schedule,
     ) {
         world.insert_resource(PopulationConfig::default());
-        world.insert_resource(LastProcessedMonth::default());
+        // `LastProcessedMonth` is installed by `install_mobility` (it is a
+        // mobility-snapshot-persisted cursor, like `Tick`); no insert here.
         // Run the combined population system in MobilitySet::Bookkeeping —
         // same phase as tick_increment_system, after Advance and Output, so
         // despawns/spawns happen after all movement logic is done.
@@ -507,5 +511,84 @@ mod tests {
             "child's parent_id must be the mother's AgentId"
         );
         let _ = born_tick;
+    }
+
+    /// Per-month age: in a multi-month catch-up, fertility must be judged by the
+    /// agent's age in each processed month, not at the final tick. The mother is
+    /// past `fertile_max` at now_tick but fertile in the early processed months;
+    /// with per-month age she gives birth, with now-age she never would.
+    #[test]
+    fn catch_up_judges_fertility_by_per_month_age() {
+        use crate::ids::AgentId;
+        use crate::mobility::components::{
+            AgentMarker, AgentMobilityStateComponent, BirthTick, Sex, StableAgentId, WalkPlan,
+            WalkSpeed,
+        };
+        use crate::mobility::resources::{AgentIdIndex, Tick};
+        use crate::mobility::{AgentMobilityState, PlanStage};
+        use crate::time::{SECONDS_PER_YEAR, SimClock};
+        use bevy_ecs::prelude::*;
+        use bevy_ecs::schedule::Schedule;
+
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        world.insert_resource(SimClock::default());
+        world.insert_resource(PopulationConfig {
+            mort_a: 0.0,
+            mort_b: 0.0,
+            tfr: 1000.0,
+            ..PopulationConfig::default()
+        });
+        world.insert_resource(LastProcessedMonth::default());
+        world.insert_resource(Tick(0));
+        world.insert_resource(AgentIdIndex::default());
+        schedule.add_systems(population_monthly_system);
+
+        let clock = *world.resource::<SimClock>();
+        let ticks_per_year: u64 = SECONDS_PER_YEAR / clock.sim_seconds_per_tick;
+        let now_tick = 200 * ticks_per_year;
+        let mother_birth_tick = now_tick - 55 * ticks_per_year; // 55 > fertile_max
+        let age28_tick = mother_birth_tick + 28 * ticks_per_year;
+        let start_month = clock.month_index(age28_tick);
+        world.resource_mut::<LastProcessedMonth>().0 = start_month.saturating_sub(1);
+        world.resource_mut::<Tick>().0 = now_tick;
+
+        let mother_id = AgentId("agent:mother:permonth".to_string());
+        let entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(mother_id.clone()),
+                BirthTick(mother_birth_tick),
+                Sex::Female,
+                AgentMobilityStateComponent(AgentMobilityState::AtActivity {
+                    activity_id: "home".to_string(),
+                }),
+                WalkPlan {
+                    stages: vec![PlanStage::Activity {
+                        activity_id: "home".to_string(),
+                    }],
+                    cursor: 0,
+                    cyclic: false,
+                },
+                WalkSpeed(1.0),
+                crate::mobility::components::Position { x: 16.0, y: 16.0 },
+            ))
+            .id();
+        world
+            .resource_mut::<AgentIdIndex>()
+            .0
+            .insert(mother_id.clone(), entity);
+
+        schedule.run(&mut world);
+
+        let born = world
+            .resource::<AgentIdIndex>()
+            .0
+            .keys()
+            .any(|id| id.0.starts_with("agent:born:"));
+        assert!(
+            born,
+            "mother must give birth in an early fertile month (per-month age)"
+        );
     }
 }
