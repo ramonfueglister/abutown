@@ -8,13 +8,20 @@ use bevy_ecs::world::World;
 use serde::{Deserialize, Serialize};
 
 use crate::economy::{
-    AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, GoodId, InventoryBalance,
-    InventoryBook, MarketChunks, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, MarketSite,
-    Markets, MoneyAccount, NextOrderId, OrderBook, OrderId, ProductionPool, ProductionPools,
-    SupplyPool, SupplyPools, Trader, Traders,
+    AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyEvent, GoodId,
+    InventoryBalance, InventoryBook, MarketChunks, MarketGoodKey, MarketGoodState, MarketGoods,
+    MarketId, MarketSite, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId, ProductionPool,
+    ProductionPools, SupplyPool, SupplyPools, TradeLedger, Trader, Traders,
 };
 use crate::ids::ChunkCoord;
 use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
+
+/// How many of the most-recent `TradeLedger` events are persisted in a snapshot.
+/// The ledger is an append-only, unbounded telemetry stream, so the durable
+/// snapshot keeps only a bounded recent tail — enough for post-restart
+/// continuity and the `/economy` debug view, without growing each snapshot
+/// without bound. A full append-only audit store is a separate (deferred) slice.
+pub const PERSISTED_LEDGER_TAIL: usize = 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EconomyPersistSnapshot {
@@ -30,6 +37,8 @@ pub struct EconomyPersistSnapshot {
     pub production_pools: Vec<(EconomicActorId, ProductionPool)>,
     pub traders: Vec<(EconomicActorId, Trader)>,
     pub market_chunks: Vec<(MarketId, ChunkCoord)>,
+    /// The most-recent `PERSISTED_LEDGER_TAIL` ledger events (oldest→newest).
+    pub ledger_tail: Vec<EconomyEvent>,
 }
 
 /// Pull a snapshot out of a live economy `World`. `BTreeMap` iteration is sorted,
@@ -46,6 +55,13 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
     let production = world.resource::<ProductionPools>();
     let traders = world.resource::<Traders>();
     let market_chunks = world.resource::<MarketChunks>();
+    let ledger = world.resource::<TradeLedger>();
+
+    let ledger_tail = {
+        let events = &ledger.0;
+        let start = events.len().saturating_sub(PERSISTED_LEDGER_TAIL);
+        events[start..].to_vec()
+    };
 
     EconomyPersistSnapshot {
         accounts: accounts.accounts.iter().map(|(k, v)| (*k, *v)).collect(),
@@ -64,6 +80,7 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
         production_pools: production.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
         traders: traders.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
         market_chunks: market_chunks.0.iter().map(|(k, v)| (*k, *v)).collect(),
+        ledger_tail,
     }
 }
 
@@ -91,6 +108,7 @@ pub fn apply_into_world(world: &mut World, snap: &EconomyPersistSnapshot) {
     ));
     world.insert_resource(Traders(snap.traders.iter().cloned().collect()));
     world.insert_resource(MarketChunks(snap.market_chunks.iter().cloned().collect()));
+    world.insert_resource(TradeLedger(snap.ledger_tail.clone()));
 }
 
 /// A `SnapshotProvider` emitting the full economy state as one JSON item. The

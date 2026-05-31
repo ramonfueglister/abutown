@@ -1,6 +1,6 @@
 pub const ECONOMY_SCALE: i128 = 1_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EconomyError {
     Overflow,
     NegativeMoney,
