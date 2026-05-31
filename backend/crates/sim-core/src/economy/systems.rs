@@ -23,6 +23,7 @@ pub enum EconomySet {
     GeneratePoolOrders,
     ClearMarkets,
     WarmFlow,
+    Materialize,
     Telemetry,
 }
 
@@ -61,6 +62,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::WarmFlow,
+            EconomySet::Materialize,
             EconomySet::Telemetry,
         )
             .chain(),
@@ -76,6 +78,14 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             run_warm_market_flow_system.in_set(EconomySet::WarmFlow),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
         )
+            .before(crate::mobility::systems::tick_increment_system),
+    );
+    // Render-only trader materialization is an exclusive system (it needs &mut
+    // World to spawn/despawn agents), so it is registered separately from the
+    // parallel economy systems above. The set chain places it after WarmFlow.
+    schedule.add_systems(
+        crate::economy::materialize::materialize_traders_system
+            .in_set(EconomySet::Materialize)
             .before(crate::mobility::systems::tick_increment_system),
     );
 }

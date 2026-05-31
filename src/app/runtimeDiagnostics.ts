@@ -142,7 +142,9 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       buildings: counts.buildings,
       trees: counts.trees,
       cars: projectedCars.length,
-      pedestrians: projectedPedestrians.length,
+      // Pedestrians counts only pedestrian-kind agents; economy traders render via
+      // the same path but are a distinct kind, so they don't inflate this count.
+      pedestrians: projectedPedestrians.filter((p) => p.kind === 'pedestrian').length,
       pedestrianSprites: pedestrianSprites.length,
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],
       vehicleSprites: vehicleSprites.length,

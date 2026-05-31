@@ -10,6 +10,7 @@
     "preview:stack": "node scripts/run-dev-stack.mjs preview",
     "build": "npm run generate:proto && node scripts/build.mjs",
     "smoke:mobility-persistence": "tsx scripts/smoke-mobility-persistence.mjs",
+    "smoke:visible-traders": "node scripts/smoke-visible-traders.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "test:e2e": "npm run build && playwright test",

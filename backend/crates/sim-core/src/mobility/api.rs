@@ -613,6 +613,15 @@ fn resolve_link_polyline(
 
 pub fn world_coord_for_agent(world: &World, agent_id: &AgentId) -> Option<(f32, f32)> {
     let entity = *world.resource::<AgentIdIndex>().0.get(agent_id)?;
+    // Materialized trader-agents carry an authoritative Position written by the
+    // economy materialize bridge; their mobility state is only a benign DTO filler.
+    if world
+        .get::<crate::mobility::components::TraderAgent>(entity)
+        .is_some()
+    {
+        let pos = world.get::<crate::mobility::components::Position>(entity)?;
+        return Some((pos.x, pos.y));
+    }
     let state = world.get::<AgentMobilityStateComponent>(entity)?;
     let graph = world.resource::<crate::routing::Graph>();
     match &state.0 {

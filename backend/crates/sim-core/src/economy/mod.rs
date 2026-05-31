@@ -5,12 +5,15 @@ pub mod ids;
 pub mod inventory;
 pub mod ledger;
 pub mod market;
+pub mod materialize;
 pub mod money;
 pub mod orders;
 pub mod persist;
 pub mod pools;
 pub mod production;
+pub mod seed;
 pub mod systems;
+pub mod trader_render;
 pub mod traders;
 pub mod transport;
 pub mod warm_flow;
@@ -22,12 +25,14 @@ pub use ids::*;
 pub use inventory::*;
 pub use ledger::*;
 pub use market::*;
+pub use materialize::MaterializedTraders;
 pub use money::*;
 pub use orders::*;
 pub use persist::*;
 pub use pools::*;
 pub use production::*;
 pub use systems::*;
+pub use trader_render::*;
 pub use traders::*;
 pub use transport::*;
 pub use warm_flow::*;
@@ -59,6 +64,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(MarketChunks::default());
         world.insert_resource(DormantMarkets::default());
         world.insert_resource(WarmMarkets::default());
+        world.insert_resource(crate::economy::materialize::MaterializedTraders::default());
         install_systems(schedule);
     }
 }

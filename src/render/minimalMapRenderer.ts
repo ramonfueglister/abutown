@@ -121,6 +121,7 @@ const BUILDING_COMMERCIAL = '#c9d8dc';
 const BUILDING_CIVIC = '#dccb9a';
 const BUILDING_INDUSTRIAL = '#cabed6';
 const AGENT_COLOR = '#343b43';
+const TRADER_COLOR = '#c0392b';
 const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c73c8', '#ef7f5a', '#28a6b0'];
 const VIEWPORT_GRID_PADDING = 9;
 const TERRAIN_TILE_OVERLAP = 0.6;
@@ -544,11 +545,20 @@ function drawPedestrian(state: MinimalMapRendererState, pedestrian: BackendPedes
     ctx.ellipse(0, 0, style.selectedRadius, style.selectedRadius, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-  ctx.fillStyle = AGENT_COLOR;
-  ctx.globalAlpha *= 0.78;
-  ctx.beginPath();
-  ctx.arc(0, 0, style.radius, 0, Math.PI * 2);
-  ctx.fill();
+  if (pedestrian.kind === 'trader') {
+    // Distinct trader marker: a larger, fully-opaque red dot.
+    ctx.fillStyle = TRADER_COLOR;
+    ctx.globalAlpha *= 0.95;
+    ctx.beginPath();
+    ctx.arc(0, 0, style.radius * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = AGENT_COLOR;
+    ctx.globalAlpha *= 0.78;
+    ctx.beginPath();
+    ctx.arc(0, 0, style.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
