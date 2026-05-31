@@ -124,15 +124,18 @@ It runs in two borrow-clean phases:
    smoothly on the client** — the prior attempt only touched the snapshot, so it
    jumped on resubscribe and never walked.
 
-**Client visibility uses the standard machinery, not a special chunk gate.** The
-trader-agent is kept alive and dirtied at its real position every tick (exactly
-like a normal agent); when it crosses out of a client's subscribed chunk the
-delta's `left_agents` (computed from `PreviousAgentChunks` on chunk change) clears
-it client-side — no ghost. (An earlier "despawn when the current chunk is
-unobserved" idea was dropped: a despawned entity makes `agent_record_from_entity`
-return `None`, so **no** `left_agents` would be emitted and the agent would ghost
-on the client.) Per-chunk LOD *despawn* of unobserved trader-agents is a deferred
-optimization; the economy's dormant gate already bounds how many traders advance.
+**LOD-consistent like the rest of the sim.** A trader-agent exists ONLY while its
+current position is in an observed (Active/Hot) chunk — the materialize bridge
+gates on `chunk_of(pos) ∈ observed`. When the trader walks out of observed chunks
+it is **despawned**, ghost-free via a one-tick "dirty-then-despawn": on the leaving
+tick the agent is dirtied at its new (unobserved) position so `tick_mobility`
+emits `left_agents` for the chunk it left (the client clears it cleanly), and it
+is despawned the following tick. (A despawned entity makes `agent_record_from_entity`
+return `None`, so despawning WITHOUT first emitting that leave would ghost the
+agent on the client — hence the two-tick dance, which mirrors how mobility demotes
+its agents.) A `MaterializedTrader { entity, observed }` per actor tracks the
+one-tick state. This keeps render/delta cost proportional to observed traders, not
+total — the two-tier LOD thesis.
 
 The system is **strictly render-only**: it never touches accounts/inventory/
 orders/ledger/`Traders`, so it cannot affect conservation. Trader-agents are also

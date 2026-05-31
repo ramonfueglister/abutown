@@ -3,19 +3,22 @@
 //! client renders smooth motion. Never mutates economy state (conservation-safe).
 //!
 //! The trader-agent carries render components ONLY (no `AgentMarker`), so no
-//! mobility movement/bookkeeping system touches it. It is dirtied every tick at
-//! its current routed position; the standard `tick_mobility` delta (left_agents
-//! on chunk change) handles client visibility exactly like normal agents.
-//! Per-chunk LOD despawn of unobserved trader-agents is a deferred optimization;
-//! the economy's dormant gate already bounds how many traders advance.
+//! mobility movement/bookkeeping system touches it. **LOD-consistent like the rest
+//! of the sim:** a trader-agent exists only while its current position is in an
+//! observed (Active/Hot) chunk. When it walks out of observed chunks it is
+//! despawned — but ghost-free: on the leaving tick it is dirtied at its new
+//! (unobserved) position so `tick_mobility` emits `left_agents` for the chunk it
+//! left (the client clears it), and it is despawned the following tick. This
+//! mirrors how mobility demotes its agents.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::query::Or;
 
 use crate::economy::trader_render::{is_outbound, leg_progress, route_polyline, trader_travel};
 use crate::economy::{EconomicActorId, EconomyConfig, Markets, Trader, Traders};
-use crate::ids::AgentId;
+use crate::ids::{AgentId, ChunkCoord};
 use crate::mobility::AgentMobilityState;
 use crate::mobility::components::{
     AgentMobilityStateComponent, BirthTick, Direction, Position, SpriteKey, StableAgentId,
@@ -27,11 +30,22 @@ use crate::routing::{
     EdgeId, FlowFieldCache, FlowFieldCacheKey, FlowFieldScope, Graph, HpaIndex, ModeState, NodeId,
     RoutingProfile, RoutingProfileKey,
 };
+use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 use abutown_protocol::DirectionDto;
+
+/// Render bookkeeping for one materialized trader.
+#[derive(Debug, Clone, Copy)]
+pub struct MaterializedTrader {
+    pub entity: Entity,
+    /// Whether the trader's chunk was observed (Active/Hot) last tick. Drives the
+    /// one-tick "dirty-then-despawn" so the client gets a clean `left_agents`
+    /// removal when the trader walks out of view.
+    pub observed: bool,
+}
 
 /// Maps each economy trader (by actor) to its materialized render entity.
 #[derive(Resource, Default)]
-pub struct MaterializedTraders(pub BTreeMap<EconomicActorId, Entity>);
+pub struct MaterializedTraders(pub BTreeMap<EconomicActorId, MaterializedTrader>);
 
 /// A render mutation produced by `plan_mutations` and applied by `apply_mutations`.
 pub(crate) enum TraderMutation {
@@ -48,6 +62,7 @@ pub(crate) enum TraderMutation {
         x: f32,
         y: f32,
         dir: DirectionDto,
+        observed: bool,
     },
     Despawn {
         actor: EconomicActorId,
@@ -113,44 +128,68 @@ fn leg_polyline(
 }
 
 /// Pure planner: decide the render mutation for each trader given the current-leg
-/// route polylines (keyed by actor). No ECS world access — fully unit-testable.
+/// route polylines (keyed by actor) and the set of observed (Active/Hot) chunks.
+/// No ECS world access — fully unit-testable.
 pub(crate) fn plan_mutations(
     traders: &Traders,
     config: &EconomyConfig,
     materialized: &MaterializedTraders,
     routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
+    observed: &BTreeSet<ChunkCoord>,
 ) -> Vec<TraderMutation> {
     let mut muts = Vec::new();
     for (actor, trader) in &traders.0 {
-        let Some(polyline) = routes.get(actor) else {
+        let was_observed = materialized.0.get(actor).map(|m| m.observed);
+        let Some(polyline) = routes.get(actor).filter(|p| !p.is_empty()) else {
+            // No walkable route this tick: a materialized agent can't be positioned,
+            // so retire it.
+            if was_observed.is_some() {
+                muts.push(TraderMutation::Despawn { actor: *actor });
+            }
             continue;
         };
-        if polyline.is_empty() {
-            continue;
-        }
         let travel = trader_travel(trader, config);
         let t = leg_progress(&trader.state, travel);
         let (x, y) = world_coord_at_progress_slice(polyline, t);
         let (nx, ny) = world_coord_at_progress_slice(polyline, (t + 0.02).min(1.0));
         let dir = dir_from_delta(nx - x, ny - y);
-        if materialized.0.contains_key(actor) {
-            muts.push(TraderMutation::Update {
+        let observed_now = observed.contains(&crate::mobility::chunk_of(x, y, 32));
+        match (observed_now, was_observed) {
+            // Appear: first time its current chunk is observed.
+            (true, None) => {
+                let agent_id = AgentId(format!("trader:{}", actor.0));
+                let sprite = format!("trader:{}", sprite_hash(&agent_id.0));
+                muts.push(TraderMutation::Spawn {
+                    actor: *actor,
+                    agent_id,
+                    x,
+                    y,
+                    dir,
+                    sprite,
+                });
+            }
+            // Move while observed (or re-observed after being away).
+            (true, Some(_)) => muts.push(TraderMutation::Update {
                 actor: *actor,
                 x,
                 y,
                 dir,
-            });
-        } else {
-            let agent_id = AgentId(format!("trader:{}", actor.0));
-            let sprite = format!("trader:{}", sprite_hash(&agent_id.0));
-            muts.push(TraderMutation::Spawn {
+                observed: true,
+            }),
+            // Just walked out of observed chunks: nudge to the new (unobserved)
+            // position + dirty so `tick_mobility` emits `left_agents` for the chunk
+            // it left; keep the entity alive this one tick.
+            (false, Some(true)) => muts.push(TraderMutation::Update {
                 actor: *actor,
-                agent_id,
                 x,
                 y,
                 dir,
-                sprite,
-            });
+                observed: false,
+            }),
+            // Still unobserved after the leave was emitted: despawn (LOD).
+            (false, Some(false)) => muts.push(TraderMutation::Despawn { actor: *actor }),
+            // Not materialized and unobserved: nothing to do.
+            (false, None) => {}
         }
     }
     // Despawn agents whose trader has been removed from `Traders`.
@@ -199,17 +238,26 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                     .0
                     .insert(agent_id, entity);
                 world.resource_mut::<DirtyAgents>().0.insert(entity);
-                world
-                    .resource_mut::<MaterializedTraders>()
-                    .0
-                    .insert(actor, entity);
+                world.resource_mut::<MaterializedTraders>().0.insert(
+                    actor,
+                    MaterializedTrader {
+                        entity,
+                        observed: true,
+                    },
+                );
             }
-            TraderMutation::Update { actor, x, y, dir } => {
+            TraderMutation::Update {
+                actor,
+                x,
+                y,
+                dir,
+                observed,
+            } => {
                 let Some(entity) = world
                     .resource::<MaterializedTraders>()
                     .0
                     .get(&actor)
-                    .copied()
+                    .map(|m| m.entity)
                 else {
                     continue;
                 };
@@ -221,13 +269,20 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                     d.0 = dir;
                 }
                 world.resource_mut::<DirtyAgents>().0.insert(entity);
+                if let Some(m) = world
+                    .resource_mut::<MaterializedTraders>()
+                    .0
+                    .get_mut(&actor)
+                {
+                    m.observed = observed;
+                }
             }
             TraderMutation::Despawn { actor } => {
                 let Some(entity) = world
                     .resource::<MaterializedTraders>()
                     .0
                     .get(&actor)
-                    .copied()
+                    .map(|m| m.entity)
                 else {
                     continue;
                 };
@@ -258,6 +313,12 @@ pub fn materialize_traders_system(world: &mut World) {
     }
     let tick = world.get_resource::<Tick>().map(|t| t.0).unwrap_or(0);
 
+    let observed: BTreeSet<ChunkCoord> = {
+        let mut q =
+            world.query_filtered::<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>();
+        q.iter(world).map(|c| c.0).collect()
+    };
+
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
         world.resource_scope(|world: &mut World, mut cache: Mut<FlowFieldCache>| {
             let graph = world.resource::<Graph>();
@@ -285,7 +346,7 @@ pub fn materialize_traders_system(world: &mut World) {
         let traders = world.resource::<Traders>();
         let config = world.resource::<EconomyConfig>();
         let materialized = world.resource::<MaterializedTraders>();
-        plan_mutations(traders, config, materialized, &routes)
+        plan_mutations(traders, config, materialized, &routes, &observed)
     };
     apply_mutations(world, tick, muts);
 }
