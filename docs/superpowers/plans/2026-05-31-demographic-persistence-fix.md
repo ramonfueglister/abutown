@@ -79,13 +79,16 @@ Production changes in `persist_snapshot.rs`:
 1. Struct: add `pub last_processed_month: u64` after `pub tick: u64`.
 2. `Serialize` `WorldRepr<'a>`: add `last_processed_month: u64` and populate from `self`.
 3. `Deserialize` `WorldRepr`: add `last_processed_month: u64` (NO `#[serde(default)]`) and read into `Self`.
-4. `extract_from_world`: `last_processed_month: world.resource::<crate::population::LastProcessedMonth>().0`.
+4. `extract_from_world`: `last_processed_month: world.resource::<crate::mobility::resources::LastProcessedMonth>().0`.
 5. `apply_into_world`, right after `world.resource_mut::<Tick>().0 = snap.tick;`:
    ```rust
    world
-       .resource_mut::<crate::population::LastProcessedMonth>()
+       .resource_mut::<crate::mobility::resources::LastProcessedMonth>()
        .0 = snap.last_processed_month;
    ```
+
+(Note: `LastProcessedMonth` is defined in `mobility::resources` and installed by
+`install_mobility`; `population` re-exports it via `pub use`. See Task 2b.)
 
 Compiler-driven: the two `MobilityPersistSnapshot { .. }` fixtures in
 `mobility_persistence_round_trip.rs` (`tick: 7`, `tick: 9`) each gain

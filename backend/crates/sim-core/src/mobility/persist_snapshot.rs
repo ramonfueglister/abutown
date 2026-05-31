@@ -2,18 +2,20 @@
 //!
 //! After Phase 8a Task 9 dissolved the `MobilityWorld` wrapper, persistence
 //! goes through a dedicated serializable struct. `MobilityPersistSnapshot`
-//! holds exactly the fields the previous `MobilityWorld` serde impl emitted
-//! — so the JSON wire format is byte-identical to the legacy one.
+//! grew out of the previous `MobilityWorld` serde impl. The
+//! `last_processed_month` cursor was added later as a required field (no serde
+//! default), so the wire format is intentionally NOT compatible with
+//! pre-cursor legacy snapshots.
 //!
 //! Use `extract_from_world` to pull a snapshot out of a live `World`, and
 //! `apply_into_world` to hydrate a freshly-installed mobility World from a
 //! snapshot read back from storage.
 //!
-//! The schema mirrors the legacy `MobilityWorld` serde shape:
+//! Current JSON schema (the two leading fields are the persisted sim cursors):
 //!
 //! ```text
-//! { tick, agents, vehicles, stops, routes, link_polylines,
-//!   flow_cells, chunk_activities }
+//! { tick, last_processed_month, agents, vehicles, stops, routes,
+//!   link_polylines, flow_cells, chunk_activities }
 //! ```
 
 use std::collections::{HashMap, VecDeque};
@@ -55,8 +57,9 @@ struct PersistedStopMetadata(HashMap<String, PersistedStop>);
 #[derive(Resource, Debug, Clone, Default)]
 struct PersistedLinkPolylineMetadata(HashMap<String, Vec<(f32, f32)>>);
 
-/// Serializable snapshot of mobility-world state. The JSON shape matches the
-/// legacy `MobilityWorld` serde representation exactly.
+/// Serializable snapshot of mobility-world state. `tick` and
+/// `last_processed_month` are the two persisted simulation cursors; the rest is
+/// agent/vehicle/graph state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MobilityPersistSnapshot {
     pub tick: u64,

@@ -88,23 +88,34 @@ purely a bug.
 
 ## Design
 
-### 1. Persist `last_processed_month` and restore it directly
+### 1. Own the cursor in `mobility::resources`, persist it, restore it directly
 
-All edits live in `backend/crates/sim-core/src/mobility/persist_snapshot.rs`.
+The persistence functions live in `mobility` and must read/write the cursor on
+**every** persistable world — including the minimal worlds built by the snapshot
+provider, the seed builders, and the sim-server in-memory runtimes, which call
+`install_mobility` without `PopulationPlugin`. So the resource must be owned by
+`mobility`, not `population`:
 
-1. **Struct + wire format.** Add `pub last_processed_month: u64` to
-   `MobilityPersistSnapshot`, next to `tick`. Add the field to the `WorldRepr`
-   serialize and deserialize structs. The field is **required** on both sides
-   (no serde default — legacy snapshots are not supported).
+0. **Resource home.** Define `pub struct LastProcessedMonth(pub u64)` in
+   `backend/crates/sim-core/src/mobility/resources.rs` (next to `Tick`) and
+   insert it in `install_mobility`. Re-export it from `population` via
+   `pub use crate::mobility::resources::LastProcessedMonth;` and drop the insert
+   from `PopulationPlugin::install`. This also avoids a `mobility → population`
+   dependency.
+1. **Struct + wire format** (`persist_snapshot.rs`). Add
+   `pub last_processed_month: u64` to `MobilityPersistSnapshot`, next to `tick`,
+   and to the `WorldRepr` serialize and deserialize structs. The field is
+   **required** on both sides (no serde default — legacy snapshots are not
+   supported).
 2. **Extract.** In `extract_from_world`, set
-   `last_processed_month: world.resource::<crate::population::LastProcessedMonth>().0`.
+   `last_processed_month: world.resource::<crate::mobility::resources::LastProcessedMonth>().0`.
 3. **Restore.** In `apply_into_world`, after restoring `Tick`, restore the
    cursor directly:
 
    ```rust
    world.resource_mut::<Tick>().0 = snap.tick;
    world
-       .resource_mut::<crate::population::LastProcessedMonth>()
+       .resource_mut::<crate::mobility::resources::LastProcessedMonth>()
        .0 = snap.last_processed_month;
    ```
 
@@ -114,9 +125,9 @@ All edits live in `backend/crates/sim-core/src/mobility/persist_snapshot.rs`.
    between ticks — so the persisted value is exactly the resume point.
    Frozen-time: sim-time resumes from the saved tick, there is no catch-up.
 
-`LastProcessedMonth` lives in `crate::population`; both `Tick` and
-`LastProcessedMonth` are guaranteed installed before `apply_into_world` runs
-(`empty_world_and_schedule` for tests, `PopulationPlugin` before snapshot apply
+Both `Tick` and `LastProcessedMonth` are guaranteed installed before
+`apply_into_world` runs — `install_mobility` inserts both (via
+`empty_world_and_schedule` for tests, and `MobilityPlugin` before snapshot apply
 in `sim-server/src/runtime/mod.rs`), matching how `apply_into_world` already
 assumes `Tick`/`FlowCells` exist.
 
@@ -183,12 +194,17 @@ no browser smoke.
 
 ## Affected files
 
+- `backend/crates/sim-core/src/mobility/resources.rs` — `LastProcessedMonth`
+  resource definition (moved here from `population`, next to `Tick`).
+- `backend/crates/sim-core/src/mobility/api.rs` — `install_mobility` inserts
+  `LastProcessedMonth`.
 - `backend/crates/sim-core/src/time/mod.rs` — `month_start_seconds`,
   `age_years_at` helpers + tests.
 - `backend/crates/sim-core/src/mobility/persist_snapshot.rs` — required snapshot
   field, extract, direct restore.
-- `backend/crates/sim-core/src/population/mod.rs` — per-month age in the
-  catch-up loop + per-month-age test.
+- `backend/crates/sim-core/src/population/mod.rs` — `pub use` re-export of the
+  cursor, per-month age in the catch-up loop + per-month-age test
+  (`PopulationPlugin` no longer inserts the cursor).
 - `backend/crates/sim-core/tests/mobility_persistence_round_trip.rs` — the two
   snapshot fixtures gain the required field.
 - `backend/crates/sim-core/tests/population_persistence_reload.rs` *(new)* —
