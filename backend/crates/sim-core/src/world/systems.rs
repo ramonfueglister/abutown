@@ -10,7 +10,7 @@ use crate::world::components::{
     DirtyTiles, HotChunk, LastPersistedVersion, LastSnapshotAt, LodCooldown, Tiles, WarmChunk,
 };
 use crate::world::events::*;
-use crate::world::resources::{ChunksByCoord, DirtyChunks};
+use crate::world::resources::{ChunksByCoord, DirtyChunks, PinnedActiveChunks};
 
 /// Pump message buffers — Bevy's `Messages<T>` requires periodic `update()`
 /// calls to drop already-read messages from the buffer. We do it once per
@@ -308,12 +308,13 @@ fn current_lod_marker(world: &World, entity: Entity) -> ChunkLod {
 fn classify_target(
     subscribers: u8,
     population: u32,
+    pinned_active: bool,
     previous: ChunkLod,
     cooldown_remaining: u8,
 ) -> ChunkLod {
     let target = if subscribers >= 2 {
         ChunkLod::Hot
-    } else if subscribers == 1 {
+    } else if subscribers == 1 || pinned_active {
         ChunkLod::Active
     } else if population > 0 {
         ChunkLod::Warm
@@ -392,13 +393,23 @@ pub fn reclassify_chunk_lod_system(
             .get_resource::<crate::mobility::resources::ChunkPopulations>()
             .map(|p| p.0.clone())
             .unwrap_or_default();
+        let pinned_active_chunks = world
+            .get_resource::<PinnedActiveChunks>()
+            .map(|pins| pins.0.clone())
+            .unwrap_or_default();
         let q = query.get_or_insert_with(|| {
             world.query::<(Entity, &ChunkCoordComp, &ChunkSubscriberCount, &LodCooldown)>()
         });
         for (entity, coord, sub, cooldown) in q.iter(world) {
             let pop = chunk_populations.get(&coord.0).copied().unwrap_or(0);
             let previous = current_lod_marker(world, entity);
-            let target = classify_target(sub.0, pop, previous, cooldown.0);
+            let target = classify_target(
+                sub.0,
+                pop,
+                pinned_active_chunks.contains(&coord.0),
+                previous,
+                cooldown.0,
+            );
             let new_cooldown = cooldown.0.saturating_sub(1);
             cooldown_updates.push((entity, new_cooldown));
             if target != previous {
@@ -507,6 +518,38 @@ mod lod_reclassify_tests {
                 .any(|e| e.entity == entity && e.to == ChunkLod::Active),
             "ChunkLodChanged should be emitted for Warm -> Active",
         );
+    }
+
+    #[test]
+    fn pinned_chunk_stays_active_without_browser_subscriber() {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        world.insert_resource(crate::mobility::resources::ChunkPopulations::default());
+        CorePlugin::default().install(&mut world, &mut schedule);
+
+        let coord = ChunkCoord { x: 3, y: 2 };
+        let entity = spawn_chunk_entity(
+            &mut world,
+            coord,
+            4,
+            vec![TileRecord::default(); 16],
+            0,
+            ChunkActivity::Warm,
+        );
+        world.resource_mut::<PinnedActiveChunks>().0.insert(coord);
+
+        schedule.run(&mut world);
+
+        assert!(
+            world.get::<ActiveChunk>(entity).is_some(),
+            "pinned chunks should remain concrete-simulated without viewport subscribers",
+        );
+        assert_eq!(
+            world.get::<ChunkSubscriberCount>(entity).unwrap().0,
+            0,
+            "server-side pins must not fake browser subscriber counts",
+        );
+        assert!(world.get::<WarmChunk>(entity).is_none());
     }
 }
 

@@ -36,6 +36,11 @@ pub struct WorldDimensions {
 #[derive(Resource, Default, Debug)]
 pub struct DirtyChunks(pub HashSet<Entity>);
 
+/// Server-owned simulation interest. A pinned chunk is kept at least Active by
+/// the LOD classifier even when no browser currently subscribes to it.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct PinnedActiveChunks(pub HashSet<ChunkCoord>);
+
 #[derive(Resource, Debug)]
 pub struct WorldIdRes(pub String);
 

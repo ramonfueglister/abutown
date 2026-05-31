@@ -111,6 +111,43 @@ fn runtime_seeds_backend_pedestrian_from_base_world() {
     assert!(vehicles.is_empty());
 }
 
+#[test]
+fn runtime_keeps_base_world_agents_concrete_after_viewport_unsubscribe() {
+    let fixture_root = workspace_root().join("data/worlds/abutopia");
+    let mut runtime = SimulationRuntime::new_from_base_world_dir(&fixture_root)
+        .expect("base world fixture must load");
+    let base_world = base_world_fixture();
+    let expected_agents = expected_base_world_agent_count(&base_world);
+    let first_agent_id = sim_core::ids::AgentId("agent:walk:0".to_string());
+    let (x, y) = sim_core::mobility::api::world_coord_for_agent(&runtime.world, &first_agent_id)
+        .expect("seeded base-world agent has a world coordinate");
+    let agent_chunk = sim_core::mobility::chunk_of(x, y, runtime.chunk_size);
+
+    runtime.apply_subscription_diff([&agent_chunk], []);
+    for _ in 0..2 {
+        runtime.tick_world_mobility();
+    }
+    runtime.apply_subscription_diff([], [&agent_chunk]);
+    for _ in 0..35 {
+        runtime.tick_world_mobility();
+    }
+
+    let snapshot = runtime.mobility_persist_snapshot();
+
+    assert_eq!(
+        snapshot.agents.len(),
+        expected_agents,
+        "base-world agents must remain concrete for health-gated persistence after viewport unsubscribe"
+    );
+    assert!(
+        snapshot
+            .flow_cells
+            .values()
+            .all(|cell| cell.population < 1.0),
+        "base-world agents must not be folded into anonymous flow cells"
+    );
+}
+
 fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

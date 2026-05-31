@@ -49,6 +49,7 @@ impl SimPlugin for CorePlugin {
         world.insert_resource(TickClock::default());
         world.insert_resource(EventCount::default());
         world.insert_resource(DirtyChunks::default());
+        world.insert_resource(PinnedActiveChunks::default());
         world.insert_resource(DeterministicRng::from_world_id(&self.world_id));
         world.insert_resource(crate::world::persistence::SnapshotProviders::default());
         world.insert_resource(crate::world::persistence::MigrationRegistry::default());
@@ -92,6 +93,7 @@ mod tests {
         CorePlugin::default().install(&mut world, &mut schedule);
         assert!(world.contains_resource::<ChunksByCoord>());
         assert!(world.contains_resource::<TickClock>());
+        assert!(world.contains_resource::<PinnedActiveChunks>());
         assert!(world.contains_resource::<DeterministicRng>());
         assert!(world.contains_resource::<Messages<ChunkLoaded>>());
         assert!(world.contains_resource::<Messages<TileChanged>>());
