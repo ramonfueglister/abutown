@@ -84,15 +84,19 @@ test('renders abutopia with 300 backend-driven pedestrians', async ({ page }) =>
     source: 'backend',
     status: 'connected',
     tick: expect.any(Number),
-    agents: 300,
+    // Total backend agents = 300 base pedestrians + the seeded economy trader,
+    // which materializes asynchronously; assert the pedestrian population below.
+    agents: expect.any(Number),
     vehicles: 0,
     stops: 0,
     invalidMessages: 0,
     lastError: null,
   }));
-  expect(state.city.mobilityAgents.count).toBe(300);
+  expect(
+    state.city.mobilityAgents.agents.filter((a) => !a.id.startsWith('trader:')),
+  ).toHaveLength(300);
   expect(state.city.mobilityAgents.selectedId).toBeNull();
-  expect(state.city.mobilityAgents.agents).toHaveLength(300);
+  expect(state.city.mobilityAgents.count).toBeGreaterThanOrEqual(300);
   expect(state.city.mobilityAgents.agents[0]).toEqual(expect.objectContaining({
     id: expect.any(String),
     kind: 'pedestrian',
