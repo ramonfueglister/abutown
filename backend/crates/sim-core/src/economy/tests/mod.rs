@@ -11,6 +11,7 @@ mod plugin;
 mod pools;
 mod production;
 mod rationing;
+mod seed;
 mod settlement_policy;
 mod systems;
 mod traders;
