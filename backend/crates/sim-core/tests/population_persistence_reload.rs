@@ -122,7 +122,10 @@ fn reload_does_not_replay_months_or_change_population() {
 fn last_processed_month_round_trips_through_json() {
     let world = aged_world();
     let snap = extract_from_world(&world);
-    assert!(snap.last_processed_month > 0, "precondition: non-zero cursor");
+    assert!(
+        snap.last_processed_month > 0,
+        "precondition: non-zero cursor"
+    );
 
     let json = serde_json::to_string(&snap).expect("serialize");
     let back: MobilityPersistSnapshot = serde_json::from_str(&json).expect("deserialize");

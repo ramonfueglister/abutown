@@ -2,6 +2,12 @@
 //! and tracked-lineage are later slices. Deterministic + replay-safe.
 use bevy_ecs::prelude::*;
 
+/// The persisted cursor recording the last sim-month this system advanced
+/// through. Defined in `mobility::resources` next to `Tick` (both are persisted
+/// in the mobility snapshot and installed by `install_mobility`); re-exported
+/// here because the population system owns its semantics.
+pub use crate::mobility::resources::LastProcessedMonth;
+
 /// Order-independent, reproducible unit draw in [0,1) for one event.
 /// Keyed by a stable agent hash, the sim-month, and a salt (0=death, 1=birth, 2=child sex).
 pub fn unit_draw(agent_hash: u64, month: u64, salt: u64) -> f32 {
@@ -85,9 +91,6 @@ impl Default for PopulationConfig {
         }
     }
 }
-
-#[derive(Resource, Debug, Default, Clone, Copy)]
-pub struct LastProcessedMonth(pub u64);
 
 /// Combined monthly population system: mortality then fertility, one cadence.
 ///
@@ -264,7 +267,8 @@ impl crate::world::schedule::SimPlugin for PopulationPlugin {
         schedule: &mut bevy_ecs::schedule::Schedule,
     ) {
         world.insert_resource(PopulationConfig::default());
-        world.insert_resource(LastProcessedMonth::default());
+        // `LastProcessedMonth` is installed by `install_mobility` (it is a
+        // mobility-snapshot-persisted cursor, like `Tick`); no insert here.
         // Run the combined population system in MobilitySet::Bookkeeping —
         // same phase as tick_increment_system, after Advance and Output, so
         // despawns/spawns happen after all movement logic is done.

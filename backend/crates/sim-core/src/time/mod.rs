@@ -52,8 +52,7 @@ impl SimClock {
     /// Age in years at an absolute sim-second `at_sim_second`, for an agent born
     /// at `birth_tick`. Saturates to 0 if the agent is born after that instant.
     pub fn age_years_at(&self, at_sim_second: u64, birth_tick: u64) -> f32 {
-        at_sim_second.saturating_sub(self.sim_seconds(birth_tick)) as f32
-            / SECONDS_PER_YEAR as f32
+        at_sim_second.saturating_sub(self.sim_seconds(birth_tick)) as f32 / SECONDS_PER_YEAR as f32
     }
 }
 

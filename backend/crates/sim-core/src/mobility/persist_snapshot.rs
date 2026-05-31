@@ -193,7 +193,7 @@ pub fn extract_from_world(world: &World) -> MobilityPersistSnapshot {
     MobilityPersistSnapshot {
         tick: world.resource::<Tick>().0,
         last_processed_month: world
-            .resource::<crate::population::LastProcessedMonth>()
+            .resource::<crate::mobility::resources::LastProcessedMonth>()
             .0,
         agents: agents_map,
         vehicles: vehicles_map,
@@ -843,7 +843,7 @@ fn normalize_persisted_active_routes(
 pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
     world.resource_mut::<Tick>().0 = snap.tick;
     world
-        .resource_mut::<crate::population::LastProcessedMonth>()
+        .resource_mut::<crate::mobility::resources::LastProcessedMonth>()
         .0 = snap.last_processed_month;
     install_snapshot_routing(world, &snap);
     let agents = {
