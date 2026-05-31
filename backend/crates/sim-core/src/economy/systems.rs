@@ -6,12 +6,12 @@ use bevy_ecs::query::Or;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     InventoryBook, MarketChunks, MarketGoods, Money, NextOrderId, OrderBook, ProductionPools,
-    SupplyPools, TradeLedger, Traders, clear_market_good, expire_orders_at_tick,
+    SupplyPools, TradeLedger, Traders, WarmMarkets, clear_market_good, expire_orders_at_tick,
     generate_pool_orders_at_tick, integer_ewma, run_production_at_tick, run_traders_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
-use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
+use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk, WarmChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
@@ -31,6 +31,7 @@ pub struct EconomyConfig {
     pub transport_cost_per_tile_unit: Money,
     pub trader_tiles_per_tick: u64,
     pub trader_default_ref_price: Money,
+    pub warm_flow_interval_ticks: u64,
 }
 
 impl Default for EconomyConfig {
@@ -41,6 +42,7 @@ impl Default for EconomyConfig {
             transport_cost_per_tile_unit: Money(5),
             trader_tiles_per_tick: 4,
             trader_default_ref_price: Money(1_000),
+            warm_flow_interval_ticks: 10,
         }
     }
 }
@@ -72,21 +74,30 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
 }
 
-/// Bridge: derive `DormantMarkets` from chunk LOD. A market anchored (in
-/// `MarketChunks`) to a chunk that is not Active/Hot is dormant; everything else
-/// runs at full fidelity. Cheap: one pass over active chunk coords + one over the
-/// anchor map. Deterministic (BTree iteration, set membership).
-#[allow(clippy::type_complexity)]
+/// Bridge: derive `DormantMarkets` and `WarmMarkets` from chunk LOD. A market
+/// anchored (in `MarketChunks`) to a chunk that is not Active/Hot is dormant;
+/// dormant markets anchored to a WarmChunk are also added to `WarmMarkets`.
+/// Cheap: one pass over active/warm chunk coords + one over the anchor map.
+/// Deterministic (BTree iteration, set membership).
 pub fn refresh_dormant_markets_system(
     anchors: Res<MarketChunks>,
     active_chunks: Query<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>,
+    warm_chunks: Query<&ChunkCoordComp, With<WarmChunk>>,
     mut dormant: ResMut<DormantMarkets>,
+    mut warm: ResMut<WarmMarkets>,
 ) {
     let active: BTreeSet<ChunkCoord> = active_chunks.iter().map(|c| c.0).collect();
+    let warm_coords: BTreeSet<ChunkCoord> = warm_chunks.iter().map(|c| c.0).collect();
     dormant.0 = anchors
         .0
         .iter()
         .filter(|(_, coord)| !active.contains(coord))
+        .map(|(market, _)| *market)
+        .collect();
+    warm.0 = anchors
+        .0
+        .iter()
+        .filter(|(_, coord)| warm_coords.contains(coord))
         .map(|(market, _)| *market)
         .collect();
 }
