@@ -58,6 +58,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(Traders::default());
         world.insert_resource(MarketChunks::default());
         world.insert_resource(DormantMarkets::default());
+        world.insert_resource(WarmMarkets::default());
         install_systems(schedule);
     }
 }

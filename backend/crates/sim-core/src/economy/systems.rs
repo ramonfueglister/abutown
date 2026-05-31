@@ -8,6 +8,7 @@ use crate::economy::{
     InventoryBook, MarketChunks, MarketGoods, Money, NextOrderId, OrderBook, ProductionPools,
     SupplyPools, TradeLedger, Traders, WarmMarkets, clear_market_good, expire_orders_at_tick,
     generate_pool_orders_at_tick, integer_ewma, run_production_at_tick, run_traders_at_tick,
+    run_warm_market_flow_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -21,6 +22,7 @@ pub enum EconomySet {
     Traders,
     GeneratePoolOrders,
     ClearMarkets,
+    WarmFlow,
     Telemetry,
 }
 
@@ -56,6 +58,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::Traders,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
+            EconomySet::WarmFlow,
             EconomySet::Telemetry,
         )
             .chain(),
@@ -68,6 +71,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             run_traders_system.in_set(EconomySet::Traders),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
+            run_warm_market_flow_system.in_set(EconomySet::WarmFlow),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
         )
             .before(crate::mobility::systems::tick_increment_system),
@@ -205,6 +209,31 @@ pub fn update_market_telemetry(
 
 pub fn update_market_telemetry_system(config: Res<EconomyConfig>, mut goods: ResMut<MarketGoods>) {
     let _ = update_market_telemetry(&mut goods, *config);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_warm_market_flow_system(
+    tick: Res<Tick>,
+    config: Res<EconomyConfig>,
+    warm: Res<WarmMarkets>,
+    mut accounts: ResMut<AccountBook>,
+    mut inventory: ResMut<InventoryBook>,
+    mut ledger: ResMut<TradeLedger>,
+    demand: Res<DemandPools>,
+    supply: Res<SupplyPools>,
+    market_goods: Res<MarketGoods>,
+) {
+    let _ = run_warm_market_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &market_goods,
+        &warm.0,
+        &config,
+        tick.0,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

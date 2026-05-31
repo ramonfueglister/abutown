@@ -227,3 +227,56 @@ fn warm_flow_is_deterministic() {
     };
     assert_eq!(build(), build());
 }
+
+use crate::economy::EconomyPlugin;
+use crate::mobility::resources::Tick;
+use crate::world::schedule::SimPlugin;
+
+#[test]
+fn warm_market_flows_through_the_schedule_and_conserves() {
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    let market = MarketId(1);
+    let buyer = EconomicActorId(1);
+    let seller = EconomicActorId(2);
+    let coord = ChunkCoord { x: 9, y: 9 };
+    world.spawn((ChunkCoordComp(coord), WarmChunk));
+    {
+        let mut acc = world.resource_mut::<AccountBook>();
+        acc.deposit(buyer, Money(1_000_000)).unwrap();
+    }
+    {
+        let mut inv = world.resource_mut::<InventoryBook>();
+        inv.deposit(seller, GOOD_FOOD, Quantity(1_000)).unwrap();
+    }
+    {
+        let mut mg = world.resource_mut::<MarketGoods>();
+        let key = MarketGoodKey { market, good: GOOD_FOOD };
+        let mut st = MarketGoodState::new(key);
+        st.last_settlement_price = Money(1_000);
+        mg.0.insert(key, st);
+    }
+    {
+        let mut d = world.resource_mut::<DemandPools>();
+        d.0.insert(buyer, dp(1, market, 50));
+    }
+    {
+        let mut s = world.resource_mut::<SupplyPools>();
+        s.0.insert(seller, sp(2, market, 50));
+    }
+    world.resource_mut::<MarketChunks>().0.insert(market, coord);
+    world.insert_resource(Tick(0));
+
+    let m0 = world.resource::<AccountBook>().total_money().unwrap();
+    let g0 = world.resource::<InventoryBook>().total_good(GOOD_FOOD).unwrap();
+
+    // tick 0 fires the warm flow (multiple of 10).
+    schedule.run(&mut world);
+
+    assert_eq!(world.resource::<InventoryBook>().balance(buyer, GOOD_FOOD).available, Quantity(50));
+    assert_eq!(world.resource::<AccountBook>().total_money().unwrap(), m0);
+    assert_eq!(world.resource::<InventoryBook>().total_good(GOOD_FOOD).unwrap(), g0);
+    assert!(world.contains_resource::<crate::economy::WarmMarkets>());
+}

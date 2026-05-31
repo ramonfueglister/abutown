@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use bevy_ecs::prelude::*;
 
-use crate::economy::{DormantMarkets, MarketChunks, MarketId, refresh_dormant_markets_system};
+use crate::economy::{DormantMarkets, MarketChunks, MarketId, WarmMarkets, refresh_dormant_markets_system};
 use crate::ids::ChunkCoord;
 use crate::world::components::{ActiveChunk, AsleepChunk, ChunkCoordComp, HotChunk, WarmChunk};
 
@@ -22,6 +22,7 @@ fn refresh_dormant_markets_marks_only_anchored_inactive() {
     anchors.0.insert(MarketId(13), ChunkCoord { x: 3, y: 0 }); // hot    -> awake
     world.insert_resource(anchors);
     world.insert_resource(DormantMarkets::default());
+    world.insert_resource(WarmMarkets::default());
 
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     schedule.add_systems(refresh_dormant_markets_system);
@@ -38,6 +39,7 @@ fn unanchored_market_is_never_dormant() {
     // No active chunks at all, and the market is not anchored.
     world.insert_resource(MarketChunks::default());
     world.insert_resource(DormantMarkets::default());
+    world.insert_resource(WarmMarkets::default());
 
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     schedule.add_systems(refresh_dormant_markets_system);
