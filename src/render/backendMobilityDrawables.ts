@@ -30,6 +30,7 @@ export type BackendPedestrian = {
   sprite: SimutransPedestrianSpriteLike;
   direction: DirectionDto;
   ageSeconds: number;
+  kind: 'pedestrian' | 'trader';
 };
 
 export type BackendCar = {
@@ -51,6 +52,12 @@ const DIRECTION_VECTORS: Record<DirectionDto, Coord> = {
   w: { x: -1, y: 0 },
   nw: { x: -1, y: -1 },
 };
+
+/** Backend tags economy-trader agents with a `trader:` sprite_key prefix so the
+ * client can render them distinctly (no protobuf change — sprite_key is a string). */
+export function isTraderSpriteKey(key: string): boolean {
+  return key.startsWith('trader:');
+}
 
 function spriteIndexFromKey(key: string, modulus: number): number {
   const parts = key.split(':');
@@ -87,6 +94,7 @@ export function pedestriansFromMobilityState(
       sprite,
       direction: agent.direction,
       ageSeconds: agent.age_seconds,
+      kind: isTraderSpriteKey(agent.sprite_key) ? 'trader' : 'pedestrian',
     });
   }
   return out;

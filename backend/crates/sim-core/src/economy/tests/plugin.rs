@@ -27,6 +27,8 @@ fn economy_plugin_installs_books_orderbook_ledger_and_sets() {
     assert!(world.contains_resource::<EconomyConfig>());
     assert!(world.contains_resource::<crate::economy::MarketChunks>());
     assert!(world.contains_resource::<crate::economy::DormantMarkets>());
+    assert!(world.contains_resource::<crate::economy::MaterializedTraders>());
 
+    // Runs cleanly even without a routing graph: the materialize bridge no-ops.
     schedule.run(&mut world);
 }

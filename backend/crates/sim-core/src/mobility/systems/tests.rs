@@ -1466,3 +1466,44 @@ fn spawned_agent_carries_birth_tick_and_ages() {
     };
     assert!((clock.age_years(100 + 157_680, 100) - 1.0).abs() < 1e-3);
 }
+
+#[test]
+fn trader_agent_world_coord_reads_position_verbatim() {
+    use crate::ids::AgentId;
+    use crate::mobility::api::world_coord_for_agent;
+    use crate::mobility::components::{
+        AgentMobilityStateComponent, BirthTick, Direction, Position, SpriteKey, StableAgentId,
+        TraderAgent, WalkPlan, WalkSpeed,
+    };
+    use crate::mobility::records::AgentMobilityState;
+    use crate::mobility::resources::AgentIdIndex;
+
+    let mut world = bevy_ecs::world::World::new();
+    world.insert_resource(AgentIdIndex::default());
+    let id = AgentId("trader:1".to_string());
+    let entity = world
+        .spawn((
+            TraderAgent,
+            StableAgentId(id.clone()),
+            AgentMobilityStateComponent(AgentMobilityState::AtActivity {
+                activity_id: "trader".to_string(),
+            }),
+            WalkPlan {
+                stages: vec![],
+                cursor: 0,
+                cyclic: false,
+            },
+            WalkSpeed(0.0),
+            BirthTick(0),
+            Position { x: 12.5, y: 34.0 },
+            Direction(abutown_protocol::DirectionDto::S),
+            SpriteKey("trader:3".to_string()),
+        ))
+        .id();
+    world
+        .resource_mut::<AgentIdIndex>()
+        .0
+        .insert(id.clone(), entity);
+
+    assert_eq!(world_coord_for_agent(&world, &id), Some((12.5, 34.0)));
+}

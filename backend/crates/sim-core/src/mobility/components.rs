@@ -8,6 +8,12 @@ use std::sync::Arc;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentMarker;
 
+/// Marks a render-only economy-trader agent. It carries NO `AgentMarker`, so no
+/// mobility movement/bookkeeping system touches it; the economy materialization
+/// bridge is its sole owner and writes its `Position` authoritatively.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraderAgent;
+
 /// Marker component for vehicles.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VehicleMarker;

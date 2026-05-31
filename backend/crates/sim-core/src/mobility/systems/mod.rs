@@ -20,6 +20,7 @@ pub use lod::{
     promote_warm_to_active_system, refresh_simulated_chunks_system, warm_chunk_flow_system,
 };
 pub use output::{compute_direction_system, compute_world_coord_system};
+pub(crate) use routing::materialize_route_steps;
 pub use routing::{route_advance_system, route_assignment_system};
 pub use vehicles::vehicle_advance_system;
 pub use walking::{stop_arrival_system, update_link_polyline_cache_system, walk_advance_system};

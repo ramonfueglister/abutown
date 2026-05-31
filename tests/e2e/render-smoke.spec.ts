@@ -25,7 +25,8 @@ test('renders abutopia with 300 backend-driven pedestrians', async ({ page }) =>
   await expect(page.locator('#game')).toHaveAttribute('data-ready', 'true');
   await expect.poll(async () => {
     const state = await readCityState(page);
-    return state.city.mobilityAgents.agents.length;
+    // Pedestrian-kind agents only — the seeded economy trader is a distinct kind.
+    return state.city.pedestrians;
   }, { timeout: 10_000 }).toBe(300);
 
   const state = await readCityState(page);
