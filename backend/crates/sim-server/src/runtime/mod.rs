@@ -97,6 +97,51 @@ fn refresh_flow_field_resources(world: &mut sim_core::bevy_ecs::world::World) {
     }
 }
 
+fn pin_base_world_mobility_chunks(
+    world: &mut sim_core::bevy_ecs::world::World,
+    base_world: &BaseWorldBundle,
+) {
+    let chunk_size = base_world.chunk_size();
+    let mut pins = std::collections::HashSet::new();
+
+    for group in &base_world.spawns.pedestrian_groups {
+        if let Some(corridor) = base_world
+            .transport
+            .pedestrian_corridors
+            .iter()
+            .find(|path| path.id == group.corridor_id)
+        {
+            pins.extend(
+                corridor
+                    .points
+                    .iter()
+                    .map(|point| sim_core::mobility::chunk_of(point.x, point.y, chunk_size)),
+            );
+        }
+    }
+
+    for group in &base_world.spawns.car_groups {
+        if let Some(arterial) = base_world
+            .transport
+            .arterial_paths
+            .iter()
+            .find(|path| path.id == group.arterial_id)
+        {
+            pins.extend(
+                arterial
+                    .points
+                    .iter()
+                    .map(|point| sim_core::mobility::chunk_of(point.x, point.y, chunk_size)),
+            );
+        }
+    }
+
+    world
+        .resource_mut::<sim_core::world::resources::PinnedActiveChunks>()
+        .0
+        .extend(pins);
+}
+
 impl std::fmt::Debug for SimulationRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimulationRuntime")
@@ -179,6 +224,7 @@ impl SimulationRuntime {
         bundle.spawn_all_chunks(&mut world, 0);
         let mobility_snap = initial_mobility_snapshot_for_base_world(&bundle)?;
         apply_into_world(&mut world, mobility_snap);
+        pin_base_world_mobility_chunks(&mut world, &bundle);
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
         refresh_flow_field_resources(&mut world);
 
@@ -312,6 +358,7 @@ impl SimulationRuntime {
                 .map_err(HydrationError::Seed)?,
         };
         apply_into_world(&mut world, mobility_snap);
+        pin_base_world_mobility_chunks(&mut world, base_world);
 
         // Restore the economy from a current base-world snapshot if present.
         if let Some((_tick, econ_snap)) = economy_snapshot_store
