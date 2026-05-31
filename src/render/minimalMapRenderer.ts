@@ -97,6 +97,8 @@ type StaticDrawable =
 type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: string };
 type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
 type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
+type TileFillStyle = { color: string; alpha: number };
+type TileFillBatch = TileFillStyle & { coords: Coord[] };
 
 export const MAP_BACKGROUND = '#182018';
 const MAP_GRASS = '#91c86f';
@@ -154,8 +156,8 @@ function drawScene(state: MinimalMapRendererState, offset: Coord): void {
   }
   visibleTerrainTiles.sort((a, b) => iso(state, a).y - iso(state, b).y || a.x - b.x);
   drawGrassBaseLayer(state);
-  for (const coord of visibleTerrainTiles) drawTerrainOverlay(state, coord);
-  for (const coord of visibleTerrainTiles) drawRiverSurface(state, coord);
+  drawTerrainOverlayLayer(state, visibleTerrainTiles);
+  drawRiverSurfaceLayer(state, visibleTerrainTiles);
 
   const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(
     state.mobilityState,
@@ -203,19 +205,36 @@ function drawGrassBaseLayer(state: MinimalMapRendererState): void {
   ctx.restore();
 }
 
-function drawTerrainOverlay(state: MinimalMapRendererState, coord: Coord): void {
-  const kind = state.terrainKinds.get(key(coord))?.kind;
-  if (kind === 'park' || kind === 'forest' || kind === 'reserve') {
-    drawTileFill(state, coord, MAP_PARK, 0.82);
-  } else if (kind === 'plaza') {
-    drawTileFill(state, coord, MAP_PLAZA, 0.72);
+function drawTerrainOverlayLayer(state: MinimalMapRendererState, coords: readonly Coord[]): void {
+  const batches = new Map<string, TileFillBatch>();
+  for (const coord of coords) {
+    const style = terrainOverlayStyle(state, coord);
+    if (style) appendTileFillBatch(batches, style, coord);
   }
+  drawTileFillBatches(state, batches);
 }
 
-function drawRiverSurface(state: MinimalMapRendererState, coord: Coord): void {
-  if (!isWaterSurface(state, coord)) return;
+function terrainOverlayStyle(state: MinimalMapRendererState, coord: Coord): TileFillStyle | null {
   const kind = state.terrainKinds.get(key(coord))?.kind;
-  drawTileFill(state, coord, kind === 'riverbank' ? MAP_RIVERBANK : MAP_WATER, 0.96);
+  if (kind === 'park' || kind === 'forest' || kind === 'reserve') return { color: MAP_PARK, alpha: 0.82 };
+  if (kind === 'plaza') return { color: MAP_PLAZA, alpha: 0.72 };
+  return null;
+}
+
+function drawRiverSurfaceLayer(state: MinimalMapRendererState, coords: readonly Coord[]): void {
+  const batches = new Map<string, TileFillBatch>();
+  for (const coord of coords) {
+    const style = riverSurfaceStyle(state, coord);
+    if (style) appendTileFillBatch(batches, style, coord);
+  }
+  drawTileFillBatches(state, batches);
+}
+
+function riverSurfaceStyle(state: MinimalMapRendererState, coord: Coord): TileFillStyle | null {
+  const terrain = state.terrain.get(key(coord));
+  if (terrain === 'riverbank') return { color: MAP_RIVERBANK, alpha: 0.96 };
+  if (terrain === 'water') return { color: MAP_WATER, alpha: 0.96 };
+  return null;
 }
 
 function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
@@ -411,18 +430,36 @@ function drawTree(state: MinimalMapRendererState, coord: Coord): void {
   ctx.restore();
 }
 
-function drawTileFill(state: MinimalMapRendererState, coord: Coord, color: string, alpha = 1): void {
+function appendTileFillBatch(batches: Map<string, TileFillBatch>, style: TileFillStyle, coord: Coord): void {
+  const batchKey = `${style.color}:${style.alpha}`;
+  const batch = batches.get(batchKey);
+  if (batch) {
+    batch.coords.push(coord);
+    return;
+  }
+  batches.set(batchKey, { ...style, coords: [coord] });
+}
+
+function drawTileFillBatches(state: MinimalMapRendererState, batches: ReadonlyMap<string, TileFillBatch>): void {
+  for (const batch of batches.values()) drawTileFillBatch(state, batch);
+}
+
+function drawTileFillBatch(state: MinimalMapRendererState, batch: TileFillBatch): void {
   const { ctx, tileSize } = state;
-  const point = iso(state, coord);
   ctx.save();
-  ctx.globalAlpha *= alpha;
-  ctx.fillStyle = color;
-  ctx.fillRect(
-    point.x - tileSize.width / 2 - TERRAIN_TILE_OVERLAP,
-    point.y - tileSize.height / 2 - TERRAIN_TILE_OVERLAP,
-    tileSize.width + TERRAIN_TILE_OVERLAP * 2,
-    tileSize.height + TERRAIN_TILE_OVERLAP * 2,
-  );
+  ctx.globalAlpha *= batch.alpha;
+  ctx.fillStyle = batch.color;
+  ctx.beginPath();
+  for (const coord of batch.coords) {
+    const point = iso(state, coord);
+    ctx.rect(
+      point.x - tileSize.width / 2 - TERRAIN_TILE_OVERLAP,
+      point.y - tileSize.height / 2 - TERRAIN_TILE_OVERLAP,
+      tileSize.width + TERRAIN_TILE_OVERLAP * 2,
+      tileSize.height + TERRAIN_TILE_OVERLAP * 2,
+    );
+  }
+  ctx.fill();
   ctx.restore();
 }
 
