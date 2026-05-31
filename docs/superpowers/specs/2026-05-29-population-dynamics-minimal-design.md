@@ -36,8 +36,22 @@ shrinks over sim-time — a real, paper-grounded life cycle.
   `birth_sim_time`; the implementation used `birth_tick` — 8l uses the real one.)
 - 8i's calendar boundary events were **deferred** (no consumer then), so **8l
   brings its own sim-month cadence** — it is the first consumer.
-- Deterministic + replay-able (8n): all stochastic draws via the existing
-  `DeterministicRng`.
+- Deterministic + replay-able (8n): all stochastic draws are deterministic and
+  reproducible.
+  - **Implementation note (as built):** the shipped code does **not** draw from
+    the mutable `DeterministicRng` stream. Each event uses a stateless hash,
+    `unit_draw(stable_agent_hash(agent_id), sim_month, salt)` in
+    `population/mod.rs` (salt `0` = death, `1` = birth, `2` = child sex). This is
+    a deliberate improvement over a shared `StdRng`: a stateless hash is
+    order-independent (immune to `AgentIdIndex`/HashMap iteration order and to
+    population size), needs no RNG sequence-position state in the snapshot, and
+    supports random access per `(agent, month)` for multi-month catch-up. A
+    mutable global RNG would reintroduce exactly the reload-reset bug class fixed
+    for `LastProcessedMonth` (see
+    `2026-05-31-demographic-persistence-fix-design.md`). Do not "spec-align" the
+    code back onto `DeterministicRng`. The references to `DeterministicRng` below
+    describe the original intent (per-agent keyed independent draws), which
+    `unit_draw` satisfies directly.
 
 ## Architecture (minimal slice)
 
