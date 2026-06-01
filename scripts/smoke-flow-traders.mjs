@@ -25,7 +25,7 @@ import { chromium } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { tsImport } from 'tsx/esm/api';
 const protoModule = await tsImport('../src/backend/proto/abutown_pb.ts', import.meta.url);
-const { ServerMessageSchema } = protoModule;
+const { ServerMessageSchema, ClientMessageSchema } = protoModule;
 
 const URL = 'http://127.0.0.1:5175';
 const PAGE_TIMEOUT_MS = 20000;
@@ -75,23 +75,27 @@ page.on('websocket', (ws) => {
   ws.on('framesent', (ev) => {
     if (typeof ev.payload === 'string') {
       textFramesSent += 1;
-      try {
-        const msg = JSON.parse(ev.payload);
-        if (msg.type === 'chunk_subscribe' && Array.isArray(msg.coords)) {
-          subscribedChunks.clear();
-          for (const c of msg.coords) {
-            subscribedChunks.add(`${c.x},${c.y}`);
-          }
-        }
-        if (msg.type === 'chunk_unsubscribe' && Array.isArray(msg.coords)) {
-          for (const c of msg.coords) {
-            subscribedChunks.delete(`${c.x},${c.y}`);
-          }
-        }
-      } catch { /* non-JSON */ }
       return;
     }
-    // binary sent frames are not expected here
+    // Binary sent frames are client→server protobuf ClientMessage (chunkSubscribe /
+    // chunkUnsubscribe).  Decode and track subscribed chunks.
+    const bytes = toBytes(ev.payload);
+    if (!bytes) return;
+    let msg;
+    try {
+      msg = fromBinary(ClientMessageSchema, bytes);
+    } catch {
+      return;
+    }
+    if (msg.body.case === 'chunkSubscribe') {
+      for (const c of msg.body.value.coords) {
+        subscribedChunks.add(`${c.x},${c.y}`);
+      }
+    } else if (msg.body.case === 'chunkUnsubscribe') {
+      for (const c of msg.body.value.coords) {
+        subscribedChunks.delete(`${c.x},${c.y}`);
+      }
+    }
   });
   ws.on('framereceived', (ev) => {
     if (typeof ev.payload === 'string') {
