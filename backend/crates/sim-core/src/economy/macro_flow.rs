@@ -570,8 +570,8 @@ pub fn run_macro_flow_at_tick(
     config: &EconomyConfig,
     current_tick: u64,
 ) -> Result<(), EconomyError> {
-    if config.warm_flow_interval_ticks == 0
-        || !current_tick.is_multiple_of(config.warm_flow_interval_ticks)
+    if config.macro_flow_interval_ticks == 0
+        || !current_tick.is_multiple_of(config.macro_flow_interval_ticks)
     {
         return Ok(());
     }

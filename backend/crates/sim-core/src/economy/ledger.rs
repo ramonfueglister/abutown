@@ -69,12 +69,6 @@ pub enum EconomyEvent {
         actor: EconomicActorId,
         amount: Money,
     },
-    WarmMarketFlow {
-        market: MarketId,
-        good: GoodId,
-        qty: Quantity,
-        price: Money,
-    },
     MacroFlow {
         from_market: MarketId,
         to_market: MarketId,
@@ -103,7 +97,6 @@ impl EconomyEvent {
             Self::OrderRejected { .. } => "order_rejected",
             Self::MarketClearFailed { .. } => "market_clear_failed",
             Self::TransportPaid { .. } => "transport_paid",
-            Self::WarmMarketFlow { .. } => "warm_market_flow",
             Self::MacroFlow { .. } => "macro_flow",
         }
     }

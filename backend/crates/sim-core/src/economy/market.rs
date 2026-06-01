@@ -78,9 +78,3 @@ pub struct DormantMarkets(pub BTreeSet<MarketId>);
 /// core is graph-free at hydrate, so it cannot be recomputed on restore).
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct MarketDistances(pub BTreeMap<(MarketId, MarketId), i64>);
-
-/// Markets anchored (in `MarketChunks`) to a WARM chunk — they run the cheap
-/// aggregate warm-flow update instead of the full auction. Subset of
-/// `DormantMarkets`. Recomputed each tick by `refresh_dormant_markets_system`.
-#[derive(Resource, Default)]
-pub struct WarmMarkets(pub BTreeSet<MarketId>);

@@ -18,7 +18,6 @@ pub mod systems;
 pub mod trader_render;
 pub mod traders;
 pub mod transport;
-pub mod warm_flow;
 
 pub use accounts::*;
 pub use auction::*;
@@ -27,6 +26,7 @@ pub use goods::*;
 pub use ids::*;
 pub use inventory::*;
 pub use ledger::*;
+pub use macro_flow::*;
 pub use market::*;
 pub use materialize::MaterializedTraders;
 pub use money::*;
@@ -38,7 +38,6 @@ pub use systems::*;
 pub use trader_render::*;
 pub use traders::*;
 pub use transport::*;
-pub use warm_flow::*;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::Schedule;
@@ -67,7 +66,6 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(MarketChunks::default());
         world.insert_resource(DormantMarkets::default());
         world.insert_resource(MarketDistances::default());
-        world.insert_resource(WarmMarkets::default());
         world.insert_resource(crate::economy::materialize::MaterializedTraders::default());
         world.insert_resource(crate::economy::audit::LedgerAuditCursor::default());
         install_systems(schedule);
