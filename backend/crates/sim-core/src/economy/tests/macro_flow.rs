@@ -209,8 +209,10 @@ fn build_candidates_keeps_cross_edge_when_gap_exceeds_transport() {
     let mut distances = MarketDistances::default();
     distances.0.insert((a, b), 1); // 1 tile
     distances.0.insert((b, a), 1);
-    let mut cfg = EconomyConfig::default();
-    cfg.transport_cost_per_tile_unit = Money(50);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
 
     let candidates = build_candidates(&buckets, &distances, &cfg).unwrap();
     // q_cap = min(surplus 100, deficit 100) = 100.
@@ -246,8 +248,10 @@ fn build_candidates_prunes_cross_edge_when_gap_not_above_transport() {
     let mut distances = MarketDistances::default();
     distances.0.insert((a, b), 3);
     distances.0.insert((b, a), 3);
-    let mut cfg = EconomyConfig::default();
-    cfg.transport_cost_per_tile_unit = Money(50);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
     // gap value = 200 - 190 = 10 ; transport = (50*100/1000)*3 = 15 ; net = -5 <= 0.
     let candidates = build_candidates(&buckets, &distances, &cfg).unwrap();
     assert!(
@@ -282,8 +286,10 @@ fn build_candidates_prunes_cross_edge_at_exact_break_even() {
     let mut distances = MarketDistances::default();
     distances.0.insert((a, b), 2);
     distances.0.insert((b, a), 2);
-    let mut cfg = EconomyConfig::default();
-    cfg.transport_cost_per_tile_unit = Money(50);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
     // gap value = 10 ; transport = (50*100/1000)*2 = 10 ; net = 0 -> NOT kept (strict >).
     let candidates = build_candidates(&buckets, &distances, &cfg).unwrap();
     assert!(
@@ -314,8 +320,10 @@ fn build_candidates_drops_overflow_edge() {
     let mut distances = MarketDistances::default();
     distances.0.insert((a, b), i64::MAX); // pathological distance
     distances.0.insert((b, a), i64::MAX);
-    let mut cfg = EconomyConfig::default();
-    cfg.transport_cost_per_tile_unit = Money(50);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
     let candidates = build_candidates(&buckets, &distances, &cfg)
         .expect("gate overflow is pruned, never an Err");
     assert!(
