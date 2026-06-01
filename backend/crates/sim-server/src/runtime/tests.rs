@@ -1589,8 +1589,8 @@ async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
     let snap = runtime.economy_snapshot();
     assert_eq!(
         snap.markets.len(),
-        2,
-        "demo markets bootstrapped on empty hydrate"
+        4,
+        "demo markets bootstrapped on empty hydrate (2 original + 2 flow-demo)"
     );
     assert_eq!(
         snap.traders.len(),
@@ -1603,7 +1603,11 @@ async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
 fn live_runtime_seeds_demo_markets_and_trader() {
     let runtime = SimulationRuntime::new();
     let markets = runtime.world.resource::<sim_core::economy::Markets>();
-    assert_eq!(markets.0.len(), 2, "fresh world seeds two demo markets");
+    assert_eq!(
+        markets.0.len(),
+        4,
+        "fresh world seeds 2 original + 2 flow-demo markets"
+    );
     let traders = runtime.world.resource::<sim_core::economy::Traders>();
     assert_eq!(traders.0.len(), 1, "fresh world seeds one demo trader");
 }
