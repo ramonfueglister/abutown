@@ -2108,3 +2108,137 @@ fn dormant_producer_does_not_burst_dump() {
     );
     assert!(moved > 0, "but it does export up to the cap");
 }
+
+#[test]
+fn poisoning_market_does_not_abort_others() {
+    // Three markets. A (cheap surplus) and C (cheap surplus) both target B (dear
+    // deficit). A healthy independent pair D->E still conserves.
+    //
+    // NOTE (verified against the merged core, see also
+    // `macro_flow_settle_fault_isolates_and_conserves`): the spec/plan sketch a
+    // *cash* over-charge — B's buyer affording the first edge but not both — as
+    // the poisoning mechanism. That construction is UNREACHABLE here. STEP A
+    // (`build_macro_buckets`) caps each buyer's effective demand to
+    // `affordable_qty(cash, p_dst)`, and per accepted import edge `settle_flow`
+    // charges the buyer `dst_payment = src_revenue + transport = p_src*q +
+    // transport`, NOT `p_dst*q`. Since the STEP-D transport gate guarantees
+    // `transport < (p_dst - p_src)*q`, summing over a buyer's edges gives
+    // `total_charge < p_dst * effective_demand <= cash`. So `lock_cash` provably
+    // never under-funds at settle time and B emits no `MarketClearFailed`. We
+    // therefore assert the genuinely-true behavior: BOTH imports into B settle,
+    // global conservation holds, the healthy D->E pair flows, and NO edge faults.
+    let (m_a, m_b, m_c) = (MarketId(1), MarketId(2), MarketId(3));
+    let (m_d, m_e) = (MarketId(4), MarketId(5));
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+
+    // Surpluses A and C: 200 each @ ask 500.
+    inventory
+        .deposit(EconomicActorId(100), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply
+        .0
+        .insert(EconomicActorId(100), sp(100, m_a, 200, 500));
+    inventory
+        .deposit(EconomicActorId(101), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply
+        .0
+        .insert(EconomicActorId(101), sp(101, m_c, 200, 500));
+    // B's buyer wants 400 @ bid 2000. Funded for the full 400 at p_dst=2000:
+    // affordable_qty(450_000, 2000) = 450_000*1000/2000 = 225_000 >> 400, so the
+    // effective demand is the full 400 (NOT cash-capped). Both 200-unit imports
+    // settle because each only charges ~p_src(500)*200 + transport, far under cash.
+    accounts
+        .deposit(EconomicActorId(200), Money(450_000))
+        .unwrap();
+    demand
+        .0
+        .insert(EconomicActorId(200), dp(200, m_b, 400, 2000));
+
+    // Healthy independent pair D(cheap surplus)->E(dear deficit), fully funded.
+    inventory
+        .deposit(EconomicActorId(300), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply
+        .0
+        .insert(EconomicActorId(300), sp(300, m_d, 100, 500));
+    accounts
+        .deposit(EconomicActorId(400), Money(1_000_000_000))
+        .unwrap();
+    demand
+        .0
+        .insert(EconomicActorId(400), dp(400, m_e, 100, 2000));
+
+    let mut distances = MarketDistances(BTreeMap::new());
+    for (x, y) in [
+        (m_a, m_b),
+        (m_b, m_a),
+        (m_c, m_b),
+        (m_b, m_c),
+        (m_d, m_e),
+        (m_e, m_d),
+    ] {
+        distances.0.insert((x, y), 2);
+    }
+    let mut s = DormantScenario {
+        accounts,
+        inventory,
+        ledger: TradeLedger::default(),
+        demand,
+        supply,
+        market_goods: MarketGoods::default(),
+        dirty: crate::economy::DirtyMarketGoods::default(),
+        dormant: [m_a, m_b, m_c, m_d, m_e].into_iter().collect(),
+        distances,
+        config: EconomyConfig {
+            transport_cost_per_tile_unit: Money(50),
+            ..Default::default()
+        },
+    };
+    let money_before = s.accounts.total_money().unwrap();
+    let good_before = s.inventory.total_good(GOOD_FOOD).unwrap();
+    let d_seller = EconomicActorId(300);
+    let e_buyer = EconomicActorId(400);
+    let d_before = s.inventory.balance(d_seller, GOOD_FOOD).available;
+    let e_before = s.inventory.balance(e_buyer, GOOD_FOOD).available;
+    let b_buyer = EconomicActorId(200);
+    let b_before = s.inventory.balance(b_buyer, GOOD_FOOD).available;
+
+    run_flow(&mut s, 0).unwrap();
+
+    // Global conservation holds (atomic per-edge, transport a transfer).
+    assert_eq!(
+        s.accounts.total_money().unwrap(),
+        money_before,
+        "money conserved"
+    );
+    assert_eq!(
+        s.inventory.total_good(GOOD_FOOD).unwrap(),
+        good_before,
+        "goods conserved"
+    );
+    // Healthy pair flowed.
+    let moved = s.inventory.balance(e_buyer, GOOD_FOOD).available.0 - e_before.0;
+    assert!(moved > 0, "healthy D->E pair flowed");
+    assert_eq!(
+        d_before.0 - s.inventory.balance(d_seller, GOOD_FOOD).available.0,
+        moved
+    );
+    // BOTH imports into B settled (proof: lock_cash never under-funds) — B
+    // received the full 400 from A (200) + C (200), and NO edge faulted.
+    assert_eq!(
+        s.inventory.balance(b_buyer, GOOD_FOOD).available.0 - b_before.0,
+        400,
+        "both cheap surplus sources fully supplied B's deficit"
+    );
+    assert!(
+        !s.ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::MarketClearFailed { .. })),
+        "no settle-time fault: STEP A affordability caps make lock_cash always solvent"
+    );
+}
