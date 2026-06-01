@@ -571,6 +571,67 @@ describe('mobility state interpolation buffer', () => {
     expect(entry.current.world_coord).toEqual({ x: 50, y: 60 });
   });
 
+  it('birth-like new agents hard-appear without interpolation trail', () => {
+    let state = createMobilityOverlayState();
+    state = applyMobilityChunkDelta(
+      state,
+      {
+        type: 'mobility_chunk_delta',
+        protocol_version: 1,
+        world_id: 'abutopia',
+        tick: 1,
+        chunk: { x: 1, y: 1 },
+        changed_agents: [agentAt('agent:born:mother:1', 50, 60)],
+        changed_vehicles: [],
+        left_agents: [],
+        left_vehicles: [],
+      },
+      500,
+    );
+
+    const entry = state.agents.get('agent:born:mother:1')!;
+    expect(entry.prev.world_coord).toEqual({ x: 50, y: 60 });
+    expect(entry.current.world_coord).toEqual({ x: 50, y: 60 });
+
+    const rendered = interpolatedAgents(state, 550, 100);
+    expect(rendered).toHaveLength(1);
+    expect(rendered[0].world_coord).toEqual({ x: 50, y: 60 });
+  });
+
+  it('death-like left_agents hard-disappear before interpolation', () => {
+    let state = applyMobilitySnapshot(
+      createMobilityOverlayState(),
+      {
+        protocol_version: 1,
+        world_id: 'abutopia',
+        tick: 1,
+        agents: [agentAt('agent:elder:0', 10, 20)],
+        vehicles: [],
+        stops: [],
+      },
+      1000,
+    );
+
+    state = applyMobilityChunkDelta(
+      state,
+      {
+        type: 'mobility_chunk_delta',
+        protocol_version: 1,
+        world_id: 'abutopia',
+        tick: 2,
+        chunk: { x: 0, y: 0 },
+        changed_agents: [],
+        changed_vehicles: [],
+        left_agents: ['agent:elder:0'],
+        left_vehicles: [],
+      },
+      1100,
+    );
+
+    expect(state.agents.has('agent:elder:0')).toBe(false);
+    expect(interpolatedAgents(state, 1150, 100)).toHaveLength(0);
+  });
+
   it('interpolatedAgents lerps world_coord by t = (now - lastTickAt) / tickPeriodMs', () => {
     let state = applyMobilitySnapshot(
       createMobilityOverlayState(),
