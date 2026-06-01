@@ -97,7 +97,14 @@ pub fn capture_shopper_visits(
             continue;
         };
         let target = (unmet / per_unit).clamp(0, config.max_shoppers_per_market as i64) as usize;
-        let current = visits.0.values().filter(|v| v.market == key.market).count();
+        // Scope the in-flight count to THIS (market, good): the cap is per-good, so a
+        // multi-good market attracts foot traffic for each unmet good independently
+        // (not just the lowest GoodId). Deterministic + conservation-safe either way.
+        let current = visits
+            .0
+            .values()
+            .filter(|v| v.market == key.market && v.good == key.good)
+            .count();
         if current >= target {
             continue;
         }
