@@ -346,3 +346,36 @@ fn trader_arbitrages_between_markets_end_to_end() {
         total_money_before
     );
 }
+
+#[test]
+fn refresh_lod_runs_after_core_lod_reclassify() {
+    use bevy_ecs::prelude::*;
+    use crate::economy::{DormantMarkets, EconomyPlugin, MarketChunks, MarketId};
+    use crate::ids::ChunkCoord;
+    use crate::mobility::resources::Tick;
+    use crate::world::plugin::CorePlugin;
+    use crate::world::schedule::SimPlugin;
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    // Anchor a market to a chunk with NO active/hot subscriber -> reclassify
+    // leaves it non-Active, so refresh (running AFTER reclassify) marks it dormant.
+    let market = MarketId(77);
+    let coord = ChunkCoord { x: 9, y: 9 };
+    world
+        .resource_mut::<MarketChunks>()
+        .0
+        .insert(market, coord);
+    world.insert_resource(Tick(0));
+
+    schedule.run(&mut world);
+
+    assert!(
+        world.resource::<DormantMarkets>().0.contains(&market),
+        "RefreshLod observed the reclassified (non-active) chunk -> market is dormant"
+    );
+}

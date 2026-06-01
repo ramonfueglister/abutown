@@ -67,6 +67,14 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
         )
             .chain(),
     );
+    // The macro flow is stateful (writes dormant prices), so the set of markets
+    // it mutates must be a deterministic function of LOD classification. Anchor
+    // RefreshLod after CoreSet::LodReclassify. Inert (the CoreSet is simply not
+    // configured) when EconomyPlugin installs without CorePlugin; load-bearing
+    // only in the full SimPlugin stack, where it removes a classify/mutate race.
+    schedule.configure_sets(
+        EconomySet::RefreshLod.after(crate::world::schedule::CoreSet::LodReclassify),
+    );
     schedule.add_systems(
         (
             refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
