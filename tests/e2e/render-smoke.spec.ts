@@ -93,7 +93,9 @@ test('renders abutopia with 300 backend-driven pedestrians', async ({ page }) =>
     lastError: null,
   }));
   expect(
-    state.city.mobilityAgents.agents.filter((a: { id: string }) => !a.id.startsWith('trader:')),
+    state.city.mobilityAgents.agents.filter(
+      (a: { id: string }) => !a.id.startsWith('trader:') && !a.id.startsWith('shopper:'),
+    ),
   ).toHaveLength(300);
   expect(state.city.mobilityAgents.selectedId).toBeNull();
   expect(state.city.mobilityAgents.count).toBeGreaterThanOrEqual(300);
