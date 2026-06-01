@@ -1788,3 +1788,108 @@ fn one_sided_pair_flows_goods_but_price_is_pinned() {
         );
     }
 }
+
+#[test]
+fn goods_flow_from_cheap_surplus_to_dear_deficit() {
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 4, Money(50));
+    let seller = EconomicActorId(100);
+    let buyer = EconomicActorId(200);
+    let seller_before = s.inventory.balance(seller, GOOD_FOOD).available;
+    let buyer_before = s.inventory.balance(buyer, GOOD_FOOD).available;
+
+    run_flow(&mut s, 0).unwrap();
+
+    let seller_after = s.inventory.balance(seller, GOOD_FOOD).available;
+    let buyer_after = s.inventory.balance(buyer, GOOD_FOOD).available;
+    let moved = buyer_after.0 - buyer_before.0;
+    assert!(moved > 0, "goods moved into deficit market");
+    assert_eq!(
+        seller_before.0 - seller_after.0,
+        moved,
+        "same q left surplus"
+    );
+
+    let cross: Vec<_> = s
+        .ledger
+        .0
+        .iter()
+        .filter_map(|e| match e {
+            EconomyEvent::MacroFlow {
+                from_market,
+                to_market,
+                qty,
+                ..
+            } if from_market != to_market => Some((*from_market, *to_market, qty.0)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(cross.len(), 1, "exactly one cross-market flow");
+    assert_eq!(cross[0].0, MarketId(1), "from == surplus A");
+    assert_eq!(cross[0].1, MarketId(2), "to == deficit B");
+    assert_eq!(cross[0].2, moved);
+}
+
+#[test]
+fn direction_reverses_when_dear_and_cheap_swap() {
+    // Swap: now market 1 is the dear/demand side and market 2 the cheap/supply
+    // side — flow must reverse to from==2, to==1.
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+    inventory
+        .deposit(EconomicActorId(100), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply
+        .0
+        .insert(EconomicActorId(100), sp(100, m_b, 200, 500)); // cheap supply at B
+    accounts
+        .deposit(EconomicActorId(200), Money(1_000_000_000))
+        .unwrap();
+    demand
+        .0
+        .insert(EconomicActorId(200), dp(200, m_a, 200, 2000)); // dear demand at A
+
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), 4);
+    distances.0.insert((m_b, m_a), 4);
+    let config = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+
+    let mut s = DormantScenario {
+        accounts,
+        inventory,
+        ledger: TradeLedger::default(),
+        demand,
+        supply,
+        market_goods: MarketGoods::default(),
+        dirty: crate::economy::DirtyMarketGoods::default(),
+        dormant: [m_a, m_b].into_iter().collect(),
+        distances,
+        config,
+    };
+    run_flow(&mut s, 0).unwrap();
+
+    let cross: Vec<_> = s
+        .ledger
+        .0
+        .iter()
+        .filter_map(|e| match e {
+            EconomyEvent::MacroFlow {
+                from_market,
+                to_market,
+                ..
+            } if from_market != to_market => Some((*from_market, *to_market)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        cross,
+        vec![(MarketId(2), MarketId(1))],
+        "direction reversed"
+    );
+}
