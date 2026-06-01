@@ -70,6 +70,17 @@ pub(crate) enum TraderMutation {
     },
 }
 
+/// Sprite/id prefix for a render-actor by its actor-id namespace. Shopper actors
+/// (>= SHOPPER_ACTOR_OFFSET) render as pedestrians (`shopper:`), everything else
+/// (demo traders + flow shipments) as `trader:`.
+pub(crate) fn id_prefix(actor: EconomicActorId) -> &'static str {
+    if actor.0 >= crate::economy::shoppers::SHOPPER_ACTOR_OFFSET {
+        "shopper:"
+    } else {
+        "trader:"
+    }
+}
+
 /// Deterministic sprite-variant index for a trader id (FNV-1a, 8 variants).
 fn sprite_hash(id: &str) -> u32 {
     let mut h: u32 = 0x811c_9dc5;
@@ -186,8 +197,9 @@ pub(crate) fn plan_render_mutations(
         match (observed_now, was_observed) {
             // Appear: first time its current chunk is observed.
             (true, None) => {
-                let agent_id = AgentId(format!("trader:{}", actor.0));
-                let sprite = format!("trader:{}", sprite_hash(&agent_id.0));
+                let p = id_prefix(*actor);
+                let agent_id = AgentId(format!("{p}{}", actor.0));
+                let sprite = format!("{p}{}", sprite_hash(&agent_id.0));
                 muts.push(TraderMutation::Spawn {
                     actor: *actor,
                     agent_id,
@@ -359,7 +371,7 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                 world
                     .resource_mut::<AgentIdIndex>()
                     .0
-                    .remove(&AgentId(format!("trader:{}", actor.0)));
+                    .remove(&AgentId(format!("{}{}", id_prefix(actor), actor.0)));
                 world.resource_mut::<MaterializedTraders>().0.remove(&actor);
             }
         }
@@ -375,6 +387,7 @@ fn rendering_shipment_ids(materialized: &MaterializedTraders) -> BTreeSet<u64> {
     materialized
         .0
         .keys()
+        .filter(|a| a.0 < crate::economy::shoppers::SHOPPER_ACTOR_OFFSET)
         .filter_map(|a| a.0.checked_sub(SHIPMENT_ACTOR_OFFSET))
         .collect()
 }

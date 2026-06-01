@@ -2,6 +2,23 @@ use crate::economy::{GoodId, MarketId, NextShopperId, ShopperVisit, ShopperVisit
 use crate::routing::NodeId;
 
 #[test]
+fn id_prefix_distinguishes_shoppers_from_traders() {
+    use crate::economy::EconomicActorId;
+    use crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET;
+    use crate::economy::materialize::id_prefix;
+    use crate::economy::shoppers::SHOPPER_ACTOR_OFFSET;
+    assert_eq!(id_prefix(EconomicActorId(8003)), "trader:");
+    assert_eq!(
+        id_prefix(EconomicActorId(SHIPMENT_ACTOR_OFFSET + 1)),
+        "trader:"
+    );
+    assert_eq!(
+        id_prefix(EconomicActorId(SHOPPER_ACTOR_OFFSET + 1)),
+        "shopper:"
+    );
+}
+
+#[test]
 fn economy_config_has_shopper_tuning_defaults() {
     let c = crate::economy::EconomyConfig::default();
     assert!(c.shoppers_per_unit >= 1);
