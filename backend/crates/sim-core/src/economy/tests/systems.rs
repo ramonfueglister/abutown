@@ -348,13 +348,24 @@ fn trader_arbitrages_between_markets_end_to_end() {
 }
 
 #[test]
-fn refresh_lod_runs_after_core_lod_reclassify() {
+fn refresh_lod_observes_post_reclassify_lod_not_stale_active() {
+    // Discriminating test for the EconomySet::RefreshLod.after(CoreSet::LodReclassify)
+    // ordering edge.
+    //
+    // Setup: spawn a chunk entity with ActiveChunk but zero subscribers and no
+    // population. reclassify_chunk_lod_system will demote it Active→Asleep in the
+    // same tick. refresh_dormant_markets_system must run AFTER that demotion so it
+    // sees the post-reclassify (non-active) state and marks the market dormant.
+    //
+    // Ordering matters: if RefreshLod ran BEFORE LodReclassify it would observe the
+    // still-Active marker and the market would NOT be marked dormant (the assertion
+    // would fail), proving the .after() edge is load-bearing.
     use bevy_ecs::prelude::*;
     use crate::economy::{DormantMarkets, EconomyPlugin, MarketChunks, MarketId};
     use crate::ids::ChunkCoord;
     use crate::mobility::resources::Tick;
+    use crate::world::components::{ActiveChunk, ChunkCoordComp, ChunkSubscriberCount, LodCooldown};
     use crate::world::plugin::CorePlugin;
-    use crate::world::schedule::SimPlugin;
 
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
@@ -362,20 +373,36 @@ fn refresh_lod_runs_after_core_lod_reclassify() {
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
     EconomyPlugin.install(&mut world, &mut schedule);
 
-    // Anchor a market to a chunk with NO active/hot subscriber -> reclassify
-    // leaves it non-Active, so refresh (running AFTER reclassify) marks it dormant.
     let market = MarketId(77);
     let coord = ChunkCoord { x: 9, y: 9 };
+
+    // Anchor market to the chunk.
     world
         .resource_mut::<MarketChunks>()
         .0
         .insert(market, coord);
+
+    // Spawn an Active chunk entity with zero subscribers and cooldown=0. No
+    // population entry → reclassify target is Asleep. With cooldown=0 (no
+    // hysteresis) the demotion fires immediately: Active→Asleep.
+    world.spawn((
+        ChunkCoordComp(coord),
+        ActiveChunk,
+        ChunkSubscriberCount(0),
+        LodCooldown(0),
+    ));
+
     world.insert_resource(Tick(0));
 
+    // Run one full tick. reclassify demotes Active→Asleep first (CoreSet::LodReclassify),
+    // then refresh_dormant_markets_system (EconomySet::RefreshLod, ordered after) sees no
+    // Active/Hot chunk at coord → market is dormant.
     schedule.run(&mut world);
 
     assert!(
         world.resource::<DormantMarkets>().0.contains(&market),
-        "RefreshLod observed the reclassified (non-active) chunk -> market is dormant"
+        "RefreshLod must observe the reclassified (Asleep) chunk state; \
+         if the ordering edge were removed it would see ActiveChunk and market \
+         would NOT be dormant"
     );
 }
