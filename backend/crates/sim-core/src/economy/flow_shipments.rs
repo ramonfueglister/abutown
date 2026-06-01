@@ -59,3 +59,9 @@ pub fn shipment_travel_ticks(dist: i64, config: &EconomyConfig) -> u64 {
     let speed = config.trader_tiles_per_tick.max(1);
     (dist.max(0) as u64).div_ceil(speed).max(1)
 }
+
+/// Drop shipments that have reached their destination by `tick`. Deterministic
+/// (BTreeMap retain). Called once per tick by the materialize system.
+pub fn expire_arrived(shipments: &mut FlowShipments, tick: u64) {
+    shipments.0.retain(|_, s| !s.arrived(tick));
+}

@@ -121,3 +121,38 @@ fn macro_flow_captures_one_shipment_per_cross_edge() {
     assert!(s.travel_ticks > 0);
     assert_eq!(next_id.0, 1);
 }
+
+#[test]
+fn expire_arrived_drops_only_arrived() {
+    let mut s = FlowShipments::default();
+    s.0.insert(
+        0,
+        FlowShipment {
+            id: 0,
+            from_market: MarketId(1),
+            to_market: MarketId(2),
+            good: GoodId(0),
+            qty: Quantity(1),
+            start_tick: 0,
+            travel_ticks: 10,
+        },
+    );
+    s.0.insert(
+        1,
+        FlowShipment {
+            id: 1,
+            from_market: MarketId(1),
+            to_market: MarketId(2),
+            good: GoodId(0),
+            qty: Quantity(1),
+            start_tick: 5,
+            travel_ticks: 10,
+        },
+    );
+    crate::economy::flow_shipments::expire_arrived(&mut s, /*tick=*/ 12);
+    assert_eq!(
+        s.0.keys().copied().collect::<Vec<_>>(),
+        vec![1],
+        "shipment 0 arrived (0+10<=12), 1 not (5+10>12)"
+    );
+}
