@@ -54,11 +54,17 @@ fn seed_demo_economy_creates_two_markets_and_one_trader() {
     let distances = world.resource::<crate::economy::MarketDistances>();
     assert_eq!(distances.0.len(), 2, "both directed pairs baked");
     assert_eq!(
-        distances.0.get(&(MarketId(9_001), MarketId(9_002))).copied(),
+        distances
+            .0
+            .get(&(MarketId(9_001), MarketId(9_002)))
+            .copied(),
         Some(11)
     );
     assert_eq!(
-        distances.0.get(&(MarketId(9_002), MarketId(9_001))).copied(),
+        distances
+            .0
+            .get(&(MarketId(9_002), MarketId(9_001)))
+            .copied(),
         Some(11)
     );
 }

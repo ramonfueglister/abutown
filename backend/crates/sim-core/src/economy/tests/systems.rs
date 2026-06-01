@@ -360,12 +360,14 @@ fn refresh_lod_observes_post_reclassify_lod_not_stale_active() {
     // Ordering matters: if RefreshLod ran BEFORE LodReclassify it would observe the
     // still-Active marker and the market would NOT be marked dormant (the assertion
     // would fail), proving the .after() edge is load-bearing.
-    use bevy_ecs::prelude::*;
     use crate::economy::{DormantMarkets, EconomyPlugin, MarketChunks, MarketId};
     use crate::ids::ChunkCoord;
     use crate::mobility::resources::Tick;
-    use crate::world::components::{ActiveChunk, ChunkCoordComp, ChunkSubscriberCount, LodCooldown};
+    use crate::world::components::{
+        ActiveChunk, ChunkCoordComp, ChunkSubscriberCount, LodCooldown,
+    };
     use crate::world::plugin::CorePlugin;
+    use bevy_ecs::prelude::*;
 
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
@@ -377,10 +379,7 @@ fn refresh_lod_observes_post_reclassify_lod_not_stale_active() {
     let coord = ChunkCoord { x: 9, y: 9 };
 
     // Anchor market to the chunk.
-    world
-        .resource_mut::<MarketChunks>()
-        .0
-        .insert(market, coord);
+    world.resource_mut::<MarketChunks>().0.insert(market, coord);
 
     // Spawn an Active chunk entity with zero subscribers and cooldown=0. No
     // population entry → reclassify target is Asleep. With cooldown=0 (no

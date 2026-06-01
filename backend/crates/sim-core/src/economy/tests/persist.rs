@@ -188,8 +188,14 @@ fn economy_snapshot_round_trips() {
     assert_eq!(
         snap.market_distances,
         vec![
-            ((crate::economy::MarketId(1), crate::economy::MarketId(2)), 4),
-            ((crate::economy::MarketId(2), crate::economy::MarketId(1)), 4),
+            (
+                (crate::economy::MarketId(1), crate::economy::MarketId(2)),
+                4
+            ),
+            (
+                (crate::economy::MarketId(2), crate::economy::MarketId(1)),
+                4
+            ),
         ],
         "directed distances persist in sorted BTreeMap order"
     );
