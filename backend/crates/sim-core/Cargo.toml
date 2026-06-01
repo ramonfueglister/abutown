@@ -28,3 +28,7 @@ harness = false
 [[bench]]
 name = "mobility_tick_lod"
 harness = false
+
+[[bench]]
+name = "economy_tick"
+harness = false
