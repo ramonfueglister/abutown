@@ -161,6 +161,11 @@ fn seed(world: &mut World) {
         .resource_mut::<MarketChunks>()
         .0
         .insert(m, ChunkCoord { x: 2, y: 3 });
+    {
+        let mut d = world.resource_mut::<crate::economy::MarketDistances>();
+        d.0.insert((m, crate::economy::MarketId(2)), 4);
+        d.0.insert((crate::economy::MarketId(2), m), 4);
+    }
 }
 
 #[test]
@@ -179,6 +184,14 @@ fn economy_snapshot_round_trips() {
     assert_eq!(
         snap, snap2,
         "extract->serialize->deserialize->apply->extract is identity"
+    );
+    assert_eq!(
+        snap.market_distances,
+        vec![
+            ((crate::economy::MarketId(1), crate::economy::MarketId(2)), 4),
+            ((crate::economy::MarketId(2), crate::economy::MarketId(1)), 4),
+        ],
+        "directed distances persist in sorted BTreeMap order"
     );
 }
 
