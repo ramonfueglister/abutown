@@ -207,6 +207,9 @@ pub struct Candidate {
     pub transport_total: Money,
     /// 0 for self-edges; strictly > 0 for kept cross-edges.
     pub net_gain: i64,
+    /// Tile distance src->dst (0 for self-edges); lets STEP F recompute transport
+    /// exactly on the actual `q` via `transport_cost(dist, q, rate)`.
+    pub dist: i64,
 }
 
 /// STEP D: enumerate candidate directed edges per good. Self-edges (matched > 0)
@@ -243,6 +246,7 @@ pub fn build_candidates(
                     p_dst: *price,
                     transport_total: Money::ZERO,
                     net_gain: 0,
+                    dist: 0,
                 });
             }
         }
@@ -298,10 +302,106 @@ pub fn build_candidates(
                         p_dst: *p_dst,
                         transport_total,
                         net_gain,
+                        dist,
                     });
                 }
             }
         }
     }
     Ok(candidates)
+}
+
+/// STEP E: total order over distinct keys — `net_gain DESC, good ASC, src ASC,
+/// dst ASC`. All ids are BTree-keyed, so no surviving tie affects ordering.
+pub fn sort_candidates(candidates: &mut [Candidate]) {
+    candidates.sort_by(|a, b| {
+        b.net_gain
+            .cmp(&a.net_gain)
+            .then(a.good.cmp(&b.good))
+            .then(a.src.cmp(&b.src))
+            .then(a.dst.cmp(&b.dst))
+    });
+}
+
+/// A flow chosen by the STEP-F pass, ready for STEP-G settlement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedFlow {
+    pub good: GoodId,
+    pub src: MarketId,
+    pub dst: MarketId,
+    pub q: i64,
+    pub p_src: Money,
+    pub p_dst: Money,
+    pub dist: i64,
+}
+
+/// STEP F: single greedy pass over the sorted candidates with disjoint per-market
+/// budgets (`remaining_matched` / `remaining_surplus` / `remaining_need`). Self-edges
+/// consume matched; cross-edges consume surplus/need. Each budget is consumed
+/// exactly once -> no double-spend; the output is a pure function of the sort.
+pub fn plan_flows(
+    candidates: &[Candidate],
+    buckets: &BTreeMap<MarketGoodKey, MacroBucket>,
+) -> Vec<PlannedFlow> {
+    let mut remaining_matched: BTreeMap<(GoodId, MarketId), i64> = BTreeMap::new();
+    let mut remaining_surplus: BTreeMap<(GoodId, MarketId), i64> = BTreeMap::new();
+    let mut remaining_need: BTreeMap<(GoodId, MarketId), i64> = BTreeMap::new();
+    for (key, b) in buckets {
+        let (matched, surplus, deficit) = classify_bucket(b.total_demand(), b.total_supply());
+        remaining_matched.insert((key.good, key.market), matched);
+        remaining_surplus.insert((key.good, key.market), surplus);
+        remaining_need.insert((key.good, key.market), deficit);
+    }
+
+    let mut flows: Vec<PlannedFlow> = Vec::new();
+    for c in candidates {
+        if c.src == c.dst {
+            let avail = remaining_matched
+                .get_mut(&(c.good, c.src))
+                .copied()
+                .unwrap_or(0);
+            let q = avail.min(c.q_cap);
+            if q <= 0 {
+                continue;
+            }
+            if let Some(slot) = remaining_matched.get_mut(&(c.good, c.src)) {
+                *slot -= q;
+            }
+            flows.push(PlannedFlow {
+                good: c.good,
+                src: c.src,
+                dst: c.dst,
+                q,
+                p_src: c.p_src,
+                p_dst: c.p_dst,
+                dist: c.dist,
+            });
+        } else {
+            let surplus = remaining_surplus
+                .get(&(c.good, c.src))
+                .copied()
+                .unwrap_or(0);
+            let need = remaining_need.get(&(c.good, c.dst)).copied().unwrap_or(0);
+            let q = surplus.min(need).min(c.q_cap);
+            if q <= 0 {
+                continue;
+            }
+            if let Some(slot) = remaining_surplus.get_mut(&(c.good, c.src)) {
+                *slot -= q;
+            }
+            if let Some(slot) = remaining_need.get_mut(&(c.good, c.dst)) {
+                *slot -= q;
+            }
+            flows.push(PlannedFlow {
+                good: c.good,
+                src: c.src,
+                dst: c.dst,
+                q,
+                p_src: c.p_src,
+                p_dst: c.p_dst,
+                dist: c.dist,
+            });
+        }
+    }
+    flows
 }

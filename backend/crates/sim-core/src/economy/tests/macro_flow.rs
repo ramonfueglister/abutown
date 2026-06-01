@@ -4,9 +4,9 @@ use crate::economy::MarketDistances;
 use crate::economy::macro_flow::synthetic_price;
 use crate::economy::macro_flow::{Candidate, MacroBucket, build_candidates, build_macro_buckets};
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD, InventoryBook,
-    MarketGoodKey, MarketGoods, MarketId, Money, Quantity, SettlementPolicy, SupplyPool,
-    SupplyPools,
+    AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD, GoodId,
+    InventoryBook, MarketGoodKey, MarketGoods, MarketId, Money, Quantity, SettlementPolicy,
+    SupplyPool, SupplyPools,
 };
 
 fn bucket(price: Money, buyers: Vec<(u64, i64)>, sellers: Vec<(u64, i64)>) -> MacroBucket {
@@ -358,4 +358,187 @@ fn build_candidates_emits_gate_exempt_self_edge() {
         self_edges[0].net_gain, 0,
         "self-edge net_gain is identically 0, gate-exempt"
     );
+}
+
+#[test]
+fn sort_candidates_total_order() {
+    use crate::economy::macro_flow::sort_candidates;
+
+    fn cand(good: u16, src: u32, dst: u32, net: i64) -> Candidate {
+        Candidate {
+            good: GoodId(good),
+            src: MarketId(src),
+            dst: MarketId(dst),
+            q_cap: 10,
+            p_src: Money(500),
+            p_dst: Money(2_000),
+            transport_total: Money(0),
+            net_gain: net,
+            dist: 1,
+        }
+    }
+
+    let mut v = vec![
+        cand(1, 1, 2, 100),
+        cand(1, 1, 3, 100), // same net & good & src; dst 3 after dst 2
+        cand(2, 1, 2, 100), // same net; good 2 after good 1
+        cand(1, 1, 2, 200), // higher net first
+    ];
+    sort_candidates(&mut v);
+    assert_eq!(v[0].net_gain, 200);
+    assert_eq!((v[1].good.0, v[1].src.0, v[1].dst.0), (1, 1, 2));
+    assert_eq!((v[2].good.0, v[2].src.0, v[2].dst.0), (1, 1, 3));
+    assert_eq!((v[3].good.0, v[3].src.0, v[3].dst.0), (2, 1, 2));
+}
+
+#[test]
+fn plan_flows_consumes_disjoint_budgets_once() {
+    use crate::economy::macro_flow::sort_candidates;
+    use crate::economy::macro_flow::{PlannedFlow, plan_flows};
+
+    let a = MarketId(1); // surplus 30, matched 0
+    let b = MarketId(2); // deficit 20
+    let c = MarketId(3); // deficit 50
+    let mut buckets: BTreeMap<MarketGoodKey, MacroBucket> = BTreeMap::new();
+    buckets.insert(
+        MarketGoodKey {
+            market: a,
+            good: GOOD_FOOD,
+        },
+        bucket(Money(500), vec![], vec![(10, 30)]),
+    ); // surplus 30
+    buckets.insert(
+        MarketGoodKey {
+            market: b,
+            good: GOOD_FOOD,
+        },
+        bucket(Money(2_000), vec![(20, 20)], vec![]),
+    ); // deficit 20
+    buckets.insert(
+        MarketGoodKey {
+            market: c,
+            good: GOOD_FOOD,
+        },
+        bucket(Money(3_000), vec![(30, 50)], vec![]),
+    ); // deficit 50 (higher net first)
+    let mut distances = MarketDistances::default();
+    for (x, y) in [(a, b), (a, c), (b, a), (c, a)] {
+        distances.0.insert((x, y), 1);
+    }
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+
+    let mut candidates = build_candidates(&buckets, &distances, &cfg).unwrap();
+    sort_candidates(&mut candidates);
+    let flows: Vec<PlannedFlow> = plan_flows(&candidates, &buckets);
+    // a->c has higher net_gain (p_dst 3000 > 2000) so it fills first: q=min(surplus30, need50)=30.
+    // a->b then sees remaining_surplus[a]=0 -> q=0 -> skipped.
+    let total_from_a: i64 = flows.iter().filter(|f| f.src == a).map(|f| f.q).sum();
+    assert_eq!(
+        total_from_a, 30,
+        "surplus consumed exactly once across cross-edges"
+    );
+    assert!(flows.iter().any(|f| f.src == a && f.dst == c && f.q == 30));
+    assert!(
+        !flows.iter().any(|f| f.src == a && f.dst == b),
+        "second cross-edge gets nothing once surplus is spent"
+    );
+}
+
+#[test]
+fn plan_flows_self_and_cross_are_disjoint() {
+    use crate::economy::macro_flow::plan_flows;
+    use crate::economy::macro_flow::sort_candidates;
+
+    let a = MarketId(1); // D=20, S=50 -> matched 20, surplus 30
+    let b = MarketId(2); // deficit 40
+    let mut buckets: BTreeMap<MarketGoodKey, MacroBucket> = BTreeMap::new();
+    buckets.insert(
+        MarketGoodKey {
+            market: a,
+            good: GOOD_FOOD,
+        },
+        bucket(Money(500), vec![(11, 20)], vec![(10, 50)]),
+    );
+    buckets.insert(
+        MarketGoodKey {
+            market: b,
+            good: GOOD_FOOD,
+        },
+        bucket(Money(2_000), vec![(20, 40)], vec![]),
+    );
+    let mut distances = MarketDistances::default();
+    distances.0.insert((a, b), 1);
+    distances.0.insert((b, a), 1);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+    let mut candidates = build_candidates(&buckets, &distances, &cfg).unwrap();
+    sort_candidates(&mut candidates);
+    let flows = plan_flows(&candidates, &buckets);
+    let self_q: i64 = flows
+        .iter()
+        .filter(|f| f.src == a && f.dst == a)
+        .map(|f| f.q)
+        .sum();
+    let cross_q: i64 = flows
+        .iter()
+        .filter(|f| f.src == a && f.dst == b)
+        .map(|f| f.q)
+        .sum();
+    assert_eq!(self_q, 20, "matched cleared locally");
+    assert_eq!(cross_q, 30, "surplus exported; budgets never contend");
+}
+
+#[test]
+fn plan_flows_tiebreak_is_stable_ascending_dst() {
+    use crate::economy::macro_flow::plan_flows;
+    use crate::economy::macro_flow::sort_candidates;
+
+    let build = || {
+        let a = MarketId(1); // surplus 30
+        let b = MarketId(2); // deficit 30, p_dst 2000
+        let c = MarketId(3); // deficit 30, p_dst 2000 (equal net_gain & dist -> tie)
+        let mut buckets: BTreeMap<MarketGoodKey, MacroBucket> = BTreeMap::new();
+        buckets.insert(
+            MarketGoodKey {
+                market: a,
+                good: GOOD_FOOD,
+            },
+            bucket(Money(500), vec![], vec![(10, 30)]),
+        );
+        buckets.insert(
+            MarketGoodKey {
+                market: b,
+                good: GOOD_FOOD,
+            },
+            bucket(Money(2_000), vec![(20, 30)], vec![]),
+        );
+        buckets.insert(
+            MarketGoodKey {
+                market: c,
+                good: GOOD_FOOD,
+            },
+            bucket(Money(2_000), vec![(30, 30)], vec![]),
+        );
+        let mut distances = MarketDistances::default();
+        for (x, y) in [(a, b), (a, c), (b, a), (c, a)] {
+            distances.0.insert((x, y), 1);
+        }
+        let cfg = EconomyConfig {
+            transport_cost_per_tile_unit: Money(50),
+            ..Default::default()
+        };
+        let mut candidates = build_candidates(&buckets, &distances, &cfg).unwrap();
+        sort_candidates(&mut candidates);
+        plan_flows(&candidates, &buckets)
+    };
+    let flows = build();
+    // dst b (lower id) wins the whole surplus; c gets nothing.
+    assert!(flows.iter().any(|f| f.dst == MarketId(2) && f.q == 30));
+    assert!(!flows.iter().any(|f| f.dst == MarketId(3)));
+    assert_eq!(flows, build(), "planning is byte-identical across runs");
 }
