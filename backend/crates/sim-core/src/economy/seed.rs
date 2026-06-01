@@ -21,6 +21,13 @@ use crate::routing::{Graph, NodeSpatialIndex};
 const REF_A: (f32, f32) = (2.0, 3.0);
 const REF_B: (f32, f32) = (13.0, 3.0);
 
+/// Reference points for the dormant flow-demo market pair (Task 7).  Both sit
+/// at grass-row y≈48 (chunk row 1), far apart in x so their route crosses the
+/// transit chunk (3,1) while both market chunks stay ≥2 chunks from it.
+/// F_A @ tile (16,48) → chunk (0,1); F_B @ tile (208,48) → chunk (6,1).
+const REF_FA: (f32, f32) = (16.0, 48.0);
+const REF_FB: (f32, f32) = (208.0, 48.0);
+
 /// Seed two anchored markets, a supplier, a consumer, and one trader cycling
 /// between them. Requires `Graph` + `NodeSpatialIndex` (the spatial seeder runs
 /// after `RoutingPlugin`). No-ops only if the graph is too small to host two
@@ -179,6 +186,100 @@ pub fn seed_demo_economy(world: &mut World) {
             sell_discount_bps: 500,
             order_ttl_ticks: 20,
             state: TraderState::Buying { order: None },
+        },
+    );
+
+    // ── Task 7: dormant flow-demo market pair ────────────────────────────────
+    // F_A @ tile ≈(16,48) chunk (0,1); F_B @ tile ≈(208,48) chunk (6,1).
+    // Both are ≥3 chunks from the transit chunk (3,1) → never pulled Active
+    // by a 3×3+ring subscription centred on (3,1). The straight-line grass
+    // route at y≈48 crosses (3,1), so a flow-shipment is visible there.
+    // Avoids the pinned chunk (3,2). Standing GOOD_FOOD imbalance (supply@FA,
+    // demand@FB) → recurring MacroFlow every macro_flow_interval_ticks.
+    let (node_fa, node_fb) = {
+        let spatial = world.resource::<NodeSpatialIndex>();
+        match (spatial.nearest(REF_FA), spatial.nearest(REF_FB)) {
+            (Some(fa), Some(fb)) if fa != fb => (fa, fb),
+            _ => return, // graph too small; skip flow-demo markets
+        }
+    };
+    let (chunk_fa, chunk_fb, dist_fa_fb) = {
+        let graph = world.resource::<Graph>();
+        let pfa = graph.node(node_fa).position;
+        let pfb = graph.node(node_fb).position;
+        (
+            crate::mobility::chunk_of(pfa.0, pfa.1, 32),
+            crate::mobility::chunk_of(pfb.0, pfb.1, 32),
+            manhattan_tiles(graph, node_fa, node_fb),
+        )
+    };
+    let (m_fa, m_fb) = (MarketId(9_003), MarketId(9_004));
+    {
+        let mut markets = world.resource_mut::<Markets>();
+        markets.0.insert(
+            m_fa,
+            MarketSite {
+                id: m_fa,
+                node_id: node_fa,
+                name: "Flow Demo A".to_string(),
+            },
+        );
+        markets.0.insert(
+            m_fb,
+            MarketSite {
+                id: m_fb,
+                node_id: node_fb,
+                name: "Flow Demo B".to_string(),
+            },
+        );
+    }
+    {
+        let mut anchors = world.resource_mut::<MarketChunks>();
+        anchors.0.insert(m_fa, chunk_fa);
+        anchors.0.insert(m_fb, chunk_fb);
+    }
+    {
+        let mut distances = world.resource_mut::<MarketDistances>();
+        distances.0.insert((m_fa, m_fb), dist_fa_fb);
+        distances.0.insert((m_fb, m_fa), dist_fa_fb);
+    }
+    // Flow actors: supplier at F_A, consumer at F_B for GOOD_FOOD.
+    // Reuses the second good (GOOD_FOOD) introduced in Slice 1 (ids 8_021/8_022
+    // are fresh — existing pools use 8_011/8_012 at m_a/m_b).
+    let flow_supplier = EconomicActorId(8_021);
+    let flow_consumer = EconomicActorId(8_022);
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(flow_supplier, GOOD_FOOD, Quantity(1_000_000))
+        .expect("seed: flow-demo food supplier goods");
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(flow_consumer, Money(1_000_000))
+        .expect("seed: flow-demo food consumer cash");
+    world.resource_mut::<SupplyPools>().0.insert(
+        flow_supplier,
+        SupplyPool {
+            actor: flow_supplier,
+            market: m_fa,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<DemandPools>().0.insert(
+        flow_consumer,
+        DemandPool {
+            actor: flow_consumer,
+            market: m_fb,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(10),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
         },
     );
 }
