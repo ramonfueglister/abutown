@@ -219,7 +219,8 @@ pub fn build_candidates(
     config: &EconomyConfig,
 ) -> Result<Vec<Candidate>, EconomyError> {
     // Per good, per market: (matched, surplus, deficit, price).
-    let mut by_good: BTreeMap<GoodId, BTreeMap<MarketId, (i64, i64, i64, Money)>> = BTreeMap::new();
+    type MarketClassification = (i64, i64, i64, Money);
+    let mut by_good: BTreeMap<GoodId, BTreeMap<MarketId, MarketClassification>> = BTreeMap::new();
     for (key, b) in buckets {
         let (matched, surplus, deficit) = classify_bucket(b.total_demand(), b.total_supply());
         by_good
