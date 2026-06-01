@@ -182,6 +182,56 @@ fn warm_flow_conserves_with_two_sided_pro_rata() {
 }
 
 #[test]
+fn warm_flow_conserves_above_reference_price() {
+    // Regression: when the warm reference price exceeds 1.0 scale-unit
+    // (Money(1000)), per-unit cash > 1 weight-unit. A clamping
+    // prorata_distribute(goods, buyers_total) would cap seller credit at the
+    // traded quantity and destroy the price premium; apportion_cash must
+    // distribute the FULL buyers_total so money is conserved exactly.
+    let market = MarketId(1);
+    let buyer = EconomicActorId(1);
+    let seller = EconomicActorId(2);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut ledger = TradeLedger::default();
+    accounts.deposit(buyer, Money(1_000_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(1_000))
+        .unwrap();
+    let mut demand = DemandPools::default();
+    demand.0.insert(buyer, dp(1, market, 100));
+    let mut supply = SupplyPools::default();
+    supply.0.insert(seller, sp(2, market, 100));
+    // ref price 2000 -> 2 money per unit, the clamp-binding regime.
+    let mg = with_ref_price(market, Money(2_000));
+    let warm: BTreeSet<MarketId> = [market].into_iter().collect();
+    let cfg = EconomyConfig::default();
+    let m0 = accounts.total_money().unwrap();
+    let g0 = inventory.total_good(GOOD_FOOD).unwrap();
+
+    run_warm_market_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mg,
+        &warm,
+        &cfg,
+        0,
+    )
+    .unwrap();
+
+    // Q=100 traded at 2 money/unit: buyer debited 200, seller credited 200.
+    assert_eq!(inventory.balance(buyer, GOOD_FOOD).available, Quantity(100));
+    assert_eq!(accounts.account(seller).available, Money(200));
+    assert_eq!(accounts.account(buyer).available, Money(1_000_000 - 200));
+    // Conservation: no cash destroyed despite the above-reference price.
+    assert_eq!(accounts.total_money().unwrap(), m0);
+    assert_eq!(inventory.total_good(GOOD_FOOD).unwrap(), g0);
+}
+
+#[test]
 fn warm_flow_only_fires_on_interval() {
     let market = MarketId(1);
     let mut accounts = AccountBook::default();

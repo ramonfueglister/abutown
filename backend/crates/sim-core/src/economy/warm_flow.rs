@@ -10,7 +10,7 @@ use crate::economy::pools::affordable_qty;
 use crate::economy::{
     AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent,
     InventoryBook, MarketGoodKey, MarketGoods, MarketId, Money, Quantity, SupplyPools, TradeLedger,
-    checked_order_value, prorata_distribute,
+    apportion_cash, checked_order_value, prorata_distribute,
 };
 
 fn warm_ref_price(market_goods: &MarketGoods, key: MarketGoodKey, config: &EconomyConfig) -> Money {
@@ -116,12 +116,18 @@ pub fn run_warm_market_flow_at_tick(
 
         // Per-buyer floored cost; the exact sum is distributed to sellers so
         // both sides move identical cash (money conserved despite rounding).
+        // apportion_cash (NOT prorata_distribute): per-unit cash exceeds one
+        // goods-unit at any price > 1.0 scale-unit, and prorata_distribute's
+        // min(total, Σweights) clamp would cap seller credit at the traded
+        // quantity and silently destroy the price premium (warm_flow has no
+        // transport operator to absorb it). apportion_cash distributes the
+        // FULL buyers_total, so Σ seller_cash == buyers_total exactly.
         let mut costs: Vec<i64> = Vec::with_capacity(buyers.len());
         for goods in &buyer_goods {
             costs.push(checked_order_value(price, Quantity(*goods))?.0);
         }
         let buyers_total: i64 = costs.iter().sum();
-        let seller_cash = prorata_distribute(&seller_goods, buyers_total);
+        let seller_cash = apportion_cash(&seller_goods, buyers_total);
 
         for (idx, (actor, _)) in buyers.iter().enumerate() {
             let goods = buyer_goods[idx];
