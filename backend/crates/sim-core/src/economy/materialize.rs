@@ -127,29 +127,39 @@ fn leg_polyline(
     if poly.is_empty() { None } else { Some(poly) }
 }
 
-/// Pure planner: decide the render mutation for each trader given the current-leg
-/// route polylines (keyed by actor) and the set of observed (Active/Hot) chunks.
-/// No ECS world access — fully unit-testable.
-pub(crate) fn plan_mutations(
-    traders: &Traders,
-    config: &EconomyConfig,
+/// A render-actor input to `plan_render_mutations`: an opaque id, the current-leg
+/// route polyline, and the progress along it. Demo `Trader`s and flow shipments
+/// both produce these — the lifecycle machine never sees their economic source.
+pub(crate) struct RenderActor<'a> {
+    pub actor: EconomicActorId,
+    pub polyline: &'a [(f32, f32)],
+    pub progress: f32, // [0,1]
+}
+
+/// Ghost-free Spawn/Update/Despawn lifecycle (the #66 logic), generic over the
+/// source of (actor, polyline, progress). Demo traders and flow shipments both
+/// feed this. No ECS world access — fully unit-testable.
+pub(crate) fn plan_render_mutations(
+    actors: &[RenderActor<'_>],
     materialized: &MaterializedTraders,
-    routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
     observed: &BTreeSet<ChunkCoord>,
 ) -> Vec<TraderMutation> {
     let mut muts = Vec::new();
-    for (actor, trader) in &traders.0 {
+    let mut live: BTreeSet<EconomicActorId> = BTreeSet::new();
+    for ra in actors {
+        live.insert(ra.actor);
+        let actor = &ra.actor;
         let was_observed = materialized.0.get(actor).map(|m| m.observed);
-        let Some(polyline) = routes.get(actor).filter(|p| !p.is_empty()) else {
+        if ra.polyline.is_empty() {
             // No walkable route this tick: a materialized agent can't be positioned,
             // so retire it.
             if was_observed.is_some() {
                 muts.push(TraderMutation::Despawn { actor: *actor });
             }
             continue;
-        };
-        let travel = trader_travel(trader, config);
-        let t = leg_progress(&trader.state, travel);
+        }
+        let polyline = ra.polyline;
+        let t = ra.progress;
         let (x, y) = world_coord_at_progress_slice(polyline, t);
         let (nx, ny) = world_coord_at_progress_slice(polyline, (t + 0.02).min(1.0));
         let dir = dir_from_delta(nx - x, ny - y);
@@ -192,13 +202,44 @@ pub(crate) fn plan_mutations(
             (false, None) => {}
         }
     }
-    // Despawn agents whose trader has been removed from `Traders`.
+    // Despawn any materialized actor no longer in `actors`.
     for actor in materialized.0.keys() {
-        if !traders.0.contains_key(actor) {
+        if !live.contains(actor) {
             muts.push(TraderMutation::Despawn { actor: *actor });
         }
     }
     muts
+}
+
+/// Pure planner: decide the render mutation for each demo trader given the
+/// current-leg route polylines (keyed by actor) and the set of observed
+/// (Active/Hot) chunks. Thin adapter over `plan_render_mutations`: builds the
+/// `RenderActor` list from `Traders` (progress via `trader_travel`/`leg_progress`).
+/// No ECS world access — fully unit-testable.
+pub(crate) fn plan_mutations(
+    traders: &Traders,
+    config: &EconomyConfig,
+    materialized: &MaterializedTraders,
+    routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
+    observed: &BTreeSet<ChunkCoord>,
+) -> Vec<TraderMutation> {
+    let actors: Vec<RenderActor<'_>> = traders
+        .0
+        .iter()
+        .filter_map(|(actor, trader)| {
+            let polyline = routes.get(actor)?;
+            if polyline.is_empty() {
+                return None;
+            }
+            let progress = leg_progress(&trader.state, trader_travel(trader, config));
+            Some(RenderActor {
+                actor: *actor,
+                polyline,
+                progress,
+            })
+        })
+        .collect();
+    plan_render_mutations(&actors, materialized, observed)
 }
 
 /// Apply render mutations to the world: spawn/update/despawn the trader-agent

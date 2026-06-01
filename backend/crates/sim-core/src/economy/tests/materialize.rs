@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_ecs::prelude::*;
 
-use crate::economy::materialize::{MaterializedTraders, apply_mutations, plan_mutations};
+use crate::economy::materialize::{
+    MaterializedTraders, RenderActor, apply_mutations, plan_mutations, plan_render_mutations,
+};
 use crate::economy::{
     EconomicActorId, EconomyConfig, GOOD_TOOLS, MarketId, Quantity, Trader, TraderState, Traders,
 };
@@ -53,6 +55,49 @@ fn run(
 
 fn observed_origin() -> BTreeSet<ChunkCoord> {
     [ChunkCoord { x: 0, y: 0 }].into_iter().collect()
+}
+
+#[test]
+fn plan_render_mutations_drives_lifecycle_generically() {
+    use crate::economy::materialize::TraderMutation;
+    // A render-actor with no backing Trader (progress supplied directly).
+    let actor = EconomicActorId(7);
+    let polyline = vec![(1.0, 1.0), (5.0, 1.0)];
+    let actors = [RenderActor {
+        actor,
+        polyline: &polyline,
+        progress: 0.0,
+    }];
+    let materialized = MaterializedTraders::default();
+    let observed = observed_origin();
+
+    // First tick: observed + not materialized => Spawn at route start.
+    let muts = plan_render_mutations(&actors, &materialized, &observed);
+    assert_eq!(muts.len(), 1, "exactly one mutation");
+    match &muts[0] {
+        TraderMutation::Spawn { actor: a, x, y, .. } => {
+            assert_eq!(*a, actor);
+            assert_eq!((*x, *y), (1.0, 1.0), "progress 0 => route start");
+        }
+        _ => panic!("expected Spawn"),
+    }
+
+    // A materialized actor that is no longer in the actor list must be despawned
+    // by the generic sweep (drives the shipment-expiry / trader-removal path).
+    let mut materialized = MaterializedTraders::default();
+    materialized.0.insert(
+        EconomicActorId(99),
+        crate::economy::materialize::MaterializedTrader {
+            entity: Entity::PLACEHOLDER,
+            observed: true,
+        },
+    );
+    let muts = plan_render_mutations(&[], &materialized, &observed);
+    assert_eq!(muts.len(), 1, "stale materialized actor swept");
+    match &muts[0] {
+        TraderMutation::Despawn { actor: a } => assert_eq!(a.0, 99),
+        _ => panic!("expected Despawn of stale actor"),
+    }
 }
 
 #[test]
