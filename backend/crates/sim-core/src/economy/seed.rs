@@ -10,8 +10,8 @@ use bevy_ecs::prelude::*;
 use crate::economy::transport::manhattan_tiles;
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_TOOLS, InventoryBook, MarketChunks,
-    MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools, Trader, TraderState,
-    Traders,
+    MarketDistances, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools,
+    Trader, TraderState, Traders,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
 
@@ -76,6 +76,11 @@ pub fn seed_demo_economy(world: &mut World) {
         let mut anchors = world.resource_mut::<MarketChunks>();
         anchors.0.insert(m_a, chunk_a);
         anchors.0.insert(m_b, chunk_b);
+    }
+    {
+        let mut distances = world.resource_mut::<MarketDistances>();
+        distances.0.insert((m_a, m_b), dist);
+        distances.0.insert((m_b, m_a), dist);
     }
 
     let supplier = EconomicActorId(8_001);

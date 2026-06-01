@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::seed::seed_demo_economy;
 use crate::economy::{
-    AccountBook, DemandPools, InventoryBook, MarketChunks, Markets, SupplyPools, Traders,
+    AccountBook, DemandPools, InventoryBook, MarketChunks, MarketId, Markets, SupplyPools, Traders,
 };
 use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
 
@@ -29,6 +29,7 @@ fn seed_demo_economy_creates_two_markets_and_one_trader() {
     world.insert_resource(SupplyPools::default());
     world.insert_resource(DemandPools::default());
     world.insert_resource(Traders::default());
+    world.insert_resource(crate::economy::MarketDistances::default());
 
     seed_demo_economy(&mut world);
 
@@ -48,5 +49,16 @@ fn seed_demo_economy_creates_two_markets_and_one_trader() {
     assert_ne!(
         node_ids[0], node_ids[1],
         "source and dest are distinct nodes"
+    );
+
+    let distances = world.resource::<crate::economy::MarketDistances>();
+    assert_eq!(distances.0.len(), 2, "both directed pairs baked");
+    assert_eq!(
+        distances.0.get(&(MarketId(9_001), MarketId(9_002))).copied(),
+        Some(11)
+    );
+    assert_eq!(
+        distances.0.get(&(MarketId(9_002), MarketId(9_001))).copied(),
+        Some(11)
     );
 }
