@@ -64,6 +64,7 @@ mod base_world_expectations;
 use base_world_expectations::*;
 pub(crate) use base_world_expectations::{
     expected_base_world_agent_count, initial_mobility_snapshot_for_base_world,
+    normalize_seeded_agent_birth_ticks,
 };
 
 pub fn default_base_world_path() -> std::path::PathBuf {
@@ -368,7 +369,10 @@ impl SimulationRuntime {
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => snap,
+            Some((_tick, mut snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => {
+                normalize_seeded_agent_birth_ticks(&mut snap, base_world);
+                snap
+            }
             None => initial_mobility_snapshot_for_base_world(base_world)
                 .map_err(HydrationError::Seed)?,
             Some((_tick, _snap)) => initial_mobility_snapshot_for_base_world(base_world)

@@ -53,6 +53,38 @@ pub(crate) fn mobility_snapshot_matches_base_world(
     })
 }
 
+pub(crate) fn normalize_seeded_agent_birth_ticks(
+    snapshot: &mut MobilityPersistSnapshot,
+    base_world: &BaseWorldBundle,
+) {
+    let mut seed_ids = std::collections::HashSet::new();
+    seed_ids.extend(
+        expected_base_world_pedestrian_walks(base_world)
+            .keys()
+            .cloned(),
+    );
+    seed_ids.extend(
+        expected_base_world_driver_vehicles(base_world)
+            .keys()
+            .cloned(),
+    );
+
+    let clock = sim_core::time::SimClock::default();
+    let now_tick = snapshot.tick;
+
+    for id in seed_ids {
+        let agent_id = sim_core::ids::AgentId(id);
+        let Some(agent) = snapshot.agents.get_mut(&agent_id) else {
+            continue;
+        };
+        if agent.birth_tick == 0 {
+            agent.birth_tick = sim_core::mobility::seed::seeded_birth_tick_for_agent_id(
+                &agent.id, now_tick, &clock,
+            );
+        }
+    }
+}
+
 pub(crate) fn expected_base_world_car_routes(
     base_world: &BaseWorldBundle,
 ) -> std::collections::HashMap<String, String> {

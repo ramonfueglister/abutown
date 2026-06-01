@@ -274,6 +274,35 @@ fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_polyline() {
 }
 
 #[test]
+fn normalize_seeded_agent_birth_ticks_updates_legacy_zero_age_snapshot() {
+    let base_world = base_world_fixture();
+    let mut snap = initial_mobility_snapshot_for_base_world(&base_world)
+        .expect("base world mobility seed succeeds");
+    for agent in snap.agents.values_mut() {
+        agent.birth_tick = 0;
+    }
+
+    normalize_seeded_agent_birth_ticks(&mut snap, &base_world);
+
+    let clock = sim_core::time::SimClock::default();
+    let ages: Vec<f32> = snap
+        .agents
+        .values()
+        .map(|agent| clock.age_years(snap.tick, agent.birth_tick))
+        .collect();
+
+    assert!(ages.iter().any(|age| *age > 0.0));
+    assert!(
+        ages.iter().any(|age| (15.0..=49.0).contains(age)),
+        "normalized base-world cohort must include fertile-age agents"
+    );
+    assert!(
+        ages.iter().any(|age| *age >= 70.0),
+        "normalized base-world cohort must include elder agents"
+    );
+}
+
+#[test]
 fn runtime_has_populated_routing_graph() {
     let network = base_world_fixture().to_city_network();
     let runtime = SimulationRuntime::new_from_network(&network);
@@ -1130,6 +1159,52 @@ async fn hydrate_restores_mobility_from_store_when_present() {
     .unwrap();
 
     assert_eq!(runtime.mobility_tick_for_test(), 7);
+}
+
+#[tokio::test]
+async fn hydrate_normalizes_legacy_zero_birth_ticks_for_base_world_snapshot() {
+    let base_world = base_world_fixture();
+    let mut authored_snap = initial_mobility_snapshot_for_base_world(&base_world)
+        .expect("base world mobility seed succeeds");
+    authored_snap.tick = 7;
+    for agent in authored_snap.agents.values_mut() {
+        agent.birth_tick = 0;
+    }
+
+    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+    MobilitySnapshotStore::write(
+        &mut mobility_store,
+        "abutopia",
+        authored_snap.tick,
+        &authored_snap,
+        &base_world.snapshot_compatibility(),
+    )
+    .await
+    .unwrap();
+
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
+        Box::new(InMemoryWorldEventStore::default()),
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        &base_world,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(runtime.mobility_tick_for_test(), 7);
+
+    let snap = runtime.mobility_snapshot_for_persist();
+    let clock = sim_core::time::SimClock::default();
+    let ages: Vec<f32> = snap
+        .agents
+        .values()
+        .map(|agent| clock.age_years(snap.tick, agent.birth_tick))
+        .collect();
+
+    assert!(ages.iter().any(|age| *age > 0.0));
+    assert!(ages.iter().any(|age| (15.0..=49.0).contains(age)));
+    assert!(ages.iter().any(|age| *age >= 70.0));
 }
 
 #[tokio::test]
