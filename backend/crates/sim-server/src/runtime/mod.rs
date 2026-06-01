@@ -285,6 +285,16 @@ impl SimulationRuntime {
         let _ = mobility_api::tick_mobility(&mut self.world, &mut self.schedule);
     }
 
+    /// Append events to the live trade ledger so a test can drive the audit
+    /// flush with deterministic, identifiable events instead of relying on the
+    /// economy systems to produce them.
+    pub fn push_ledger_events_for_test(&mut self, events: Vec<sim_core::economy::EconomyEvent>) {
+        self.world
+            .resource_mut::<sim_core::economy::TradeLedger>()
+            .0
+            .extend(events);
+    }
+
     /// Snapshot of mobility state (for persist callers and tests).
     pub fn mobility_snapshot_for_persist(&self) -> MobilityPersistSnapshot {
         extract_from_world(&self.world)
@@ -380,6 +390,12 @@ impl SimulationRuntime {
         // no-ops when an economy was restored above). This is what makes the demo
         // trader visible in the always-hydrated live server.
         sim_core::economy::seed::seed_demo_economy(&mut world);
+
+        // Treat the restored ledger tail as already durably appended so the audit
+        // flush only persists events produced after this boot. Must run after the
+        // economy restore + seed (which finalize the ledger length) and after
+        // EconomyPlugin install (which inserted the cursor at its default 0).
+        sim_core::economy::init_ledger_audit_cursor(&mut world);
 
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
         refresh_flow_field_resources(&mut world);
@@ -629,6 +645,20 @@ impl SimulationRuntime {
     /// Live economy snapshot for the debug endpoint.
     pub fn economy_snapshot(&self) -> sim_core::economy::EconomyPersistSnapshot {
         sim_core::economy::extract_from_world(&self.world)
+    }
+
+    /// The current tick plus the un-appended tail of the trade ledger, for the
+    /// persist loop's audit flush. Non-mutating: the cursor only advances once the
+    /// durable append succeeds (`commit_ledger_audit`), so a failed flush retries
+    /// the same events next cycle.
+    pub fn pending_ledger_audit(&self) -> (u64, Vec<sim_core::economy::EconomyEvent>) {
+        sim_core::economy::pending_ledger_audit(&self.world)
+    }
+
+    /// Acknowledge a successful audit append of `appended` events: advance the
+    /// cursor and bound the live ledger to its persisted tail.
+    pub fn commit_ledger_audit(&mut self, appended: usize) {
+        sim_core::economy::commit_ledger_audit(&mut self.world, appended);
     }
 
     /// Collect snapshot items from every registered `SnapshotProvider`.

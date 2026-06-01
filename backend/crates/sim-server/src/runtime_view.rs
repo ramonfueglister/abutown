@@ -6,7 +6,7 @@
 
 use abutown_protocol::v1 as w;
 use abutown_protocol::{ChunkSnapshotDto, WorldId};
-use sim_core::economy::EconomyPersistSnapshot;
+use sim_core::economy::{EconomyEvent, EconomyPersistSnapshot};
 use sim_core::ids::ChunkCoord;
 use sim_core::mobility::MobilityPersistSnapshot;
 use std::collections::HashMap;
@@ -27,6 +27,12 @@ pub enum Mutation {
     },
     MarkChunkSnapshotsPersisted {
         coords: Vec<ChunkCoord>,
+    },
+    /// Acknowledge a successful audit append: advance the ledger audit cursor past
+    /// the `count` events the persist loop durably appended and bound the live
+    /// ledger. Fire-and-forget — a dropped commit just re-appends next cycle.
+    CommitLedgerAudit {
+        count: usize,
     },
     /// Persist loop's request for everything it needs to write a snapshot
     /// cycle: a list of dirty chunk snapshots and a clone of the mobility
@@ -52,6 +58,11 @@ pub struct PersistPayload {
     pub mobility_world: MobilityPersistSnapshot,
     pub economy_tick: u64,
     pub economy_world: EconomyPersistSnapshot,
+    /// Tick stamped onto the audit events appended this cycle.
+    pub economy_audit_tick: u64,
+    /// The ledger tail not yet durably appended to the `EconomyEventStore`. The
+    /// persist loop appends these, then sends `CommitLedgerAudit { count }`.
+    pub economy_audit_pending: Vec<EconomyEvent>,
 }
 
 /// Lock-free read view of the runtime, published once per tick.

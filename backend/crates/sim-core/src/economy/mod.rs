@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod auction;
+pub mod audit;
 pub mod goods;
 pub mod ids;
 pub mod inventory;
@@ -20,6 +21,7 @@ pub mod warm_flow;
 
 pub use accounts::*;
 pub use auction::*;
+pub use audit::*;
 pub use goods::*;
 pub use ids::*;
 pub use inventory::*;
@@ -65,6 +67,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(DormantMarkets::default());
         world.insert_resource(WarmMarkets::default());
         world.insert_resource(crate::economy::materialize::MaterializedTraders::default());
+        world.insert_resource(crate::economy::audit::LedgerAuditCursor::default());
         install_systems(schedule);
     }
 }
