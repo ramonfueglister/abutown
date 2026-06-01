@@ -55,8 +55,7 @@ fn seed_demo_economy_creates_four_markets_and_one_trader() {
     assert!(
         distances
             .0
-            .get(&(MarketId(9_001), MarketId(9_002)))
-            .is_some(),
+            .contains_key(&(MarketId(9_001), MarketId(9_002))),
         "original demo pair baked"
     );
 
@@ -64,15 +63,13 @@ fn seed_demo_economy_creates_four_markets_and_one_trader() {
     assert!(
         distances
             .0
-            .get(&(MarketId(9_003), MarketId(9_004)))
-            .is_some(),
+            .contains_key(&(MarketId(9_003), MarketId(9_004))),
         "flow-demo A->B distance baked"
     );
     assert!(
         distances
             .0
-            .get(&(MarketId(9_004), MarketId(9_003)))
-            .is_some(),
+            .contains_key(&(MarketId(9_004), MarketId(9_003))),
         "flow-demo B->A distance baked"
     );
 }
