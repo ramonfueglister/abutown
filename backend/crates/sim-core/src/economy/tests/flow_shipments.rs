@@ -149,10 +149,27 @@ fn expire_arrived_drops_only_arrived() {
             travel_ticks: 10,
         },
     );
-    crate::economy::flow_shipments::expire_arrived(&mut s, /*tick=*/ 12);
+    // Nothing rendering: arrived shipment 0 is dropped, 1 (not arrived) kept.
+    let mut dropped = s.clone();
+    crate::economy::flow_shipments::expire_arrived(
+        &mut dropped,
+        /*tick=*/ 12,
+        &std::collections::BTreeSet::new(),
+    );
     assert_eq!(
-        s.0.keys().copied().collect::<Vec<_>>(),
+        dropped.0.keys().copied().collect::<Vec<_>>(),
         vec![1],
-        "shipment 0 arrived (0+10<=12), 1 not (5+10>12)"
+        "shipment 0 arrived (0+10<=12) and is not rendering, so dropped; 1 not arrived (5+10>12)"
+    );
+
+    // Shipment 0 still has a live render-agent walking its leave->despawn path:
+    // retained (ghost-free removal) even though arrived.
+    let mut kept = s.clone();
+    let rendering: std::collections::BTreeSet<u64> = [0].into_iter().collect();
+    crate::economy::flow_shipments::expire_arrived(&mut kept, /*tick=*/ 12, &rendering);
+    assert_eq!(
+        kept.0.keys().copied().collect::<Vec<_>>(),
+        vec![0, 1],
+        "arrived shipment 0 retained while its render-agent is still materialized"
     );
 }

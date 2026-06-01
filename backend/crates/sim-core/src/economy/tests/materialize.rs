@@ -67,6 +67,7 @@ fn plan_render_mutations_drives_lifecycle_generically() {
         actor,
         polyline: &polyline,
         progress: 0.0,
+        arrived: false,
     }];
     let materialized = MaterializedTraders::default();
     let observed = observed_origin();
@@ -378,25 +379,53 @@ fn materialize_renders_flow_shipment_then_despawns_on_arrival() {
         hits[0].0
     );
 
-    // Arrival tick (tick 10 => progress 1.0, arrived): the final position is
-    // rendered this tick (the agent is updated to the destination), THEN the
-    // shipment is expired from FlowShipments (drop-after-render, plan §5.3).
+    // Capture the live render-entity so we can assert it is freshly dirtied on the
+    // arrival (leave) tick. Drain DirtyAgents first so the assertion below proves a
+    // NEW dirty was emitted on the arrival tick — not a stale one from the spawn.
+    let entity = world
+        .resource::<MaterializedTraders>()
+        .0
+        .get(&shipment_actor)
+        .map(|m| m.entity)
+        .expect("materialized mid-flight");
+    world.resource_mut::<DirtyAgents>().0.clear();
+
+    // Arrival tick (tick 10 => progress 1.0, arrived): the destination lies inside
+    // the observed chunk (the player is watching goods arrive), so the generic
+    // sweep would despawn abruptly without a leave -> client ghost. Instead the
+    // arrived shipment is routed through the SAME ghost-free leaving->despawn path
+    // as an LOD demotion: on this tick the agent is marked dirty (the leave) so
+    // tick_mobility can broadcast its removal, and the shipment is kept one extra
+    // tick (spec lines 25/63/94, mirroring
+    // materialize_despawns_when_trader_leaves_observed_chunks).
     world.insert_resource(Tick(10));
     materialize_traders_system(&mut world);
     assert!(
-        world.resource::<FlowShipments>().0.is_empty(),
-        "arrived shipment expired from FlowShipments after its final position rendered"
+        world.resource::<DirtyAgents>().0.contains(&entity),
+        "arrived shipment-trader marked dirty on the leave tick (ghost-free removal)"
+    );
+    assert!(
+        !world.resource::<FlowShipments>().0.is_empty(),
+        "arrived shipment kept one extra tick so the leave is emitted before despawn"
     );
     assert!(
         world
             .resource::<MaterializedTraders>()
             .0
             .contains_key(&shipment_actor),
-        "agent still alive on the arrival tick (final position rendered)"
+        "agent still alive on the arrival (leave) tick"
+    );
+    assert_eq!(
+        world
+            .query_filtered::<Entity, With<TraderAgent>>()
+            .iter(&world)
+            .count(),
+        1,
+        "one trader-agent still alive on the leave tick"
     );
 
-    // Next tick: the shipment is gone from FlowShipments, so the generic sweep
-    // despawns its render-agent (ghost-free removal).
+    // Next tick: the leave was already emitted, so the agent is despawned (LOD)
+    // and only now is the shipment dropped from FlowShipments.
     world.insert_resource(Tick(11));
     materialize_traders_system(&mut world);
     assert!(
@@ -404,7 +433,11 @@ fn materialize_renders_flow_shipment_then_despawns_on_arrival() {
             .resource::<MaterializedTraders>()
             .0
             .contains_key(&shipment_actor),
-        "shipment-trader despawned the tick after arrival"
+        "shipment-trader despawned the tick after the leave"
+    );
+    assert!(
+        world.resource::<FlowShipments>().0.is_empty(),
+        "arrived shipment dropped once its trader finished the leave->despawn path"
     );
     assert_eq!(
         world

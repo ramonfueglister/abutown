@@ -4,7 +4,7 @@
 //! persisted (ephemeral, regenerated from the resumed flow on restart).
 
 use bevy_ecs::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::{EconomyConfig, GoodId, MarketId, Quantity};
 
@@ -60,8 +60,23 @@ pub fn shipment_travel_ticks(dist: i64, config: &EconomyConfig) -> u64 {
     (dist.max(0) as u64).div_ceil(speed).max(1)
 }
 
-/// Drop shipments that have reached their destination by `tick`. Deterministic
-/// (BTreeMap retain). Called once per tick by the materialize system.
-pub fn expire_arrived(shipments: &mut FlowShipments, tick: u64) {
-    shipments.0.retain(|_, s| !s.arrived(tick));
+/// Drop arrived shipments that no longer have a live render-agent.
+///
+/// `rendering` is the set of shipment ids whose materialized trader is still
+/// being walked through the ghost-free leave->despawn lifecycle (see
+/// `materialize::plan_render_mutations`). An arrived shipment is KEPT while its
+/// agent is still materialized so the client receives a proper removal (a
+/// `left_agents`/dirty leave) before the entity is dropped — never an abrupt
+/// despawn that would strand a ghost in a continuously-observed destination
+/// chunk. Once the agent has been despawned (id absent from `rendering`), or it
+/// was never materialized (route never observed, or a graph-free schedule where
+/// nothing materializes), the arrived shipment is dropped here.
+///
+/// This is lifecycle/state management, not rendering: the materialize system
+/// runs it independent of its render graph-guard so `FlowShipments` can never
+/// leak in an economy-without-routing schedule. Deterministic (BTreeMap retain).
+pub fn expire_arrived(shipments: &mut FlowShipments, tick: u64, rendering: &BTreeSet<u64>) {
+    shipments
+        .0
+        .retain(|id, s| !s.arrived(tick) || rendering.contains(id));
 }
