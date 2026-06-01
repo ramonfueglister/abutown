@@ -379,6 +379,7 @@ fn routed_shipment_world(market_a: MarketId, market_b: MarketId) -> World {
     world.insert_resource(EconomyConfig::default());
     world.insert_resource(MaterializedTraders::default());
     world.insert_resource(FlowShipments::default());
+    world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
     world.insert_resource(AgentIdIndex::default());
     world.insert_resource(DirtyAgents::default());
     world.insert_resource(Tick(0));
@@ -504,5 +505,128 @@ fn materialize_renders_flow_shipment_then_despawns_on_arrival() {
             .count(),
         0,
         "no trader-agent remains after arrival"
+    );
+}
+
+#[test]
+fn materialize_renders_shopper_then_despawns_on_arrival() {
+    use crate::economy::shoppers::{SHOPPER_ACTOR_OFFSET, ShopperVisit, ShopperVisits};
+
+    // Reuse the #70 routed-world fixture: two markets on a single footway, both in
+    // chunk (0,0). The shopper walks from the origin footway node (node 0) TO the
+    // market (node 1); the whole route — and every mid-flight position — sits in the
+    // observed chunk.
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let mut world = routed_shipment_world(a, b);
+    let shopper_actor = EconomicActorId(SHOPPER_ACTOR_OFFSET);
+
+    // One active visit (id 0) walking origin=node0 -> market_b=node1, 10 ticks.
+    world.resource_mut::<ShopperVisits>().0.insert(
+        0,
+        ShopperVisit {
+            id: 0,
+            market: b,
+            good: GoodId(0),
+            origin_node: NodeId(0),
+            start_tick: 0,
+            travel_ticks: 10,
+        },
+    );
+
+    // Mid-flight (tick 5 => progress 0.5): a shopper-agent materializes at the
+    // visit's progressed position inside the observed chunk.
+    world.insert_resource(Tick(5));
+    materialize_traders_system(&mut world);
+
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shopper_actor),
+        "shopper materialized while in an observed chunk"
+    );
+    let mut q =
+        world.query_filtered::<(&Position, &StableAgentId, &SpriteKey), With<TraderAgent>>();
+    let hits: Vec<((f32, f32), String, String)> = q
+        .iter(&world)
+        .map(|(p, s, sk)| ((p.x, p.y), s.0.0.clone(), sk.0.clone()))
+        .collect();
+    assert_eq!(hits.len(), 1, "exactly one shopper agent");
+    assert!(
+        hits[0].1.starts_with("shopper:"),
+        "shopper-namespaced stable id, got {:?}",
+        hits[0].1
+    );
+    assert!(
+        hits[0].2.starts_with("shopper:"),
+        "shopper sprite variant, got {:?}",
+        hits[0].2
+    );
+    // Progress 0.5 along [(1,1)->(20,1)] => ~(10.5, 1.0), well inside chunk (0,0).
+    assert!(
+        (hits[0].0.0 - 10.5).abs() < 0.5 && (hits[0].0.1 - 1.0).abs() < 0.01,
+        "rendered at the progressed position, got {:?}",
+        hits[0].0
+    );
+
+    // The shopper visit must remain mid-flight (not yet arrived).
+    assert!(
+        !world.resource::<ShopperVisits>().0.is_empty(),
+        "active shopper visit retained mid-flight"
+    );
+
+    let entity = world
+        .resource::<MaterializedTraders>()
+        .0
+        .get(&shopper_actor)
+        .map(|m| m.entity)
+        .expect("materialized mid-flight");
+    world.resource_mut::<DirtyAgents>().0.clear();
+
+    // Arrival tick (tick 10 => progress 1.0, arrived): the destination sits in the
+    // observed chunk, so the arrived shopper is routed through the SAME ghost-free
+    // leave->despawn path. On this tick the agent is dirtied (the leave) and kept;
+    // the visit is retained one extra tick.
+    world.insert_resource(Tick(10));
+    materialize_traders_system(&mut world);
+    assert!(
+        world.resource::<DirtyAgents>().0.contains(&entity),
+        "arrived shopper marked dirty on the leave tick (ghost-free removal)"
+    );
+    assert!(
+        !world.resource::<ShopperVisits>().0.is_empty(),
+        "arrived shopper visit kept one extra tick so the leave is emitted before despawn"
+    );
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shopper_actor),
+        "agent still alive on the arrival (leave) tick"
+    );
+
+    // Next tick: the leave was emitted, so the agent is despawned (LOD) and only now
+    // is the visit dropped from ShopperVisits.
+    world.insert_resource(Tick(11));
+    materialize_traders_system(&mut world);
+    assert!(
+        !world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shopper_actor),
+        "shopper despawned the tick after the leave"
+    );
+    assert!(
+        world.resource::<ShopperVisits>().0.is_empty(),
+        "arrived shopper visit dropped once its agent finished the leave->despawn path"
+    );
+    assert_eq!(
+        world
+            .query_filtered::<Entity, With<TraderAgent>>()
+            .iter(&world)
+            .count(),
+        0,
+        "no shopper-agent remains after arrival"
     );
 }
