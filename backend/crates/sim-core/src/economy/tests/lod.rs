@@ -361,3 +361,14 @@ fn active_anchored_market_trades_end_to_end() {
     }
     assert!(saw_ask, "active market must place asks");
 }
+
+#[test]
+fn market_distances_stores_directed_pairs_both_ways() {
+    use crate::economy::MarketDistances;
+    let mut d = MarketDistances::default();
+    d.0.insert((MarketId(1), MarketId(2)), 7);
+    d.0.insert((MarketId(2), MarketId(1)), 7);
+    assert_eq!(d.0.get(&(MarketId(1), MarketId(2))).copied(), Some(7));
+    assert_eq!(d.0.get(&(MarketId(2), MarketId(1))).copied(), Some(7));
+    assert_eq!(d.0.get(&(MarketId(1), MarketId(3))).copied(), None);
+}

@@ -65,6 +65,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(Traders::default());
         world.insert_resource(MarketChunks::default());
         world.insert_resource(DormantMarkets::default());
+        world.insert_resource(MarketDistances::default());
         world.insert_resource(WarmMarkets::default());
         world.insert_resource(crate::economy::materialize::MaterializedTraders::default());
         world.insert_resource(crate::economy::audit::LedgerAuditCursor::default());
