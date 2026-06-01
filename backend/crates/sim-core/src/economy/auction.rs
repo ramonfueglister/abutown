@@ -93,6 +93,47 @@ pub fn prorata_distribute(weights: &[i64], total: i64) -> Vec<i64> {
     alloc
 }
 
+/// Largest-remainder (Hamilton) apportionment of a CASH `total` across
+/// `weights`, WITHOUT the `min(total, sum(weights))` clamp of
+/// [`prorata_distribute`]. Each output is the floor of its proportional share
+/// plus at most one leftover unit; the sum of outputs equals `total` exactly
+/// (when `sum(weights) > 0` and `total > 0`). Use this — never
+/// [`prorata_distribute`] — to apportion a money amount whose per-unit value
+/// can exceed one weight-unit (e.g. `src_revenue` / `dst_payment` weighted by
+/// traded goods), where clamping the total to the weight sum would silently
+/// drop cash and break conservation. Weights are treated as non-negative and
+/// must be passed in a deterministic order (ties broken by ascending index).
+pub fn apportion_cash(weights: &[i64], total: i64) -> Vec<i64> {
+    let n = weights.len();
+    let sum: i128 = weights.iter().map(|w| (*w).max(0) as i128).sum();
+    if sum <= 0 || total <= 0 {
+        return vec![0; n];
+    }
+    let total = total as i128;
+    let mut alloc = vec![0i64; n];
+    let mut remainders: Vec<(i128, usize)> = Vec::with_capacity(n);
+    let mut distributed: i128 = 0;
+    for (idx, &w) in weights.iter().enumerate() {
+        let w = w.max(0) as i128;
+        let num = total * w;
+        let base = num / sum;
+        alloc[idx] = base as i64;
+        distributed += base;
+        remainders.push((num % sum, idx));
+    }
+    let mut leftover = (total - distributed) as usize;
+    // Largest remainder first; ties by ascending index for determinism.
+    remainders.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    for &(_, idx) in &remainders {
+        if leftover == 0 {
+            break;
+        }
+        alloc[idx] += 1;
+        leftover -= 1;
+    }
+    alloc
+}
+
 pub fn build_clearing_plan(
     key: MarketGoodKey,
     bids: &[Bid],

@@ -9,9 +9,9 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::transport::manhattan_tiles;
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_TOOLS, InventoryBook, MarketChunks,
-    MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools, Trader, TraderState,
-    Traders,
+    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_TOOLS, InventoryBook,
+    MarketChunks, MarketDistances, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
+    SupplyPools, Trader, TraderState, Traders,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
 
@@ -77,6 +77,11 @@ pub fn seed_demo_economy(world: &mut World) {
         anchors.0.insert(m_a, chunk_a);
         anchors.0.insert(m_b, chunk_b);
     }
+    {
+        let mut distances = world.resource_mut::<MarketDistances>();
+        distances.0.insert((m_a, m_b), dist);
+        distances.0.insert((m_b, m_a), dist);
+    }
 
     let supplier = EconomicActorId(8_001);
     let consumer = EconomicActorId(8_002);
@@ -113,6 +118,46 @@ pub fn seed_demo_economy(world: &mut World) {
             actor: consumer,
             market: m_b,
             good: GOOD_TOOLS,
+            desired_qty_per_tick: Quantity(10),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    // Second good (FOOD): a cheap supplier at m_a and a dear consumer at m_b,
+    // reusing the SAME two markets. This adds POOLS, not markets/traders, so the
+    // live macro flow shows a non-vacuous cross-market FOOD MacroFlow without
+    // enlarging the world (Markets.len()==2, Traders.len()==1 still hold).
+    let food_supplier = EconomicActorId(8_011);
+    let food_consumer = EconomicActorId(8_012);
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(food_supplier, GOOD_FOOD, Quantity(1_000_000))
+        .expect("seed: food supplier goods");
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(food_consumer, Money(1_000_000))
+        .expect("seed: food consumer cash");
+    world.resource_mut::<SupplyPools>().0.insert(
+        food_supplier,
+        SupplyPool {
+            actor: food_supplier,
+            market: m_a,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<DemandPools>().0.insert(
+        food_consumer,
+        DemandPool {
+            actor: food_consumer,
+            market: m_b,
+            good: GOOD_FOOD,
             desired_qty_per_tick: Quantity(10),
             max_price: Money(2_000),
             urgency_bps: 0,

@@ -2,9 +2,7 @@ use std::collections::BTreeSet;
 
 use bevy_ecs::prelude::*;
 
-use crate::economy::{
-    DormantMarkets, MarketChunks, MarketId, WarmMarkets, refresh_dormant_markets_system,
-};
+use crate::economy::{DormantMarkets, MarketChunks, MarketId, refresh_dormant_markets_system};
 use crate::ids::ChunkCoord;
 use crate::world::components::{ActiveChunk, AsleepChunk, ChunkCoordComp, HotChunk, WarmChunk};
 
@@ -24,7 +22,6 @@ fn refresh_dormant_markets_marks_only_anchored_inactive() {
     anchors.0.insert(MarketId(13), ChunkCoord { x: 3, y: 0 }); // hot    -> awake
     world.insert_resource(anchors);
     world.insert_resource(DormantMarkets::default());
-    world.insert_resource(WarmMarkets::default());
 
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     schedule.add_systems(refresh_dormant_markets_system);
@@ -41,7 +38,6 @@ fn unanchored_market_is_never_dormant() {
     // No active chunks at all, and the market is not anchored.
     world.insert_resource(MarketChunks::default());
     world.insert_resource(DormantMarkets::default());
-    world.insert_resource(WarmMarkets::default());
 
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     schedule.add_systems(refresh_dormant_markets_system);
@@ -327,19 +323,146 @@ fn lod_world(
 }
 
 #[test]
-fn asleep_anchored_market_stays_frozen_end_to_end() {
-    let market = MarketId(99);
-    let coord = ChunkCoord { x: 5, y: 5 };
-    let (mut world, mut schedule) = lod_world(market, coord, /*asleep=*/ true);
+#[allow(non_snake_case)]
+fn asleep_anchored_market_DOES_flow() {
+    use crate::economy::{MarketDistances, MarketGoodKey, TRANSPORT_OPERATOR};
 
-    for _ in 0..10 {
+    // Market A (99): the lod_world supplier sells FOOD. Market B (100): a buyer
+    // demands FOOD. BOTH are anchored to ASLEEP chunks (dormant). The macro flow
+    // is the *only* path that touches dormant markets, and unlike the retired
+    // warm-flow it spans markets: with a positive A->B price gap that strictly
+    // exceeds transport, FOOD flows surplus(A)->deficit(B). This proves the LOD
+    // path is NOT a hollow world — dormant markets still equilibrate.
+    let a = MarketId(99);
+    let coord_a = ChunkCoord { x: 5, y: 5 };
+    let (mut world, mut schedule) = lod_world(a, coord_a, /*asleep=*/ true);
+
+    // lod_world offers only 10/tick; at rate 50 that floors transport to 0
+    // (50*10/1000 == 0). Bump the supplier's offer to 100 so transport > 0 and
+    // a clean by-hand quantity exists. The supplier already holds 1_000_000 FOOD.
+    let supplier = EconomicActorId(50);
+    {
+        let mut supply = world.resource_mut::<SupplyPools>();
+        supply.0.get_mut(&supplier).unwrap().offered_qty_per_tick = Quantity(100);
+    }
+
+    // Market B: a second asleep-anchored market with a FOOD demand pool.
+    let b = MarketId(100);
+    let coord_b = ChunkCoord { x: 6, y: 6 };
+    let buyer = EconomicActorId(60);
+    {
+        let mut accounts = world.resource_mut::<AccountBook>();
+        accounts.deposit(buyer, Money(1_000_000)).unwrap();
+    }
+    {
+        let mut demand = world.resource_mut::<DemandPools>();
+        demand.0.insert(
+            buyer,
+            DemandPool {
+                actor: buyer,
+                market: b,
+                good: GOOD_FOOD,
+                desired_qty_per_tick: Quantity(100),
+                max_price: Money(2_000),
+                urgency_bps: 0,
+                elasticity_bps: 0,
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+    }
+    {
+        let mut anchors = world.resource_mut::<MarketChunks>();
+        anchors.0.insert(b, coord_b);
+    }
+    world.spawn((ChunkCoordComp(coord_b), AsleepChunk));
+
+    // transport > 0 requires a finite distance AND rate 50 (with q=100 ->
+    // per_tile = 50*100/1000 = 5, transport = 5 * dist).
+    {
+        let mut distances = world.resource_mut::<MarketDistances>();
+        distances.0.insert((a, b), 2);
+        distances.0.insert((b, a), 2);
+    }
+    {
+        let mut config = world.resource_mut::<EconomyConfig>();
+        config.transport_cost_per_tile_unit = Money(50);
+        // macro_flow_interval_ticks defaults to 10; leave it.
+    }
+
+    let money_before = world.resource::<AccountBook>().total_money().unwrap();
+    let supplier_food_before = world
+        .resource::<InventoryBook>()
+        .balance(supplier, GOOD_FOOD)
+        .available;
+
+    // The schedule's own tick_increment_system advances Tick by 1 per run, and
+    // the manual bump below adds another (the established idiom in this file's
+    // end-to-end tests), so Tick steps by 2 per iteration. The macro flow reads
+    // the PRE-increment tick (it is ordered .before tick_increment_system), so
+    // across 6 iterations it observes ticks 0, 2, 4, 6, 8, 10. The interval gate
+    // (macro_flow_interval_ticks = 10) fires on multiples of 10 -> tick 0 AND
+    // tick 10 -> exactly 2 flows.
+    for _ in 0..6 {
         schedule.run(&mut world);
         let mut t = world.resource_mut::<Tick>();
         t.0 += 1;
     }
-    // No asks were ever placed because the supplier's market is dormant.
-    assert!(world.resource::<OrderBook>().asks.is_empty());
-    // Plugin installed the two new resources.
+
+    // Hand-computed flow per fire (q = min(surplus 100, deficit 100, q_cap 100)):
+    //   p_src (A, supply-only) = ask_floor = 1000; p_dst (B, demand-only) =
+    //   bid_ceiling = 2000. src_revenue = 1000*100/1000 = 100; transport =
+    //   (50*100/1000)*2 = 10; dst_payment = 110; net_gain = 200-100-10 = 90 > 0.
+    // Two fires -> 200 FOOD moved A->B, B traded 200 @ 2000, A traded 200 @ 1000.
+    let goods = &world.resource::<MarketGoods>().0;
+    let state_a = &goods[&MarketGoodKey {
+        market: a,
+        good: GOOD_FOOD,
+    }];
+    let state_b = &goods[&MarketGoodKey {
+        market: b,
+        good: GOOD_FOOD,
+    }];
+    assert_eq!(
+        state_b.last_settlement_price,
+        Money(2_000),
+        "B's price was discovered by the macro flow (changed from ZERO default)"
+    );
+    assert_eq!(
+        state_b.traded_qty_last_tick,
+        Quantity(200),
+        "B imported 100 FOOD per fire across the two interval boundaries"
+    );
+    assert_eq!(state_a.last_settlement_price, Money(1_000));
+    assert_eq!(state_a.traded_qty_last_tick, Quantity(200));
+
+    // Goods actually MOVED A->B: the buyer now holds 200 FOOD, the supplier 200 fewer.
+    let inv = world.resource::<InventoryBook>();
+    assert_eq!(
+        inv.balance(buyer, GOOD_FOOD).available,
+        Quantity(200),
+        "buyer at the asleep destination received the imported FOOD"
+    );
+    assert_eq!(
+        inv.balance(supplier, GOOD_FOOD).available,
+        Quantity(supplier_food_before.0 - 200),
+        "supplier at the asleep source shipped the FOOD out",
+    );
+
+    // Conservation: transport is a TRANSFER to TRANSPORT_OPERATOR, never minted
+    // or destroyed, so total money is exactly preserved.
+    let money_after = world.resource::<AccountBook>().total_money().unwrap();
+    assert_eq!(money_after, money_before, "cash exactly conserved");
+    assert_eq!(
+        world
+            .resource::<AccountBook>()
+            .account(TRANSPORT_OPERATOR)
+            .available,
+        Money(20),
+        "operator collected transport (10 per fire) across two fires",
+    );
+
+    // Both new resources are still installed by the plugin.
     assert!(world.contains_resource::<MarketChunks>());
     assert!(world.contains_resource::<DormantMarkets>());
 }
@@ -360,4 +483,143 @@ fn active_anchored_market_trades_end_to_end() {
         t.0 += 1;
     }
     assert!(saw_ask, "active market must place asks");
+}
+
+#[test]
+fn market_distances_stores_directed_pairs_both_ways() {
+    use crate::economy::MarketDistances;
+    let mut d = MarketDistances::default();
+    d.0.insert((MarketId(1), MarketId(2)), 7);
+    d.0.insert((MarketId(2), MarketId(1)), 7);
+    assert_eq!(d.0.get(&(MarketId(1), MarketId(2))).copied(), Some(7));
+    assert_eq!(d.0.get(&(MarketId(2), MarketId(1))).copied(), Some(7));
+    assert_eq!(d.0.get(&(MarketId(1), MarketId(3))).copied(), None);
+}
+
+#[test]
+fn active_to_dormant_handoff_conserves() {
+    use crate::economy::{EconomyConfig, MarketDistances};
+
+    // m_b starts ACTIVE with a live consumer bid (locks cash); m_a is a dormant
+    // surplus. We demote m_b's chunk to Asleep with the bid still locked, then run
+    // flow intervals through the TTL window (default 10). The locked cash is
+    // unavailable to the flow until the order expires; conservation holds every
+    // tick; released cash becomes flow-eligible after expiry.
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    let m_a = MarketId(9_201); // dormant surplus
+    let m_b = MarketId(9_202); // active->demoted deficit
+    let coord_a = ChunkCoord { x: 5, y: 5 };
+    let coord_b = ChunkCoord { x: 9, y: 5 };
+    let supplier = EconomicActorId(50);
+    let consumer = EconomicActorId(60);
+    {
+        let mut inv = world.resource_mut::<InventoryBook>();
+        inv.deposit(supplier, GOOD_FOOD, Quantity(1_000_000))
+            .unwrap();
+    }
+    {
+        let mut acc = world.resource_mut::<AccountBook>();
+        acc.deposit(consumer, Money(1_000_000_000)).unwrap();
+    }
+    {
+        let mut supply = world.resource_mut::<SupplyPools>();
+        supply.0.insert(
+            supplier,
+            SupplyPool {
+                actor: supplier,
+                market: m_a,
+                good: GOOD_FOOD,
+                offered_qty_per_tick: Quantity(200),
+                min_price: Money(500),
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+    }
+    {
+        let mut demand = world.resource_mut::<DemandPools>();
+        demand.0.insert(
+            consumer,
+            DemandPool {
+                actor: consumer,
+                market: m_b,
+                good: GOOD_FOOD,
+                desired_qty_per_tick: Quantity(50),
+                max_price: Money(2_000),
+                urgency_bps: 0,
+                elasticity_bps: 0,
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+    }
+    {
+        let mut anchors = world.resource_mut::<MarketChunks>();
+        anchors.0.insert(m_a, coord_a);
+        anchors.0.insert(m_b, coord_b);
+    }
+    {
+        let mut dist = world.resource_mut::<MarketDistances>();
+        dist.0.insert((m_a, m_b), 4);
+        dist.0.insert((m_b, m_a), 4);
+    }
+    {
+        let mut cfg = world.resource_mut::<EconomyConfig>();
+        cfg.transport_cost_per_tile_unit = Money(50);
+    }
+    // m_a asleep (dormant) from the start; m_b ACTIVE so its bid is placed+locked.
+    let chunk_b = world.spawn((ChunkCoordComp(coord_b), ActiveChunk)).id();
+    world.spawn((ChunkCoordComp(coord_a), AsleepChunk));
+    world.insert_resource(Tick(0));
+
+    let money_total = world.resource::<AccountBook>().total_money().unwrap();
+    let good_total = world
+        .resource::<InventoryBook>()
+        .total_good(GOOD_FOOD)
+        .unwrap();
+
+    // Tick 0: m_b active -> consumer bids, cash locks. Run one tick.
+    schedule.run(&mut world);
+    {
+        let mut t = world.resource_mut::<Tick>();
+        t.0 += 1;
+    }
+    let locked_now = world.resource::<AccountBook>().account(consumer).locked;
+    assert!(locked_now.0 > 0, "active bid locked the consumer's cash");
+
+    // Demote m_b to Asleep with the bid still live (locked).
+    world
+        .entity_mut(chunk_b)
+        .remove::<ActiveChunk>()
+        .insert(AsleepChunk);
+
+    // Run through the TTL window; conservation must hold every tick.
+    for _ in 0..15 {
+        schedule.run(&mut world);
+        let m = world.resource::<AccountBook>().total_money().unwrap();
+        let g = world
+            .resource::<InventoryBook>()
+            .total_good(GOOD_FOOD)
+            .unwrap();
+        assert_eq!(m, money_total, "money conserved across handoff");
+        assert_eq!(g, good_total, "goods conserved across handoff");
+        let mut t = world.resource_mut::<Tick>();
+        t.0 += 1;
+    }
+
+    // After the TTL window the order expired and released cash; the flow has by
+    // now had eligible (available) cash and moved goods into m_b.
+    let consumer_goods = world
+        .resource::<InventoryBook>()
+        .balance(consumer, GOOD_FOOD)
+        .available;
+    assert!(
+        consumer_goods.0 > 0,
+        "after expiry the released cash funded macro flow into the demoted market"
+    );
 }

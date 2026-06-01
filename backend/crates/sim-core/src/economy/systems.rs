@@ -4,15 +4,15 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
 use crate::economy::{
-    AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    InventoryBook, MarketChunks, MarketGoods, Money, NextOrderId, OrderBook, ProductionPools,
-    SettlementPolicy, SupplyPools, TradeLedger, Traders, WarmMarkets,
+    AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent, GoodId,
+    InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId, Money, NextOrderId,
+    OrderBook, ProductionPools, SettlementPolicy, SupplyPools, TradeLedger, Traders,
     clear_market_good_with_policy, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_production_at_tick, run_traders_at_tick, run_warm_market_flow_at_tick,
+    integer_ewma, run_macro_flow_at_tick, run_production_at_tick, run_traders_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
-use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk, WarmChunk};
+use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
@@ -22,7 +22,7 @@ pub enum EconomySet {
     Traders,
     GeneratePoolOrders,
     ClearMarkets,
-    WarmFlow,
+    MacroFlow,
     Materialize,
     Telemetry,
 }
@@ -34,7 +34,7 @@ pub struct EconomyConfig {
     pub transport_cost_per_tile_unit: Money,
     pub trader_tiles_per_tick: u64,
     pub trader_default_ref_price: Money,
-    pub warm_flow_interval_ticks: u64,
+    pub macro_flow_interval_ticks: u64,
     pub settlement_policy: SettlementPolicy,
 }
 
@@ -46,7 +46,7 @@ impl Default for EconomyConfig {
             transport_cost_per_tile_unit: Money(5),
             trader_tiles_per_tick: 4,
             trader_default_ref_price: Money(1_000),
-            warm_flow_interval_ticks: 10,
+            macro_flow_interval_ticks: 10,
             settlement_policy: SettlementPolicy::Anchored,
         }
     }
@@ -61,11 +61,19 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::Traders,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
-            EconomySet::WarmFlow,
+            EconomySet::MacroFlow,
             EconomySet::Materialize,
             EconomySet::Telemetry,
         )
             .chain(),
+    );
+    // The macro flow is stateful (writes dormant prices), so the set of markets
+    // it mutates must be a deterministic function of LOD classification. Anchor
+    // RefreshLod after CoreSet::LodReclassify. Inert (the CoreSet is simply not
+    // configured) when EconomyPlugin installs without CorePlugin; load-bearing
+    // only in the full SimPlugin stack, where it removes a classify/mutate race.
+    schedule.configure_sets(
+        EconomySet::RefreshLod.after(crate::world::schedule::CoreSet::LodReclassify),
     );
     schedule.add_systems(
         (
@@ -75,14 +83,14 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             run_traders_system.in_set(EconomySet::Traders),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
-            run_warm_market_flow_system.in_set(EconomySet::WarmFlow),
+            run_macro_flow_system.in_set(EconomySet::MacroFlow),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
         )
             .before(crate::mobility::systems::tick_increment_system),
     );
     // Render-only trader materialization is an exclusive system (it needs &mut
     // World to spawn/despawn agents), so it is registered separately from the
-    // parallel economy systems above. The set chain places it after WarmFlow.
+    // parallel economy systems above. The set chain places it after MacroFlow.
     schedule.add_systems(
         crate::economy::materialize::materialize_traders_system
             .in_set(EconomySet::Materialize)
@@ -90,31 +98,21 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
 }
 
-/// Bridge: derive `DormantMarkets` and `WarmMarkets` from chunk LOD. A market
-/// anchored (in `MarketChunks`) to a chunk that is not Active/Hot is dormant;
-/// dormant markets anchored to a WarmChunk are also added to `WarmMarkets`.
-/// Cheap: one pass over active/warm chunk coords + one over the anchor map.
+/// Bridge: derive `DormantMarkets` from chunk LOD. A market anchored (in
+/// `MarketChunks`) to a chunk that is not Active/Hot is dormant.
+/// Cheap: one pass over active chunk coords + one over the anchor map.
 /// Deterministic (BTree iteration, set membership).
 #[allow(clippy::type_complexity)]
 pub fn refresh_dormant_markets_system(
     anchors: Res<MarketChunks>,
     active_chunks: Query<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>,
-    warm_chunks: Query<&ChunkCoordComp, With<WarmChunk>>,
     mut dormant: ResMut<DormantMarkets>,
-    mut warm: ResMut<WarmMarkets>,
 ) {
     let active: BTreeSet<ChunkCoord> = active_chunks.iter().map(|c| c.0).collect();
-    let warm_coords: BTreeSet<ChunkCoord> = warm_chunks.iter().map(|c| c.0).collect();
     dormant.0 = anchors
         .0
         .iter()
         .filter(|(_, coord)| !active.contains(coord))
-        .map(|(market, _)| *market)
-        .collect();
-    warm.0 = anchors
-        .0
-        .iter()
-        .filter(|(_, coord)| warm_coords.contains(coord))
         .map(|(market, _)| *market)
         .collect();
 }
@@ -227,28 +225,43 @@ pub fn update_market_telemetry_system(config: Res<EconomyConfig>, mut goods: Res
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn run_warm_market_flow_system(
+pub fn run_macro_flow_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
-    warm: Res<WarmMarkets>,
+    dormant: Res<DormantMarkets>,
+    dirty: Res<DirtyMarketGoods>,
+    distances: Res<MarketDistances>,
     mut accounts: ResMut<AccountBook>,
     mut inventory: ResMut<InventoryBook>,
     mut ledger: ResMut<TradeLedger>,
     demand: Res<DemandPools>,
     supply: Res<SupplyPools>,
-    market_goods: Res<MarketGoods>,
+    mut market_goods: ResMut<MarketGoods>,
 ) {
-    let _ = run_warm_market_flow_at_tick(
+    if let Err(reason) = run_macro_flow_at_tick(
         &mut accounts,
         &mut inventory,
         &mut ledger,
         &demand,
         &supply,
-        &market_goods,
-        &warm.0,
+        &mut market_goods,
+        &dirty,
+        &dormant.0,
+        &distances,
         &config,
         tick.0,
-    );
+    ) {
+        // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
+        // atomic boundary left the books unchanged. Per-edge settle faults are
+        // already isolated inside run_macro_flow_at_tick (their own
+        // MarketClearFailed events). market/good = the demo sentinel for a
+        // tick-level fault that is not attributable to one (market,good).
+        ledger.0.push(EconomyEvent::MarketClearFailed {
+            market: MarketId(0),
+            good: GoodId(0),
+            reason,
+        });
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

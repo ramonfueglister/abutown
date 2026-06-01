@@ -53,7 +53,7 @@ impl MarketGoodState {
 #[derive(Resource, Default)]
 pub struct Markets(pub BTreeMap<MarketId, MarketSite>);
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone)]
 pub struct MarketGoods(pub BTreeMap<MarketGoodKey, MarketGoodState>);
 
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
@@ -72,8 +72,9 @@ pub struct MarketChunks(pub BTreeMap<MarketId, ChunkCoord>);
 #[derive(Resource, Default)]
 pub struct DormantMarkets(pub BTreeSet<MarketId>);
 
-/// Markets anchored (in `MarketChunks`) to a WARM chunk — they run the cheap
-/// aggregate warm-flow update instead of the full auction. Subset of
-/// `DormantMarkets`. Recomputed each tick by `refresh_dormant_markets_system`.
-#[derive(Resource, Default)]
-pub struct WarmMarkets(pub BTreeSet<MarketId>);
+/// MarketId-pair -> Manhattan distance in whole tiles, stored DIRECTED both
+/// ways ((a,b) and (b,a) both present) for O(1) symmetric lookup. Baked once
+/// in `seed_demo_economy` from the routing `Graph`; persisted (the economy
+/// core is graph-free at hydrate, so it cannot be recomputed on restore).
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct MarketDistances(pub BTreeMap<(MarketId, MarketId), i64>);

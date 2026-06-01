@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::economy::{
     AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyEvent, GoodId,
-    InventoryBalance, InventoryBook, MarketChunks, MarketGoodKey, MarketGoodState, MarketGoods,
-    MarketId, MarketSite, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId, ProductionPool,
-    ProductionPools, SupplyPool, SupplyPools, TradeLedger, Trader, Traders,
+    InventoryBalance, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState,
+    MarketGoods, MarketId, MarketSite, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId,
+    ProductionPool, ProductionPools, SupplyPool, SupplyPools, TradeLedger, Trader, Traders,
 };
 use crate::ids::ChunkCoord;
 use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
@@ -39,6 +39,10 @@ pub struct EconomyPersistSnapshot {
     pub market_chunks: Vec<(MarketId, ChunkCoord)>,
     /// The most-recent `PERSISTED_LEDGER_TAIL` ledger events (oldest→newest).
     pub ledger_tail: Vec<EconomyEvent>,
+    /// Directed market-pair distances (Manhattan tiles), sorted BTreeMap order.
+    /// Recompute-on-hydrate is impossible (the economy core holds no `Graph`),
+    /// so this is persisted verbatim. No serde-default shim.
+    pub market_distances: Vec<((MarketId, MarketId), i64)>,
 }
 
 /// Pull a snapshot out of a live economy `World`. `BTreeMap` iteration is sorted,
@@ -56,6 +60,7 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
     let traders = world.resource::<Traders>();
     let market_chunks = world.resource::<MarketChunks>();
     let ledger = world.resource::<TradeLedger>();
+    let market_distances = world.resource::<MarketDistances>();
 
     let ledger_tail = {
         let events = &ledger.0;
@@ -81,6 +86,7 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
         traders: traders.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
         market_chunks: market_chunks.0.iter().map(|(k, v)| (*k, *v)).collect(),
         ledger_tail,
+        market_distances: market_distances.0.iter().map(|(k, v)| (*k, *v)).collect(),
     }
 }
 
@@ -109,6 +115,9 @@ pub fn apply_into_world(world: &mut World, snap: &EconomyPersistSnapshot) {
     world.insert_resource(Traders(snap.traders.iter().cloned().collect()));
     world.insert_resource(MarketChunks(snap.market_chunks.iter().cloned().collect()));
     world.insert_resource(TradeLedger(snap.ledger_tail.clone()));
+    world.insert_resource(MarketDistances(
+        snap.market_distances.iter().cloned().collect(),
+    ));
 }
 
 /// A `SnapshotProvider` emitting the full economy state as one JSON item. The

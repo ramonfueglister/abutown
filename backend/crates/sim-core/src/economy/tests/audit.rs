@@ -158,3 +158,17 @@ async fn in_memory_event_store_appends_in_order() {
     assert_eq!((evs[1].0, evs[1].1.event_type()), (2, "transport_paid"));
     assert_eq!(store.len("other"), 0);
 }
+
+#[test]
+fn macro_flow_event_type_is_macro_flow() {
+    use crate::economy::{EconomyEvent, GoodId, MarketId, Money, Quantity};
+    let ev = EconomyEvent::MacroFlow {
+        from_market: MarketId(1),
+        to_market: MarketId(2),
+        good: GoodId(4),
+        qty: Quantity(10),
+        price: Money(1_000),
+        transport: Money(50),
+    };
+    assert_eq!(ev.event_type(), "macro_flow");
+}
