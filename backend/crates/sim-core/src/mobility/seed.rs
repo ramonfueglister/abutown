@@ -441,7 +441,7 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
                     dwell_ticks_remaining: 0,
                 },
             );
-            let mut rec = AgentRecord::new_born_at(
+            let rec = AgentRecord::new_born_at(
                 driver_id.clone(),
                 AgentMobilityState::InVehicle {
                     vehicle_id,
@@ -453,7 +453,6 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
                 0.05,
                 seeded_birth_tick_for_agent_id(&driver_id, now_tick, &clock),
             );
-            rec.sex = sex_from_id(&driver_id.0);
             api::spawn_agent_from_record(&mut world, rec);
         }
     }
@@ -631,7 +630,7 @@ fn seed_cars_from_bundle(
                     dwell_ticks_remaining: 0,
                 },
             );
-            let mut rec = AgentRecord::new_born_at(
+            let rec = AgentRecord::new_born_at(
                 driver_id.clone(),
                 AgentMobilityState::InVehicle {
                     vehicle_id,
@@ -643,7 +642,6 @@ fn seed_cars_from_bundle(
                 0.05,
                 seeded_birth_tick_for_agent_id(&driver_id, now_tick, &clock),
             );
-            rec.sex = sex_from_id(&driver_id.0);
             api::spawn_agent_from_record(world, rec);
         }
     }
@@ -720,6 +718,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn seeded_drivers_preserve_default_male_sex_and_birth_ticks() {
+        let network = tiny_city_network();
+        let (world, _schedule) = from_network(
+            &network,
+            SeedDensity {
+                pedestrians_per_corridor: 0,
+                cars_per_arterial: 2,
+            },
+        );
+        let snapshot = crate::mobility::extract_from_world(&world);
+        let driver = snapshot
+            .agents
+            .get(&crate::ids::AgentId("agent:driver:1".into()))
+            .expect("network seed creates a second driver");
+
+        assert_eq!(driver.sex, crate::mobility::components::Sex::Male);
+        assert_ne!(driver.birth_tick, 0);
+    }
+
     fn walkability_bundle() -> BaseWorldBundle {
         BaseWorldBundle {
             manifest: BaseWorldManifest {
@@ -791,7 +809,7 @@ mod tests {
                 pedestrian_groups: vec![PedestrianSpawnGroup {
                     id: "spawn:test".into(),
                     corridor_id: "corridor:test-sidewalk".into(),
-                    agents_per_corridor: 1,
+                    agents_per_corridor: 2,
                 }],
                 car_groups: Vec::<CarSpawnGroup>::new(),
                 tram_lines: Vec::new(),
@@ -810,8 +828,14 @@ mod tests {
             .values()
             .map(|agent| clock.age_years(snapshot.tick, agent.birth_tick))
             .collect();
+        let distinct_birth_ticks: std::collections::HashSet<i64> = snapshot
+            .agents
+            .values()
+            .map(|agent| agent.birth_tick)
+            .collect();
 
         assert!(!ages.is_empty());
+        assert!(distinct_birth_ticks.len() >= 2);
         assert!(ages.iter().any(|age| *age > 0.0));
         assert!(ages.iter().all(|age| (0.0..=90.1).contains(age)));
     }
