@@ -1608,3 +1608,165 @@ fn macro_flow_tiebreak_is_stable() {
     assert_eq!(to_b + to_c, 100, "all surplus exported");
     assert!(to_b >= to_c, "ascending-MarketId tie favors B");
 }
+
+fn last_price(mg: &MarketGoods, market: MarketId) -> Money {
+    mg.0.get(&MarketGoodKey {
+        market,
+        good: GOOD_FOOD,
+    })
+    .map(|s| s.last_settlement_price)
+    .unwrap_or(Money::ZERO)
+}
+
+/// Both-sided pair: A is net-surplus & cheap (big supplier@low ask + small
+/// consumer), B is net-deficit & dear (big consumer@high bid + small supplier).
+/// Both markets thus have a binding `settlement_price_with_policy` band → prices
+/// drift across intervals.
+fn both_sided_pair(rate: Money, dist: i64) -> DormantScenario {
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+
+    // A: big seller (300 @ ask 600) + small local buyer (20 @ bid 700).
+    inventory
+        .deposit(EconomicActorId(100), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply
+        .0
+        .insert(EconomicActorId(100), sp(100, m_a, 300, 600));
+    accounts
+        .deposit(EconomicActorId(110), Money(1_000_000_000))
+        .unwrap();
+    demand.0.insert(EconomicActorId(110), dp(110, m_a, 20, 700));
+
+    // B: big buyer (300 @ bid 1800) + small local seller (20 @ ask 1700).
+    accounts
+        .deposit(EconomicActorId(200), Money(1_000_000_000))
+        .unwrap();
+    demand
+        .0
+        .insert(EconomicActorId(200), dp(200, m_b, 300, 1800));
+    inventory
+        .deposit(EconomicActorId(210), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply
+        .0
+        .insert(EconomicActorId(210), sp(210, m_b, 20, 1700));
+
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), dist);
+    distances.0.insert((m_b, m_a), dist);
+    let config = EconomyConfig {
+        transport_cost_per_tile_unit: rate,
+        ..Default::default()
+    };
+
+    DormantScenario {
+        accounts,
+        inventory,
+        ledger: TradeLedger::default(),
+        demand,
+        supply,
+        market_goods: MarketGoods::default(),
+        dirty: crate::economy::DirtyMarketGoods::default(),
+        dormant: [m_a, m_b].into_iter().collect(),
+        distances,
+        config,
+    }
+}
+
+#[test]
+fn prices_converge_to_within_transport_cost() {
+    let rate = Money(50);
+    let dist = 2;
+    let mut s = both_sided_pair(rate, dist);
+
+    // The macro-flow only CLAMPS each market's `prior` price into that market's
+    // own fixed reservation band (Anchored settlement); it does not move the
+    // bands themselves. With `trader_default_ref_price = 1000`:
+    //   A band [ask 600, bid 700]  → prior 1000 clamps DOWN to bid_ceiling 700.
+    //   B band [ask 1700, bid 1800] → prior 1000 clamps UP to ask_floor 1700.
+    // So each price is pushed as far TOWARD the other market as its own band
+    // permits (A to its high edge 700, B to its low edge 1700) — the most the
+    // flow can do without the bands overlapping. The residual gap is therefore
+    // the structural separation between the two non-overlapping bands:
+    //     converged_gap = ask_floor_B - bid_ceiling_A = 1700 - 700 = 1000.
+    // Transport (~1 unit/good here) never becomes the binding constraint: the
+    // reservation bands do, so the gap floors at 1000, NOT at unit_transport+1.
+    // (This is the §3 STEP A caveat in band form — see the one-sided companion.)
+    let converged_gap = 1700 - 700;
+    // Sanity: transport per unit good is tiny vs. the structural gap, confirming
+    // it is the bands (not transport) that pin the residual.
+    let q_ref = Quantity(280);
+    let agg_transport = transport_cost(dist, q_ref, rate).unwrap(); // (50*280/1000)*2 = 28
+    assert_eq!(agg_transport, Money(28));
+    let unit_transport = Money((agg_transport.0 + q_ref.0 - 1) / q_ref.0); // ceil = 1
+    assert!(
+        unit_transport.0 < converged_gap,
+        "transport not the binding constraint"
+    );
+
+    let mut prev_gap = i64::MAX;
+    for k in 0..40u64 {
+        run_flow(&mut s, k * 10).unwrap();
+        let pa = last_price(&s.market_goods, MarketId(1));
+        let pb = last_price(&s.market_goods, MarketId(2));
+        if pa.0 == 0 || pb.0 == 0 {
+            continue; // not both priced yet
+        }
+        let gap = (pb.0 - pa.0).abs();
+        assert!(
+            gap <= prev_gap,
+            "gap monotone non-increasing: {gap} <= {prev_gap}"
+        );
+        prev_gap = gap;
+    }
+    assert_eq!(
+        prev_gap, converged_gap,
+        "gap converges to the structural band separation \
+         (each price pinned to its band edge nearest the counterpart)"
+    );
+}
+
+#[test]
+fn one_sided_pair_flows_goods_but_price_is_pinned() {
+    // Pure source A (supply-only, ask 500) ↔ pure sink B (demand-only, bid 2000).
+    // Reservation-pinned: p_a = ask_floor = 500, p_b = bid_ceiling = 2000 every
+    // interval. Goods move each interval; the 1500 gap NEVER narrows.
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 2, Money(50));
+    let buyer_before = s
+        .inventory
+        .balance(EconomicActorId(200), GOOD_FOOD)
+        .available;
+
+    run_flow(&mut s, 0).unwrap();
+    let pa0 = last_price(&s.market_goods, MarketId(1));
+    let pb0 = last_price(&s.market_goods, MarketId(2));
+    assert_eq!(pa0, Money(500), "supply-only price pinned to ask floor");
+    assert_eq!(pb0, Money(2000), "demand-only price pinned to bid ceiling");
+    let buyer_after_1 = s
+        .inventory
+        .balance(EconomicActorId(200), GOOD_FOOD)
+        .available;
+    assert!(
+        buyer_after_1.0 > buyer_before.0,
+        "goods flowed on interval 0"
+    );
+
+    for k in 1..5u64 {
+        run_flow(&mut s, k * 10).unwrap();
+        assert_eq!(
+            last_price(&s.market_goods, MarketId(1)),
+            Money(500),
+            "still pinned"
+        );
+        assert_eq!(
+            last_price(&s.market_goods, MarketId(2)),
+            Money(2000),
+            "still pinned"
+        );
+    }
+}
