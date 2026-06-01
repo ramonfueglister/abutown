@@ -1006,3 +1006,297 @@ fn settle_flow_self_edge_clears_locally_transport_zero() {
         .unwrap();
     assert_eq!(st.traded_qty_last_tick, Quantity(40));
 }
+
+use crate::economy::macro_flow::run_macro_flow_at_tick;
+use crate::economy::{DirtyMarketGoods, EconomyEvent, TradeLedger};
+
+#[allow(clippy::type_complexity)]
+fn surplus_deficit_world() -> (
+    AccountBook,
+    InventoryBook,
+    TradeLedger,
+    DemandPools,
+    SupplyPools,
+    MarketGoods,
+    DirtyMarketGoods,
+    BTreeSet<MarketId>,
+    MarketDistances,
+    EconomyConfig,
+) {
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let seller = EconomicActorId(10);
+    let buyer = EconomicActorId(20);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    accounts.deposit(buyer, Money(1_000_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(1_000))
+        .unwrap();
+    let mut demand = DemandPools::default();
+    demand.0.insert(
+        buyer,
+        DemandPool {
+            actor: buyer,
+            market: b,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(100),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    let mut supply = SupplyPools::default();
+    supply.0.insert(
+        seller,
+        SupplyPool {
+            actor: seller,
+            market: a,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(100),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    let dormant: BTreeSet<MarketId> = [a, b].into_iter().collect();
+    let mut distances = MarketDistances::default();
+    distances.0.insert((a, b), 1);
+    distances.0.insert((b, a), 1);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+    (
+        accounts,
+        inventory,
+        TradeLedger::default(),
+        demand,
+        supply,
+        MarketGoods::default(),
+        DirtyMarketGoods::default(),
+        dormant,
+        distances,
+        cfg,
+    )
+}
+
+#[test]
+fn macro_flow_only_fires_on_interval() {
+    let (mut acc, mut inv, mut led, dem, sup, mut mg, dirty, dormant, dist, cfg) =
+        surplus_deficit_world();
+    // tick 3: not a multiple of 10 -> no flow, no events.
+    run_macro_flow_at_tick(
+        &mut acc, &mut inv, &mut led, &dem, &sup, &mut mg, &dirty, &dormant, &dist, &cfg, 3,
+    )
+    .unwrap();
+    assert!(led.0.is_empty(), "no flow off-interval");
+    // tick 10: fires.
+    run_macro_flow_at_tick(
+        &mut acc, &mut inv, &mut led, &dem, &sup, &mut mg, &dirty, &dormant, &dist, &cfg, 10,
+    )
+    .unwrap();
+    assert!(
+        led.0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::MacroFlow { .. })),
+        "flow on interval tick"
+    );
+}
+
+#[test]
+fn macro_flow_idle_interval_is_a_noop() {
+    let mut acc = AccountBook::default();
+    let mut inv = InventoryBook::default();
+    let mut led = TradeLedger::default();
+    let mut mg = MarketGoods::default();
+    let dormant: BTreeSet<MarketId> = [MarketId(1)].into_iter().collect();
+    let cfg = EconomyConfig::default();
+    let before_acc = acc.clone();
+    let before_inv = inv.clone();
+    // tick 0 is an interval tick, but there are no pools -> empty plan -> no clone.
+    run_macro_flow_at_tick(
+        &mut acc,
+        &mut inv,
+        &mut led,
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut mg,
+        &DirtyMarketGoods::default(),
+        &dormant,
+        &MarketDistances::default(),
+        &cfg,
+        0,
+    )
+    .unwrap();
+    assert_eq!(acc, before_acc, "books byte-identical on idle interval");
+    assert_eq!(inv, before_inv);
+    assert!(led.0.is_empty());
+    assert!(mg.0.is_empty(), "no write-back on idle interval");
+}
+
+#[test]
+fn macro_flow_settle_fault_isolates_and_conserves() {
+    use crate::economy::MarketGoodState;
+
+    // STEP H per-edge settle-fault isolation: one edge faults at SETTLEMENT time,
+    // the system emits a single MarketClearFailed for it, skips it (its scratch
+    // clone is discarded so the live books are byte-identical for that edge), and
+    // every healthy edge still commits + emits a MacroFlow. Conservation holds
+    // across the whole tick.
+    //
+    // NOTE ON THE FAULT MECHANISM. The spec/plan sketch a *cash* over-charge — a
+    // deficit buyer targeted by two sources whose second edge's `lock_cash`
+    // exceeds bucket-time affordability. That construction is UNREACHABLE against
+    // this implementation: STEP A caps each buyer's effective demand to
+    // `affordable_qty(cash, p_m)`, and the STEP-D transport gate guarantees, per
+    // accepted import edge, `transport_i < (p_m - p_src_i) * q_i`. Summing over a
+    // buyer's edges (self-edge at `p_src = p_dst = p_m`, imports at `p_src < p_m`):
+    //   total_charge = Σ p_src_i·q_i + Σ transport_i + p_m·matched
+    //                < Σ p_src_i·q_i + Σ(p_m - p_src_i)·q_i + p_m·matched
+    //                = p_m·(deficit + matched) = p_m·effective_demand ≤ cash.
+    // So `lock_cash` provably never under-funds. An exhaustive sweep over cash /
+    // transport-rate / source-prices / demand / local-supply / distance produced
+    // ZERO cash faults, confirming the proof. The genuine settlement-time fault
+    // that STEP H isolates is therefore a *checked-op* fault — exactly the "…or
+    // any checked op underflows" clause of the STEP H contract: here the
+    // `traded_qty_last_tick` accumulator in `write_back` overflows `Quantity::
+    // checked_add` for an import sink whose prior accumulated quantity is at
+    // `i64::MAX`. The import to that sink errors with `Overflow`; the unrelated
+    // healthy import commits.
+    let a1 = MarketId(1); // cheap surplus source for the HEALTHY import
+    let a2 = MarketId(2); // cheap surplus source for the FAULTING import
+    let cdst = MarketId(3); // healthy deficit sink
+    let bdst = MarketId(4); // faulting deficit sink (pre-seeded near i64::MAX)
+    let s1 = EconomicActorId(10);
+    let s2 = EconomicActorId(11);
+    let cbuyer = EconomicActorId(20);
+    let bbuyer = EconomicActorId(21);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    accounts.deposit(cbuyer, Money(1_000_000)).unwrap();
+    accounts.deposit(bbuyer, Money(1_000_000)).unwrap();
+    inventory.deposit(s1, GOOD_FOOD, Quantity(100)).unwrap();
+    inventory.deposit(s2, GOOD_FOOD, Quantity(100)).unwrap();
+    let mut demand = DemandPools::default();
+    demand.0.insert(
+        cbuyer,
+        DemandPool {
+            actor: cbuyer,
+            market: cdst,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(100),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    demand.0.insert(
+        bbuyer,
+        DemandPool {
+            actor: bbuyer,
+            market: bdst,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(100),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    let mut supply = SupplyPools::default();
+    supply.0.insert(
+        s1,
+        SupplyPool {
+            actor: s1,
+            market: a1,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(100),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    supply.0.insert(
+        s2,
+        SupplyPool {
+            actor: s2,
+            market: a2,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(100),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    let dormant: BTreeSet<MarketId> = [a1, a2, cdst, bdst].into_iter().collect();
+    let mut distances = MarketDistances::default();
+    for (x, y) in [(a1, cdst), (cdst, a1), (a2, bdst), (bdst, a2)] {
+        distances.0.insert((x, y), 1);
+    }
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+    let mut market_goods = MarketGoods::default();
+    // Pre-seed B's accumulator at i64::MAX so the import's write_back overflows
+    // `Quantity::checked_add` -> settle returns Err(Overflow) -> the B edge faults.
+    let bkey = MarketGoodKey {
+        market: bdst,
+        good: GOOD_FOOD,
+    };
+    let mut bstate = MarketGoodState::new(bkey);
+    bstate.traded_qty_last_tick = Quantity(i64::MAX);
+    bstate.last_settlement_price = Money(1_000);
+    market_goods.0.insert(bkey, bstate);
+    let mut ledger = TradeLedger::default();
+    let m0 = accounts.total_money().unwrap();
+    let g0 = inventory.total_good(GOOD_FOOD).unwrap();
+
+    run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mut market_goods,
+        &DirtyMarketGoods::default(),
+        &dormant,
+        &distances,
+        &cfg,
+        0,
+    )
+    .unwrap();
+
+    // Conservation holds across the whole tick (faulted edge left books unchanged for it).
+    assert_eq!(accounts.total_money().unwrap(), m0);
+    assert_eq!(inventory.total_good(GOOD_FOOD).unwrap(), g0);
+    // At least one healthy MacroFlow AND exactly one MarketClearFailed for the faulted edge.
+    assert!(
+        ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::MacroFlow { .. }))
+    );
+    assert_eq!(
+        ledger
+            .0
+            .iter()
+            .filter(|e| matches!(e, EconomyEvent::MarketClearFailed { .. }))
+            .count(),
+        1,
+        "the faulting edge faults exactly once, others healthy"
+    );
+    // The faulted edge moved nothing: the B buyer never spent, the healthy C buyer did.
+    assert_eq!(
+        accounts.account(bbuyer).available,
+        Money(1_000_000),
+        "faulted-edge buyer untouched"
+    );
+    assert!(accounts.account(bbuyer).available.0 >= 0, "no overdraw");
+}

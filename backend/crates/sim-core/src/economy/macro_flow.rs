@@ -9,10 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::pools::affordable_qty;
 use crate::economy::{
-    AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent, GoodId,
-    InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
-    Quantity, SettlementPolicy, SupplyPools, TRANSPORT_OPERATOR, apportion_cash,
-    checked_order_value, prorata_distribute, settlement_price_with_policy, transport_cost,
+    AccountBook, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig, EconomyError,
+    EconomyEvent, GoodId, InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState,
+    MarketGoods, MarketId, Money, Quantity, SettlementPolicy, SupplyPools, TRANSPORT_OPERATOR,
+    TradeLedger, apportion_cash, checked_order_value, prorata_distribute,
+    settlement_price_with_policy, transport_cost,
 };
 
 /// Synthetic per-(market,good) price derived from the pool band each interval.
@@ -549,5 +550,126 @@ fn write_back(
     state.unmet_demand_last_tick = Quantity(unmet_demand);
     state.unsold_supply_last_tick = Quantity(unsold_supply);
     state.last_cleared_tick = current_tick;
+    Ok(())
+}
+
+/// STEP H/I + assembly: the per-interval macro flow over all dormant markets.
+/// Interval-gated, conditional-clone (no clone on a quiescent interval), atomic
+/// clone-validate-apply with per-edge settle-fault isolation, then commit + emit.
+#[allow(clippy::too_many_arguments)]
+pub fn run_macro_flow_at_tick(
+    accounts: &mut AccountBook,
+    inventory: &mut InventoryBook,
+    ledger: &mut TradeLedger,
+    demand: &DemandPools,
+    supply: &SupplyPools,
+    market_goods: &mut MarketGoods,
+    dirty: &DirtyMarketGoods,
+    dormant: &BTreeSet<MarketId>,
+    distances: &MarketDistances,
+    config: &EconomyConfig,
+    current_tick: u64,
+) -> Result<(), EconomyError> {
+    if config.warm_flow_interval_ticks == 0
+        || !current_tick.is_multiple_of(config.warm_flow_interval_ticks)
+    {
+        return Ok(());
+    }
+
+    // STEP A-D against the LIVE books, read-only. Skip keys still settling under
+    // the auction (handoff skip-guard §5): a (market,good) currently dirty is
+    // dropped from the dormant bucket set.
+    let buckets = build_macro_buckets(
+        accounts,
+        inventory,
+        demand,
+        supply,
+        market_goods,
+        dormant,
+        config,
+    )?;
+    let buckets: BTreeMap<MarketGoodKey, MacroBucket> = buckets
+        .into_iter()
+        .filter(|(key, _)| !dirty.0.contains(key))
+        .collect();
+    let mut candidates = build_candidates(&buckets, distances, config)?;
+    sort_candidates(&mut candidates);
+    let flows = plan_flows(&candidates, &buckets);
+    if flows.is_empty() {
+        return Ok(()); // truly-quiescent interval: NO clone.
+    }
+
+    // Atomic boundary: mutate clones, commit on success.
+    let mut next_accounts = accounts.clone();
+    let mut next_inventory = inventory.clone();
+    let mut next_goods = market_goods.clone();
+    let mut events: Vec<EconomyEvent> = Vec::new();
+
+    // Per-market effective demand/supply for the write-back residuals (bucket-time).
+    let effective = |market: MarketId, good: GoodId| -> (i64, i64) {
+        match buckets.get(&MarketGoodKey { market, good }) {
+            Some(b) => (b.total_demand(), b.total_supply()),
+            None => (0, 0),
+        }
+    };
+
+    for flow in &flows {
+        // Recover the seller/buyer weight lists for this flow's endpoints.
+        let sellers = buckets
+            .get(&MarketGoodKey {
+                market: flow.src,
+                good: flow.good,
+            })
+            .map(|b| b.sellers.clone())
+            .unwrap_or_default();
+        let buyers = buckets
+            .get(&MarketGoodKey {
+                market: flow.dst,
+                good: flow.good,
+            })
+            .map(|b| b.buyers.clone())
+            .unwrap_or_default();
+        let (eff_demand_src, eff_supply_src) = effective(flow.src, flow.good);
+        let (eff_demand_dst, eff_supply_dst) = effective(flow.dst, flow.good);
+
+        // STEP H fault isolation: settle into a scratch clone; fold back only on
+        // success, else emit MarketClearFailed and skip (books byte-identical).
+        let mut scratch_accounts = next_accounts.clone();
+        let mut scratch_inventory = next_inventory.clone();
+        let mut scratch_goods = next_goods.clone();
+        match settle_flow(
+            &mut scratch_accounts,
+            &mut scratch_inventory,
+            &mut scratch_goods,
+            flow,
+            &sellers,
+            &buyers,
+            eff_demand_src,
+            eff_supply_src,
+            eff_demand_dst,
+            eff_supply_dst,
+            config,
+            current_tick,
+        ) {
+            Ok(event) => {
+                next_accounts = scratch_accounts;
+                next_inventory = scratch_inventory;
+                next_goods = scratch_goods;
+                events.push(event);
+            }
+            Err(reason) => {
+                events.push(EconomyEvent::MarketClearFailed {
+                    market: flow.dst,
+                    good: flow.good,
+                    reason,
+                });
+            }
+        }
+    }
+
+    *accounts = next_accounts;
+    *inventory = next_inventory;
+    *market_goods = next_goods;
+    ledger.0.extend(events);
     Ok(())
 }

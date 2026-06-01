@@ -53,7 +53,7 @@ impl MarketGoodState {
 #[derive(Resource, Default)]
 pub struct Markets(pub BTreeMap<MarketId, MarketSite>);
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone)]
 pub struct MarketGoods(pub BTreeMap<MarketGoodKey, MarketGoodState>);
 
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
