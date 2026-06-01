@@ -16,6 +16,7 @@ mod production;
 mod rationing;
 mod seed;
 mod settlement_policy;
+mod shoppers;
 mod systems;
 mod traders;
 mod transport;

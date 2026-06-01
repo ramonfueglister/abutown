@@ -214,14 +214,36 @@ fn materialize_despawns_when_trader_leaves_observed_chunks() {
 
 #[test]
 fn materialize_does_not_touch_money_or_goods() {
-    use crate::economy::{AccountBook, InventoryBook, Money};
+    use crate::economy::shoppers::{SHOPPER_ACTOR_OFFSET, ShopperVisit, ShopperVisits};
+    use crate::economy::{AccountBook, GoodId, InventoryBook, Money};
+    use crate::routing::NodeId;
     let (mut world, actor) = seed(TraderState::ToDest { remaining: 2 });
     let mut accounts = AccountBook::default();
     accounts.deposit(actor, Money(10_000)).unwrap();
     let mut inv = InventoryBook::default();
     inv.deposit(actor, GOOD_TOOLS, Quantity(5)).unwrap();
+    // Give the shopper actor economic state that must remain untouched.
+    let shopper_actor = EconomicActorId(SHOPPER_ACTOR_OFFSET);
+    accounts.deposit(shopper_actor, Money(777)).unwrap();
+    inv.deposit(shopper_actor, GoodId(0), Quantity(3)).unwrap();
     world.insert_resource(accounts);
     world.insert_resource(inv);
+    // Insert an active shopper visit so conservation is checked even when ShopperVisits is
+    // non-empty (plan_mutations only iterates Traders; shopper render is tested in the
+    // *_with_active_shipment variant which runs materialize_traders_system end-to-end).
+    let mut sv = ShopperVisits::default();
+    sv.0.insert(
+        0,
+        ShopperVisit {
+            id: 0,
+            market: MarketId(1),
+            good: GoodId(0),
+            origin_node: NodeId(7),
+            start_tick: 0,
+            travel_ticks: 20,
+        },
+    );
+    world.insert_resource(sv);
 
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
         [(actor, vec![(1.0, 1.0), (9.0, 1.0)])]
@@ -244,10 +266,28 @@ fn materialize_does_not_touch_money_or_goods() {
         Quantity(5),
         "goods untouched (render-only)"
     );
+    // Shopper actor's economic books must also be untouched.
+    assert_eq!(
+        world
+            .resource::<AccountBook>()
+            .account(shopper_actor)
+            .available,
+        Money(777),
+        "shopper actor money untouched (pure render projection)"
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(shopper_actor, GoodId(0))
+            .available,
+        Quantity(3),
+        "shopper actor goods untouched (pure render projection)"
+    );
 }
 
 #[test]
 fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
+    use crate::economy::shoppers::{SHOPPER_ACTOR_OFFSET, ShopperVisit, ShopperVisits};
     use crate::economy::{AccountBook, InventoryBook, Money};
 
     // Build a fully-routed world so materialize_traders_system can run end-to-end.
@@ -257,10 +297,14 @@ fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
 
     // Give the shipment actor some economic state so we can verify it is never mutated.
     let shipment_actor_id = EconomicActorId(SHIPMENT_ACTOR_OFFSET);
+    let shopper_actor_id = EconomicActorId(SHOPPER_ACTOR_OFFSET);
     let mut accounts = AccountBook::default();
     accounts.deposit(shipment_actor_id, Money(9_999)).unwrap();
+    accounts.deposit(shopper_actor_id, Money(4_321)).unwrap();
     let mut inv = InventoryBook::default();
     inv.deposit(shipment_actor_id, GoodId(0), Quantity(7))
+        .unwrap();
+    inv.deposit(shopper_actor_id, GoodId(0), Quantity(11))
         .unwrap();
     world.insert_resource(accounts);
     world.insert_resource(inv);
@@ -278,8 +322,20 @@ fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
             travel_ticks: 10,
         },
     );
+    // Insert an active shopper visit (walks from market_a's node to market_b's node).
+    world.resource_mut::<ShopperVisits>().0.insert(
+        0,
+        ShopperVisit {
+            id: 0,
+            market: b,
+            good: GoodId(0),
+            origin_node: crate::routing::NodeId(0),
+            start_tick: 0,
+            travel_ticks: 10,
+        },
+    );
 
-    // Run the materialize system several ticks; the shipment renders and expires.
+    // Run the materialize system several ticks; both the shipment and shopper render and expire.
     for t in 0u64..12 {
         world.insert_resource(Tick(t));
         materialize_traders_system(&mut world);
@@ -301,6 +357,23 @@ fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
             .available,
         Quantity(7),
         "goods untouched by shipment-materialize path"
+    );
+    // Shopper actor's economic books must also remain untouched — shopper path is read-only.
+    assert_eq!(
+        world
+            .resource::<AccountBook>()
+            .account(shopper_actor_id)
+            .available,
+        Money(4_321),
+        "money untouched by shopper-materialize path"
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(shopper_actor_id, GoodId(0))
+            .available,
+        Quantity(11),
+        "goods untouched by shopper-materialize path"
     );
 }
 
@@ -379,6 +452,7 @@ fn routed_shipment_world(market_a: MarketId, market_b: MarketId) -> World {
     world.insert_resource(EconomyConfig::default());
     world.insert_resource(MaterializedTraders::default());
     world.insert_resource(FlowShipments::default());
+    world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
     world.insert_resource(AgentIdIndex::default());
     world.insert_resource(DirtyAgents::default());
     world.insert_resource(Tick(0));
@@ -504,5 +578,128 @@ fn materialize_renders_flow_shipment_then_despawns_on_arrival() {
             .count(),
         0,
         "no trader-agent remains after arrival"
+    );
+}
+
+#[test]
+fn materialize_renders_shopper_then_despawns_on_arrival() {
+    use crate::economy::shoppers::{SHOPPER_ACTOR_OFFSET, ShopperVisit, ShopperVisits};
+
+    // Reuse the #70 routed-world fixture: two markets on a single footway, both in
+    // chunk (0,0). The shopper walks from the origin footway node (node 0) TO the
+    // market (node 1); the whole route — and every mid-flight position — sits in the
+    // observed chunk.
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let mut world = routed_shipment_world(a, b);
+    let shopper_actor = EconomicActorId(SHOPPER_ACTOR_OFFSET);
+
+    // One active visit (id 0) walking origin=node0 -> market_b=node1, 10 ticks.
+    world.resource_mut::<ShopperVisits>().0.insert(
+        0,
+        ShopperVisit {
+            id: 0,
+            market: b,
+            good: GoodId(0),
+            origin_node: NodeId(0),
+            start_tick: 0,
+            travel_ticks: 10,
+        },
+    );
+
+    // Mid-flight (tick 5 => progress 0.5): a shopper-agent materializes at the
+    // visit's progressed position inside the observed chunk.
+    world.insert_resource(Tick(5));
+    materialize_traders_system(&mut world);
+
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shopper_actor),
+        "shopper materialized while in an observed chunk"
+    );
+    let mut q =
+        world.query_filtered::<(&Position, &StableAgentId, &SpriteKey), With<TraderAgent>>();
+    let hits: Vec<((f32, f32), String, String)> = q
+        .iter(&world)
+        .map(|(p, s, sk)| ((p.x, p.y), s.0.0.clone(), sk.0.clone()))
+        .collect();
+    assert_eq!(hits.len(), 1, "exactly one shopper agent");
+    assert!(
+        hits[0].1.starts_with("shopper:"),
+        "shopper-namespaced stable id, got {:?}",
+        hits[0].1
+    );
+    assert!(
+        hits[0].2.starts_with("shopper:"),
+        "shopper sprite variant, got {:?}",
+        hits[0].2
+    );
+    // Progress 0.5 along [(1,1)->(20,1)] => ~(10.5, 1.0), well inside chunk (0,0).
+    assert!(
+        (hits[0].0.0 - 10.5).abs() < 0.5 && (hits[0].0.1 - 1.0).abs() < 0.01,
+        "rendered at the progressed position, got {:?}",
+        hits[0].0
+    );
+
+    // The shopper visit must remain mid-flight (not yet arrived).
+    assert!(
+        !world.resource::<ShopperVisits>().0.is_empty(),
+        "active shopper visit retained mid-flight"
+    );
+
+    let entity = world
+        .resource::<MaterializedTraders>()
+        .0
+        .get(&shopper_actor)
+        .map(|m| m.entity)
+        .expect("materialized mid-flight");
+    world.resource_mut::<DirtyAgents>().0.clear();
+
+    // Arrival tick (tick 10 => progress 1.0, arrived): the destination sits in the
+    // observed chunk, so the arrived shopper is routed through the SAME ghost-free
+    // leave->despawn path. On this tick the agent is dirtied (the leave) and kept;
+    // the visit is retained one extra tick.
+    world.insert_resource(Tick(10));
+    materialize_traders_system(&mut world);
+    assert!(
+        world.resource::<DirtyAgents>().0.contains(&entity),
+        "arrived shopper marked dirty on the leave tick (ghost-free removal)"
+    );
+    assert!(
+        !world.resource::<ShopperVisits>().0.is_empty(),
+        "arrived shopper visit kept one extra tick so the leave is emitted before despawn"
+    );
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shopper_actor),
+        "agent still alive on the arrival (leave) tick"
+    );
+
+    // Next tick: the leave was emitted, so the agent is despawned (LOD) and only now
+    // is the visit dropped from ShopperVisits.
+    world.insert_resource(Tick(11));
+    materialize_traders_system(&mut world);
+    assert!(
+        !world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shopper_actor),
+        "shopper despawned the tick after the leave"
+    );
+    assert!(
+        world.resource::<ShopperVisits>().0.is_empty(),
+        "arrived shopper visit dropped once its agent finished the leave->despawn path"
+    );
+    assert_eq!(
+        world
+            .query_filtered::<Entity, With<TraderAgent>>()
+            .iter(&world)
+            .count(),
+        0,
+        "no shopper-agent remains after arrival"
     );
 }

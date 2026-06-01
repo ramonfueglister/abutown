@@ -70,6 +70,17 @@ pub(crate) enum TraderMutation {
     },
 }
 
+/// Sprite/id prefix for a render-actor by its actor-id namespace. Shopper actors
+/// (>= SHOPPER_ACTOR_OFFSET) render as pedestrians (`shopper:`), everything else
+/// (demo traders + flow shipments) as `trader:`.
+pub(crate) fn id_prefix(actor: EconomicActorId) -> &'static str {
+    if actor.0 >= crate::economy::shoppers::SHOPPER_ACTOR_OFFSET {
+        "shopper:"
+    } else {
+        "trader:"
+    }
+}
+
 /// Deterministic sprite-variant index for a trader id (FNV-1a, 8 variants).
 fn sprite_hash(id: &str) -> u32 {
     let mut h: u32 = 0x811c_9dc5;
@@ -186,8 +197,9 @@ pub(crate) fn plan_render_mutations(
         match (observed_now, was_observed) {
             // Appear: first time its current chunk is observed.
             (true, None) => {
-                let agent_id = AgentId(format!("trader:{}", actor.0));
-                let sprite = format!("trader:{}", sprite_hash(&agent_id.0));
+                let p = id_prefix(*actor);
+                let agent_id = AgentId(format!("{p}{}", actor.0));
+                let sprite = format!("{p}{}", sprite_hash(&agent_id.0));
                 muts.push(TraderMutation::Spawn {
                     actor: *actor,
                     agent_id,
@@ -359,7 +371,7 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                 world
                     .resource_mut::<AgentIdIndex>()
                     .0
-                    .remove(&AgentId(format!("trader:{}", actor.0)));
+                    .remove(&AgentId(format!("{}{}", id_prefix(actor), actor.0)));
                 world.resource_mut::<MaterializedTraders>().0.remove(&actor);
             }
         }
@@ -375,7 +387,21 @@ fn rendering_shipment_ids(materialized: &MaterializedTraders) -> BTreeSet<u64> {
     materialized
         .0
         .keys()
+        .filter(|a| a.0 < crate::economy::shoppers::SHOPPER_ACTOR_OFFSET)
         .filter_map(|a| a.0.checked_sub(SHIPMENT_ACTOR_OFFSET))
+        .collect()
+}
+
+/// The set of shopper-visit ids that currently have a live materialized
+/// render-agent (their reserved actor id is `SHOPPER_ACTOR_OFFSET + id`). Used by
+/// `expire_arrived_shoppers` to retain an arrived visit until its agent has
+/// finished the ghost-free leave->despawn lifecycle.
+fn rendering_shopper_ids(materialized: &MaterializedTraders) -> std::collections::BTreeSet<u64> {
+    use crate::economy::shoppers::SHOPPER_ACTOR_OFFSET;
+    materialized
+        .0
+        .keys()
+        .filter_map(|a| a.0.checked_sub(SHOPPER_ACTOR_OFFSET))
         .collect()
 }
 
@@ -396,6 +422,12 @@ pub fn materialize_traders_system(world: &mut World) {
             &mut world.resource_mut::<crate::economy::FlowShipments>(),
             tick,
             &rendering,
+        );
+        let s_rendering = rendering_shopper_ids(world.resource::<MaterializedTraders>());
+        crate::economy::shoppers::expire_arrived_shoppers(
+            &mut world.resource_mut::<crate::economy::ShopperVisits>(),
+            tick,
+            &s_rendering,
         );
     }
 
@@ -461,6 +493,25 @@ pub fn materialize_traders_system(world: &mut World) {
                     ));
                 }
             }
+            // shopper visits (NEW): demand-side twin of flow shipments. Route the
+            // visit's origin footway node -> its market node, linear progress,
+            // reserved shopper actor id. Arrived visits are fed in (arrived=true) so
+            // the lifecycle walks them through the ghost-free leave->despawn path.
+            for v in world.resource::<crate::economy::ShopperVisits>().0.values() {
+                let Some(market) = markets.0.get(&v.market) else {
+                    continue;
+                };
+                if let Some(poly) =
+                    leg_polyline(graph, hpa, &mut cache, v.origin_node, market.node_id)
+                {
+                    out.push((
+                        EconomicActorId(crate::economy::shoppers::SHOPPER_ACTOR_OFFSET + v.id),
+                        poly,
+                        v.progress(tick),
+                        v.arrived(tick),
+                    ));
+                }
+            }
             out
         });
 
@@ -488,5 +539,11 @@ pub fn materialize_traders_system(world: &mut World) {
         &mut world.resource_mut::<crate::economy::FlowShipments>(),
         tick,
         &rendering,
+    );
+    let s_rendering = rendering_shopper_ids(world.resource::<MaterializedTraders>());
+    crate::economy::shoppers::expire_arrived_shoppers(
+        &mut world.resource_mut::<crate::economy::ShopperVisits>(),
+        tick,
+        &s_rendering,
     );
 }

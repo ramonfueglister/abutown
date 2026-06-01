@@ -24,11 +24,12 @@ pub enum EconomySet {
     GeneratePoolOrders,
     ClearMarkets,
     MacroFlow,
+    ShopperCapture,
     Materialize,
     Telemetry,
 }
 
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct EconomyConfig {
     pub ewma_alpha_bps: u16,
     pub default_order_ttl_ticks: u64,
@@ -37,6 +38,12 @@ pub struct EconomyConfig {
     pub trader_default_ref_price: Money,
     pub macro_flow_interval_ticks: u64,
     pub settlement_policy: SettlementPolicy,
+    /// How many unmet-demand units one visible shopper represents.
+    pub shoppers_per_unit: i64,
+    /// Cap on simultaneous shoppers rendered per market (keeps it a handful, not hundreds).
+    pub max_shoppers_per_market: usize,
+    /// Radius (tiles) around a market to pick shopper origin nodes.
+    pub shopper_radius_tiles: f32,
 }
 
 impl Default for EconomyConfig {
@@ -49,6 +56,9 @@ impl Default for EconomyConfig {
             trader_default_ref_price: Money(1_000),
             macro_flow_interval_ticks: 10,
             settlement_policy: SettlementPolicy::Anchored,
+            shoppers_per_unit: 3,
+            max_shoppers_per_market: 4,
+            shopper_radius_tiles: 24.0,
         }
     }
 }
@@ -63,6 +73,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::MacroFlow,
+            EconomySet::ShopperCapture,
             EconomySet::Materialize,
             EconomySet::Telemetry,
         )
@@ -89,6 +100,16 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
         )
             .before(crate::mobility::systems::tick_increment_system),
     );
+    // Shopper capture is an exclusive system (it reads the spatial Graph +
+    // NodeSpatialIndex and the observed-chunk set to pick deterministic origin
+    // nodes), so it is registered separately like materialize below. The set chain
+    // places it after MacroFlow and before Materialize so the same tick that
+    // observes unmet demand also renders its shoppers.
+    schedule.add_systems(
+        run_shopper_capture_system
+            .in_set(EconomySet::ShopperCapture)
+            .before(crate::mobility::systems::tick_increment_system),
+    );
     // Render-only trader materialization is an exclusive system (it needs &mut
     // World to spawn/despawn agents), so it is registered separately from the
     // parallel economy systems above. The set chain places it after MacroFlow.
@@ -97,6 +118,91 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             .in_set(EconomySet::Materialize)
             .before(crate::mobility::systems::tick_increment_system),
     );
+}
+
+/// Exclusive system: fill `ShopperVisits` from observed markets' unmet demand.
+///
+/// Mirrors how `materialize_traders_system` derives observed Active/Hot chunks: a
+/// market is observed iff the chunk containing its market node is observed. For
+/// each observed market it builds a deterministic origin-candidate provider from
+/// `NodeSpatialIndex::within_radius` — which returns an UNSORTED `Vec<NodeId>`
+/// (rstar tree order), so the result is SORTED by `NodeId` and the market node is
+/// dropped before taking the Nth — then delegates to the pure
+/// `capture_shopper_visits`. Routability is deferred to `materialize` (it skips
+/// origins with no Walk route). No-op when the spatial world is absent (a
+/// pure-economy schedule without `RoutingPlugin`), keeping the economy graph-free.
+pub fn run_shopper_capture_system(world: &mut World) {
+    use crate::economy::shoppers::{NextShopperId, ShopperVisits, capture_shopper_visits};
+    use crate::economy::transport::manhattan_tiles;
+    use crate::routing::{Graph, NodeId, NodeSpatialIndex};
+
+    if world.get_resource::<Graph>().is_none() || world.get_resource::<NodeSpatialIndex>().is_none()
+    {
+        return;
+    }
+
+    let tick = world.get_resource::<Tick>().map(|t| t.0).unwrap_or(0);
+
+    let observed_chunks: BTreeSet<ChunkCoord> = {
+        let mut q =
+            world.query_filtered::<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>();
+        q.iter(world).map(|c| c.0).collect()
+    };
+
+    // Capture into local copies inside a borrow scope: every economy/spatial read
+    // is an immutable borrow of `world`, so the (visits, next) results are computed
+    // here and written back below once those borrows are released — keeping the
+    // exclusive system borrow-clean.
+    let captured = {
+        let graph = world.resource::<Graph>();
+        let markets = world.resource::<crate::economy::Markets>();
+        // Observed markets: those whose market-node chunk is currently observed.
+        let observed_markets: BTreeSet<MarketId> = markets
+            .0
+            .iter()
+            .filter(|(_, site)| {
+                let pos = graph.node(site.node_id).position;
+                observed_chunks.contains(&crate::mobility::chunk_of(pos.0, pos.1, 32))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if observed_markets.is_empty() {
+            return;
+        }
+
+        let spatial = world.resource::<NodeSpatialIndex>();
+        let config = *world.resource::<EconomyConfig>();
+        let market_goods = world.resource::<MarketGoods>();
+
+        let mut visits = world.resource::<ShopperVisits>().clone();
+        let mut next = *world.resource::<NextShopperId>();
+        // Deterministic origin provider: within_radius (UNSORTED) -> sort by NodeId
+        // -> drop the market node -> pair with Manhattan distance (tiles) to the
+        // market.
+        let origins = |market_node: NodeId| -> Vec<(NodeId, i64)> {
+            let pos = graph.node(market_node).position;
+            let mut cands = spatial.within_radius((pos.0, pos.1), config.shopper_radius_tiles);
+            cands.sort_unstable_by_key(|n| n.0);
+            cands
+                .into_iter()
+                .filter(|n| *n != market_node)
+                .map(|n| (n, manhattan_tiles(graph, n, market_node)))
+                .collect()
+        };
+        capture_shopper_visits(
+            market_goods,
+            &observed_markets,
+            markets,
+            origins,
+            &config,
+            tick,
+            &mut visits,
+            &mut next,
+        );
+        (visits, next)
+    };
+    *world.resource_mut::<ShopperVisits>() = captured.0;
+    *world.resource_mut::<NextShopperId>() = captured.1;
 }
 
 /// Bridge: derive `DormantMarkets` from chunk LOD. A market anchored (in
