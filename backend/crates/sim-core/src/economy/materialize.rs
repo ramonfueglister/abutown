@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
+use crate::economy::flow_shipments::expire_arrived;
 use crate::economy::trader_render::{is_outbound, leg_progress, route_polyline, trader_travel};
 use crate::economy::{EconomicActorId, EconomyConfig, Markets, Trader, Traders};
 use crate::ids::{AgentId, ChunkCoord};
@@ -127,6 +128,11 @@ fn leg_polyline(
     if poly.is_empty() { None } else { Some(poly) }
 }
 
+/// Owned render input gathered inside the routing cache scope: (actor, current-leg
+/// polyline, progress in [0,1]). Demo traders and flow shipments both produce these;
+/// they are mapped to borrowed `RenderActor`s once the routing borrows are released.
+type RenderInput = (EconomicActorId, Vec<(f32, f32)>, f32);
+
 /// A render-actor input to `plan_render_mutations`: an opaque id, the current-leg
 /// route polyline, and the progress along it. Demo `Trader`s and flow shipments
 /// both produce these — the lifecycle machine never sees their economic source.
@@ -216,6 +222,12 @@ pub(crate) fn plan_render_mutations(
 /// (Active/Hot) chunks. Thin adapter over `plan_render_mutations`: builds the
 /// `RenderActor` list from `Traders` (progress via `trader_travel`/`leg_progress`).
 /// No ECS world access — fully unit-testable.
+///
+/// Test-only since the materialize system builds its combined demo-trader +
+/// shipment render-input list inline (see `materialize_traders_system`) and calls
+/// `plan_render_mutations` directly; this adapter exists to unit-test the
+/// demo-trader → `RenderActor` derivation in isolation.
+#[cfg(test)]
 pub(crate) fn plan_mutations(
     traders: &Traders,
     config: &EconomyConfig,
@@ -360,14 +372,17 @@ pub fn materialize_traders_system(world: &mut World) {
         q.iter(world).map(|c| c.0).collect()
     };
 
-    let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
+    // Build owned render inputs (actor, polyline, progress) for demo traders AND
+    // flow shipments inside one cache scope, then plan + apply.
+    let render_inputs: Vec<RenderInput> =
         world.resource_scope(|world: &mut World, mut cache: Mut<FlowFieldCache>| {
             let graph = world.resource::<Graph>();
             let hpa = world.resource::<HpaIndex>();
             let markets = world.resource::<Markets>();
-            let traders = world.resource::<Traders>();
-            let mut routes = BTreeMap::new();
-            for (actor, trader) in &traders.0 {
+            let config = world.resource::<EconomyConfig>();
+            let mut out: Vec<RenderInput> = Vec::new();
+            // demo traders (existing endpoints/outbound logic)
+            for (actor, trader) in &world.resource::<Traders>().0 {
                 let Some((src, dst)) = endpoints(markets, trader) else {
                     continue;
                 };
@@ -377,17 +392,47 @@ pub fn materialize_traders_system(world: &mut World) {
                     (dst, src)
                 };
                 if let Some(poly) = leg_polyline(graph, hpa, &mut cache, a, b) {
-                    routes.insert(*actor, poly);
+                    let progress = leg_progress(&trader.state, trader_travel(trader, config));
+                    out.push((*actor, poly, progress));
                 }
             }
-            routes
+            // flow shipments (NEW): route from->to, linear progress, reserved actor id
+            for s in world.resource::<crate::economy::FlowShipments>().0.values() {
+                let (Some(from), Some(to)) =
+                    (markets.0.get(&s.from_market), markets.0.get(&s.to_market))
+                else {
+                    continue;
+                };
+                if let Some(poly) = leg_polyline(graph, hpa, &mut cache, from.node_id, to.node_id) {
+                    out.push((
+                        EconomicActorId(
+                            crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET + s.id,
+                        ),
+                        poly,
+                        s.progress(tick),
+                    ));
+                }
+            }
+            out
         });
 
     let muts = {
-        let traders = world.resource::<Traders>();
-        let config = world.resource::<EconomyConfig>();
         let materialized = world.resource::<MaterializedTraders>();
-        plan_mutations(traders, config, materialized, &routes, &observed)
+        let actors: Vec<RenderActor<'_>> = render_inputs
+            .iter()
+            .map(|(actor, poly, progress)| RenderActor {
+                actor: *actor,
+                polyline: poly,
+                progress: *progress,
+            })
+            .collect();
+        plan_render_mutations(&actors, materialized, &observed)
     };
     apply_mutations(world, tick, muts);
+
+    // Drop shipments that have arrived this tick (after their final position rendered).
+    expire_arrived(
+        &mut world.resource_mut::<crate::economy::FlowShipments>(),
+        tick,
+    );
 }

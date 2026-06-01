@@ -244,3 +244,174 @@ fn materialize_does_not_touch_money_or_goods() {
         "goods untouched (render-only)"
     );
 }
+
+use crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET;
+use crate::economy::materialize::materialize_traders_system;
+use crate::economy::{FlowShipment, FlowShipments, GoodId, MarketSite, Markets};
+use crate::mobility::components::SpriteKey;
+use crate::mobility::resources::Tick;
+use crate::routing::{
+    Edge, EdgeId, EdgeKind, FlowFieldCache, Graph, HpaConfig, HpaIndex, Node, NodeId, NodeKind,
+    NodeSpatialIndex,
+};
+use crate::world::components::{ActiveChunk, ChunkCoordComp};
+
+/// Build a fully routed world (Graph + HpaIndex + FlowFieldCache + the render
+/// resources the materialize system reads) with two markets anchored to two
+/// footway nodes that share chunk (0,0). One straight Footway joins them so a
+/// flow shipment's whole route — and every mid-flight position — lands in the
+/// observed chunk. No demo trader is seeded.
+fn routed_shipment_world(market_a: MarketId, market_b: MarketId) -> World {
+    let mut world = World::new();
+    let graph = Graph::new(
+        vec![
+            Node {
+                id: NodeId(0),
+                position: (1.0, 1.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(1),
+                position: (20.0, 1.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+        ],
+        vec![Edge {
+            id: EdgeId(0),
+            from: NodeId(0),
+            to: NodeId(1),
+            polyline: vec![(1.0, 1.0), (20.0, 1.0)],
+            length: 19.0,
+            kind: EdgeKind::Footway,
+            speed_limit: 1.0,
+            capacity: 1,
+            legacy_id: Some("walk:ab".into()),
+        }],
+    );
+    let hpa = HpaIndex::build(&graph, HpaConfig::default()).expect("HPA should build");
+    let spatial = NodeSpatialIndex::from_nodes(graph.nodes());
+    world.insert_resource(graph);
+    world.insert_resource(hpa);
+    world.insert_resource(spatial);
+    world.insert_resource(FlowFieldCache::default());
+
+    let mut markets = Markets::default();
+    markets.0.insert(
+        market_a,
+        MarketSite {
+            id: market_a,
+            node_id: NodeId(0),
+            name: "A".to_string(),
+        },
+    );
+    markets.0.insert(
+        market_b,
+        MarketSite {
+            id: market_b,
+            node_id: NodeId(1),
+            name: "B".to_string(),
+        },
+    );
+    world.insert_resource(markets);
+
+    world.insert_resource(Traders::default());
+    world.insert_resource(EconomyConfig::default());
+    world.insert_resource(MaterializedTraders::default());
+    world.insert_resource(FlowShipments::default());
+    world.insert_resource(AgentIdIndex::default());
+    world.insert_resource(DirtyAgents::default());
+    world.insert_resource(Tick(0));
+
+    // Chunk (0,0) is observed (Active). The whole route sits inside it.
+    world.spawn((ChunkCoordComp(ChunkCoord { x: 0, y: 0 }), ActiveChunk));
+    world
+}
+
+#[test]
+fn materialize_renders_flow_shipment_then_despawns_on_arrival() {
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let mut world = routed_shipment_world(a, b);
+    let shipment_actor = EconomicActorId(SHIPMENT_ACTOR_OFFSET);
+
+    // One in-transit shipment A->B, 10 ticks, starting at tick 0.
+    world.resource_mut::<FlowShipments>().0.insert(
+        0,
+        FlowShipment {
+            id: 0,
+            from_market: a,
+            to_market: b,
+            good: GoodId(0),
+            qty: Quantity(10),
+            start_tick: 0,
+            travel_ticks: 10,
+        },
+    );
+
+    // Mid-flight (tick 5 => progress 0.5): a trader-agent must materialize at the
+    // shipment's progressed position inside the observed chunk.
+    world.insert_resource(Tick(5));
+    materialize_traders_system(&mut world);
+
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shipment_actor),
+        "shipment-trader materialized while in an observed chunk"
+    );
+    let mut q =
+        world.query_filtered::<(&Position, &StableAgentId, &SpriteKey), With<TraderAgent>>();
+    let hits: Vec<((f32, f32), String, String)> = q
+        .iter(&world)
+        .map(|(p, s, sk)| ((p.x, p.y), s.0.0.clone(), sk.0.clone()))
+        .collect();
+    assert_eq!(hits.len(), 1, "exactly one shipment-trader agent");
+    assert!(hits[0].1.starts_with("trader:"), "namespaced stable id");
+    assert!(hits[0].2.starts_with("trader:"), "trader sprite variant");
+    // Progress 0.5 along [(1,1)->(20,1)] => ~(10.5, 1.0), well inside chunk (0,0).
+    assert!(
+        (hits[0].0.0 - 10.5).abs() < 0.5 && (hits[0].0.1 - 1.0).abs() < 0.01,
+        "rendered at the progressed position, got {:?}",
+        hits[0].0
+    );
+
+    // Arrival tick (tick 10 => progress 1.0, arrived): the final position is
+    // rendered this tick (the agent is updated to the destination), THEN the
+    // shipment is expired from FlowShipments (drop-after-render, plan §5.3).
+    world.insert_resource(Tick(10));
+    materialize_traders_system(&mut world);
+    assert!(
+        world.resource::<FlowShipments>().0.is_empty(),
+        "arrived shipment expired from FlowShipments after its final position rendered"
+    );
+    assert!(
+        world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shipment_actor),
+        "agent still alive on the arrival tick (final position rendered)"
+    );
+
+    // Next tick: the shipment is gone from FlowShipments, so the generic sweep
+    // despawns its render-agent (ghost-free removal).
+    world.insert_resource(Tick(11));
+    materialize_traders_system(&mut world);
+    assert!(
+        !world
+            .resource::<MaterializedTraders>()
+            .0
+            .contains_key(&shipment_actor),
+        "shipment-trader despawned the tick after arrival"
+    );
+    assert_eq!(
+        world
+            .query_filtered::<Entity, With<TraderAgent>>()
+            .iter(&world)
+            .count(),
+        0,
+        "no trader-agent remains after arrival"
+    );
+}
