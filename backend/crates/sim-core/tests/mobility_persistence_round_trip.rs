@@ -395,9 +395,9 @@ fn active_route_hydration_rejects_cursor_past_steps() {
 
 #[test]
 fn birth_tick_round_trips() {
-    // Spawn an agent with birth_tick = 4242, extract → JSON → deserialize,
+    // Spawn an agent with birth_tick = -4242, extract → JSON → deserialize,
     // assert the persisted record carries birth_tick. Then re-apply into a
-    // fresh world and confirm the live entity still has birth_tick == 4242.
+    // fresh world and confirm the live entity still has birth_tick == -4242.
     let (mut world, _schedule) = empty_world_with_activity("activity:home");
     let rec = AgentRecord::new_born_at(
         AgentId("agent:born".into()),
@@ -408,7 +408,7 @@ fn birth_tick_round_trips() {
             activity_id: "activity:home".into(),
         }],
         0.05,
-        4242,
+        -4242,
     );
     api::spawn_agent_from_record(&mut world, rec);
 
@@ -421,7 +421,7 @@ fn birth_tick_round_trips() {
         .agents
         .get(&AgentId("agent:born".into()))
         .expect("agent was persisted in snapshot");
-    assert_eq!(agent.birth_tick, 4242);
+    assert_eq!(agent.birth_tick, -4242);
 
     // Re-applying into a fresh world must preserve birth_tick on the live entity.
     let (mut w2, _s2) = empty_world_with_activity("activity:home");
@@ -433,7 +433,7 @@ fn birth_tick_round_trips() {
             .get(&AgentId("agent:born".into()))
             .expect("agent present after re-apply")
             .birth_tick,
-        4242,
+        -4242,
         "birth_tick must survive extract → JSON → apply round-trip"
     );
 }

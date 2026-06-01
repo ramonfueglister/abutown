@@ -37,12 +37,13 @@ fn aged_world() -> bevy_ecs::world::World {
     let mut world = fresh_world();
 
     let clock = *world.resource::<SimClock>();
-    let ticks_per_year = SECONDS_PER_YEAR / clock.sim_seconds_per_tick;
+    let ticks_per_year = i64::try_from(SECONDS_PER_YEAR / clock.sim_seconds_per_tick)
+        .expect("test tick rate fits i64");
     let ticks_per_month = SECONDS_PER_MONTH / clock.sim_seconds_per_tick;
 
-    let now_tick: u64 = 50 * ticks_per_year; // sim-year ≈ 50
-    world.resource_mut::<Tick>().0 = now_tick;
-    let now_month = clock.month_index(now_tick);
+    let now_tick: i64 = 50 * ticks_per_year; // sim-year ≈ 50
+    world.resource_mut::<Tick>().0 = u64::try_from(now_tick).expect("test tick fits u64");
+    let now_month = clock.month_index(u64::try_from(now_tick).expect("test tick fits u64"));
     world.resource_mut::<LastProcessedMonth>().0 = now_month.saturating_sub(1);
     world.insert_resource(PopulationConfig::default());
 

@@ -85,7 +85,7 @@ pub struct AgentRecord {
     pub plan_cursor: usize,
     pub walk_speed_per_tick: f32,
     #[serde(default)]
-    pub birth_tick: u64,
+    pub birth_tick: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_route: Option<PersistedActiveRoute>,
     #[serde(default)]
@@ -115,7 +115,7 @@ impl AgentRecord {
         state: AgentMobilityState,
         plan: Vec<PlanStage>,
         walk_speed_per_tick: f32,
-        birth_tick: u64,
+        birth_tick: i64,
     ) -> Self {
         Self {
             id,

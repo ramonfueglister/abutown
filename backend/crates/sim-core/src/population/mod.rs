@@ -233,7 +233,7 @@ pub fn population_monthly_system(world: &mut World) {
                 candidate.mother_state.clone(),
                 candidate.mother_plan.clone(),
                 candidate.walk_speed,
-                now_tick,
+                i64::try_from(now_tick).unwrap_or(i64::MAX),
             );
             child_record.plan_cursor = candidate.mother_plan_cursor;
             child_record.sex = child_sex;
@@ -414,7 +414,8 @@ mod tests {
         schedule.add_systems(population_monthly_system);
 
         // birth_tick chosen so age ≈ 28 years at now_tick.
-        let ticks_per_year: u64 = crate::time::SECONDS_PER_YEAR / 200;
+        let ticks_per_year: i64 =
+            i64::try_from(crate::time::SECONDS_PER_YEAR / 200).expect("test tick rate fits i64");
         let age_ticks = 28 * ticks_per_year;
         let now_tick = 100 * ticks_per_year; // arbitrary "now"
         let mother_birth_tick = now_tick - age_ticks;
@@ -449,9 +450,10 @@ mod tests {
 
         // Start just before now_tick's month so each schedule.run processes one month.
         let clock = *world.resource::<SimClock>();
-        let now_month = clock.month_index(now_tick);
+        let now_tick_u64 = u64::try_from(now_tick).expect("test tick fits u64");
+        let now_month = clock.month_index(now_tick_u64);
         world.resource_mut::<LastProcessedMonth>().0 = now_month - 1;
-        world.resource_mut::<Tick>().0 = now_tick;
+        world.resource_mut::<Tick>().0 = now_tick_u64;
 
         let ticks_per_month = crate::time::SECONDS_PER_MONTH / 200;
 
@@ -459,7 +461,7 @@ mod tests {
         // P(no birth) ≈ (0.44)^20 < 10^-7, effectively impossible.
         let mut child_born = false;
         let mut child_info: Option<(Sex, Option<AgentId>)> = None;
-        let mut born_tick: Option<u64> = None;
+        let mut born_tick: Option<i64> = None;
         for _iter in 0..20 {
             let tick_before = world.resource::<Tick>().0;
             schedule.run(&mut world);
@@ -490,7 +492,8 @@ mod tests {
                 born_tick = Some(bt);
                 // The birth_tick must equal the tick at which the system ran.
                 assert_eq!(
-                    bt, tick_before,
+                    bt,
+                    i64::try_from(tick_before).expect("test tick fits i64"),
                     "newborn birth_tick {bt} must equal the tick when system ran {tick_before}"
                 );
                 child_born = true;
@@ -545,13 +548,14 @@ mod tests {
         schedule.add_systems(population_monthly_system);
 
         let clock = *world.resource::<SimClock>();
-        let ticks_per_year: u64 = SECONDS_PER_YEAR / clock.sim_seconds_per_tick;
+        let ticks_per_year = i64::try_from(SECONDS_PER_YEAR / clock.sim_seconds_per_tick)
+            .expect("test tick rate fits i64");
         let now_tick = 200 * ticks_per_year;
         let mother_birth_tick = now_tick - 55 * ticks_per_year; // 55 > fertile_max
         let age28_tick = mother_birth_tick + 28 * ticks_per_year;
-        let start_month = clock.month_index(age28_tick);
+        let start_month = clock.month_index(u64::try_from(age28_tick).expect("test tick fits u64"));
         world.resource_mut::<LastProcessedMonth>().0 = start_month.saturating_sub(1);
-        world.resource_mut::<Tick>().0 = now_tick;
+        world.resource_mut::<Tick>().0 = u64::try_from(now_tick).expect("test tick fits u64");
 
         let mother_id = AgentId("agent:mother:permonth".to_string());
         let entity = world

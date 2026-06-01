@@ -227,7 +227,7 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
                             cyclic: false,
                         },
                         WalkSpeed(0.0),
-                        BirthTick(tick),
+                        BirthTick(i64::try_from(tick).unwrap_or(i64::MAX)),
                         Position { x, y },
                         Direction(dir),
                         SpriteKey(sprite),

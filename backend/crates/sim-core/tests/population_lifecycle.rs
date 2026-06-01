@@ -70,15 +70,17 @@ fn build_world_with_cohort() -> (bevy_ecs::world::World, HashSet<String>, u64) {
     let tpm = ticks_per_month(&clock);
 
     // Choose a "current" tick large enough to express all ages correctly.
-    let ticks_per_year = sim_core::time::SECONDS_PER_YEAR / clock.sim_seconds_per_tick;
-    let now_tick: u64 = 200 * ticks_per_year; // sim-time ≈ year 200
+    let ticks_per_year: i64 =
+        i64::try_from(sim_core::time::SECONDS_PER_YEAR / clock.sim_seconds_per_tick)
+            .expect("test tick rate fits i64");
+    let now_tick: i64 = 200 * ticks_per_year; // sim-time ≈ year 200
 
     // Initialise Tick resource to now_tick.
-    world.resource_mut::<Tick>().0 = now_tick;
+    world.resource_mut::<Tick>().0 = u64::try_from(now_tick).expect("test tick fits u64");
 
     // Set LastProcessedMonth to one before the current month so the first
     // call to population_monthly_system processes exactly one month.
-    let now_month = clock.month_index(now_tick);
+    let now_month = clock.month_index(u64::try_from(now_tick).expect("test tick fits u64"));
     world.resource_mut::<LastProcessedMonth>().0 = now_month.saturating_sub(1);
 
     let activity_state = || AgentMobilityState::AtActivity {

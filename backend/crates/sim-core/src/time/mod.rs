@@ -29,17 +29,23 @@ impl SimClock {
     pub fn sim_seconds(&self, tick: u64) -> u64 {
         tick.saturating_mul(self.sim_seconds_per_tick)
     }
+
     pub fn calendar(&self, tick: u64) -> SimDate {
         SimDate::from_seconds(self.sim_seconds(tick))
     }
-    pub fn age_seconds(&self, now_tick: u64, birth_tick: u64) -> u64 {
-        now_tick
-            .saturating_sub(birth_tick)
-            .saturating_mul(self.sim_seconds_per_tick)
+
+    fn birth_sim_seconds(&self, birth_tick: i64) -> i128 {
+        i128::from(birth_tick) * i128::from(self.sim_seconds_per_tick)
     }
-    pub fn age_years(&self, now_tick: u64, birth_tick: u64) -> f32 {
+
+    pub fn age_seconds(&self, now_tick: u64, birth_tick: i64) -> u64 {
+        self.age_seconds_at(self.sim_seconds(now_tick), birth_tick)
+    }
+
+    pub fn age_years(&self, now_tick: u64, birth_tick: i64) -> f32 {
         self.age_seconds(now_tick, birth_tick) as f32 / SECONDS_PER_YEAR as f32
     }
+
     pub fn month_index(&self, tick: u64) -> u64 {
         self.sim_seconds(tick) / SECONDS_PER_MONTH
     }
@@ -49,10 +55,15 @@ impl SimClock {
         month.saturating_mul(SECONDS_PER_MONTH)
     }
 
+    pub fn age_seconds_at(&self, at_sim_second: u64, birth_tick: i64) -> u64 {
+        let elapsed = (i128::from(at_sim_second) - self.birth_sim_seconds(birth_tick)).max(0);
+        u64::try_from(elapsed).unwrap_or(u64::MAX)
+    }
+
     /// Age in years at an absolute sim-second `at_sim_second`, for an agent born
     /// at `birth_tick`. Saturates to 0 if the agent is born after that instant.
-    pub fn age_years_at(&self, at_sim_second: u64, birth_tick: u64) -> f32 {
-        at_sim_second.saturating_sub(self.sim_seconds(birth_tick)) as f32 / SECONDS_PER_YEAR as f32
+    pub fn age_years_at(&self, at_sim_second: u64, birth_tick: i64) -> f32 {
+        self.age_seconds_at(at_sim_second, birth_tick) as f32 / SECONDS_PER_YEAR as f32
     }
 }
 
@@ -133,6 +144,18 @@ mod tests {
     }
 
     #[test]
+    fn age_seconds_supports_birth_before_tick_zero() {
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
+
+        assert_eq!(clock.age_seconds(0, -157_680), SECONDS_PER_YEAR);
+
+        let years = clock.age_years(0, -157_680);
+        assert!((years - 1.0).abs() < 1e-3, "got {years}");
+    }
+
+    #[test]
     fn month_start_seconds_is_month_times_month_length() {
         let clock = SimClock {
             sim_seconds_per_tick: 200,
@@ -153,6 +176,20 @@ mod tests {
         assert!((one_year - 1.0).abs() < 1e-3, "got {one_year}");
         let two_years = clock.age_years_at(2 * SECONDS_PER_YEAR, 0);
         assert!((two_years - 2.0).abs() < 1e-3, "got {two_years}");
+    }
+
+    #[test]
+    fn age_years_at_supports_birth_before_sim_epoch() {
+        let clock = SimClock {
+            sim_seconds_per_tick: 200,
+        };
+
+        let at_epoch = clock.age_years_at(0, -157_680);
+        assert!((at_epoch - 1.0).abs() < 1e-3, "got {at_epoch}");
+
+        let at_month_one = clock.age_years_at(SECONDS_PER_MONTH, -157_680);
+        let expected = 1.0 + (SECONDS_PER_MONTH as f32 / SECONDS_PER_YEAR as f32);
+        assert!((at_month_one - expected).abs() < 0.01, "got {at_month_one}");
     }
 
     #[test]

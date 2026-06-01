@@ -114,7 +114,7 @@ pub struct NearStop;
 /// Simulation tick at which this agent was born (spawned). Age is derived from
 /// it via `SimClock`. Durable: mirrors `AgentRecord.birth_tick`.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BirthTick(pub u64);
+pub struct BirthTick(pub i64);
 
 /// Biological sex of an agent. Durable: mirrors `AgentRecord.sex`.
 #[derive(

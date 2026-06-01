@@ -114,7 +114,7 @@ pub fn promote_warm_to_active_system(
                     cyclic: false,
                 },
                 WalkSpeed(0.05),
-                crate::mobility::components::BirthTick(tick.0),
+                crate::mobility::components::BirthTick(i64::try_from(tick.0).unwrap_or(i64::MAX)),
                 Position { x: px, y: py },
                 Direction(abutown_protocol::DirectionDto::S),
                 SpriteKey(sprite_key),
