@@ -1512,3 +1512,99 @@ fn macro_flow_conserves_with_N_buyers_per_line_floor() {
         "operator delta == transport_total despite N buyers (aggregate floor, not per-line)"
     );
 }
+
+#[test]
+fn macro_flow_is_deterministic() {
+    let build = || {
+        let mut s = surplus_deficit_scenario(2, 100, 400, 2, 100, 1800, 3, Money(50));
+        // Several intervals so any iteration-order nondeterminism would surface.
+        for tick in [0u64, 10, 20] {
+            run_flow(&mut s, tick).unwrap();
+        }
+        s.ledger.clone()
+    };
+    let a = build();
+    let b = build();
+    assert_eq!(a, b, "ledger is a pure deterministic function of inputs");
+}
+
+#[test]
+fn macro_flow_tiebreak_is_stable() {
+    // A surplus, B and C deficit, B and C EQUIDISTANT from A with identical bids.
+    // The shared surplus is split by the deterministic candidate sort
+    // (net_gain DESC, good ASC, src ASC, dst ASC) + largest-remainder prorata.
+    let build = || {
+        let m_a = MarketId(1);
+        let m_b = MarketId(2);
+        let m_c = MarketId(3);
+        let mut accounts = AccountBook::default();
+        let mut inventory = InventoryBook::default();
+        let mut demand = DemandPools::default();
+        let mut supply = SupplyPools::default();
+
+        inventory
+            .deposit(EconomicActorId(100), GOOD_FOOD, Quantity(1_000_000))
+            .unwrap();
+        supply
+            .0
+            .insert(EconomicActorId(100), sp(100, m_a, 100, 400));
+        accounts
+            .deposit(EconomicActorId(200), Money(1_000_000_000))
+            .unwrap();
+        demand
+            .0
+            .insert(EconomicActorId(200), dp(200, m_b, 100, 1800));
+        accounts
+            .deposit(EconomicActorId(201), Money(1_000_000_000))
+            .unwrap();
+        demand
+            .0
+            .insert(EconomicActorId(201), dp(201, m_c, 100, 1800));
+
+        let mut distances = MarketDistances(BTreeMap::new());
+        for (x, y) in [(m_a, m_b), (m_b, m_a), (m_a, m_c), (m_c, m_a)] {
+            distances.0.insert((x, y), 3);
+        }
+        let config = EconomyConfig {
+            transport_cost_per_tile_unit: Money(50),
+            ..Default::default()
+        };
+
+        let mut s = DormantScenario {
+            accounts,
+            inventory,
+            ledger: TradeLedger::default(),
+            demand,
+            supply,
+            market_goods: MarketGoods::default(),
+            dirty: crate::economy::DirtyMarketGoods::default(),
+            dormant: [m_a, m_b, m_c].into_iter().collect(),
+            distances,
+            config,
+        };
+        run_flow(&mut s, 0).unwrap();
+        s.ledger.clone()
+    };
+    let a = build();
+    let b = build();
+    assert_eq!(
+        a, b,
+        "equidistant deficit split is byte-identical across runs"
+    );
+
+    // The split must favor ascending MarketId on the tie: B (id 2) receives no
+    // less than C (id 3), and total exported == surplus capacity (100).
+    let mut to_b = 0i64;
+    let mut to_c = 0i64;
+    for ev in &a.0 {
+        if let EconomyEvent::MacroFlow { to_market, qty, .. } = ev {
+            if *to_market == MarketId(2) {
+                to_b += qty.0;
+            } else if *to_market == MarketId(3) {
+                to_c += qty.0;
+            }
+        }
+    }
+    assert_eq!(to_b + to_c, 100, "all surplus exported");
+    assert!(to_b >= to_c, "ascending-MarketId tie favors B");
+}
