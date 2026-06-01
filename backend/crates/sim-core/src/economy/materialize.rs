@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
+use crate::economy::flow_shipments::expire_arrived;
 use crate::economy::trader_render::{is_outbound, leg_progress, route_polyline, trader_travel};
 use crate::economy::{EconomicActorId, EconomyConfig, Markets, Trader, Traders};
 use crate::ids::{AgentId, ChunkCoord};
@@ -127,33 +128,61 @@ fn leg_polyline(
     if poly.is_empty() { None } else { Some(poly) }
 }
 
-/// Pure planner: decide the render mutation for each trader given the current-leg
-/// route polylines (keyed by actor) and the set of observed (Active/Hot) chunks.
-/// No ECS world access — fully unit-testable.
-pub(crate) fn plan_mutations(
-    traders: &Traders,
-    config: &EconomyConfig,
+/// Owned render input gathered inside the routing cache scope: (actor, current-leg
+/// polyline, progress in [0,1], arrived). Demo traders and flow shipments both
+/// produce these; they are mapped to borrowed `RenderActor`s once the routing
+/// borrows are released.
+type RenderInput = (EconomicActorId, Vec<(f32, f32)>, f32, bool);
+
+/// A render-actor input to `plan_render_mutations`: an opaque id, the current-leg
+/// route polyline, the progress along it, and whether it has `arrived` (reached
+/// its destination this tick). Demo `Trader`s and flow shipments both produce
+/// these — the lifecycle machine never sees their economic source.
+pub(crate) struct RenderActor<'a> {
+    pub actor: EconomicActorId,
+    pub polyline: &'a [(f32, f32)],
+    pub progress: f32, // [0,1]
+    /// True once the source has reached its destination. An arrived actor is
+    /// routed through the SAME ghost-free leave->despawn path as an LOD demotion
+    /// (dirty-then-despawn) even when its destination sits in an observed chunk,
+    /// so the client never strands a ghost when watching goods arrive. Demo
+    /// traders never set this (they loop), so `false` preserves their behaviour.
+    pub arrived: bool,
+}
+
+/// Ghost-free Spawn/Update/Despawn lifecycle (the #66 logic), generic over the
+/// source of (actor, polyline, progress). Demo traders and flow shipments both
+/// feed this. No ECS world access — fully unit-testable.
+pub(crate) fn plan_render_mutations(
+    actors: &[RenderActor<'_>],
     materialized: &MaterializedTraders,
-    routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
     observed: &BTreeSet<ChunkCoord>,
 ) -> Vec<TraderMutation> {
     let mut muts = Vec::new();
-    for (actor, trader) in &traders.0 {
+    let mut live: BTreeSet<EconomicActorId> = BTreeSet::new();
+    for ra in actors {
+        live.insert(ra.actor);
+        let actor = &ra.actor;
         let was_observed = materialized.0.get(actor).map(|m| m.observed);
-        let Some(polyline) = routes.get(actor).filter(|p| !p.is_empty()) else {
+        if ra.polyline.is_empty() {
             // No walkable route this tick: a materialized agent can't be positioned,
             // so retire it.
             if was_observed.is_some() {
                 muts.push(TraderMutation::Despawn { actor: *actor });
             }
             continue;
-        };
-        let travel = trader_travel(trader, config);
-        let t = leg_progress(&trader.state, travel);
+        }
+        let polyline = ra.polyline;
+        let t = ra.progress;
         let (x, y) = world_coord_at_progress_slice(polyline, t);
         let (nx, ny) = world_coord_at_progress_slice(polyline, (t + 0.02).min(1.0));
         let dir = dir_from_delta(nx - x, ny - y);
-        let observed_now = observed.contains(&crate::mobility::chunk_of(x, y, 32));
+        // An arrived actor is treated as having left observation regardless of
+        // where its destination sits: this drives it through the leave->despawn
+        // path (dirty-then-despawn) instead of a final Update-observed that would
+        // leave the generic sweep to despawn it abruptly next tick (a client ghost
+        // when the destination chunk stays continuously observed).
+        let observed_now = !ra.arrived && observed.contains(&crate::mobility::chunk_of(x, y, 32));
         match (observed_now, was_observed) {
             // Appear: first time its current chunk is observed.
             (true, None) => {
@@ -192,13 +221,53 @@ pub(crate) fn plan_mutations(
             (false, None) => {}
         }
     }
-    // Despawn agents whose trader has been removed from `Traders`.
+    // Despawn any materialized actor no longer in `actors`.
     for actor in materialized.0.keys() {
-        if !traders.0.contains_key(actor) {
+        if !live.contains(actor) {
             muts.push(TraderMutation::Despawn { actor: *actor });
         }
     }
     muts
+}
+
+/// Pure planner: decide the render mutation for each demo trader given the
+/// current-leg route polylines (keyed by actor) and the set of observed
+/// (Active/Hot) chunks. Thin adapter over `plan_render_mutations`: builds the
+/// `RenderActor` list from `Traders` (progress via `trader_travel`/`leg_progress`).
+/// No ECS world access — fully unit-testable.
+///
+/// Test-only since the materialize system builds its combined demo-trader +
+/// shipment render-input list inline (see `materialize_traders_system`) and calls
+/// `plan_render_mutations` directly; this adapter exists to unit-test the
+/// demo-trader → `RenderActor` derivation in isolation.
+#[cfg(test)]
+pub(crate) fn plan_mutations(
+    traders: &Traders,
+    config: &EconomyConfig,
+    materialized: &MaterializedTraders,
+    routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
+    observed: &BTreeSet<ChunkCoord>,
+) -> Vec<TraderMutation> {
+    let actors: Vec<RenderActor<'_>> = traders
+        .0
+        .iter()
+        .filter_map(|(actor, trader)| {
+            let polyline = routes.get(actor)?;
+            if polyline.is_empty() {
+                return None;
+            }
+            let progress = leg_progress(&trader.state, trader_travel(trader, config));
+            Some(RenderActor {
+                actor: *actor,
+                polyline,
+                progress,
+                // Demo traders loop between markets; they never "arrive" in the
+                // shipment sense (their LOD removal is position-driven).
+                arrived: false,
+            })
+        })
+        .collect();
+    plan_render_mutations(&actors, materialized, observed)
 }
 
 /// Apply render mutations to the world: spawn/update/despawn the trader-agent
@@ -297,10 +366,39 @@ pub(crate) fn apply_mutations(world: &mut World, tick: u64, muts: Vec<TraderMuta
     }
 }
 
+/// The set of shipment ids that currently have a live materialized render-agent
+/// (their reserved actor id is `SHIPMENT_ACTOR_OFFSET + id`). Used by
+/// `expire_arrived` to retain an arrived shipment until its agent has finished
+/// the ghost-free leave->despawn lifecycle.
+fn rendering_shipment_ids(materialized: &MaterializedTraders) -> BTreeSet<u64> {
+    use crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET;
+    materialized
+        .0
+        .keys()
+        .filter_map(|a| a.0.checked_sub(SHIPMENT_ACTOR_OFFSET))
+        .collect()
+}
+
 /// Exclusive system: compute each trader's current-leg footway route, then plan
 /// and apply the render mutations. Routes are computed into an owned map first
 /// (releasing the routing borrows) so the apply phase has clean `&mut World`.
 pub fn materialize_traders_system(world: &mut World) {
+    let tick = world.get_resource::<Tick>().map(|t| t.0).unwrap_or(0);
+
+    // Lifecycle/state management (NOT rendering): expire arrived shipments whose
+    // render-agent is gone (or never existed). Run BEFORE the render graph-guard
+    // below so `FlowShipments` cannot leak in a graph-free schedule (EconomyPlugin
+    // without RoutingPlugin) — there nothing ever materializes, so every arrived
+    // shipment is dropped here each tick instead of accumulating unbounded.
+    {
+        let rendering = rendering_shipment_ids(world.resource::<MaterializedTraders>());
+        expire_arrived(
+            &mut world.resource_mut::<crate::economy::FlowShipments>(),
+            tick,
+            &rendering,
+        );
+    }
+
     // The render bridge needs the spatial world (graph + routing indices). In
     // pure-economy schedules (no RoutingPlugin) there is nothing to route, so the
     // bridge is a no-op — keeping the economy schedule runnable without a graph
@@ -311,7 +409,6 @@ pub fn materialize_traders_system(world: &mut World) {
     {
         return;
     }
-    let tick = world.get_resource::<Tick>().map(|t| t.0).unwrap_or(0);
 
     let observed: BTreeSet<ChunkCoord> = {
         let mut q =
@@ -319,14 +416,17 @@ pub fn materialize_traders_system(world: &mut World) {
         q.iter(world).map(|c| c.0).collect()
     };
 
-    let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
+    // Build owned render inputs (actor, polyline, progress) for demo traders AND
+    // flow shipments inside one cache scope, then plan + apply.
+    let render_inputs: Vec<RenderInput> =
         world.resource_scope(|world: &mut World, mut cache: Mut<FlowFieldCache>| {
             let graph = world.resource::<Graph>();
             let hpa = world.resource::<HpaIndex>();
             let markets = world.resource::<Markets>();
-            let traders = world.resource::<Traders>();
-            let mut routes = BTreeMap::new();
-            for (actor, trader) in &traders.0 {
+            let config = world.resource::<EconomyConfig>();
+            let mut out: Vec<RenderInput> = Vec::new();
+            // demo traders (existing endpoints/outbound logic)
+            for (actor, trader) in &world.resource::<Traders>().0 {
                 let Some((src, dst)) = endpoints(markets, trader) else {
                     continue;
                 };
@@ -336,17 +436,57 @@ pub fn materialize_traders_system(world: &mut World) {
                     (dst, src)
                 };
                 if let Some(poly) = leg_polyline(graph, hpa, &mut cache, a, b) {
-                    routes.insert(*actor, poly);
+                    let progress = leg_progress(&trader.state, trader_travel(trader, config));
+                    out.push((*actor, poly, progress, false));
                 }
             }
-            routes
+            // flow shipments (NEW): route from->to, linear progress, reserved actor
+            // id. Arrived shipments are still fed in (with arrived=true) so the
+            // lifecycle walks them through the ghost-free leave->despawn path rather
+            // than the generic sweep abruptly despawning them next tick.
+            for s in world.resource::<crate::economy::FlowShipments>().0.values() {
+                let (Some(from), Some(to)) =
+                    (markets.0.get(&s.from_market), markets.0.get(&s.to_market))
+                else {
+                    continue;
+                };
+                if let Some(poly) = leg_polyline(graph, hpa, &mut cache, from.node_id, to.node_id) {
+                    out.push((
+                        EconomicActorId(
+                            crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET + s.id,
+                        ),
+                        poly,
+                        s.progress(tick),
+                        s.arrived(tick),
+                    ));
+                }
+            }
+            out
         });
 
     let muts = {
-        let traders = world.resource::<Traders>();
-        let config = world.resource::<EconomyConfig>();
         let materialized = world.resource::<MaterializedTraders>();
-        plan_mutations(traders, config, materialized, &routes, &observed)
+        let actors: Vec<RenderActor<'_>> = render_inputs
+            .iter()
+            .map(|(actor, poly, progress, arrived)| RenderActor {
+                actor: *actor,
+                polyline: poly,
+                progress: *progress,
+                arrived: *arrived,
+            })
+            .collect();
+        plan_render_mutations(&actors, materialized, &observed)
     };
     apply_mutations(world, tick, muts);
+
+    // Drop arrived shipments whose render-agent finished its leave->despawn this
+    // tick (its id is no longer in the materialized set). Re-derive `rendering`
+    // AFTER apply so a just-despawned shipment is released immediately, not a tick
+    // late. Materialized arrived shipments mid-lifecycle are retained.
+    let rendering = rendering_shipment_ids(world.resource::<MaterializedTraders>());
+    expire_arrived(
+        &mut world.resource_mut::<crate::economy::FlowShipments>(),
+        tick,
+        &rendering,
+    );
 }

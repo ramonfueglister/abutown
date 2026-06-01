@@ -1101,13 +1101,37 @@ fn macro_flow_only_fires_on_interval() {
         surplus_deficit_world();
     // tick 3: not a multiple of 10 -> no flow, no events.
     run_macro_flow_at_tick(
-        &mut acc, &mut inv, &mut led, &dem, &sup, &mut mg, &dirty, &dormant, &dist, &cfg, 3,
+        &mut acc,
+        &mut inv,
+        &mut led,
+        &dem,
+        &sup,
+        &mut mg,
+        &dirty,
+        &dormant,
+        &dist,
+        &cfg,
+        3,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
     )
     .unwrap();
     assert!(led.0.is_empty(), "no flow off-interval");
     // tick 10: fires.
     run_macro_flow_at_tick(
-        &mut acc, &mut inv, &mut led, &dem, &sup, &mut mg, &dirty, &dormant, &dist, &cfg, 10,
+        &mut acc,
+        &mut inv,
+        &mut led,
+        &dem,
+        &sup,
+        &mut mg,
+        &dirty,
+        &dormant,
+        &dist,
+        &cfg,
+        10,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
     )
     .unwrap();
     assert!(
@@ -1141,6 +1165,8 @@ fn macro_flow_idle_interval_is_a_noop() {
         &MarketDistances::default(),
         &cfg,
         0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
     )
     .unwrap();
     assert_eq!(acc, before_acc, "books byte-identical on idle interval");
@@ -1282,6 +1308,8 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
         &distances,
         &cfg,
         0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
     )
     .unwrap();
 
@@ -1448,6 +1476,8 @@ fn run_flow(s: &mut DormantScenario, tick: u64) -> Result<(), EconomyError> {
         &s.distances,
         &s.config,
         tick,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
     )
 }
 

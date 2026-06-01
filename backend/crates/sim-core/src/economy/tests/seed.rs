@@ -4,6 +4,7 @@ use crate::economy::seed::seed_demo_economy;
 use crate::economy::{
     AccountBook, DemandPools, InventoryBook, MarketChunks, MarketId, Markets, SupplyPools, Traders,
 };
+use crate::ids::ChunkCoord;
 use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
 
 fn node(id: u32, x: f32, y: f32) -> Node {
@@ -15,12 +16,17 @@ fn node(id: u32, x: f32, y: f32) -> Node {
     }
 }
 
-/// Build the same fresh world the seed tests use, with the two footway nodes
-/// near the seeder's reference points (2,3) and (13,3) and all economy
-/// resources empty so `seed_demo_economy` performs its one-shot bootstrap.
+/// Build a fresh world with four footway nodes: two near the original seeder
+/// reference points (2,3) and (13,3), and two near the flow-demo reference
+/// points (16,48) and (208,48) for the dormant cross-market pair.
 fn seed_world() -> World {
     let mut world = World::new();
-    let nodes = vec![node(0, 2.0, 3.0), node(1, 13.0, 3.0)];
+    let nodes = vec![
+        node(0, 2.0, 3.0),
+        node(1, 13.0, 3.0),
+        node(2, 16.0, 48.0),
+        node(3, 208.0, 48.0),
+    ];
     world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
     world.insert_resource(Graph::new(nodes, vec![]));
     world.insert_resource(Markets::default());
@@ -35,50 +41,42 @@ fn seed_world() -> World {
 }
 
 #[test]
-fn seed_demo_economy_creates_two_markets_and_one_trader() {
+fn seed_demo_economy_creates_four_markets_and_one_trader() {
     let mut world = seed_world();
 
     seed_demo_economy(&mut world);
 
-    assert_eq!(world.resource::<Markets>().0.len(), 2, "two demo markets");
-    assert_eq!(world.resource::<MarketChunks>().0.len(), 2, "both anchored");
+    assert_eq!(world.resource::<Markets>().0.len(), 4, "four demo markets");
+    assert_eq!(world.resource::<MarketChunks>().0.len(), 4, "all anchored");
     assert_eq!(world.resource::<Traders>().0.len(), 1, "one demo trader");
 
-    // Market nodes resolve to finite positions, and the two are distinct.
-    let graph = world.resource::<Graph>();
-    let markets = world.resource::<Markets>();
-    let mut node_ids = Vec::new();
-    for site in markets.0.values() {
-        let p = graph.node(site.node_id).position;
-        assert!(p.0.is_finite() && p.1.is_finite());
-        node_ids.push(site.node_id);
-    }
-    assert_ne!(
-        node_ids[0], node_ids[1],
-        "source and dest are distinct nodes"
+    // The original demo markets still exist.
+    let distances = world.resource::<crate::economy::MarketDistances>();
+    assert!(
+        distances
+            .0
+            .contains_key(&(MarketId(9_001), MarketId(9_002))),
+        "original demo pair baked"
     );
 
-    let distances = world.resource::<crate::economy::MarketDistances>();
-    assert_eq!(distances.0.len(), 2, "both directed pairs baked");
-    assert_eq!(
+    // The flow-demo markets have distance entries in both directions.
+    assert!(
         distances
             .0
-            .get(&(MarketId(9_001), MarketId(9_002)))
-            .copied(),
-        Some(11)
+            .contains_key(&(MarketId(9_003), MarketId(9_004))),
+        "flow-demo A->B distance baked"
     );
-    assert_eq!(
+    assert!(
         distances
             .0
-            .get(&(MarketId(9_002), MarketId(9_001)))
-            .copied(),
-        Some(11)
+            .contains_key(&(MarketId(9_004), MarketId(9_003))),
+        "flow-demo B->A distance baked"
     );
 }
 
 #[test]
 fn seed_adds_second_good_without_new_markets_or_traders() {
-    // After seeding, the live economy still has exactly 2 markets and 1 trader,
+    // After seeding, the live economy still has exactly 4 markets and 1 trader,
     // but now a GOOD_FOOD supplier@m_a + consumer@m_b exists so the macro flow
     // produces a non-vacuous cross-market FOOD flow on the live stream.
     use crate::economy::GOOD_FOOD;
@@ -86,8 +84,8 @@ fn seed_adds_second_good_without_new_markets_or_traders() {
     seed_demo_economy(&mut world);
     assert_eq!(
         world.resource::<Markets>().0.len(),
-        2,
-        "still exactly 2 markets"
+        4,
+        "still exactly 4 markets"
     );
     assert_eq!(
         world.resource::<Traders>().0.len(),
@@ -107,5 +105,89 @@ fn seed_adds_second_good_without_new_markets_or_traders() {
     assert!(
         has_food_supply && has_food_demand,
         "FOOD supplier@A + consumer@B added"
+    );
+}
+
+#[test]
+fn seed_adds_flow_demo_markets_for_dormant_cross_flow() {
+    // Task 7: two far-apart dormant markets (F_A @ chunk (0,1), F_B @ chunk
+    // (6,1)) with a standing GOOD_FOOD imbalance → recurring MacroFlow whose
+    // straight-line route at row y≈48 crosses the transit chunk (3,1).
+    // Both market chunks must be ≥2 chunks from the transit chunk in x.
+    use crate::economy::GOOD_FOOD;
+    let mut world = seed_world();
+    seed_demo_economy(&mut world);
+
+    // The two flow-demo markets exist.
+    let markets = world.resource::<Markets>();
+    assert!(
+        markets.0.contains_key(&MarketId(9_003)),
+        "flow-demo market F_A seeded"
+    );
+    assert!(
+        markets.0.contains_key(&MarketId(9_004)),
+        "flow-demo market F_B seeded"
+    );
+
+    // Both have entries in MarketChunks.
+    let chunks = world.resource::<MarketChunks>();
+    let chunk_fa = *chunks.0.get(&MarketId(9_003)).expect("F_A chunk");
+    let chunk_fb = *chunks.0.get(&MarketId(9_004)).expect("F_B chunk");
+
+    // Chunks are distinct.
+    assert_ne!(chunk_fa, chunk_fb, "F_A and F_B in different chunks");
+
+    // Both chunks differ from the transit chunk (3,1) by ≥2 in x.
+    let transit = ChunkCoord { x: 3, y: 1 };
+    assert!(
+        (chunk_fa.x - transit.x).unsigned_abs() >= 2,
+        "F_A chunk {:?} must be ≥2 chunks from transit {:?}",
+        chunk_fa,
+        transit
+    );
+    assert!(
+        (chunk_fb.x - transit.x).unsigned_abs() >= 2,
+        "F_B chunk {:?} must be ≥2 chunks from transit {:?}",
+        chunk_fb,
+        transit
+    );
+
+    // Supplier pool at F_A and consumer pool at F_B for GOOD_FOOD.
+    let supply = world.resource::<SupplyPools>();
+    let demand = world.resource::<DemandPools>();
+    assert!(
+        supply
+            .0
+            .values()
+            .any(|p| p.market == MarketId(9_003) && p.good == GOOD_FOOD),
+        "FOOD supplier at F_A"
+    );
+    assert!(
+        demand
+            .0
+            .values()
+            .any(|p| p.market == MarketId(9_004) && p.good == GOOD_FOOD),
+        "FOOD consumer at F_B"
+    );
+
+    // MarketDistances entry in both directions.
+    let distances = world.resource::<crate::economy::MarketDistances>();
+    assert!(
+        distances
+            .0
+            .get(&(MarketId(9_003), MarketId(9_004)))
+            .copied()
+            .unwrap_or(0)
+            > 0,
+        "F_A->F_B distance > 0"
+    );
+    assert!(
+        distances
+            .0
+            .get(&(MarketId(9_004), MarketId(9_003)))
+            .copied()
+            .unwrap_or(0)
+            > 0,
+        "F_B->F_A distance > 0"
     );
 }

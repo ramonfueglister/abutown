@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod auction;
 pub mod audit;
+pub mod flow_shipments;
 pub mod goods;
 pub mod ids;
 pub mod inventory;
@@ -22,6 +23,7 @@ pub mod transport;
 pub use accounts::*;
 pub use auction::*;
 pub use audit::*;
+pub use flow_shipments::*;
 pub use goods::*;
 pub use ids::*;
 pub use inventory::*;
@@ -68,6 +70,8 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(MarketDistances::default());
         world.insert_resource(crate::economy::materialize::MaterializedTraders::default());
         world.insert_resource(crate::economy::audit::LedgerAuditCursor::default());
+        world.insert_resource(crate::economy::flow_shipments::FlowShipments::default());
+        world.insert_resource(crate::economy::flow_shipments::NextShipmentId::default());
         install_systems(schedule);
     }
 }
