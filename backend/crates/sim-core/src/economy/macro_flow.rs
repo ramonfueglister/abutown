@@ -9,9 +9,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::pools::affordable_qty;
 use crate::economy::{
-    AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, GoodId, InventoryBook,
-    MarketDistances, MarketGoodKey, MarketGoods, MarketId, Money, Quantity, SettlementPolicy,
-    SupplyPools, checked_order_value, settlement_price_with_policy, transport_cost,
+    AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent, GoodId,
+    InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
+    Quantity, SettlementPolicy, SupplyPools, TRANSPORT_OPERATOR, checked_order_value,
+    prorata_distribute, settlement_price_with_policy, transport_cost,
 };
 
 /// Synthetic per-(market,good) price derived from the pool band each interval.
@@ -404,4 +405,131 @@ pub fn plan_flows(
         }
     }
     flows
+}
+
+/// STEP G: settle ONE accepted flow against the (cloned) books and write the
+/// discovered prices back into `market_goods`. Aggregate-floor cash scheme: one
+/// `src_revenue` floor; transport carved out of (never added on top of) the buyer
+/// total; sellers credited from `src_revenue`, buyers charged `dst_payment` via
+/// lock+debit. Returns the `MacroFlow` event. Does NOT touch `dirty`. The caller
+/// passes the bucket-time effective demand/supply per endpoint for the residual
+/// imbalance write-back (mirrors auction.rs:395-402).
+#[allow(clippy::too_many_arguments)]
+pub fn settle_flow(
+    accounts: &mut AccountBook,
+    inventory: &mut InventoryBook,
+    market_goods: &mut MarketGoods,
+    flow: &PlannedFlow,
+    sellers: &[(EconomicActorId, i64)],
+    buyers: &[(EconomicActorId, i64)],
+    eff_demand_src: i64,
+    eff_supply_src: i64,
+    eff_demand_dst: i64,
+    eff_supply_dst: i64,
+    config: &EconomyConfig,
+    current_tick: u64,
+) -> Result<EconomyEvent, EconomyError> {
+    let q = flow.q;
+    let src_revenue = checked_order_value(flow.p_src, Quantity(q))?;
+    let transport_total =
+        transport_cost(flow.dist, Quantity(q), config.transport_cost_per_tile_unit)?;
+    let dst_payment = src_revenue.checked_add(transport_total)?;
+
+    // Sellers at src: prorata goods, prorata cash out of src_revenue (Σ == src_revenue).
+    let seller_w: Vec<i64> = sellers.iter().map(|(_, w)| *w).collect();
+    let seller_goods = prorata_distribute(&seller_w, q);
+    let seller_cash = prorata_distribute(&seller_goods, src_revenue.0);
+    for (idx, (actor, _)) in sellers.iter().enumerate() {
+        let goods = seller_goods[idx];
+        if goods > 0 {
+            inventory.consume(*actor, flow.good, Quantity(goods))?;
+        }
+        let receipt = Money(seller_cash[idx]);
+        if receipt.0 > 0 {
+            accounts.deposit(*actor, receipt)?;
+        }
+    }
+
+    // Buyers at dst: prorata goods, prorata charge out of dst_payment (Σ == dst_payment).
+    let buyer_w: Vec<i64> = buyers.iter().map(|(_, w)| *w).collect();
+    let buyer_goods = prorata_distribute(&buyer_w, q);
+    let buyer_charge = prorata_distribute(&buyer_goods, dst_payment.0);
+    for (idx, (actor, _)) in buyers.iter().enumerate() {
+        let goods = buyer_goods[idx];
+        let charge = Money(buyer_charge[idx]);
+        if charge.0 > 0 {
+            accounts.lock_cash(*actor, charge)?;
+            accounts.debit_locked(*actor, charge)?;
+        }
+        if goods > 0 {
+            inventory.deposit(*actor, flow.good, Quantity(goods))?;
+        }
+    }
+
+    // Transport: deposit to the reserved operator (transfer, never destroyed).
+    if transport_total.0 > 0 {
+        accounts.deposit(TRANSPORT_OPERATOR, transport_total)?;
+    }
+
+    // Write-back at src and dst. Residuals are against EFFECTIVE demand/supply:
+    // post-flow unmet/unsold = effective_side - traded_q (clamped at 0).
+    write_back(
+        market_goods,
+        MarketGoodKey {
+            market: flow.src,
+            good: flow.good,
+        },
+        flow.p_src,
+        q,
+        (eff_demand_src - q).max(0),
+        (eff_supply_src - q).max(0),
+        current_tick,
+    );
+    if flow.dst != flow.src {
+        write_back(
+            market_goods,
+            MarketGoodKey {
+                market: flow.dst,
+                good: flow.good,
+            },
+            flow.p_dst,
+            q,
+            (eff_demand_dst - q).max(0),
+            (eff_supply_dst - q).max(0),
+            current_tick,
+        );
+    }
+
+    Ok(EconomyEvent::MacroFlow {
+        from_market: flow.src,
+        to_market: flow.dst,
+        good: flow.good,
+        qty: Quantity(q),
+        price: flow.p_dst,
+        transport: transport_total,
+    })
+}
+
+/// Apply the STEP-G market-state write-back for one endpoint. Accumulates
+/// `traded_qty_last_tick` (a market may both self-clear and import in one
+/// interval), sets the discovered price, last cleared tick, and post-flow
+/// residual imbalance. Intentionally does NOT touch `dirty`.
+fn write_back(
+    market_goods: &mut MarketGoods,
+    key: MarketGoodKey,
+    price: Money,
+    traded: i64,
+    unmet_demand: i64,
+    unsold_supply: i64,
+    current_tick: u64,
+) {
+    let state = market_goods
+        .0
+        .entry(key)
+        .or_insert_with(|| MarketGoodState::new(key));
+    state.last_settlement_price = price;
+    state.traded_qty_last_tick = Quantity(state.traded_qty_last_tick.0 + traded);
+    state.unmet_demand_last_tick = Quantity(unmet_demand);
+    state.unsold_supply_last_tick = Quantity(unsold_supply);
+    state.last_cleared_tick = current_tick;
 }
