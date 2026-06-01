@@ -1893,3 +1893,218 @@ fn direction_reverses_when_dear_and_cheap_swap() {
         "direction reversed"
     );
 }
+
+// --- Task 17: Edge cases (each its own #[test]). ---
+
+#[test]
+fn no_demand_no_flow() {
+    // Supply-only across two dormant markets, no demand anywhere → no flow.
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+    let mut s = surplus_deficit_scenario(1, 200, 500, 0, 0, 0, 4, Money(50));
+    // surplus_deficit_scenario with n_buyers=0 leaves demand empty.
+    let before = (s.accounts.clone(), s.inventory.clone());
+    run_flow(&mut s, 0).unwrap();
+    assert_eq!(s.accounts, before.0, "no demand → books unchanged");
+    assert_eq!(s.inventory, before.1);
+    assert!(s.ledger.0.is_empty(), "no MacroFlow event");
+    let _ = (m_a, m_b);
+}
+
+#[test]
+fn no_supply_no_flow() {
+    let mut s = surplus_deficit_scenario(0, 0, 0, 1, 200, 2000, 4, Money(50));
+    let before = (s.accounts.clone(), s.inventory.clone());
+    run_flow(&mut s, 0).unwrap();
+    assert_eq!(s.accounts, before.0);
+    assert_eq!(s.inventory, before.1);
+    assert!(s.ledger.0.is_empty());
+}
+
+#[test]
+fn single_market_no_partner() {
+    // One dormant market with both demand & supply: only a self-edge clears
+    // locally; no cross-edge (no partner). Conserves; no cross MacroFlow.
+    let m = MarketId(1);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+    inventory
+        .deposit(EconomicActorId(100), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply.0.insert(EconomicActorId(100), sp(100, m, 100, 500));
+    accounts
+        .deposit(EconomicActorId(200), Money(1_000_000_000))
+        .unwrap();
+    demand.0.insert(EconomicActorId(200), dp(200, m, 100, 2000));
+
+    let mut s = DormantScenario {
+        accounts,
+        inventory,
+        ledger: TradeLedger::default(),
+        demand,
+        supply,
+        market_goods: MarketGoods::default(),
+        dirty: crate::economy::DirtyMarketGoods::default(),
+        dormant: [m].into_iter().collect(),
+        distances: MarketDistances(BTreeMap::new()),
+        config: EconomyConfig {
+            transport_cost_per_tile_unit: Money(50),
+            ..Default::default()
+        },
+    };
+    let money_before = s.accounts.total_money().unwrap();
+    let good_before = s.inventory.total_good(GOOD_FOOD).unwrap();
+    run_flow(&mut s, 0).unwrap();
+    assert_eq!(s.accounts.total_money().unwrap(), money_before);
+    assert_eq!(s.inventory.total_good(GOOD_FOOD).unwrap(), good_before);
+    assert!(
+        s.ledger.0.iter().all(|e| match e {
+            EconomyEvent::MacroFlow {
+                from_market,
+                to_market,
+                ..
+            } => from_market == to_market,
+            _ => true,
+        }),
+        "only self-edges, no cross flow"
+    );
+}
+
+#[test]
+fn zero_distance_markets() {
+    // dist 0 → transport 0 → full equalization of residual still conserves.
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 0, Money(50));
+    let money_before = s.accounts.total_money().unwrap();
+    let good_before = s.inventory.total_good(GOOD_FOOD).unwrap();
+    let op_before = s.accounts.account(TRANSPORT_OPERATOR).available;
+    run_flow(&mut s, 0).unwrap();
+    assert_eq!(s.accounts.total_money().unwrap(), money_before);
+    assert_eq!(s.inventory.total_good(GOOD_FOOD).unwrap(), good_before);
+    assert_eq!(
+        s.accounts.account(TRANSPORT_OPERATOR).available,
+        op_before,
+        "zero distance → zero transport"
+    );
+}
+
+#[test]
+fn overflow_edge_is_pruned_not_faulted() {
+    // A pathological distance forces the net_gain transport term to overflow i128
+    // → the edge is PRUNED in STEP D (no candidate, no event, no panic). Books
+    // unchanged. dist = i64::MAX with a large qty overflows transport_cost.
+    let mut s = surplus_deficit_scenario(
+        1,
+        1_000_000,
+        500,
+        1,
+        1_000_000,
+        2000,
+        i64::MAX,
+        Money(i64::MAX),
+    );
+    let before = (s.accounts.clone(), s.inventory.clone());
+    run_flow(&mut s, 0).expect("gate overflow is pruned, never an Err");
+    assert_eq!(s.accounts, before.0, "pruned edge leaves books unchanged");
+    assert_eq!(s.inventory, before.1);
+    assert!(
+        s.ledger
+            .0
+            .iter()
+            .all(|e| !matches!(e, EconomyEvent::MacroFlow { .. })),
+        "no MacroFlow event for a pruned edge"
+    );
+    assert!(
+        s.ledger
+            .0
+            .iter()
+            .all(|e| !matches!(e, EconomyEvent::MarketClearFailed { .. })),
+        "pruned (gate-time) edge is NOT a settle-time fault"
+    );
+}
+
+#[test]
+fn tiny_qty_floors_to_zero() {
+    // rate*q < SCALE so transport floors to 0; flow still conserves.
+    // rate 5 (default), q 100 → 5*100=500 < 1000 → transport floors to 0.
+    let mut s = surplus_deficit_scenario(1, 100, 500, 1, 100, 2000, 3, Money(5));
+    let money_before = s.accounts.total_money().unwrap();
+    let good_before = s.inventory.total_good(GOOD_FOOD).unwrap();
+    let op_before = s.accounts.account(TRANSPORT_OPERATOR).available;
+    run_flow(&mut s, 0).unwrap();
+    assert_eq!(
+        s.accounts.total_money().unwrap(),
+        money_before,
+        "conserves with floored transport"
+    );
+    assert_eq!(s.inventory.total_good(GOOD_FOOD).unwrap(), good_before);
+    assert_eq!(
+        s.accounts.account(TRANSPORT_OPERATOR).available,
+        op_before,
+        "transport floored to 0"
+    );
+}
+
+#[test]
+fn zero_price_band_market_skipped() {
+    // A demand-only dear market whose only buyer has max_price 0 → p_m guard
+    // (p_m.0 <= 0) skips it; no error, no flow. Pair it with a healthy surplus so
+    // we prove the guard skips ONLY the degenerate market.
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+    inventory
+        .deposit(EconomicActorId(100), GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    supply
+        .0
+        .insert(EconomicActorId(100), sp(100, m_a, 100, 500));
+    accounts
+        .deposit(EconomicActorId(200), Money(1_000_000_000))
+        .unwrap();
+    demand.0.insert(EconomicActorId(200), dp(200, m_b, 100, 0)); // bid ceiling 0 → p_m<=0
+
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), 3);
+    distances.0.insert((m_b, m_a), 3);
+    let mut s = DormantScenario {
+        accounts,
+        inventory,
+        ledger: TradeLedger::default(),
+        demand,
+        supply,
+        market_goods: MarketGoods::default(),
+        dirty: crate::economy::DirtyMarketGoods::default(),
+        dormant: [m_a, m_b].into_iter().collect(),
+        distances,
+        config: EconomyConfig {
+            transport_cost_per_tile_unit: Money(50),
+            ..Default::default()
+        },
+    };
+    let before = (s.accounts.clone(), s.inventory.clone());
+    run_flow(&mut s, 0).expect("zero-band market is skipped, not ZeroPrice-aborted");
+    assert_eq!(s.accounts, before.0, "no flow into zero-band market");
+    assert_eq!(s.inventory, before.1);
+}
+
+#[test]
+fn dormant_producer_does_not_burst_dump() {
+    // Seller holds 1_000_000 on-hand but offered_qty_per_tick is 50; the flow's
+    // effective supply is min(offered, on-hand) = 50, NOT total inventory. So per
+    // interval at most 50 leaves the surplus market regardless of accumulated stock.
+    let mut s = surplus_deficit_scenario(1, 50, 500, 1, 100, 2000, 2, Money(50));
+    let seller = EconomicActorId(100);
+    let seller_before = s.inventory.balance(seller, GOOD_FOOD).available;
+    run_flow(&mut s, 0).unwrap();
+    let moved = seller_before.0 - s.inventory.balance(seller, GOOD_FOOD).available.0;
+    assert!(
+        moved <= 50,
+        "per-interval export bounded by offered_qty_per_tick (50), got {moved}"
+    );
+    assert!(moved > 0, "but it does export up to the cap");
+}
