@@ -1,9 +1,12 @@
 use async_trait::async_trait;
 use serde_json::Value;
+use sim_core::ids::AgentId;
 use sim_core::mobility::MobilityPersistSnapshot;
+use sim_core::mobility::seed::seeded_birth_tick_for_agent_id;
 use sim_core::persistence::{
     MobilitySnapshotStore, MobilitySnapshotStoreError, SnapshotCompatibility,
 };
+use sim_core::time::SimClock;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
 const MOBILITY_SNAPSHOTS_MIGRATION: &str =
@@ -14,6 +17,8 @@ const SNAPSHOT_COMPATIBILITY_MIGRATION: &str =
     include_str!("../migrations/202605280002_mobility_snapshot_base_world_metadata.sql");
 const LAST_PROCESSED_MONTH_MIGRATION: &str =
     include_str!("../migrations/202606010001_mobility_snapshot_last_processed_month.sql");
+const LEGACY_AGENT_BIRTH_TICK_MIGRATION_NAME: &str =
+    "202606010002_mobility_snapshot_agent_birth_tick";
 
 #[derive(Debug)]
 pub struct PostgresMobilitySnapshotStore {
@@ -52,12 +57,97 @@ impl PostgresMobilitySnapshotStore {
                 .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
         }
 
+        migrate_legacy_agent_birth_ticks(&pool).await?;
+
         Ok(Self { pool })
     }
 
     pub fn pool_for_test(&self) -> &sqlx::PgPool {
         &self.pool
     }
+}
+
+async fn migrate_legacy_agent_birth_ticks(pool: &PgPool) -> Result<(), MobilitySnapshotStoreError> {
+    let rows: Vec<(String, i64, Value)> = sqlx::query_as(
+        r#"
+        SELECT world_id, tick, payload
+        FROM mobility_snapshots
+        WHERE jsonb_typeof(payload->'agents') = 'object'
+          AND EXISTS (
+              SELECT 1
+              FROM jsonb_each(payload->'agents') AS agent_entries(agent_id, agent)
+              WHERE jsonb_typeof(agent) = 'object'
+                AND NOT (agent ? 'birth_tick')
+          )
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| {
+        MobilitySnapshotStoreError::unavailable(format!(
+            "{LEGACY_AGENT_BIRTH_TICK_MIGRATION_NAME}: {error}"
+        ))
+    })?;
+
+    for (world_id, row_tick, mut payload) in rows {
+        let snapshot_tick = payload
+            .get("tick")
+            .and_then(Value::as_u64)
+            .or_else(|| u64::try_from(row_tick).ok())
+            .ok_or_else(|| {
+                MobilitySnapshotStoreError::unavailable(format!(
+                    "{LEGACY_AGENT_BIRTH_TICK_MIGRATION_NAME}: negative snapshot tick for {world_id}"
+                ))
+            })?;
+
+        if !migrate_legacy_agent_birth_ticks_in_payload(&mut payload, snapshot_tick) {
+            continue;
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE mobility_snapshots
+            SET payload = $2,
+                updated_at = now()
+            WHERE world_id = $1
+            "#,
+        )
+        .bind(&world_id)
+        .bind(payload)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            MobilitySnapshotStoreError::unavailable(format!(
+                "{LEGACY_AGENT_BIRTH_TICK_MIGRATION_NAME}: {error}"
+            ))
+        })?;
+    }
+
+    Ok(())
+}
+
+fn migrate_legacy_agent_birth_ticks_in_payload(payload: &mut Value, snapshot_tick: u64) -> bool {
+    let Some(agents) = payload.get_mut("agents").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let clock = SimClock::default();
+    let mut changed = false;
+
+    for (agent_id, agent) in agents.iter_mut() {
+        let Some(agent) = agent.as_object_mut() else {
+            continue;
+        };
+        if agent.contains_key("birth_tick") {
+            continue;
+        }
+
+        let birth_tick =
+            seeded_birth_tick_for_agent_id(&AgentId(agent_id.clone()), snapshot_tick, &clock);
+        agent.insert("birth_tick".to_string(), Value::from(birth_tick));
+        changed = true;
+    }
+
+    changed
 }
 
 #[async_trait]
@@ -149,10 +239,73 @@ impl MobilitySnapshotStore for PostgresMobilitySnapshotStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim_core::ids::AgentId;
+    use sim_core::mobility::seed::seeded_birth_tick_for_agent_id;
+    use sim_core::time::SimClock;
 
     #[test]
     fn mobility_snapshot_schema_migrations_do_not_touch_chunk_snapshots() {
         assert!(!SNAPSHOT_COMPATIBILITY_MIGRATION.contains("chunk_snapshots"));
+    }
+
+    #[test]
+    fn legacy_agent_birth_tick_migration_fills_missing_birth_ticks() {
+        let tick = 26_280_u64;
+        let missing_id = AgentId("agent:legacy-birth:missing".to_string());
+        let existing_id = AgentId("agent:legacy-birth:existing".to_string());
+        let mut payload = serde_json::json!({
+            "tick": tick,
+            "last_processed_month": 2,
+            "agents": {
+                missing_id.0.clone(): {
+                    "id": missing_id.0.clone(),
+                    "state": {"AtActivity": {"activity_id": "activity:home"}},
+                    "plan": [],
+                    "plan_cursor": 0,
+                    "walk_speed_per_tick": 1.0
+                },
+                existing_id.0.clone(): {
+                    "id": existing_id.0.clone(),
+                    "state": {"AtActivity": {"activity_id": "activity:home"}},
+                    "plan": [],
+                    "plan_cursor": 0,
+                    "walk_speed_per_tick": 1.0,
+                    "birth_tick": 7
+                }
+            },
+            "vehicles": {},
+            "stops": {},
+            "routes": {},
+            "link_polylines": {},
+            "flow_cells": [],
+            "chunk_activities": []
+        });
+        let expected = seeded_birth_tick_for_agent_id(&missing_id, tick, &SimClock::default());
+
+        assert!(migrate_legacy_agent_birth_ticks_in_payload(
+            &mut payload,
+            tick
+        ));
+
+        assert_eq!(
+            payload["agents"][&missing_id.0]["birth_tick"],
+            serde_json::json!(expected)
+        );
+        assert_eq!(
+            payload["agents"][&existing_id.0]["birth_tick"],
+            serde_json::json!(7)
+        );
+
+        let restored: MobilityPersistSnapshot =
+            serde_json::from_value(payload).expect("migrated payload deserializes strictly");
+        assert_eq!(
+            restored
+                .agents
+                .get(&missing_id)
+                .expect("agent exists")
+                .birth_tick,
+            expected
+        );
     }
 
     #[tokio::test]
@@ -241,6 +394,89 @@ mod tests {
             .expect("legacy snapshot remains present");
 
         assert_eq!(restored.last_processed_month, 2);
+
+        let _ = sqlx::query("DELETE FROM mobility_snapshots WHERE world_id = $1")
+            .bind(&world_id)
+            .execute(store.pool_for_test())
+            .await;
+    }
+
+    #[tokio::test]
+    async fn postgres_mobility_connect_migrates_legacy_missing_agent_birth_tick() {
+        let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
+            eprintln!("skipping; ABUTOWN_TEST_DATABASE_URL not set");
+            return;
+        };
+
+        let bootstrap = PostgresMobilitySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect mobility store for bootstrap");
+        let world_id = format!("test:mobility:legacy-birth:{}", uuid::Uuid::now_v7());
+        let compatibility = SnapshotCompatibility::new("abutopia", 1);
+        let tick = 26_280_i64;
+        let agent_id = AgentId("agent:legacy-birth:db".to_string());
+        let legacy_payload = serde_json::json!({
+            "tick": tick,
+            "last_processed_month": 2,
+            "agents": {
+                agent_id.0.clone(): {
+                    "id": agent_id.0.clone(),
+                    "state": {"AtActivity": {"activity_id": "activity:home"}},
+                    "plan": [],
+                    "plan_cursor": 0,
+                    "walk_speed_per_tick": 1.0
+                }
+            },
+            "vehicles": {},
+            "stops": {},
+            "routes": {},
+            "link_polylines": {},
+            "flow_cells": [],
+            "chunk_activities": []
+        });
+
+        sqlx::query(
+            r#"
+            INSERT INTO mobility_snapshots (
+                world_id,
+                tick,
+                base_world_id,
+                base_world_schema_version,
+                payload
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(&world_id)
+        .bind(tick)
+        .bind(&compatibility.base_world_id)
+        .bind(i32::try_from(compatibility.base_world_schema_version).unwrap())
+        .bind(legacy_payload)
+        .execute(bootstrap.pool_for_test())
+        .await
+        .expect("insert legacy mobility snapshot");
+
+        let store = PostgresMobilitySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect mobility store runs migrations");
+        let (_tick, restored) = MobilitySnapshotStore::read(&store, &world_id, &compatibility)
+            .await
+            .expect("legacy snapshot is migrated before strict deserialization")
+            .expect("legacy snapshot remains present");
+        let expected = seeded_birth_tick_for_agent_id(
+            &agent_id,
+            u64::try_from(tick).unwrap(),
+            &SimClock::default(),
+        );
+
+        assert_eq!(
+            restored
+                .agents
+                .get(&agent_id)
+                .expect("agent exists")
+                .birth_tick,
+            expected
+        );
 
         let _ = sqlx::query("DELETE FROM mobility_snapshots WHERE world_id = $1")
             .bind(&world_id)

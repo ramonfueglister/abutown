@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use sim_core::ids::AgentId;
+use sim_core::mobility::components::BirthTick;
+use sim_core::mobility::resources::AgentIdIndex;
 use sim_core::mobility::{
     AgentMobilityState, AgentRecord, MobilityPersistSnapshot, PersistedActiveRoute,
     PersistedRouteStep, PlanStage, api, apply_into_world, extract_from_world,
@@ -436,6 +438,66 @@ fn birth_tick_round_trips() {
         -4242,
         "birth_tick must survive extract → JSON → apply round-trip"
     );
+}
+
+#[test]
+#[should_panic(
+    expected = "agent_record_from_entity: agent agent:missing-birth-tick is missing BirthTick"
+)]
+fn extracting_agent_record_rejects_missing_live_birth_tick() {
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
+    let id = AgentId("agent:missing-birth-tick".into());
+    api::spawn_agent_from_record(
+        &mut world,
+        AgentRecord::new_born_at(
+            id.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".into(),
+            },
+            vec![PlanStage::Activity {
+                activity_id: "activity:home".into(),
+            }],
+            0.05,
+            -12,
+        ),
+    );
+    let entity = *world
+        .resource::<AgentIdIndex>()
+        .0
+        .get(&id)
+        .expect("spawned agent is indexed");
+    world.entity_mut(entity).remove::<BirthTick>();
+
+    let _ = api::agent(&world, &id);
+}
+
+#[test]
+#[should_panic(expected = "agent_dto_for: agent agent:missing-dto-birth-tick is missing BirthTick")]
+fn agent_dto_rejects_missing_live_birth_tick() {
+    let (mut world, _schedule) = empty_world_with_activity("activity:home");
+    let id = AgentId("agent:missing-dto-birth-tick".into());
+    api::spawn_agent_from_record(
+        &mut world,
+        AgentRecord::new_born_at(
+            id.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".into(),
+            },
+            vec![PlanStage::Activity {
+                activity_id: "activity:home".into(),
+            }],
+            0.05,
+            -12,
+        ),
+    );
+    let entity = *world
+        .resource::<AgentIdIndex>()
+        .0
+        .get(&id)
+        .expect("spawned agent is indexed");
+    world.entity_mut(entity).remove::<BirthTick>();
+
+    let _ = api::agent_dto_for(&world, &id);
 }
 
 #[test]

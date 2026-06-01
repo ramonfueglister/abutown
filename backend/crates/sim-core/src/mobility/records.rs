@@ -84,7 +84,6 @@ pub struct AgentRecord {
     pub plan: Vec<PlanStage>,
     pub plan_cursor: usize,
     pub walk_speed_per_tick: f32,
-    #[serde(default)]
     pub birth_tick: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_route: Option<PersistedActiveRoute>,
@@ -232,12 +231,32 @@ mod route_execution_tests {
             "state":{"AtActivity":{"activity_id":"home"}},
             "plan":[],
             "plan_cursor":0,
-            "walk_speed_per_tick":1.0
+            "walk_speed_per_tick":1.0,
+            "birth_tick":123
         }"#;
 
         let decoded: AgentRecord =
             serde_json::from_str(json).expect("legacy agent record deserializes");
 
         assert_eq!(decoded.active_route, None);
+    }
+
+    #[test]
+    fn agent_record_rejects_missing_birth_tick() {
+        let json = r#"{
+            "id":"agent:legacy",
+            "state":{"AtActivity":{"activity_id":"home"}},
+            "plan":[],
+            "plan_cursor":0,
+            "walk_speed_per_tick":1.0
+        }"#;
+
+        let error = serde_json::from_str::<AgentRecord>(json)
+            .expect_err("missing birth_tick must be rejected");
+
+        assert!(
+            error.to_string().contains("birth_tick"),
+            "error should name missing birth_tick, got: {error}"
+        );
     }
 }
