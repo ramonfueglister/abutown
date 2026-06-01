@@ -12,6 +12,8 @@ const DROP_ROAD_VEHICLE_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605160005_drop_road_vehicle_snapshots.sql");
 const SNAPSHOT_COMPATIBILITY_MIGRATION: &str =
     include_str!("../migrations/202605280002_mobility_snapshot_base_world_metadata.sql");
+const LAST_PROCESSED_MONTH_MIGRATION: &str =
+    include_str!("../migrations/202606010001_mobility_snapshot_last_processed_month.sql");
 
 #[derive(Debug)]
 pub struct PostgresMobilitySnapshotStore {
@@ -40,6 +42,7 @@ impl PostgresMobilitySnapshotStore {
         for statement in DROP_ROAD_VEHICLE_SNAPSHOTS_MIGRATION
             .split(';')
             .chain(SNAPSHOT_COMPATIBILITY_MIGRATION.split(';'))
+            .chain(LAST_PROCESSED_MONTH_MIGRATION.split(';'))
             .map(str::trim)
             .filter(|statement| !statement.is_empty())
         {
@@ -183,6 +186,65 @@ mod tests {
         let _ = sqlx::query("DELETE FROM mobility_snapshots WHERE world_id = $1")
             .bind(&world_id)
             .execute(&store.pool)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn postgres_mobility_connect_migrates_legacy_missing_month_cursor() {
+        let Some(database_url) = std::env::var("ABUTOWN_TEST_DATABASE_URL").ok() else {
+            eprintln!("skipping; ABUTOWN_TEST_DATABASE_URL not set");
+            return;
+        };
+
+        let bootstrap = PostgresMobilitySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect mobility store for bootstrap");
+        let world_id = format!("test:mobility:legacy-month:{}", uuid::Uuid::now_v7());
+        let compatibility = SnapshotCompatibility::new("abutopia", 1);
+        let tick = 26_280_i64;
+        let legacy_payload = serde_json::json!({
+            "tick": tick,
+            "agents": {},
+            "vehicles": {},
+            "stops": {},
+            "routes": {},
+            "link_polylines": {}
+        });
+
+        sqlx::query(
+            r#"
+            INSERT INTO mobility_snapshots (
+                world_id,
+                tick,
+                base_world_id,
+                base_world_schema_version,
+                payload
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(&world_id)
+        .bind(tick)
+        .bind(&compatibility.base_world_id)
+        .bind(i32::try_from(compatibility.base_world_schema_version).unwrap())
+        .bind(legacy_payload)
+        .execute(bootstrap.pool_for_test())
+        .await
+        .expect("insert legacy mobility snapshot");
+
+        let store = PostgresMobilitySnapshotStore::connect(&database_url)
+            .await
+            .expect("connect mobility store runs migrations");
+        let (_tick, restored) = MobilitySnapshotStore::read(&store, &world_id, &compatibility)
+            .await
+            .expect("legacy snapshot is migrated before strict deserialization")
+            .expect("legacy snapshot remains present");
+
+        assert_eq!(restored.last_processed_month, 2);
+
+        let _ = sqlx::query("DELETE FROM mobility_snapshots WHERE world_id = $1")
+            .bind(&world_id)
+            .execute(store.pool_for_test())
             .await;
     }
 }
