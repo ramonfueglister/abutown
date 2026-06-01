@@ -875,10 +875,9 @@ async fn mobility_snapshot_agent_age_seconds_is_present() {
         // age_seconds is u64 — presence means we can decode and read it (>= 0 always).
         let _ = agent.age_seconds;
     }
-    // At tick=0, birth_tick=0, age_seconds should be 0.
-    assert_eq!(
-        mobility.agents[0].age_seconds, 0,
-        "agent spawned at tick 0 has age_seconds=0 at tick 0"
+    assert!(
+        mobility.agents.iter().any(|agent| agent.age_seconds > 0),
+        "seeded agents now have deterministic pre-epoch birth ticks, so at least one age_seconds value should be positive"
     );
 }
 
