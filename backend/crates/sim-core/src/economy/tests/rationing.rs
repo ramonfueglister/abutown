@@ -1,3 +1,4 @@
+use crate::economy::apportion_cash;
 use crate::economy::prorata_distribute;
 use crate::economy::{
     AccountBook, DirtyMarketGoods, GOOD_FOOD as FOOD, InventoryBook, MarketGoodState, MarketGoods,
@@ -102,6 +103,56 @@ fn prorata_never_exceeds_a_weight() {
         for (o, w) in out.iter().zip(weights.iter()) {
             assert!(*o <= *w, "alloc {o} exceeded weight {w} at total {total}");
         }
+    }
+}
+
+#[test]
+fn apportion_cash_distributes_full_total_above_weight_sum() {
+    // The defining difference from prorata_distribute: NO min(total, Σweights)
+    // clamp. total=205 across goods weights summing to 100 distributes all 205.
+    let out = apportion_cash(&[70, 30], 205);
+    assert_eq!(
+        out.iter().sum::<i64>(),
+        205,
+        "full total distributed, no clamp"
+    );
+    // 205*70/100 = 143.5 -> 143 + leftover ; 205*30/100 = 61.5 -> 61 + leftover.
+    // distributed floors = 143 + 61 = 204, 1 leftover unit to the larger
+    // remainder (both .5, tie -> ascending index -> index 0).
+    assert_eq!(out, vec![144, 61]);
+}
+
+#[test]
+fn apportion_cash_matches_prorata_when_total_below_weight_sum() {
+    // When total <= Σweights the clamp in prorata never binds, so the two agree.
+    assert_eq!(
+        apportion_cash(&[30, 10], 20),
+        prorata_distribute(&[30, 10], 20)
+    );
+    assert_eq!(
+        apportion_cash(&[1, 1, 1], 2),
+        prorata_distribute(&[1, 1, 1], 2)
+    );
+}
+
+#[test]
+fn apportion_cash_zero_total_or_weights_is_zeros() {
+    assert_eq!(apportion_cash(&[5, 5], 0), vec![0, 0]);
+    assert_eq!(apportion_cash(&[0, 0], 100), vec![0, 0]);
+}
+
+#[test]
+fn apportion_cash_sum_is_exact_total_for_any_total() {
+    // Conservation property the cash split relies on: Σ output == total for
+    // every total > 0, including totals far above the weight sum.
+    let weights = [3, 5, 2];
+    for total in 1..=50 {
+        let out = apportion_cash(&weights, total);
+        assert_eq!(
+            out.iter().sum::<i64>(),
+            total,
+            "Σ != total at total={total}"
+        );
     }
 }
 

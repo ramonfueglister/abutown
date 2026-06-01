@@ -547,7 +547,7 @@ fn plan_flows_tiebreak_is_stable_ascending_dst() {
 fn settle_flow_conserves_and_credits_operator_exactly() {
     use crate::economy::macro_flow::PlannedFlow;
     use crate::economy::macro_flow::settle_flow;
-    use crate::economy::{EconomyEvent, TRANSPORT_OPERATOR, TradeLedger};
+    use crate::economy::{TRANSPORT_OPERATOR, TradeLedger};
 
     let a = MarketId(1);
     let b = MarketId(2);
@@ -577,8 +577,10 @@ fn settle_flow_conserves_and_credits_operator_exactly() {
 
     let m0 = accounts.total_money().unwrap();
     let g0 = inventory.total_good(GOOD_FOOD).unwrap();
-    let mut cfg = EconomyConfig::default();
-    cfg.transport_cost_per_tile_unit = Money(50);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
 
     let mut next_accounts = accounts.clone();
     let mut next_inventory = inventory.clone();
@@ -667,8 +669,10 @@ fn settle_flow_n_buyers_aggregate_floor_conserves() {
         .deposit(seller, GOOD_FOOD, Quantity(1_000))
         .unwrap();
     let mut market_goods = MarketGoods::default();
-    let mut cfg = EconomyConfig::default();
-    cfg.transport_cost_per_tile_unit = Money(50);
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
 
     // q=3, p_src=500 -> src_revenue floor(1500/1000)=1 ; transport (50*3/1000)floor=0.
     let flow = PlannedFlow {
@@ -723,6 +727,208 @@ fn settle_flow_n_buyers_aggregate_floor_conserves() {
     if let EconomyEvent::MacroFlow { transport, qty, .. } = ev {
         assert_eq!(transport, Money(0));
         assert_eq!(qty, Quantity(3));
+    } else {
+        panic!("expected MacroFlow");
+    }
+}
+
+#[test]
+fn settle_flow_conserves_when_per_unit_cash_exceeds_one_scale_unit() {
+    // Regime the earlier conservation tests never exercised: p_src > 1.0
+    // scale-unit (so per-unit cash > 1) AND positive transport. Here the old
+    // `prorata_distribute(goods, cash)` clamp `min(cash, Σgoods)` would have
+    // capped both the seller credit and the buyer charge at q, undercrediting
+    // the seller and undercharging the buyer while the operator still received
+    // the full transport -> money minted. With the exact (non-clamping)
+    // apportionment the seller is credited src_revenue, buyers are charged
+    // dst_payment, and total money is invariant.
+    use crate::economy::macro_flow::PlannedFlow;
+    use crate::economy::macro_flow::settle_flow;
+    use crate::economy::{EconomyEvent, TRANSPORT_OPERATOR};
+
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let seller1 = EconomicActorId(10);
+    let seller2 = EconomicActorId(11);
+    let buyer1 = EconomicActorId(20);
+    let buyer2 = EconomicActorId(21);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    accounts.deposit(buyer1, Money(1_000_000)).unwrap();
+    accounts.deposit(buyer2, Money(1_000_000)).unwrap();
+    inventory
+        .deposit(seller1, GOOD_FOOD, Quantity(1_000))
+        .unwrap();
+    inventory
+        .deposit(seller2, GOOD_FOOD, Quantity(1_000))
+        .unwrap();
+    let mut market_goods = MarketGoods::default();
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+
+    // p_src=2000 (=2.0 scale-units), q=100, dist=1, rate=50:
+    //   src_revenue = floor(2000*100/1000) = 200
+    //   transport   = floor(50*100/1000)*1 = 5
+    //   dst_payment = 205
+    let flow = PlannedFlow {
+        good: GOOD_FOOD,
+        src: a,
+        dst: b,
+        q: 100,
+        p_src: Money(2_000),
+        p_dst: Money(3_000),
+        dist: 1,
+    };
+    let sellers = vec![(seller1, 60i64), (seller2, 40i64)];
+    let buyers = vec![(buyer1, 70i64), (buyer2, 30i64)];
+    let m0 = accounts.total_money().unwrap();
+    let g0 = inventory.total_good(GOOD_FOOD).unwrap();
+
+    let mut na = accounts.clone();
+    let mut ni = inventory.clone();
+    let ev = settle_flow(
+        &mut na,
+        &mut ni,
+        &mut market_goods,
+        &flow,
+        &sellers,
+        &buyers,
+        0,
+        100,
+        100,
+        0,
+        &cfg,
+        10,
+    )
+    .unwrap();
+    accounts = na;
+    inventory = ni;
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        m0,
+        "money conserved even when per-unit cash exceeds one scale-unit"
+    );
+    assert_eq!(
+        inventory.total_good(GOOD_FOOD).unwrap(),
+        g0,
+        "goods conserved"
+    );
+    assert_eq!(
+        accounts.account(TRANSPORT_OPERATOR).available,
+        Money(5),
+        "operator credited exactly the transport total"
+    );
+    // Σ seller credit == src_revenue (200), Σ buyer charge == dst_payment (205).
+    let seller_credit =
+        accounts.account(seller1).available.0 + accounts.account(seller2).available.0;
+    assert_eq!(seller_credit, 200, "Σ seller credit == src_revenue");
+    let buyer_charge =
+        m0.0 - (accounts.account(buyer1).available.0 + accounts.account(buyer2).available.0);
+    assert_eq!(buyer_charge, 205, "Σ buyer charge == dst_payment");
+    if let EconomyEvent::MacroFlow { transport, qty, .. } = ev {
+        assert_eq!(transport, Money(5));
+        assert_eq!(qty, Quantity(100));
+    } else {
+        panic!("expected MacroFlow");
+    }
+}
+
+#[test]
+fn settle_flow_default_reference_price_with_transport_conserves() {
+    // The production default reference price is Money(1_000) == 1.0 scale-unit,
+    // which makes src_revenue == q exactly. With positive transport the buyer
+    // charge dst_payment == q + transport > q. The old `min(cash, Σgoods)` clamp
+    // capped the buyer charge at q while the operator received the full
+    // transport -> exactly `transport` money minted on every default-priced
+    // cross-market flow. This is the common production path.
+    use crate::economy::macro_flow::PlannedFlow;
+    use crate::economy::macro_flow::settle_flow;
+    use crate::economy::{EconomyEvent, TRANSPORT_OPERATOR};
+
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let seller = EconomicActorId(10);
+    let buyer = EconomicActorId(20);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    accounts.deposit(buyer, Money(1_000_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(1_000))
+        .unwrap();
+    let mut market_goods = MarketGoods::default();
+    let cfg = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+
+    // p_src=1000 (default), q=100, dist=1, rate=50:
+    //   src_revenue = floor(1000*100/1000) = 100 == q
+    //   transport   = floor(50*100/1000)*1 = 5
+    //   dst_payment = 105 (> q)
+    let flow = PlannedFlow {
+        good: GOOD_FOOD,
+        src: a,
+        dst: b,
+        q: 100,
+        p_src: Money(1_000),
+        p_dst: Money(1_000),
+        dist: 1,
+    };
+    let sellers = vec![(seller, 100i64)];
+    let buyers = vec![(buyer, 100i64)];
+    let m0 = accounts.total_money().unwrap();
+    let g0 = inventory.total_good(GOOD_FOOD).unwrap();
+
+    let mut na = accounts.clone();
+    let mut ni = inventory.clone();
+    let ev = settle_flow(
+        &mut na,
+        &mut ni,
+        &mut market_goods,
+        &flow,
+        &sellers,
+        &buyers,
+        0,
+        100,
+        100,
+        0,
+        &cfg,
+        10,
+    )
+    .unwrap();
+    accounts = na;
+    inventory = ni;
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        m0,
+        "no money minted on the default-priced cross-market flow"
+    );
+    assert_eq!(
+        inventory.total_good(GOOD_FOOD).unwrap(),
+        g0,
+        "goods conserved"
+    );
+    assert_eq!(
+        accounts.account(TRANSPORT_OPERATOR).available,
+        Money(5),
+        "operator credited exactly the transport total"
+    );
+    assert_eq!(
+        accounts.account(seller).available,
+        Money(100),
+        "seller credited src_revenue == q"
+    );
+    let buyer_charge = m0.0 - accounts.account(buyer).available.0;
+    assert_eq!(
+        buyer_charge, 105,
+        "buyer charged dst_payment == q + transport"
+    );
+    if let EconomyEvent::MacroFlow { transport, .. } = ev {
+        assert_eq!(transport, Money(5));
     } else {
         panic!("expected MacroFlow");
     }

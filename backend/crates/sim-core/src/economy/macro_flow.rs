@@ -11,8 +11,8 @@ use crate::economy::pools::affordable_qty;
 use crate::economy::{
     AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent, GoodId,
     InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
-    Quantity, SettlementPolicy, SupplyPools, TRANSPORT_OPERATOR, checked_order_value,
-    prorata_distribute, settlement_price_with_policy, transport_cost,
+    Quantity, SettlementPolicy, SupplyPools, TRANSPORT_OPERATOR, apportion_cash,
+    checked_order_value, prorata_distribute, settlement_price_with_policy, transport_cost,
 };
 
 /// Synthetic per-(market,good) price derived from the pool band each interval.
@@ -409,11 +409,20 @@ pub fn plan_flows(
 
 /// STEP G: settle ONE accepted flow against the (cloned) books and write the
 /// discovered prices back into `market_goods`. Aggregate-floor cash scheme: one
-/// `src_revenue` floor; transport carved out of (never added on top of) the buyer
-/// total; sellers credited from `src_revenue`, buyers charged `dst_payment` via
-/// lock+debit. Returns the `MacroFlow` event. Does NOT touch `dirty`. The caller
-/// passes the bucket-time effective demand/supply per endpoint for the residual
-/// imbalance write-back (mirrors auction.rs:395-402).
+/// `src_revenue` floor; `dst_payment = src_revenue + transport` (transport is
+/// the buyer's premium over the seller's take, never destroyed). Sellers are
+/// credited a largest-remainder split of the FULL `src_revenue` (Σ seller_cash
+/// == src_revenue) and buyers are charged a largest-remainder split of the FULL
+/// `dst_payment` (Σ buyer_charge == dst_payment) via lock+debit. The cash split
+/// uses [`apportion_cash`], NOT [`prorata_distribute`]: per-unit cash can exceed
+/// one goods-unit (any price >= 1.0 scale-unit, including the default reference
+/// price), and `prorata_distribute`'s `min(total, Σweights)` clamp would cap the
+/// distributed cash at the traded quantity and silently mint `transport` money.
+/// Net money delta is exactly zero: -dst_payment (buyers) + src_revenue
+/// (sellers) + transport (operator) == 0. Returns the `MacroFlow` event. Does
+/// NOT touch `dirty`. The caller passes the bucket-time effective demand/supply
+/// per endpoint for the residual imbalance write-back (mirrors
+/// auction.rs:395-402).
 #[allow(clippy::too_many_arguments)]
 pub fn settle_flow(
     accounts: &mut AccountBook,
@@ -435,10 +444,12 @@ pub fn settle_flow(
         transport_cost(flow.dist, Quantity(q), config.transport_cost_per_tile_unit)?;
     let dst_payment = src_revenue.checked_add(transport_total)?;
 
-    // Sellers at src: prorata goods, prorata cash out of src_revenue (Σ == src_revenue).
+    // Sellers at src: prorata goods (clamped to Σweights == q is correct here),
+    // then a non-clamping largest-remainder split of the FULL src_revenue across
+    // those goods (Σ seller_cash == src_revenue, even when src_revenue > q).
     let seller_w: Vec<i64> = sellers.iter().map(|(_, w)| *w).collect();
     let seller_goods = prorata_distribute(&seller_w, q);
-    let seller_cash = prorata_distribute(&seller_goods, src_revenue.0);
+    let seller_cash = apportion_cash(&seller_goods, src_revenue.0);
     for (idx, (actor, _)) in sellers.iter().enumerate() {
         let goods = seller_goods[idx];
         if goods > 0 {
@@ -450,10 +461,13 @@ pub fn settle_flow(
         }
     }
 
-    // Buyers at dst: prorata goods, prorata charge out of dst_payment (Σ == dst_payment).
+    // Buyers at dst: prorata goods (clamped to Σweights == q is correct here),
+    // then a non-clamping largest-remainder split of the FULL dst_payment across
+    // those goods (Σ buyer_charge == dst_payment == src_revenue + transport, so
+    // the buyers cover both the seller take and the transport premium).
     let buyer_w: Vec<i64> = buyers.iter().map(|(_, w)| *w).collect();
     let buyer_goods = prorata_distribute(&buyer_w, q);
-    let buyer_charge = prorata_distribute(&buyer_goods, dst_payment.0);
+    let buyer_charge = apportion_cash(&buyer_goods, dst_payment.0);
     for (idx, (actor, _)) in buyers.iter().enumerate() {
         let goods = buyer_goods[idx];
         let charge = Money(buyer_charge[idx]);
@@ -484,7 +498,7 @@ pub fn settle_flow(
         (eff_demand_src - q).max(0),
         (eff_supply_src - q).max(0),
         current_tick,
-    );
+    )?;
     if flow.dst != flow.src {
         write_back(
             market_goods,
@@ -497,7 +511,7 @@ pub fn settle_flow(
             (eff_demand_dst - q).max(0),
             (eff_supply_dst - q).max(0),
             current_tick,
-        );
+        )?;
     }
 
     Ok(EconomyEvent::MacroFlow {
@@ -511,9 +525,12 @@ pub fn settle_flow(
 }
 
 /// Apply the STEP-G market-state write-back for one endpoint. Accumulates
-/// `traded_qty_last_tick` (a market may both self-clear and import in one
-/// interval), sets the discovered price, last cleared tick, and post-flow
-/// residual imbalance. Intentionally does NOT touch `dirty`.
+/// `traded_qty_last_tick` via [`Quantity::checked_add`] (a market may both
+/// self-clear and import in one interval, so this can sum across calls), sets
+/// the discovered price, last cleared tick, and post-flow residual imbalance.
+/// Intentionally does NOT touch `dirty`. Returns `Err(Overflow)` rather than
+/// wrapping the accumulator, matching the checked-everywhere discipline of the
+/// rest of this module (and `auction.rs`).
 fn write_back(
     market_goods: &mut MarketGoods,
     key: MarketGoodKey,
@@ -522,14 +539,15 @@ fn write_back(
     unmet_demand: i64,
     unsold_supply: i64,
     current_tick: u64,
-) {
+) -> Result<(), EconomyError> {
     let state = market_goods
         .0
         .entry(key)
         .or_insert_with(|| MarketGoodState::new(key));
     state.last_settlement_price = price;
-    state.traded_qty_last_tick = Quantity(state.traded_qty_last_tick.0 + traded);
+    state.traded_qty_last_tick = state.traded_qty_last_tick.checked_add(Quantity(traded))?;
     state.unmet_demand_last_tick = Quantity(unmet_demand);
     state.unsold_supply_last_tick = Quantity(unsold_supply);
     state.last_cleared_tick = current_tick;
+    Ok(())
 }
