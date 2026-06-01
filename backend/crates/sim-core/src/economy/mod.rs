@@ -5,6 +5,7 @@ pub mod goods;
 pub mod ids;
 pub mod inventory;
 pub mod ledger;
+pub mod macro_flow;
 pub mod market;
 pub mod materialize;
 pub mod money;

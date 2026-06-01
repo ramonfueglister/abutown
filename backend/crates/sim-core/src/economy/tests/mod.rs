@@ -5,6 +5,7 @@ mod determinism;
 mod expiry;
 mod locking;
 mod lod;
+mod macro_flow;
 mod materialize;
 mod overflow;
 mod persist;
