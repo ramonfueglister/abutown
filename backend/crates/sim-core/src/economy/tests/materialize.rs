@@ -246,6 +246,64 @@ fn materialize_does_not_touch_money_or_goods() {
     );
 }
 
+#[test]
+fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
+    use crate::economy::{AccountBook, InventoryBook, Money};
+
+    // Build a fully-routed world so materialize_traders_system can run end-to-end.
+    let a = MarketId(10);
+    let b = MarketId(11);
+    let mut world = routed_shipment_world(a, b);
+
+    // Give the shipment actor some economic state so we can verify it is never mutated.
+    let shipment_actor_id = EconomicActorId(SHIPMENT_ACTOR_OFFSET);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(shipment_actor_id, Money(9_999)).unwrap();
+    let mut inv = InventoryBook::default();
+    inv.deposit(shipment_actor_id, GoodId(0), Quantity(7))
+        .unwrap();
+    world.insert_resource(accounts);
+    world.insert_resource(inv);
+
+    // Insert an active in-transit shipment.
+    world.resource_mut::<FlowShipments>().0.insert(
+        0,
+        FlowShipment {
+            id: 0,
+            from_market: a,
+            to_market: b,
+            good: GoodId(0),
+            qty: Quantity(50),
+            start_tick: 0,
+            travel_ticks: 10,
+        },
+    );
+
+    // Run the materialize system several ticks; the shipment renders and expires.
+    for t in 0u64..12 {
+        world.insert_resource(Tick(t));
+        materialize_traders_system(&mut world);
+    }
+
+    // Economic books must be byte-identical to what we inserted — pure render projection.
+    assert_eq!(
+        world
+            .resource::<AccountBook>()
+            .account(shipment_actor_id)
+            .available,
+        Money(9_999),
+        "money untouched by shipment-materialize path"
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(shipment_actor_id, GoodId(0))
+            .available,
+        Quantity(7),
+        "goods untouched by shipment-materialize path"
+    );
+}
+
 use crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET;
 use crate::economy::materialize::materialize_traders_system;
 use crate::economy::{FlowShipment, FlowShipments, GoodId, MarketSite, Markets};

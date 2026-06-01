@@ -173,3 +173,152 @@ fn expire_arrived_drops_only_arrived() {
         "arrived shipment 0 retained while its render-agent is still materialized"
     );
 }
+
+#[test]
+fn flow_shipments_capture_is_deterministic() {
+    // Run the Task-2 scenario twice from identical initial state; assert the
+    // resulting FlowShipments maps and NextShipmentId counters are identical.
+    fn run_scenario() -> (FlowShipments, NextShipmentId) {
+        let a = MarketId(1);
+        let b = MarketId(2);
+        let good = GoodId(0);
+        let seller = EconomicActorId(10);
+        let buyer = EconomicActorId(20);
+
+        let mut accounts = AccountBook::default();
+        let mut inventory = InventoryBook::default();
+        accounts.deposit(buyer, Money(1_000_000)).unwrap();
+        inventory.deposit(seller, good, Quantity(1_000)).unwrap();
+
+        let mut supply = SupplyPools::default();
+        supply.0.insert(
+            seller,
+            SupplyPool {
+                actor: seller,
+                market: a,
+                good,
+                offered_qty_per_tick: Quantity(100),
+                min_price: Money(500),
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+        let mut demand = DemandPools::default();
+        demand.0.insert(
+            buyer,
+            DemandPool {
+                actor: buyer,
+                market: b,
+                good,
+                desired_qty_per_tick: Quantity(100),
+                max_price: Money(2_000),
+                urgency_bps: 0,
+                elasticity_bps: 0,
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+
+        let mut mg = MarketGoods::default();
+        mg.0.insert(
+            MarketGoodKey { market: a, good },
+            MarketGoodState::new(MarketGoodKey { market: a, good }),
+        );
+        mg.0.insert(
+            MarketGoodKey { market: b, good },
+            MarketGoodState::new(MarketGoodKey { market: b, good }),
+        );
+
+        let mut dist = MarketDistances::default();
+        dist.0.insert((a, b), 4);
+        dist.0.insert((b, a), 4);
+        let dormant: BTreeSet<MarketId> = [a, b].into_iter().collect();
+
+        let config = EconomyConfig {
+            transport_cost_per_tile_unit: Money(50),
+            ..Default::default()
+        };
+        let dirty = DirtyMarketGoods::default();
+        let mut ledger = TradeLedger::default();
+        let mut shipments = FlowShipments::default();
+        let mut next_id = NextShipmentId::default();
+
+        run_macro_flow_at_tick(
+            &mut accounts,
+            &mut inventory,
+            &mut ledger,
+            &demand,
+            &supply,
+            &mut mg,
+            &dirty,
+            &dormant,
+            &dist,
+            &config,
+            /*tick=*/ 0,
+            &mut shipments,
+            &mut next_id,
+        )
+        .unwrap();
+
+        (shipments, next_id)
+    }
+
+    let (s1, n1) = run_scenario();
+    let (s2, n2) = run_scenario();
+    assert_eq!(s1, s2, "FlowShipments are identical across runs");
+    assert_eq!(n1, n2, "NextShipmentId is identical across runs");
+}
+
+#[test]
+fn flow_shipments_not_persisted() {
+    use crate::economy::{EconomyPlugin, FlowShipments, apply_into_world, extract_from_world};
+    use crate::world::schedule::SimPlugin;
+    use bevy_ecs::prelude::*;
+
+    fn install_economy() -> World {
+        let mut world = World::new();
+        let mut schedule = bevy_ecs::schedule::Schedule::default();
+        EconomyPlugin.install(&mut world, &mut schedule);
+        world
+    }
+
+    // Build a world with an active shipment.
+    let mut world_with_shipment = install_economy();
+    world_with_shipment
+        .resource_mut::<FlowShipments>()
+        .0
+        .insert(
+            0,
+            FlowShipment {
+                id: 0,
+                from_market: MarketId(1),
+                to_market: MarketId(2),
+                good: GoodId(0),
+                qty: Quantity(42),
+                start_tick: 0,
+                travel_ticks: 20,
+            },
+        );
+
+    // Build a baseline world with NO shipments.
+    let world_no_shipment = install_economy();
+
+    // Snapshots from both worlds must be byte-identical (shipments are ephemeral,
+    // NOT included in EconomyPersistSnapshot).
+    let snap_with = extract_from_world(&world_with_shipment);
+    let snap_without = extract_from_world(&world_no_shipment);
+    assert_eq!(
+        snap_with, snap_without,
+        "EconomyPersistSnapshot is identical regardless of active shipments"
+    );
+
+    // Restore the shipment world into a fresh world; FlowShipments must be empty.
+    let bytes = serde_json::to_vec(&snap_with).unwrap();
+    let decoded: crate::economy::EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+    assert!(
+        fresh.resource::<FlowShipments>().0.is_empty(),
+        "FlowShipments is empty after restore (ephemeral, not persisted)"
+    );
+}
