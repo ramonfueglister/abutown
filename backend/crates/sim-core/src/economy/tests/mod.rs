@@ -3,6 +3,7 @@ mod audit;
 mod conservation;
 mod determinism;
 mod expiry;
+mod flow_shipments;
 mod locking;
 mod lod;
 mod macro_flow;
