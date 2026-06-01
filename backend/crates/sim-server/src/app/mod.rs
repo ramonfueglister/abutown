@@ -22,9 +22,9 @@ use sim_core::{
     base_world::BaseWorldBundle,
     ids::ChunkCoord,
     persistence::{
-        ChunkSnapshotStore, ChunkSnapshotStoreError, EconomySnapshotStore,
-        InMemoryChunkSnapshotStore, InMemoryEconomySnapshotStore, InMemoryMobilitySnapshotStore,
-        MobilitySnapshotStore,
+        ChunkSnapshotStore, ChunkSnapshotStoreError, EconomyEventStore, EconomySnapshotStore,
+        InMemoryChunkSnapshotStore, InMemoryEconomyEventStore, InMemoryEconomySnapshotStore,
+        InMemoryMobilitySnapshotStore, MobilitySnapshotStore,
     },
 };
 use tokio::sync::{Mutex, broadcast};
@@ -40,6 +40,7 @@ use crate::{
     config::ServerConfig,
     persistence_liveness::{MobilityPersistenceHealthStatus, MobilityPersistenceLiveness},
     postgres_economy::PostgresEconomySnapshotStore,
+    postgres_economy_events::PostgresEconomyEventStore,
     postgres_events::PostgresWorldEventStore,
     postgres_mobility::PostgresMobilitySnapshotStore,
     postgres_snapshots::PostgresChunkSnapshotStore,
@@ -79,6 +80,7 @@ pub struct AppState {
     snapshot_store: Arc<Mutex<Box<dyn ChunkSnapshotStore + Send + Sync>>>,
     mobility_snapshot_store: Arc<Mutex<Box<dyn MobilitySnapshotStore + Send + Sync>>>,
     economy_snapshot_store: Arc<Mutex<Box<dyn EconomySnapshotStore + Send + Sync>>>,
+    economy_event_store: Arc<Mutex<Box<dyn EconomyEventStore + Send + Sync>>>,
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
     view: Arc<arc_swap::ArcSwap<crate::runtime_view::RuntimeReadView>>,
     mutations: tokio::sync::mpsc::UnboundedSender<crate::runtime_view::Mutation>,
@@ -97,6 +99,7 @@ impl AppState {
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             Box::new(InMemoryEconomySnapshotStore::default()),
+            Box::new(InMemoryEconomyEventStore::default()),
             CardHandStore::memory(),
             AuthVerifier::local_bearer_uuid(),
         )
@@ -115,17 +118,23 @@ impl AppState {
             Box::new(InMemoryChunkSnapshotStore::default()),
             Box::new(InMemoryMobilitySnapshotStore::default()),
             Box::new(InMemoryEconomySnapshotStore::default()),
+            Box::new(InMemoryEconomyEventStore::default()),
             card_hands,
             auth,
         )
     }
 
+    // Dependency-injection constructor wiring all persistence stores in one place;
+    // the arg count is inherent to that (repo convention applies this allow to such
+    // cohesive-parameter functions rather than introducing a pass-through struct).
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_stores(
         runtime: SimulationRuntime,
         base_world: &BaseWorldBundle,
         snapshot_store: Box<dyn ChunkSnapshotStore + Send + Sync>,
         mobility_snapshot_store: Box<dyn MobilitySnapshotStore + Send + Sync>,
         economy_snapshot_store: Box<dyn EconomySnapshotStore + Send + Sync>,
+        economy_event_store: Box<dyn EconomyEventStore + Send + Sync>,
         card_hands: CardHandStore,
         auth: AuthVerifier,
     ) -> Self {
@@ -148,6 +157,7 @@ impl AppState {
             snapshot_store: Arc::new(Mutex::new(snapshot_store)),
             mobility_snapshot_store: Arc::new(Mutex::new(mobility_snapshot_store)),
             economy_snapshot_store: Arc::new(Mutex::new(economy_snapshot_store)),
+            economy_event_store: Arc::new(Mutex::new(economy_event_store)),
             chunk_channels: Arc::clone(&chunk_channels),
             view: Arc::clone(&view),
             mutations: mutation_tx,
@@ -210,6 +220,10 @@ impl AppState {
 
     fn economy_snapshot_store(&self) -> Arc<Mutex<Box<dyn EconomySnapshotStore + Send + Sync>>> {
         Arc::clone(&self.economy_snapshot_store)
+    }
+
+    fn economy_event_store(&self) -> Arc<Mutex<Box<dyn EconomyEventStore + Send + Sync>>> {
+        Arc::clone(&self.economy_event_store)
     }
 
     pub(crate) fn mobility_liveness(&self) -> Arc<MobilityPersistenceLiveness> {
@@ -364,6 +378,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
     let economy_snapshot_store =
         PostgresEconomySnapshotStore::connect(&config.database_url).await?;
+    let economy_event_store = PostgresEconomyEventStore::connect(&config.database_url).await?;
     let card_hands = CardHandStore::postgres(&config.database_url).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
@@ -383,6 +398,7 @@ pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Rout
         snapshot_store,
         mobility_snapshot_store,
         economy_snapshot_store,
+        Box::new(economy_event_store),
         card_hands,
         auth,
     );
@@ -888,6 +904,9 @@ async fn apply_mutation_owned(
         Mutation::MarkChunkSnapshotsPersisted { coords } => {
             runtime.mark_chunk_snapshots_persisted(&coords);
         }
+        Mutation::CommitLedgerAudit { count } => {
+            runtime.commit_ledger_audit(count);
+        }
         Mutation::CollectPersistData { reply } => {
             // Iterate registered SnapshotProviders and dispatch by
             // `key.kind`. The provider path is the source of truth for
@@ -944,6 +963,7 @@ async fn apply_mutation_owned(
             // Stable ordering for chunk snapshots (matches the legacy
             // `collect_chunk_snapshots()` (y, x) sort).
             chunk_snapshots.sort_by_key(|s| (s.coord.y, s.coord.x));
+            let (economy_audit_tick, economy_audit_pending) = runtime.pending_ledger_audit();
             let payload = crate::runtime_view::PersistPayload {
                 chunk_snapshots,
                 world_id: runtime.world_id_for_persist().clone(),
@@ -952,6 +972,8 @@ async fn apply_mutation_owned(
                     .unwrap_or_else(|| runtime.mobility_persist_snapshot()),
                 economy_tick: runtime.mobility_tick(),
                 economy_world: economy_world.unwrap_or_default(),
+                economy_audit_tick,
+                economy_audit_pending,
             };
             let _ = reply.send(payload);
         }
@@ -1223,6 +1245,8 @@ async fn persist_snapshots_once(
         mobility_world,
         economy_tick,
         economy_world,
+        economy_audit_tick,
+        economy_audit_pending,
     } = payload;
     let compatibility = sim_core::persistence::SnapshotCompatibility::new(
         state.base_world.world_id.clone(),
@@ -1296,6 +1320,29 @@ async fn persist_snapshots_once(
             .await
         {
             tracing::warn!(%error, "failed to persist economy snapshot");
+        }
+    }
+
+    // Phase 2d: economy audit-log append — best-effort, store-mutex only. On a
+    // successful append, send a fire-and-forget `CommitLedgerAudit` so the tick
+    // task advances the audit cursor and bounds the live ledger. A failed append
+    // leaves the cursor untouched, so the same events retry next cycle.
+    if !economy_audit_pending.is_empty() {
+        let appended = economy_audit_pending.len();
+        let event_store = state.economy_event_store();
+        let mut event_store = event_store.lock().await;
+        match event_store
+            .append(&world_id.0, economy_audit_tick, &economy_audit_pending)
+            .await
+        {
+            Ok(()) => {
+                let _ = state
+                    .mutations
+                    .send(crate::runtime_view::Mutation::CommitLedgerAudit { count: appended });
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to append economy audit events");
+            }
         }
     }
 

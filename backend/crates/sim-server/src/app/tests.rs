@@ -2,8 +2,8 @@ use super::*;
 use abutown_protocol::ChunkSnapshotDto;
 use sim_core::ids::ChunkCoord;
 use sim_core::persistence::{
-    ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryEconomySnapshotStore,
-    MobilitySnapshotStore, MobilitySnapshotStoreError,
+    ChunkSnapshotStore, ChunkSnapshotStoreError, InMemoryEconomyEventStore,
+    InMemoryEconomySnapshotStore, MobilitySnapshotStore, MobilitySnapshotStoreError,
 };
 use std::time::Duration;
 
@@ -136,6 +136,7 @@ async fn healthy_mobility_persistence_keeps_health_ok() {
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(InMemoryMobilitySnapshotStore::default()),
         Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(InMemoryEconomyEventStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );
@@ -158,6 +159,187 @@ async fn healthy_mobility_persistence_keeps_health_ok() {
     assert_eq!(persistence.consecutive_failures, 0);
     assert_eq!(persistence.last_error, "");
     assert!(persistence.freshness_ms <= 15_000);
+}
+
+#[derive(Debug)]
+struct RecordingEconomyEventStore {
+    recorded: Arc<std::sync::Mutex<Vec<(u64, sim_core::economy::EconomyEvent)>>>,
+}
+
+#[async_trait::async_trait]
+impl sim_core::persistence::EconomyEventStore for RecordingEconomyEventStore {
+    async fn append(
+        &mut self,
+        _world_id: &str,
+        tick: u64,
+        events: &[sim_core::economy::EconomyEvent],
+    ) -> Result<(), sim_core::persistence::EconomyEventStoreError> {
+        self.recorded
+            .lock()
+            .unwrap()
+            .extend(events.iter().map(|e| (tick, e.clone())));
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn economy_audit_flush_appends_pending_then_commit_prevents_reappend() {
+    use sim_core::economy::{EconomicActorId, EconomyEvent, Money};
+
+    // Sentinel events with actor ids in a reserved high range the economy systems
+    // never generate, so the assertions are robust to any organic ledger activity
+    // from the live tick task running alongside the test.
+    const SENTINEL_BASE: u64 = 900_000;
+    fn sentinel_count(recorded: &Arc<std::sync::Mutex<Vec<(u64, EconomyEvent)>>>) -> usize {
+        recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, e)| {
+                matches!(e, EconomyEvent::CashLocked { actor, .. } if actor.0 >= SENTINEL_BASE)
+            })
+            .count()
+    }
+
+    let mut runtime = SimulationRuntime::new();
+    runtime.push_ledger_events_for_test(
+        (0..3)
+            .map(|i| EconomyEvent::CashLocked {
+                actor: EconomicActorId(SENTINEL_BASE + i),
+                amount: Money(1),
+            })
+            .collect(),
+    );
+
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let state = AppState::new_with_stores(
+        runtime,
+        &base_world,
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(RecordingEconomyEventStore {
+            recorded: Arc::clone(&recorded),
+        }),
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    );
+
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    // First flush appends the pending ledger tail, which includes the 3 sentinels.
+    persist_snapshots_once(&state).await.unwrap();
+    assert_eq!(
+        sentinel_count(&recorded),
+        3,
+        "first flush appends the pending ledger tail"
+    );
+
+    // Let the fire-and-forget CommitLedgerAudit mutation apply on the next tick.
+    let tick1 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick1, TICK_WAIT).await;
+
+    // Second flush must not re-append the already-committed sentinels: the commit
+    // advanced the audit cursor past them.
+    persist_snapshots_once(&state).await.unwrap();
+    assert_eq!(
+        sentinel_count(&recorded),
+        3,
+        "commit advanced the audit cursor; committed events are not re-appended"
+    );
+}
+
+/// Records every append attempt, then fails — to prove the flush is best-effort.
+#[derive(Debug)]
+struct FailingEconomyEventStore {
+    attempts: Arc<std::sync::Mutex<Vec<(u64, sim_core::economy::EconomyEvent)>>>,
+}
+
+#[async_trait::async_trait]
+impl sim_core::persistence::EconomyEventStore for FailingEconomyEventStore {
+    async fn append(
+        &mut self,
+        _world_id: &str,
+        tick: u64,
+        events: &[sim_core::economy::EconomyEvent],
+    ) -> Result<(), sim_core::persistence::EconomyEventStoreError> {
+        self.attempts
+            .lock()
+            .unwrap()
+            .extend(events.iter().map(|e| (tick, e.clone())));
+        Err(sim_core::persistence::EconomyEventStoreError::unavailable(
+            "simulated audit store outage",
+        ))
+    }
+}
+
+#[tokio::test]
+async fn economy_audit_flush_failure_is_best_effort_and_retries() {
+    use sim_core::economy::{EconomicActorId, EconomyEvent, Money};
+
+    const SENTINEL_BASE: u64 = 910_000;
+    fn sentinel_count(attempts: &Arc<std::sync::Mutex<Vec<(u64, EconomyEvent)>>>) -> usize {
+        attempts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, e)| {
+                matches!(e, EconomyEvent::CashLocked { actor, .. } if actor.0 >= SENTINEL_BASE)
+            })
+            .count()
+    }
+
+    let mut runtime = SimulationRuntime::new();
+    runtime.push_ledger_events_for_test(
+        (0..2)
+            .map(|i| EconomyEvent::CashLocked {
+                actor: EconomicActorId(SENTINEL_BASE + i),
+                amount: Money(1),
+            })
+            .collect(),
+    );
+
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let state = AppState::new_with_stores(
+        runtime,
+        &base_world,
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(FailingEconomyEventStore {
+            attempts: Arc::clone(&attempts),
+        }),
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    );
+
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    // A failed audit append must not fail the persistence cycle (best-effort).
+    persist_snapshots_once(&state).await.unwrap();
+    assert_eq!(
+        sentinel_count(&attempts),
+        2,
+        "first flush attempts the pending events"
+    );
+
+    let tick1 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick1, TICK_WAIT).await;
+
+    // The failed append sent no commit, so the cursor never advanced: the same
+    // sentinels are attempted again on the next cycle.
+    persist_snapshots_once(&state).await.unwrap();
+    assert_eq!(
+        sentinel_count(&attempts),
+        4,
+        "a failed flush does not advance the cursor; events are retried"
+    );
 }
 
 #[derive(Debug, Default)]
@@ -201,6 +383,7 @@ async fn failing_mobility_write_marks_health_degraded_with_redacted_error() {
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(FailingMobilitySnapshotStore),
         Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(InMemoryEconomyEventStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );
@@ -300,6 +483,8 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
                     mobility_world: invalid_mobility.clone(),
                     economy_tick: 0,
                     economy_world: sim_core::economy::EconomyPersistSnapshot::default(),
+                    economy_audit_tick: 0,
+                    economy_audit_pending: Vec::new(),
                 });
             }
         }
@@ -316,6 +501,7 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
         economy_snapshot_store: Arc::new(Mutex::new(Box::new(
             InMemoryEconomySnapshotStore::default(),
         ))),
+        economy_event_store: Arc::new(Mutex::new(Box::new(InMemoryEconomyEventStore::default()))),
         chunk_channels: Arc::new(DashMap::new()),
         view: Arc::new(arc_swap::ArcSwap::from_pointee(
             build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0),
@@ -389,6 +575,7 @@ async fn concurrent_reads_proceed_during_snapshot_persist() {
         }),
         Box::new(InMemoryMobilitySnapshotStore::default()),
         Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(InMemoryEconomyEventStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );
@@ -557,6 +744,7 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
         economy_snapshot_store: Arc::new(Mutex::new(Box::new(
             InMemoryEconomySnapshotStore::default(),
         ))),
+        economy_event_store: Arc::new(Mutex::new(Box::new(InMemoryEconomyEventStore::default()))),
         chunk_channels: Arc::new(DashMap::new()),
         view: Arc::new(arc_swap::ArcSwap::from_pointee(initial_view)),
         mutations: mutation_tx,
@@ -606,6 +794,7 @@ async fn snapshot_write_failure_preserves_dirty_state() {
         Box::new(FailingSnapshotStore),
         Box::new(InMemoryMobilitySnapshotStore::default()),
         Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(InMemoryEconomyEventStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );
@@ -659,6 +848,7 @@ async fn persist_writes_economy_snapshot_to_store() {
         Box::new(InMemoryChunkSnapshotStore::default()),
         Box::new(InMemoryMobilitySnapshotStore::default()),
         Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(InMemoryEconomyEventStore::default()),
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
     );

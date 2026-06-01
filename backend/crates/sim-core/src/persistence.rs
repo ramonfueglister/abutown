@@ -4,7 +4,7 @@ use abutown_protocol::{ChunkSnapshotDto, PROTOCOL_VERSION, TileMutationDto, Worl
 use async_trait::async_trait;
 
 use crate::chunk::Chunk;
-use crate::economy::EconomyPersistSnapshot;
+use crate::economy::{EconomyEvent, EconomyPersistSnapshot};
 use crate::ids::ChunkCoord;
 use crate::mobility::MobilityPersistSnapshot;
 use crate::scheduler::ChunkActivity;
@@ -294,6 +294,67 @@ impl EconomySnapshotStore for InMemoryEconomySnapshotStore {
             .snapshots
             .get(&(world_id.to_string(), compatibility.clone()))
             .cloned())
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct EconomyEventStoreError {
+    message: String,
+}
+
+impl EconomyEventStoreError {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+/// Durable, append-only audit log of economy events (observability — NOT a
+/// recovery / event-sourcing source; the `EconomySnapshotStore` remains the
+/// recovery source of truth). Best-effort: callers treat append failures as
+/// non-fatal and retry on the next persistence cycle. Read/query APIs are a later
+/// slice — the durable backend is indexed so SQL queries are possible.
+#[async_trait]
+pub trait EconomyEventStore: std::fmt::Debug + Send + Sync {
+    /// Durably append a batch of economy events for a world, in order.
+    async fn append(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        events: &[EconomyEvent],
+    ) -> Result<(), EconomyEventStoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct InMemoryEconomyEventStore {
+    events: HashMap<String, Vec<(u64, EconomyEvent)>>,
+}
+
+impl InMemoryEconomyEventStore {
+    /// Test/diagnostic helper: the appended `(tick, event)` rows for a world, in
+    /// append order. Not on the trait — a SQL store can't return a borrowed slice.
+    pub fn events(&self, world_id: &str) -> &[(u64, EconomyEvent)] {
+        self.events.get(world_id).map_or(&[], |v| v.as_slice())
+    }
+
+    pub fn len(&self, world_id: &str) -> usize {
+        self.events.get(world_id).map_or(0, Vec::len)
+    }
+}
+
+#[async_trait]
+impl EconomyEventStore for InMemoryEconomyEventStore {
+    async fn append(
+        &mut self,
+        world_id: &str,
+        tick: u64,
+        events: &[EconomyEvent],
+    ) -> Result<(), EconomyEventStoreError> {
+        let entry = self.events.entry(world_id.to_string()).or_default();
+        entry.extend(events.iter().map(|e| (tick, e.clone())));
+        Ok(())
     }
 }
 
