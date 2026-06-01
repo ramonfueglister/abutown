@@ -263,34 +263,17 @@ fn shoppers_not_persisted() {
         bytes_a, bytes_b,
         "economy snapshot is byte-identical with or without active ShopperVisits"
     );
+    assert!(
+        snap_a == snap_b,
+        "EconomyPersistSnapshot does not include ShopperVisits field"
+    );
 
     // Restoring from the snapshot into a fresh world yields empty ShopperVisits.
     let decoded: crate::economy::EconomyPersistSnapshot = serde_json::from_slice(&bytes_a).unwrap();
     let mut fresh = install_economy();
-    // Inject a shopper visit to make sure apply_into_world clears/ignores it.
-    fresh.resource_mut::<ShopperVisits>().0.insert(
-        1,
-        ShopperVisit {
-            id: 1,
-            market: MarketId(1),
-            good: GoodId(0),
-            origin_node: NodeId(7),
-            start_tick: 0,
-            travel_ticks: 5,
-        },
-    );
     apply_into_world(&mut fresh, &decoded);
-    // apply_into_world does not overwrite ShopperVisits (it is NOT in the snapshot);
-    // but the visits injected before apply_into_world are still there — which is
-    // correct: on a real restart the shopper-capture system regenerates visits from
-    // resumed demand, and the materialize system starts fresh (no pre-apply visits).
-    // The important invariant is that the SNAPSHOT itself carries no shopper data.
-    assert_eq!(
-        bytes_a, bytes_b,
-        "snapshot remains identical regardless of ShopperVisits in world"
-    );
     assert!(
-        snap_a == snap_b,
-        "EconomyPersistSnapshot does not include ShopperVisits field"
+        fresh.resource::<ShopperVisits>().0.is_empty(),
+        "fresh ShopperVisits is empty after apply_into_world (ephemeral, not persisted)"
     );
 }

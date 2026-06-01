@@ -228,7 +228,9 @@ fn materialize_does_not_touch_money_or_goods() {
     inv.deposit(shopper_actor, GoodId(0), Quantity(3)).unwrap();
     world.insert_resource(accounts);
     world.insert_resource(inv);
-    // Insert an active shopper visit so the render path is exercised.
+    // Insert an active shopper visit so conservation is checked even when ShopperVisits is
+    // non-empty (plan_mutations only iterates Traders; shopper render is tested in the
+    // *_with_active_shipment variant which runs materialize_traders_system end-to-end).
     let mut sv = ShopperVisits::default();
     sv.0.insert(
         0,
