@@ -6,7 +6,7 @@
 use bevy_ecs::prelude::*;
 use std::collections::BTreeMap;
 
-use crate::economy::{GoodId, MarketId, Quantity};
+use crate::economy::{EconomyConfig, GoodId, MarketId, Quantity};
 
 /// Reserved actor-id offset for shipment-traders so they never collide with
 /// seeded economic actors (8001-8012) or the demo trader (8003).
@@ -51,4 +51,11 @@ impl NextShipmentId {
         self.0 += 1;
         id
     }
+}
+
+/// Visible travel time for a shipment over `dist` tiles, at the same tile/tick
+/// speed the demo trader walks (so flow-traders pace identically). >= 1.
+pub fn shipment_travel_ticks(dist: i64, config: &EconomyConfig) -> u64 {
+    let speed = config.trader_tiles_per_tick.max(1);
+    (dist.max(0) as u64).div_ceil(speed).max(1)
 }

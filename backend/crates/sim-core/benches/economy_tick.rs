@@ -106,6 +106,7 @@ fn build_fixture(m: u32, g: u16) -> FlowFixture {
 }
 
 fn run_once(f: &mut FlowFixture) {
+    use sim_core::economy::{FlowShipments, NextShipmentId};
     run_macro_flow_at_tick(
         &mut f.accounts,
         &mut f.inventory,
@@ -118,6 +119,8 @@ fn run_once(f: &mut FlowFixture) {
         &f.distances,
         &f.config,
         0,
+        &mut FlowShipments::default(),
+        &mut NextShipmentId::default(),
     )
     .unwrap();
 }

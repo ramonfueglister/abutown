@@ -1,4 +1,11 @@
+use crate::economy::macro_flow::run_macro_flow_at_tick;
+use crate::economy::{
+    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig,
+    InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods, Money, SupplyPool,
+    SupplyPools, TradeLedger,
+};
 use crate::economy::{FlowShipment, FlowShipments, GoodId, MarketId, NextShipmentId, Quantity};
+use std::collections::BTreeSet;
 
 #[test]
 fn shipment_progress_and_arrival() {
@@ -20,4 +27,97 @@ fn shipment_progress_and_arrival() {
     assert_eq!(n.next(), 0);
     assert_eq!(n.next(), 1);
     assert_eq!(FlowShipments::default().0.len(), 0);
+}
+
+#[test]
+fn macro_flow_captures_one_shipment_per_cross_edge() {
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let good = GoodId(0);
+    let seller = EconomicActorId(10);
+    let buyer = EconomicActorId(20);
+
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    accounts.deposit(buyer, Money(1_000_000)).unwrap();
+    inventory.deposit(seller, good, Quantity(1_000)).unwrap();
+
+    let mut supply = SupplyPools::default();
+    supply.0.insert(
+        seller,
+        SupplyPool {
+            actor: seller,
+            market: a,
+            good,
+            offered_qty_per_tick: Quantity(100),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    let mut demand = DemandPools::default();
+    demand.0.insert(
+        buyer,
+        DemandPool {
+            actor: buyer,
+            market: b,
+            good,
+            desired_qty_per_tick: Quantity(100),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+
+    let mut mg = MarketGoods::default();
+    mg.0.insert(
+        MarketGoodKey { market: a, good },
+        MarketGoodState::new(MarketGoodKey { market: a, good }),
+    );
+    mg.0.insert(
+        MarketGoodKey { market: b, good },
+        MarketGoodState::new(MarketGoodKey { market: b, good }),
+    );
+
+    // dist=4: transport=5*4=20, net_gain=200-50-20=130>0 → profitable cross-edge.
+    // (dist=40 would give transport=200, net_gain=-50, pruning the edge.)
+    let mut dist = MarketDistances::default();
+    dist.0.insert((a, b), 4);
+    dist.0.insert((b, a), 4);
+    let dormant: BTreeSet<MarketId> = [a, b].into_iter().collect();
+
+    let config = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+    let dirty = DirtyMarketGoods::default();
+    let mut ledger = TradeLedger::default();
+    let mut shipments = FlowShipments::default();
+    let mut next_id = NextShipmentId::default();
+
+    run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &demand,
+        &supply,
+        &mut mg,
+        &dirty,
+        &dormant,
+        &dist,
+        &config,
+        /*tick=*/ 0,
+        &mut shipments,
+        &mut next_id,
+    )
+    .unwrap();
+
+    assert_eq!(shipments.0.len(), 1, "one shipment for the A->B cross edge");
+    let s = shipments.0.values().next().unwrap();
+    assert_eq!((s.from_market, s.to_market, s.good), (a, b, good));
+    assert_eq!(s.start_tick, 0);
+    assert!(s.travel_ticks > 0);
+    assert_eq!(next_id.0, 1);
 }

@@ -569,6 +569,8 @@ pub fn run_macro_flow_at_tick(
     distances: &MarketDistances,
     config: &EconomyConfig,
     current_tick: u64,
+    shipments: &mut crate::economy::FlowShipments,
+    next_shipment_id: &mut crate::economy::NextShipmentId,
 ) -> Result<(), EconomyError> {
     if config.macro_flow_interval_ticks == 0
         || !current_tick.is_multiple_of(config.macro_flow_interval_ticks)
@@ -655,6 +657,23 @@ pub fn run_macro_flow_at_tick(
                 next_accounts = scratch_accounts;
                 next_inventory = scratch_inventory;
                 next_goods = scratch_goods;
+                if flow.src != flow.dst {
+                    let id = next_shipment_id.next();
+                    let travel_ticks =
+                        crate::economy::flow_shipments::shipment_travel_ticks(flow.dist, config);
+                    shipments.0.insert(
+                        id,
+                        crate::economy::FlowShipment {
+                            id,
+                            from_market: flow.src,
+                            to_market: flow.dst,
+                            good: flow.good,
+                            qty: crate::economy::Quantity(flow.q),
+                            start_tick: current_tick,
+                            travel_ticks,
+                        },
+                    );
+                }
                 events.push(event);
             }
             Err(reason) => {

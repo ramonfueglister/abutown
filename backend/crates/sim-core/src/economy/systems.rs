@@ -4,11 +4,12 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
 use crate::economy::{
-    AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent, GoodId,
-    InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId, Money, NextOrderId,
-    OrderBook, ProductionPools, SettlementPolicy, SupplyPools, TradeLedger, Traders,
-    clear_market_good_with_policy, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_macro_flow_at_tick, run_production_at_tick, run_traders_at_tick,
+    AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
+    FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
+    Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SettlementPolicy, SupplyPools,
+    TradeLedger, Traders, clear_market_good_with_policy, expire_orders_at_tick,
+    generate_pool_orders_at_tick, integer_ewma, run_macro_flow_at_tick, run_production_at_tick,
+    run_traders_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -237,6 +238,8 @@ pub fn run_macro_flow_system(
     demand: Res<DemandPools>,
     supply: Res<SupplyPools>,
     mut market_goods: ResMut<MarketGoods>,
+    mut shipments: ResMut<FlowShipments>,
+    mut next_shipment_id: ResMut<NextShipmentId>,
 ) {
     if let Err(reason) = run_macro_flow_at_tick(
         &mut accounts,
@@ -250,6 +253,8 @@ pub fn run_macro_flow_system(
         &distances,
         &config,
         tick.0,
+        &mut shipments,
+        &mut next_shipment_id,
     ) {
         // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
         // atomic boundary left the books unchanged. Per-edge settle faults are
