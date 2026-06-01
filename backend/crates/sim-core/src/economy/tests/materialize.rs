@@ -214,14 +214,34 @@ fn materialize_despawns_when_trader_leaves_observed_chunks() {
 
 #[test]
 fn materialize_does_not_touch_money_or_goods() {
-    use crate::economy::{AccountBook, InventoryBook, Money};
+    use crate::economy::shoppers::{SHOPPER_ACTOR_OFFSET, ShopperVisit, ShopperVisits};
+    use crate::economy::{AccountBook, GoodId, InventoryBook, Money};
+    use crate::routing::NodeId;
     let (mut world, actor) = seed(TraderState::ToDest { remaining: 2 });
     let mut accounts = AccountBook::default();
     accounts.deposit(actor, Money(10_000)).unwrap();
     let mut inv = InventoryBook::default();
     inv.deposit(actor, GOOD_TOOLS, Quantity(5)).unwrap();
+    // Give the shopper actor economic state that must remain untouched.
+    let shopper_actor = EconomicActorId(SHOPPER_ACTOR_OFFSET);
+    accounts.deposit(shopper_actor, Money(777)).unwrap();
+    inv.deposit(shopper_actor, GoodId(0), Quantity(3)).unwrap();
     world.insert_resource(accounts);
     world.insert_resource(inv);
+    // Insert an active shopper visit so the render path is exercised.
+    let mut sv = ShopperVisits::default();
+    sv.0.insert(
+        0,
+        ShopperVisit {
+            id: 0,
+            market: MarketId(1),
+            good: GoodId(0),
+            origin_node: NodeId(7),
+            start_tick: 0,
+            travel_ticks: 20,
+        },
+    );
+    world.insert_resource(sv);
 
     let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
         [(actor, vec![(1.0, 1.0), (9.0, 1.0)])]
@@ -244,10 +264,28 @@ fn materialize_does_not_touch_money_or_goods() {
         Quantity(5),
         "goods untouched (render-only)"
     );
+    // Shopper actor's economic books must also be untouched.
+    assert_eq!(
+        world
+            .resource::<AccountBook>()
+            .account(shopper_actor)
+            .available,
+        Money(777),
+        "shopper actor money untouched (pure render projection)"
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(shopper_actor, GoodId(0))
+            .available,
+        Quantity(3),
+        "shopper actor goods untouched (pure render projection)"
+    );
 }
 
 #[test]
 fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
+    use crate::economy::shoppers::{SHOPPER_ACTOR_OFFSET, ShopperVisit, ShopperVisits};
     use crate::economy::{AccountBook, InventoryBook, Money};
 
     // Build a fully-routed world so materialize_traders_system can run end-to-end.
@@ -257,10 +295,14 @@ fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
 
     // Give the shipment actor some economic state so we can verify it is never mutated.
     let shipment_actor_id = EconomicActorId(SHIPMENT_ACTOR_OFFSET);
+    let shopper_actor_id = EconomicActorId(SHOPPER_ACTOR_OFFSET);
     let mut accounts = AccountBook::default();
     accounts.deposit(shipment_actor_id, Money(9_999)).unwrap();
+    accounts.deposit(shopper_actor_id, Money(4_321)).unwrap();
     let mut inv = InventoryBook::default();
     inv.deposit(shipment_actor_id, GoodId(0), Quantity(7))
+        .unwrap();
+    inv.deposit(shopper_actor_id, GoodId(0), Quantity(11))
         .unwrap();
     world.insert_resource(accounts);
     world.insert_resource(inv);
@@ -278,8 +320,20 @@ fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
             travel_ticks: 10,
         },
     );
+    // Insert an active shopper visit (walks from market_a's node to market_b's node).
+    world.resource_mut::<ShopperVisits>().0.insert(
+        0,
+        ShopperVisit {
+            id: 0,
+            market: b,
+            good: GoodId(0),
+            origin_node: crate::routing::NodeId(0),
+            start_tick: 0,
+            travel_ticks: 10,
+        },
+    );
 
-    // Run the materialize system several ticks; the shipment renders and expires.
+    // Run the materialize system several ticks; both the shipment and shopper render and expire.
     for t in 0u64..12 {
         world.insert_resource(Tick(t));
         materialize_traders_system(&mut world);
@@ -301,6 +355,23 @@ fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
             .available,
         Quantity(7),
         "goods untouched by shipment-materialize path"
+    );
+    // Shopper actor's economic books must also remain untouched — shopper path is read-only.
+    assert_eq!(
+        world
+            .resource::<AccountBook>()
+            .account(shopper_actor_id)
+            .available,
+        Money(4_321),
+        "money untouched by shopper-materialize path"
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .balance(shopper_actor_id, GoodId(0))
+            .available,
+        Quantity(11),
+        "goods untouched by shopper-materialize path"
     );
 }
 
