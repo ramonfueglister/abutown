@@ -35,11 +35,19 @@ impl SimClock {
     }
 
     fn birth_sim_seconds(&self, birth_tick: i64) -> i128 {
-        i128::from(birth_tick) * i128::from(self.sim_seconds_per_tick)
+        i128::from(birth_tick).saturating_mul(i128::from(self.sim_seconds_per_tick))
+    }
+
+    fn clamp_age_seconds(elapsed: i128) -> u64 {
+        u64::try_from(elapsed.max(0)).unwrap_or(u64::MAX)
     }
 
     pub fn age_seconds(&self, now_tick: u64, birth_tick: i64) -> u64 {
-        self.age_seconds_at(self.sim_seconds(now_tick), birth_tick)
+        let elapsed_ticks = i128::from(now_tick)
+            .saturating_sub(i128::from(birth_tick))
+            .max(0);
+        let elapsed_seconds = elapsed_ticks.saturating_mul(i128::from(self.sim_seconds_per_tick));
+        Self::clamp_age_seconds(elapsed_seconds)
     }
 
     pub fn age_years(&self, now_tick: u64, birth_tick: i64) -> f32 {
@@ -56,8 +64,8 @@ impl SimClock {
     }
 
     pub fn age_seconds_at(&self, at_sim_second: u64, birth_tick: i64) -> u64 {
-        let elapsed = (i128::from(at_sim_second) - self.birth_sim_seconds(birth_tick)).max(0);
-        u64::try_from(elapsed).unwrap_or(u64::MAX)
+        let elapsed = i128::from(at_sim_second).saturating_sub(self.birth_sim_seconds(birth_tick));
+        Self::clamp_age_seconds(elapsed)
     }
 
     /// Age in years at an absolute sim-second `at_sim_second`, for an agent born
@@ -156,6 +164,24 @@ mod tests {
     }
 
     #[test]
+    fn age_seconds_saturates_after_signed_tick_delta_math() {
+        let clock = SimClock {
+            sim_seconds_per_tick: u64::MAX,
+        };
+
+        assert_eq!(clock.age_seconds(u64::MAX, 0), u64::MAX);
+    }
+
+    #[test]
+    fn age_seconds_subtracts_birth_tick_before_saturating_current_seconds() {
+        let clock = SimClock {
+            sim_seconds_per_tick: 2,
+        };
+
+        assert_eq!(clock.age_seconds(u64::MAX, i64::MAX), u64::MAX);
+    }
+
+    #[test]
     fn month_start_seconds_is_month_times_month_length() {
         let clock = SimClock {
             sim_seconds_per_tick: 200,
@@ -190,6 +216,24 @@ mod tests {
         let at_month_one = clock.age_years_at(SECONDS_PER_MONTH, -157_680);
         let expected = 1.0 + (SECONDS_PER_MONTH as f32 / SECONDS_PER_YEAR as f32);
         assert!((at_month_one - expected).abs() < 0.01, "got {at_month_one}");
+    }
+
+    #[test]
+    fn age_seconds_at_saturates_for_extreme_negative_birth_tick() {
+        let clock = SimClock {
+            sim_seconds_per_tick: u64::MAX,
+        };
+
+        assert_eq!(clock.age_seconds_at(0, i64::MIN), u64::MAX);
+    }
+
+    #[test]
+    fn age_seconds_at_saturates_when_elapsed_exceeds_i128() {
+        let clock = SimClock {
+            sim_seconds_per_tick: u64::MAX,
+        };
+
+        assert_eq!(clock.age_seconds_at(u64::MAX, i64::MIN), u64::MAX);
     }
 
     #[test]
