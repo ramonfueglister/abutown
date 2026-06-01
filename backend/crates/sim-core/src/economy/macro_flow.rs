@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::pools::affordable_qty;
 use crate::economy::{
-    AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, InventoryBook,
-    MarketGoodKey, MarketGoods, MarketId, Money, SettlementPolicy, SupplyPools,
-    settlement_price_with_policy,
+    AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, GoodId, InventoryBook,
+    MarketDistances, MarketGoodKey, MarketGoods, MarketId, Money, Quantity, SettlementPolicy,
+    SupplyPools, checked_order_value, settlement_price_with_policy, transport_cost,
 };
 
 /// Synthetic per-(market,good) price derived from the pool band each interval.
@@ -191,4 +191,116 @@ pub fn build_macro_buckets(
         );
     }
     Ok(buckets)
+}
+
+/// One accepted-or-candidate directed flow edge for STEP D-F. `src == dst` is a
+/// self-edge (local clearing of `matched`, transport 0, gate-exempt).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub good: GoodId,
+    pub src: MarketId,
+    pub dst: MarketId,
+    /// Fill cap = matched (self-edge) or min(surplus_src, deficit_dst) (cross-edge).
+    pub q_cap: i64,
+    pub p_src: Money,
+    pub p_dst: Money,
+    pub transport_total: Money,
+    /// 0 for self-edges; strictly > 0 for kept cross-edges.
+    pub net_gain: i64,
+}
+
+/// STEP D: enumerate candidate directed edges per good. Self-edges (matched > 0)
+/// are always emitted (gate-exempt). Cross-edges (src surplus -> dst deficit) are
+/// kept iff aggregate `net_gain > 0` on `q_cap`; any checked-op overflow in the
+/// gate PRUNES the edge (an uncomputable edge is not an opportunity). Read-only.
+pub fn build_candidates(
+    buckets: &BTreeMap<MarketGoodKey, MacroBucket>,
+    distances: &MarketDistances,
+    config: &EconomyConfig,
+) -> Result<Vec<Candidate>, EconomyError> {
+    // Per good, per market: (matched, surplus, deficit, price).
+    let mut by_good: BTreeMap<GoodId, BTreeMap<MarketId, (i64, i64, i64, Money)>> = BTreeMap::new();
+    for (key, b) in buckets {
+        let (matched, surplus, deficit) = classify_bucket(b.total_demand(), b.total_supply());
+        by_good
+            .entry(key.good)
+            .or_default()
+            .insert(key.market, (matched, surplus, deficit, b.price));
+    }
+
+    let mut candidates: Vec<Candidate> = Vec::new();
+    for (good, markets) in &by_good {
+        // Self-edges: one per market with locally-clearable overlap.
+        for (market, (matched, _surplus, _deficit, price)) in markets {
+            if *matched > 0 {
+                candidates.push(Candidate {
+                    good: *good,
+                    src: *market,
+                    dst: *market,
+                    q_cap: *matched,
+                    p_src: *price,
+                    p_dst: *price,
+                    transport_total: Money::ZERO,
+                    net_gain: 0,
+                });
+            }
+        }
+        // Cross-edges: ordered (src surplus, dst deficit) pairs.
+        for (src, (_m_s, surplus, _d_s, p_src)) in markets {
+            if *surplus <= 0 {
+                continue;
+            }
+            for (dst, (_m_d, _s_d, deficit, p_dst)) in markets {
+                if src == dst || *deficit <= 0 {
+                    continue;
+                }
+                let q_cap = (*surplus).min(*deficit);
+                if q_cap <= 0 {
+                    continue;
+                }
+                let dist = match distances.0.get(&(*src, *dst)) {
+                    Some(d) => *d,
+                    None => continue, // no known route: not a candidate
+                };
+                // Aggregate transport gate on the actual q_cap; checked ops,
+                // any overflow PRUNES the edge (no candidate, no event).
+                let dst_value = match checked_order_value(*p_dst, Quantity(q_cap)) {
+                    Ok(v) => v.0,
+                    Err(_) => continue,
+                };
+                let src_value = match checked_order_value(*p_src, Quantity(q_cap)) {
+                    Ok(v) => v.0,
+                    Err(_) => continue,
+                };
+                let transport_total = match transport_cost(
+                    dist,
+                    Quantity(q_cap),
+                    config.transport_cost_per_tile_unit,
+                ) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let net_gain = match dst_value
+                    .checked_sub(src_value)
+                    .and_then(|g| g.checked_sub(transport_total.0))
+                {
+                    Some(g) => g,
+                    None => continue,
+                };
+                if net_gain > 0 {
+                    candidates.push(Candidate {
+                        good: *good,
+                        src: *src,
+                        dst: *dst,
+                        q_cap,
+                        p_src: *p_src,
+                        p_dst: *p_dst,
+                        transport_total,
+                        net_gain,
+                    });
+                }
+            }
+        }
+    }
+    Ok(candidates)
 }
