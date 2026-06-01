@@ -9,6 +9,16 @@ use crate::economy::{
     SupplyPool, SupplyPools,
 };
 
+// --- Section-C schedule-level harness (Task 13): reused BY NAME by Tasks 14-19. ---
+use bevy_ecs::prelude::*;
+
+use crate::economy::EconomyPlugin;
+use crate::economy::transport::transport_cost;
+use crate::economy::{EconomyError, TRANSPORT_OPERATOR};
+use crate::mobility::resources::Tick;
+use crate::world::plugin::CorePlugin;
+use crate::world::schedule::SimPlugin;
+
 fn bucket(price: Money, buyers: Vec<(u64, i64)>, sellers: Vec<(u64, i64)>) -> MacroBucket {
     MacroBucket {
         price,
@@ -1299,4 +1309,206 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
         "faulted-edge buyer untouched"
     );
     assert!(accounts.account(bbuyer).available.0 >= 0, "no overdraw");
+}
+
+/// Full Core+Mobility+Economy world so the wired `EconomySet` chain runs end to
+/// end. Inserts an (initially empty) `MarketDistances` table + `Tick(0)`. Markets
+/// are NOT anchored here (callers anchor + set distances), so the schedule-level
+/// tests drive the real `run_macro_flow_system`. Reused by every Section-C test.
+#[allow(dead_code)] // consumed by the schedule-level Section-C tests (Tasks 14-19).
+fn macro_flow_world() -> World {
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+    world.insert_resource(MarketDistances(BTreeMap::new()));
+    world.insert_resource(Tick(0));
+    world
+}
+
+/// A direct-call scenario: two dormant markets, `surplus` (cheap, supply-only or
+/// net-surplus) and `deficit` (dear, demand-only or net-deficit), wired into bare
+/// books + pools so a single `run_macro_flow_at_tick` call moves goods cheap→dear.
+/// All actors funded so affordability never floors. `rate` sets transport.
+struct DormantScenario {
+    accounts: AccountBook,
+    inventory: InventoryBook,
+    ledger: TradeLedger,
+    demand: DemandPools,
+    supply: SupplyPools,
+    market_goods: MarketGoods,
+    dirty: crate::economy::DirtyMarketGoods,
+    dormant: BTreeSet<MarketId>,
+    distances: MarketDistances,
+    config: EconomyConfig,
+}
+
+fn dp(actor: u64, market: MarketId, qty: i64, max_price: i64) -> DemandPool {
+    DemandPool {
+        actor: EconomicActorId(actor),
+        market,
+        good: GOOD_FOOD,
+        desired_qty_per_tick: Quantity(qty),
+        max_price: Money(max_price),
+        urgency_bps: 0,
+        elasticity_bps: 0,
+        interval_ticks: 1,
+        last_generated_tick: None,
+    }
+}
+fn sp(actor: u64, market: MarketId, qty: i64, min_price: i64) -> SupplyPool {
+    SupplyPool {
+        actor: EconomicActorId(actor),
+        market,
+        good: GOOD_FOOD,
+        offered_qty_per_tick: Quantity(qty),
+        min_price: Money(min_price),
+        interval_ticks: 1,
+        last_generated_tick: None,
+    }
+}
+
+/// Build a one-line surplus@A→deficit@B scenario. `n_buyers` consumers at B share
+/// the demand. `rate` is the transport rate; `dist` the A↔B distance (both ways).
+#[allow(clippy::too_many_arguments)]
+fn surplus_deficit_scenario(
+    n_sellers: u64,
+    seller_qty: i64,
+    ask_floor: i64,
+    n_buyers: u64,
+    buyer_qty: i64,
+    bid_ceiling: i64,
+    dist: i64,
+    rate: Money,
+) -> DormantScenario {
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut demand = DemandPools::default();
+    let mut supply = SupplyPools::default();
+
+    for s in 0..n_sellers {
+        let actor = 100 + s;
+        inventory
+            .deposit(EconomicActorId(actor), GOOD_FOOD, Quantity(1_000_000))
+            .unwrap();
+        supply.0.insert(
+            EconomicActorId(actor),
+            sp(actor, m_a, seller_qty, ask_floor),
+        );
+    }
+    for c in 0..n_buyers {
+        let actor = 200 + c;
+        accounts
+            .deposit(EconomicActorId(actor), Money(1_000_000_000))
+            .unwrap();
+        demand.0.insert(
+            EconomicActorId(actor),
+            dp(actor, m_b, buyer_qty, bid_ceiling),
+        );
+    }
+
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), dist);
+    distances.0.insert((m_b, m_a), dist);
+
+    let config = EconomyConfig {
+        transport_cost_per_tile_unit: rate,
+        ..Default::default()
+    };
+
+    DormantScenario {
+        accounts,
+        inventory,
+        ledger: TradeLedger::default(),
+        demand,
+        supply,
+        market_goods: MarketGoods::default(),
+        dirty: crate::economy::DirtyMarketGoods::default(),
+        dormant: [m_a, m_b].into_iter().collect(),
+        distances,
+        config,
+    }
+}
+
+fn run_flow(s: &mut DormantScenario, tick: u64) -> Result<(), EconomyError> {
+    run_macro_flow_at_tick(
+        &mut s.accounts,
+        &mut s.inventory,
+        &mut s.ledger,
+        &s.demand,
+        &s.supply,
+        &mut s.market_goods,
+        &s.dirty,
+        &s.dormant,
+        &s.distances,
+        &s.config,
+        tick,
+    )
+}
+
+#[test]
+fn macro_flow_conserves_money_and_goods() {
+    // surplus@A (10 units @ ask 500) → deficit@B (10 units @ bid 2000), dist 4,
+    // rate 50: transport = (50*10/1000)*4 = floor(0.5)*4 ... q_cap*rate=500 < 1000
+    // floors to 0 — so use seller_qty 200 so rate*q = 50*200 = 10000 >= 1000.
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 4, Money(50));
+    let money_before = s.accounts.total_money().unwrap();
+    let good_before = s.inventory.total_good(GOOD_FOOD).unwrap();
+    let op_before = s.accounts.account(TRANSPORT_OPERATOR).available;
+
+    run_flow(&mut s, 0).unwrap();
+
+    // q = min(surplus 200, need 200) = 200; transport = (50*200/1000)*4 = 10*4 = 40.
+    let q = Quantity(200);
+    let expected_transport = transport_cost(4, q, Money(50)).unwrap();
+    assert_eq!(expected_transport, Money(40));
+
+    assert_eq!(
+        s.accounts.total_money().unwrap(),
+        money_before,
+        "money conserved"
+    );
+    assert_eq!(
+        s.inventory.total_good(GOOD_FOOD).unwrap(),
+        good_before,
+        "goods conserved"
+    );
+    let op_after = s.accounts.account(TRANSPORT_OPERATOR).available;
+    assert_eq!(
+        op_after.0 - op_before.0,
+        expected_transport.0,
+        "operator gained exactly transport_total"
+    );
+    for acct in s.accounts.accounts.values() {
+        assert!(acct.available.0 >= 0, "no negative available cash");
+    }
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn macro_flow_conserves_with_N_buyers_per_line_floor() {
+    // 3 buyers each wanting 67 → 201 total demand vs 201 supply; ask 333, bid 999,
+    // rate 50, dist 1. With aggregate-floor charging, per-buyer prorata of one
+    // floored aggregate value conserves to the unit. Per-line charging would lose
+    // up to N-1 scale-units and break operator==transport.
+    let mut s = surplus_deficit_scenario(1, 201, 333, 3, 67, 999, 1, Money(50));
+    let money_before = s.accounts.total_money().unwrap();
+    let good_before = s.inventory.total_good(GOOD_FOOD).unwrap();
+    let op_before = s.accounts.account(TRANSPORT_OPERATOR).available;
+
+    run_flow(&mut s, 0).unwrap();
+
+    let q = Quantity(201);
+    let expected_transport = transport_cost(1, q, Money(50)).unwrap(); // (50*201/1000)*1 = 10
+    assert_eq!(expected_transport, Money(10));
+    assert_eq!(s.accounts.total_money().unwrap(), money_before);
+    assert_eq!(s.inventory.total_good(GOOD_FOOD).unwrap(), good_before);
+    assert_eq!(
+        s.accounts.account(TRANSPORT_OPERATOR).available.0 - op_before.0,
+        expected_transport.0,
+        "operator delta == transport_total despite N buyers (aggregate floor, not per-line)"
+    );
 }
