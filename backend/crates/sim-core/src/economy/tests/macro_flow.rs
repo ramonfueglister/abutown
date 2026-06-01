@@ -14,8 +14,10 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::EconomyPlugin;
 use crate::economy::transport::transport_cost;
-use crate::economy::{EconomyError, TRANSPORT_OPERATOR};
+use crate::economy::{EconomyError, MarketChunks, TRANSPORT_OPERATOR};
+use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
+use crate::world::components::{AsleepChunk, ChunkCoordComp};
 use crate::world::plugin::CorePlugin;
 use crate::world::schedule::SimPlugin;
 
@@ -2269,5 +2271,205 @@ fn poisoning_market_does_not_abort_others() {
             .count(),
         1,
         "the poisoning edge faults exactly once; the healthy edge does not"
+    );
+}
+
+#[tokio::test]
+async fn macro_flow_emits_auditable_events() {
+    use crate::economy::audit::{LedgerAuditCursor, commit_ledger_audit, pending_ledger_audit};
+    use crate::persistence::{EconomyEventStore, InMemoryEconomyEventStore};
+
+    // event_type extension first.
+    assert_eq!(
+        EconomyEvent::MacroFlow {
+            from_market: MarketId(1),
+            to_market: MarketId(2),
+            good: GOOD_FOOD,
+            qty: Quantity(10),
+            price: Money(1_000),
+            transport: Money(40),
+        }
+        .event_type(),
+        "macro_flow"
+    );
+
+    // Drive the flow directly, push events into a World's ledger, then drain.
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 4, Money(50));
+    run_flow(&mut s, 0).unwrap();
+    assert!(
+        s.ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::MacroFlow { .. })),
+        "flow produced at least one MacroFlow event"
+    );
+
+    let mut world = World::new();
+    world.insert_resource(Tick(0));
+    world.insert_resource(s.ledger.clone());
+    world.insert_resource(LedgerAuditCursor(0));
+
+    let (tick, pending) = pending_ledger_audit(&world);
+    assert_eq!(tick, 0);
+    assert!(!pending.is_empty());
+
+    let mut store = InMemoryEconomyEventStore::default();
+    store.append("w", tick, &pending).await.unwrap();
+    commit_ledger_audit(&mut world, pending.len());
+    assert!(
+        pending_ledger_audit(&world).1.is_empty(),
+        "cursor advanced past appended events"
+    );
+
+    let stored = store.events("w");
+    let mf = stored
+        .iter()
+        .find_map(|(t, e)| match e {
+            EconomyEvent::MacroFlow {
+                from_market,
+                to_market,
+                ..
+            } => Some((*t, *from_market, *to_market)),
+            _ => None,
+        })
+        .expect("a MacroFlow row survived the store round-trip");
+    assert_eq!(
+        mf,
+        (0, MarketId(1), MarketId(2)),
+        "tick + from/to round-trip via serde jsonb"
+    );
+}
+
+#[test]
+fn macro_flow_replays_across_restart() {
+    use crate::economy::{apply_into_world, extract_from_world};
+
+    // Build a wired world with two asleep-anchored markets that flow; reuse the
+    // lod-style assembly inline (macro_flow_world has no anchors). We anchor here.
+    fn wired_flow_world() -> (World, bevy_ecs::schedule::Schedule) {
+        let world = macro_flow_world();
+        let mut schedule = bevy_ecs::schedule::Schedule::default();
+        // macro_flow_world used its own throwaway schedule; rebuild one that the
+        // EconomyPlugin populated. Instead, install fresh so schedule is wired:
+        // (re-install is idempotent on a fresh World here — simpler to build anew)
+        let mut w2 = World::new();
+        CorePlugin::default().install(&mut w2, &mut schedule);
+        crate::mobility::MobilityPlugin.install(&mut w2, &mut schedule);
+        EconomyPlugin.install(&mut w2, &mut schedule);
+        let m_a = MarketId(9_301);
+        let m_b = MarketId(9_302);
+        w2.resource_mut::<InventoryBook>()
+            .deposit(EconomicActorId(50), GOOD_FOOD, Quantity(1_000_000))
+            .unwrap();
+        w2.resource_mut::<AccountBook>()
+            .deposit(EconomicActorId(60), Money(1_000_000_000))
+            .unwrap();
+        w2.resource_mut::<SupplyPools>().0.insert(
+            EconomicActorId(50),
+            SupplyPool {
+                actor: EconomicActorId(50),
+                market: m_a,
+                good: GOOD_FOOD,
+                offered_qty_per_tick: Quantity(200),
+                min_price: Money(500),
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+        w2.resource_mut::<DemandPools>().0.insert(
+            EconomicActorId(60),
+            DemandPool {
+                actor: EconomicActorId(60),
+                market: m_b,
+                good: GOOD_FOOD,
+                desired_qty_per_tick: Quantity(200),
+                max_price: Money(2_000),
+                urgency_bps: 0,
+                elasticity_bps: 0,
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+        w2.resource_mut::<MarketChunks>()
+            .0
+            .insert(m_a, ChunkCoord { x: 5, y: 5 });
+        w2.resource_mut::<MarketChunks>()
+            .0
+            .insert(m_b, ChunkCoord { x: 9, y: 5 });
+        let mut dist = MarketDistances(BTreeMap::new());
+        dist.0.insert((m_a, m_b), 4);
+        dist.0.insert((m_b, m_a), 4);
+        w2.insert_resource(dist);
+        w2.resource_mut::<EconomyConfig>()
+            .transport_cost_per_tile_unit = Money(50);
+        w2.spawn((ChunkCoordComp(ChunkCoord { x: 5, y: 5 }), AsleepChunk));
+        w2.spawn((ChunkCoordComp(ChunkCoord { x: 9, y: 5 }), AsleepChunk));
+        w2.insert_resource(Tick(0));
+        let _ = world; // macro_flow_world world dropped; we use w2.
+        (w2, schedule)
+    }
+
+    let (mut world, mut schedule) = wired_flow_world();
+    // Run N=25 ticks (covers ticks 0,10,20 flow intervals).
+    for _ in 0..25 {
+        schedule.run(&mut world);
+        let mut t = world.resource_mut::<Tick>();
+        t.0 += 1;
+    }
+    let saved_tick = world.resource::<Tick>().0;
+
+    // Restart: extract → serialize → apply into a freshly-installed world.
+    let snap = extract_from_world(&world);
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: crate::economy::EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+
+    let mut restart = World::new();
+    let mut restart_sched = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut restart, &mut restart_sched);
+    crate::mobility::MobilityPlugin.install(&mut restart, &mut restart_sched);
+    EconomyPlugin.install(&mut restart, &mut restart_sched);
+    apply_into_world(&mut restart, &decoded);
+    // EconomyConfig is intentionally NOT persisted (design spec: static tuning,
+    // default-constructed by EconomyPlugin::install each boot). A real restart
+    // re-applies the operator's static config to the freshly-installed world, so
+    // mirror the live world's rate here — otherwise the macro flow would charge
+    // the default rate (5) and diverge from the rate-50 continuation.
+    restart
+        .resource_mut::<EconomyConfig>()
+        .transport_cost_per_tile_unit = Money(50);
+    // Distances + chunks restore from the snapshot (market_distances persisted);
+    // re-spawn the chunk markers (LOD entities are not in the economy snapshot).
+    restart.spawn((ChunkCoordComp(ChunkCoord { x: 5, y: 5 }), AsleepChunk));
+    restart.spawn((ChunkCoordComp(ChunkCoord { x: 9, y: 5 }), AsleepChunk));
+    restart.insert_resource(Tick(saved_tick));
+
+    // Run M=20 more on BOTH continuations.
+    for _ in 0..20 {
+        schedule.run(&mut world);
+        let mut t = world.resource_mut::<Tick>();
+        t.0 += 1;
+        restart_sched.run(&mut restart);
+        let mut t2 = restart.resource_mut::<Tick>();
+        t2.0 += 1;
+    }
+
+    assert_eq!(
+        world.resource::<MarketGoods>().0,
+        restart.resource::<MarketGoods>().0,
+        "MarketGoods identical across restart"
+    );
+    assert_eq!(
+        world.resource::<AccountBook>().accounts,
+        restart.resource::<AccountBook>().accounts,
+        "AccountBook identical across restart"
+    );
+    let tail = |w: &World| {
+        let l = &w.resource::<TradeLedger>().0;
+        l[l.len().saturating_sub(16)..].to_vec()
+    };
+    assert_eq!(
+        tail(&world),
+        tail(&restart),
+        "ledger tail identical across restart"
     );
 }

@@ -22,10 +22,10 @@ use bevy_ecs::prelude::*;
 use crate::economy::InventoryBalance;
 use crate::economy::{
     AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyPersistSnapshot,
-    EconomyPlugin, GOOD_TOOLS, InventoryBook, MarketChunks, MarketGoodKey, MarketGoodState,
-    MarketGoods, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId, ProductionPool,
-    ProductionPools, Quantity, Recipe, SupplyPool, SupplyPools, Trader, TraderState, Traders,
-    apply_into_world, extract_from_world,
+    EconomyPlugin, GOOD_TOOLS, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey,
+    MarketGoodState, MarketGoods, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId,
+    ProductionPool, ProductionPools, Quantity, Recipe, SupplyPool, SupplyPools, Trader,
+    TraderState, Traders, apply_into_world, extract_from_world,
 };
 use crate::ids::ChunkCoord;
 use crate::world::schedule::SimPlugin;
@@ -208,6 +208,24 @@ fn economy_snapshot_is_byte_stable() {
     let a = serde_json::to_vec(&extract_from_world(&world)).unwrap();
     let b = serde_json::to_vec(&extract_from_world(&world)).unwrap();
     assert_eq!(a, b);
+}
+
+#[test]
+fn market_distances_round_trips() {
+    let mut world = install_economy();
+    seed(&mut world);
+    let snap = extract_from_world(&world);
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+    assert_eq!(
+        world.resource::<MarketDistances>().0,
+        fresh.resource::<MarketDistances>().0,
+        "market_distances survive extract->serialize->apply"
+    );
+    // And the whole snapshot remains an identity round-trip (covers the new field).
+    assert_eq!(snap, extract_from_world(&fresh));
 }
 
 #[test]
