@@ -2,6 +2,14 @@ use crate::economy::{GoodId, MarketId, NextShopperId, ShopperVisit, ShopperVisit
 use crate::routing::NodeId;
 
 #[test]
+fn economy_config_has_shopper_tuning_defaults() {
+    let c = crate::economy::EconomyConfig::default();
+    assert!(c.shoppers_per_unit >= 1);
+    assert!(c.max_shoppers_per_market >= 1);
+    assert!(c.shopper_radius_tiles > 0.0);
+}
+
+#[test]
 fn shopper_progress_arrival_and_id() {
     let v = ShopperVisit {
         id: 0,

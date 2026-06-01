@@ -28,7 +28,7 @@ pub enum EconomySet {
     Telemetry,
 }
 
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct EconomyConfig {
     pub ewma_alpha_bps: u16,
     pub default_order_ttl_ticks: u64,
@@ -37,6 +37,12 @@ pub struct EconomyConfig {
     pub trader_default_ref_price: Money,
     pub macro_flow_interval_ticks: u64,
     pub settlement_policy: SettlementPolicy,
+    /// How many unmet-demand units one visible shopper represents.
+    pub shoppers_per_unit: i64,
+    /// Cap on simultaneous shoppers rendered per market (keeps it a handful, not hundreds).
+    pub max_shoppers_per_market: usize,
+    /// Radius (tiles) around a market to pick shopper origin nodes.
+    pub shopper_radius_tiles: f32,
 }
 
 impl Default for EconomyConfig {
@@ -49,6 +55,9 @@ impl Default for EconomyConfig {
             trader_default_ref_price: Money(1_000),
             macro_flow_interval_ticks: 10,
             settlement_policy: SettlementPolicy::Anchored,
+            shoppers_per_unit: 3,
+            max_shoppers_per_market: 4,
+            shopper_radius_tiles: 24.0,
         }
     }
 }
