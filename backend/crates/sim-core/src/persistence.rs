@@ -51,12 +51,15 @@ pub fn build_chunk_snapshot_from_parts(
     chunk_version: u64,
     activity: ChunkActivity,
 ) -> ChunkSnapshotDto {
-    let tile_count = tiles.len() as u16;
+    let tile_count = u16::try_from(tiles.len())
+        .expect("chunk tile count exceeds u16; chunk_size must be <= 255 (see Chunk::try_new)");
     let mut emitted: Vec<TileMutationDto> = Vec::new();
     for (index, tile) in tiles.iter().enumerate() {
         if tile.kind != TileKind::default() {
             emitted.push(TileMutationDto {
-                local_index: index as u16,
+                local_index: u16::try_from(index).expect(
+                    "tile index exceeds u16; chunk_size must be <= 255 (see Chunk::try_new)",
+                ),
                 kind: tile.kind.into(),
                 version: tile.version,
             });
@@ -303,7 +306,38 @@ mod tests {
     use crate::chunk::Chunk;
     use crate::ids::ChunkCoord;
     use crate::scheduler::ChunkActivity;
-    use crate::tile::TileKind;
+    use crate::tile::{TileKind, TileRecord};
+
+    #[test]
+    fn build_chunk_snapshot_accepts_u16_max_tiles() {
+        // 65535 tiles fit in u16: must not panic, tile_count round-trips.
+        let tiles = vec![TileRecord::default(); usize::from(u16::MAX)];
+        let dto = build_chunk_snapshot_from_parts(
+            "abutopia",
+            ChunkCoord { x: 0, y: 0 },
+            &tiles,
+            1,
+            ChunkActivity::Active,
+        );
+        assert_eq!(dto.tile_count, u16::MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "chunk tile count exceeds u16")]
+    fn build_chunk_snapshot_panics_when_tile_count_exceeds_u16() {
+        // 65536 tiles overflow u16: the writer must fail loudly, never silently
+        // truncate the snapshot. (chunk_size is capped at 255 by Chunk::try_new,
+        // so this is an unreachable internal invariant — but the public builder
+        // must not corrupt data if that contract is ever broken.)
+        let tiles = vec![TileRecord::default(); usize::from(u16::MAX) + 1];
+        let _ = build_chunk_snapshot_from_parts(
+            "abutopia",
+            ChunkCoord { x: 0, y: 0 },
+            &tiles,
+            1,
+            ChunkActivity::Active,
+        );
+    }
 
     #[test]
     fn snapshot_contains_initial_tiles_then_clears_dirty_state() {
