@@ -155,3 +155,19 @@ fn build_macro_buckets_skips_zero_price_band() {
         "zero-price band market produces no bucket and no error"
     );
 }
+
+#[test]
+fn classify_bucket_partitions_matched_surplus_deficit() {
+    use crate::economy::macro_flow::classify_bucket;
+
+    // surplus side: S=80 > D=30 -> matched 30, surplus 50, deficit 0.
+    let (m, surplus, deficit) = classify_bucket(/*demand=*/ 30, /*supply=*/ 80);
+    assert_eq!((m, surplus, deficit), (30, 50, 0));
+    // deficit side: D=120 > S=40 -> matched 40, surplus 0, deficit 80.
+    let (m2, sur2, def2) = classify_bucket(120, 40);
+    assert_eq!((m2, sur2, def2), (40, 0, 80));
+    // balanced: D==S -> matched all, no residual.
+    assert_eq!(classify_bucket(50, 50), (50, 0, 0));
+    // empty side: D=0 -> matched 0, no surplus exported when supply has no buyers locally.
+    assert_eq!(classify_bucket(0, 70), (0, 70, 0));
+}

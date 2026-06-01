@@ -71,6 +71,17 @@ fn prior_price(market_goods: &MarketGoods, key: MarketGoodKey, config: &EconomyC
     }
 }
 
+/// STEP C: partition a market's aggregate demand/supply into the locally-clearable
+/// overlap `matched = min(D, S)`, the exportable `surplus = S - matched`, and the
+/// importable `deficit = D - matched`. At most one of surplus/deficit is non-zero;
+/// `matched` and the residual are disjoint quantities (overlap vs excess).
+pub fn classify_bucket(total_demand: i64, total_supply: i64) -> (i64, i64, i64) {
+    let matched = total_demand.min(total_supply).max(0);
+    let surplus = (total_supply - matched).max(0);
+    let deficit = (total_demand - matched).max(0);
+    (matched, surplus, deficit)
+}
+
 /// STEP A: build the dormant aggregate buckets. Groups dormant demand/supply by
 /// market-good, derives the synthetic price from the raw band, then caps demand
 /// by affordability (at `price`) and supply by on-hand stock. Buckets whose
