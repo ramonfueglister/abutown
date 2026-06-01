@@ -45,6 +45,7 @@ pub struct FlowShipments(pub BTreeMap<u64, FlowShipment>);
 pub struct NextShipmentId(pub u64);
 
 impl NextShipmentId {
+    #[allow(clippy::should_implement_trait)] // Not an Iterator; 'next' is an ID counter.
     pub fn next(&mut self) -> u64 {
         let id = self.0;
         self.0 += 1;
