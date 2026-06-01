@@ -207,6 +207,32 @@ fn sex_from_id(agent_id_str: &str) -> crate::mobility::components::Sex {
     }
 }
 
+const MAX_SEED_AGENT_AGE_YEARS: u64 = 90;
+const SEED_AGENT_AGE_HASH_SALT: u64 = 0xA9E7_1D3C_5B29_0F17;
+
+fn stable_seed_hash(input: &str, salt: u64) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64 ^ salt;
+    for byte in input.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    hash
+}
+
+pub fn seeded_birth_tick_for_agent_id(
+    agent_id: &AgentId,
+    now_tick: u64,
+    clock: &crate::time::SimClock,
+) -> i64 {
+    let age_years =
+        stable_seed_hash(&agent_id.0, SEED_AGENT_AGE_HASH_SALT) % (MAX_SEED_AGENT_AGE_YEARS + 1);
+    let age_seconds = age_years.saturating_mul(crate::time::SECONDS_PER_YEAR);
+    let age_ticks = age_seconds / clock.sim_seconds_per_tick.max(1);
+    let age_ticks = i64::try_from(age_ticks).unwrap_or(i64::MAX);
+    let now_tick = i64::try_from(now_tick).unwrap_or(i64::MAX);
+    now_tick.saturating_sub(age_ticks)
+}
+
 fn empty_world_and_schedule_for_network(network: &CityNetwork) -> (World, Schedule) {
     let mut world = World::new();
     let mut schedule = Schedule::default();
@@ -363,6 +389,8 @@ pub enum SeedError {
 
 pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Schedule) {
     let (mut world, schedule) = empty_world_and_schedule_for_network(network);
+    let clock = *world.resource::<crate::time::SimClock>();
+    let now_tick = world.resource::<crate::mobility::resources::Tick>().0;
 
     // Spawn walking agents distributed across corridors.
     if !network.pedestrian_corridors.is_empty() {
@@ -373,13 +401,14 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
             let agent_id = AgentId(format!("agent:walk:{n}"));
             let link_id = format!("link:walk:corridor:{corridor_index}");
             let progress = ((n as f32) / (density.pedestrians_per_corridor as f32)).fract();
-            let mut rec = AgentRecord::new(
+            let mut rec = AgentRecord::new_born_at(
                 agent_id.clone(),
                 AgentMobilityState::Walking { link_id, progress },
                 vec![PlanStage::Activity {
                     activity_id: format!("activity:wander:{corridor_index}"),
                 }],
                 0.05,
+                seeded_birth_tick_for_agent_id(&agent_id, now_tick, &clock),
             );
             rec.sex = sex_from_id(&agent_id.0);
             api::spawn_agent_from_record(&mut world, rec);
@@ -412,20 +441,20 @@ pub fn from_network(network: &CityNetwork, density: SeedDensity) -> (World, Sche
                     dwell_ticks_remaining: 0,
                 },
             );
-            api::spawn_agent_from_record(
-                &mut world,
-                AgentRecord::new(
-                    driver_id,
-                    AgentMobilityState::InVehicle {
-                        vehicle_id,
-                        seat_index: 0,
-                    },
-                    vec![PlanStage::Activity {
-                        activity_id: format!("activity:drive:{arterial_index}"),
-                    }],
-                    0.05,
-                ),
+            let mut rec = AgentRecord::new_born_at(
+                driver_id.clone(),
+                AgentMobilityState::InVehicle {
+                    vehicle_id,
+                    seat_index: 0,
+                },
+                vec![PlanStage::Activity {
+                    activity_id: format!("activity:drive:{arterial_index}"),
+                }],
+                0.05,
+                seeded_birth_tick_for_agent_id(&driver_id, now_tick, &clock),
             );
+            rec.sex = sex_from_id(&driver_id.0);
+            api::spawn_agent_from_record(&mut world, rec);
         }
     }
 
@@ -441,6 +470,7 @@ pub fn from_base_world_bundle(
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     CorePlugin::default().install(&mut world, &mut schedule);
+    crate::time::TimePlugin.install(&mut world, &mut schedule);
     world.insert_resource(network);
     crate::routing::RoutingPlugin {
         seeded_stops: Vec::new(),
@@ -506,6 +536,8 @@ fn seed_pedestrians_from_bundle(
     bundle: &crate::base_world::BaseWorldBundle,
 ) -> Result<(), SeedError> {
     insert_activity_waypoints_from_base_world(world, bundle)?;
+    let clock = *world.resource::<crate::time::SimClock>();
+    let now_tick = world.resource::<crate::mobility::resources::Tick>().0;
 
     let mut agent_index = 0u32;
     for group in &bundle.spawns.pedestrian_groups {
@@ -529,7 +561,7 @@ fn seed_pedestrians_from_bundle(
             } else {
                 0.0
             };
-            let mut rec = AgentRecord::new(
+            let mut rec = AgentRecord::new_born_at(
                 agent_id.clone(),
                 AgentMobilityState::Walking {
                     link_id: link_id.clone(),
@@ -546,6 +578,7 @@ fn seed_pedestrians_from_bundle(
                     },
                 ],
                 0.05,
+                seeded_birth_tick_for_agent_id(&agent_id, now_tick, &clock),
             );
             rec.cyclic = true;
             rec.sex = sex_from_id(&agent_id.0);
@@ -559,6 +592,9 @@ fn seed_cars_from_bundle(
     world: &mut World,
     bundle: &crate::base_world::BaseWorldBundle,
 ) -> Result<(), SeedError> {
+    let clock = *world.resource::<crate::time::SimClock>();
+    let now_tick = world.resource::<crate::mobility::resources::Tick>().0;
+
     let mut driver_index = 0u32;
     for group in &bundle.spawns.car_groups {
         let Some(arterial_index) = bundle
@@ -595,20 +631,20 @@ fn seed_cars_from_bundle(
                     dwell_ticks_remaining: 0,
                 },
             );
-            api::spawn_agent_from_record(
-                world,
-                AgentRecord::new(
-                    driver_id,
-                    AgentMobilityState::InVehicle {
-                        vehicle_id,
-                        seat_index: 0,
-                    },
-                    vec![PlanStage::Activity {
-                        activity_id: format!("activity:drive:{arterial_index}"),
-                    }],
-                    0.05,
-                ),
+            let mut rec = AgentRecord::new_born_at(
+                driver_id.clone(),
+                AgentMobilityState::InVehicle {
+                    vehicle_id,
+                    seat_index: 0,
+                },
+                vec![PlanStage::Activity {
+                    activity_id: format!("activity:drive:{arterial_index}"),
+                }],
+                0.05,
+                seeded_birth_tick_for_agent_id(&driver_id, now_tick, &clock),
             );
+            rec.sex = sex_from_id(&driver_id.0);
+            api::spawn_agent_from_record(world, rec);
         }
     }
     Ok(())
@@ -654,6 +690,34 @@ mod tests {
         assert_eq!(walks.len(), 2);
         assert_eq!(walks[0].polyline, vec![(2.0, 2.49), (13.0, 2.49)]);
         assert_eq!(walks[1].polyline, vec![(2.0, 3.51), (13.0, 3.51)]);
+    }
+
+    #[test]
+    fn seeded_birth_ticks_are_deterministic_and_cover_life_stages() {
+        let clock = crate::time::SimClock::default();
+        let first =
+            seeded_birth_tick_for_agent_id(&crate::ids::AgentId("agent:walk:42".into()), 0, &clock);
+        let repeat =
+            seeded_birth_tick_for_agent_id(&crate::ids::AgentId("agent:walk:42".into()), 0, &clock);
+        assert_eq!(first, repeat);
+
+        let ages: Vec<f32> = (0..300)
+            .map(|i| {
+                let id = crate::ids::AgentId(format!("agent:walk:{i}"));
+                let birth_tick = seeded_birth_tick_for_agent_id(&id, 0, &clock);
+                clock.age_years(0, birth_tick)
+            })
+            .collect();
+
+        assert!(ages.iter().all(|age| (0.0..=90.1).contains(age)));
+        assert!(
+            ages.iter().any(|age| (15.0..=49.0).contains(age)),
+            "seeded cohort must include fertile-age agents"
+        );
+        assert!(
+            ages.iter().any(|age| *age >= 70.0),
+            "seeded cohort must include elder agents"
+        );
     }
 
     fn walkability_bundle() -> BaseWorldBundle {
@@ -733,6 +797,23 @@ mod tests {
                 tram_lines: Vec::new(),
             },
         }
+    }
+
+    #[test]
+    fn base_world_seed_agents_have_varied_start_ages() {
+        let bundle = walkability_bundle();
+        let (world, _schedule) = from_base_world_bundle(&bundle).expect("base world seeds");
+        let snapshot = crate::mobility::extract_from_world(&world);
+        let clock = crate::time::SimClock::default();
+        let ages: Vec<f32> = snapshot
+            .agents
+            .values()
+            .map(|agent| clock.age_years(snapshot.tick, agent.birth_tick))
+            .collect();
+
+        assert!(!ages.is_empty());
+        assert!(ages.iter().any(|age| *age > 0.0));
+        assert!(ages.iter().all(|age| (0.0..=90.1).contains(age)));
     }
 
     #[test]
