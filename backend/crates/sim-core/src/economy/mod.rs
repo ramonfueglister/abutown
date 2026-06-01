@@ -15,6 +15,7 @@ pub mod persist;
 pub mod pools;
 pub mod production;
 pub mod seed;
+pub mod shoppers;
 pub mod systems;
 pub mod trader_render;
 pub mod traders;
@@ -36,6 +37,7 @@ pub use orders::*;
 pub use persist::*;
 pub use pools::*;
 pub use production::*;
+pub use shoppers::*;
 pub use systems::*;
 pub use trader_render::*;
 pub use traders::*;
@@ -72,6 +74,8 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::audit::LedgerAuditCursor::default());
         world.insert_resource(crate::economy::flow_shipments::FlowShipments::default());
         world.insert_resource(crate::economy::flow_shipments::NextShipmentId::default());
+        world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
+        world.insert_resource(crate::economy::shoppers::NextShopperId::default());
         install_systems(schedule);
     }
 }
