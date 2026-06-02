@@ -3247,3 +3247,156 @@ fn build_macro_buckets_active_one_entry_per_order_not_per_owner() {
         "per-row max_price preserved (not collapsed to one per owner)"
     );
 }
+
+#[test]
+fn active_multi_ask_partial_export_settles_not_faults() {
+    // Seller-side regression (the S3 review blocker): an active src with TWO asks (distinct
+    // owners, qty 3 and 7) exports to an active dst whose deficit (5) is BELOW the src
+    // surplus (10), so q'=5 < Σ supply. A greedy OrderId-order ask drain would release a
+    // different per-owner split than settle_flow's prorata consume -> InsufficientGoods ->
+    // MarketClearFailed. The per-entry prorata ask drain releases exactly what settle
+    // consumes, so the flow SETTLES and conserves.
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+
+    let mut inventory = InventoryBook::default();
+    for (owner, qty) in [(50_u64, 3_i64), (51, 7)] {
+        inventory
+            .deposit(EconomicActorId(owner), GOOD_FOOD, Quantity(qty))
+            .unwrap();
+        inventory
+            .lock_goods(EconomicActorId(owner), GOOD_FOOD, Quantity(qty))
+            .unwrap();
+    }
+
+    let mut accounts = AccountBook::default();
+    accounts.deposit(EconomicActorId(60), Money(100)).unwrap();
+    accounts.lock_cash(EconomicActorId(60), Money(10)).unwrap(); // value(2000,5)=10
+
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(1),
+        Ask {
+            id: OrderId(1),
+            owner: EconomicActorId(50),
+            market: m_a,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(3),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(3),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.asks.insert(
+        OrderId(2),
+        Ask {
+            id: OrderId(2),
+            owner: EconomicActorId(51),
+            market: m_a,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(7),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(7),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(3),
+        Bid {
+            id: OrderId(3),
+            owner: EconomicActorId(60),
+            market: m_b,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+
+    let mut mg = MarketGoods::default();
+    for (m, p) in [(m_a, 500_i64), (m_b, 2_000)] {
+        let key = MarketGoodKey {
+            market: m,
+            good: GOOD_FOOD,
+        };
+        let mut st = MarketGoodState::new(key);
+        st.last_settlement_price = Money(p);
+        mg.0.insert(key, st);
+    }
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), 4);
+    distances.0.insert((m_b, m_a), 4);
+    let config = EconomyConfig {
+        drain_active_residual: true,
+        ..Default::default()
+    };
+
+    let money_before = accounts.total_money().unwrap();
+    let good_before = inventory.total_good(GOOD_FOOD).unwrap();
+    let mut ledger = crate::economy::TradeLedger::default();
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &BTreeSet::new(),
+        &distances,
+        &config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut crate::economy::NextOrderId::default(),
+    )
+    .unwrap();
+
+    assert!(
+        ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, crate::economy::EconomyEvent::MacroFlow { .. })),
+        "the multi-ask export settled (a MacroFlow event was emitted)"
+    );
+    assert!(
+        !ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, crate::economy::EconomyEvent::MarketClearFailed { .. })),
+        "no MarketClearFailed — the prorata ask drain matches settle's prorata consume"
+    );
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        money_before,
+        "money conserved"
+    );
+    assert_eq!(
+        inventory.total_good(GOOD_FOOD).unwrap(),
+        good_before,
+        "goods conserved"
+    );
+    assert_eq!(
+        inventory.balance(EconomicActorId(60), GOOD_FOOD).available,
+        Quantity(5),
+        "buyer imported the full deficit (5)"
+    );
+    let ask1 = orders.asks[&OrderId(1)].qty_remaining.0;
+    let ask2 = orders.asks[&OrderId(2)].qty_remaining.0;
+    assert_eq!(
+        ask1 + ask2,
+        5,
+        "5 units drained total across the two asks (3+7-5)"
+    );
+    assert!(
+        ask1 < 3 && ask2 < 7,
+        "both asks partially drained (prorata split, not greedy)"
+    );
+    assert!(orders.bids.is_empty(), "the bid (qty 5) fully drained");
+}

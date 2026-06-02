@@ -750,19 +750,22 @@ pub(crate) fn write_back(
 
 /// S3: release the active endpoints' residual locks into available on the per-edge
 /// SCRATCH clones, so `settle_flow` (which consumes/charges from available) can move
-/// them. Ask side: drain `q'` goods 1:1 across the src market's residual asks in OrderId
-/// order. Bid side: drain each surviving buyer's exact settle share `g_i =
-/// prorata(buyer_weights, q')[i]` from its backing bid (one OrderId per entry,
-/// DECISION-1), so released and charged reference the identical quantity. Dormant
-/// endpoints (`!active`) are no-ops (their goods/cash are already available from pools).
-/// An under-drain on the ask side is a conservation breach -> `Err` (the caller drops
-/// the half-drained scratch, books byte-identical).
+/// them. BOTH sides drain the **exact per-entry settle share** so released-per-actor ==
+/// consumed/charged-per-actor (no per-actor mismatch). Ask side: each seller's share
+/// `prorata(seller_weights, q')[i]` from its backing ask (`seller_orders[i]`). Bid side:
+/// each surviving buyer's share `prorata(buyer_weights, q')[i]` from its backing bid
+/// (`buyer_orders[i]`). One OrderId per entry (DECISION-1), index-aligned to the
+/// `sellers`/`buyers` weight lists `settle_flow` is given, so the drain and the settle
+/// reference the identical quantities. Dormant endpoints (`!active`) are no-ops (their
+/// goods/cash are already available from pools).
 #[allow(clippy::too_many_arguments)]
 fn drain_active_endpoints(
     scratch_orders: &mut OrderBook,
     scratch_inventory: &mut InventoryBook,
     scratch_accounts: &mut AccountBook,
     eflow: &PlannedFlow,
+    sellers: &[(EconomicActorId, i64)],
+    seller_orders: &[OrderId],
     buyers: &[(EconomicActorId, i64)],
     buyer_orders: &[OrderId],
     src_active: bool,
@@ -770,25 +773,21 @@ fn drain_active_endpoints(
 ) -> Result<(), EconomyError> {
     let q_prime = eflow.q;
     if src_active {
-        let ask_ids: Vec<OrderId> = scratch_orders
-            .asks
-            .iter()
-            .filter(|(_, a)| a.market == eflow.src && a.good == eflow.good && a.qty_remaining.0 > 0)
-            .map(|(id, _)| *id)
-            .collect();
-        let mut remaining = q_prime;
-        for id in ask_ids {
-            if remaining <= 0 {
-                break;
+        // Mirror settle_flow's seller prorata (macro_flow `prorata_distribute(seller_w, q)`)
+        // so each seller's released goods == the goods settle will consume from it. A
+        // greedy OrderId walk would release a DIFFERENT per-actor split than the prorata
+        // consume and fault `inventory.consume` for q' < Σ supply with >= 2 asks.
+        let seller_w: Vec<i64> = sellers.iter().map(|(_, w)| *w).collect();
+        let seller_goods = prorata_distribute(&seller_w, q_prime);
+        for (i, &oid) in seller_orders.iter().enumerate() {
+            if seller_goods[i] > 0 {
+                drain_residual_ask(
+                    scratch_orders,
+                    scratch_inventory,
+                    oid,
+                    Quantity(seller_goods[i]),
+                )?;
             }
-            let take = remaining.min(scratch_orders.asks[&id].qty_remaining.0);
-            drain_residual_ask(scratch_orders, scratch_inventory, id, Quantity(take))?;
-            remaining -= take;
-        }
-        if remaining != 0 {
-            // The src surplus (= Σ residual-ask qty_remaining) bounds q', so this is
-            // unreachable for a well-formed plan; treat an under-drain as a breach.
-            return Err(EconomyError::InvalidOrder);
         }
     }
     if dst_active {
@@ -889,6 +888,9 @@ pub fn run_macro_flow_at_tick(
             good: flow.good,
         });
         let sellers = src_bucket.map(|b| b.sellers.clone()).unwrap_or_default();
+        let seller_orders = src_bucket
+            .map(|b| b.seller_orders.clone())
+            .unwrap_or_default();
         let src_active = src_bucket.map(|b| b.intra_cleared).unwrap_or(false);
         let dst_active = dst_bucket.map(|b| b.intra_cleared).unwrap_or(false);
         let (eff_demand_src, eff_supply_src) = effective(flow.src, flow.good);
@@ -948,6 +950,8 @@ pub fn run_macro_flow_at_tick(
             &mut scratch_inventory,
             &mut scratch_accounts,
             &eflow,
+            &sellers,
+            &seller_orders,
             &buyers,
             &buyer_orders,
             src_active,
