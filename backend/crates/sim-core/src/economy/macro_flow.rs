@@ -239,22 +239,27 @@ pub fn build_candidates(
     distances: &MarketDistances,
     config: &EconomyConfig,
 ) -> Result<Vec<Candidate>, EconomyError> {
-    // Per good, per market: (matched, surplus, deficit, price).
-    type MarketClassification = (i64, i64, i64, Money);
+    // Per good, per market: (matched, surplus, deficit, price, intra_cleared).
+    type MarketClassification = (i64, i64, i64, Money, bool);
     let mut by_good: BTreeMap<GoodId, BTreeMap<MarketId, MarketClassification>> = BTreeMap::new();
     for (key, b) in buckets {
         let (matched, surplus, deficit) = classify_bucket(b.total_demand(), b.total_supply());
-        by_good
-            .entry(key.good)
-            .or_default()
-            .insert(key.market, (matched, surplus, deficit, b.price));
+        by_good.entry(key.good).or_default().insert(
+            key.market,
+            (matched, surplus, deficit, b.price, b.intra_cleared),
+        );
     }
 
     let mut candidates: Vec<Candidate> = Vec::new();
     for (good, markets) in &by_good {
         // Self-edges: one per market with locally-clearable overlap.
-        for (market, (matched, _surplus, _deficit, price)) in markets {
-            if *matched > 0 {
+        for (market, (matched, _surplus, _deficit, price, intra_cleared)) in markets {
+            // Suppress the self-edge for active (intra_cleared) buckets: the auction
+            // already cleared the matched overlap this tick, and a non-crossing active
+            // market's matched>0 reflects bids/asks the auction REFUSED on price — a
+            // flow self-edge would double-clear them. Dormant self-edges stay (their
+            // self-edge IS the intra-clear).
+            if *matched > 0 && !*intra_cleared {
                 candidates.push(Candidate {
                     good: *good,
                     src: *market,
@@ -269,11 +274,11 @@ pub fn build_candidates(
             }
         }
         // Cross-edges: ordered (src surplus, dst deficit) pairs.
-        for (src, (_m_s, surplus, _d_s, p_src)) in markets {
+        for (src, (_m_s, surplus, _d_s, p_src, _intra_s)) in markets {
             if *surplus <= 0 {
                 continue;
             }
-            for (dst, (_m_d, _s_d, deficit, p_dst)) in markets {
+            for (dst, (_m_d, _s_d, deficit, p_dst, _intra_d)) in markets {
                 if src == dst || *deficit <= 0 {
                     continue;
                 }
@@ -366,6 +371,10 @@ pub fn plan_flows(
     let mut remaining_need: BTreeMap<(GoodId, MarketId), i64> = BTreeMap::new();
     for (key, b) in buckets {
         let (matched, surplus, deficit) = classify_bucket(b.total_demand(), b.total_supply());
+        // Defense-in-depth (mirrors build_candidates' self-edge suppression): force the
+        // matched budget to 0 for active buckets, so a stray self-edge Candidate that
+        // bypassed build_candidates finds no budget and skips at the `q <= 0` continue.
+        let matched = if b.intra_cleared { 0 } else { matched };
         remaining_matched.insert((key.good, key.market), matched);
         remaining_surplus.insert((key.good, key.market), surplus);
         remaining_need.insert((key.good, key.market), deficit);

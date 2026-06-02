@@ -2,11 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::MarketDistances;
 use crate::economy::macro_flow::synthetic_price;
-use crate::economy::macro_flow::{Candidate, MacroBucket, build_candidates, build_macro_buckets};
+use crate::economy::macro_flow::{
+    Candidate, MacroBucket, build_candidates, build_macro_buckets, plan_flows,
+};
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD, GoodId,
-    InventoryBook, MarketGoodKey, MarketGoods, MarketId, Money, Quantity, SettlementPolicy,
-    SupplyPool, SupplyPools,
+    InventoryBook, MarketGoodKey, MarketGoods, MarketId, Money, OrderId, Quantity,
+    SettlementPolicy, SupplyPool, SupplyPools,
 };
 
 // --- Section-C schedule-level harness (Task 13): reused BY NAME by Tasks 14-19. ---
@@ -2600,5 +2602,102 @@ fn macro_flow_threads_orderbook_and_counter_unchanged() {
             .iter()
             .any(|e| matches!(e, crate::economy::EconomyEvent::MacroFlow { .. })),
         "the dormant flow still executed its cross-edge while the OrderBook was carried through"
+    );
+}
+
+/// S3 active-bucket constructor: one entry per residual order (DECISION-1).
+/// `buyers`: (actor, qty_remaining, order_id, max_price); `sellers`: (actor, qty_remaining, order_id).
+fn active_bucket(
+    price: Money,
+    buyers: Vec<(u64, i64, u64, i64)>,
+    sellers: Vec<(u64, i64, u64)>,
+) -> MacroBucket {
+    MacroBucket {
+        price,
+        buyers: buyers
+            .iter()
+            .map(|(a, q, _, _)| (EconomicActorId(*a), *q))
+            .collect(),
+        sellers: sellers
+            .iter()
+            .map(|(a, q, _)| (EconomicActorId(*a), *q))
+            .collect(),
+        intra_cleared: true,
+        buyer_orders: buyers.iter().map(|(_, _, o, _)| OrderId(*o)).collect(),
+        buyer_max_prices: buyers.iter().map(|(_, _, _, mp)| Money(*mp)).collect(),
+        seller_orders: sellers.iter().map(|(_, _, o)| OrderId(*o)).collect(),
+    }
+}
+
+#[test]
+fn build_candidates_suppresses_active_self_edge() {
+    // A both-sided NON-CROSSING active market: residual bids (D) AND residual asks (S)
+    // the auction left unmatched. D==S -> classify_bucket matched>0, but the self-edge
+    // must be SUPPRESSED (re-clearing units the auction refused on price = double-clear).
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
+    let mut active = BTreeMap::new();
+    active.insert(
+        key,
+        active_bucket(Money(1_000), vec![(10, 5, 1, 900)], vec![(20, 5, 2)]),
+    );
+    let cands = build_candidates(
+        &active,
+        &MarketDistances(BTreeMap::new()),
+        &EconomyConfig::default(),
+    )
+    .unwrap();
+    assert!(
+        cands.iter().all(|c| c.src != c.dst),
+        "active bucket emits no self-edge"
+    );
+
+    // Control: the SAME quantities as a DORMANT bucket DO emit exactly one self-edge —
+    // proving it is the intra_cleared flag (not the quantities) that suppressed it.
+    let mut dormant = BTreeMap::new();
+    dormant.insert(key, bucket(Money(1_000), vec![(10, 5)], vec![(20, 5)]));
+    let dcands = build_candidates(
+        &dormant,
+        &MarketDistances(BTreeMap::new()),
+        &EconomyConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        dcands.iter().filter(|c| c.src == c.dst).count(),
+        1,
+        "dormant bucket keeps its self-edge"
+    );
+}
+
+#[test]
+fn plan_flows_forces_zero_matched_for_active_bucket() {
+    // Defense-in-depth: even if a self-edge Candidate reaches plan_flows for an active
+    // bucket, the forced matched=0 budget makes it plan no flow.
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
+    let mut active = BTreeMap::new();
+    active.insert(
+        key,
+        active_bucket(Money(1_000), vec![(10, 5, 1, 900)], vec![(20, 5, 2)]),
+    );
+    let self_cand = Candidate {
+        good: GOOD_FOOD,
+        src: MarketId(1),
+        dst: MarketId(1),
+        q_cap: 5,
+        p_src: Money(1_000),
+        p_dst: Money(1_000),
+        transport_total: Money::ZERO,
+        net_gain: 0,
+        dist: 0,
+    };
+    let flows = plan_flows(&[self_cand], &active);
+    assert!(
+        flows.is_empty(),
+        "active bucket's forced matched=0 plans no self-flow"
     );
 }
