@@ -24,8 +24,8 @@ use crate::economy::{
     AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyPersistSnapshot,
     EconomyPlugin, GOOD_TOOLS, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey,
     MarketGoodState, MarketGoods, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId,
-    ProductionPool, ProductionPools, Quantity, Recipe, SupplyPool, SupplyPools, Trader,
-    TraderState, Traders, apply_into_world, extract_from_world,
+    ProductionPool, ProductionPools, Quantity, Recipe, SupplyPool, SupplyPools, apply_into_world,
+    extract_from_world,
 };
 use crate::ids::ChunkCoord;
 use crate::world::schedule::SimPlugin;
@@ -140,21 +140,6 @@ fn seed(world: &mut World) {
             },
             interval_ticks: 4,
             last_generated_tick: None,
-        },
-    );
-    world.resource_mut::<Traders>().0.insert(
-        a,
-        Trader {
-            actor: a,
-            good: GOOD_TOOLS,
-            source: m,
-            dest: crate::economy::MarketId(2),
-            distance_tiles: 4,
-            batch_qty: Quantity(100),
-            buy_premium_bps: 500,
-            sell_discount_bps: 500,
-            order_ttl_ticks: 10,
-            state: TraderState::Buying { order: None },
         },
     );
     world

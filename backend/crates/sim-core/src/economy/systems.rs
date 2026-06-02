@@ -7,9 +7,8 @@ use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
     Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SettlementPolicy, SupplyPools,
-    TradeLedger, Traders, clear_market_good_with_policy, expire_orders_at_tick,
+    TradeLedger, clear_market_good_with_policy, expire_orders_at_tick,
     generate_pool_orders_at_tick, integer_ewma, run_macro_flow_at_tick, run_production_at_tick,
-    run_traders_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -20,7 +19,6 @@ pub enum EconomySet {
     RefreshLod,
     ExpireOrders,
     Production,
-    Traders,
     GeneratePoolOrders,
     ClearMarkets,
     MacroFlow,
@@ -74,7 +72,6 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
             EconomySet::Production,
-            EconomySet::Traders,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::MacroFlow,
@@ -97,7 +94,6 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
             run_production_system.in_set(EconomySet::Production),
-            run_traders_system.in_set(EconomySet::Traders),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
             run_macro_flow_system.in_set(EconomySet::MacroFlow),
@@ -382,33 +378,4 @@ pub fn run_macro_flow_system(
             reason,
         });
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run_traders_system(
-    tick: Res<Tick>,
-    config: Res<EconomyConfig>,
-    dormant: Res<DormantMarkets>,
-    mut accounts: ResMut<AccountBook>,
-    mut inventory: ResMut<InventoryBook>,
-    mut orders: ResMut<OrderBook>,
-    mut ledger: ResMut<TradeLedger>,
-    mut dirty: ResMut<DirtyMarketGoods>,
-    mut next: ResMut<NextOrderId>,
-    market_goods: Res<MarketGoods>,
-    mut traders: ResMut<Traders>,
-) {
-    let _ = run_traders_at_tick(
-        &mut accounts,
-        &mut inventory,
-        &mut orders,
-        &mut ledger,
-        &mut dirty,
-        &mut next,
-        &market_goods,
-        &mut traders,
-        &config,
-        tick.0,
-        &dormant.0,
-    );
 }

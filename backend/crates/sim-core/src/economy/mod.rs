@@ -18,7 +18,6 @@ pub mod seed;
 pub mod shoppers;
 pub mod systems;
 pub mod trader_render;
-pub mod traders;
 pub mod transport;
 
 pub use accounts::*;
@@ -40,7 +39,6 @@ pub use production::*;
 pub use shoppers::*;
 pub use systems::*;
 pub use trader_render::*;
-pub use traders::*;
 pub use transport::*;
 
 use bevy_ecs::prelude::*;
@@ -66,7 +64,6 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(ProductionPools::default());
         world.insert_resource(NextOrderId::default());
         world.insert_resource(EconomyConfig::default());
-        world.insert_resource(Traders::default());
         world.insert_resource(MarketChunks::default());
         world.insert_resource(DormantMarkets::default());
         world.insert_resource(MarketDistances::default());

@@ -198,77 +198,6 @@ fn market_resumes_with_single_order_no_burst() {
     assert_eq!(orders.bids.len(), 1, "wake emits exactly one order");
 }
 
-use crate::economy::{
-    EconomyConfig, GOOD_TOOLS, MarketGoods, Trader, TraderState, Traders, run_traders_at_tick,
-};
-
-#[test]
-fn dormant_trader_is_frozen_and_conserves() {
-    let trader_actor = EconomicActorId(1);
-    let source = MarketId(1);
-    let dest = MarketId(2);
-
-    let mut accounts = AccountBook::default();
-    let mut inventory = InventoryBook::default();
-    let mut orders = OrderBook::default();
-    let mut ledger = TradeLedger::default();
-    let mut dirty = DirtyMarketGoods::default();
-    let mut next = NextOrderId::default();
-    let goods = MarketGoods::default();
-    let cfg = EconomyConfig::default();
-
-    accounts.deposit(trader_actor, Money(1_000_000)).unwrap();
-    let mut traders = Traders::default();
-    traders.0.insert(
-        trader_actor,
-        Trader {
-            actor: trader_actor,
-            good: GOOD_TOOLS,
-            source,
-            dest,
-            distance_tiles: 4,
-            batch_qty: Quantity(100),
-            buy_premium_bps: 500,
-            sell_discount_bps: 500,
-            order_ttl_ticks: 10,
-            state: TraderState::Buying { order: None },
-        },
-    );
-
-    let money_before = accounts.total_money();
-    let trader_before = traders.0[&trader_actor].clone();
-
-    // source market dormant -> trader frozen for many ticks
-    let dormant: BTreeSet<MarketId> = [source].into_iter().collect();
-    for tick in 0..20 {
-        run_traders_at_tick(
-            &mut accounts,
-            &mut inventory,
-            &mut orders,
-            &mut ledger,
-            &mut dirty,
-            &mut next,
-            &goods,
-            &mut traders,
-            &cfg,
-            tick,
-            &dormant,
-        )
-        .unwrap();
-    }
-
-    assert!(orders.bids.is_empty(), "frozen trader places no bids");
-    assert_eq!(
-        accounts.total_money(),
-        money_before,
-        "money conserved while frozen"
-    );
-    assert_eq!(
-        traders.0[&trader_actor].state, trader_before.state,
-        "frozen trader keeps its state",
-    );
-}
-
 use crate::economy::EconomyPlugin;
 use crate::mobility::resources::Tick;
 use crate::world::plugin::CorePlugin;
@@ -325,7 +254,9 @@ fn lod_world(
 #[test]
 #[allow(non_snake_case)]
 fn asleep_anchored_market_DOES_flow() {
-    use crate::economy::{MarketDistances, MarketGoodKey, TRANSPORT_OPERATOR};
+    use crate::economy::{
+        EconomyConfig, MarketDistances, MarketGoodKey, MarketGoods, TRANSPORT_OPERATOR,
+    };
 
     // Market A (99): the lod_world supplier sells FOOD. Market B (100): a buyer
     // demands FOOD. BOTH are anchored to ASLEEP chunks (dormant). The macro flow

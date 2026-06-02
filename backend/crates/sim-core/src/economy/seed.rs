@@ -11,7 +11,7 @@ use crate::economy::transport::manhattan_tiles;
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_TOOLS, InventoryBook,
     MarketChunks, MarketDistances, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
-    SupplyPools, Trader, TraderState, Traders,
+    SupplyPools,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
 
@@ -92,15 +92,11 @@ pub fn seed_demo_economy(world: &mut World) {
 
     let supplier = EconomicActorId(8_001);
     let consumer = EconomicActorId(8_002);
-    let trader_actor = EconomicActorId(8_003);
     {
         let mut accounts = world.resource_mut::<AccountBook>();
         accounts
             .deposit(consumer, Money(1_000_000))
             .expect("seed: consumer cash");
-        accounts
-            .deposit(trader_actor, Money(1_000_000))
-            .expect("seed: trader cash");
     }
     world
         .resource_mut::<InventoryBook>()
@@ -173,22 +169,6 @@ pub fn seed_demo_economy(world: &mut World) {
             last_generated_tick: None,
         },
     );
-    world.resource_mut::<Traders>().0.insert(
-        trader_actor,
-        Trader {
-            actor: trader_actor,
-            good: GOOD_TOOLS,
-            source: m_a,
-            dest: m_b,
-            distance_tiles: dist,
-            batch_qty: Quantity(5),
-            buy_premium_bps: 500,
-            sell_discount_bps: 500,
-            order_ttl_ticks: 20,
-            state: TraderState::Buying { order: None },
-        },
-    );
-
     // ── Task 7: dormant flow-demo market pair ────────────────────────────────
     // F_A @ tile ≈(16,48) chunk (0,1); F_B @ tile ≈(208,48) chunk (6,1).
     // Both are ≥3 chunks from the transit chunk (3,1) → never pulled Active

@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::seed::seed_demo_economy;
 use crate::economy::{
-    AccountBook, DemandPools, InventoryBook, MarketChunks, MarketId, Markets, SupplyPools, Traders,
+    AccountBook, DemandPools, InventoryBook, MarketChunks, MarketId, Markets, SupplyPools,
 };
 use crate::ids::ChunkCoord;
 use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
@@ -35,20 +35,18 @@ fn seed_world() -> World {
     world.insert_resource(InventoryBook::default());
     world.insert_resource(SupplyPools::default());
     world.insert_resource(DemandPools::default());
-    world.insert_resource(Traders::default());
     world.insert_resource(crate::economy::MarketDistances::default());
     world
 }
 
 #[test]
-fn seed_demo_economy_creates_four_markets_and_one_trader() {
+fn seed_demo_economy_creates_four_markets() {
     let mut world = seed_world();
 
     seed_demo_economy(&mut world);
 
     assert_eq!(world.resource::<Markets>().0.len(), 4, "four demo markets");
     assert_eq!(world.resource::<MarketChunks>().0.len(), 4, "all anchored");
-    assert_eq!(world.resource::<Traders>().0.len(), 1, "one demo trader");
 
     // The original demo markets still exist.
     let distances = world.resource::<crate::economy::MarketDistances>();
@@ -75,9 +73,9 @@ fn seed_demo_economy_creates_four_markets_and_one_trader() {
 }
 
 #[test]
-fn seed_adds_second_good_without_new_markets_or_traders() {
-    // After seeding, the live economy still has exactly 4 markets and 1 trader,
-    // but now a GOOD_FOOD supplier@m_a + consumer@m_b exists so the macro flow
+fn seed_adds_second_good_without_new_markets() {
+    // After seeding, the live economy still has exactly 4 markets, and a
+    // GOOD_FOOD supplier@m_a + consumer@m_b exists so the macro flow
     // produces a non-vacuous cross-market FOOD flow on the live stream.
     use crate::economy::GOOD_FOOD;
     let mut world = seed_world();
@@ -86,11 +84,6 @@ fn seed_adds_second_good_without_new_markets_or_traders() {
         world.resource::<Markets>().0.len(),
         4,
         "still exactly 4 markets"
-    );
-    assert_eq!(
-        world.resource::<Traders>().0.len(),
-        1,
-        "still exactly 1 trader"
     );
     let has_food_supply = world
         .resource::<SupplyPools>()

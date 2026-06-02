@@ -11,7 +11,7 @@ use crate::economy::{
     AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyEvent, GoodId,
     InventoryBalance, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState,
     MarketGoods, MarketId, MarketSite, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId,
-    ProductionPool, ProductionPools, SupplyPool, SupplyPools, TradeLedger, Trader, Traders,
+    ProductionPool, ProductionPools, SupplyPool, SupplyPools, TradeLedger,
 };
 use crate::ids::ChunkCoord;
 use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
@@ -35,7 +35,6 @@ pub struct EconomyPersistSnapshot {
     pub demand_pools: Vec<(EconomicActorId, DemandPool)>,
     pub supply_pools: Vec<(EconomicActorId, SupplyPool)>,
     pub production_pools: Vec<(EconomicActorId, ProductionPool)>,
-    pub traders: Vec<(EconomicActorId, Trader)>,
     pub market_chunks: Vec<(MarketId, ChunkCoord)>,
     /// The most-recent `PERSISTED_LEDGER_TAIL` ledger events (oldest→newest).
     pub ledger_tail: Vec<EconomyEvent>,
@@ -57,7 +56,6 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
     let demand = world.resource::<DemandPools>();
     let supply = world.resource::<SupplyPools>();
     let production = world.resource::<ProductionPools>();
-    let traders = world.resource::<Traders>();
     let market_chunks = world.resource::<MarketChunks>();
     let ledger = world.resource::<TradeLedger>();
     let market_distances = world.resource::<MarketDistances>();
@@ -83,7 +81,6 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
         demand_pools: demand.0.iter().map(|(k, v)| (*k, *v)).collect(),
         supply_pools: supply.0.iter().map(|(k, v)| (*k, *v)).collect(),
         production_pools: production.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
-        traders: traders.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
         market_chunks: market_chunks.0.iter().map(|(k, v)| (*k, *v)).collect(),
         ledger_tail,
         market_distances: market_distances.0.iter().map(|(k, v)| (*k, *v)).collect(),
@@ -112,7 +109,6 @@ pub fn apply_into_world(world: &mut World, snap: &EconomyPersistSnapshot) {
     world.insert_resource(ProductionPools(
         snap.production_pools.iter().cloned().collect(),
     ));
-    world.insert_resource(Traders(snap.traders.iter().cloned().collect()));
     world.insert_resource(MarketChunks(snap.market_chunks.iter().cloned().collect()));
     world.insert_resource(TradeLedger(snap.ledger_tail.clone()));
     world.insert_resource(MarketDistances(
