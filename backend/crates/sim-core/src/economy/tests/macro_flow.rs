@@ -2823,11 +2823,12 @@ fn prune_is_deterministic() {
 }
 
 #[test]
-fn build_macro_buckets_active_sources_residual_orders_and_drops_below_price() {
-    // ACTIVE (non-dormant) market m: two residual bids (one affordable @2000, one
-    // below-price @1100 -> Stage-1 dropped) + one residual ask. The bucket is sourced
-    // from qty_remaining (NOT available), priced at the auction's last_settlement_price
-    // (authoritative, 1200 — distinct from the default ref 1000), intra_cleared=true.
+fn build_macro_buckets_active_sources_all_residual_orders() {
+    // ACTIVE (non-dormant) market m: two residual bids + one residual ask. ALL residual
+    // bids are admitted (no build-time affordability filter — Stage-2 prunes per-edge
+    // against the actual landed charge). The bucket is sourced from qty_remaining (NOT
+    // available), priced at the auction's last_settlement_price (authoritative, 1200 —
+    // distinct from the default ref 1000), intra_cleared=true, provenance in OrderId order.
     let m = MarketId(1);
     let key = MarketGoodKey {
         market: m,
@@ -2904,11 +2905,11 @@ fn build_macro_buckets_active_sources_residual_orders_and_drops_below_price() {
     );
     assert_eq!(
         b.buyers,
-        vec![(EconomicActorId(10), 5)],
-        "below-price bid (1100<1200) dropped at Stage-1"
+        vec![(EconomicActorId(10), 5), (EconomicActorId(11), 4)],
+        "all residual bids admitted (Stage-2 prunes per-edge, not at build time)"
     );
-    assert_eq!(b.buyer_orders, vec![OrderId(1)]);
-    assert_eq!(b.buyer_max_prices, vec![Money(2_000)]);
+    assert_eq!(b.buyer_orders, vec![OrderId(1), OrderId(3)]);
+    assert_eq!(b.buyer_max_prices, vec![Money(2_000), Money(1_100)]);
     assert_eq!(
         b.sellers,
         vec![(EconomicActorId(20), 7)],
@@ -2991,4 +2992,122 @@ fn write_back_preserves_active_price_but_updates_traded_and_residual() {
     );
     assert_eq!(s.traded_qty_last_tick, Quantity(7), "5 + 2 accumulated");
     assert_eq!(s.unmet_demand_last_tick, Quantity(1));
+}
+
+#[test]
+fn active_flow_conserves_and_drains_residual_orders() {
+    // Two ACTIVE markets: m_a (cheap, last_settlement 500) holds a residual ASK; m_b
+    // (dear, 2000) holds a residual BID. With the flag on, the flow drains both residual
+    // locks into the per-edge scratch, moves the goods m_a->m_b, and settles — charging
+    // the buyer src_revenue+transport (value(500,10)+0 = 5), which the max-2000 bid easily
+    // affords. Asserts: conservation (money + goods), both orders fully drained, buyer got
+    // the goods, seller got paid. Exercises the whole active path end-to-end.
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+
+    let mut inventory = InventoryBook::default();
+    inventory
+        .deposit(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+    inventory
+        .lock_goods(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+
+    let mut accounts = AccountBook::default();
+    accounts.deposit(EconomicActorId(60), Money(100)).unwrap();
+    accounts.lock_cash(EconomicActorId(60), Money(20)).unwrap(); // value(2000,10)=20
+
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(1),
+        Ask {
+            id: OrderId(1),
+            owner: EconomicActorId(50),
+            market: m_a,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(2),
+        Bid {
+            id: OrderId(2),
+            owner: EconomicActorId(60),
+            market: m_b,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(20),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+
+    let mut mg = MarketGoods::default();
+    for (m, p) in [(m_a, 500_i64), (m_b, 2_000)] {
+        let key = MarketGoodKey {
+            market: m,
+            good: GOOD_FOOD,
+        };
+        let mut st = MarketGoodState::new(key);
+        st.last_settlement_price = Money(p);
+        mg.0.insert(key, st);
+    }
+
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), 4);
+    distances.0.insert((m_b, m_a), 4);
+
+    let config = EconomyConfig {
+        drain_active_residual: true,
+        ..Default::default()
+    };
+
+    let money_before = accounts.total_money().unwrap();
+    let good_before = inventory.total_good(GOOD_FOOD).unwrap();
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut crate::economy::TradeLedger::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &BTreeSet::new(),
+        &distances,
+        &config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut crate::economy::NextOrderId::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        money_before,
+        "money conserved across the active-market flow"
+    );
+    assert_eq!(
+        inventory.total_good(GOOD_FOOD).unwrap(),
+        good_before,
+        "goods conserved"
+    );
+    assert!(orders.asks.is_empty(), "src residual ask fully drained");
+    assert!(orders.bids.is_empty(), "dst residual bid fully drained");
+    assert_eq!(
+        inventory.balance(EconomicActorId(60), GOOD_FOOD).available,
+        Quantity(10),
+        "buyer received the imported goods"
+    );
+    assert!(
+        accounts.account(EconomicActorId(50)).available.0 > 0,
+        "seller was paid"
+    );
 }
