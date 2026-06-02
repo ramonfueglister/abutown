@@ -2,6 +2,7 @@ mod auction;
 mod audit;
 mod conservation;
 mod determinism;
+mod drain;
 mod expiry;
 mod flow_shipments;
 mod locking;
