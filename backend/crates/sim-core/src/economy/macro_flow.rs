@@ -571,6 +571,8 @@ pub fn run_macro_flow_at_tick(
     current_tick: u64,
     shipments: &mut crate::economy::FlowShipments,
     next_shipment_id: &mut crate::economy::NextShipmentId,
+    orders: &mut crate::economy::OrderBook,
+    next_order_id: &mut crate::economy::NextOrderId,
 ) -> Result<(), EconomyError> {
     if config.macro_flow_interval_ticks == 0
         || !current_tick.is_multiple_of(config.macro_flow_interval_ticks)
@@ -605,6 +607,11 @@ pub fn run_macro_flow_at_tick(
     let mut next_accounts = accounts.clone();
     let mut next_inventory = inventory.clone();
     let mut next_goods = market_goods.clone();
+    // S1: carry the OrderBook + id counter through the SAME atomic boundary so S3's
+    // residual-drain mutation lands inside the per-edge fault isolation below, not
+    // outside it. S1 mutates neither — both round-trip unchanged (guarded by test).
+    let mut next_orders = orders.clone();
+    let next_oid = *next_order_id;
     let mut events: Vec<EconomyEvent> = Vec::new();
 
     // Per-market effective demand/supply for the write-back residuals (bucket-time).
@@ -639,6 +646,7 @@ pub fn run_macro_flow_at_tick(
         let mut scratch_accounts = next_accounts.clone();
         let mut scratch_inventory = next_inventory.clone();
         let mut scratch_goods = next_goods.clone();
+        let scratch_orders = next_orders.clone(); // S1: threaded clone, not yet mutated (S3 adds `mut` + drains it)
         match settle_flow(
             &mut scratch_accounts,
             &mut scratch_inventory,
@@ -657,6 +665,7 @@ pub fn run_macro_flow_at_tick(
                 next_accounts = scratch_accounts;
                 next_inventory = scratch_inventory;
                 next_goods = scratch_goods;
+                next_orders = scratch_orders; // S1: fold (round-trips unchanged)
                 if flow.src != flow.dst {
                     let id = next_shipment_id.next();
                     let travel_ticks =
@@ -689,6 +698,8 @@ pub fn run_macro_flow_at_tick(
     *accounts = next_accounts;
     *inventory = next_inventory;
     *market_goods = next_goods;
+    *orders = next_orders;
+    *next_order_id = next_oid;
     ledger.0.extend(events);
     Ok(())
 }

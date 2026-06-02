@@ -44,6 +44,10 @@ pub struct EconomyConfig {
     pub max_shoppers_per_market: usize,
     /// Radius (tiles) around a market to pick shopper origin nodes.
     pub shopper_radius_tiles: f32,
+    /// When TRUE, the macro flow drains active/observed markets' post-auction
+    /// residual orders into the inter-market flow (S3). FALSE keeps the flow
+    /// dormant-only (S1/S2 land dark). Defaulted FALSE; S3 flips it.
+    pub drain_active_residual: bool,
 }
 
 impl Default for EconomyConfig {
@@ -59,6 +63,7 @@ impl Default for EconomyConfig {
             shoppers_per_unit: 3,
             max_shoppers_per_market: 4,
             shopper_radius_tiles: 24.0,
+            drain_active_residual: false,
         }
     }
 }
@@ -346,6 +351,8 @@ pub fn run_macro_flow_system(
     mut market_goods: ResMut<MarketGoods>,
     mut shipments: ResMut<FlowShipments>,
     mut next_shipment_id: ResMut<NextShipmentId>,
+    mut orders: ResMut<OrderBook>,
+    mut next_order_id: ResMut<NextOrderId>,
 ) {
     if let Err(reason) = run_macro_flow_at_tick(
         &mut accounts,
@@ -361,6 +368,8 @@ pub fn run_macro_flow_system(
         tick.0,
         &mut shipments,
         &mut next_shipment_id,
+        &mut orders,
+        &mut next_order_id,
     ) {
         // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
         // atomic boundary left the books unchanged. Per-edge settle faults are

@@ -1114,6 +1114,8 @@ fn macro_flow_only_fires_on_interval() {
         3,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
     assert!(led.0.is_empty(), "no flow off-interval");
@@ -1132,6 +1134,8 @@ fn macro_flow_only_fires_on_interval() {
         10,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
     assert!(
@@ -1167,6 +1171,8 @@ fn macro_flow_idle_interval_is_a_noop() {
         0,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
     assert_eq!(acc, before_acc, "books byte-identical on idle interval");
@@ -1310,6 +1316,8 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
         0,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
 
@@ -1478,6 +1486,8 @@ fn run_flow(s: &mut DormantScenario, tick: u64) -> Result<(), EconomyError> {
         tick,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
 }
 
@@ -2501,5 +2511,90 @@ fn macro_flow_replays_across_restart() {
         tail(&world),
         tail(&restart),
         "ledger tail identical across restart"
+    );
+}
+
+#[test]
+fn drain_active_residual_defaults_off() {
+    // S1 lands the config surface dark: S1+S2 must not change behavior, so the
+    // drain flag is FALSE by default; S3 flips it. This guards that safety property.
+    assert!(!EconomyConfig::default().drain_active_residual);
+}
+
+#[test]
+fn macro_flow_threads_orderbook_and_counter_unchanged() {
+    // S1 behavior-neutral threading: a populated OrderBook + a non-zero NextOrderId
+    // ride through the macro-flow atomic boundary UNTOUCHED, while the dormant flow
+    // still executes its cross-edge. Guards the clone topology S3 will mutate.
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 4, Money(50));
+
+    // Arbitrary residual orders the dormant-flow path must ignore entirely in S1.
+    let mut orders = crate::economy::OrderBook::default();
+    orders.bids.insert(
+        crate::economy::OrderId(7),
+        crate::economy::Bid {
+            id: crate::economy::OrderId(7),
+            owner: EconomicActorId(99),
+            market: MarketId(9_001),
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            max_price: Money(1_500),
+            cash_locked_remaining: Money(7_500),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.asks.insert(
+        crate::economy::OrderId(8),
+        crate::economy::Ask {
+            id: crate::economy::OrderId(8),
+            owner: EconomicActorId(98),
+            market: MarketId(9_002),
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(5),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let mut next_oid = crate::economy::NextOrderId(42);
+
+    let orders_before = orders.clone();
+    let oid_before = next_oid;
+
+    run_macro_flow_at_tick(
+        &mut s.accounts,
+        &mut s.inventory,
+        &mut s.ledger,
+        &s.demand,
+        &s.supply,
+        &mut s.market_goods,
+        &s.dirty,
+        &s.dormant,
+        &s.distances,
+        &s.config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut next_oid,
+    )
+    .unwrap();
+
+    assert_eq!(
+        orders, orders_before,
+        "OrderBook must round-trip unchanged in S1"
+    );
+    assert_eq!(
+        next_oid, oid_before,
+        "NextOrderId must round-trip unchanged in S1"
+    );
+    assert!(
+        s.ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, crate::economy::EconomyEvent::MacroFlow { .. })),
+        "the dormant flow still executed its cross-edge while the OrderBook was carried through"
     );
 }
