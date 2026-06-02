@@ -615,6 +615,8 @@ pub fn settle_flow(
     eff_supply_dst: i64,
     config: &EconomyConfig,
     current_tick: u64,
+    preserve_price_src: bool,
+    preserve_price_dst: bool,
 ) -> Result<EconomyEvent, EconomyError> {
     let q = flow.q;
     let src_revenue = checked_order_value(flow.p_src, Quantity(q))?;
@@ -676,6 +678,7 @@ pub fn settle_flow(
         (eff_demand_src - q).max(0),
         (eff_supply_src - q).max(0),
         current_tick,
+        preserve_price_src,
     )?;
     if flow.dst != flow.src {
         write_back(
@@ -689,6 +692,7 @@ pub fn settle_flow(
             (eff_demand_dst - q).max(0),
             (eff_supply_dst - q).max(0),
             current_tick,
+            preserve_price_dst,
         )?;
     }
 
@@ -709,7 +713,8 @@ pub fn settle_flow(
 /// Intentionally does NOT touch `dirty`. Returns `Err(Overflow)` rather than
 /// wrapping the accumulator, matching the checked-everywhere discipline of the
 /// rest of this module (and `auction.rs`).
-fn write_back(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_back(
     market_goods: &mut MarketGoods,
     key: MarketGoodKey,
     price: Money,
@@ -717,12 +722,19 @@ fn write_back(
     unmet_demand: i64,
     unsold_supply: i64,
     current_tick: u64,
+    preserve_price: bool,
 ) -> Result<(), EconomyError> {
     let state = market_goods
         .0
         .entry(key)
         .or_insert_with(|| MarketGoodState::new(key));
-    state.last_settlement_price = price;
+    // For an ACTIVE endpoint the auction discovered `last_settlement_price` this tick and
+    // is authoritative (user decision a) — the flow must not clobber it. Dormant
+    // endpoints keep writing the flow-discovered price. traded/unmet/unsold ALWAYS update
+    // (the post-drain residual is the reality #71's shopper projection reads).
+    if !preserve_price {
+        state.last_settlement_price = price;
+    }
     state.traded_qty_last_tick = state.traded_qty_last_tick.checked_add(Quantity(traded))?;
     state.unmet_demand_last_tick = Quantity(unmet_demand);
     state.unsold_supply_last_tick = Quantity(unsold_supply);
@@ -839,6 +851,8 @@ pub fn run_macro_flow_at_tick(
             eff_supply_dst,
             config,
             current_tick,
+            false,
+            false,
         ) {
             Ok(event) => {
                 next_accounts = scratch_accounts;

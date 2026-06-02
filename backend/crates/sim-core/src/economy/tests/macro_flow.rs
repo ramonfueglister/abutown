@@ -628,6 +628,8 @@ fn settle_flow_conserves_and_credits_operator_exactly() {
         /*eff_supply_dst=*/ 0,
         &cfg,
         /*current_tick=*/ 10,
+        false,
+        false,
     )
     .unwrap();
     accounts = next_accounts;
@@ -735,6 +737,8 @@ fn settle_flow_n_buyers_aggregate_floor_conserves() {
         0,
         &cfg,
         10,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -832,6 +836,8 @@ fn settle_flow_conserves_when_per_unit_cash_exceeds_one_scale_unit() {
         0,
         &cfg,
         10,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -928,6 +934,8 @@ fn settle_flow_default_reference_price_with_transport_conserves() {
         0,
         &cfg,
         10,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -1008,6 +1016,8 @@ fn settle_flow_self_edge_clears_locally_transport_zero() {
         40,
         &cfg,
         0,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -2945,4 +2955,40 @@ fn build_macro_buckets_flag_false_ignores_orders() {
         !buckets.contains_key(&key),
         "flag off -> residual orders produce no active bucket"
     );
+}
+
+#[test]
+fn write_back_preserves_active_price_but_updates_traded_and_residual() {
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
+    let mut mg = MarketGoods::default();
+    let mut state = MarketGoodState::new(key);
+    state.last_settlement_price = Money(1_234); // auction-discovered, authoritative
+    mg.0.insert(key, state);
+
+    // preserve_price = true (active endpoint): price KEPT; traded/unmet/unsold updated.
+    crate::economy::macro_flow::write_back(&mut mg, key, Money(999), 5, 3, 2, 7, true).unwrap();
+    let s = &mg.0[&key];
+    assert_eq!(
+        s.last_settlement_price,
+        Money(1_234),
+        "active price preserved — auction authoritative"
+    );
+    assert_eq!(s.traded_qty_last_tick, Quantity(5));
+    assert_eq!(s.unmet_demand_last_tick, Quantity(3));
+    assert_eq!(s.unsold_supply_last_tick, Quantity(2));
+    assert_eq!(s.last_cleared_tick, 7);
+
+    // preserve_price = false (dormant endpoint): price OVERWRITTEN; traded accumulates.
+    crate::economy::macro_flow::write_back(&mut mg, key, Money(999), 2, 1, 0, 8, false).unwrap();
+    let s = &mg.0[&key];
+    assert_eq!(
+        s.last_settlement_price,
+        Money(999),
+        "dormant price overwritten by the flow"
+    );
+    assert_eq!(s.traded_qty_last_tick, Quantity(7), "5 + 2 accumulated");
+    assert_eq!(s.unmet_demand_last_tick, Quantity(1));
 }
