@@ -11,7 +11,7 @@ use crate::economy::pools::affordable_qty;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig, EconomyError,
     EconomyEvent, GoodId, InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState,
-    MarketGoods, MarketId, Money, OrderId, Quantity, SettlementPolicy, SupplyPools,
+    MarketGoods, MarketId, Money, OrderBook, OrderId, Quantity, SettlementPolicy, SupplyPools,
     TRANSPORT_OPERATOR, TradeLedger, apportion_cash, checked_order_value, prorata_distribute,
     settlement_price_with_policy, transport_cost,
 };
@@ -96,11 +96,15 @@ pub fn classify_bucket(total_demand: i64, total_supply: i64) -> (i64, i64, i64) 
     (matched, surplus, deficit)
 }
 
-/// STEP A: build the dormant aggregate buckets. Groups dormant demand/supply by
-/// market-good, derives the synthetic price from the raw band, then caps demand
-/// by affordability (at `price`) and supply by on-hand stock. Buckets whose
-/// `price <= 0` are dropped (the warm-flow zero-band skip, applied before any
-/// `affordable_qty`). Empty buyer AND empty seller buckets are dropped.
+/// STEP A: build the aggregate buckets from TWO sources. **Dormant** markets are
+/// pool-sourced (this function's original behavior): group dormant demand/supply by
+/// market-good, derive the synthetic price from the raw band, cap demand by
+/// affordability and supply by on-hand stock; `price <= 0` buckets are dropped;
+/// `intra_cleared = false`. **Active** (non-dormant) markets are residual-ORDER-sourced
+/// (S3, gated on `drain_active_residual`): one bucket entry per residual `OrderId`,
+/// weight = `qty_remaining`, price = the auction's `last_settlement_price` (via
+/// `prior_price`), `intra_cleared = true`; bids failing the Stage-1 `max_price >= price`
+/// filter are left for `expire_orders`. The two sources are disjoint by market.
 #[allow(clippy::too_many_arguments)]
 pub fn build_macro_buckets(
     accounts: &AccountBook,
@@ -110,6 +114,8 @@ pub fn build_macro_buckets(
     market_goods: &MarketGoods,
     dormant: &BTreeSet<MarketId>,
     config: &EconomyConfig,
+    orders: &OrderBook,
+    drain_active_residual: bool,
 ) -> Result<BTreeMap<MarketGoodKey, MacroBucket>, EconomyError> {
     // Phase 1: raw bands (max_price ceiling for buyers, min_price floor for sellers).
     type Raw = (Vec<(EconomicActorId, i64)>, Option<Money>); // (entries, band-extreme)
@@ -208,6 +214,75 @@ pub fn build_macro_buckets(
             },
         );
     }
+
+    // ACTIVE CONTRIBUTOR (S3): for markets NOT dormant, source buckets from the
+    // post-auction RESIDUAL ORDERS — one entry per OrderId (DECISION-1) so the per-row
+    // affordability predicate and the per-OrderId drain agree. Gated on
+    // `drain_active_residual` so S1/S2 land dark.
+    if drain_active_residual {
+        #[derive(Default)]
+        struct ActiveAccum {
+            buyers: Vec<(EconomicActorId, i64)>,
+            buyer_orders: Vec<OrderId>,
+            buyer_max_prices: Vec<Money>,
+            sellers: Vec<(EconomicActorId, i64)>,
+            seller_orders: Vec<OrderId>,
+        }
+        let mut active: BTreeMap<MarketGoodKey, ActiveAccum> = BTreeMap::new();
+        // BTreeMap iteration is OrderId-ascending -> deterministic per-key entry order.
+        for (id, bid) in orders.bids.iter() {
+            if dormant.contains(&bid.market) || bid.qty_remaining.0 <= 0 {
+                continue;
+            }
+            let key = MarketGoodKey {
+                market: bid.market,
+                good: bid.good,
+            };
+            // Stage-1 affordability: admit a bid only if its max_price covers the local
+            // discovered price (cheap build-time filter; Stage-2 prunes per-edge against
+            // the landed price+transport). Below-price bids are left for expire_orders.
+            if bid.max_price.0 < prior_price(market_goods, key, config).0 {
+                continue;
+            }
+            let e = active.entry(key).or_default();
+            e.buyers.push((bid.owner, bid.qty_remaining.0));
+            e.buyer_orders.push(*id);
+            e.buyer_max_prices.push(bid.max_price);
+        }
+        for (id, ask) in orders.asks.iter() {
+            if dormant.contains(&ask.market) || ask.qty_remaining.0 <= 0 {
+                continue;
+            }
+            let key = MarketGoodKey {
+                market: ask.market,
+                good: ask.good,
+            };
+            let e = active.entry(key).or_default();
+            e.sellers.push((ask.owner, ask.qty_remaining.0));
+            e.seller_orders.push(*id);
+        }
+        for (key, acc) in active {
+            // Dormant pools and active orders never collide on a key (a dormant market
+            // generates no orders; an active market is not dormant).
+            debug_assert!(
+                !buckets.contains_key(&key),
+                "active-order bucket collides with a dormant-pool bucket"
+            );
+            buckets.insert(
+                key,
+                MacroBucket {
+                    price: prior_price(market_goods, key, config),
+                    buyers: acc.buyers,
+                    sellers: acc.sellers,
+                    intra_cleared: true,
+                    buyer_orders: acc.buyer_orders,
+                    buyer_max_prices: acc.buyer_max_prices,
+                    seller_orders: acc.seller_orders,
+                },
+            );
+        }
+    }
+
     Ok(buckets)
 }
 
@@ -693,6 +768,8 @@ pub fn run_macro_flow_at_tick(
         market_goods,
         dormant,
         config,
+        &*orders,
+        config.drain_active_residual,
     )?;
     let buckets: BTreeMap<MarketGoodKey, MacroBucket> = buckets
         .into_iter()

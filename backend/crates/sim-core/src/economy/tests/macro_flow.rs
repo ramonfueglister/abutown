@@ -7,9 +7,9 @@ use crate::economy::macro_flow::{
     prune_unaffordable_buyers,
 };
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD, GoodId,
-    InventoryBook, MarketGoodKey, MarketGoods, MarketId, Money, OrderId, Quantity,
-    SettlementPolicy, SupplyPool, SupplyPools,
+    AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD,
+    GoodId, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money, OrderBook,
+    OrderId, Quantity, SettlementPolicy, SupplyPool, SupplyPools,
 };
 
 // --- Section-C schedule-level harness (Task 13): reused BY NAME by Tasks 14-19. ---
@@ -139,8 +139,18 @@ fn build_macro_buckets_caps_effective_demand_and_supply() {
     let mg = MarketGoods::default(); // never auctioned -> prior = default ref price
     let cfg = EconomyConfig::default();
 
-    let buckets =
-        build_macro_buckets(&accounts, &inventory, &demand, &supply, &mg, &dormant, &cfg).unwrap();
+    let buckets = build_macro_buckets(
+        &accounts,
+        &inventory,
+        &demand,
+        &supply,
+        &mg,
+        &dormant,
+        &cfg,
+        &crate::economy::OrderBook::default(),
+        false,
+    )
+    .unwrap();
     let key = MarketGoodKey {
         market,
         good: GOOD_FOOD,
@@ -182,6 +192,8 @@ fn build_macro_buckets_skips_zero_price_band() {
         &MarketGoods::default(),
         &dormant,
         &EconomyConfig::default(),
+        &crate::economy::OrderBook::default(),
+        false,
     )
     .unwrap();
     assert!(
@@ -2798,4 +2810,139 @@ fn prune_is_deterministic() {
         .unwrap()
     };
     assert_eq!(run(), run());
+}
+
+#[test]
+fn build_macro_buckets_active_sources_residual_orders_and_drops_below_price() {
+    // ACTIVE (non-dormant) market m: two residual bids (one affordable @2000, one
+    // below-price @1100 -> Stage-1 dropped) + one residual ask. The bucket is sourced
+    // from qty_remaining (NOT available), priced at the auction's last_settlement_price
+    // (authoritative, 1200 — distinct from the default ref 1000), intra_cleared=true.
+    let m = MarketId(1);
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let mut mg = MarketGoods::default();
+    let mut state = MarketGoodState::new(key);
+    state.last_settlement_price = Money(1_200);
+    mg.0.insert(key, state);
+
+    let mut orders = OrderBook::default();
+    orders.bids.insert(
+        OrderId(1),
+        Bid {
+            id: OrderId(1),
+            owner: EconomicActorId(10),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(3),
+        Bid {
+            id: OrderId(3),
+            owner: EconomicActorId(11),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(4),
+            max_price: Money(1_100), // below price 1200 -> Stage-1 dropped
+            cash_locked_remaining: Money(4),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.asks.insert(
+        OrderId(2),
+        Ask {
+            id: OrderId(2),
+            owner: EconomicActorId(20),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(7),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(7),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+
+    let buckets = build_macro_buckets(
+        &AccountBook::default(),
+        &InventoryBook::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mg,
+        &BTreeSet::new(),
+        &EconomyConfig::default(),
+        &orders,
+        true,
+    )
+    .unwrap();
+
+    let b = &buckets[&key];
+    assert!(b.intra_cleared);
+    assert_eq!(
+        b.price,
+        Money(1_200),
+        "active price = auction last_settlement_price (not the default ref)"
+    );
+    assert_eq!(
+        b.buyers,
+        vec![(EconomicActorId(10), 5)],
+        "below-price bid (1100<1200) dropped at Stage-1"
+    );
+    assert_eq!(b.buyer_orders, vec![OrderId(1)]);
+    assert_eq!(b.buyer_max_prices, vec![Money(2_000)]);
+    assert_eq!(
+        b.sellers,
+        vec![(EconomicActorId(20), 7)],
+        "seller weight = qty_remaining (no available cap on the active path)"
+    );
+    assert_eq!(b.seller_orders, vec![OrderId(2)]);
+}
+
+#[test]
+fn build_macro_buckets_flag_false_ignores_orders() {
+    let m = MarketId(1);
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(2),
+        Ask {
+            id: OrderId(2),
+            owner: EconomicActorId(20),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(7),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(7),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let buckets = build_macro_buckets(
+        &AccountBook::default(),
+        &InventoryBook::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &MarketGoods::default(),
+        &BTreeSet::new(),
+        &EconomyConfig::default(),
+        &orders,
+        false, // flag OFF -> dark
+    )
+    .unwrap();
+    assert!(
+        !buckets.contains_key(&key),
+        "flag off -> residual orders produce no active bucket"
+    );
 }
