@@ -3111,3 +3111,139 @@ fn active_flow_conserves_and_drains_residual_orders() {
         "seller was paid"
     );
 }
+
+#[test]
+fn active_residual_with_no_cross_edge_is_not_drained() {
+    // A lone active market with a residual ask and NO other market to export to: the flow
+    // finds no profitable cross-edge, so the ask is NOT drained — it stays for
+    // expire_orders. Guards the drain/expire PARTITION (§2.3): the flow consumes only
+    // residuals it actually moves; everything else is left for normal expiry.
+    let m = MarketId(1);
+    let mut inventory = InventoryBook::default();
+    inventory
+        .deposit(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+    inventory
+        .lock_goods(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(1),
+        Ask {
+            id: OrderId(1),
+            owner: EconomicActorId(50),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let mut mg = MarketGoods::default();
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let mut st = MarketGoodState::new(key);
+    st.last_settlement_price = Money(500);
+    mg.0.insert(key, st);
+    let config = EconomyConfig {
+        drain_active_residual: true,
+        ..Default::default()
+    };
+    let orders_before = orders.clone();
+    let inv_before = inventory.clone();
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut AccountBook::default(),
+        &mut inventory,
+        &mut crate::economy::TradeLedger::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &BTreeSet::new(),
+        &MarketDistances(BTreeMap::new()),
+        &config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut crate::economy::NextOrderId::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        orders, orders_before,
+        "no cross-edge -> residual ask NOT drained (left for expire_orders)"
+    );
+    assert_eq!(inventory, inv_before, "inventory untouched");
+}
+
+#[test]
+fn build_macro_buckets_active_one_entry_per_order_not_per_owner() {
+    // One owner holds TWO residual bids at different max_price on the same (market,good).
+    // DECISION-1: the active bucket carries one entry PER OrderId (not merged per owner),
+    // so each row's max_price drives its own affordability test + per-OrderId drain.
+    let m = MarketId(1);
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let owner = EconomicActorId(10);
+    let mut orders = OrderBook::default();
+    orders.bids.insert(
+        OrderId(1),
+        Bid {
+            id: OrderId(1),
+            owner,
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(3),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(6), // value(2000,3)=6
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(2),
+        Bid {
+            id: OrderId(2),
+            owner,
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(4),
+            max_price: Money(1_500),
+            cash_locked_remaining: Money(6), // value(1500,4)=6
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let buckets = build_macro_buckets(
+        &AccountBook::default(),
+        &InventoryBook::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &MarketGoods::default(),
+        &BTreeSet::new(),
+        &EconomyConfig::default(),
+        &orders,
+        true,
+    )
+    .unwrap();
+    let b = &buckets[&key];
+    assert_eq!(
+        b.buyers,
+        vec![(owner, 3), (owner, 4)],
+        "two entries for the SAME owner (one per OrderId)"
+    );
+    assert_eq!(b.buyer_orders, vec![OrderId(1), OrderId(2)]);
+    assert_eq!(
+        b.buyer_max_prices,
+        vec![Money(2_000), Money(1_500)],
+        "per-row max_price preserved (not collapsed to one per owner)"
+    );
+}
