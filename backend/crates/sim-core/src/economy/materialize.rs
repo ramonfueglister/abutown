@@ -17,8 +17,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
 use crate::economy::flow_shipments::expire_arrived;
-use crate::economy::trader_render::{is_outbound, leg_progress, route_polyline, trader_travel};
-use crate::economy::{EconomicActorId, EconomyConfig, Markets, Trader, Traders};
+use crate::economy::trader_render::route_polyline;
+use crate::economy::{EconomicActorId, Markets};
 use crate::ids::{AgentId, ChunkCoord};
 use crate::mobility::AgentMobilityState;
 use crate::mobility::components::{
@@ -99,13 +99,6 @@ fn dir_from_delta(dx: f32, dy: f32) -> DirectionDto {
     }
     let octant = (((dy.atan2(dx) / std::f32::consts::FRAC_PI_4).round() as i32) + 8) % 8;
     [D::E, D::Se, D::S, D::Sw, D::W, D::Nw, D::N, D::Ne][octant as usize]
-}
-
-fn endpoints(markets: &Markets, trader: &Trader) -> Option<(NodeId, NodeId)> {
-    Some((
-        markets.0.get(&trader.source)?.node_id,
-        markets.0.get(&trader.dest)?.node_id,
-    ))
 }
 
 /// Compute a Walk footway route polyline between two graph nodes. `from == to`
@@ -240,46 +233,6 @@ pub(crate) fn plan_render_mutations(
         }
     }
     muts
-}
-
-/// Pure planner: decide the render mutation for each demo trader given the
-/// current-leg route polylines (keyed by actor) and the set of observed
-/// (Active/Hot) chunks. Thin adapter over `plan_render_mutations`: builds the
-/// `RenderActor` list from `Traders` (progress via `trader_travel`/`leg_progress`).
-/// No ECS world access — fully unit-testable.
-///
-/// Test-only since the materialize system builds its combined demo-trader +
-/// shipment render-input list inline (see `materialize_traders_system`) and calls
-/// `plan_render_mutations` directly; this adapter exists to unit-test the
-/// demo-trader → `RenderActor` derivation in isolation.
-#[cfg(test)]
-pub(crate) fn plan_mutations(
-    traders: &Traders,
-    config: &EconomyConfig,
-    materialized: &MaterializedTraders,
-    routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
-    observed: &BTreeSet<ChunkCoord>,
-) -> Vec<TraderMutation> {
-    let actors: Vec<RenderActor<'_>> = traders
-        .0
-        .iter()
-        .filter_map(|(actor, trader)| {
-            let polyline = routes.get(actor)?;
-            if polyline.is_empty() {
-                return None;
-            }
-            let progress = leg_progress(&trader.state, trader_travel(trader, config));
-            Some(RenderActor {
-                actor: *actor,
-                polyline,
-                progress,
-                // Demo traders loop between markets; they never "arrive" in the
-                // shipment sense (their LOD removal is position-driven).
-                arrived: false,
-            })
-        })
-        .collect();
-    plan_render_mutations(&actors, materialized, observed)
 }
 
 /// Apply render mutations to the world: spawn/update/despawn the trader-agent
@@ -448,31 +401,15 @@ pub fn materialize_traders_system(world: &mut World) {
         q.iter(world).map(|c| c.0).collect()
     };
 
-    // Build owned render inputs (actor, polyline, progress) for demo traders AND
-    // flow shipments inside one cache scope, then plan + apply.
+    // Build owned render inputs (actor, polyline, progress) for flow shipments and
+    // shopper visits inside one cache scope, then plan + apply.
     let render_inputs: Vec<RenderInput> =
         world.resource_scope(|world: &mut World, mut cache: Mut<FlowFieldCache>| {
             let graph = world.resource::<Graph>();
             let hpa = world.resource::<HpaIndex>();
             let markets = world.resource::<Markets>();
-            let config = world.resource::<EconomyConfig>();
             let mut out: Vec<RenderInput> = Vec::new();
-            // demo traders (existing endpoints/outbound logic)
-            for (actor, trader) in &world.resource::<Traders>().0 {
-                let Some((src, dst)) = endpoints(markets, trader) else {
-                    continue;
-                };
-                let (a, b) = if is_outbound(&trader.state) {
-                    (src, dst)
-                } else {
-                    (dst, src)
-                };
-                if let Some(poly) = leg_polyline(graph, hpa, &mut cache, a, b) {
-                    let progress = leg_progress(&trader.state, trader_travel(trader, config));
-                    out.push((*actor, poly, progress, false));
-                }
-            }
-            // flow shipments (NEW): route from->to, linear progress, reserved actor
+            // flow shipments: route from->to, linear progress, reserved actor
             // id. Arrived shipments are still fed in (with arrived=true) so the
             // lifecycle walks them through the ghost-free leave->despawn path rather
             // than the generic sweep abruptly despawning them next tick.

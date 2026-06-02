@@ -7,9 +7,8 @@ use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
     Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SettlementPolicy, SupplyPools,
-    TradeLedger, Traders, clear_market_good_with_policy, expire_orders_at_tick,
+    TradeLedger, clear_market_good_with_policy, expire_orders_at_tick,
     generate_pool_orders_at_tick, integer_ewma, run_macro_flow_at_tick, run_production_at_tick,
-    run_traders_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -20,7 +19,6 @@ pub enum EconomySet {
     RefreshLod,
     ExpireOrders,
     Production,
-    Traders,
     GeneratePoolOrders,
     ClearMarkets,
     MacroFlow,
@@ -44,6 +42,10 @@ pub struct EconomyConfig {
     pub max_shoppers_per_market: usize,
     /// Radius (tiles) around a market to pick shopper origin nodes.
     pub shopper_radius_tiles: f32,
+    /// When TRUE, the macro flow drains active/observed markets' post-auction
+    /// residual orders into the inter-market flow (S3). FALSE keeps the flow
+    /// dormant-only (S1/S2 land dark). Defaulted FALSE; S3 flips it.
+    pub drain_active_residual: bool,
 }
 
 impl Default for EconomyConfig {
@@ -59,6 +61,7 @@ impl Default for EconomyConfig {
             shoppers_per_unit: 3,
             max_shoppers_per_market: 4,
             shopper_radius_tiles: 24.0,
+            drain_active_residual: true,
         }
     }
 }
@@ -69,7 +72,6 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
             EconomySet::Production,
-            EconomySet::Traders,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::MacroFlow,
@@ -92,7 +94,6 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
             run_production_system.in_set(EconomySet::Production),
-            run_traders_system.in_set(EconomySet::Traders),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
             run_macro_flow_system.in_set(EconomySet::MacroFlow),
@@ -346,6 +347,8 @@ pub fn run_macro_flow_system(
     mut market_goods: ResMut<MarketGoods>,
     mut shipments: ResMut<FlowShipments>,
     mut next_shipment_id: ResMut<NextShipmentId>,
+    mut orders: ResMut<OrderBook>,
+    mut next_order_id: ResMut<NextOrderId>,
 ) {
     if let Err(reason) = run_macro_flow_at_tick(
         &mut accounts,
@@ -361,6 +364,8 @@ pub fn run_macro_flow_system(
         tick.0,
         &mut shipments,
         &mut next_shipment_id,
+        &mut orders,
+        &mut next_order_id,
     ) {
         // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
         // atomic boundary left the books unchanged. Per-edge settle faults are
@@ -373,33 +378,4 @@ pub fn run_macro_flow_system(
             reason,
         });
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run_traders_system(
-    tick: Res<Tick>,
-    config: Res<EconomyConfig>,
-    dormant: Res<DormantMarkets>,
-    mut accounts: ResMut<AccountBook>,
-    mut inventory: ResMut<InventoryBook>,
-    mut orders: ResMut<OrderBook>,
-    mut ledger: ResMut<TradeLedger>,
-    mut dirty: ResMut<DirtyMarketGoods>,
-    mut next: ResMut<NextOrderId>,
-    market_goods: Res<MarketGoods>,
-    mut traders: ResMut<Traders>,
-) {
-    let _ = run_traders_at_tick(
-        &mut accounts,
-        &mut inventory,
-        &mut orders,
-        &mut ledger,
-        &mut dirty,
-        &mut next,
-        &market_goods,
-        &mut traders,
-        &config,
-        tick.0,
-        &dormant.0,
-    );
 }

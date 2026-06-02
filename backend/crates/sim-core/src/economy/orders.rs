@@ -208,3 +208,67 @@ pub fn expire_orders_at_tick(
 
     Ok(())
 }
+
+/// S2 drain primitive (ask side): release `q` units of a residual ask's goods lock
+/// (locked→available, 1:1), shrink the order, and remove it at `qty_remaining == 0`.
+/// PURE — mutates only the passed-in (scratch) clones; performs NO settle and is NOT
+/// wired into any schedule (that is S3). Returns `true` if the order was fully drained
+/// and removed. Rejects `q <= 0`, `q > qty_remaining`, or a missing id with
+/// `InvalidOrder`. Never uses `debit_locked_goods` (the auction fill path) — that would
+/// conflate matched-exit with residual-exit and let `expire_orders` double-release.
+pub fn drain_residual_ask(
+    orders: &mut OrderBook,
+    inventory: &mut InventoryBook,
+    ask_id: OrderId,
+    q: Quantity,
+) -> Result<bool, EconomyError> {
+    let ask = orders
+        .asks
+        .get_mut(&ask_id)
+        .ok_or(EconomyError::InvalidOrder)?;
+    if q.0 <= 0 || q > ask.qty_remaining {
+        return Err(EconomyError::InvalidOrder);
+    }
+    inventory.release_goods(ask.owner, ask.good, q)?;
+    ask.qty_remaining = ask.qty_remaining.checked_sub(q)?;
+    ask.goods_locked_remaining = ask.goods_locked_remaining.checked_sub(q)?;
+    let removed = ask.qty_remaining.0 == 0;
+    if removed {
+        orders.asks.remove(&ask_id);
+    }
+    Ok(removed)
+}
+
+/// S2 drain primitive (bid side): release a residual bid's cash lock by the
+/// FIELD-DIFFERENCE — never a recomputed per-`q` product — shrink the order, and
+/// remove it at `qty_remaining == 0`. `released = cash_locked_remaining −
+/// checked_order_value(max_price, new_qty)`; at `new_qty == 0` this is the full locked
+/// field (`checked_order_value(_, 0) == 0`), disposing any floor-drift remainder so no
+/// cash is orphaned in `locked` (spec §5.1, resolves CRITICAL #1). PURE — mutates only
+/// the passed-in clones; NO settle, NOT wired (S3 adds the settle+refund wrapper).
+/// Returns `true` if fully drained + removed. Rejects bad input with `InvalidOrder`.
+pub fn drain_residual_bid(
+    orders: &mut OrderBook,
+    accounts: &mut AccountBook,
+    bid_id: OrderId,
+    q: Quantity,
+) -> Result<bool, EconomyError> {
+    let bid = orders
+        .bids
+        .get_mut(&bid_id)
+        .ok_or(EconomyError::InvalidOrder)?;
+    if q.0 <= 0 || q > bid.qty_remaining {
+        return Err(EconomyError::InvalidOrder);
+    }
+    let new_qty = bid.qty_remaining.checked_sub(q)?;
+    let target_lock = checked_order_value(bid.max_price, new_qty)?;
+    let released = bid.cash_locked_remaining.checked_sub(target_lock)?;
+    accounts.release_cash(bid.owner, released)?;
+    bid.cash_locked_remaining = target_lock;
+    bid.qty_remaining = new_qty;
+    let removed = new_qty.0 == 0;
+    if removed {
+        orders.bids.remove(&bid_id);
+    }
+    Ok(removed)
+}

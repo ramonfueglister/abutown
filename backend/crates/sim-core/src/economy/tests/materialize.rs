@@ -1,57 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use bevy_ecs::prelude::*;
 
-use crate::economy::materialize::{
-    MaterializedTraders, RenderActor, apply_mutations, plan_mutations, plan_render_mutations,
-};
-use crate::economy::{
-    EconomicActorId, EconomyConfig, GOOD_TOOLS, MarketId, Quantity, Trader, TraderState, Traders,
-};
+use crate::economy::materialize::{MaterializedTraders, RenderActor, plan_render_mutations};
+use crate::economy::{EconomicActorId, MarketId};
 use crate::ids::ChunkCoord;
 use crate::mobility::components::{Position, StableAgentId, TraderAgent};
 use crate::mobility::resources::{AgentIdIndex, DirtyAgents};
-
-fn seed(state: TraderState) -> (World, EconomicActorId) {
-    let mut world = World::new();
-    world.insert_resource(AgentIdIndex::default());
-    world.insert_resource(DirtyAgents::default());
-    world.insert_resource(MaterializedTraders::default());
-    world.insert_resource(EconomyConfig::default());
-    let actor = EconomicActorId(1);
-    let mut traders = Traders::default();
-    traders.0.insert(
-        actor,
-        Trader {
-            actor,
-            good: GOOD_TOOLS,
-            source: MarketId(1),
-            dest: MarketId(2),
-            distance_tiles: 4,
-            batch_qty: Quantity(1),
-            buy_premium_bps: 0,
-            sell_discount_bps: 0,
-            order_ttl_ticks: 10,
-            state,
-        },
-    );
-    world.insert_resource(traders);
-    (world, actor)
-}
-
-fn run(
-    world: &mut World,
-    routes: &BTreeMap<EconomicActorId, Vec<(f32, f32)>>,
-    observed: &BTreeSet<ChunkCoord>,
-) {
-    let muts = {
-        let traders = world.resource::<Traders>();
-        let config = world.resource::<EconomyConfig>();
-        let materialized = world.resource::<MaterializedTraders>();
-        plan_mutations(traders, config, materialized, routes, observed)
-    };
-    apply_mutations(world, 0, muts);
-}
 
 fn observed_origin() -> BTreeSet<ChunkCoord> {
     [ChunkCoord { x: 0, y: 0 }].into_iter().collect()
@@ -99,190 +54,6 @@ fn plan_render_mutations_drives_lifecycle_generically() {
         TraderMutation::Despawn { actor: a } => assert_eq!(a.0, 99),
         _ => panic!("expected Despawn of stale actor"),
     }
-}
-
-#[test]
-fn materialize_spawns_trader_agent_at_route_start_and_feeds_delta() {
-    let (mut world, actor) = seed(TraderState::Buying { order: None });
-    let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
-        [(actor, vec![(1.0, 1.0), (5.0, 1.0)])]
-            .into_iter()
-            .collect();
-    run(&mut world, &routes, &observed_origin());
-
-    let mut q = world.query_filtered::<(Entity, &Position, &StableAgentId), With<TraderAgent>>();
-    let hits: Vec<(Entity, (f32, f32), String)> = q
-        .iter(&world)
-        .map(|(e, p, s)| (e, (p.x, p.y), s.0.0.clone()))
-        .collect();
-    assert_eq!(hits.len(), 1, "exactly one trader-agent");
-    assert_eq!(hits[0].1, (1.0, 1.0), "Buying => progress 0 => route start");
-    assert!(hits[0].2.starts_with("trader:"), "namespaced stable id");
-    assert!(
-        world.resource::<DirtyAgents>().0.contains(&hits[0].0),
-        "trader-agent fed into DirtyAgents (the per-tick delta path)"
-    );
-    assert!(
-        world
-            .resource::<MaterializedTraders>()
-            .0
-            .contains_key(&actor)
-    );
-}
-
-#[test]
-fn materialize_despawns_when_trader_removed_from_economy() {
-    let (mut world, actor) = seed(TraderState::Buying { order: None });
-    let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
-        [(actor, vec![(1.0, 1.0)])].into_iter().collect();
-    run(&mut world, &routes, &observed_origin());
-    assert!(
-        world
-            .resource::<MaterializedTraders>()
-            .0
-            .contains_key(&actor)
-    );
-
-    world.resource_mut::<Traders>().0.remove(&actor);
-    run(&mut world, &BTreeMap::new(), &observed_origin());
-
-    let mut q = world.query_filtered::<Entity, With<TraderAgent>>();
-    assert_eq!(q.iter(&world).count(), 0, "trader-agent despawned");
-    assert!(
-        !world
-            .resource::<MaterializedTraders>()
-            .0
-            .contains_key(&actor)
-    );
-    assert!(
-        !world
-            .resource::<AgentIdIndex>()
-            .0
-            .keys()
-            .any(|k| k.0.starts_with("trader:")),
-        "dropped from AgentIdIndex"
-    );
-}
-
-#[test]
-fn materialize_despawns_when_trader_leaves_observed_chunks() {
-    let (mut world, actor) = seed(TraderState::Buying { order: None });
-    let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
-        [(actor, vec![(1.0, 1.0)])].into_iter().collect();
-    let none: BTreeSet<ChunkCoord> = BTreeSet::new();
-
-    // Observed -> spawned.
-    run(&mut world, &routes, &observed_origin());
-    assert!(
-        world
-            .resource::<MaterializedTraders>()
-            .0
-            .contains_key(&actor)
-    );
-
-    // First unobserved tick: kept ALIVE + marked dirty at its position so the
-    // delta emits left_agents for the chunk it left (ghost-free client removal).
-    run(&mut world, &routes, &none);
-    let entity = world
-        .resource::<MaterializedTraders>()
-        .0
-        .get(&actor)
-        .map(|m| m.entity)
-        .expect("kept alive one tick to emit the leave");
-    assert!(
-        world.resource::<DirtyAgents>().0.contains(&entity),
-        "marked dirty on the leaving tick"
-    );
-
-    // Second unobserved tick: despawned (LOD).
-    run(&mut world, &routes, &none);
-    let count = world
-        .query_filtered::<Entity, With<TraderAgent>>()
-        .iter(&world)
-        .count();
-    assert_eq!(
-        count, 0,
-        "despawned once unobserved (after the leave emitted)"
-    );
-    assert!(
-        !world
-            .resource::<MaterializedTraders>()
-            .0
-            .contains_key(&actor)
-    );
-}
-
-#[test]
-fn materialize_does_not_touch_money_or_goods() {
-    use crate::economy::shoppers::{SHOPPER_ACTOR_OFFSET, ShopperVisit, ShopperVisits};
-    use crate::economy::{AccountBook, GoodId, InventoryBook, Money};
-    use crate::routing::NodeId;
-    let (mut world, actor) = seed(TraderState::ToDest { remaining: 2 });
-    let mut accounts = AccountBook::default();
-    accounts.deposit(actor, Money(10_000)).unwrap();
-    let mut inv = InventoryBook::default();
-    inv.deposit(actor, GOOD_TOOLS, Quantity(5)).unwrap();
-    // Give the shopper actor economic state that must remain untouched.
-    let shopper_actor = EconomicActorId(SHOPPER_ACTOR_OFFSET);
-    accounts.deposit(shopper_actor, Money(777)).unwrap();
-    inv.deposit(shopper_actor, GoodId(0), Quantity(3)).unwrap();
-    world.insert_resource(accounts);
-    world.insert_resource(inv);
-    // Insert an active shopper visit so conservation is checked even when ShopperVisits is
-    // non-empty (plan_mutations only iterates Traders; shopper render is tested in the
-    // *_with_active_shipment variant which runs materialize_traders_system end-to-end).
-    let mut sv = ShopperVisits::default();
-    sv.0.insert(
-        0,
-        ShopperVisit {
-            id: 0,
-            market: MarketId(1),
-            good: GoodId(0),
-            origin_node: NodeId(7),
-            start_tick: 0,
-            travel_ticks: 20,
-        },
-    );
-    world.insert_resource(sv);
-
-    let routes: BTreeMap<EconomicActorId, Vec<(f32, f32)>> =
-        [(actor, vec![(1.0, 1.0), (9.0, 1.0)])]
-            .into_iter()
-            .collect();
-    for _ in 0..5 {
-        run(&mut world, &routes, &observed_origin());
-    }
-
-    assert_eq!(
-        world.resource::<AccountBook>().account(actor).available,
-        Money(10_000),
-        "money untouched (render-only)"
-    );
-    assert_eq!(
-        world
-            .resource::<InventoryBook>()
-            .balance(actor, GOOD_TOOLS)
-            .available,
-        Quantity(5),
-        "goods untouched (render-only)"
-    );
-    // Shopper actor's economic books must also be untouched.
-    assert_eq!(
-        world
-            .resource::<AccountBook>()
-            .account(shopper_actor)
-            .available,
-        Money(777),
-        "shopper actor money untouched (pure render projection)"
-    );
-    assert_eq!(
-        world
-            .resource::<InventoryBook>()
-            .balance(shopper_actor, GoodId(0))
-            .available,
-        Quantity(3),
-        "shopper actor goods untouched (pure render projection)"
-    );
 }
 
 #[test]
@@ -379,7 +150,7 @@ fn materialize_does_not_touch_money_or_goods_with_active_shipment() {
 
 use crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET;
 use crate::economy::materialize::materialize_traders_system;
-use crate::economy::{FlowShipment, FlowShipments, GoodId, MarketSite, Markets};
+use crate::economy::{FlowShipment, FlowShipments, GoodId, MarketSite, Markets, Quantity};
 use crate::mobility::components::SpriteKey;
 use crate::mobility::resources::Tick;
 use crate::routing::{
@@ -448,8 +219,6 @@ fn routed_shipment_world(market_a: MarketId, market_b: MarketId) -> World {
     );
     world.insert_resource(markets);
 
-    world.insert_resource(Traders::default());
-    world.insert_resource(EconomyConfig::default());
     world.insert_resource(MaterializedTraders::default());
     world.insert_resource(FlowShipments::default());
     world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
@@ -528,8 +297,7 @@ fn materialize_renders_flow_shipment_then_despawns_on_arrival() {
     // arrived shipment is routed through the SAME ghost-free leaving->despawn path
     // as an LOD demotion: on this tick the agent is marked dirty (the leave) so
     // tick_mobility can broadcast its removal, and the shipment is kept one extra
-    // tick (spec lines 25/63/94, mirroring
-    // materialize_despawns_when_trader_leaves_observed_chunks).
+    // tick (spec lines 25/63/94, mirroring the ghost-free leave->despawn design).
     world.insert_resource(Tick(10));
     materialize_traders_system(&mut world);
     assert!(

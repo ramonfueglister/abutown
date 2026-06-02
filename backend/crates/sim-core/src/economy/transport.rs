@@ -1,5 +1,8 @@
-use crate::economy::{EconomyError, Money, Quantity, checked_order_value};
+use crate::economy::{EconomicActorId, EconomyError, Money, Quantity, checked_order_value};
 use crate::routing::{Graph, NodeId};
+
+/// Reserved account that receives transport-cost payments (keeps money conserved).
+pub const TRANSPORT_OPERATOR: EconomicActorId = EconomicActorId(u64::MAX);
 
 /// Integer Manhattan distance in whole tiles. Positions are rounded to integer
 /// tiles first, then subtracted as integers — no float subtraction/sqrt, so the

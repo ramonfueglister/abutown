@@ -7,12 +7,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::economy::orders::{drain_residual_ask, drain_residual_bid};
 use crate::economy::pools::affordable_qty;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig, EconomyError,
     EconomyEvent, GoodId, InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState,
-    MarketGoods, MarketId, Money, Quantity, SettlementPolicy, SupplyPools, TRANSPORT_OPERATOR,
-    TradeLedger, apportion_cash, checked_order_value, prorata_distribute,
+    MarketGoods, MarketId, Money, OrderBook, OrderId, Quantity, SettlementPolicy, SupplyPools,
+    TRANSPORT_OPERATOR, TradeLedger, apportion_cash, checked_order_value, prorata_distribute,
     settlement_price_with_policy, transport_cost,
 };
 
@@ -55,6 +56,18 @@ pub struct MacroBucket {
     pub buyers: Vec<(EconomicActorId, i64)>,
     /// (actor, effective_supply_qty), filtered to qty > 0, in ascending actor order.
     pub sellers: Vec<(EconomicActorId, i64)>,
+    /// S3: `true` ⇒ active/residual-sourced (the auction already intra-cleared this
+    /// market this tick); `false` ⇒ dormant/pool-sourced. Suppresses the self-edge for
+    /// active buckets (the flow must not re-clear units the auction refused on price).
+    pub intra_cleared: bool,
+    /// S3 active-only provenance, index-aligned to `buyers`/`sellers`; **empty** for
+    /// dormant buckets. `buyer_orders[i]` is the residual bid backing `buyers[i]`,
+    /// `buyer_max_prices[i]` its `max_price` (the affordability-predicate input), and
+    /// `seller_orders[i]` the residual ask backing `sellers[i]`. One entry per `OrderId`
+    /// (NOT per owner) so the per-row drain and the per-row affordability test agree.
+    pub buyer_orders: Vec<OrderId>,
+    pub buyer_max_prices: Vec<Money>,
+    pub seller_orders: Vec<OrderId>,
 }
 
 impl MacroBucket {
@@ -84,11 +97,17 @@ pub fn classify_bucket(total_demand: i64, total_supply: i64) -> (i64, i64, i64) 
     (matched, surplus, deficit)
 }
 
-/// STEP A: build the dormant aggregate buckets. Groups dormant demand/supply by
-/// market-good, derives the synthetic price from the raw band, then caps demand
-/// by affordability (at `price`) and supply by on-hand stock. Buckets whose
-/// `price <= 0` are dropped (the warm-flow zero-band skip, applied before any
-/// `affordable_qty`). Empty buyer AND empty seller buckets are dropped.
+/// STEP A: build the aggregate buckets from TWO sources. **Dormant** markets are
+/// pool-sourced (this function's original behavior): group dormant demand/supply by
+/// market-good, derive the synthetic price from the raw band, cap demand by
+/// affordability and supply by on-hand stock; `price <= 0` buckets are dropped;
+/// `intra_cleared = false`. **Active** (non-dormant) markets are residual-ORDER-sourced
+/// (S3, gated on `drain_active_residual`): one bucket entry per residual `OrderId`,
+/// weight = `qty_remaining`, price = the auction's `last_settlement_price` (via
+/// `prior_price`), `intra_cleared = true`. ALL residual bids are admitted — affordability
+/// is decided per-edge by `prune_unaffordable_buyers` against the actual landed charge
+/// (`value(p_src, q) + transport`), there is no build-time price filter. The two sources
+/// are disjoint by market.
 #[allow(clippy::too_many_arguments)]
 pub fn build_macro_buckets(
     accounts: &AccountBook,
@@ -98,6 +117,8 @@ pub fn build_macro_buckets(
     market_goods: &MarketGoods,
     dormant: &BTreeSet<MarketId>,
     config: &EconomyConfig,
+    orders: &OrderBook,
+    drain_active_residual: bool,
 ) -> Result<BTreeMap<MarketGoodKey, MacroBucket>, EconomyError> {
     // Phase 1: raw bands (max_price ceiling for buyers, min_price floor for sellers).
     type Raw = (Vec<(EconomicActorId, i64)>, Option<Money>); // (entries, band-extreme)
@@ -189,9 +210,82 @@ pub fn build_macro_buckets(
                 price,
                 buyers,
                 sellers,
+                intra_cleared: false,
+                buyer_orders: Vec::new(),
+                buyer_max_prices: Vec::new(),
+                seller_orders: Vec::new(),
             },
         );
     }
+
+    // ACTIVE CONTRIBUTOR (S3): for markets NOT dormant, source buckets from the
+    // post-auction RESIDUAL ORDERS — one entry per OrderId (DECISION-1) so the per-row
+    // affordability predicate and the per-OrderId drain agree. Gated on
+    // `drain_active_residual` so S1/S2 land dark.
+    if drain_active_residual {
+        #[derive(Default)]
+        struct ActiveAccum {
+            buyers: Vec<(EconomicActorId, i64)>,
+            buyer_orders: Vec<OrderId>,
+            buyer_max_prices: Vec<Money>,
+            sellers: Vec<(EconomicActorId, i64)>,
+            seller_orders: Vec<OrderId>,
+        }
+        let mut active: BTreeMap<MarketGoodKey, ActiveAccum> = BTreeMap::new();
+        // BTreeMap iteration is OrderId-ascending -> deterministic per-key entry order.
+        for (id, bid) in orders.bids.iter() {
+            if dormant.contains(&bid.market) || bid.qty_remaining.0 <= 0 {
+                continue;
+            }
+            let key = MarketGoodKey {
+                market: bid.market,
+                good: bid.good,
+            };
+            // No build-time affordability filter: a flow charges buyers the SOURCE price
+            // + transport (settle_flow's `src_revenue + transport`, not p_dst), which is
+            // edge-specific and unknown here. The per-edge Stage-2 prune
+            // (`prune_unaffordable_buyers`, priced at the actual landed charge) is the
+            // sole affordability authority — admitting all residual bids serves every
+            // buyer willing to pay the landed price (Law of One Price).
+            let e = active.entry(key).or_default();
+            e.buyers.push((bid.owner, bid.qty_remaining.0));
+            e.buyer_orders.push(*id);
+            e.buyer_max_prices.push(bid.max_price);
+        }
+        for (id, ask) in orders.asks.iter() {
+            if dormant.contains(&ask.market) || ask.qty_remaining.0 <= 0 {
+                continue;
+            }
+            let key = MarketGoodKey {
+                market: ask.market,
+                good: ask.good,
+            };
+            let e = active.entry(key).or_default();
+            e.sellers.push((ask.owner, ask.qty_remaining.0));
+            e.seller_orders.push(*id);
+        }
+        for (key, acc) in active {
+            // Dormant pools and active orders never collide on a key (a dormant market
+            // generates no orders; an active market is not dormant).
+            debug_assert!(
+                !buckets.contains_key(&key),
+                "active-order bucket collides with a dormant-pool bucket"
+            );
+            buckets.insert(
+                key,
+                MacroBucket {
+                    price: prior_price(market_goods, key, config),
+                    buyers: acc.buyers,
+                    sellers: acc.sellers,
+                    intra_cleared: true,
+                    buyer_orders: acc.buyer_orders,
+                    buyer_max_prices: acc.buyer_max_prices,
+                    seller_orders: acc.seller_orders,
+                },
+            );
+        }
+    }
+
     Ok(buckets)
 }
 
@@ -223,22 +317,27 @@ pub fn build_candidates(
     distances: &MarketDistances,
     config: &EconomyConfig,
 ) -> Result<Vec<Candidate>, EconomyError> {
-    // Per good, per market: (matched, surplus, deficit, price).
-    type MarketClassification = (i64, i64, i64, Money);
+    // Per good, per market: (matched, surplus, deficit, price, intra_cleared).
+    type MarketClassification = (i64, i64, i64, Money, bool);
     let mut by_good: BTreeMap<GoodId, BTreeMap<MarketId, MarketClassification>> = BTreeMap::new();
     for (key, b) in buckets {
         let (matched, surplus, deficit) = classify_bucket(b.total_demand(), b.total_supply());
-        by_good
-            .entry(key.good)
-            .or_default()
-            .insert(key.market, (matched, surplus, deficit, b.price));
+        by_good.entry(key.good).or_default().insert(
+            key.market,
+            (matched, surplus, deficit, b.price, b.intra_cleared),
+        );
     }
 
     let mut candidates: Vec<Candidate> = Vec::new();
     for (good, markets) in &by_good {
         // Self-edges: one per market with locally-clearable overlap.
-        for (market, (matched, _surplus, _deficit, price)) in markets {
-            if *matched > 0 {
+        for (market, (matched, _surplus, _deficit, price, intra_cleared)) in markets {
+            // Suppress the self-edge for active (intra_cleared) buckets: the auction
+            // already cleared the matched overlap this tick, and a non-crossing active
+            // market's matched>0 reflects bids/asks the auction REFUSED on price — a
+            // flow self-edge would double-clear them. Dormant self-edges stay (their
+            // self-edge IS the intra-clear).
+            if *matched > 0 && !*intra_cleared {
                 candidates.push(Candidate {
                     good: *good,
                     src: *market,
@@ -253,11 +352,11 @@ pub fn build_candidates(
             }
         }
         // Cross-edges: ordered (src surplus, dst deficit) pairs.
-        for (src, (_m_s, surplus, _d_s, p_src)) in markets {
+        for (src, (_m_s, surplus, _d_s, p_src, _intra_s)) in markets {
             if *surplus <= 0 {
                 continue;
             }
-            for (dst, (_m_d, _s_d, deficit, p_dst)) in markets {
+            for (dst, (_m_d, _s_d, deficit, p_dst, _intra_d)) in markets {
                 if src == dst || *deficit <= 0 {
                     continue;
                 }
@@ -350,6 +449,10 @@ pub fn plan_flows(
     let mut remaining_need: BTreeMap<(GoodId, MarketId), i64> = BTreeMap::new();
     for (key, b) in buckets {
         let (matched, surplus, deficit) = classify_bucket(b.total_demand(), b.total_supply());
+        // Defense-in-depth (mirrors build_candidates' self-edge suppression): force the
+        // matched budget to 0 for active buckets, so a stray self-edge Candidate that
+        // bypassed build_candidates finds no budget and skips at the `q <= 0` continue.
+        let matched = if b.intra_cleared { 0 } else { matched };
         remaining_matched.insert((key.good, key.market), matched);
         remaining_surplus.insert((key.good, key.market), surplus);
         remaining_need.insert((key.good, key.market), deficit);
@@ -408,6 +511,86 @@ pub fn plan_flows(
     flows
 }
 
+/// Output of [`prune_unaffordable_buyers`]: the residual bids that survive the
+/// landed-price affordability test, index-aligned, plus `q_prime` — the flow quantity
+/// those survivors actually absorb (`Σ prorata(surviving_weights, q)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrunedBuyers {
+    pub buyers: Vec<(EconomicActorId, i64)>,
+    pub orders: Vec<OrderId>,
+    pub max_prices: Vec<Money>,
+    pub q_prime: i64,
+}
+
+/// S3 affordability bound (Stage-2, per-edge). A residual bid drained for its share
+/// `g_i` releases ~`value(max_price_i, g_i)` to available; `settle_flow` then charges it
+/// `apportion_cash(buyer_goods, dst_payment)[i]`, where `dst_payment = value(p_src, q') +
+/// transport` — the SOURCE price + transport, exactly as `settle_flow` computes it
+/// (`src_revenue + transport`, NOT `p_dst`; the buyer pays what the seller takes plus
+/// transport, not the destination's discovered price). If `value(max_price_i, g_i) <
+/// charge_i` the release under-funds the charge and `lock_cash` faults → stranded
+/// residual. This drops every buyer whose `max_price` cannot cover its apportioned landed
+/// charge, recomputes, and repeats to a **fixpoint** (dropping one buyer raises the
+/// survivors' per-unit share via prorata, which can newly disqualify a marginal survivor —
+/// a single pass would not be order-independent). Pure, deterministic (largest-remainder
+/// prorata/apportion, ascending index, i64/i128), bounded by `buyers.len()` passes.
+/// Returns the survivors + `q_prime`; `q_prime == 0` ⇒ skip the edge. Because this prices
+/// the charge identically to `settle_flow`, a surviving buyer can never fault `lock_cash`
+/// (its field-difference release ≥ `value(max_price_i, g_i)` ≥ `charge_i`).
+#[allow(clippy::too_many_arguments)]
+pub fn prune_unaffordable_buyers(
+    buyers: &[(EconomicActorId, i64)],
+    buyer_orders: &[OrderId],
+    max_prices: &[Money],
+    q: i64,
+    dist: i64,
+    p_src: Money,
+    config: &EconomyConfig,
+) -> Result<PrunedBuyers, EconomyError> {
+    let mut keep: Vec<usize> = (0..buyers.len()).collect();
+    loop {
+        if keep.is_empty() {
+            return Ok(PrunedBuyers {
+                buyers: Vec::new(),
+                orders: Vec::new(),
+                max_prices: Vec::new(),
+                q_prime: 0,
+            });
+        }
+        let w: Vec<i64> = keep.iter().map(|&i| buyers[i].1).collect();
+        let goods = prorata_distribute(&w, q); // Σ goods = min(q, Σw)
+        let q_prime: i64 = goods.iter().sum();
+        if q_prime <= 0 {
+            return Ok(PrunedBuyers {
+                buyers: Vec::new(),
+                orders: Vec::new(),
+                max_prices: Vec::new(),
+                q_prime: 0,
+            });
+        }
+        let dst_payment = checked_order_value(p_src, Quantity(q_prime))?.checked_add(
+            transport_cost(dist, Quantity(q_prime), config.transport_cost_per_tile_unit)?,
+        )?;
+        let charge = apportion_cash(&goods, dst_payment.0);
+        let mut next_keep: Vec<usize> = Vec::new();
+        for (j, &i) in keep.iter().enumerate() {
+            let released = checked_order_value(max_prices[i], Quantity(goods[j]))?;
+            if released.0 >= charge[j] {
+                next_keep.push(i);
+            }
+        }
+        if next_keep.len() == keep.len() {
+            return Ok(PrunedBuyers {
+                buyers: keep.iter().map(|&i| buyers[i]).collect(),
+                orders: keep.iter().map(|&i| buyer_orders[i]).collect(),
+                max_prices: keep.iter().map(|&i| max_prices[i]).collect(),
+                q_prime,
+            });
+        }
+        keep = next_keep;
+    }
+}
+
 /// STEP G: settle ONE accepted flow against the (cloned) books and write the
 /// discovered prices back into `market_goods`. Aggregate-floor cash scheme: one
 /// `src_revenue` floor; `dst_payment = src_revenue + transport` (transport is
@@ -438,6 +621,8 @@ pub fn settle_flow(
     eff_supply_dst: i64,
     config: &EconomyConfig,
     current_tick: u64,
+    preserve_price_src: bool,
+    preserve_price_dst: bool,
 ) -> Result<EconomyEvent, EconomyError> {
     let q = flow.q;
     let src_revenue = checked_order_value(flow.p_src, Quantity(q))?;
@@ -499,6 +684,7 @@ pub fn settle_flow(
         (eff_demand_src - q).max(0),
         (eff_supply_src - q).max(0),
         current_tick,
+        preserve_price_src,
     )?;
     if flow.dst != flow.src {
         write_back(
@@ -512,6 +698,7 @@ pub fn settle_flow(
             (eff_demand_dst - q).max(0),
             (eff_supply_dst - q).max(0),
             current_tick,
+            preserve_price_dst,
         )?;
     }
 
@@ -532,7 +719,8 @@ pub fn settle_flow(
 /// Intentionally does NOT touch `dirty`. Returns `Err(Overflow)` rather than
 /// wrapping the accumulator, matching the checked-everywhere discipline of the
 /// rest of this module (and `auction.rs`).
-fn write_back(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_back(
     market_goods: &mut MarketGoods,
     key: MarketGoodKey,
     price: Money,
@@ -540,12 +728,19 @@ fn write_back(
     unmet_demand: i64,
     unsold_supply: i64,
     current_tick: u64,
+    preserve_price: bool,
 ) -> Result<(), EconomyError> {
     let state = market_goods
         .0
         .entry(key)
         .or_insert_with(|| MarketGoodState::new(key));
-    state.last_settlement_price = price;
+    // For an ACTIVE endpoint the auction discovered `last_settlement_price` this tick and
+    // is authoritative (user decision a) — the flow must not clobber it. Dormant
+    // endpoints keep writing the flow-discovered price. traded/unmet/unsold ALWAYS update
+    // (the post-drain residual is the reality #71's shopper projection reads).
+    if !preserve_price {
+        state.last_settlement_price = price;
+    }
     state.traded_qty_last_tick = state.traded_qty_last_tick.checked_add(Quantity(traded))?;
     state.unmet_demand_last_tick = Quantity(unmet_demand);
     state.unsold_supply_last_tick = Quantity(unsold_supply);
@@ -553,7 +748,66 @@ fn write_back(
     Ok(())
 }
 
-/// STEP H/I + assembly: the per-interval macro flow over all dormant markets.
+/// S3: release the active endpoints' residual locks into available on the per-edge
+/// SCRATCH clones, so `settle_flow` (which consumes/charges from available) can move
+/// them. BOTH sides drain the **exact per-entry settle share** so released-per-actor ==
+/// consumed/charged-per-actor (no per-actor mismatch). Ask side: each seller's share
+/// `prorata(seller_weights, q')[i]` from its backing ask (`seller_orders[i]`). Bid side:
+/// each surviving buyer's share `prorata(buyer_weights, q')[i]` from its backing bid
+/// (`buyer_orders[i]`). One OrderId per entry (DECISION-1), index-aligned to the
+/// `sellers`/`buyers` weight lists `settle_flow` is given, so the drain and the settle
+/// reference the identical quantities. Dormant endpoints (`!active`) are no-ops (their
+/// goods/cash are already available from pools).
+#[allow(clippy::too_many_arguments)]
+fn drain_active_endpoints(
+    scratch_orders: &mut OrderBook,
+    scratch_inventory: &mut InventoryBook,
+    scratch_accounts: &mut AccountBook,
+    eflow: &PlannedFlow,
+    sellers: &[(EconomicActorId, i64)],
+    seller_orders: &[OrderId],
+    buyers: &[(EconomicActorId, i64)],
+    buyer_orders: &[OrderId],
+    src_active: bool,
+    dst_active: bool,
+) -> Result<(), EconomyError> {
+    let q_prime = eflow.q;
+    if src_active {
+        // Mirror settle_flow's seller prorata (macro_flow `prorata_distribute(seller_w, q)`)
+        // so each seller's released goods == the goods settle will consume from it. A
+        // greedy OrderId walk would release a DIFFERENT per-actor split than the prorata
+        // consume and fault `inventory.consume` for q' < Σ supply with >= 2 asks.
+        let seller_w: Vec<i64> = sellers.iter().map(|(_, w)| *w).collect();
+        let seller_goods = prorata_distribute(&seller_w, q_prime);
+        for (i, &oid) in seller_orders.iter().enumerate() {
+            if seller_goods[i] > 0 {
+                drain_residual_ask(
+                    scratch_orders,
+                    scratch_inventory,
+                    oid,
+                    Quantity(seller_goods[i]),
+                )?;
+            }
+        }
+    }
+    if dst_active {
+        let buyer_w: Vec<i64> = buyers.iter().map(|(_, w)| *w).collect();
+        let buyer_goods = prorata_distribute(&buyer_w, q_prime);
+        for (i, &oid) in buyer_orders.iter().enumerate() {
+            if buyer_goods[i] > 0 {
+                drain_residual_bid(
+                    scratch_orders,
+                    scratch_accounts,
+                    oid,
+                    Quantity(buyer_goods[i]),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// STEP H/I + assembly: the per-interval macro flow over dormant AND active markets.
 /// Interval-gated, conditional-clone (no clone on a quiescent interval), atomic
 /// clone-validate-apply with per-edge settle-fault isolation, then commit + emit.
 #[allow(clippy::too_many_arguments)]
@@ -571,6 +825,8 @@ pub fn run_macro_flow_at_tick(
     current_tick: u64,
     shipments: &mut crate::economy::FlowShipments,
     next_shipment_id: &mut crate::economy::NextShipmentId,
+    orders: &mut crate::economy::OrderBook,
+    next_order_id: &mut crate::economy::NextOrderId,
 ) -> Result<(), EconomyError> {
     if config.macro_flow_interval_ticks == 0
         || !current_tick.is_multiple_of(config.macro_flow_interval_ticks)
@@ -589,6 +845,8 @@ pub fn run_macro_flow_at_tick(
         market_goods,
         dormant,
         config,
+        &*orders,
+        config.drain_active_residual,
     )?;
     let buckets: BTreeMap<MarketGoodKey, MacroBucket> = buckets
         .into_iter()
@@ -605,6 +863,11 @@ pub fn run_macro_flow_at_tick(
     let mut next_accounts = accounts.clone();
     let mut next_inventory = inventory.clone();
     let mut next_goods = market_goods.clone();
+    // S1: carry the OrderBook + id counter through the SAME atomic boundary so S3's
+    // residual-drain mutation lands inside the per-edge fault isolation below, not
+    // outside it. S1 mutates neither — both round-trip unchanged (guarded by test).
+    let mut next_orders = orders.clone();
+    let next_oid = *next_order_id;
     let mut events: Vec<EconomyEvent> = Vec::new();
 
     // Per-market effective demand/supply for the write-back residuals (bucket-time).
@@ -616,34 +879,97 @@ pub fn run_macro_flow_at_tick(
     };
 
     for flow in &flows {
-        // Recover the seller/buyer weight lists for this flow's endpoints.
-        let sellers = buckets
-            .get(&MarketGoodKey {
-                market: flow.src,
-                good: flow.good,
-            })
-            .map(|b| b.sellers.clone())
+        let src_bucket = buckets.get(&MarketGoodKey {
+            market: flow.src,
+            good: flow.good,
+        });
+        let dst_bucket = buckets.get(&MarketGoodKey {
+            market: flow.dst,
+            good: flow.good,
+        });
+        let sellers = src_bucket.map(|b| b.sellers.clone()).unwrap_or_default();
+        let seller_orders = src_bucket
+            .map(|b| b.seller_orders.clone())
             .unwrap_or_default();
-        let buyers = buckets
-            .get(&MarketGoodKey {
-                market: flow.dst,
-                good: flow.good,
-            })
-            .map(|b| b.buyers.clone())
-            .unwrap_or_default();
+        let src_active = src_bucket.map(|b| b.intra_cleared).unwrap_or(false);
+        let dst_active = dst_bucket.map(|b| b.intra_cleared).unwrap_or(false);
         let (eff_demand_src, eff_supply_src) = effective(flow.src, flow.good);
-        let (eff_demand_dst, eff_supply_dst) = effective(flow.dst, flow.good);
+        let (eff_demand_dst_pre, eff_supply_dst) = effective(flow.dst, flow.good);
 
-        // STEP H fault isolation: settle into a scratch clone; fold back only on
-        // success, else emit MarketClearFailed and skip (books byte-identical).
+        // Stage-2 affordability prune (active dst only): drop residual bids whose
+        // max_price cannot cover the landed charge; recompute q'. buyers/buyer_orders/
+        // q'/eff_demand_dst then reflect the SURVIVING set (DECISION-2). A dormant dst
+        // keeps the bucket buyers, q'=flow.q, eff_demand_dst=bucket-time demand — so the
+        // dormant path is byte-identical to pre-S3.
+        let (buyers, buyer_orders, q_prime, eff_demand_dst) = if dst_active {
+            let b = dst_bucket.expect("dst_active implies a dst bucket");
+            let pruned = match prune_unaffordable_buyers(
+                &b.buyers,
+                &b.buyer_orders,
+                &b.buyer_max_prices,
+                flow.q,
+                flow.dist,
+                flow.p_src,
+                config,
+            ) {
+                Ok(p) => p,
+                Err(reason) => {
+                    events.push(EconomyEvent::MarketClearFailed {
+                        market: flow.dst,
+                        good: flow.good,
+                        reason,
+                    });
+                    continue;
+                }
+            };
+            let eff: i64 = pruned.buyers.iter().map(|(_, q)| *q).sum();
+            (pruned.buyers, pruned.orders, pruned.q_prime, eff)
+        } else {
+            let buyers = dst_bucket.map(|b| b.buyers.clone()).unwrap_or_default();
+            (buyers, Vec::new(), flow.q, eff_demand_dst_pre)
+        };
+
+        if q_prime <= 0 {
+            continue; // no affordable demand survived -> skip the edge entirely.
+        }
+
+        // q' threads to the drain, settle, write-back residual, and the shipment.
+        let mut eflow = flow.clone();
+        eflow.q = q_prime;
+
+        // STEP H fault isolation: drain active endpoints + settle into scratch clones;
+        // fold back only on success, else emit MarketClearFailed and drop the scratch
+        // (books + OrderBook byte-identical).
         let mut scratch_accounts = next_accounts.clone();
         let mut scratch_inventory = next_inventory.clone();
         let mut scratch_goods = next_goods.clone();
+        let mut scratch_orders = next_orders.clone();
+
+        if let Err(reason) = drain_active_endpoints(
+            &mut scratch_orders,
+            &mut scratch_inventory,
+            &mut scratch_accounts,
+            &eflow,
+            &sellers,
+            &seller_orders,
+            &buyers,
+            &buyer_orders,
+            src_active,
+            dst_active,
+        ) {
+            events.push(EconomyEvent::MarketClearFailed {
+                market: flow.dst,
+                good: flow.good,
+                reason,
+            });
+            continue;
+        }
+
         match settle_flow(
             &mut scratch_accounts,
             &mut scratch_inventory,
             &mut scratch_goods,
-            flow,
+            &eflow,
             &sellers,
             &buyers,
             eff_demand_src,
@@ -652,23 +978,26 @@ pub fn run_macro_flow_at_tick(
             eff_supply_dst,
             config,
             current_tick,
+            src_active,
+            dst_active,
         ) {
             Ok(event) => {
                 next_accounts = scratch_accounts;
                 next_inventory = scratch_inventory;
                 next_goods = scratch_goods;
-                if flow.src != flow.dst {
+                next_orders = scratch_orders;
+                if eflow.src != eflow.dst {
                     let id = next_shipment_id.next();
                     let travel_ticks =
-                        crate::economy::flow_shipments::shipment_travel_ticks(flow.dist, config);
+                        crate::economy::flow_shipments::shipment_travel_ticks(eflow.dist, config);
                     shipments.0.insert(
                         id,
                         crate::economy::FlowShipment {
                             id,
-                            from_market: flow.src,
-                            to_market: flow.dst,
-                            good: flow.good,
-                            qty: crate::economy::Quantity(flow.q),
+                            from_market: eflow.src,
+                            to_market: eflow.dst,
+                            good: eflow.good,
+                            qty: crate::economy::Quantity(eflow.q),
                             start_tick: current_tick,
                             travel_ticks,
                         },
@@ -689,6 +1018,8 @@ pub fn run_macro_flow_at_tick(
     *accounts = next_accounts;
     *inventory = next_inventory;
     *market_goods = next_goods;
+    *orders = next_orders;
+    *next_order_id = next_oid;
     ledger.0.extend(events);
     Ok(())
 }

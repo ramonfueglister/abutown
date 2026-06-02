@@ -2,11 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::MarketDistances;
 use crate::economy::macro_flow::synthetic_price;
-use crate::economy::macro_flow::{Candidate, MacroBucket, build_candidates, build_macro_buckets};
+use crate::economy::macro_flow::{
+    Candidate, MacroBucket, build_candidates, build_macro_buckets, plan_flows,
+    prune_unaffordable_buyers,
+};
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD, GoodId,
-    InventoryBook, MarketGoodKey, MarketGoods, MarketId, Money, Quantity, SettlementPolicy,
-    SupplyPool, SupplyPools,
+    AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD,
+    GoodId, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money, OrderBook,
+    OrderId, Quantity, SettlementPolicy, SupplyPool, SupplyPools,
 };
 
 // --- Section-C schedule-level harness (Task 13): reused BY NAME by Tasks 14-19. ---
@@ -32,6 +35,10 @@ fn bucket(price: Money, buyers: Vec<(u64, i64)>, sellers: Vec<(u64, i64)>) -> Ma
             .into_iter()
             .map(|(a, q)| (EconomicActorId(a), q))
             .collect(),
+        intra_cleared: false,
+        buyer_orders: Vec::new(),
+        buyer_max_prices: Vec::new(),
+        seller_orders: Vec::new(),
     }
 }
 
@@ -132,8 +139,18 @@ fn build_macro_buckets_caps_effective_demand_and_supply() {
     let mg = MarketGoods::default(); // never auctioned -> prior = default ref price
     let cfg = EconomyConfig::default();
 
-    let buckets =
-        build_macro_buckets(&accounts, &inventory, &demand, &supply, &mg, &dormant, &cfg).unwrap();
+    let buckets = build_macro_buckets(
+        &accounts,
+        &inventory,
+        &demand,
+        &supply,
+        &mg,
+        &dormant,
+        &cfg,
+        &crate::economy::OrderBook::default(),
+        false,
+    )
+    .unwrap();
     let key = MarketGoodKey {
         market,
         good: GOOD_FOOD,
@@ -175,6 +192,8 @@ fn build_macro_buckets_skips_zero_price_band() {
         &MarketGoods::default(),
         &dormant,
         &EconomyConfig::default(),
+        &crate::economy::OrderBook::default(),
+        false,
     )
     .unwrap();
     assert!(
@@ -609,6 +628,8 @@ fn settle_flow_conserves_and_credits_operator_exactly() {
         /*eff_supply_dst=*/ 0,
         &cfg,
         /*current_tick=*/ 10,
+        false,
+        false,
     )
     .unwrap();
     accounts = next_accounts;
@@ -716,6 +737,8 @@ fn settle_flow_n_buyers_aggregate_floor_conserves() {
         0,
         &cfg,
         10,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -813,6 +836,8 @@ fn settle_flow_conserves_when_per_unit_cash_exceeds_one_scale_unit() {
         0,
         &cfg,
         10,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -909,6 +934,8 @@ fn settle_flow_default_reference_price_with_transport_conserves() {
         0,
         &cfg,
         10,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -989,6 +1016,8 @@ fn settle_flow_self_edge_clears_locally_transport_zero() {
         40,
         &cfg,
         0,
+        false,
+        false,
     )
     .unwrap();
     accounts = na;
@@ -1114,6 +1143,8 @@ fn macro_flow_only_fires_on_interval() {
         3,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
     assert!(led.0.is_empty(), "no flow off-interval");
@@ -1132,6 +1163,8 @@ fn macro_flow_only_fires_on_interval() {
         10,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
     assert!(
@@ -1167,6 +1200,8 @@ fn macro_flow_idle_interval_is_a_noop() {
         0,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
     assert_eq!(acc, before_acc, "books byte-identical on idle interval");
@@ -1310,6 +1345,8 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
         0,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
     .unwrap();
 
@@ -1478,6 +1515,8 @@ fn run_flow(s: &mut DormantScenario, tick: u64) -> Result<(), EconomyError> {
         tick,
         &mut crate::economy::FlowShipments::default(),
         &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
     )
 }
 
@@ -2502,4 +2541,862 @@ fn macro_flow_replays_across_restart() {
         tail(&restart),
         "ledger tail identical across restart"
     );
+}
+
+#[test]
+fn drain_active_residual_defaults_on() {
+    // S3 activated the coupling: active/observed markets now join the inter-market flow
+    // by default. (S1/S2 shipped this flag FALSE; S3 flipped it.)
+    assert!(EconomyConfig::default().drain_active_residual);
+}
+
+#[test]
+fn macro_flow_threads_orderbook_and_counter_unchanged() {
+    // S1 behavior-neutral threading: a populated OrderBook + a non-zero NextOrderId
+    // ride through the macro-flow atomic boundary UNTOUCHED, while the dormant flow
+    // still executes its cross-edge. Guards the clone topology S3 will mutate.
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 4, Money(50));
+
+    // Arbitrary residual orders the dormant-flow path must ignore entirely in S1.
+    let mut orders = crate::economy::OrderBook::default();
+    orders.bids.insert(
+        crate::economy::OrderId(7),
+        crate::economy::Bid {
+            id: crate::economy::OrderId(7),
+            owner: EconomicActorId(99),
+            market: MarketId(9_001),
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            max_price: Money(1_500),
+            cash_locked_remaining: Money(7_500),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.asks.insert(
+        crate::economy::OrderId(8),
+        crate::economy::Ask {
+            id: crate::economy::OrderId(8),
+            owner: EconomicActorId(98),
+            market: MarketId(9_002),
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(5),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let mut next_oid = crate::economy::NextOrderId(42);
+
+    let orders_before = orders.clone();
+    let oid_before = next_oid;
+
+    run_macro_flow_at_tick(
+        &mut s.accounts,
+        &mut s.inventory,
+        &mut s.ledger,
+        &s.demand,
+        &s.supply,
+        &mut s.market_goods,
+        &s.dirty,
+        &s.dormant,
+        &s.distances,
+        &s.config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut next_oid,
+    )
+    .unwrap();
+
+    assert_eq!(
+        orders, orders_before,
+        "OrderBook must round-trip unchanged in S1"
+    );
+    assert_eq!(
+        next_oid, oid_before,
+        "NextOrderId must round-trip unchanged in S1"
+    );
+    assert!(
+        s.ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, crate::economy::EconomyEvent::MacroFlow { .. })),
+        "the dormant flow still executed its cross-edge while the OrderBook was carried through"
+    );
+}
+
+/// S3 active-bucket constructor: one entry per residual order (DECISION-1).
+/// `buyers`: (actor, qty_remaining, order_id, max_price); `sellers`: (actor, qty_remaining, order_id).
+fn active_bucket(
+    price: Money,
+    buyers: Vec<(u64, i64, u64, i64)>,
+    sellers: Vec<(u64, i64, u64)>,
+) -> MacroBucket {
+    MacroBucket {
+        price,
+        buyers: buyers
+            .iter()
+            .map(|(a, q, _, _)| (EconomicActorId(*a), *q))
+            .collect(),
+        sellers: sellers
+            .iter()
+            .map(|(a, q, _)| (EconomicActorId(*a), *q))
+            .collect(),
+        intra_cleared: true,
+        buyer_orders: buyers.iter().map(|(_, _, o, _)| OrderId(*o)).collect(),
+        buyer_max_prices: buyers.iter().map(|(_, _, _, mp)| Money(*mp)).collect(),
+        seller_orders: sellers.iter().map(|(_, _, o)| OrderId(*o)).collect(),
+    }
+}
+
+#[test]
+fn build_candidates_suppresses_active_self_edge() {
+    // A both-sided NON-CROSSING active market: residual bids (D) AND residual asks (S)
+    // the auction left unmatched. D==S -> classify_bucket matched>0, but the self-edge
+    // must be SUPPRESSED (re-clearing units the auction refused on price = double-clear).
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
+    let mut active = BTreeMap::new();
+    active.insert(
+        key,
+        active_bucket(Money(1_000), vec![(10, 5, 1, 900)], vec![(20, 5, 2)]),
+    );
+    let cands = build_candidates(
+        &active,
+        &MarketDistances(BTreeMap::new()),
+        &EconomyConfig::default(),
+    )
+    .unwrap();
+    assert!(
+        cands.iter().all(|c| c.src != c.dst),
+        "active bucket emits no self-edge"
+    );
+
+    // Control: the SAME quantities as a DORMANT bucket DO emit exactly one self-edge —
+    // proving it is the intra_cleared flag (not the quantities) that suppressed it.
+    let mut dormant = BTreeMap::new();
+    dormant.insert(key, bucket(Money(1_000), vec![(10, 5)], vec![(20, 5)]));
+    let dcands = build_candidates(
+        &dormant,
+        &MarketDistances(BTreeMap::new()),
+        &EconomyConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        dcands.iter().filter(|c| c.src == c.dst).count(),
+        1,
+        "dormant bucket keeps its self-edge"
+    );
+}
+
+#[test]
+fn plan_flows_forces_zero_matched_for_active_bucket() {
+    // Defense-in-depth: even if a self-edge Candidate reaches plan_flows for an active
+    // bucket, the forced matched=0 budget makes it plan no flow.
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
+    let mut active = BTreeMap::new();
+    active.insert(
+        key,
+        active_bucket(Money(1_000), vec![(10, 5, 1, 900)], vec![(20, 5, 2)]),
+    );
+    let self_cand = Candidate {
+        good: GOOD_FOOD,
+        src: MarketId(1),
+        dst: MarketId(1),
+        q_cap: 5,
+        p_src: Money(1_000),
+        p_dst: Money(1_000),
+        transport_total: Money::ZERO,
+        net_gain: 0,
+        dist: 0,
+    };
+    let flows = plan_flows(&[self_cand], &active);
+    assert!(
+        flows.is_empty(),
+        "active bucket's forced matched=0 plans no self-flow"
+    );
+}
+
+#[test]
+fn prune_keeps_single_affordable_buyer() {
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(
+        &[(EconomicActorId(1), 5)],
+        &[OrderId(1)],
+        &[Money(2_000)],
+        5,
+        0,
+        Money(1_000),
+        &cfg,
+    )
+    .unwrap();
+    assert_eq!(r.buyers, vec![(EconomicActorId(1), 5)]);
+    assert_eq!(r.orders, vec![OrderId(1)]);
+    assert_eq!(r.q_prime, 5);
+}
+
+#[test]
+fn prune_drops_single_unaffordable_buyer_to_empty() {
+    // max_price 500 < landed p_dst 1000 -> value(500,5)=2 < charge 5 -> dropped.
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(
+        &[(EconomicActorId(1), 5)],
+        &[OrderId(1)],
+        &[Money(500)],
+        5,
+        0,
+        Money(1_000),
+        &cfg,
+    )
+    .unwrap();
+    assert!(r.buyers.is_empty());
+    assert_eq!(
+        r.q_prime, 0,
+        "below-price buyer dropped -> q'==0 -> edge skipped"
+    );
+}
+
+#[test]
+fn prune_fixpoint_drops_unaffordable_then_stabilizes() {
+    // 3 bids; C (max 500) unaffordable at p_dst 1000 -> dropped pass 1; A,B (max 2000)
+    // stable pass 2 with the recomputed q' (15 -> 10 after C leaves).
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(
+        &[
+            (EconomicActorId(1), 5),
+            (EconomicActorId(2), 5),
+            (EconomicActorId(3), 5),
+        ],
+        &[OrderId(1), OrderId(2), OrderId(3)],
+        &[Money(2_000), Money(2_000), Money(500)],
+        15,
+        0,
+        Money(1_000),
+        &cfg,
+    )
+    .unwrap();
+    assert_eq!(
+        r.buyers,
+        vec![(EconomicActorId(1), 5), (EconomicActorId(2), 5)]
+    );
+    assert_eq!(r.orders, vec![OrderId(1), OrderId(2)]);
+    assert_eq!(r.max_prices, vec![Money(2_000), Money(2_000)]);
+    assert_eq!(r.q_prime, 10, "q' recomputed over survivors after the drop");
+}
+
+#[test]
+fn prune_empty_input_is_empty() {
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(&[], &[], &[], 0, 0, Money(1_000), &cfg).unwrap();
+    assert!(r.buyers.is_empty());
+    assert_eq!(r.q_prime, 0);
+}
+
+#[test]
+fn prune_is_deterministic() {
+    let cfg = EconomyConfig::default();
+    let run = || {
+        prune_unaffordable_buyers(
+            &[
+                (EconomicActorId(1), 5),
+                (EconomicActorId(2), 5),
+                (EconomicActorId(3), 5),
+            ],
+            &[OrderId(1), OrderId(2), OrderId(3)],
+            &[Money(2_000), Money(2_000), Money(500)],
+            15,
+            0,
+            Money(1_000),
+            &cfg,
+        )
+        .unwrap()
+    };
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn build_macro_buckets_active_sources_all_residual_orders() {
+    // ACTIVE (non-dormant) market m: two residual bids + one residual ask. ALL residual
+    // bids are admitted (no build-time affordability filter — Stage-2 prunes per-edge
+    // against the actual landed charge). The bucket is sourced from qty_remaining (NOT
+    // available), priced at the auction's last_settlement_price (authoritative, 1200 —
+    // distinct from the default ref 1000), intra_cleared=true, provenance in OrderId order.
+    let m = MarketId(1);
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let mut mg = MarketGoods::default();
+    let mut state = MarketGoodState::new(key);
+    state.last_settlement_price = Money(1_200);
+    mg.0.insert(key, state);
+
+    let mut orders = OrderBook::default();
+    orders.bids.insert(
+        OrderId(1),
+        Bid {
+            id: OrderId(1),
+            owner: EconomicActorId(10),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(3),
+        Bid {
+            id: OrderId(3),
+            owner: EconomicActorId(11),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(4),
+            max_price: Money(1_100), // below the local price 1200, but still admitted (no build-time filter)
+            cash_locked_remaining: Money(4),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.asks.insert(
+        OrderId(2),
+        Ask {
+            id: OrderId(2),
+            owner: EconomicActorId(20),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(7),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(7),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+
+    let buckets = build_macro_buckets(
+        &AccountBook::default(),
+        &InventoryBook::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mg,
+        &BTreeSet::new(),
+        &EconomyConfig::default(),
+        &orders,
+        true,
+    )
+    .unwrap();
+
+    let b = &buckets[&key];
+    assert!(b.intra_cleared);
+    assert_eq!(
+        b.price,
+        Money(1_200),
+        "active price = auction last_settlement_price (not the default ref)"
+    );
+    assert_eq!(
+        b.buyers,
+        vec![(EconomicActorId(10), 5), (EconomicActorId(11), 4)],
+        "all residual bids admitted (Stage-2 prunes per-edge, not at build time)"
+    );
+    assert_eq!(b.buyer_orders, vec![OrderId(1), OrderId(3)]);
+    assert_eq!(b.buyer_max_prices, vec![Money(2_000), Money(1_100)]);
+    assert_eq!(
+        b.sellers,
+        vec![(EconomicActorId(20), 7)],
+        "seller weight = qty_remaining (no available cap on the active path)"
+    );
+    assert_eq!(b.seller_orders, vec![OrderId(2)]);
+}
+
+#[test]
+fn build_macro_buckets_flag_false_ignores_orders() {
+    let m = MarketId(1);
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(2),
+        Ask {
+            id: OrderId(2),
+            owner: EconomicActorId(20),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(7),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(7),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let buckets = build_macro_buckets(
+        &AccountBook::default(),
+        &InventoryBook::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &MarketGoods::default(),
+        &BTreeSet::new(),
+        &EconomyConfig::default(),
+        &orders,
+        false, // flag OFF -> dark
+    )
+    .unwrap();
+    assert!(
+        !buckets.contains_key(&key),
+        "flag off -> residual orders produce no active bucket"
+    );
+}
+
+#[test]
+fn write_back_preserves_active_price_but_updates_traded_and_residual() {
+    let key = MarketGoodKey {
+        market: MarketId(1),
+        good: GOOD_FOOD,
+    };
+    let mut mg = MarketGoods::default();
+    let mut state = MarketGoodState::new(key);
+    state.last_settlement_price = Money(1_234); // auction-discovered, authoritative
+    mg.0.insert(key, state);
+
+    // preserve_price = true (active endpoint): price KEPT; traded/unmet/unsold updated.
+    crate::economy::macro_flow::write_back(&mut mg, key, Money(999), 5, 3, 2, 7, true).unwrap();
+    let s = &mg.0[&key];
+    assert_eq!(
+        s.last_settlement_price,
+        Money(1_234),
+        "active price preserved — auction authoritative"
+    );
+    assert_eq!(s.traded_qty_last_tick, Quantity(5));
+    assert_eq!(s.unmet_demand_last_tick, Quantity(3));
+    assert_eq!(s.unsold_supply_last_tick, Quantity(2));
+    assert_eq!(s.last_cleared_tick, 7);
+
+    // preserve_price = false (dormant endpoint): price OVERWRITTEN; traded accumulates.
+    crate::economy::macro_flow::write_back(&mut mg, key, Money(999), 2, 1, 0, 8, false).unwrap();
+    let s = &mg.0[&key];
+    assert_eq!(
+        s.last_settlement_price,
+        Money(999),
+        "dormant price overwritten by the flow"
+    );
+    assert_eq!(s.traded_qty_last_tick, Quantity(7), "5 + 2 accumulated");
+    assert_eq!(s.unmet_demand_last_tick, Quantity(1));
+}
+
+#[test]
+fn active_flow_conserves_and_drains_residual_orders() {
+    // Two ACTIVE markets: m_a (cheap, last_settlement 500) holds a residual ASK; m_b
+    // (dear, 2000) holds a residual BID. With the flag on, the flow drains both residual
+    // locks into the per-edge scratch, moves the goods m_a->m_b, and settles — charging
+    // the buyer src_revenue+transport (value(500,10)+0 = 5), which the max-2000 bid easily
+    // affords. Asserts: conservation (money + goods), both orders fully drained, buyer got
+    // the goods, seller got paid. Exercises the whole active path end-to-end.
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+
+    let mut inventory = InventoryBook::default();
+    inventory
+        .deposit(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+    inventory
+        .lock_goods(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+
+    let mut accounts = AccountBook::default();
+    accounts.deposit(EconomicActorId(60), Money(100)).unwrap();
+    accounts.lock_cash(EconomicActorId(60), Money(20)).unwrap(); // value(2000,10)=20
+
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(1),
+        Ask {
+            id: OrderId(1),
+            owner: EconomicActorId(50),
+            market: m_a,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(2),
+        Bid {
+            id: OrderId(2),
+            owner: EconomicActorId(60),
+            market: m_b,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(20),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+
+    let mut mg = MarketGoods::default();
+    for (m, p) in [(m_a, 500_i64), (m_b, 2_000)] {
+        let key = MarketGoodKey {
+            market: m,
+            good: GOOD_FOOD,
+        };
+        let mut st = MarketGoodState::new(key);
+        st.last_settlement_price = Money(p);
+        mg.0.insert(key, st);
+    }
+
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), 4);
+    distances.0.insert((m_b, m_a), 4);
+
+    let config = EconomyConfig {
+        drain_active_residual: true,
+        ..Default::default()
+    };
+
+    let money_before = accounts.total_money().unwrap();
+    let good_before = inventory.total_good(GOOD_FOOD).unwrap();
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut crate::economy::TradeLedger::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &BTreeSet::new(),
+        &distances,
+        &config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut crate::economy::NextOrderId::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        money_before,
+        "money conserved across the active-market flow"
+    );
+    assert_eq!(
+        inventory.total_good(GOOD_FOOD).unwrap(),
+        good_before,
+        "goods conserved"
+    );
+    assert!(orders.asks.is_empty(), "src residual ask fully drained");
+    assert!(orders.bids.is_empty(), "dst residual bid fully drained");
+    assert_eq!(
+        inventory.balance(EconomicActorId(60), GOOD_FOOD).available,
+        Quantity(10),
+        "buyer received the imported goods"
+    );
+    assert!(
+        accounts.account(EconomicActorId(50)).available.0 > 0,
+        "seller was paid"
+    );
+}
+
+#[test]
+fn active_residual_with_no_cross_edge_is_not_drained() {
+    // A lone active market with a residual ask and NO other market to export to: the flow
+    // finds no profitable cross-edge, so the ask is NOT drained — it stays for
+    // expire_orders. Guards the drain/expire PARTITION (§2.3): the flow consumes only
+    // residuals it actually moves; everything else is left for normal expiry.
+    let m = MarketId(1);
+    let mut inventory = InventoryBook::default();
+    inventory
+        .deposit(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+    inventory
+        .lock_goods(EconomicActorId(50), GOOD_FOOD, Quantity(10))
+        .unwrap();
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(1),
+        Ask {
+            id: OrderId(1),
+            owner: EconomicActorId(50),
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(10),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let mut mg = MarketGoods::default();
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let mut st = MarketGoodState::new(key);
+    st.last_settlement_price = Money(500);
+    mg.0.insert(key, st);
+    let config = EconomyConfig {
+        drain_active_residual: true,
+        ..Default::default()
+    };
+    let orders_before = orders.clone();
+    let inv_before = inventory.clone();
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut AccountBook::default(),
+        &mut inventory,
+        &mut crate::economy::TradeLedger::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &BTreeSet::new(),
+        &MarketDistances(BTreeMap::new()),
+        &config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut crate::economy::NextOrderId::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        orders, orders_before,
+        "no cross-edge -> residual ask NOT drained (left for expire_orders)"
+    );
+    assert_eq!(inventory, inv_before, "inventory untouched");
+}
+
+#[test]
+fn build_macro_buckets_active_one_entry_per_order_not_per_owner() {
+    // One owner holds TWO residual bids at different max_price on the same (market,good).
+    // DECISION-1: the active bucket carries one entry PER OrderId (not merged per owner),
+    // so each row's max_price drives its own affordability test + per-OrderId drain.
+    let m = MarketId(1);
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    let owner = EconomicActorId(10);
+    let mut orders = OrderBook::default();
+    orders.bids.insert(
+        OrderId(1),
+        Bid {
+            id: OrderId(1),
+            owner,
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(3),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(6), // value(2000,3)=6
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(2),
+        Bid {
+            id: OrderId(2),
+            owner,
+            market: m,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(4),
+            max_price: Money(1_500),
+            cash_locked_remaining: Money(6), // value(1500,4)=6
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    let buckets = build_macro_buckets(
+        &AccountBook::default(),
+        &InventoryBook::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &MarketGoods::default(),
+        &BTreeSet::new(),
+        &EconomyConfig::default(),
+        &orders,
+        true,
+    )
+    .unwrap();
+    let b = &buckets[&key];
+    assert_eq!(
+        b.buyers,
+        vec![(owner, 3), (owner, 4)],
+        "two entries for the SAME owner (one per OrderId)"
+    );
+    assert_eq!(b.buyer_orders, vec![OrderId(1), OrderId(2)]);
+    assert_eq!(
+        b.buyer_max_prices,
+        vec![Money(2_000), Money(1_500)],
+        "per-row max_price preserved (not collapsed to one per owner)"
+    );
+}
+
+#[test]
+fn active_multi_ask_partial_export_settles_not_faults() {
+    // Seller-side regression (the S3 review blocker): an active src with TWO asks (distinct
+    // owners, qty 3 and 7) exports to an active dst whose deficit (5) is BELOW the src
+    // surplus (10), so q'=5 < Σ supply. A greedy OrderId-order ask drain would release a
+    // different per-owner split than settle_flow's prorata consume -> InsufficientGoods ->
+    // MarketClearFailed. The per-entry prorata ask drain releases exactly what settle
+    // consumes, so the flow SETTLES and conserves.
+    let m_a = MarketId(1);
+    let m_b = MarketId(2);
+
+    let mut inventory = InventoryBook::default();
+    for (owner, qty) in [(50_u64, 3_i64), (51, 7)] {
+        inventory
+            .deposit(EconomicActorId(owner), GOOD_FOOD, Quantity(qty))
+            .unwrap();
+        inventory
+            .lock_goods(EconomicActorId(owner), GOOD_FOOD, Quantity(qty))
+            .unwrap();
+    }
+
+    let mut accounts = AccountBook::default();
+    accounts.deposit(EconomicActorId(60), Money(100)).unwrap();
+    accounts.lock_cash(EconomicActorId(60), Money(10)).unwrap(); // value(2000,5)=10
+
+    let mut orders = OrderBook::default();
+    orders.asks.insert(
+        OrderId(1),
+        Ask {
+            id: OrderId(1),
+            owner: EconomicActorId(50),
+            market: m_a,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(3),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(3),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.asks.insert(
+        OrderId(2),
+        Ask {
+            id: OrderId(2),
+            owner: EconomicActorId(51),
+            market: m_a,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(7),
+            min_price: Money(400),
+            goods_locked_remaining: Quantity(7),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+    orders.bids.insert(
+        OrderId(3),
+        Bid {
+            id: OrderId(3),
+            owner: EconomicActorId(60),
+            market: m_b,
+            good: GOOD_FOOD,
+            qty_remaining: Quantity(5),
+            max_price: Money(2_000),
+            cash_locked_remaining: Money(10),
+            created_tick: 0,
+            expires_tick: 100,
+        },
+    );
+
+    let mut mg = MarketGoods::default();
+    for (m, p) in [(m_a, 500_i64), (m_b, 2_000)] {
+        let key = MarketGoodKey {
+            market: m,
+            good: GOOD_FOOD,
+        };
+        let mut st = MarketGoodState::new(key);
+        st.last_settlement_price = Money(p);
+        mg.0.insert(key, st);
+    }
+    let mut distances = MarketDistances(BTreeMap::new());
+    distances.0.insert((m_a, m_b), 4);
+    distances.0.insert((m_b, m_a), 4);
+    let config = EconomyConfig {
+        drain_active_residual: true,
+        ..Default::default()
+    };
+
+    let money_before = accounts.total_money().unwrap();
+    let good_before = inventory.total_good(GOOD_FOOD).unwrap();
+    let mut ledger = crate::economy::TradeLedger::default();
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut ledger,
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &BTreeSet::new(),
+        &distances,
+        &config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut orders,
+        &mut crate::economy::NextOrderId::default(),
+    )
+    .unwrap();
+
+    assert!(
+        ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, crate::economy::EconomyEvent::MacroFlow { .. })),
+        "the multi-ask export settled (a MacroFlow event was emitted)"
+    );
+    assert!(
+        !ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, crate::economy::EconomyEvent::MarketClearFailed { .. })),
+        "no MarketClearFailed — the prorata ask drain matches settle's prorata consume"
+    );
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        money_before,
+        "money conserved"
+    );
+    assert_eq!(
+        inventory.total_good(GOOD_FOOD).unwrap(),
+        good_before,
+        "goods conserved"
+    );
+    assert_eq!(
+        inventory.balance(EconomicActorId(60), GOOD_FOOD).available,
+        Quantity(5),
+        "buyer imported the full deficit (5)"
+    );
+    let ask1 = orders.asks[&OrderId(1)].qty_remaining.0;
+    let ask2 = orders.asks[&OrderId(2)].qty_remaining.0;
+    assert_eq!(
+        ask1 + ask2,
+        5,
+        "5 units drained total across the two asks (3+7-5)"
+    );
+    assert!(
+        ask1 < 3 && ask2 < 7,
+        "both asks partially drained (prorata split, not greedy)"
+    );
+    assert!(orders.bids.is_empty(), "the bid (qty 5) fully drained");
 }

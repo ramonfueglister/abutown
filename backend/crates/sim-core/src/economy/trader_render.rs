@@ -1,8 +1,6 @@
-//! Render-only helpers turning trader state + a footway route into a world coord.
+//! Render-only helpers shared by flow shipment and shopper render paths.
 //! Pure functions; no ECS. The bridge (materialize.rs) wires these to resources.
 
-use crate::economy::traders::transport_ticks;
-use crate::economy::{EconomyConfig, Trader, TraderState};
 use crate::routing::{EdgeId, Graph};
 
 /// Concatenate the polylines of `edges` into one route polyline, dropping the
@@ -18,33 +16,6 @@ pub fn route_polyline(graph: &Graph, edges: &[EdgeId]) -> Vec<(f32, f32)> {
         out.extend_from_slice(&poly[start..]);
     }
     out
-}
-
-/// Travel progress in [0,1] for a trader, given its travel-tick budget.
-/// `Buying` => 0 (at source), `Selling` => 1 (at dest).
-pub fn leg_progress(state: &TraderState, travel: u64) -> f32 {
-    let travel = travel.max(1) as f32;
-    match state {
-        TraderState::Buying { .. } => 0.0,
-        TraderState::Selling { .. } => 1.0,
-        TraderState::ToDest { remaining } | TraderState::ToSource { remaining } => {
-            let done = travel - (*remaining as f32);
-            (done / travel).clamp(0.0, 1.0)
-        }
-    }
-}
-
-/// `Buying`/`ToDest` => outbound (source->dest); `Selling`/`ToSource` => return.
-pub fn is_outbound(state: &TraderState) -> bool {
-    matches!(
-        state,
-        TraderState::Buying { .. } | TraderState::ToDest { .. }
-    )
-}
-
-/// The travel-tick budget for a trader (so callers don't re-derive it).
-pub fn trader_travel(trader: &Trader, config: &EconomyConfig) -> u64 {
-    transport_ticks(trader.distance_tiles, config)
 }
 
 #[cfg(test)]
@@ -89,21 +60,5 @@ mod tests {
         );
         let poly = route_polyline(&graph, &[EdgeId(0), EdgeId(1)]);
         assert_eq!(poly, vec![(0.0, 0.0), (2.0, 0.0), (2.0, 3.0)]); // shared (2,0) once
-    }
-
-    #[test]
-    fn leg_progress_maps_countdown_to_unit_interval() {
-        assert_eq!(leg_progress(&TraderState::ToDest { remaining: 4 }, 4), 0.0);
-        assert_eq!(leg_progress(&TraderState::ToDest { remaining: 1 }, 4), 0.75);
-        assert_eq!(leg_progress(&TraderState::Buying { order: None }, 4), 0.0);
-        assert_eq!(leg_progress(&TraderState::Selling { order: None }, 4), 1.0);
-    }
-
-    #[test]
-    fn is_outbound_distinguishes_legs() {
-        assert!(is_outbound(&TraderState::Buying { order: None }));
-        assert!(is_outbound(&TraderState::ToDest { remaining: 2 }));
-        assert!(!is_outbound(&TraderState::Selling { order: None }));
-        assert!(!is_outbound(&TraderState::ToSource { remaining: 2 }));
     }
 }

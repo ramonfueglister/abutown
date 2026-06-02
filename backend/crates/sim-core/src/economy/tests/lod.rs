@@ -198,77 +198,6 @@ fn market_resumes_with_single_order_no_burst() {
     assert_eq!(orders.bids.len(), 1, "wake emits exactly one order");
 }
 
-use crate::economy::{
-    EconomyConfig, GOOD_TOOLS, MarketGoods, Trader, TraderState, Traders, run_traders_at_tick,
-};
-
-#[test]
-fn dormant_trader_is_frozen_and_conserves() {
-    let trader_actor = EconomicActorId(1);
-    let source = MarketId(1);
-    let dest = MarketId(2);
-
-    let mut accounts = AccountBook::default();
-    let mut inventory = InventoryBook::default();
-    let mut orders = OrderBook::default();
-    let mut ledger = TradeLedger::default();
-    let mut dirty = DirtyMarketGoods::default();
-    let mut next = NextOrderId::default();
-    let goods = MarketGoods::default();
-    let cfg = EconomyConfig::default();
-
-    accounts.deposit(trader_actor, Money(1_000_000)).unwrap();
-    let mut traders = Traders::default();
-    traders.0.insert(
-        trader_actor,
-        Trader {
-            actor: trader_actor,
-            good: GOOD_TOOLS,
-            source,
-            dest,
-            distance_tiles: 4,
-            batch_qty: Quantity(100),
-            buy_premium_bps: 500,
-            sell_discount_bps: 500,
-            order_ttl_ticks: 10,
-            state: TraderState::Buying { order: None },
-        },
-    );
-
-    let money_before = accounts.total_money();
-    let trader_before = traders.0[&trader_actor].clone();
-
-    // source market dormant -> trader frozen for many ticks
-    let dormant: BTreeSet<MarketId> = [source].into_iter().collect();
-    for tick in 0..20 {
-        run_traders_at_tick(
-            &mut accounts,
-            &mut inventory,
-            &mut orders,
-            &mut ledger,
-            &mut dirty,
-            &mut next,
-            &goods,
-            &mut traders,
-            &cfg,
-            tick,
-            &dormant,
-        )
-        .unwrap();
-    }
-
-    assert!(orders.bids.is_empty(), "frozen trader places no bids");
-    assert_eq!(
-        accounts.total_money(),
-        money_before,
-        "money conserved while frozen"
-    );
-    assert_eq!(
-        traders.0[&trader_actor].state, trader_before.state,
-        "frozen trader keeps its state",
-    );
-}
-
 use crate::economy::EconomyPlugin;
 use crate::mobility::resources::Tick;
 use crate::world::plugin::CorePlugin;
@@ -325,7 +254,9 @@ fn lod_world(
 #[test]
 #[allow(non_snake_case)]
 fn asleep_anchored_market_DOES_flow() {
-    use crate::economy::{MarketDistances, MarketGoodKey, TRANSPORT_OPERATOR};
+    use crate::economy::{
+        EconomyConfig, MarketDistances, MarketGoodKey, MarketGoods, TRANSPORT_OPERATOR,
+    };
 
     // Market A (99): the lod_world supplier sells FOOD. Market B (100): a buyer
     // demands FOOD. BOTH are anchored to ASLEEP chunks (dormant). The macro flow
@@ -501,10 +432,11 @@ fn active_to_dormant_handoff_conserves() {
     use crate::economy::{EconomyConfig, MarketDistances};
 
     // m_b starts ACTIVE with a live consumer bid (locks cash); m_a is a dormant
-    // surplus. We demote m_b's chunk to Asleep with the bid still locked, then run
-    // flow intervals through the TTL window (default 10). The locked cash is
-    // unavailable to the flow until the order expires; conservation holds every
-    // tick; released cash becomes flow-eligible after expiry.
+    // surplus. S3: while m_b is active the flow DRAINS its residual bid into available
+    // and imports goods from m_a directly — it no longer waits for the order to TTL-expire
+    // (that was the pre-S3 dormant-only behavior). We then demote m_b's chunk to Asleep
+    // and keep running. Conservation MUST hold every tick across the LOD handoff (the real
+    // atomicity guard), and the consumer ends up served.
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     CorePlugin::default().install(&mut world, &mut schedule);
@@ -583,22 +515,33 @@ fn active_to_dormant_handoff_conserves() {
         .total_good(GOOD_FOOD)
         .unwrap();
 
-    // Tick 0: m_b active -> consumer bids, cash locks. Run one tick.
+    // Tick 0: m_b active -> the consumer bids, then the flow drains that residual bid and
+    // imports goods from m_a directly. Conservation must hold.
     schedule.run(&mut world);
+    assert_eq!(
+        world.resource::<AccountBook>().total_money().unwrap(),
+        money_total,
+        "money conserved while m_b is active"
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .total_good(GOOD_FOOD)
+            .unwrap(),
+        good_total,
+        "goods conserved while m_b is active"
+    );
     {
         let mut t = world.resource_mut::<Tick>();
         t.0 += 1;
     }
-    let locked_now = world.resource::<AccountBook>().account(consumer).locked;
-    assert!(locked_now.0 > 0, "active bid locked the consumer's cash");
 
-    // Demote m_b to Asleep with the bid still live (locked).
+    // Demote m_b to Asleep and keep running through the old TTL window; conservation must
+    // hold EVERY tick across the LOD handoff (the atomicity regression guard).
     world
         .entity_mut(chunk_b)
         .remove::<ActiveChunk>()
         .insert(AsleepChunk);
-
-    // Run through the TTL window; conservation must hold every tick.
     for _ in 0..15 {
         schedule.run(&mut world);
         let m = world.resource::<AccountBook>().total_money().unwrap();
@@ -612,14 +555,14 @@ fn active_to_dormant_handoff_conserves() {
         t.0 += 1;
     }
 
-    // After the TTL window the order expired and released cash; the flow has by
-    // now had eligible (available) cash and moved goods into m_b.
+    // The consumer was served — the flow moved goods into m_b (while active via the
+    // residual-bid drain, and via the dormant-pool path after demotion).
     let consumer_goods = world
         .resource::<InventoryBook>()
         .balance(consumer, GOOD_FOOD)
         .available;
     assert!(
         consumer_goods.0 > 0,
-        "after expiry the released cash funded macro flow into the demoted market"
+        "the flow served the observed/demoted market's demand"
     );
 }
