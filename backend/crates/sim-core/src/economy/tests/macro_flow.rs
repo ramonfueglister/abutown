@@ -32,6 +32,10 @@ fn bucket(price: Money, buyers: Vec<(u64, i64)>, sellers: Vec<(u64, i64)>) -> Ma
             .into_iter()
             .map(|(a, q)| (EconomicActorId(a), q))
             .collect(),
+        intra_cleared: false,
+        buyer_orders: Vec::new(),
+        buyer_max_prices: Vec::new(),
+        seller_orders: Vec::new(),
     }
 }
 

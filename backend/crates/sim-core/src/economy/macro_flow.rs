@@ -11,8 +11,8 @@ use crate::economy::pools::affordable_qty;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig, EconomyError,
     EconomyEvent, GoodId, InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState,
-    MarketGoods, MarketId, Money, Quantity, SettlementPolicy, SupplyPools, TRANSPORT_OPERATOR,
-    TradeLedger, apportion_cash, checked_order_value, prorata_distribute,
+    MarketGoods, MarketId, Money, OrderId, Quantity, SettlementPolicy, SupplyPools,
+    TRANSPORT_OPERATOR, TradeLedger, apportion_cash, checked_order_value, prorata_distribute,
     settlement_price_with_policy, transport_cost,
 };
 
@@ -55,6 +55,18 @@ pub struct MacroBucket {
     pub buyers: Vec<(EconomicActorId, i64)>,
     /// (actor, effective_supply_qty), filtered to qty > 0, in ascending actor order.
     pub sellers: Vec<(EconomicActorId, i64)>,
+    /// S3: `true` ⇒ active/residual-sourced (the auction already intra-cleared this
+    /// market this tick); `false` ⇒ dormant/pool-sourced. Suppresses the self-edge for
+    /// active buckets (the flow must not re-clear units the auction refused on price).
+    pub intra_cleared: bool,
+    /// S3 active-only provenance, index-aligned to `buyers`/`sellers`; **empty** for
+    /// dormant buckets. `buyer_orders[i]` is the residual bid backing `buyers[i]`,
+    /// `buyer_max_prices[i]` its `max_price` (the affordability-predicate input), and
+    /// `seller_orders[i]` the residual ask backing `sellers[i]`. One entry per `OrderId`
+    /// (NOT per owner) so the per-row drain and the per-row affordability test agree.
+    pub buyer_orders: Vec<OrderId>,
+    pub buyer_max_prices: Vec<Money>,
+    pub seller_orders: Vec<OrderId>,
 }
 
 impl MacroBucket {
@@ -189,6 +201,10 @@ pub fn build_macro_buckets(
                 price,
                 buyers,
                 sellers,
+                intra_cleared: false,
+                buyer_orders: Vec::new(),
+                buyer_max_prices: Vec::new(),
+                seller_orders: Vec::new(),
             },
         );
     }
