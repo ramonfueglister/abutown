@@ -2862,7 +2862,7 @@ fn build_macro_buckets_active_sources_all_residual_orders() {
             market: m,
             good: GOOD_FOOD,
             qty_remaining: Quantity(4),
-            max_price: Money(1_100), // below price 1200 -> Stage-1 dropped
+            max_price: Money(1_100), // below the local price 1200, but still admitted (no build-time filter)
             cash_locked_remaining: Money(4),
             created_tick: 0,
             expires_tick: 100,

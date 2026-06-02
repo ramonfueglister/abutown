@@ -2,6 +2,24 @@
 
 # S3 Final Code-Level Design — Auction↔Macro-Flow Coupling (ACTIVATING slice)
 
+> **IMPLEMENTATION CORRECTIONS (post-design, verified during coding — this doc below
+> describes the pre-correction design; the shipped code is authoritative):**
+> 1. **Charge basis is `p_src`, not `p_dst`.** `settle_flow` charges buyers
+>    `src_revenue + transport = value(p_src, q) + transport` (macro_flow.rs:625-628), NOT
+>    `value(p_dst, q)`. So `prune_unaffordable_buyers` prices its affordability charge at
+>    `p_src` (exactly matching settle) — every §1.4/§5.1 reference to `p_dst` as the charge
+>    basis is superseded by `p_src`.
+> 2. **No build-time Stage-1 filter.** The `max_price >= prior_price` admit filter (§1.2/§1.4
+>    "STAGE-1") was REMOVED: it was economically wrong (it excluded buyers willing to pay the
+>    landed price but below the local price, violating Law of One Price). ALL residual bids
+>    are admitted; the per-edge Stage-2 prune (priced at the actual landed charge) is the sole
+>    affordability authority.
+> 3. **Seller-side drain is per-entry PRORATA, not greedy.** The ask drain releases each
+>    seller's `prorata(seller_weights, q')[i]` from `seller_orders[i]` (mirroring the bid side),
+>    so released-per-actor == settle's consumed-per-actor. (A greedy OrderId walk faulted
+>    `inventory.consume` for `q' < Σ supply` with ≥2 asks — caught by the S3 adversarial review.)
+> Otherwise the design below is as-built.
+
 File-line anchors verified against `backend/crates/sim-core/src/economy/{macro_flow.rs,orders.rs,accounts.rs,auction.rs}` and `src/economy/tests/macro_flow.rs`. **Anchor correction:** the test helper `bucket(...)` lives at `src/economy/tests/macro_flow.rs:24-36` (an inline `mod tests`), NOT `tests/macro_flow.rs` — there is no top-level `tests/macro_flow.rs`. All test references below use the corrected path.
 
 ---
