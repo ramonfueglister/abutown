@@ -4,6 +4,7 @@ use crate::economy::MarketDistances;
 use crate::economy::macro_flow::synthetic_price;
 use crate::economy::macro_flow::{
     Candidate, MacroBucket, build_candidates, build_macro_buckets, plan_flows,
+    prune_unaffordable_buyers,
 };
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyConfig, GOOD_FOOD, GoodId,
@@ -2700,4 +2701,101 @@ fn plan_flows_forces_zero_matched_for_active_bucket() {
         flows.is_empty(),
         "active bucket's forced matched=0 plans no self-flow"
     );
+}
+
+#[test]
+fn prune_keeps_single_affordable_buyer() {
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(
+        &[(EconomicActorId(1), 5)],
+        &[OrderId(1)],
+        &[Money(2_000)],
+        5,
+        0,
+        Money(1_000),
+        &cfg,
+    )
+    .unwrap();
+    assert_eq!(r.buyers, vec![(EconomicActorId(1), 5)]);
+    assert_eq!(r.orders, vec![OrderId(1)]);
+    assert_eq!(r.q_prime, 5);
+}
+
+#[test]
+fn prune_drops_single_unaffordable_buyer_to_empty() {
+    // max_price 500 < landed p_dst 1000 -> value(500,5)=2 < charge 5 -> dropped.
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(
+        &[(EconomicActorId(1), 5)],
+        &[OrderId(1)],
+        &[Money(500)],
+        5,
+        0,
+        Money(1_000),
+        &cfg,
+    )
+    .unwrap();
+    assert!(r.buyers.is_empty());
+    assert_eq!(
+        r.q_prime, 0,
+        "below-price buyer dropped -> q'==0 -> edge skipped"
+    );
+}
+
+#[test]
+fn prune_fixpoint_drops_unaffordable_then_stabilizes() {
+    // 3 bids; C (max 500) unaffordable at p_dst 1000 -> dropped pass 1; A,B (max 2000)
+    // stable pass 2 with the recomputed q' (15 -> 10 after C leaves).
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(
+        &[
+            (EconomicActorId(1), 5),
+            (EconomicActorId(2), 5),
+            (EconomicActorId(3), 5),
+        ],
+        &[OrderId(1), OrderId(2), OrderId(3)],
+        &[Money(2_000), Money(2_000), Money(500)],
+        15,
+        0,
+        Money(1_000),
+        &cfg,
+    )
+    .unwrap();
+    assert_eq!(
+        r.buyers,
+        vec![(EconomicActorId(1), 5), (EconomicActorId(2), 5)]
+    );
+    assert_eq!(r.orders, vec![OrderId(1), OrderId(2)]);
+    assert_eq!(r.max_prices, vec![Money(2_000), Money(2_000)]);
+    assert_eq!(r.q_prime, 10, "q' recomputed over survivors after the drop");
+}
+
+#[test]
+fn prune_empty_input_is_empty() {
+    let cfg = EconomyConfig::default();
+    let r = prune_unaffordable_buyers(&[], &[], &[], 0, 0, Money(1_000), &cfg).unwrap();
+    assert!(r.buyers.is_empty());
+    assert_eq!(r.q_prime, 0);
+}
+
+#[test]
+fn prune_is_deterministic() {
+    let cfg = EconomyConfig::default();
+    let run = || {
+        prune_unaffordable_buyers(
+            &[
+                (EconomicActorId(1), 5),
+                (EconomicActorId(2), 5),
+                (EconomicActorId(3), 5),
+            ],
+            &[OrderId(1), OrderId(2), OrderId(3)],
+            &[Money(2_000), Money(2_000), Money(500)],
+            15,
+            0,
+            Money(1_000),
+            &cfg,
+        )
+        .unwrap()
+    };
+    assert_eq!(run(), run());
 }

@@ -433,6 +433,83 @@ pub fn plan_flows(
     flows
 }
 
+/// Output of [`prune_unaffordable_buyers`]: the residual bids that survive the
+/// landed-price affordability test, index-aligned, plus `q_prime` — the flow quantity
+/// those survivors actually absorb (`Σ prorata(surviving_weights, q)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrunedBuyers {
+    pub buyers: Vec<(EconomicActorId, i64)>,
+    pub orders: Vec<OrderId>,
+    pub max_prices: Vec<Money>,
+    pub q_prime: i64,
+}
+
+/// S3 affordability bound (Stage-2, per-edge). A residual bid drained for its share
+/// `g_i` releases ~`value(max_price_i, g_i)` to available; `settle_flow` then charges it
+/// `apportion_cash(buyer_goods, dst_payment)[i]` (= `value(p_dst, q') + transport` share).
+/// If `value(max_price_i, g_i) < charge_i` the release under-funds the charge and
+/// `lock_cash` faults → stranded residual. This drops every buyer whose `max_price`
+/// cannot cover its apportioned landed charge, recomputes, and repeats to a **fixpoint**
+/// (dropping one buyer raises the survivors' per-unit share via prorata, which can newly
+/// disqualify a marginal survivor — a single pass would not be order-independent). Pure,
+/// deterministic (largest-remainder prorata/apportion, ascending index, i64/i128), bounded
+/// by `buyers.len()` passes. Returns the survivors + `q_prime`; `q_prime == 0` ⇒ skip the
+/// edge. By floor super-additivity the true field-difference release ≥ `value(max_price_i,
+/// g_i)` ≥ the predicate LHS, so a surviving buyer can never fault `lock_cash`.
+#[allow(clippy::too_many_arguments)]
+pub fn prune_unaffordable_buyers(
+    buyers: &[(EconomicActorId, i64)],
+    buyer_orders: &[OrderId],
+    max_prices: &[Money],
+    q: i64,
+    dist: i64,
+    p_dst: Money,
+    config: &EconomyConfig,
+) -> Result<PrunedBuyers, EconomyError> {
+    let mut keep: Vec<usize> = (0..buyers.len()).collect();
+    loop {
+        if keep.is_empty() {
+            return Ok(PrunedBuyers {
+                buyers: Vec::new(),
+                orders: Vec::new(),
+                max_prices: Vec::new(),
+                q_prime: 0,
+            });
+        }
+        let w: Vec<i64> = keep.iter().map(|&i| buyers[i].1).collect();
+        let goods = prorata_distribute(&w, q); // Σ goods = min(q, Σw)
+        let q_prime: i64 = goods.iter().sum();
+        if q_prime <= 0 {
+            return Ok(PrunedBuyers {
+                buyers: Vec::new(),
+                orders: Vec::new(),
+                max_prices: Vec::new(),
+                q_prime: 0,
+            });
+        }
+        let dst_payment = checked_order_value(p_dst, Quantity(q_prime))?.checked_add(
+            transport_cost(dist, Quantity(q_prime), config.transport_cost_per_tile_unit)?,
+        )?;
+        let charge = apportion_cash(&goods, dst_payment.0);
+        let mut next_keep: Vec<usize> = Vec::new();
+        for (j, &i) in keep.iter().enumerate() {
+            let released = checked_order_value(max_prices[i], Quantity(goods[j]))?;
+            if released.0 >= charge[j] {
+                next_keep.push(i);
+            }
+        }
+        if next_keep.len() == keep.len() {
+            return Ok(PrunedBuyers {
+                buyers: keep.iter().map(|&i| buyers[i]).collect(),
+                orders: keep.iter().map(|&i| buyer_orders[i]).collect(),
+                max_prices: keep.iter().map(|&i| max_prices[i]).collect(),
+                q_prime,
+            });
+        }
+        keep = next_keep;
+    }
+}
+
 /// STEP G: settle ONE accepted flow against the (cloned) books and write the
 /// discovered prices back into `market_goods`. Aggregate-floor cash scheme: one
 /// `src_revenue` floor; `dst_payment = src_revenue + transport` (transport is
