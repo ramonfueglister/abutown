@@ -501,10 +501,11 @@ fn active_to_dormant_handoff_conserves() {
     use crate::economy::{EconomyConfig, MarketDistances};
 
     // m_b starts ACTIVE with a live consumer bid (locks cash); m_a is a dormant
-    // surplus. We demote m_b's chunk to Asleep with the bid still locked, then run
-    // flow intervals through the TTL window (default 10). The locked cash is
-    // unavailable to the flow until the order expires; conservation holds every
-    // tick; released cash becomes flow-eligible after expiry.
+    // surplus. S3: while m_b is active the flow DRAINS its residual bid into available
+    // and imports goods from m_a directly — it no longer waits for the order to TTL-expire
+    // (that was the pre-S3 dormant-only behavior). We then demote m_b's chunk to Asleep
+    // and keep running. Conservation MUST hold every tick across the LOD handoff (the real
+    // atomicity guard), and the consumer ends up served.
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     CorePlugin::default().install(&mut world, &mut schedule);
@@ -583,22 +584,33 @@ fn active_to_dormant_handoff_conserves() {
         .total_good(GOOD_FOOD)
         .unwrap();
 
-    // Tick 0: m_b active -> consumer bids, cash locks. Run one tick.
+    // Tick 0: m_b active -> the consumer bids, then the flow drains that residual bid and
+    // imports goods from m_a directly. Conservation must hold.
     schedule.run(&mut world);
+    assert_eq!(
+        world.resource::<AccountBook>().total_money().unwrap(),
+        money_total,
+        "money conserved while m_b is active"
+    );
+    assert_eq!(
+        world
+            .resource::<InventoryBook>()
+            .total_good(GOOD_FOOD)
+            .unwrap(),
+        good_total,
+        "goods conserved while m_b is active"
+    );
     {
         let mut t = world.resource_mut::<Tick>();
         t.0 += 1;
     }
-    let locked_now = world.resource::<AccountBook>().account(consumer).locked;
-    assert!(locked_now.0 > 0, "active bid locked the consumer's cash");
 
-    // Demote m_b to Asleep with the bid still live (locked).
+    // Demote m_b to Asleep and keep running through the old TTL window; conservation must
+    // hold EVERY tick across the LOD handoff (the atomicity regression guard).
     world
         .entity_mut(chunk_b)
         .remove::<ActiveChunk>()
         .insert(AsleepChunk);
-
-    // Run through the TTL window; conservation must hold every tick.
     for _ in 0..15 {
         schedule.run(&mut world);
         let m = world.resource::<AccountBook>().total_money().unwrap();
@@ -612,14 +624,14 @@ fn active_to_dormant_handoff_conserves() {
         t.0 += 1;
     }
 
-    // After the TTL window the order expired and released cash; the flow has by
-    // now had eligible (available) cash and moved goods into m_b.
+    // The consumer was served — the flow moved goods into m_b (while active via the
+    // residual-bid drain, and via the dormant-pool path after demotion).
     let consumer_goods = world
         .resource::<InventoryBook>()
         .balance(consumer, GOOD_FOOD)
         .available;
     assert!(
         consumer_goods.0 > 0,
-        "after expiry the released cash funded macro flow into the demoted market"
+        "the flow served the observed/demoted market's demand"
     );
 }

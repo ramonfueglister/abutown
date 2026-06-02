@@ -63,7 +63,7 @@ impl Default for EconomyConfig {
             shoppers_per_unit: 3,
             max_shoppers_per_market: 4,
             shopper_radius_tiles: 24.0,
-            drain_active_residual: false,
+            drain_active_residual: true,
         }
     }
 }

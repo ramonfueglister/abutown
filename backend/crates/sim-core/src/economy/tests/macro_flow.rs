@@ -2544,10 +2544,10 @@ fn macro_flow_replays_across_restart() {
 }
 
 #[test]
-fn drain_active_residual_defaults_off() {
-    // S1 lands the config surface dark: S1+S2 must not change behavior, so the
-    // drain flag is FALSE by default; S3 flips it. This guards that safety property.
-    assert!(!EconomyConfig::default().drain_active_residual);
+fn drain_active_residual_defaults_on() {
+    // S3 activated the coupling: active/observed markets now join the inter-market flow
+    // by default. (S1/S2 shipped this flag FALSE; S3 flipped it.)
+    assert!(EconomyConfig::default().drain_active_residual);
 }
 
 #[test]
