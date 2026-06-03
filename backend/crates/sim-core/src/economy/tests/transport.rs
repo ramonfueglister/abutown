@@ -91,3 +91,118 @@ fn transport_cost_between_uses_graph_node_positions() {
         Ok(Money(7_000))
     );
 }
+
+#[test]
+fn transport_rebate_drains_operator_to_zero_and_conserves() {
+    use crate::economy::transport::run_transport_rebate_at_tick;
+    use crate::economy::{
+        AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyEvent, GOOD_TOOLS,
+        HOUSEHOLD_SECTOR, HouseholdSector, MarketId, Money, Quantity, TRANSPORT_OPERATOR,
+        TradeLedger,
+    };
+    use std::collections::BTreeMap;
+
+    fn pool(actor: EconomicActorId) -> DemandPool {
+        DemandPool {
+            actor,
+            market: MarketId(9_002),
+            good: GOOD_TOOLS,
+            desired_qty_per_tick: Quantity(10),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        }
+    }
+
+    let c1 = EconomicActorId(8_002);
+    let c2 = EconomicActorId(8_012);
+    let c3 = EconomicActorId(8_022);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(TRANSPORT_OPERATOR, Money(301)).unwrap();
+    let mut demand = DemandPools::default();
+    for c in [c1, c2, c3] {
+        demand.0.insert(c, pool(c));
+    }
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1), (c2, 1), (c3, 1)]),
+    };
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_transport_rebate_at_tick(&mut accounts, &mut demand, &household, &mut ledger).unwrap();
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant total money"
+    );
+    assert_eq!(
+        accounts.account(TRANSPORT_OPERATOR).available,
+        Money::ZERO,
+        "operator fully drained"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    // 301 across 3 equal weights, largest-remainder ⇒ 101/100/100 (lowest index wins extra).
+    assert_eq!(demand.0[&c1].income_last_tick, Money(101));
+    assert_eq!(demand.0[&c2].income_last_tick, Money(100));
+    assert_eq!(demand.0[&c3].income_last_tick, Money(100));
+    let total: i64 = demand.0.values().map(|p| p.income_last_tick.0).sum();
+    assert_eq!(total, 301, "Σ income == rebated amount");
+    assert!(
+        ledger
+            .0
+            .contains(&EconomyEvent::TransportRebate { amount: Money(301) })
+    );
+}
+
+#[test]
+fn transport_rebate_zero_balance_is_noop() {
+    use crate::economy::transport::run_transport_rebate_at_tick;
+    use crate::economy::{
+        AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_TOOLS, HouseholdSector,
+        MarketId, Money, Quantity, TradeLedger,
+    };
+    use std::collections::BTreeMap;
+    let c1 = EconomicActorId(8_002);
+    let mut accounts = AccountBook::default();
+    let mut demand = DemandPools::default();
+    demand.0.insert(
+        c1,
+        DemandPool {
+            actor: c1,
+            market: MarketId(9_002),
+            good: GOOD_TOOLS,
+            desired_qty_per_tick: Quantity(10),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        },
+    );
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_transport_rebate_at_tick(&mut accounts, &mut demand, &household, &mut ledger).unwrap();
+    assert_eq!(accounts.total_money().unwrap(), before);
+    assert_eq!(demand.0[&c1].income_last_tick, Money::ZERO);
+    assert!(ledger.0.is_empty(), "no rebate event when nothing to drain");
+}
