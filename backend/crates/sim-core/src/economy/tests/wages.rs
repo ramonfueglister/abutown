@@ -729,6 +729,22 @@ fn full_tick_wage_loop_conserves_total_money_auction_path() {
         },
     );
 
+    // Seed the opening reference price for the consumer's (market, good) so that
+    // run_consumption_update_at_tick (which .expects a real price) does not panic.
+    {
+        let key = MarketGoodKey {
+            market,
+            good: GOOD_TOOLS,
+        };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let state = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        state.ewma_reference_price = Money(1_000);
+        state.last_settlement_price = Money(1_000);
+    }
+
     let before = world.resource::<AccountBook>().total_money().unwrap();
 
     let mut earned_income = false;
@@ -867,6 +883,23 @@ fn full_tick_macro_flow_feeds_pay_wages_and_conserves() {
         pool_weights: BTreeMap::from([(consumer, 1)]),
     });
 
+    // Seed the opening reference price for the consumer's (m_dst, GOOD_FOOD) so that
+    // run_consumption_update_at_tick (which .expects a real price) does not panic.
+    // The first UpdateConsumption runs at end of tick 0, before any macro-flow settle.
+    {
+        let key = MarketGoodKey {
+            market: m_dst,
+            good: GOOD_FOOD,
+        };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let state = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        state.ewma_reference_price = Money(1_000);
+        state.last_settlement_price = Money(1_000);
+    }
+
     let before = world.resource::<AccountBook>().total_money().unwrap();
 
     let macro_interval = world.resource::<EconomyConfig>().macro_flow_interval_ticks;
@@ -954,6 +987,22 @@ fn closed_loop_bootstraps_from_autonomous_and_lags_one_tick() {
         population: 1_000_000,
         pool_weights: BTreeMap::from([(consumer, 1_i64)]),
     });
+
+    // Seed the opening reference price for the consumer's (m, GOOD_TOOLS) so that
+    // run_consumption_update_at_tick (which .expects a real price) does not panic.
+    {
+        let key = MarketGoodKey {
+            market: m,
+            good: GOOD_TOOLS,
+        };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let state = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        state.ewma_reference_price = Money(1_000);
+        state.last_settlement_price = Money(1_000);
+    }
 
     let before = world.resource::<AccountBook>().total_money().unwrap();
 

@@ -535,6 +535,23 @@ fn active_to_dormant_handoff_conserves() {
     world.spawn((ChunkCoordComp(coord_a), AsleepChunk));
     world.insert_resource(Tick(0));
 
+    // Seed the opening reference price for the consumer's (m_b, GOOD_FOOD) so that
+    // run_consumption_update_at_tick (which .expects a real price) does not panic.
+    {
+        use crate::economy::{MarketGoodKey, MarketGoodState, MarketGoods};
+        let key = MarketGoodKey {
+            market: m_b,
+            good: GOOD_FOOD,
+        };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let state = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        state.ewma_reference_price = Money(1_000);
+        state.last_settlement_price = Money(1_000);
+    }
+
     let money_total = world.resource::<AccountBook>().total_money().unwrap();
     let good_total = world
         .resource::<InventoryBook>()

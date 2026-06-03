@@ -383,7 +383,7 @@ pub fn run_pay_wages_system(
     mut wage_telemetry: ResMut<WageTelemetry>,
     mut ledger: ResMut<TradeLedger>,
 ) {
-    let _ = run_pay_wages_at_tick(
+    run_pay_wages_at_tick(
         &mut accounts,
         &receipts,
         &mut demand,
@@ -391,7 +391,8 @@ pub fn run_pay_wages_system(
         &mut wage_telemetry,
         &mut ledger,
         &config,
-    );
+    )
+    .expect("run_pay_wages_at_tick is infallible by construction (wage <= just-credited revenue, Σweights guards); an Err is a bug");
 }
 
 pub fn update_market_telemetry(
@@ -466,10 +467,7 @@ pub fn run_macro_flow_system(
 /// the FINAL smoothed reference price. Runs after PayWages (income) and after
 /// Telemetry (the ewma write). The new desired_qty becomes a bid in NEXT tick's
 /// GeneratePoolOrders — the explicit 1-tick income→consumption lag.
-pub fn run_consumption_update_system(
-    config: Res<EconomyConfig>,
-    mut demand: ResMut<DemandPools>,
-    goods: Res<MarketGoods>,
-) {
-    let _ = run_consumption_update_at_tick(&mut demand, &goods, &config);
+pub fn run_consumption_update_system(mut demand: ResMut<DemandPools>, goods: Res<MarketGoods>) {
+    run_consumption_update_at_tick(&mut demand, &goods)
+        .expect("run_consumption_update_at_tick is infallible once every consumer market has a seeded opening price; an Err is a bug");
 }

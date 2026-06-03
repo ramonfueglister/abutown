@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use bevy_ecs::prelude::*;
 
 use crate::economy::{
-    AccountBook, DirtyMarketGoods, ECONOMY_SCALE, EconomicActorId, EconomyConfig, EconomyError,
-    EconomyEvent, GoodId, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId,
-    Money, NextOrderId, OrderBook, Quantity, TradeLedger, create_ask, create_bid,
+    AccountBook, DirtyMarketGoods, ECONOMY_SCALE, EconomicActorId, EconomyError, EconomyEvent,
+    GoodId, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
+    NextOrderId, OrderBook, Quantity, TradeLedger, create_ask, create_bid,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -91,14 +91,15 @@ pub(crate) fn spend_to_qty(spend: Money, p_ref: Money) -> Result<Quantity, Econo
 
 /// Part B: rewrite each consumer pool's `desired_qty_per_tick` from its
 /// `income_last_tick` (booked by PayWages THIS tick) and the SMOOTHED reference price.
-/// `p_ref = ewma_reference_price` if > 0 else `config.trader_default_ref_price`. Writes
-/// a Quantity ONLY; touches no money field. Pure, deterministic, keys-first. `mpc_bps`
-/// is validated and `p_ref > 0` by construction, so the math cannot fault here; `?`
-/// surfaces a genuine bug instead of silently freezing a pool's demand.
+/// The price comes from the market's seeded/traded `ewma_reference_price`; a missing
+/// or zero price is an honest `ZeroPrice` error, never a default. Writes a Quantity
+/// ONLY; touches no money field. Pure, deterministic, keys-first. `mpc_bps` is
+/// validated; `?` surfaces a genuine bug instead of silently freezing a pool's demand.
+/// Pre-condition: every consumer pool's `(market, good)` MUST have a `MarketGoodState`
+/// with a positive `ewma_reference_price` (seeded at world creation).
 pub fn run_consumption_update_at_tick(
     demand: &mut DemandPools,
     market_goods: &MarketGoods,
-    config: &EconomyConfig,
 ) -> Result<(), EconomyError> {
     let actors: Vec<EconomicActorId> = demand.0.keys().copied().collect();
     for actor in actors {
@@ -107,12 +108,9 @@ pub fn run_consumption_update_at_tick(
             market: pool.market,
             good: pool.good,
         };
-        let p_ref = match market_goods.0.get(&key) {
-            Some(s) if s.ewma_reference_price.0 > 0 => s.ewma_reference_price,
-            _ => config.trader_default_ref_price,
-        };
         let spend = target_spend(pool.autonomous, pool.mpc_bps, pool.income_last_tick)?;
-        let qty = spend_to_qty(spend, p_ref)?;
+        let state = market_goods.0.get(&key).ok_or(EconomyError::ZeroPrice)?;
+        let qty = spend_to_qty(spend, state.ewma_reference_price)?; // errors ZeroPrice if <= 0
         if let Some(p) = demand.0.get_mut(&actor) {
             p.desired_qty_per_tick = qty;
         }

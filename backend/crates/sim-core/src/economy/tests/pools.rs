@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 
 use crate::economy::pools::{spend_to_qty, target_spend};
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig,
-    EconomyError, EconomyEvent, GOOD_FOOD, GOOD_TOOLS, InventoryBook, MarketGoodKey,
-    MarketGoodState, MarketGoods, MarketId, Money, NextOrderId, OrderBook, Quantity, SupplyPool,
-    SupplyPools, TradeLedger, generate_pool_orders_at_tick, run_consumption_at_tick,
+    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyError,
+    EconomyEvent, GOOD_FOOD, GOOD_TOOLS, InventoryBook, MarketGoodKey, MarketGoodState,
+    MarketGoods, MarketId, Money, NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools,
+    TradeLedger, generate_pool_orders_at_tick, run_consumption_at_tick,
     run_consumption_update_at_tick,
 };
 
@@ -404,21 +404,25 @@ fn consumption_update_sets_desired_qty_from_income_and_ref_price() {
     let mut state = MarketGoodState::new(key);
     state.ewma_reference_price = Money(1_000);
     goods.0.insert(key, state);
-    run_consumption_update_at_tick(&mut demand, &goods, &EconomyConfig::default()).unwrap();
+    run_consumption_update_at_tick(&mut demand, &goods).unwrap();
     // C = 5_000 + 0.8*10_000 = 13_000; qty = 13_000 * 1_000 / 1_000 = 13_000.
     assert_eq!(demand.0[&actor].desired_qty_per_tick, Quantity(13_000));
 }
 
 #[test]
-fn consumption_update_falls_back_to_default_ref_price_when_ewma_zero() {
+fn consumption_update_errors_when_market_has_no_price() {
+    // With NO MarketGoodState for the pool's market, run_consumption_update_at_tick
+    // must return Err(EconomyError::ZeroPrice) — honest error, never a silent default.
     let actor = EconomicActorId(8_002);
     let market = MarketId(9_002);
     let mut demand = DemandPools::default();
     let mut pool = pools_test_pool(actor, market);
-    pool.income_last_tick = Money::ZERO; // C = autonomous = 5_000
+    pool.income_last_tick = Money::ZERO;
     demand.0.insert(actor, pool);
-    let goods = MarketGoods::default();
-    run_consumption_update_at_tick(&mut demand, &goods, &EconomyConfig::default()).unwrap();
-    // qty = 5_000 * 1_000 / 1_000 = 5_000 (default ref price 1_000).
-    assert_eq!(demand.0[&actor].desired_qty_per_tick, Quantity(5_000));
+    let goods = MarketGoods::default(); // no MarketGoodState for (market, GOOD_TOOLS)
+    assert_eq!(
+        run_consumption_update_at_tick(&mut demand, &goods),
+        Err(EconomyError::ZeroPrice),
+        "absent market-good must yield ZeroPrice, not a silent default"
+    );
 }
