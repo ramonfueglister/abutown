@@ -379,3 +379,64 @@ fn ledger_tail_is_capped_and_round_trips() {
     apply_into_world(&mut fresh, &decoded);
     assert_eq!(fresh.resource::<TradeLedger>().0, snap.ledger_tail);
 }
+
+#[test]
+fn raw_deposits_round_trip() {
+    use crate::economy::GOOD_RAW;
+    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits};
+
+    let mut world = install_economy();
+    world.resource_mut::<RawDeposits>().0.insert(
+        EXTRACTOR,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: Quantity(10),
+            interval_ticks: 1,
+            last_regen_tick: Some(42),
+        },
+    );
+
+    let snap = extract_from_world(&world);
+    assert_eq!(
+        snap.raw_deposits,
+        vec![(
+            EXTRACTOR,
+            RawDeposit {
+                good: GOOD_RAW,
+                qty_per_interval: Quantity(10),
+                interval_ticks: 1,
+                last_regen_tick: Some(42),
+            }
+        )],
+        "raw_deposits extracted in sorted order"
+    );
+
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+
+    let restored = fresh.resource::<RawDeposits>().0[&EXTRACTOR];
+    assert_eq!(restored.last_regen_tick, Some(42));
+    assert_eq!(restored.qty_per_interval, Quantity(10));
+    assert_eq!(
+        snap,
+        extract_from_world(&fresh),
+        "full snapshot identity with raw_deposits"
+    );
+}
+
+#[test]
+fn snapshot_without_raw_deposits_field_fails_to_deserialize() {
+    // No serde-default: a JSON object missing `raw_deposits` MUST fail (forces the one-time
+    // DELETE FROM economy_snapshots before deploy; no silent legacy shim).
+    let json = r#"{"accounts":[],"inventory":[],"bids":[],"asks":[],"next_order_id":0,
+        "markets":[],"market_goods":[],"demand_pools":[],"supply_pools":[],
+        "production_pools":[],"market_chunks":[],"ledger_tail":[],"market_distances":[],
+        "household_sector":{"population":0,"pool_weights":[]}}"#;
+    let res: Result<EconomyPersistSnapshot, _> = serde_json::from_str(json);
+    assert!(
+        res.is_err(),
+        "missing raw_deposits must fail (no serde-default)"
+    );
+}
