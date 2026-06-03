@@ -101,19 +101,17 @@ pub fn run_consumption_update_at_tick(
     demand: &mut DemandPools,
     market_goods: &MarketGoods,
 ) -> Result<(), EconomyError> {
-    let actors: Vec<EconomicActorId> = demand.0.keys().copied().collect();
-    for actor in actors {
-        let pool = demand.0[&actor];
+    for pool in demand.0.values_mut() {
         let key = MarketGoodKey {
             market: pool.market,
             good: pool.good,
         };
         let spend = target_spend(pool.autonomous, pool.mpc_bps, pool.income_last_tick)?;
+        // The reference price is the market's seeded/traded ewma. A missing market-good
+        // or a non-positive price is an honest `ZeroPrice` error (propagated), never a
+        // default — every consumer market is seeded with an opening price.
         let state = market_goods.0.get(&key).ok_or(EconomyError::ZeroPrice)?;
-        let qty = spend_to_qty(spend, state.ewma_reference_price)?; // errors ZeroPrice if <= 0
-        if let Some(p) = demand.0.get_mut(&actor) {
-            p.desired_qty_per_tick = qty;
-        }
+        pool.desired_qty_per_tick = spend_to_qty(spend, state.ewma_reference_price)?;
     }
     Ok(())
 }

@@ -86,11 +86,10 @@ pub fn run_pay_wages_at_tick(
 
     let labor_share = config.validated_labor_share_bps()?;
 
-    let pool_ids: Vec<EconomicActorId> = demand.0.keys().copied().collect();
-    let weights: Vec<i64> = pool_ids
-        .iter()
-        .map(|a| household.pool_weights.get(a).copied().unwrap_or(0))
-        .collect();
+    // Payees and weights come straight from the household sector's weight map — the
+    // authoritative definition of who is paid and by how much. No Option-defaulting.
+    let payees: Vec<EconomicActorId> = household.pool_weights.keys().copied().collect();
+    let weights: Vec<i64> = household.pool_weights.values().copied().collect();
     let weight_sum: i128 = weights.iter().map(|w| *w as i128).sum();
 
     // FIRST LEG: firms → HOUSEHOLD_SECTOR. Skipped entirely when there is no payout
@@ -124,15 +123,20 @@ pub fn run_pay_wages_at_tick(
     // SECOND LEG: HOUSEHOLD_SECTOR → consumer pools (largest-remainder, sum-preserving).
     if wage_bill > 0 && weight_sum > 0 {
         let splits = apportion_cash(&weights, wage_bill);
-        for (idx, actor) in pool_ids.iter().enumerate() {
+        for (idx, actor) in payees.iter().enumerate() {
             let share = Money(splits[idx]);
             if share.0 <= 0 {
                 continue;
             }
+            // A weight entry MUST reference a real consumer pool (the seed builds
+            // pool_weights FROM the demand pools). Surface a seed inconsistency loudly
+            // rather than silently dropping the income, which would strand cash here.
+            let pool = demand
+                .0
+                .get_mut(actor)
+                .expect("pool_weights key must reference a seeded demand pool");
             accounts.transfer(HOUSEHOLD_SECTOR, *actor, share)?;
-            if let Some(pool) = demand.0.get_mut(actor) {
-                pool.income_last_tick = pool.income_last_tick.checked_add(share)?;
-            }
+            pool.income_last_tick = pool.income_last_tick.checked_add(share)?;
         }
     }
 
