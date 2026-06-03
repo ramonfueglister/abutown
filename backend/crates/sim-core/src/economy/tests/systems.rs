@@ -473,3 +473,66 @@ fn regenerate_system_feeds_input_gated_production_same_tick() {
         "the recipe drained the freshly-deposited RAW this tick"
     );
 }
+
+#[test]
+fn pay_wages_then_profit_then_rebate_order_within_schedule() {
+    // Pin the intra/inter-set ordering: wage-credit (PayWages) → profit-credit (PayWages,
+    // .after wage) → rebate-credit (TransportRebate set, after PayWages, before Consume).
+    // Recorders are anchored to the REAL systems via .after edges so the recorded order
+    // reflects the real .after edges, not just set membership.
+    use crate::economy::EconomyPlugin;
+    use crate::economy::systems::{
+        EconomySet, run_distribute_profit_system, run_pay_wages_system, run_transport_rebate_system,
+    };
+    use bevy_ecs::prelude::*;
+
+    #[derive(Resource, Default)]
+    struct OrderLog(Vec<&'static str>);
+    fn rec_wages(mut log: ResMut<OrderLog>) {
+        log.0.push("wages");
+    }
+    fn rec_profit(mut log: ResMut<OrderLog>) {
+        log.0.push("profit");
+    }
+    fn rec_rebate(mut log: ResMut<OrderLog>) {
+        log.0.push("rebate");
+    }
+    fn rec_consume(mut log: ResMut<OrderLog>) {
+        log.0.push("consume");
+    }
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    // The rebate system is macro-flow-modulo gated; force tick 0 so the gate is open
+    // (0 is a multiple of macro_flow_interval_ticks) and the rebate recorder still has a
+    // deterministic position even though the recorder itself is unconditional.
+    world.insert_resource(crate::mobility::resources::Tick(0));
+
+    world.insert_resource(OrderLog::default());
+    schedule.add_systems((
+        rec_wages
+            .in_set(EconomySet::PayWages)
+            .after(run_pay_wages_system),
+        rec_profit
+            .in_set(EconomySet::PayWages)
+            .after(run_distribute_profit_system),
+        rec_rebate
+            .in_set(EconomySet::TransportRebate)
+            .after(run_transport_rebate_system),
+        rec_consume.in_set(EconomySet::Consume),
+    ));
+    schedule.run(&mut world);
+
+    let log = &world.resource::<OrderLog>().0;
+    let i_w = log.iter().position(|s| *s == "wages").unwrap();
+    let i_p = log.iter().position(|s| *s == "profit").unwrap();
+    let i_r = log.iter().position(|s| *s == "rebate").unwrap();
+    let i_c = log.iter().position(|s| *s == "consume").unwrap();
+    assert!(i_w < i_p, "profit credit AFTER wage credit: {log:?}");
+    assert!(i_p < i_r, "rebate AFTER profit: {log:?}");
+    assert!(i_r < i_c, "rebate BEFORE consume: {log:?}");
+}
