@@ -76,6 +76,11 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
         world.insert_resource(crate::economy::shoppers::NextShopperId::default());
         world.insert_resource(crate::economy::wages::SellerReceipts::default());
+        world.insert_resource(crate::economy::wages::WageTelemetry::default());
+        world.insert_resource(crate::economy::wages::HouseholdSector {
+            population: 0,
+            pool_weights: std::collections::BTreeMap::new(),
+        });
         install_systems(schedule);
     }
 }

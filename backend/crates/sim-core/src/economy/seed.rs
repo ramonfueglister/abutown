@@ -9,9 +9,9 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::transport::manhattan_tiles;
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_TOOLS, InventoryBook,
-    MarketChunks, MarketDistances, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
-    SupplyPools,
+    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR,
+    HouseholdSector, InventoryBook, MarketChunks, MarketDistances, MarketId, MarketSite, Markets,
+    Money, Quantity, SupplyPool, SupplyPools,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
 
@@ -177,6 +177,27 @@ pub fn seed_demo_economy(world: &mut World) {
             autonomous: Money(5_000),
         },
     );
+    // ── SFC household sector: equal-weight payout across the seeded consumer pools ──
+    {
+        let consumer_ids: Vec<EconomicActorId> =
+            world.resource::<DemandPools>().0.keys().copied().collect();
+        let mut weights = std::collections::BTreeMap::new();
+        for id in &consumer_ids {
+            weights.insert(*id, 1_i64);
+        }
+        assert!(
+            weights.values().any(|w| *w > 0),
+            "seed: HouseholdSector must have at least one positive pool weight"
+        );
+        assert!(
+            HOUSEHOLD_SECTOR.0 == u64::MAX - 1 && !consumer_ids.contains(&HOUSEHOLD_SECTOR),
+            "HOUSEHOLD_SECTOR must not collide with a seeded actor id"
+        );
+        world.insert_resource(HouseholdSector {
+            population: 1_000_000,
+            pool_weights: weights,
+        });
+    }
     // ── Task 7: dormant flow-demo market pair ────────────────────────────────
     // F_A @ tile ≈(16,48) chunk (0,1); F_B @ tile ≈(208,48) chunk (6,1).
     // Both are ≥3 chunks from the transit chunk (3,1) → never pulled Active

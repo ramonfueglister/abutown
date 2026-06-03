@@ -5,11 +5,12 @@ use bevy_ecs::query::Or;
 
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
-    Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SellerReceipts,
-    SettlementPolicy, SupplyPools, TradeLedger, clear_market_good_with_receipts,
-    expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
-    run_macro_flow_at_tick, run_production_at_tick,
+    FlowShipments, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
+    MarketGoods, MarketId, Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools,
+    SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
+    clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
+    integer_ewma, run_consumption_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
+    run_production_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -24,6 +25,7 @@ pub enum EconomySet {
     GeneratePoolOrders,
     ClearMarkets,
     MacroFlow,
+    PayWages,
     Consume,
     ShopperCapture,
     Materialize,
@@ -95,6 +97,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::MacroFlow,
+            EconomySet::PayWages,
             EconomySet::Consume,
             EconomySet::ShopperCapture,
             EconomySet::Materialize,
@@ -119,6 +122,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
             run_macro_flow_system.in_set(EconomySet::MacroFlow),
+            run_pay_wages_system.in_set(EconomySet::PayWages),
             run_consumption_system.in_set(EconomySet::Consume),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
         )
@@ -361,6 +365,29 @@ pub fn run_consumption_system(
         &mut demand,
         &mut market_goods,
         tick.0,
+    );
+}
+
+/// The SFC wage step: firms pay a labor share of this tick's revenue into the
+/// household sector, apportioned to consumer pools (income). Runs after BOTH settle
+/// paths (ClearMarkets, MacroFlow) so all receipts are booked, before Consume.
+pub fn run_pay_wages_system(
+    config: Res<EconomyConfig>,
+    receipts: Res<SellerReceipts>,
+    household: Res<HouseholdSector>,
+    mut accounts: ResMut<AccountBook>,
+    mut demand: ResMut<DemandPools>,
+    mut wage_telemetry: ResMut<WageTelemetry>,
+    mut ledger: ResMut<TradeLedger>,
+) {
+    let _ = run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_telemetry,
+        &mut ledger,
+        &config,
     );
 }
 

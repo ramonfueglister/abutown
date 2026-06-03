@@ -1,15 +1,23 @@
 use std::collections::BTreeMap;
 
+use bevy_ecs::prelude::*;
+
 use crate::economy::auction::SettlementPolicy;
 use crate::economy::macro_flow::PlannedFlow;
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig,
-    EconomyError, EconomyEvent, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR, HouseholdSector,
-    InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money, NextOrderId,
-    OrderBook, Quantity, SellerReceipts, TradeLedger, WageTelemetry,
-    clear_market_good_with_receipts, create_ask, create_bid, run_pay_wages_at_tick,
+    EconomyEvent, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR, HouseholdSector, InventoryBook,
+    MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
+    NextOrderId, OrderBook, Quantity, SellerReceipts, SupplyPool, SupplyPools, TradeLedger,
+    WageTelemetry, clear_market_good_with_receipts, create_ask, create_bid, run_pay_wages_at_tick,
     settle_flow_with_receipts,
 };
+use crate::economy::{EconomyError, EconomyPlugin};
+use crate::ids::ChunkCoord;
+use crate::mobility::resources::Tick;
+use crate::world::components::{AsleepChunk, ChunkCoordComp};
+use crate::world::plugin::CorePlugin;
+use crate::world::schedule::SimPlugin;
 
 fn seeded_state(market: MarketId) -> MarketGoodState {
     MarketGoodState {
@@ -698,4 +706,261 @@ fn pay_wages_property_conserves_over_random_inputs() {
             );
         }
     }
+}
+
+// ── Full-tick schedule-level tests ────────────────────────────────────────────
+
+/// Build a full CorePlugin+MobilityPlugin+EconomyPlugin world with a live schedule.
+/// `Tick(0)` is inserted by MobilityPlugin. No markets or actors are seeded here;
+/// callers add their fixtures. Mirrors the pattern from tests/macro_flow.rs.
+fn full_economy_world() -> (World, bevy_ecs::schedule::Schedule) {
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+    (world, schedule)
+}
+
+/// Run the schedule once and advance the tick counter (mirrors all wired tests).
+fn tick_world(world: &mut World, schedule: &mut bevy_ecs::schedule::Schedule) {
+    schedule.run(world);
+    world.resource_mut::<Tick>().0 += 1;
+}
+
+/// Auction path: a supplier sells TOOLS via SupplyPool (active market → auction
+/// path), a consumer has cash and a DemandPool at the same market (m=1), a
+/// HouseholdSector paying the consumer. Run 6 ticks. Assert:
+///   1. total_money byte-invariant (no mint, no burn).
+///   2. HOUSEHOLD_SECTOR available == ZERO (sentinel cleared every tick).
+///   3. consumer earned income (income_last_tick > 0 at least once over 6 ticks).
+#[test]
+fn full_tick_wage_loop_conserves_total_money_auction_path() {
+    let (mut world, mut schedule) = full_economy_world();
+
+    let supplier = EconomicActorId(8_001);
+    let consumer = EconomicActorId(8_002);
+    let market = MarketId(1);
+
+    // Fund the supplier with goods and the consumer with cash.
+    world
+        .resource_mut::<crate::economy::InventoryBook>()
+        .deposit(supplier, GOOD_TOOLS, Quantity(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(consumer, Money(1_000_000))
+        .unwrap();
+
+    // SupplyPool: supplier offers TOOLS at market 1.
+    world.resource_mut::<SupplyPools>().0.insert(
+        supplier,
+        SupplyPool {
+            actor: supplier,
+            market,
+            good: GOOD_TOOLS,
+            offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    // DemandPool: consumer bids for TOOLS at market 1 (SAME market — so the
+    // auction path can clear, capturing seller revenue into SellerReceipts).
+    world
+        .resource_mut::<DemandPools>()
+        .0
+        .insert(consumer, consumer_pool(consumer, market));
+
+    // HouseholdSector pays the consumer.
+    world.insert_resource(HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(consumer, 1)]),
+    });
+
+    // Anchor the market to a chunk that is NOT active → market stays dormant for
+    // the auction path. Actually for the auction path the market must be active.
+    // Use NO anchor so the market is never in DormantMarkets (the auction fires
+    // because the market IS in DirtyMarketGoods after pool-order generation).
+    // No MarketChunks entry → market absent from DormantMarkets → auction fires.
+    world.resource_mut::<crate::economy::Markets>().0.insert(
+        market,
+        crate::economy::MarketSite {
+            id: market,
+            node_id: crate::routing::NodeId(0),
+            name: "Test Market".to_string(),
+        },
+    );
+
+    let before = world.resource::<AccountBook>().total_money().unwrap();
+
+    let mut earned_income = false;
+    for _ in 0..6 {
+        tick_world(&mut world, &mut schedule);
+        // Check sentinel clears every tick.
+        assert_eq!(
+            world
+                .resource::<AccountBook>()
+                .account(HOUSEHOLD_SECTOR)
+                .available,
+            Money::ZERO,
+            "HOUSEHOLD_SECTOR must net to zero after every tick"
+        );
+        if world
+            .resource::<DemandPools>()
+            .0
+            .get(&consumer)
+            .map(|p| p.income_last_tick.0 > 0)
+            .unwrap_or(false)
+        {
+            earned_income = true;
+        }
+    }
+
+    assert_eq!(
+        world.resource::<AccountBook>().total_money().unwrap(),
+        before,
+        "total_money byte-invariant over 6 ticks (auction path)"
+    );
+    assert!(earned_income, "consumer earned income at least once");
+}
+
+/// MacroFlow path: dormant supply@src / demand@dst pair — the auction never clears
+/// it (both markets are anchored to AsleepChunk so they stay dormant), but
+/// `run_macro_flow_at_tick` settles it each interval, crediting SellerReceipts →
+/// PayWages. Mirrored verbatim from `macro_flow_replays_across_restart` fixture in
+/// tests/macro_flow.rs (ChunkCoord-anchored AsleepChunk entities for each market).
+#[test]
+fn full_tick_macro_flow_feeds_pay_wages_and_conserves() {
+    let (mut world, mut schedule) = full_economy_world();
+
+    let supplier = EconomicActorId(50);
+    let consumer = EconomicActorId(60);
+    let m_src = MarketId(9_401);
+    let m_dst = MarketId(9_402);
+    let chunk_src = ChunkCoord { x: 5, y: 5 };
+    let chunk_dst = ChunkCoord { x: 9, y: 5 };
+
+    // Fund actors.
+    world
+        .resource_mut::<crate::economy::InventoryBook>()
+        .deposit(supplier, GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(consumer, Money(1_000_000_000))
+        .unwrap();
+
+    // Pools.
+    world.resource_mut::<SupplyPools>().0.insert(
+        supplier,
+        SupplyPool {
+            actor: supplier,
+            market: m_src,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(200),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<DemandPools>().0.insert(
+        consumer,
+        DemandPool {
+            actor: consumer,
+            market: m_dst,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(200),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        },
+    );
+
+    // Anchor each market to an AsleepChunk → refresh_dormant_markets_system puts
+    // both in DormantMarkets → macro-flow fires; auction does NOT fire for them.
+    // (Mirrored exactly from macro_flow_replays_across_restart in macro_flow.rs.)
+    world
+        .resource_mut::<MarketChunks>()
+        .0
+        .insert(m_src, chunk_src);
+    world
+        .resource_mut::<MarketChunks>()
+        .0
+        .insert(m_dst, chunk_dst);
+
+    let mut dist = MarketDistances(BTreeMap::new());
+    dist.0.insert((m_src, m_dst), 4);
+    dist.0.insert((m_dst, m_src), 4);
+    world.insert_resource(dist);
+
+    world
+        .resource_mut::<EconomyConfig>()
+        .transport_cost_per_tile_unit = Money(50);
+
+    // Spawn AsleepChunk entities for each market chunk — these make
+    // refresh_dormant_markets_system classify them as dormant.
+    world.spawn((ChunkCoordComp(chunk_src), AsleepChunk));
+    world.spawn((ChunkCoordComp(chunk_dst), AsleepChunk));
+
+    // HouseholdSector paying the consumer.
+    world.insert_resource(HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(consumer, 1)]),
+    });
+
+    let before = world.resource::<AccountBook>().total_money().unwrap();
+
+    let macro_interval = world.resource::<EconomyConfig>().macro_flow_interval_ticks;
+    let n_ticks = macro_interval + 2;
+
+    for _ in 0..n_ticks {
+        tick_world(&mut world, &mut schedule);
+        // sentinel clears every tick
+        assert_eq!(
+            world
+                .resource::<AccountBook>()
+                .account(HOUSEHOLD_SECTOR)
+                .available,
+            Money::ZERO,
+            "HOUSEHOLD_SECTOR nets to zero each tick"
+        );
+    }
+
+    // money byte-invariant
+    assert_eq!(
+        world.resource::<AccountBook>().total_money().unwrap(),
+        before,
+        "total_money byte-invariant (macro-flow path)"
+    );
+
+    // no account ever negative
+    for acct in world.resource::<AccountBook>().accounts.values() {
+        assert!(
+            acct.available.0 >= 0,
+            "no account goes negative: {:?}",
+            acct
+        );
+    }
+
+    // Σ WagePaid amounts > 0: proves the MacroFlow path produced wages through PayWages.
+    let total_wages_paid: i64 = world
+        .resource::<TradeLedger>()
+        .0
+        .iter()
+        .filter_map(|e| match e {
+            EconomyEvent::WagePaid { amount, .. } => Some(amount.0),
+            _ => None,
+        })
+        .sum();
+    assert!(
+        total_wages_paid > 0,
+        "WagePaid events must be emitted via the MacroFlow settle path (got 0)"
+    );
 }

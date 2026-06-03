@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::economy::{
     AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyEvent, GoodId,
-    InventoryBalance, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState,
-    MarketGoods, MarketId, MarketSite, Markets, MoneyAccount, NextOrderId, OrderBook, OrderId,
-    ProductionPool, ProductionPools, SupplyPool, SupplyPools, TradeLedger,
+    HouseholdSector, InventoryBalance, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey,
+    MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, MoneyAccount, NextOrderId,
+    OrderBook, OrderId, ProductionPool, ProductionPools, SupplyPool, SupplyPools, TradeLedger,
 };
 use crate::ids::ChunkCoord;
 use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
@@ -22,6 +22,14 @@ use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, Snaps
 /// continuity and the `/economy` debug view, without growing each snapshot
 /// without bound. A full append-only audit store is a separate (deferred) slice.
 pub const PERSISTED_LEDGER_TAIL: usize = 1024;
+
+/// Serializable form of `HouseholdSector`. Uses `Vec<(K, V)>` (same pattern as
+/// other maps in this file) because `serde_json` rejects non-string map keys.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HouseholdSectorSnapshot {
+    pub population: u64,
+    pub pool_weights: Vec<(EconomicActorId, i64)>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EconomyPersistSnapshot {
@@ -42,6 +50,9 @@ pub struct EconomyPersistSnapshot {
     /// Recompute-on-hydrate is impossible (the economy core holds no `Graph`),
     /// so this is persisted verbatim. No serde-default shim.
     pub market_distances: Vec<((MarketId, MarketId), i64)>,
+    /// The mean-field household sector. New non-default snapshot field; old rows fail
+    /// to deserialize (one-time `DELETE FROM economy_snapshots` before deploy). No serde-default.
+    pub household_sector: HouseholdSectorSnapshot,
 }
 
 /// Pull a snapshot out of a live economy `World`. `BTreeMap` iteration is sorted,
@@ -59,6 +70,7 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
     let market_chunks = world.resource::<MarketChunks>();
     let ledger = world.resource::<TradeLedger>();
     let market_distances = world.resource::<MarketDistances>();
+    let household = world.resource::<HouseholdSector>();
 
     let ledger_tail = {
         let events = &ledger.0;
@@ -84,6 +96,14 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
         market_chunks: market_chunks.0.iter().map(|(k, v)| (*k, *v)).collect(),
         ledger_tail,
         market_distances: market_distances.0.iter().map(|(k, v)| (*k, *v)).collect(),
+        household_sector: HouseholdSectorSnapshot {
+            population: household.population,
+            pool_weights: household
+                .pool_weights
+                .iter()
+                .map(|(k, v)| (*k, *v))
+                .collect(),
+        },
     }
 }
 
@@ -114,6 +134,10 @@ pub fn apply_into_world(world: &mut World, snap: &EconomyPersistSnapshot) {
     world.insert_resource(MarketDistances(
         snap.market_distances.iter().cloned().collect(),
     ));
+    world.insert_resource(HouseholdSector {
+        population: snap.household_sector.population,
+        pool_weights: snap.household_sector.pool_weights.iter().cloned().collect(),
+    });
 }
 
 /// A `SnapshotProvider` emitting the full economy state as one JSON item. The
