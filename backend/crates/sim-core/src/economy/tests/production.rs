@@ -124,3 +124,26 @@ fn production_is_deterministic() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn good_raw_is_the_next_free_good_id_and_distinct() {
+    use crate::economy::{GOOD_FOOD, GOOD_IRON, GOOD_RAW, GOOD_TOOLS, GOOD_WOOD, GoodId};
+    assert_eq!(GOOD_RAW, GoodId(5));
+    for g in [GOOD_FOOD, GOOD_WOOD, GOOD_IRON, GOOD_TOOLS] {
+        assert_ne!(
+            g, GOOD_RAW,
+            "GOOD_RAW must not collide with a tradable good"
+        );
+    }
+}
+
+#[test]
+fn regenerated_event_type_tag_is_stable() {
+    use crate::economy::{EconomicActorId, EconomyEvent, GOOD_RAW, Quantity};
+    let e = EconomyEvent::Regenerated {
+        actor: EconomicActorId(8_031),
+        good: GOOD_RAW,
+        qty: Quantity(100),
+    };
+    assert_eq!(e.event_type(), "regenerated");
+}

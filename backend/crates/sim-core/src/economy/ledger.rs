@@ -92,6 +92,14 @@ pub enum EconomyEvent {
         market: MarketId,
         amount: Money,
     },
+    /// The `EXTRACTOR` faucet deposited `qty` of a raw good this interval (goods-only,
+    /// no money). The sole source of new `GOOD_RAW`; pairs with the recipe `Consumed`
+    /// events in the per-good conservation balance.
+    Regenerated {
+        actor: EconomicActorId,
+        good: GoodId,
+        qty: Quantity,
+    },
 }
 
 impl EconomyEvent {
@@ -115,6 +123,7 @@ impl EconomyEvent {
             Self::TransportPaid { .. } => "transport_paid",
             Self::MacroFlow { .. } => "macro_flow",
             Self::WagePaid { .. } => "wage_paid",
+            Self::Regenerated { .. } => "regenerated",
         }
     }
 }
