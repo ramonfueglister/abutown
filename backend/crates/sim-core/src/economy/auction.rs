@@ -401,10 +401,9 @@ pub fn clear_market_good_with_receipts(
     let mut next_accounts = accounts.clone();
     let mut next_inventory = inventory.clone();
     let mut next_orders = orders.clone();
+    let mut next_receipts = receipts.clone();
     let mut trade_events = Vec::new();
     let mut traded_qty = Quantity::ZERO;
-    let mut scratch_receipts: std::collections::BTreeMap<(EconomicActorId, MarketId), Money> =
-        std::collections::BTreeMap::new();
 
     for fill in &plan.fills {
         let bid = next_orders
@@ -426,8 +425,8 @@ pub fn clear_market_good_with_receipts(
             next_accounts.deposit(bid.owner, refund)?;
         }
         next_accounts.deposit(ask.owner, actual_cost)?;
-        // Accumulate seller revenue into scratch receipts.
-        let slot = scratch_receipts
+        // Accumulate seller revenue into next_receipts (scratch zone, before any commit).
+        let slot = next_receipts
             .entry((ask.owner, key.market))
             .or_insert(Money::ZERO);
         *slot = slot.checked_add(actual_cost)?;
@@ -462,16 +461,13 @@ pub fn clear_market_good_with_receipts(
     next_orders.bids.retain(|_, bid| bid.qty_remaining.0 > 0);
     next_orders.asks.retain(|_, ask| ask.qty_remaining.0 > 0);
 
+    // Commit block: all infallible assignments. Every `?` above fired in the
+    // scratch zone (next_* clones) before any state is modified.
     *accounts = next_accounts;
     *inventory = next_inventory;
     *orders = next_orders;
+    *receipts = next_receipts;
     ledger.0.extend(trade_events);
-    // Fold scratch_receipts into the caller's receipts map atomically with the
-    // money commit above.
-    for (k, v) in scratch_receipts {
-        let slot = receipts.entry(k).or_insert(Money::ZERO);
-        *slot = slot.checked_add(v)?;
-    }
     if let Some(state) = market_goods.0.get_mut(&key) {
         state.last_settlement_price = price;
         state.traded_qty_last_tick = traded_qty;

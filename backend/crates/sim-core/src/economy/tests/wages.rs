@@ -56,7 +56,7 @@ fn auction_captures_seller_revenue_into_receipts() {
 }
 
 #[test]
-fn auction_receipts_discarded_on_fault_are_coherent() {
+fn auction_no_fills_produces_no_receipts() {
     let market = MarketId(7);
     let key = MarketGoodKey { market, good: GOOD_FOOD };
     let mut accounts = AccountBook::default();
@@ -95,5 +95,6 @@ fn settle_flow_captures_seller_revenue_into_receipts() {
         10, 10, 10, 10, &config, 1, false, false, &mut receipts.0,
     ).unwrap();
     assert_eq!(accounts.total_money().unwrap(), before, "money conserved");
+    // src_revenue = value(1_000, 10) = 1_000*10/ECONOMY_SCALE(=1_000) = 10
     assert_eq!(receipts.0.get(&(seller, src)).copied(), Some(Money(10)));
 }
