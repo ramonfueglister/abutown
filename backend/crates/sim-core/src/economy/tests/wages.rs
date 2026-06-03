@@ -1394,3 +1394,193 @@ fn distribute_profit_does_not_reset_income() {
         "wage 600 + dividend 400, accumulated"
     );
 }
+
+#[test]
+fn full_tick_wage_profit_rebate_all_net_household_sector_to_zero() {
+    // One world where a firm sells (auction path → revenue → wage + profit) AND transport
+    // accrues (a dormant macro-flow pair → operator fee). Run past a macro-flow interval so
+    // wage, profit, AND rebate all fire. Assert: total_money byte-invariant every tick AND
+    // HOUSEHOLD_SECTOR == 0 after every tick (each of the three legs nets it independently).
+    let (mut world, mut schedule) = full_economy_world();
+
+    // Auction-path firm: supplier sells TOOLS at active market m1, consumer buys there.
+    let supplier = EconomicActorId(8_001);
+    let consumer = EconomicActorId(8_002);
+    let m1 = MarketId(1);
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(supplier, GOOD_TOOLS, Quantity(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(consumer, Money(10_000_000))
+        .unwrap();
+    world.resource_mut::<SupplyPools>().0.insert(
+        supplier,
+        SupplyPool {
+            actor: supplier,
+            market: m1,
+            good: GOOD_TOOLS,
+            offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world
+        .resource_mut::<DemandPools>()
+        .0
+        .insert(consumer, consumer_pool(consumer, m1));
+    world.resource_mut::<crate::economy::Markets>().0.insert(
+        m1,
+        crate::economy::MarketSite {
+            id: m1,
+            node_id: crate::routing::NodeId(0),
+            name: "M1".to_string(),
+        },
+    );
+
+    // Dormant macro-flow pair (GOOD_FOOD) → accrues a TRANSPORT_OPERATOR fee each interval.
+    // Use ids in the 8_0xx labor band for consistency with the rest of the economy.
+    let f_supplier = EconomicActorId(8_041);
+    let f_consumer = EconomicActorId(8_042);
+    let m_src = MarketId(9_401);
+    let m_dst = MarketId(9_402);
+    let chunk_src = ChunkCoord { x: 5, y: 5 };
+    let chunk_dst = ChunkCoord { x: 9, y: 5 };
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(f_supplier, GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(f_consumer, Money(1_000_000_000))
+        .unwrap();
+    world.resource_mut::<SupplyPools>().0.insert(
+        f_supplier,
+        SupplyPool {
+            actor: f_supplier,
+            market: m_src,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(200),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<DemandPools>().0.insert(
+        f_consumer,
+        DemandPool {
+            actor: f_consumer,
+            market: m_dst,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(200),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        },
+    );
+    world
+        .resource_mut::<MarketChunks>()
+        .0
+        .insert(m_src, chunk_src);
+    world
+        .resource_mut::<MarketChunks>()
+        .0
+        .insert(m_dst, chunk_dst);
+    let mut dist = MarketDistances(BTreeMap::new());
+    dist.0.insert((m_src, m_dst), 4);
+    dist.0.insert((m_dst, m_src), 4);
+    world.insert_resource(dist);
+    world
+        .resource_mut::<EconomyConfig>()
+        .transport_cost_per_tile_unit = Money(50);
+    world.spawn((ChunkCoordComp(chunk_src), AsleepChunk));
+    world.spawn((ChunkCoordComp(chunk_dst), AsleepChunk));
+
+    // Household pays BOTH consumers (the labor households).
+    world.insert_resource(HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(consumer, 1), (f_consumer, 1)]),
+    });
+
+    // Seed opening prices for both consumer (market, good)s.
+    for (mk, good) in [(m1, GOOD_TOOLS), (m_dst, GOOD_FOOD)] {
+        let key = MarketGoodKey { market: mk, good };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let state = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        state.ewma_reference_price = Money(1_000);
+        state.last_settlement_price = Money(1_000);
+    }
+
+    let before = world.resource::<AccountBook>().total_money().unwrap();
+    let interval = world.resource::<EconomyConfig>().macro_flow_interval_ticks;
+
+    // Run enough loop iterations that at least one rebate-boundary tick is reached. Because
+    // tick_world DOUBLE-increments Tick (schedule's own tick_increment + the helper's +=1),
+    // Tick.0 advances by 2 per iteration, so the loop counter is NOT Tick.0. We therefore
+    // pin every boundary assertion against the REAL Tick.0 read inside the loop, never the
+    // loop index. Run generously past one interval.
+    let mut saw_operator_drained_on_boundary = false;
+    for _ in 0..(interval as usize + 4) {
+        tick_world(&mut world, &mut schedule);
+        assert_eq!(
+            world.resource::<AccountBook>().total_money().unwrap(),
+            before,
+            "total_money byte-invariant across wage+profit+rebate legs"
+        );
+        assert_eq!(
+            world
+                .resource::<AccountBook>()
+                .account(HOUSEHOLD_SECTOR)
+                .available,
+            Money::ZERO,
+            "HOUSEHOLD_SECTOR nets to zero after the full tick (all three legs)"
+        );
+        // The rebate system gates on Tick.0 % interval == 0 (phase-locked to the operator
+        // credit). On any such boundary tick the operator must read zero AFTER the tick.
+        let now = world.resource::<crate::mobility::resources::Tick>().0;
+        if interval != 0 && now % interval == 0 {
+            assert_eq!(
+                world
+                    .resource::<AccountBook>()
+                    .account(crate::economy::TRANSPORT_OPERATOR)
+                    .available,
+                Money::ZERO,
+                "operator drained at the interval boundary Tick.0={now}"
+            );
+            saw_operator_drained_on_boundary = true;
+        }
+    }
+    assert!(
+        saw_operator_drained_on_boundary,
+        "the run must cross at least one rebate boundary (Tick.0 multiple of {interval})"
+    );
+
+    // Non-vacuity: all three event kinds must have fired at least once.
+    let ev = &world.resource::<TradeLedger>().0;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, EconomyEvent::WagePaid { .. })),
+        "wages fired"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, EconomyEvent::ProfitDistributed { .. })),
+        "profit fired"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, EconomyEvent::TransportRebate { .. })),
+        "rebate fired"
+    );
+}
