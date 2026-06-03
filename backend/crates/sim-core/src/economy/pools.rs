@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use bevy_ecs::prelude::*;
 
 use crate::economy::{
-    AccountBook, DirtyMarketGoods, ECONOMY_SCALE, EconomicActorId, EconomyError, EconomyEvent,
-    GoodId, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
-    NextOrderId, OrderBook, Quantity, TradeLedger, create_ask, create_bid,
+    AccountBook, DirtyMarketGoods, ECONOMY_SCALE, EconomicActorId, EconomyConfig, EconomyError,
+    EconomyEvent, GoodId, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId,
+    Money, NextOrderId, OrderBook, Quantity, TradeLedger, create_ask, create_bid,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -64,8 +64,6 @@ pub(crate) fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ti
 
 /// Keynesian consumption target (Money): `C = autonomous + floor(mpc_bps * income / 10_000)`.
 /// `mpc_bps` validated `0..=10_000`. i128 intermediate, floor, `try_from` → Overflow.
-// Task 5 will call this; suppress dead_code until then.
-#[allow(dead_code)]
 pub(crate) fn target_spend(
     autonomous: Money,
     mpc_bps: i32,
@@ -81,8 +79,6 @@ pub(crate) fn target_spend(
 
 /// Map a target SPEND (Money) to a desired Quantity at a reference price, inverting
 /// `affordable_qty`'s SCALE math: `qty = floor(spend * ECONOMY_SCALE / p_ref)`.
-// Task 5 will call this; suppress dead_code until then.
-#[allow(dead_code)]
 pub(crate) fn spend_to_qty(spend: Money, p_ref: Money) -> Result<Quantity, EconomyError> {
     if p_ref.0 <= 0 {
         return Err(EconomyError::ZeroPrice);
@@ -91,6 +87,42 @@ pub(crate) fn spend_to_qty(spend: Money, p_ref: Money) -> Result<Quantity, Econo
     Ok(Quantity(
         i64::try_from(raw).map_err(|_| EconomyError::Overflow)?,
     ))
+}
+
+/// Part B: rewrite each consumer pool's `desired_qty_per_tick` from its
+/// `income_last_tick` (booked by PayWages THIS tick) and the SMOOTHED reference price.
+/// `p_ref = ewma_reference_price` if > 0 else `config.trader_default_ref_price`. Writes
+/// a Quantity ONLY; touches no money field. Pure, deterministic, keys-first. A per-pool
+/// fault is skipped (the pool keeps its prior desired_qty), never aborting the others.
+pub fn run_consumption_update_at_tick(
+    demand: &mut DemandPools,
+    market_goods: &MarketGoods,
+    config: &EconomyConfig,
+) -> Result<(), EconomyError> {
+    let actors: Vec<EconomicActorId> = demand.0.keys().copied().collect();
+    for actor in actors {
+        let pool = demand.0[&actor];
+        let key = MarketGoodKey {
+            market: pool.market,
+            good: pool.good,
+        };
+        let p_ref = match market_goods.0.get(&key) {
+            Some(s) if s.ewma_reference_price.0 > 0 => s.ewma_reference_price,
+            _ => config.trader_default_ref_price,
+        };
+        let spend = match target_spend(pool.autonomous, pool.mpc_bps, pool.income_last_tick) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let qty = match spend_to_qty(spend, p_ref) {
+            Ok(q) => q,
+            Err(_) => continue,
+        };
+        if let Some(p) = demand.0.get_mut(&actor) {
+            p.desired_qty_per_tick = qty;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn affordable_qty(cash: Money, price: Money) -> Result<Quantity, EconomyError> {

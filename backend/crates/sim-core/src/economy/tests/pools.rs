@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 
 use crate::economy::pools::{spend_to_qty, target_spend};
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyError,
-    EconomyEvent, GOOD_FOOD, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId,
-    Money, NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools, TradeLedger,
-    generate_pool_orders_at_tick, run_consumption_at_tick,
+    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig,
+    EconomyError, EconomyEvent, GOOD_FOOD, GOOD_TOOLS, InventoryBook, MarketGoodKey,
+    MarketGoodState, MarketGoods, MarketId, Money, NextOrderId, OrderBook, Quantity, SupplyPool,
+    SupplyPools, TradeLedger, generate_pool_orders_at_tick, run_consumption_at_tick,
+    run_consumption_update_at_tick,
 };
 
 #[test]
@@ -365,4 +366,59 @@ fn spend_to_qty_rejects_zero_price() {
         spend_to_qty(Money(1), Money(-5)),
         Err(EconomyError::ZeroPrice)
     );
+}
+
+fn pools_test_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {
+    DemandPool {
+        actor,
+        market,
+        good: GOOD_TOOLS,
+        desired_qty_per_tick: Quantity(0),
+        max_price: Money(2_000),
+        urgency_bps: 0,
+        elasticity_bps: 0,
+        interval_ticks: 1,
+        last_generated_tick: None,
+        last_consumed_tick: None,
+        income_last_tick: Money::ZERO,
+        mpc_bps: 8_000,
+        autonomous: Money(5_000),
+    }
+}
+
+#[test]
+fn consumption_update_sets_desired_qty_from_income_and_ref_price() {
+    let actor = EconomicActorId(8_002);
+    let market = MarketId(9_002);
+    let mut demand = DemandPools::default();
+    let mut pool = pools_test_pool(actor, market);
+    pool.income_last_tick = Money(10_000);
+    pool.mpc_bps = 8_000;
+    pool.autonomous = Money(5_000);
+    demand.0.insert(actor, pool);
+    let mut goods = MarketGoods::default();
+    let key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    let mut state = MarketGoodState::new(key);
+    state.ewma_reference_price = Money(1_000);
+    goods.0.insert(key, state);
+    run_consumption_update_at_tick(&mut demand, &goods, &EconomyConfig::default()).unwrap();
+    // C = 5_000 + 0.8*10_000 = 13_000; qty = 13_000 * 1_000 / 1_000 = 13_000.
+    assert_eq!(demand.0[&actor].desired_qty_per_tick, Quantity(13_000));
+}
+
+#[test]
+fn consumption_update_falls_back_to_default_ref_price_when_ewma_zero() {
+    let actor = EconomicActorId(8_002);
+    let market = MarketId(9_002);
+    let mut demand = DemandPools::default();
+    let mut pool = pools_test_pool(actor, market);
+    pool.income_last_tick = Money::ZERO; // C = autonomous = 5_000
+    demand.0.insert(actor, pool);
+    let goods = MarketGoods::default();
+    run_consumption_update_at_tick(&mut demand, &goods, &EconomyConfig::default()).unwrap();
+    // qty = 5_000 * 1_000 / 1_000 = 5_000 (default ref price 1_000).
+    assert_eq!(demand.0[&actor].desired_qty_per_tick, Quantity(5_000));
 }

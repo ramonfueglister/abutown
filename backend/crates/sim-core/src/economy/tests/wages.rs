@@ -976,3 +976,82 @@ fn full_tick_macro_flow_feeds_pay_wages_and_conserves() {
         "WagePaid events must be emitted via the MacroFlow settle path (got 0)"
     );
 }
+
+#[test]
+fn closed_loop_bootstraps_from_autonomous_and_lags_one_tick() {
+    // Tick 0: income=0 ⇒ desired_qty driven by autonomous only (set by UpdateConsumption
+    // at end of tick 0) ⇒ subsequent ticks bid the autonomous floor ⇒ trade ⇒ wage ⇒
+    // income>0. Asserts the loop is self-starting and conservative.
+    let (mut world, mut schedule) = full_economy_world();
+    let supplier = EconomicActorId(8_001);
+    let consumer = EconomicActorId(8_002);
+    let m = MarketId(1);
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(supplier, GOOD_TOOLS, Quantity(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(consumer, Money(1_000_000))
+        .unwrap();
+    world.resource_mut::<SupplyPools>().0.insert(
+        supplier,
+        SupplyPool {
+            actor: supplier,
+            market: m,
+            good: GOOD_TOOLS,
+            offered_qty_per_tick: Quantity(1_000),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    let mut pool = consumer_pool(consumer, m);
+    pool.desired_qty_per_tick = Quantity(0);
+    pool.good = GOOD_TOOLS;
+    world.resource_mut::<DemandPools>().0.insert(consumer, pool);
+    world.insert_resource(HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(consumer, 1_i64)]),
+    });
+
+    let before = world.resource::<AccountBook>().total_money().unwrap();
+
+    // Tick 0: UpdateConsumption sets desired_qty from autonomous (income still 0).
+    schedule.run(&mut world);
+    let dq0 = world.resource::<DemandPools>().0[&consumer]
+        .desired_qty_per_tick
+        .0;
+    assert!(
+        dq0 > 0,
+        "autonomous term sets a positive desired_qty at tick 0 (bootstrap)"
+    );
+
+    let mut saw_income = false;
+    for _ in 0..7 {
+        schedule.run(&mut world);
+        if world.resource::<DemandPools>().0[&consumer]
+            .income_last_tick
+            .0
+            > 0
+        {
+            saw_income = true;
+        }
+        assert_eq!(
+            world.resource::<AccountBook>().total_money().unwrap(),
+            before,
+            "money conserved"
+        );
+        assert_eq!(
+            world
+                .resource::<AccountBook>()
+                .account(HOUSEHOLD_SECTOR)
+                .available,
+            Money::ZERO
+        );
+    }
+    assert!(
+        saw_income,
+        "the wage→income→consumption loop closed (income became positive)"
+    );
+}

@@ -9,8 +9,8 @@ use crate::economy::{
     MarketGoods, MarketId, Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools,
     SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
     clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_consumption_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
-    run_production_at_tick,
+    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick, run_macro_flow_at_tick,
+    run_pay_wages_at_tick, run_production_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -30,6 +30,7 @@ pub enum EconomySet {
     ShopperCapture,
     Materialize,
     Telemetry,
+    UpdateConsumption,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
@@ -102,6 +103,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::ShopperCapture,
             EconomySet::Materialize,
             EconomySet::Telemetry,
+            EconomySet::UpdateConsumption,
         )
             .chain(),
     );
@@ -125,6 +127,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             run_pay_wages_system.in_set(EconomySet::PayWages),
             run_consumption_system.in_set(EconomySet::Consume),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
+            run_consumption_update_system.in_set(EconomySet::UpdateConsumption),
         )
             .before(crate::mobility::systems::tick_increment_system),
     );
@@ -457,4 +460,16 @@ pub fn run_macro_flow_system(
             reason,
         });
     }
+}
+
+/// Part B: rewrite each consumer pool's desired quantity from its current income +
+/// the FINAL smoothed reference price. Runs after PayWages (income) and after
+/// Telemetry (the ewma write). The new desired_qty becomes a bid in NEXT tick's
+/// GeneratePoolOrders — the explicit 1-tick income→consumption lag.
+pub fn run_consumption_update_system(
+    config: Res<EconomyConfig>,
+    mut demand: ResMut<DemandPools>,
+    goods: Res<MarketGoods>,
+) {
+    let _ = run_consumption_update_at_tick(&mut demand, &goods, &config);
 }
