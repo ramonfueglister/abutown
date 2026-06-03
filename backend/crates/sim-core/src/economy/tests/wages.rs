@@ -540,6 +540,87 @@ fn pay_wages_firm_short_of_wage_emits_audited_halt_and_skips_its_bill() {
         "the halt is audited"
     );
     assert!(wage_tel.0.is_empty());
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel stays zero on the halt path"
+    );
+}
+
+#[test]
+fn pay_wages_weighted_split_zero_weight_pool_gets_nothing() {
+    // Three pools with weights {c1:3, c2:1, c3:0}. Firm revenue 1_000 → wage 600 (at
+    // labor_share_bps=6_000). Largest-remainder split of 600 across [3,1,0]:
+    //   base = floor(600*3/4)=450, floor(600*1/4)=150, 0 → total=600, no remainder.
+    // c3 has weight 0 → share MUST be zero; Σincome == wage_bill; sentinel nets to zero.
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let c2 = EconomicActorId(8_012);
+    let c3 = EconomicActorId(8_022);
+    let market = MarketId(9_001);
+
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(1_000)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, market), Money(1_000));
+
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    demand.0.insert(c2, consumer_pool(c2, MarketId(9_002)));
+    demand.0.insert(c3, consumer_pool(c3, MarketId(9_002)));
+
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 3), (c2, 1), (c3, 0)]),
+    };
+    let config = EconomyConfig::default(); // labor_share_bps = 6_000
+
+    let before = accounts.total_money().unwrap();
+    let mut wage_tel = WageTelemetry::default();
+    let mut ledger = TradeLedger::default();
+
+    run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_tel,
+        &mut ledger,
+        &config,
+    )
+    .unwrap();
+
+    // money byte-invariant
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant total money"
+    );
+    // HOUSEHOLD_SECTOR nets to zero
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    // per-pool exact apportionment
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(450),
+        "c1 weight=3 → 450"
+    );
+    assert_eq!(
+        demand.0[&c2].income_last_tick,
+        Money(150),
+        "c2 weight=1 → 150"
+    );
+    assert_eq!(
+        demand.0[&c3].income_last_tick,
+        Money::ZERO,
+        "zero-weight pool gets nothing"
+    );
+    // Σincome == wage_bill
+    let total_income: i64 = demand.0.values().map(|p| p.income_last_tick.0).sum();
+    assert_eq!(total_income, 600, "Σincome == wage_bill");
 }
 
 #[test]

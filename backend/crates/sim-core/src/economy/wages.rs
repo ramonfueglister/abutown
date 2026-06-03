@@ -113,6 +113,12 @@ pub fn run_pay_wages_at_tick(
                 });
                 continue;
             }
+            // Non-atomic: `accounts` is mutated in-place (no scratch/rollback). Every
+            // completed `transfer` is individually balanced so `total_money` stays
+            // byte-invariant even on an early `?`-bail (conservation-safe-but-non-atomic).
+            // The sentinel-zero invariant (and the debug_assert) hold only on the `Ok`
+            // path. An overflow bail is unreachable from a valid money state — any sum
+            // overflowing i64 here would already have overflowed `total_money`.
             accounts.transfer(firm, HOUSEHOLD_SECTOR, wage)?;
             wage_bill = wage_bill
                 .checked_add(wage.0)
