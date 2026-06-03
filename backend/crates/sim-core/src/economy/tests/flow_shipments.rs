@@ -69,6 +69,9 @@ fn macro_flow_captures_one_shipment_per_cross_edge() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
 
@@ -114,6 +117,7 @@ fn macro_flow_captures_one_shipment_per_cross_edge() {
         &mut next_id,
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 
@@ -220,6 +224,9 @@ fn flow_shipments_capture_is_deterministic() {
                 interval_ticks: 1,
                 last_generated_tick: None,
                 last_consumed_tick: None,
+                income_last_tick: Money::ZERO,
+                mpc_bps: 8_000,
+                autonomous: Money(5_000),
             },
         );
 
@@ -263,6 +270,7 @@ fn flow_shipments_capture_is_deterministic() {
             &mut next_id,
             &mut crate::economy::OrderBook::default(),
             &mut crate::economy::NextOrderId::default(),
+            &mut std::collections::BTreeMap::new(),
         )
         .unwrap();
 

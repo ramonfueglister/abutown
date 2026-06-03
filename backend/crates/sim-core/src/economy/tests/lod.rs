@@ -64,6 +64,9 @@ fn seeded_demand_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {
         interval_ticks: 1,
         last_generated_tick: None,
         last_consumed_tick: None,
+        income_last_tick: Money::ZERO,
+        mpc_bps: 8_000,
+        autonomous: Money(5_000),
     }
 }
 
@@ -301,6 +304,9 @@ fn asleep_anchored_market_DOES_flow() {
                 interval_ticks: 1,
                 last_generated_tick: None,
                 last_consumed_tick: None,
+                income_last_tick: Money::ZERO,
+                mpc_bps: 8_000,
+                autonomous: Money(5_000),
             },
         );
     }
@@ -504,6 +510,9 @@ fn active_to_dormant_handoff_conserves() {
                 interval_ticks: 1,
                 last_generated_tick: None,
                 last_consumed_tick: None,
+                income_last_tick: Money::ZERO,
+                mpc_bps: 8_000,
+                autonomous: Money(5_000),
             },
         );
     }
@@ -525,6 +534,23 @@ fn active_to_dormant_handoff_conserves() {
     let chunk_b = world.spawn((ChunkCoordComp(coord_b), ActiveChunk)).id();
     world.spawn((ChunkCoordComp(coord_a), AsleepChunk));
     world.insert_resource(Tick(0));
+
+    // Seed the opening reference price for the consumer's (m_b, GOOD_FOOD) so that
+    // run_consumption_update_at_tick (which .expects a real price) does not panic.
+    {
+        use crate::economy::{MarketGoodKey, MarketGoodState, MarketGoods};
+        let key = MarketGoodKey {
+            market: m_b,
+            good: GOOD_FOOD,
+        };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let state = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        state.ewma_reference_price = Money(1_000);
+        state.last_settlement_price = Money(1_000);
+    }
 
     let money_total = world.resource::<AccountBook>().total_money().unwrap();
     let good_total = world

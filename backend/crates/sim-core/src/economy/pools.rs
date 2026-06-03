@@ -23,6 +23,19 @@ pub struct DemandPool {
     /// `last_generated_tick` (which gates bidding). `Option<u64>: Copy` keeps `DemandPool`
     /// `Copy`; persists for free inside `demand_pools`.
     pub last_consumed_tick: Option<u64>,
+    /// Wage Money this household pool received in the PREVIOUS tick (a period FLOW,
+    /// not a balance). Zeroed every tick before the wage split accumulates. Drives the
+    /// consumption function (Part B). `Money: Copy` keeps `DemandPool` `Copy`; persists
+    /// for free in `demand_pools`. Conservation contract: credited ONLY from the `to`
+    /// side of a COMPLETED `transfer(HOUSEHOLD_SECTOR, consumer, share)` — never minted.
+    pub income_last_tick: Money,
+    /// Marginal propensity to consume (basis points, validated `0..=10_000`). Keynesian
+    /// `C = autonomous + mpc_bps*income/10_000`. Default 8_000 (0.8). Persisted per-pool.
+    pub mpc_bps: i32,
+    /// Autonomous (subsistence) consumption spend per tick, financed from wealth. `> 0`
+    /// breaks the zero-trap (income=0 ⇒ C=autonomous ⇒ a floor bid keeps the loop alive).
+    /// Persisted per-pool.
+    pub autonomous: Money,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -47,6 +60,60 @@ pub(crate) fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ti
         None => true,
         Some(last_tick) => current_tick.saturating_sub(last_tick) >= interval_ticks,
     }
+}
+
+/// Keynesian consumption target (Money): `C = autonomous + floor(mpc_bps * income / 10_000)`.
+/// `mpc_bps` validated `0..=10_000`. i128 intermediate, floor, `try_from` → Overflow.
+pub(crate) fn target_spend(
+    autonomous: Money,
+    mpc_bps: i32,
+    income_last_tick: Money,
+) -> Result<Money, EconomyError> {
+    if !(0..=10_000).contains(&mpc_bps) {
+        return Err(EconomyError::InvalidOrder);
+    }
+    let induced = i64::try_from((income_last_tick.0 as i128) * (mpc_bps as i128) / 10_000)
+        .map_err(|_| EconomyError::Overflow)?;
+    autonomous.checked_add(Money(induced))
+}
+
+/// Map a target SPEND (Money) to a desired Quantity at a reference price, inverting
+/// `affordable_qty`'s SCALE math: `qty = floor(spend * ECONOMY_SCALE / p_ref)`.
+pub(crate) fn spend_to_qty(spend: Money, p_ref: Money) -> Result<Quantity, EconomyError> {
+    if p_ref.0 <= 0 {
+        return Err(EconomyError::ZeroPrice);
+    }
+    let raw = (spend.0 as i128) * ECONOMY_SCALE / p_ref.0 as i128;
+    Ok(Quantity(
+        i64::try_from(raw).map_err(|_| EconomyError::Overflow)?,
+    ))
+}
+
+/// Part B: rewrite each consumer pool's `desired_qty_per_tick` from its
+/// `income_last_tick` (booked by PayWages THIS tick) and the SMOOTHED reference price.
+/// The price comes from the market's seeded/traded `ewma_reference_price`; a missing
+/// or zero price is an honest `ZeroPrice` error, never a default. Writes a Quantity
+/// ONLY; touches no money field. Pure, deterministic, keys-first. `mpc_bps` is
+/// validated; `?` surfaces a genuine bug instead of silently freezing a pool's demand.
+/// Pre-condition: every consumer pool's `(market, good)` MUST have a `MarketGoodState`
+/// with a positive `ewma_reference_price` (seeded at world creation).
+pub fn run_consumption_update_at_tick(
+    demand: &mut DemandPools,
+    market_goods: &MarketGoods,
+) -> Result<(), EconomyError> {
+    for pool in demand.0.values_mut() {
+        let key = MarketGoodKey {
+            market: pool.market,
+            good: pool.good,
+        };
+        let spend = target_spend(pool.autonomous, pool.mpc_bps, pool.income_last_tick)?;
+        // The reference price is the market's seeded/traded ewma. A missing market-good
+        // or a non-positive price is an honest `ZeroPrice` error (propagated), never a
+        // default — every consumer market is seeded with an opening price.
+        let state = market_goods.0.get(&key).ok_or(EconomyError::ZeroPrice)?;
+        pool.desired_qty_per_tick = spend_to_qty(spend, state.ewma_reference_price)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn affordable_qty(cash: Money, price: Money) -> Result<Quantity, EconomyError> {

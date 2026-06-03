@@ -1,5 +1,6 @@
 mod auction;
 mod audit;
+mod commuters;
 mod conservation;
 mod determinism;
 mod drain;
@@ -20,3 +21,4 @@ mod settlement_policy;
 mod shoppers;
 mod systems;
 mod transport;
+mod wages;

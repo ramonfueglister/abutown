@@ -1,4 +1,4 @@
-use crate::economy::{GOOD_FOOD, MarketId, MarketSite, Money};
+use crate::economy::{GOOD_FOOD, HouseholdSector, MarketId, MarketSite, Money};
 
 #[test]
 fn value_types_are_serde_serializable() {
@@ -117,6 +117,9 @@ fn seed(world: &mut World) {
             interval_ticks: 1,
             last_generated_tick: Some(3),
             last_consumed_tick: None,
+            income_last_tick: crate::economy::Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: crate::economy::Money(5_000),
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
@@ -152,6 +155,10 @@ fn seed(world: &mut World) {
         d.0.insert((m, crate::economy::MarketId(2)), 4);
         d.0.insert((crate::economy::MarketId(2), m), 4);
     }
+    world.insert_resource(HouseholdSector {
+        population: 500_000,
+        pool_weights: std::collections::BTreeMap::from([(a, 3), (b, 1)]),
+    });
 }
 
 #[test]
@@ -227,6 +234,51 @@ use crate::economy::EconomySnapshotProvider;
 use crate::world::persistence::SnapshotProvider;
 
 #[test]
+fn household_sector_round_trips() {
+    let a = EconomicActorId(1);
+    let b = EconomicActorId(2);
+    let mut world = install_economy();
+    seed(&mut world);
+    // seed() already inserts HouseholdSector {population:500_000, pool_weights:{a:3, b:1}}.
+
+    let snap = extract_from_world(&world);
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+
+    // The HouseholdSector resource round-trips exactly.
+    let orig = world.resource::<HouseholdSector>();
+    let restored = fresh.resource::<HouseholdSector>();
+    assert_eq!(
+        orig.population, restored.population,
+        "population round-trips"
+    );
+    assert_eq!(
+        orig.pool_weights, restored.pool_weights,
+        "pool_weights round-trips"
+    );
+
+    // Snapshot identity (extract->serialize->deserialize->apply->extract is identity).
+    assert_eq!(
+        snap,
+        extract_from_world(&fresh),
+        "full snapshot identity with HouseholdSector"
+    );
+    // Spot-check the snapshot fields.
+    assert_eq!(snap.household_sector.population, 500_000);
+    assert!(
+        snap.household_sector.pool_weights.contains(&(a, 3)),
+        "a has weight 3"
+    );
+    assert!(
+        snap.household_sector.pool_weights.contains(&(b, 1)),
+        "b has weight 1"
+    );
+}
+
+#[test]
 fn provider_collects_single_economy_item() {
     let mut world = install_economy();
     seed(&mut world);
@@ -247,6 +299,40 @@ fn provider_collects_single_economy_item() {
 
     let decoded: EconomyPersistSnapshot = serde_json::from_slice(&items[0].payload).unwrap();
     assert_eq!(decoded, extract_from_world(&world));
+}
+
+#[test]
+fn demand_pool_wage_fields_round_trip() {
+    let mut world = install_economy();
+    let actor = EconomicActorId(42);
+    world.resource_mut::<DemandPools>().0.insert(
+        actor,
+        DemandPool {
+            actor,
+            market: crate::economy::MarketId(9_002),
+            good: GOOD_TOOLS,
+            desired_qty_per_tick: Quantity(7),
+            max_price: crate::economy::Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: Some(3),
+            last_consumed_tick: Some(2),
+            income_last_tick: crate::economy::Money(1_234),
+            mpc_bps: 7_500,
+            autonomous: crate::economy::Money(4_321),
+        },
+    );
+    let snap = extract_from_world(&world);
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+    let restored = fresh.resource::<DemandPools>().0[&actor];
+    assert_eq!(restored.income_last_tick, crate::economy::Money(1_234));
+    assert_eq!(restored.mpc_bps, 7_500);
+    assert_eq!(restored.autonomous, crate::economy::Money(4_321));
+    assert_eq!(snap, extract_from_world(&fresh), "identity round-trip");
 }
 
 #[test]

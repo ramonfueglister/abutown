@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 
+use crate::economy::pools::{spend_to_qty, target_spend};
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyEvent,
-    GOOD_FOOD, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
-    NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools, TradeLedger,
-    generate_pool_orders_at_tick, run_consumption_at_tick,
+    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyError,
+    EconomyEvent, GOOD_FOOD, GOOD_TOOLS, InventoryBook, MarketGoodKey, MarketGoodState,
+    MarketGoods, MarketId, Money, NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools,
+    TradeLedger, generate_pool_orders_at_tick, run_consumption_at_tick,
+    run_consumption_update_at_tick,
 };
 
 #[test]
@@ -33,6 +35,9 @@ fn demand_pool_caps_order_to_affordable_quantity() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
 
@@ -129,6 +134,9 @@ fn rejected_pool_order_leaves_books_unchanged() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
 
@@ -166,6 +174,9 @@ fn consume_pool(actor: u64, market: u32, want: i64) -> DemandPool {
         interval_ticks: 1,
         last_generated_tick: None,
         last_consumed_tick: None,
+        income_last_tick: Money::ZERO,
+        mpc_bps: 8_000,
+        autonomous: Money(5_000),
     }
 }
 
@@ -287,5 +298,131 @@ fn consumption_attributes_to_market_and_resets_stale() {
         mg.0[&stale_key].consumed_qty_last_tick,
         Quantity(0),
         "stale market-good's consumed_qty reset to 0"
+    );
+}
+
+#[test]
+fn target_spend_is_autonomous_plus_mpc_times_income() {
+    assert_eq!(
+        target_spend(Money(5_000), 8_000, Money(10_000)).unwrap(),
+        Money(13_000)
+    );
+}
+#[test]
+fn target_spend_at_zero_income_is_autonomous() {
+    assert_eq!(
+        target_spend(Money(5_000), 8_000, Money::ZERO).unwrap(),
+        Money(5_000)
+    );
+}
+#[test]
+fn target_spend_floors_the_induced_term() {
+    // 0.8 * 12_345 = 9_876.0 floors to 9_876; + 1 autonomous = 9_877.
+    assert_eq!(
+        target_spend(Money(1), 8_000, Money(12_345)).unwrap(),
+        Money(9_877)
+    );
+}
+#[test]
+fn target_spend_rejects_out_of_band_mpc() {
+    assert_eq!(
+        target_spend(Money(1), -1, Money(1)),
+        Err(EconomyError::InvalidOrder)
+    );
+    assert_eq!(
+        target_spend(Money(1), 10_001, Money(1)),
+        Err(EconomyError::InvalidOrder)
+    );
+}
+#[test]
+fn target_spend_full_mpc_passes_all_income() {
+    assert_eq!(
+        target_spend(Money(0), 10_000, Money(7_000)).unwrap(),
+        Money(7_000)
+    );
+}
+#[test]
+fn spend_to_qty_inverts_affordable_qty_scale() {
+    assert_eq!(
+        spend_to_qty(Money(10_000), Money(1_000)).unwrap(),
+        Quantity(10_000)
+    );
+}
+#[test]
+fn spend_to_qty_floors() {
+    // 1_000 * 1_000 / 3 = 333_333.33 → floor 333_333.
+    assert_eq!(
+        spend_to_qty(Money(1_000), Money(3)).unwrap(),
+        Quantity(333_333)
+    );
+}
+#[test]
+fn spend_to_qty_rejects_zero_price() {
+    assert_eq!(
+        spend_to_qty(Money(1), Money(0)),
+        Err(EconomyError::ZeroPrice)
+    );
+    assert_eq!(
+        spend_to_qty(Money(1), Money(-5)),
+        Err(EconomyError::ZeroPrice)
+    );
+}
+
+fn pools_test_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {
+    DemandPool {
+        actor,
+        market,
+        good: GOOD_TOOLS,
+        desired_qty_per_tick: Quantity(0),
+        max_price: Money(2_000),
+        urgency_bps: 0,
+        elasticity_bps: 0,
+        interval_ticks: 1,
+        last_generated_tick: None,
+        last_consumed_tick: None,
+        income_last_tick: Money::ZERO,
+        mpc_bps: 8_000,
+        autonomous: Money(5_000),
+    }
+}
+
+#[test]
+fn consumption_update_sets_desired_qty_from_income_and_ref_price() {
+    let actor = EconomicActorId(8_002);
+    let market = MarketId(9_002);
+    let mut demand = DemandPools::default();
+    let mut pool = pools_test_pool(actor, market);
+    pool.income_last_tick = Money(10_000);
+    pool.mpc_bps = 8_000;
+    pool.autonomous = Money(5_000);
+    demand.0.insert(actor, pool);
+    let mut goods = MarketGoods::default();
+    let key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    let mut state = MarketGoodState::new(key);
+    state.ewma_reference_price = Money(1_000);
+    goods.0.insert(key, state);
+    run_consumption_update_at_tick(&mut demand, &goods).unwrap();
+    // C = 5_000 + 0.8*10_000 = 13_000; qty = 13_000 * 1_000 / 1_000 = 13_000.
+    assert_eq!(demand.0[&actor].desired_qty_per_tick, Quantity(13_000));
+}
+
+#[test]
+fn consumption_update_errors_when_market_has_no_price() {
+    // With NO MarketGoodState for the pool's market, run_consumption_update_at_tick
+    // must return Err(EconomyError::ZeroPrice) — honest error, never a silent default.
+    let actor = EconomicActorId(8_002);
+    let market = MarketId(9_002);
+    let mut demand = DemandPools::default();
+    let mut pool = pools_test_pool(actor, market);
+    pool.income_last_tick = Money::ZERO;
+    demand.0.insert(actor, pool);
+    let goods = MarketGoods::default(); // no MarketGoodState for (market, GOOD_TOOLS)
+    assert_eq!(
+        run_consumption_update_at_tick(&mut demand, &goods),
+        Err(EconomyError::ZeroPrice),
+        "absent market-good must yield ZeroPrice, not a silent default"
     );
 }

@@ -304,8 +304,8 @@ fn pair_fills(bids: &[Bid], bid_alloc: &[i64], asks: &[Ask], ask_alloc: &[i64]) 
 }
 
 use crate::economy::{
-    AccountBook, EconomyEvent, InventoryBook, MarketGoodState, MarketGoods, OrderBook, TradeLedger,
-    checked_order_value,
+    AccountBook, EconomicActorId, EconomyEvent, InventoryBook, MarketGoodState, MarketGoods,
+    MarketId, OrderBook, TradeLedger, checked_order_value,
 };
 
 pub fn clear_market_good(
@@ -339,6 +339,32 @@ pub fn clear_market_good_with_policy(
     key: MarketGoodKey,
     current_tick: u64,
     policy: SettlementPolicy,
+) -> Result<(), EconomyError> {
+    let mut discard = std::collections::BTreeMap::new();
+    clear_market_good_with_receipts(
+        accounts,
+        inventory,
+        orders,
+        ledger,
+        market_goods,
+        key,
+        current_tick,
+        policy,
+        &mut discard,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn clear_market_good_with_receipts(
+    accounts: &mut AccountBook,
+    inventory: &mut InventoryBook,
+    orders: &mut OrderBook,
+    ledger: &mut TradeLedger,
+    market_goods: &mut MarketGoods,
+    key: MarketGoodKey,
+    current_tick: u64,
+    policy: SettlementPolicy,
+    receipts: &mut std::collections::BTreeMap<(EconomicActorId, MarketId), Money>,
 ) -> Result<(), EconomyError> {
     // Get-or-create the market-good state so a freshly-dirtied key (the system
     // path) clears instead of failing with InvalidOrder. A never-traded market
@@ -375,6 +401,7 @@ pub fn clear_market_good_with_policy(
     let mut next_accounts = accounts.clone();
     let mut next_inventory = inventory.clone();
     let mut next_orders = orders.clone();
+    let mut next_receipts = receipts.clone();
     let mut trade_events = Vec::new();
     let mut traded_qty = Quantity::ZERO;
 
@@ -398,6 +425,11 @@ pub fn clear_market_good_with_policy(
             next_accounts.deposit(bid.owner, refund)?;
         }
         next_accounts.deposit(ask.owner, actual_cost)?;
+        // Accumulate seller revenue into next_receipts (scratch zone, before any commit).
+        let slot = next_receipts
+            .entry((ask.owner, key.market))
+            .or_insert(Money::ZERO);
+        *slot = slot.checked_add(actual_cost)?;
         next_inventory.debit_locked_goods(ask.owner, ask.good, fill.qty)?;
         next_inventory.deposit(bid.owner, bid.good, fill.qty)?;
 
@@ -429,9 +461,12 @@ pub fn clear_market_good_with_policy(
     next_orders.bids.retain(|_, bid| bid.qty_remaining.0 > 0);
     next_orders.asks.retain(|_, ask| ask.qty_remaining.0 > 0);
 
+    // Commit block: all infallible assignments. Every `?` above fired in the
+    // scratch zone (next_* clones) before any state is modified.
     *accounts = next_accounts;
     *inventory = next_inventory;
     *orders = next_orders;
+    *receipts = next_receipts;
     ledger.0.extend(trade_events);
     if let Some(state) = market_goods.0.get_mut(&key) {
         state.last_settlement_price = price;

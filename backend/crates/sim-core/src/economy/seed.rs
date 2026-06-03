@@ -7,11 +7,12 @@
 
 use bevy_ecs::prelude::*;
 
+use crate::economy::systems::EconomyConfig;
 use crate::economy::transport::manhattan_tiles;
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_TOOLS, InventoryBook,
-    MarketChunks, MarketDistances, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
-    SupplyPools,
+    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR,
+    HouseholdSector, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState,
+    MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
 
@@ -128,6 +129,9 @@ pub fn seed_demo_economy(world: &mut World) {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
     // Second good (FOOD): a cheap supplier at m_a and a dear consumer at m_b,
@@ -169,6 +173,9 @@ pub fn seed_demo_economy(world: &mut World) {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
     // ── Task 7: dormant flow-demo market pair ────────────────────────────────
@@ -263,6 +270,62 @@ pub fn seed_demo_economy(world: &mut World) {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
+    // ── SFC household sector: equal-weight payout across ALL seeded consumer pools ──
+    // Placed AFTER all DemandPool insertions (consumer 8_002, food_consumer 8_012,
+    // flow_consumer 8_022) so that every pool is captured in pool_weights.
+    const _: () = assert!(HOUSEHOLD_SECTOR.0 == u64::MAX - 1);
+    {
+        let consumer_ids: Vec<EconomicActorId> =
+            world.resource::<DemandPools>().0.keys().copied().collect();
+        let mut weights = std::collections::BTreeMap::new();
+        for id in &consumer_ids {
+            weights.insert(*id, 1_i64);
+        }
+        assert!(
+            weights.values().any(|w| *w > 0),
+            "seed: HouseholdSector must have at least one positive pool weight"
+        );
+        assert!(
+            !consumer_ids.contains(&HOUSEHOLD_SECTOR),
+            "HOUSEHOLD_SECTOR must not collide with a seeded actor id"
+        );
+        world.insert_resource(HouseholdSector {
+            population: 1_000_000,
+            pool_weights: weights,
+        });
+    }
+
+    // ── Seed opening reference prices for every consumer pool ────────────────
+    // `run_consumption_update_at_tick` requires a real `ewma_reference_price > 0`
+    // for every consumer pool's `(market, good)` from tick 0. This is a legitimate
+    // market opening price (data), NOT a runtime fallback. Opening value matches the
+    // old fallback constant so the steady-state economy is unchanged; after the first
+    // auction settles the EWMA takes over and this seed value is irrelevant.
+    {
+        let opening_price = EconomyConfig::default().trader_default_ref_price; // Money(1_000)
+        let consumer_markets: &[(MarketId, crate::economy::GoodId)] = &[
+            (m_b, GOOD_TOOLS), // consumer 8_002
+            (m_b, GOOD_FOOD),  // food_consumer 8_012
+            (m_fb, GOOD_FOOD), // flow_consumer 8_022
+        ];
+        let mut goods = world.resource_mut::<MarketGoods>();
+        for &(market, good) in consumer_markets {
+            let key = MarketGoodKey { market, good };
+            let state = goods
+                .0
+                .entry(key)
+                .or_insert_with(|| MarketGoodState::new(key));
+            if state.ewma_reference_price.0 <= 0 {
+                state.ewma_reference_price = opening_price;
+            }
+            if state.last_settlement_price.0 <= 0 {
+                state.last_settlement_price = opening_price;
+            }
+        }
+    }
 }

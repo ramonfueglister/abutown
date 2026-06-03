@@ -3,13 +3,15 @@ use std::collections::BTreeSet;
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
+use crate::economy::commuters::{CommuterTrips, NextCommuterId, capture_commuter_trips};
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
-    Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SettlementPolicy, SupplyPools,
-    TradeLedger, clear_market_good_with_policy, expire_orders_at_tick,
-    generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick, run_macro_flow_at_tick,
-    run_production_at_tick,
+    FlowShipments, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
+    MarketGoods, MarketId, Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools,
+    SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
+    clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
+    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick, run_macro_flow_at_tick,
+    run_pay_wages_at_tick, run_production_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -17,16 +19,20 @@ use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
+    ResetReceipts,
     RefreshLod,
     ExpireOrders,
     Production,
     GeneratePoolOrders,
     ClearMarkets,
     MacroFlow,
+    PayWages,
     Consume,
     ShopperCapture,
+    CommuterCapture,
     Materialize,
     Telemetry,
+    UpdateConsumption,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
@@ -48,6 +54,26 @@ pub struct EconomyConfig {
     /// residual orders into the inter-market flow (S3). FALSE keeps the flow
     /// dormant-only (S1/S2 land dark). Defaulted FALSE; S3 flips it.
     pub drain_active_residual: bool,
+    /// Labor share of value added (basis points, 0..=10_000). Default 6_000 = 0.60
+    /// (Kaldor stylized fact). VALIDATED `0..=10_000` so `wage <= revenue` ⇒ no overdraft.
+    pub labor_share_bps: u16,
+    /// How many wage-Money units one visible commuter represents.
+    pub commuters_per_wage_unit: i64,
+    /// Absolute cap on simultaneous commuters rendered per market (viewport-bounded;
+    /// NEVER derived from the wage magnitude, else the 1M population would leak in).
+    pub max_commuters_per_market: usize,
+}
+
+impl EconomyConfig {
+    /// `labor_share_bps` as an i128, refusing `> 10_000` (a config bug that would
+    /// over-pay). Exposed for the pure `run_pay_wages_at_tick` core. Boundary
+    /// `== 10_000` is allowed (full labor share).
+    pub fn validated_labor_share_bps(&self) -> Result<i128, crate::economy::EconomyError> {
+        if self.labor_share_bps > 10_000 {
+            return Err(crate::economy::EconomyError::InvalidOrder);
+        }
+        Ok(self.labor_share_bps as i128)
+    }
 }
 
 impl Default for EconomyConfig {
@@ -64,6 +90,9 @@ impl Default for EconomyConfig {
             max_shoppers_per_market: 4,
             shopper_radius_tiles: 24.0,
             drain_active_residual: true,
+            labor_share_bps: 6_000,
+            commuters_per_wage_unit: 100,
+            max_commuters_per_market: 4,
         }
     }
 }
@@ -71,16 +100,20 @@ impl Default for EconomyConfig {
 pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.configure_sets(
         (
+            EconomySet::ResetReceipts,
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
             EconomySet::Production,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::MacroFlow,
+            EconomySet::PayWages,
             EconomySet::Consume,
             EconomySet::ShopperCapture,
+            EconomySet::CommuterCapture,
             EconomySet::Materialize,
             EconomySet::Telemetry,
+            EconomySet::UpdateConsumption,
         )
             .chain(),
     );
@@ -94,14 +127,17 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
     schedule.add_systems(
         (
+            reset_seller_receipts_system.in_set(EconomySet::ResetReceipts),
             refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
             run_production_system.in_set(EconomySet::Production),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
             run_macro_flow_system.in_set(EconomySet::MacroFlow),
+            run_pay_wages_system.in_set(EconomySet::PayWages),
             run_consumption_system.in_set(EconomySet::Consume),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
+            run_consumption_update_system.in_set(EconomySet::UpdateConsumption),
         )
             .before(crate::mobility::systems::tick_increment_system),
     );
@@ -115,6 +151,14 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             .in_set(EconomySet::ShopperCapture)
             .before(crate::mobility::systems::tick_increment_system),
     );
+    // Commuter capture is an exclusive system (mirrors run_shopper_capture_system),
+    // reading WageTelemetry instead of unmet demand. Placed after PayWages and before
+    // Materialize so the same tick that pays wages also renders its commuters.
+    schedule.add_systems(
+        run_commuter_capture_system
+            .in_set(EconomySet::CommuterCapture)
+            .before(crate::mobility::systems::tick_increment_system),
+    );
     // Render-only trader materialization is an exclusive system (it needs &mut
     // World to spawn/despawn agents), so it is registered separately from the
     // parallel economy systems above. The set chain places it after MacroFlow.
@@ -123,6 +167,12 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             .in_set(EconomySet::Materialize)
             .before(crate::mobility::systems::tick_increment_system),
     );
+}
+
+/// Tick-start: clear `SellerReceipts` so the settle points accumulate exactly one
+/// tick of revenue (mirrors `run_consumption_at_tick`'s reset-all-then-accumulate).
+pub fn reset_seller_receipts_system(mut receipts: ResMut<SellerReceipts>) {
+    receipts.0.clear();
 }
 
 /// Exclusive system: fill `ShopperVisits` from observed markets' unmet demand.
@@ -286,11 +336,12 @@ pub fn clear_dirty_markets_system(
     mut ledger: ResMut<TradeLedger>,
     mut goods: ResMut<MarketGoods>,
     mut dirty: ResMut<DirtyMarketGoods>,
+    mut receipts: ResMut<SellerReceipts>,
 ) {
     let keys: Vec<_> = dirty.0.iter().copied().collect();
     dirty.0.clear();
     for key in keys {
-        if let Err(reason) = clear_market_good_with_policy(
+        if let Err(reason) = clear_market_good_with_receipts(
             &mut accounts,
             &mut inventory,
             &mut orders,
@@ -299,6 +350,7 @@ pub fn clear_dirty_markets_system(
             key,
             tick.0,
             config.settlement_policy,
+            &mut receipts.0,
         ) {
             ledger.0.push(EconomyEvent::MarketClearFailed {
                 market: key.market,
@@ -337,6 +389,30 @@ pub fn run_consumption_system(
     );
 }
 
+/// The SFC wage step: firms pay a labor share of this tick's revenue into the
+/// household sector, apportioned to consumer pools (income). Runs after BOTH settle
+/// paths (ClearMarkets, MacroFlow) so all receipts are booked, before Consume.
+pub fn run_pay_wages_system(
+    config: Res<EconomyConfig>,
+    receipts: Res<SellerReceipts>,
+    household: Res<HouseholdSector>,
+    mut accounts: ResMut<AccountBook>,
+    mut demand: ResMut<DemandPools>,
+    mut wage_telemetry: ResMut<WageTelemetry>,
+    mut ledger: ResMut<TradeLedger>,
+) {
+    run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_telemetry,
+        &mut ledger,
+        &config,
+    )
+    .expect("run_pay_wages_at_tick is infallible by construction (wage <= just-credited revenue, Σweights guards); an Err is a bug");
+}
+
 pub fn update_market_telemetry(
     goods: &mut MarketGoods,
     config: EconomyConfig,
@@ -372,6 +448,7 @@ pub fn run_macro_flow_system(
     mut next_shipment_id: ResMut<NextShipmentId>,
     mut orders: ResMut<OrderBook>,
     mut next_order_id: ResMut<NextOrderId>,
+    mut receipts: ResMut<SellerReceipts>,
 ) {
     if let Err(reason) = run_macro_flow_at_tick(
         &mut accounts,
@@ -389,6 +466,7 @@ pub fn run_macro_flow_system(
         &mut next_shipment_id,
         &mut orders,
         &mut next_order_id,
+        &mut receipts.0,
     ) {
         // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
         // atomic boundary left the books unchanged. Per-edge settle faults are
@@ -401,4 +479,94 @@ pub fn run_macro_flow_system(
             reason,
         });
     }
+}
+
+/// Part B: rewrite each consumer pool's desired quantity from its current income +
+/// the FINAL smoothed reference price. Runs after PayWages (income) and after
+/// Telemetry (the ewma write). The new desired_qty becomes a bid in NEXT tick's
+/// GeneratePoolOrders — the explicit 1-tick income→consumption lag.
+pub fn run_consumption_update_system(mut demand: ResMut<DemandPools>, goods: Res<MarketGoods>) {
+    run_consumption_update_at_tick(&mut demand, &goods)
+        .expect("run_consumption_update_at_tick is infallible once every consumer market has a seeded opening price; an Err is a bug");
+}
+
+/// Exclusive system: fill `CommuterTrips` from observed markets' realized WAGES.
+///
+/// Mirrors `run_shopper_capture_system` exactly, reading `WageTelemetry` instead of
+/// unmet demand. A market is observed iff the chunk containing its market node is
+/// observed. The origin-candidate provider is built from `NodeSpatialIndex::within_radius`
+/// (UNSORTED) → sorted by `NodeId` → market node dropped → paired with Manhattan distance
+/// (tiles) → delegates to the pure `capture_commuter_trips`. Routability is deferred to
+/// `materialize` (it skips origins with no Walk route). No-op when the spatial world is
+/// absent (a pure-economy schedule without `RoutingPlugin`).
+pub fn run_commuter_capture_system(world: &mut World) {
+    use crate::economy::transport::manhattan_tiles;
+    use crate::routing::{Graph, NodeId, NodeSpatialIndex};
+
+    if world.get_resource::<Graph>().is_none() || world.get_resource::<NodeSpatialIndex>().is_none()
+    {
+        return;
+    }
+
+    let tick = world.get_resource::<Tick>().map(|t| t.0).unwrap_or(0);
+
+    let observed_chunks: BTreeSet<ChunkCoord> = {
+        let mut q =
+            world.query_filtered::<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>();
+        q.iter(world).map(|c| c.0).collect()
+    };
+
+    // Capture into local copies inside a borrow scope: every economy/spatial read
+    // is an immutable borrow of `world`, so the (trips, next) results are computed
+    // here and written back below once those borrows are released.
+    let captured = {
+        let graph = world.resource::<Graph>();
+        let markets = world.resource::<crate::economy::Markets>();
+        // Observed markets: those whose market-node chunk is currently observed.
+        let observed_markets: BTreeSet<MarketId> = markets
+            .0
+            .iter()
+            .filter(|(_, site)| {
+                let pos = graph.node(site.node_id).position;
+                observed_chunks.contains(&crate::mobility::chunk_of(pos.0, pos.1, 32))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if observed_markets.is_empty() {
+            return;
+        }
+
+        let spatial = world.resource::<NodeSpatialIndex>();
+        let config = *world.resource::<EconomyConfig>();
+        let wage_telemetry = world.resource::<WageTelemetry>();
+
+        let mut trips = world.resource::<CommuterTrips>().clone();
+        let mut next = *world.resource::<NextCommuterId>();
+        // Deterministic origin provider: within_radius (UNSORTED) -> sort by NodeId
+        // -> drop the market node -> pair with Manhattan distance (tiles) to the
+        // market.
+        let origins = |market_node: NodeId| -> Vec<(NodeId, i64)> {
+            let pos = graph.node(market_node).position;
+            let mut cands = spatial.within_radius((pos.0, pos.1), config.shopper_radius_tiles);
+            cands.sort_unstable_by_key(|n| n.0);
+            cands
+                .into_iter()
+                .filter(|n| *n != market_node)
+                .map(|n| (n, manhattan_tiles(graph, n, market_node)))
+                .collect()
+        };
+        capture_commuter_trips(
+            wage_telemetry,
+            &observed_markets,
+            markets,
+            origins,
+            &config,
+            tick,
+            &mut trips,
+            &mut next,
+        );
+        (trips, next)
+    };
+    *world.resource_mut::<CommuterTrips>() = captured.0;
+    *world.resource_mut::<NextCommuterId>() = captured.1;
 }

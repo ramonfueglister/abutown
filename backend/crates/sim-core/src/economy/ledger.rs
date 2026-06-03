@@ -85,6 +85,13 @@ pub enum EconomyEvent {
         price: Money,
         transport: Money,
     },
+    /// One firm's wage payment to the household sector this tick (labor share of
+    /// revenue). Emitted in ascending firm-id order for determinism.
+    WagePaid {
+        firm: EconomicActorId,
+        market: MarketId,
+        amount: Money,
+    },
 }
 
 impl EconomyEvent {
@@ -107,6 +114,7 @@ impl EconomyEvent {
             Self::MarketClearFailed { .. } => "market_clear_failed",
             Self::TransportPaid { .. } => "transport_paid",
             Self::MacroFlow { .. } => "macro_flow",
+            Self::WagePaid { .. } => "wage_paid",
         }
     }
 }

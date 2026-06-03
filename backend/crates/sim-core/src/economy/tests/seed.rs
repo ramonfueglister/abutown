@@ -2,7 +2,8 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::seed::seed_demo_economy;
 use crate::economy::{
-    AccountBook, DemandPools, InventoryBook, MarketChunks, MarketId, Markets, SupplyPools,
+    AccountBook, DemandPools, InventoryBook, MarketChunks, MarketGoods, MarketId, Markets,
+    SupplyPools,
 };
 use crate::ids::ChunkCoord;
 use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
@@ -36,6 +37,7 @@ fn seed_world() -> World {
     world.insert_resource(SupplyPools::default());
     world.insert_resource(DemandPools::default());
     world.insert_resource(crate::economy::MarketDistances::default());
+    world.insert_resource(MarketGoods::default());
     world
 }
 
