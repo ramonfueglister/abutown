@@ -1192,3 +1192,205 @@ fn determinism_same_snapshot_same_tick_yields_identical_desired_qty() {
     let c = run_one_more(&decoded);
     assert_eq!(a, c, "serde round-trip preserves determinism");
 }
+
+#[test]
+fn distribute_profit_conserves_money_and_drains_firm_to_zero() {
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    use crate::economy::{EconomyConfig, EconomyError};
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let c2 = EconomicActorId(8_012);
+    // Firm sold 1_000; PayWages already paid wage=600 and left 400 in the firm account.
+    // Here we model the post-wage state: firm holds the 400 profit.
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000)); // gross revenue captured this tick
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    demand.0.insert(c2, consumer_pool(c2, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1), (c2, 1)]),
+    };
+    let config = EconomyConfig::default(); // labor_share=6_000, dividend_share=10_000
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+    )
+    .unwrap();
+
+    // wage = floor(1000*0.6)=600; profit = 1000-600 = 400; dividend = floor(400*1.0)=400.
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant total money"
+    );
+    assert_eq!(
+        accounts.account(f1).available,
+        Money::ZERO,
+        "full distribution drains the firm"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    assert_eq!(demand.0[&c1].income_last_tick, Money(200));
+    assert_eq!(demand.0[&c2].income_last_tick, Money(200));
+    assert!(ledger.0.contains(&EconomyEvent::ProfitDistributed {
+        firm: f1,
+        market: MarketId(9_001),
+        amount: Money(400),
+    }));
+    let _ = EconomyError::InvalidOrder; // import sanity
+}
+
+#[test]
+fn distribute_profit_underfunded_firm_books_only_covered_and_audits() {
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    // Receipts say revenue=1_000 (profit target = 400), but the firm only HOLDS 150
+    // (it spent the rest buying inputs via macro_flow this tick). We must book 150 and
+    // audit the shortfall — never panic, never silently skip.
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(150)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default();
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(&mut accounts, &receipts, &mut demand, &household, &mut ledger, &config)
+        .expect("the function itself returns Ok — the shortfall is surfaced via an audited event, not an Err");
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant even under shortfall"
+    );
+    assert_eq!(
+        accounts.account(f1).available,
+        Money::ZERO,
+        "all the firm HELD was distributed"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(150),
+        "only the covered amount reached the household"
+    );
+    // Audited shortfall event (MarketClearFailed-style), NOT a panic, NOT a silent drop.
+    let audited = ledger.0.iter().any(|e| matches!(
+        e,
+        EconomyEvent::MarketClearFailed { market, reason, .. }
+            if *market == MarketId(9_001) && *reason == crate::economy::EconomyError::InsufficientFunds
+    ));
+    assert!(
+        audited,
+        "an underfunded profit distribution must surface an audited event"
+    );
+    // The covered amount is still booked as ProfitDistributed.
+    assert!(ledger.0.contains(&EconomyEvent::ProfitDistributed {
+        firm: f1,
+        market: MarketId(9_001),
+        amount: Money(150),
+    }));
+}
+
+#[test]
+fn distribute_profit_zero_dividend_share_is_noop() {
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig {
+        dividend_share_bps: 0,
+        ..EconomyConfig::default()
+    };
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+    )
+    .unwrap();
+    assert_eq!(accounts.total_money().unwrap(), before);
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(400),
+        "0 share retains profit at the firm"
+    );
+    assert_eq!(demand.0[&c1].income_last_tick, Money::ZERO);
+}
+
+#[test]
+fn distribute_profit_does_not_reset_income() {
+    // Profit distribution ADDS to income_last_tick (wages credited it first); it must not
+    // zero it. Seed a non-zero income and assert it accumulates.
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000));
+    let mut demand = DemandPools::default();
+    let mut pool = consumer_pool(c1, MarketId(9_002));
+    pool.income_last_tick = Money(600); // wages already credited this tick
+    demand.0.insert(c1, pool);
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+    )
+    .unwrap();
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(1_000),
+        "wage 600 + dividend 400, accumulated"
+    );
+}
