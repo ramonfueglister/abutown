@@ -260,3 +260,68 @@ fn regen_is_deterministic_keys_first() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn regen_rate_covers_aggregate_tools_demand_at_seed() {
+    // §15.2 Sizing-Sim: the EXTRACTOR's faucet (and its same-rate recipe + SupplyPool)
+    // MUST cover aggregate per-tick TOOLS demand at seed prices, else static prices leave
+    // chronic TOOLS scarcity (§8). Build the live demo world, measure aggregate TOOLS
+    // demand, and assert the seeded faucet rate >= that demand.
+    use crate::economy::production::{EXTRACTOR, RawDeposits};
+    use crate::economy::{DemandPools, GOOD_TOOLS};
+
+    // Reuse the seed-test world builder (added/extended in tests/seed.rs is a sibling
+    // module; here we build a minimal spatial world the same way the seeder needs).
+    // Build the world inline so this test does not depend on the seed test module.
+    let mut world = bevy_ecs::world::World::new();
+    {
+        use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
+        let node = |id: u32, x: f32, y: f32| Node {
+            id: NodeId(id),
+            position: (x, y),
+            kind: NodeKind::Intersection,
+            legacy_id: None,
+        };
+        let nodes = vec![
+            node(0, 2.0, 3.0),
+            node(1, 13.0, 3.0),
+            node(2, 16.0, 48.0),
+            node(3, 208.0, 48.0),
+        ];
+        world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
+        world.insert_resource(Graph::new(nodes, vec![]));
+        world.insert_resource(crate::economy::Markets::default());
+        world.insert_resource(crate::economy::MarketChunks::default());
+        world.insert_resource(crate::economy::AccountBook::default());
+        world.insert_resource(crate::economy::InventoryBook::default());
+        world.insert_resource(crate::economy::SupplyPools::default());
+        world.insert_resource(crate::economy::DemandPools::default());
+        world.insert_resource(crate::economy::MarketDistances::default());
+        world.insert_resource(crate::economy::MarketGoods::default());
+        world.insert_resource(crate::economy::production::ProductionPools::default());
+        world.insert_resource(crate::economy::production::RawDeposits::default());
+    }
+    crate::economy::seed::seed_demo_economy(&mut world);
+
+    let aggregate_tools_demand: i64 = world
+        .resource::<DemandPools>()
+        .0
+        .values()
+        .filter(|p| p.good == GOOD_TOOLS)
+        .map(|p| p.desired_qty_per_tick.0)
+        .sum();
+    assert_eq!(
+        aggregate_tools_demand, 10,
+        "seed has exactly one TOOLS consumer @ 10/tick (sizing baseline)"
+    );
+
+    let faucet = world.resource::<RawDeposits>().0[&EXTRACTOR];
+    assert!(
+        faucet.qty_per_interval.0 >= aggregate_tools_demand && faucet.interval_ticks == 1,
+        "EXTRACTOR faucet rate ({} per {} tick(s)) must cover aggregate TOOLS demand ({}/tick) \
+         at seed prices, else chronic scarcity (§8/§15.2)",
+        faucet.qty_per_interval.0,
+        faucet.interval_ticks,
+        aggregate_tools_demand
+    );
+}
