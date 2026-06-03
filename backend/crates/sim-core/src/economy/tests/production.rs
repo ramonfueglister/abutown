@@ -147,3 +147,116 @@ fn regenerated_event_type_tag_is_stable() {
     };
     assert_eq!(e.event_type(), "regenerated");
 }
+
+#[test]
+fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
+    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::{EconomyEvent, GOOD_RAW, InventoryBook, Quantity, TradeLedger};
+    use std::collections::BTreeMap;
+
+    let mut inv = InventoryBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut deposits = RawDeposits(BTreeMap::new());
+    deposits.0.insert(
+        EXTRACTOR,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: Quantity(100),
+            interval_ticks: 1,
+            last_regen_tick: None,
+        },
+    );
+
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 5).unwrap();
+
+    assert_eq!(inv.balance(EXTRACTOR, GOOD_RAW).available, Quantity(100));
+    assert_eq!(deposits.0[&EXTRACTOR].last_regen_tick, Some(5));
+    assert!(ledger.0.contains(&EconomyEvent::Regenerated {
+        actor: EXTRACTOR,
+        good: GOOD_RAW,
+        qty: Quantity(100),
+    }));
+}
+
+#[test]
+fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
+    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::{GOOD_RAW, InventoryBook, Quantity, TradeLedger};
+    use std::collections::BTreeMap;
+
+    let mut inv = InventoryBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut deposits = RawDeposits(BTreeMap::new());
+    deposits.0.insert(
+        EXTRACTOR,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: Quantity(100),
+            interval_ticks: 10,
+            last_regen_tick: None,
+        },
+    );
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0).unwrap(); // fires (last=None)
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 3).unwrap(); // interval not elapsed
+    assert_eq!(
+        inv.balance(EXTRACTOR, GOOD_RAW).available,
+        Quantity(100),
+        "only one deposit within the interval"
+    );
+    // On a skip the gate returns BEFORE stamping, so the cursor stays at the firing tick.
+    assert_eq!(deposits.0[&EXTRACTOR].last_regen_tick, Some(0));
+}
+
+#[test]
+fn regen_is_flow_capped_not_capacity_capped() {
+    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::{GOOD_RAW, InventoryBook, Quantity, TradeLedger};
+    use std::collections::BTreeMap;
+
+    // No recipe consuming RAW here: deposits stack unboundedly per interval (faucet,
+    // not a level-capped reservoir). The recipe is what bounds RAW in the live loop.
+    let mut inv = InventoryBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut deposits = RawDeposits(BTreeMap::new());
+    deposits.0.insert(
+        EXTRACTOR,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: Quantity(100),
+            interval_ticks: 1,
+            last_regen_tick: None,
+        },
+    );
+    for t in 0..3 {
+        run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, t).unwrap();
+    }
+    assert_eq!(inv.balance(EXTRACTOR, GOOD_RAW).available, Quantity(300));
+}
+
+#[test]
+fn regen_is_deterministic_keys_first() {
+    use crate::economy::production::{RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::{EconomicActorId, GOOD_RAW, InventoryBook, Quantity, TradeLedger};
+    use std::collections::BTreeMap;
+
+    let run = || {
+        let mut inv = InventoryBook::default();
+        let mut ledger = TradeLedger::default();
+        let mut deposits = RawDeposits(BTreeMap::new());
+        // Insert out of ascending order to prove keys-first iteration.
+        for a in [EconomicActorId(9), EconomicActorId(2)] {
+            deposits.0.insert(
+                a,
+                RawDeposit {
+                    good: GOOD_RAW,
+                    qty_per_interval: Quantity(50),
+                    interval_ticks: 1,
+                    last_regen_tick: None,
+                },
+            );
+        }
+        run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 1).unwrap();
+        ledger.0
+    };
+    assert_eq!(run(), run());
+}
