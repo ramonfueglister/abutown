@@ -100,6 +100,17 @@ pub enum EconomyEvent {
         good: GoodId,
         qty: Quantity,
     },
+    /// One firm's profit (revenue − wage) distributed to the labor households this tick.
+    /// Full-distribution v0: no owner/capitalist actor — profit flows to the existing
+    /// consumer pools via the SAME pool_weights as wages. Emitted per (firm, market).
+    ProfitDistributed {
+        firm: EconomicActorId,
+        market: MarketId,
+        amount: Money,
+    },
+    /// The accumulated TRANSPORT_OPERATOR balance rebated to the labor households at a
+    /// macro-flow interval boundary (the buyers paid the fee; it returns to them).
+    TransportRebate { amount: Money },
 }
 
 impl EconomyEvent {
@@ -124,6 +135,8 @@ impl EconomyEvent {
             Self::MacroFlow { .. } => "macro_flow",
             Self::WagePaid { .. } => "wage_paid",
             Self::Regenerated { .. } => "regenerated",
+            Self::ProfitDistributed { .. } => "profit_distributed",
+            Self::TransportRebate { .. } => "transport_rebate",
         }
     }
 }

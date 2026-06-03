@@ -1046,6 +1046,44 @@ fn closed_loop_bootstraps_from_autonomous_and_lags_one_tick() {
 }
 
 #[test]
+fn profit_and_rebate_event_type_tags_are_stable() {
+    use crate::economy::{EconomicActorId, EconomyEvent, MarketId, Money};
+    let p = EconomyEvent::ProfitDistributed {
+        firm: EconomicActorId(8_001),
+        market: MarketId(9_001),
+        amount: Money(400),
+    };
+    assert_eq!(p.event_type(), "profit_distributed");
+    let r = EconomyEvent::TransportRebate { amount: Money(123) };
+    assert_eq!(r.event_type(), "transport_rebate");
+}
+
+#[test]
+fn dividend_share_default_is_full_and_validates_bounds() {
+    use crate::economy::{EconomyConfig, EconomyError};
+    let cfg = EconomyConfig::default();
+    assert_eq!(
+        cfg.dividend_share_bps, 10_000,
+        "default is full distribution"
+    );
+    assert_eq!(cfg.validated_dividend_share_bps().unwrap(), 10_000_i128);
+    let bad = EconomyConfig {
+        dividend_share_bps: 10_001,
+        ..EconomyConfig::default()
+    };
+    assert_eq!(
+        bad.validated_dividend_share_bps(),
+        Err(EconomyError::InvalidOrder),
+        "share > 10_000 is a config bug"
+    );
+    let zero = EconomyConfig {
+        dividend_share_bps: 0,
+        ..EconomyConfig::default()
+    };
+    assert_eq!(zero.validated_dividend_share_bps().unwrap(), 0_i128);
+}
+
+#[test]
 fn determinism_same_snapshot_same_tick_yields_identical_desired_qty() {
     // Build a closed-loop world, run a few ticks to non-trivial income, snapshot it,
     // then run ONE more tick from the snapshot — twice, and across a serde round-trip —

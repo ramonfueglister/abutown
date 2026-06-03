@@ -64,6 +64,11 @@ pub struct EconomyConfig {
     /// Absolute cap on simultaneous commuters rendered per market (viewport-bounded;
     /// NEVER derived from the wage magnitude, else the 1M population would leak in).
     pub max_commuters_per_market: usize,
+    /// Share of firm PROFIT (revenue − wage) distributed to labor households (basis
+    /// points, 0..=10_000). Default 10_000 = full distribution: firms net to zero each
+    /// tick (no retained earnings, no capitalist class — lead decision). A value < 10_000
+    /// would strand profit in firm accounts and the loop would NOT be self-sustaining.
+    pub dividend_share_bps: u16,
 }
 
 impl EconomyConfig {
@@ -75,6 +80,16 @@ impl EconomyConfig {
             return Err(crate::economy::EconomyError::InvalidOrder);
         }
         Ok(self.labor_share_bps as i128)
+    }
+
+    /// `dividend_share_bps` as an i128, refusing `> 10_000` (a config bug that would
+    /// over-distribute). Boundary `== 10_000` allowed (full distribution). Mirrors
+    /// `validated_labor_share_bps`.
+    pub fn validated_dividend_share_bps(&self) -> Result<i128, crate::economy::EconomyError> {
+        if self.dividend_share_bps > 10_000 {
+            return Err(crate::economy::EconomyError::InvalidOrder);
+        }
+        Ok(self.dividend_share_bps as i128)
     }
 }
 
@@ -95,6 +110,7 @@ impl Default for EconomyConfig {
             labor_share_bps: 6_000,
             commuters_per_wage_unit: 100,
             max_commuters_per_market: 4,
+            dividend_share_bps: 10_000,
         }
     }
 }
