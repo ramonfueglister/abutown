@@ -8,7 +8,8 @@ use crate::economy::{
     FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
     Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SettlementPolicy, SupplyPools,
     TradeLedger, clear_market_good_with_policy, expire_orders_at_tick,
-    generate_pool_orders_at_tick, integer_ewma, run_macro_flow_at_tick, run_production_at_tick,
+    generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick, run_macro_flow_at_tick,
+    run_production_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -22,6 +23,7 @@ pub enum EconomySet {
     GeneratePoolOrders,
     ClearMarkets,
     MacroFlow,
+    Consume,
     ShopperCapture,
     Materialize,
     Telemetry,
@@ -75,6 +77,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::MacroFlow,
+            EconomySet::Consume,
             EconomySet::ShopperCapture,
             EconomySet::Materialize,
             EconomySet::Telemetry,
@@ -97,6 +100,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
             run_macro_flow_system.in_set(EconomySet::MacroFlow),
+            run_consumption_system.in_set(EconomySet::Consume),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
         )
             .before(crate::mobility::systems::tick_increment_system),
@@ -312,6 +316,18 @@ pub fn run_production_system(
     mut production: ResMut<ProductionPools>,
 ) {
     let _ = run_production_at_tick(&mut inventory, &mut ledger, &mut production, tick.0);
+}
+
+/// The demand-side sink (mirror of `run_production_system`): consume delivered goods,
+/// emitting `FinalConsumed`. Runs in `EconomySet::Consume` after both delivery paths
+/// (`ClearMarkets` + `MacroFlow`) and before next tick's `GeneratePoolOrders`.
+pub fn run_consumption_system(
+    tick: Res<Tick>,
+    mut inventory: ResMut<InventoryBook>,
+    mut ledger: ResMut<TradeLedger>,
+    mut demand: ResMut<DemandPools>,
+) {
+    let _ = run_consumption_at_tick(&mut inventory, &mut ledger, &mut demand, tick.0);
 }
 
 pub fn update_market_telemetry(
