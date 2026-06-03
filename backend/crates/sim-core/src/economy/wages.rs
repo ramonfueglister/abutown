@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use bevy_ecs::prelude::*;
 
 use crate::economy::{
-    AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent, GoodId,
-    MarketId, Money, TradeLedger, apportion_cash,
+    AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent, MarketId,
+    Money, TradeLedger, apportion_cash,
 };
 
 /// Reserved clearing-account sentinel for the household sector, adjacent to
@@ -89,7 +89,7 @@ pub fn run_pay_wages_at_tick(
     let pool_ids: Vec<EconomicActorId> = demand.0.keys().copied().collect();
     let weights: Vec<i64> = pool_ids
         .iter()
-        .map(|a| household.pool_weights.get(a).copied().unwrap_or(0).max(0))
+        .map(|a| household.pool_weights.get(a).copied().unwrap_or(0))
         .collect();
     let weight_sum: i128 = weights.iter().map(|w| *w as i128).sum();
 
@@ -102,23 +102,11 @@ pub fn run_pay_wages_at_tick(
             if wage.0 <= 0 {
                 continue;
             }
-            // Affordability holds by invariant (wage <= revenue just received). A
-            // failure is AUDITED (the spec §12 honest InsufficientFunds halt), not
-            // swallowed, and its share is NOT added to wage_bill.
-            if accounts.account(firm).available < wage {
-                ledger.0.push(EconomyEvent::MarketClearFailed {
-                    market,
-                    good: GoodId(0),
-                    reason: EconomyError::InsufficientFunds,
-                });
-                continue;
-            }
-            // Non-atomic: `accounts` is mutated in-place (no scratch/rollback). Every
-            // completed `transfer` is individually balanced so `total_money` stays
-            // byte-invariant even on an early `?`-bail (conservation-safe-but-non-atomic).
-            // The sentinel-zero invariant (and the debug_assert) hold only on the `Ok`
-            // path. An overflow bail is unreachable from a valid money state — any sum
-            // overflowing i64 here would already have overflowed `total_money`.
+            // `wage <= revenue`: the firm was credited `revenue` as a SELLER this tick
+            // (ClearMarkets/MacroFlow run before PayWages) and spends nothing before
+            // wages settle, so it always holds the cash. The transfer is therefore
+            // total-conserving and cannot fault; `?` surfaces a genuine bug rather than
+            // papering over an unreachable state.
             accounts.transfer(firm, HOUSEHOLD_SECTOR, wage)?;
             wage_bill = wage_bill
                 .checked_add(wage.0)

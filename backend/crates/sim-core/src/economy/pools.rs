@@ -92,8 +92,9 @@ pub(crate) fn spend_to_qty(spend: Money, p_ref: Money) -> Result<Quantity, Econo
 /// Part B: rewrite each consumer pool's `desired_qty_per_tick` from its
 /// `income_last_tick` (booked by PayWages THIS tick) and the SMOOTHED reference price.
 /// `p_ref = ewma_reference_price` if > 0 else `config.trader_default_ref_price`. Writes
-/// a Quantity ONLY; touches no money field. Pure, deterministic, keys-first. A per-pool
-/// fault is skipped (the pool keeps its prior desired_qty), never aborting the others.
+/// a Quantity ONLY; touches no money field. Pure, deterministic, keys-first. `mpc_bps`
+/// is validated and `p_ref > 0` by construction, so the math cannot fault here; `?`
+/// surfaces a genuine bug instead of silently freezing a pool's demand.
 pub fn run_consumption_update_at_tick(
     demand: &mut DemandPools,
     market_goods: &MarketGoods,
@@ -110,14 +111,8 @@ pub fn run_consumption_update_at_tick(
             Some(s) if s.ewma_reference_price.0 > 0 => s.ewma_reference_price,
             _ => config.trader_default_ref_price,
         };
-        let spend = match target_spend(pool.autonomous, pool.mpc_bps, pool.income_last_tick) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let qty = match spend_to_qty(spend, p_ref) {
-            Ok(q) => q,
-            Err(_) => continue,
-        };
+        let spend = target_spend(pool.autonomous, pool.mpc_bps, pool.income_last_tick)?;
+        let qty = spend_to_qty(spend, p_ref)?;
         if let Some(p) = demand.0.get_mut(&actor) {
             p.desired_qty_per_tick = qty;
         }

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use bevy_ecs::prelude::*;
 
+use crate::economy::EconomyPlugin;
 use crate::economy::auction::SettlementPolicy;
 use crate::economy::macro_flow::PlannedFlow;
 use crate::economy::{
@@ -12,7 +13,6 @@ use crate::economy::{
     WageTelemetry, clear_market_good_with_receipts, create_ask, create_bid, run_pay_wages_at_tick,
     settle_flow_with_receipts,
 };
-use crate::economy::{EconomyError, EconomyPlugin};
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
 use crate::world::components::{AsleepChunk, ChunkCoordComp};
@@ -493,66 +493,6 @@ fn pay_wages_population_million_max_revenue_no_overflow() {
         "no mint under huge revenue"
     );
     assert_eq!(accounts.account(HOUSEHOLD_SECTOR).available, Money::ZERO);
-}
-
-#[test]
-fn pay_wages_firm_short_of_wage_emits_audited_halt_and_skips_its_bill() {
-    // A firm whose CASH is below the computed wage (an impossible-by-invariant state
-    // forced here) must AUDIT (MarketClearFailed/InsufficientFunds) and contribute
-    // nothing to the wage bill — a clean halt, not a panic or a mint.
-    let f1 = EconomicActorId(8_001);
-    let c1 = EconomicActorId(8_002);
-    let market = MarketId(9_001);
-    let mut accounts = AccountBook::default();
-    accounts.deposit(f1, Money(100)).unwrap(); // cash 100, but receipts claim 1_000
-    let mut receipts = SellerReceipts::default();
-    receipts.0.insert((f1, market), Money(1_000)); // wage would be 600 > 100
-    let mut demand = DemandPools::default();
-    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
-    let household = HouseholdSector {
-        population: 1,
-        pool_weights: BTreeMap::from([(c1, 1)]),
-    };
-    let before = accounts.total_money().unwrap();
-    let mut wage_tel = WageTelemetry::default();
-    let mut ledger = TradeLedger::default();
-    run_pay_wages_at_tick(
-        &mut accounts,
-        &receipts,
-        &mut demand,
-        &household,
-        &mut wage_tel,
-        &mut ledger,
-        &EconomyConfig::default(),
-    )
-    .unwrap();
-    assert_eq!(
-        accounts.total_money().unwrap(),
-        before,
-        "no mint on the halt path"
-    );
-    assert_eq!(accounts.account(f1).available, Money(100), "firm untouched");
-    assert_eq!(
-        demand.0[&c1].income_last_tick,
-        Money::ZERO,
-        "no income from a halted firm"
-    );
-    assert!(
-        ledger.0.iter().any(|e| matches!(
-            e,
-            EconomyEvent::MarketClearFailed {
-                reason: EconomyError::InsufficientFunds,
-                ..
-            }
-        )),
-        "the halt is audited"
-    );
-    assert!(wage_tel.0.is_empty());
-    assert_eq!(
-        accounts.account(HOUSEHOLD_SECTOR).available,
-        Money::ZERO,
-        "sentinel stays zero on the halt path"
-    );
 }
 
 #[test]
