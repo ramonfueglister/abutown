@@ -222,6 +222,7 @@ fn routed_shipment_world(market_a: MarketId, market_b: MarketId) -> World {
     world.insert_resource(MaterializedTraders::default());
     world.insert_resource(FlowShipments::default());
     world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
+    world.insert_resource(crate::economy::commuters::CommuterTrips::default());
     world.insert_resource(AgentIdIndex::default());
     world.insert_resource(DirtyAgents::default());
     world.insert_resource(Tick(0));

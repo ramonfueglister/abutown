@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
+use crate::economy::commuters::{CommuterTrips, NextCommuterId, capture_commuter_trips};
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     FlowShipments, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
@@ -28,6 +29,7 @@ pub enum EconomySet {
     PayWages,
     Consume,
     ShopperCapture,
+    CommuterCapture,
     Materialize,
     Telemetry,
     UpdateConsumption,
@@ -55,6 +57,11 @@ pub struct EconomyConfig {
     /// Labor share of value added (basis points, 0..=10_000). Default 6_000 = 0.60
     /// (Kaldor stylized fact). VALIDATED `0..=10_000` so `wage <= revenue` ⇒ no overdraft.
     pub labor_share_bps: u16,
+    /// How many wage-Money units one visible commuter represents.
+    pub commuters_per_wage_unit: i64,
+    /// Absolute cap on simultaneous commuters rendered per market (viewport-bounded;
+    /// NEVER derived from the wage magnitude, else the 1M population would leak in).
+    pub max_commuters_per_market: usize,
 }
 
 impl EconomyConfig {
@@ -84,6 +91,8 @@ impl Default for EconomyConfig {
             shopper_radius_tiles: 24.0,
             drain_active_residual: true,
             labor_share_bps: 6_000,
+            commuters_per_wage_unit: 100,
+            max_commuters_per_market: 4,
         }
     }
 }
@@ -101,6 +110,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::PayWages,
             EconomySet::Consume,
             EconomySet::ShopperCapture,
+            EconomySet::CommuterCapture,
             EconomySet::Materialize,
             EconomySet::Telemetry,
             EconomySet::UpdateConsumption,
@@ -139,6 +149,14 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.add_systems(
         run_shopper_capture_system
             .in_set(EconomySet::ShopperCapture)
+            .before(crate::mobility::systems::tick_increment_system),
+    );
+    // Commuter capture is an exclusive system (mirrors run_shopper_capture_system),
+    // reading WageTelemetry instead of unmet demand. Placed after PayWages and before
+    // Materialize so the same tick that pays wages also renders its commuters.
+    schedule.add_systems(
+        run_commuter_capture_system
+            .in_set(EconomySet::CommuterCapture)
             .before(crate::mobility::systems::tick_increment_system),
     );
     // Render-only trader materialization is an exclusive system (it needs &mut
@@ -470,4 +488,85 @@ pub fn run_macro_flow_system(
 pub fn run_consumption_update_system(mut demand: ResMut<DemandPools>, goods: Res<MarketGoods>) {
     run_consumption_update_at_tick(&mut demand, &goods)
         .expect("run_consumption_update_at_tick is infallible once every consumer market has a seeded opening price; an Err is a bug");
+}
+
+/// Exclusive system: fill `CommuterTrips` from observed markets' realized WAGES.
+///
+/// Mirrors `run_shopper_capture_system` exactly, reading `WageTelemetry` instead of
+/// unmet demand. A market is observed iff the chunk containing its market node is
+/// observed. The origin-candidate provider is built from `NodeSpatialIndex::within_radius`
+/// (UNSORTED) → sorted by `NodeId` → market node dropped → paired with Manhattan distance
+/// (tiles) → delegates to the pure `capture_commuter_trips`. Routability is deferred to
+/// `materialize` (it skips origins with no Walk route). No-op when the spatial world is
+/// absent (a pure-economy schedule without `RoutingPlugin`).
+pub fn run_commuter_capture_system(world: &mut World) {
+    use crate::economy::transport::manhattan_tiles;
+    use crate::routing::{Graph, NodeId, NodeSpatialIndex};
+
+    if world.get_resource::<Graph>().is_none() || world.get_resource::<NodeSpatialIndex>().is_none()
+    {
+        return;
+    }
+
+    let tick = world.get_resource::<Tick>().map(|t| t.0).unwrap_or(0);
+
+    let observed_chunks: BTreeSet<ChunkCoord> = {
+        let mut q =
+            world.query_filtered::<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>();
+        q.iter(world).map(|c| c.0).collect()
+    };
+
+    // Capture into local copies inside a borrow scope: every economy/spatial read
+    // is an immutable borrow of `world`, so the (trips, next) results are computed
+    // here and written back below once those borrows are released.
+    let captured = {
+        let graph = world.resource::<Graph>();
+        let markets = world.resource::<crate::economy::Markets>();
+        // Observed markets: those whose market-node chunk is currently observed.
+        let observed_markets: BTreeSet<MarketId> = markets
+            .0
+            .iter()
+            .filter(|(_, site)| {
+                let pos = graph.node(site.node_id).position;
+                observed_chunks.contains(&crate::mobility::chunk_of(pos.0, pos.1, 32))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if observed_markets.is_empty() {
+            return;
+        }
+
+        let spatial = world.resource::<NodeSpatialIndex>();
+        let config = *world.resource::<EconomyConfig>();
+        let wage_telemetry = world.resource::<WageTelemetry>();
+
+        let mut trips = world.resource::<CommuterTrips>().clone();
+        let mut next = *world.resource::<NextCommuterId>();
+        // Deterministic origin provider: within_radius (UNSORTED) -> sort by NodeId
+        // -> drop the market node -> pair with Manhattan distance (tiles) to the
+        // market.
+        let origins = |market_node: NodeId| -> Vec<(NodeId, i64)> {
+            let pos = graph.node(market_node).position;
+            let mut cands = spatial.within_radius((pos.0, pos.1), config.shopper_radius_tiles);
+            cands.sort_unstable_by_key(|n| n.0);
+            cands
+                .into_iter()
+                .filter(|n| *n != market_node)
+                .map(|n| (n, manhattan_tiles(graph, n, market_node)))
+                .collect()
+        };
+        capture_commuter_trips(
+            wage_telemetry,
+            &observed_markets,
+            markets,
+            origins,
+            &config,
+            tick,
+            &mut trips,
+            &mut next,
+        );
+        (trips, next)
+    };
+    *world.resource_mut::<CommuterTrips>() = captured.0;
+    *world.resource_mut::<NextCommuterId>() = captured.1;
 }

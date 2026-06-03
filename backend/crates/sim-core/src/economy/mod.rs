@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod auction;
 pub mod audit;
+pub mod commuters;
 pub mod flow_shipments;
 pub mod goods;
 pub mod ids;
@@ -24,6 +25,7 @@ pub mod wages;
 pub use accounts::*;
 pub use auction::*;
 pub use audit::*;
+pub use commuters::*;
 pub use flow_shipments::*;
 pub use goods::*;
 pub use ids::*;
@@ -75,6 +77,8 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::flow_shipments::NextShipmentId::default());
         world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
         world.insert_resource(crate::economy::shoppers::NextShopperId::default());
+        world.insert_resource(crate::economy::commuters::CommuterTrips::default());
+        world.insert_resource(crate::economy::commuters::NextCommuterId::default());
         world.insert_resource(crate::economy::wages::SellerReceipts::default());
         world.insert_resource(crate::economy::wages::WageTelemetry::default());
         world.insert_resource(crate::economy::wages::HouseholdSector {
