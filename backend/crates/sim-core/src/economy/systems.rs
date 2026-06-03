@@ -4,6 +4,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
 use crate::economy::commuters::{CommuterTrips, NextCommuterId, capture_commuter_trips};
+use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     FlowShipments, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
@@ -11,7 +12,7 @@ use crate::economy::{
     SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
     clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
     integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick, run_macro_flow_at_tick,
-    run_pay_wages_at_tick, run_production_at_tick,
+    run_pay_wages_at_tick, run_production_at_tick, run_regen_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -22,6 +23,7 @@ pub enum EconomySet {
     ResetReceipts,
     RefreshLod,
     ExpireOrders,
+    Regenerate,
     Production,
     GeneratePoolOrders,
     ClearMarkets,
@@ -103,6 +105,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::ResetReceipts,
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
+            EconomySet::Regenerate,
             EconomySet::Production,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
@@ -130,6 +133,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             reset_seller_receipts_system.in_set(EconomySet::ResetReceipts),
             refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
+            run_regen_system.in_set(EconomySet::Regenerate),
             run_production_system.in_set(EconomySet::Production),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
@@ -359,6 +363,20 @@ pub fn clear_dirty_markets_system(
             });
         }
     }
+}
+
+/// The goods-only raw faucet. Surfaces an invariant break (an inventory.deposit overflow)
+/// via `.expect` — matching the run_pay_wages_system/run_consumption_update_system convention,
+/// NOT the pre-existing `let _` wart in run_production_system. The flow-capped faucet cannot
+/// overflow a sane i64 balance, so `.expect` is a loud bug-surface, not a silent discard.
+pub fn run_regen_system(
+    tick: Res<Tick>,
+    mut inventory: ResMut<InventoryBook>,
+    mut ledger: ResMut<TradeLedger>,
+    mut deposits: ResMut<RawDeposits>,
+) {
+    run_regen_at_tick(&mut inventory, &mut ledger, &mut deposits, tick.0)
+        .expect("run_regen_at_tick is infallible by construction (flow-capped faucet deposit cannot overflow a sane i64 balance); an Err is a bug");
 }
 
 pub fn run_production_system(

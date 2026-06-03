@@ -368,3 +368,108 @@ fn shopper_capture_set_runs_after_macro_flow_before_materialize() {
         "ShopperCapture must run BEFORE Materialize (so shoppers render same-tick): {log:?}"
     );
 }
+
+#[test]
+fn regenerate_set_runs_after_expire_before_production() {
+    // Pin EconomySet::Regenerate's position against the REAL install_systems chain:
+    // recorder systems placed into ExpireOrders / Regenerate / Production must fire in
+    // exactly that order (RAW deposited before the recipe can consume it same-tick).
+    use crate::economy::{EconomyPlugin, systems::EconomySet};
+    use bevy_ecs::prelude::*;
+
+    #[derive(Resource, Default)]
+    struct OrderLog(Vec<&'static str>);
+    fn rec_expire(mut log: ResMut<OrderLog>) {
+        log.0.push("expire");
+    }
+    fn rec_regen(mut log: ResMut<OrderLog>) {
+        log.0.push("regen");
+    }
+    fn rec_production(mut log: ResMut<OrderLog>) {
+        log.0.push("production");
+    }
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    world.insert_resource(OrderLog::default());
+    schedule.add_systems((
+        rec_expire.in_set(EconomySet::ExpireOrders),
+        rec_regen.in_set(EconomySet::Regenerate),
+        rec_production.in_set(EconomySet::Production),
+    ));
+    schedule.run(&mut world);
+
+    let log = &world.resource::<OrderLog>().0;
+    let i_e = log.iter().position(|s| *s == "expire").unwrap();
+    let i_r = log.iter().position(|s| *s == "regen").unwrap();
+    let i_p = log.iter().position(|s| *s == "production").unwrap();
+    assert!(i_e < i_r, "Regenerate must run AFTER ExpireOrders: {log:?}");
+    assert!(i_r < i_p, "Regenerate must run BEFORE Production: {log:?}");
+}
+
+#[test]
+fn raw_deposits_resource_is_installed_by_plugin() {
+    use crate::economy::EconomyPlugin;
+    use crate::economy::production::RawDeposits;
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    EconomyPlugin.install(&mut world, &mut schedule);
+    assert!(world.get_resource::<RawDeposits>().is_some());
+}
+
+#[test]
+fn regenerate_system_feeds_input_gated_production_same_tick() {
+    // EXTRACTOR has a RAW faucet + a RAW->TOOLS recipe. After one schedule run, the RAW
+    // deposited this tick is immediately consumed by the recipe → TOOLS appears; net RAW
+    // on hand is bounded (deposit qty minus what the recipe took).
+    use crate::economy::production::{
+        EXTRACTOR, ProductionPool, ProductionPools, RawDeposit, RawDeposits, Recipe,
+    };
+    use crate::economy::{EconomyPlugin, GOOD_RAW, GOOD_TOOLS, InventoryBook, Quantity};
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    world.resource_mut::<RawDeposits>().0.insert(
+        EXTRACTOR,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: Quantity(100),
+            interval_ticks: 1,
+            last_regen_tick: None,
+        },
+    );
+    world.resource_mut::<ProductionPools>().0.insert(
+        EXTRACTOR,
+        ProductionPool {
+            actor: EXTRACTOR,
+            recipe: Recipe {
+                inputs: vec![(GOOD_RAW, Quantity(100))],
+                outputs: vec![(GOOD_TOOLS, Quantity(100))],
+            },
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+
+    schedule.run(&mut world);
+
+    let inv = world.resource::<InventoryBook>();
+    assert_eq!(
+        inv.balance(EXTRACTOR, GOOD_TOOLS).available,
+        Quantity(100),
+        "Regenerate deposited RAW before Production consumed it (same-tick ordering)"
+    );
+    assert_eq!(
+        inv.balance(EXTRACTOR, GOOD_RAW).available,
+        Quantity(0),
+        "the recipe drained the freshly-deposited RAW this tick"
+    );
+}
