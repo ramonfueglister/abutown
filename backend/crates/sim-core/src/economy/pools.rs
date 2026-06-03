@@ -62,6 +62,37 @@ pub(crate) fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ti
     }
 }
 
+/// Keynesian consumption target (Money): `C = autonomous + floor(mpc_bps * income / 10_000)`.
+/// `mpc_bps` validated `0..=10_000`. i128 intermediate, floor, `try_from` → Overflow.
+// Task 5 will call this; suppress dead_code until then.
+#[allow(dead_code)]
+pub(crate) fn target_spend(
+    autonomous: Money,
+    mpc_bps: i32,
+    income_last_tick: Money,
+) -> Result<Money, EconomyError> {
+    if !(0..=10_000).contains(&mpc_bps) {
+        return Err(EconomyError::InvalidOrder);
+    }
+    let induced = i64::try_from((income_last_tick.0 as i128) * (mpc_bps as i128) / 10_000)
+        .map_err(|_| EconomyError::Overflow)?;
+    autonomous.checked_add(Money(induced))
+}
+
+/// Map a target SPEND (Money) to a desired Quantity at a reference price, inverting
+/// `affordable_qty`'s SCALE math: `qty = floor(spend * ECONOMY_SCALE / p_ref)`.
+// Task 5 will call this; suppress dead_code until then.
+#[allow(dead_code)]
+pub(crate) fn spend_to_qty(spend: Money, p_ref: Money) -> Result<Quantity, EconomyError> {
+    if p_ref.0 <= 0 {
+        return Err(EconomyError::ZeroPrice);
+    }
+    let raw = (spend.0 as i128) * ECONOMY_SCALE / p_ref.0 as i128;
+    Ok(Quantity(
+        i64::try_from(raw).map_err(|_| EconomyError::Overflow)?,
+    ))
+}
+
 pub(crate) fn affordable_qty(cash: Money, price: Money) -> Result<Quantity, EconomyError> {
     if price.0 <= 0 {
         return Err(EconomyError::ZeroPrice);

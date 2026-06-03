@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
+use crate::economy::pools::{spend_to_qty, target_spend};
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyEvent,
-    GOOD_FOOD, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
-    NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools, TradeLedger,
+    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyError,
+    EconomyEvent, GOOD_FOOD, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId,
+    Money, NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools, TradeLedger,
     generate_pool_orders_at_tick, run_consumption_at_tick,
 };
 
@@ -296,5 +297,72 @@ fn consumption_attributes_to_market_and_resets_stale() {
         mg.0[&stale_key].consumed_qty_last_tick,
         Quantity(0),
         "stale market-good's consumed_qty reset to 0"
+    );
+}
+
+#[test]
+fn target_spend_is_autonomous_plus_mpc_times_income() {
+    assert_eq!(
+        target_spend(Money(5_000), 8_000, Money(10_000)).unwrap(),
+        Money(13_000)
+    );
+}
+#[test]
+fn target_spend_at_zero_income_is_autonomous() {
+    assert_eq!(
+        target_spend(Money(5_000), 8_000, Money::ZERO).unwrap(),
+        Money(5_000)
+    );
+}
+#[test]
+fn target_spend_floors_the_induced_term() {
+    // 0.8 * 12_345 = 9_876.0 floors to 9_876; + 1 autonomous = 9_877.
+    assert_eq!(
+        target_spend(Money(1), 8_000, Money(12_345)).unwrap(),
+        Money(9_877)
+    );
+}
+#[test]
+fn target_spend_rejects_out_of_band_mpc() {
+    assert_eq!(
+        target_spend(Money(1), -1, Money(1)),
+        Err(EconomyError::InvalidOrder)
+    );
+    assert_eq!(
+        target_spend(Money(1), 10_001, Money(1)),
+        Err(EconomyError::InvalidOrder)
+    );
+}
+#[test]
+fn target_spend_full_mpc_passes_all_income() {
+    assert_eq!(
+        target_spend(Money(0), 10_000, Money(7_000)).unwrap(),
+        Money(7_000)
+    );
+}
+#[test]
+fn spend_to_qty_inverts_affordable_qty_scale() {
+    assert_eq!(
+        spend_to_qty(Money(10_000), Money(1_000)).unwrap(),
+        Quantity(10_000)
+    );
+}
+#[test]
+fn spend_to_qty_floors() {
+    // 1_000 * 1_000 / 3 = 333_333.33 → floor 333_333.
+    assert_eq!(
+        spend_to_qty(Money(1_000), Money(3)).unwrap(),
+        Quantity(333_333)
+    );
+}
+#[test]
+fn spend_to_qty_rejects_zero_price() {
+    assert_eq!(
+        spend_to_qty(Money(1), Money(0)),
+        Err(EconomyError::ZeroPrice)
+    );
+    assert_eq!(
+        spend_to_qty(Money(1), Money(-5)),
+        Err(EconomyError::ZeroPrice)
     );
 }
