@@ -172,3 +172,13 @@ fn macro_flow_event_type_is_macro_flow() {
     };
     assert_eq!(ev.event_type(), "macro_flow");
 }
+
+#[test]
+fn final_consumed_event_tag() {
+    let e = EconomyEvent::FinalConsumed {
+        actor: EconomicActorId(1),
+        good: GOOD_TOOLS,
+        qty: Quantity(3),
+    };
+    assert_eq!(e.event_type(), "final_consumed");
+}

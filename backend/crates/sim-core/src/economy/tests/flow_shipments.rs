@@ -68,6 +68,7 @@ fn macro_flow_captures_one_shipment_per_cross_edge() {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
 
@@ -218,6 +219,7 @@ fn flow_shipments_capture_is_deterministic() {
                 elasticity_bps: 0,
                 interval_ticks: 1,
                 last_generated_tick: None,
+                last_consumed_tick: None,
             },
         );
 

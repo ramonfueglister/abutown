@@ -127,6 +127,7 @@ pub fn seed_demo_economy(world: &mut World) {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     // Second good (FOOD): a cheap supplier at m_a and a dear consumer at m_b,
@@ -167,6 +168,7 @@ pub fn seed_demo_economy(world: &mut World) {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     // ── Task 7: dormant flow-demo market pair ────────────────────────────────
@@ -260,6 +262,7 @@ pub fn seed_demo_economy(world: &mut World) {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
 }

@@ -63,6 +63,7 @@ fn seeded_demand_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {
         elasticity_bps: 0,
         interval_ticks: 1,
         last_generated_tick: None,
+        last_consumed_tick: None,
     }
 }
 
@@ -299,6 +300,7 @@ fn asleep_anchored_market_DOES_flow() {
                 elasticity_bps: 0,
                 interval_ticks: 1,
                 last_generated_tick: None,
+                last_consumed_tick: None,
             },
         );
     }
@@ -367,12 +369,26 @@ fn asleep_anchored_market_DOES_flow() {
     assert_eq!(state_a.last_settlement_price, Money(1_000));
     assert_eq!(state_a.traded_qty_last_tick, Quantity(200));
 
-    // Goods actually MOVED A->B: the buyer now holds 200 FOOD, the supplier 200 fewer.
+    // Goods MOVED A->B (traded_qty=200 above proves the flow). The buyer received 200
+    // FOOD; the consumption sink then consumed part — assert received = held + consumed.
+    let buyer_consumed: i64 = world
+        .resource::<TradeLedger>()
+        .0
+        .iter()
+        .filter_map(|e| match e {
+            crate::economy::EconomyEvent::FinalConsumed { actor, good, qty }
+                if *actor == buyer && *good == GOOD_FOOD =>
+            {
+                Some(qty.0)
+            }
+            _ => None,
+        })
+        .sum();
     let inv = world.resource::<InventoryBook>();
     assert_eq!(
-        inv.balance(buyer, GOOD_FOOD).available,
-        Quantity(200),
-        "buyer at the asleep destination received the imported FOOD"
+        inv.balance(buyer, GOOD_FOOD).available.0 + buyer_consumed,
+        200,
+        "buyer received 200 imported FOOD (held + consumed by the sink)"
     );
     assert_eq!(
         inv.balance(supplier, GOOD_FOOD).available,
@@ -487,6 +503,7 @@ fn active_to_dormant_handoff_conserves() {
                 elasticity_bps: 0,
                 interval_ticks: 1,
                 last_generated_tick: None,
+                last_consumed_tick: None,
             },
         );
     }
@@ -514,6 +531,28 @@ fn active_to_dormant_handoff_conserves() {
         .resource::<InventoryBook>()
         .total_good(GOOD_FOOD)
         .unwrap();
+    // Goods are no longer invariant (the consumption sink drains delivered goods). Assert
+    // the ledger-derived conservation: Δtotal_good == ΣProduced − Σ(Consumed+FinalConsumed).
+    let food_net = |w: &World| -> i64 {
+        w.resource::<TradeLedger>()
+            .0
+            .iter()
+            .filter_map(|e| match e {
+                crate::economy::EconomyEvent::Produced { good, qty, .. } if *good == GOOD_FOOD => {
+                    Some(qty.0)
+                }
+                crate::economy::EconomyEvent::Consumed { good, qty, .. } if *good == GOOD_FOOD => {
+                    Some(-qty.0)
+                }
+                crate::economy::EconomyEvent::FinalConsumed { good, qty, .. }
+                    if *good == GOOD_FOOD =>
+                {
+                    Some(-qty.0)
+                }
+                _ => None,
+            })
+            .sum()
+    };
 
     // Tick 0: m_b active -> the consumer bids, then the flow drains that residual bid and
     // imports goods from m_a directly. Conservation must hold.
@@ -527,9 +566,10 @@ fn active_to_dormant_handoff_conserves() {
         world
             .resource::<InventoryBook>()
             .total_good(GOOD_FOOD)
-            .unwrap(),
-        good_total,
-        "goods conserved while m_b is active"
+            .unwrap()
+            .0,
+        good_total.0 + food_net(&world),
+        "goods conserved vs ledger while m_b is active"
     );
     {
         let mut t = world.resource_mut::<Tick>();
@@ -548,21 +588,37 @@ fn active_to_dormant_handoff_conserves() {
         let g = world
             .resource::<InventoryBook>()
             .total_good(GOOD_FOOD)
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(m, money_total, "money conserved across handoff");
-        assert_eq!(g, good_total, "goods conserved across handoff");
+        assert_eq!(
+            g,
+            good_total.0 + food_net(&world),
+            "goods conserved vs ledger across handoff"
+        );
         let mut t = world.resource_mut::<Tick>();
         t.0 += 1;
     }
 
     // The consumer was served — the flow moved goods into m_b (while active via the
-    // residual-bid drain, and via the dormant-pool path after demotion).
-    let consumer_goods = world
-        .resource::<InventoryBook>()
-        .balance(consumer, GOOD_FOOD)
-        .available;
+    // residual-bid drain, and via the dormant-pool path after demotion), and the
+    // consumption sink then USED them. "Served" now means consumed > 0 (the goods no
+    // longer just pile up in the consumer's inventory — they flow through to consumption).
+    let consumer_consumed: i64 = world
+        .resource::<TradeLedger>()
+        .0
+        .iter()
+        .filter_map(|e| match e {
+            crate::economy::EconomyEvent::FinalConsumed { actor, good, qty }
+                if *actor == consumer && *good == GOOD_FOOD =>
+            {
+                Some(qty.0)
+            }
+            _ => None,
+        })
+        .sum();
     assert!(
-        consumer_goods.0 > 0,
-        "the flow served the observed/demoted market's demand"
+        consumer_consumed > 0,
+        "the flow served the observed/demoted market's demand (goods delivered + consumed)"
     );
 }

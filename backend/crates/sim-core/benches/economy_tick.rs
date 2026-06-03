@@ -71,6 +71,7 @@ fn build_fixture(m: u32, g: u16) -> FlowFixture {
                         elasticity_bps: 0,
                         interval_ticks: 1,
                         last_generated_tick: None,
+                        last_consumed_tick: None,
                     },
                 );
             }

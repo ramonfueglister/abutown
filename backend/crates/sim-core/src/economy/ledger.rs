@@ -54,6 +54,14 @@ pub enum EconomyEvent {
         good: GoodId,
         qty: Quantity,
     },
+    /// Final consumption by an end-buyer (the demand-side sink), distinct from
+    /// production's recipe-input `Consumed`. Both are goods-removals; splitting the
+    /// variant keeps intermediate vs final consumption distinguishable in the audit log.
+    FinalConsumed {
+        actor: EconomicActorId,
+        good: GoodId,
+        qty: Quantity,
+    },
     OrderRejected {
         actor: EconomicActorId,
         market: MarketId,
@@ -94,6 +102,7 @@ impl EconomyEvent {
             Self::GoodsReleased { .. } => "goods_released",
             Self::Produced { .. } => "produced",
             Self::Consumed { .. } => "consumed",
+            Self::FinalConsumed { .. } => "final_consumed",
             Self::OrderRejected { .. } => "order_rejected",
             Self::MarketClearFailed { .. } => "market_clear_failed",
             Self::TransportPaid { .. } => "transport_paid",

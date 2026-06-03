@@ -46,21 +46,21 @@ fn shopper_progress_arrival_and_id() {
 }
 
 #[test]
-fn capture_spawns_proportional_to_unmet_demand_deterministically() {
+fn capture_spawns_proportional_to_consumption_deterministically() {
     use crate::economy::shoppers::capture_shopper_visits;
     use crate::economy::{
         EconomyConfig, MarketGoodKey, MarketGoodState, MarketGoods, MarketSite, Markets, Quantity,
     };
     use std::collections::BTreeSet;
 
-    // One observed market m=1 (node 10) with unmet_demand 9 of good 0.
+    // One observed market m=1 (node 10) that consumed 9 of good 0 last tick.
     // cap = 4, per_unit = 3 -> target = min(9/3, 4) = 3 visits.
     let m = MarketId(1);
     let good = GoodId(0);
     let key = MarketGoodKey { market: m, good };
     let mut mg = MarketGoods::default();
     let mut st = MarketGoodState::new(key);
-    st.unmet_demand_last_tick = Quantity(9);
+    st.consumed_qty_last_tick = Quantity(9);
     mg.0.insert(key, st);
 
     let mut markets = Markets::default();
@@ -167,7 +167,7 @@ fn shopper_capture_is_deterministic() {
     let key = MarketGoodKey { market: m, good };
     let mut mg = MarketGoods::default();
     let mut st = MarketGoodState::new(key);
-    st.unmet_demand_last_tick = Quantity(6);
+    st.consumed_qty_last_tick = Quantity(6);
     mg.0.insert(key, st);
 
     let mut markets = Markets::default();

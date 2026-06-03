@@ -36,6 +36,7 @@ fn seed_trading_pair(
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
@@ -92,14 +93,31 @@ fn economy_clears_a_trade_end_to_end() {
     assert_eq!(qty, Quantity(1_000));
     assert_eq!(price, Money(900)); // first trade: last=ZERO clamps up to the ask
     assert_eq!(market, MarketId(1));
-    // Buyer received goods; books conserved (bid locked 1000, traded at 900,
-    // 100 refunded).
+    // Buyer received 1000 goods (the trade); the same-tick consumption sink then consumed
+    // them. Books conserved (bid locked 1000, traded at 900, 100 refunded). Assert
+    // received = held + consumed (ledger-derived).
+    let buyer_consumed: i64 = world
+        .resource::<TradeLedger>()
+        .0
+        .iter()
+        .filter_map(|e| match e {
+            EconomyEvent::FinalConsumed { actor, good, qty }
+                if *actor == buyer && *good == GOOD_FOOD =>
+            {
+                Some(qty.0)
+            }
+            _ => None,
+        })
+        .sum();
     assert_eq!(
         world
             .resource::<InventoryBook>()
             .balance(buyer, GOOD_FOOD)
-            .available,
-        Quantity(1_000)
+            .available
+            .0
+            + buyer_consumed,
+        1_000,
+        "buyer received 1000 FOOD (held + consumed by the sink)"
     );
     assert_eq!(
         world.resource::<AccountBook>().account(buyer).locked,
@@ -165,6 +183,7 @@ fn telemetry_updates_ewma_with_basis_points() {
             traded_qty_last_tick: Quantity(1_000),
             unmet_demand_last_tick: Quantity(0),
             unsold_supply_last_tick: Quantity(0),
+            consumed_qty_last_tick: Quantity::ZERO,
             dirty: false,
             last_cleared_tick: 1,
         },
