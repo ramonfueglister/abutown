@@ -194,7 +194,7 @@ Alle Iteration keys-first über BTreeMaps (`SellerReceipts`, `DemandPools`, `Mar
 
 ## 11. Skalierung auf 1.000.000
 
-Die Lohn-Autorität iteriert nur `SellerReceipts` (O(verkaufende Firmen × Markt)) + die Handvoll Haushalts-Pools — **nie Pro-Agent-Entities** (kein `AgentIdIndex`, keine `FlowCells`). Die Million ist ein einzelnes `u64` in `HouseholdSector`, das das Sektor-Budget *arithmetisch* parametrisiert (i64-Mathematik, O(1) in der Zahl) und nie 1M Konten materialisiert — `AccountBook` bleibt O(Firmen + Pools + 2 Sentinels). Sichtbare Pendler werden nur in beobachteten Chunks materialisiert und absolut gecappt → eine Off-Screen-Million kostet null Strukturen.
+Die Lohn-Autorität iteriert nur `SellerReceipts` (O(verkaufende Firmen × Markt)) + die Handvoll Haushalts-Pools — **nie Pro-Agent-Entities** (kein `AgentIdIndex`, keine `FlowCells`). Die Skalierung ist **architektonisch**: die Autorität ist O(Sektoren) und materialisiert nie 1M Konten — `AccountBook` bleibt O(Firmen + Pools + 2 Sentinels). Die Million ist als einzelnes `u64` `HouseholdSector.population` persistiert (die ehrliche Head-Count-Repräsentation), **geht aber in v0 in keine Berechnung ein** — die Lohnsumme ist rein der labor-share des Firmenumsatzes, headcount-unabhängig. `population` ist für die Pro-Kopf-Konsum-Skalierungs-Slice reserviert und bis dahin bewusst inert. Sichtbare Pendler werden nur in beobachteten Chunks materialisiert und absolut gecappt → eine Off-Screen-Million kostet null Strukturen.
 
 *Ehrlich benannt:* der reset-all Telemetrie-Pass ist O(Märkte), und der Tick insgesamt skaliert mit der Marktzahl (wie macro flow) — nicht mit der Population. Nur die *Magnitude* der Zahlen skaliert mit 1M, nicht die Datenstrukturen.
 

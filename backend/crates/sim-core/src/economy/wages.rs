@@ -35,11 +35,15 @@ pub struct SellerReceipts(pub BTreeMap<(EconomicActorId, MarketId), Money>);
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct WageTelemetry(pub BTreeMap<MarketId, Money>);
 
-/// The mean-field household sector. PERSISTED. `population` parametrizes the sector
-/// budget arithmetically (never materializes per-person accounts — the loop is
-/// O(firms + pools)). `pool_weights` is the largest-remainder split of the wage bill
-/// across consumer pools (equal weights v0). At least one weight MUST be positive
-/// (seed assert), else the wage bill would strand in HOUSEHOLD_SECTOR.
+/// The mean-field household sector. PERSISTED. The mean-field design keeps the wage
+/// authority O(firms + pools) regardless of how many people the sector represents —
+/// it never materializes per-person accounts. `pool_weights` is the largest-remainder
+/// split of the wage bill across consumer pools (equal weights v0); at least one weight
+/// MUST be positive (seed assert), else the wage bill would strand in HOUSEHOLD_SECTOR.
+/// `population` is the head-count this sector stands for; it is carried as persisted
+/// state but does NOT yet enter any computation (the v0 wage bill is purely the
+/// labor-share of firm revenue, headcount-independent) — it is reserved for the
+/// per-capita consumption-scaling slice and is intentionally inert until then.
 #[derive(Resource, Debug, Clone, PartialEq, Eq)]
 pub struct HouseholdSector {
     pub population: u64,
