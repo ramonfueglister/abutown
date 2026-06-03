@@ -143,11 +143,14 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       trees: counts.trees,
       cars: projectedCars.length,
       // Pedestrians counts only base-world pedestrian-kind agents. Economy traders
-      // are a distinct kind (excluded already); economy SHOPPERS render as
-      // pedestrian-kind via a `shopper:` id prefix, so exclude them by id so they
-      // don't inflate the base-world count.
+      // are a distinct kind (excluded already); economy SHOPPERS and COMMUTERS render
+      // as pedestrian-kind via `shopper:` / `commuter:` id prefixes, so exclude them by
+      // id so they don't inflate the base-world count.
       pedestrians: projectedPedestrians.filter(
-        (p) => p.kind === 'pedestrian' && !p.id.startsWith('shopper:'),
+        (p) =>
+          p.kind === 'pedestrian' &&
+          !p.id.startsWith('shopper:') &&
+          !p.id.startsWith('commuter:'),
       ).length,
       pedestrianSprites: pedestrianSprites.length,
       pedestrianSpriteSheets: [...new Set(pedestrianSprites.map((sprite) => sprite.sheet))],

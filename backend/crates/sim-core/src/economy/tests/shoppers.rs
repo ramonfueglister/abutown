@@ -5,6 +5,7 @@ use crate::routing::NodeId;
 #[test]
 fn id_prefix_distinguishes_shoppers_from_traders() {
     use crate::economy::EconomicActorId;
+    use crate::economy::commuters::COMMUTER_ACTOR_OFFSET;
     use crate::economy::flow_shipments::SHIPMENT_ACTOR_OFFSET;
     use crate::economy::materialize::id_prefix;
     use crate::economy::shoppers::SHOPPER_ACTOR_OFFSET;
@@ -16,6 +17,12 @@ fn id_prefix_distinguishes_shoppers_from_traders() {
     assert_eq!(
         id_prefix(EconomicActorId(SHOPPER_ACTOR_OFFSET + 1)),
         "shopper:"
+    );
+    // Commuters (3<<32) sit ABOVE the shopper band (2<<32); they must get their own
+    // namespace, not fall through to `shopper:`.
+    assert_eq!(
+        id_prefix(EconomicActorId(COMMUTER_ACTOR_OFFSET + 1)),
+        "commuter:"
     );
 }
 

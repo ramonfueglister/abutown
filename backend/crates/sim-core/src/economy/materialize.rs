@@ -70,12 +70,14 @@ pub(crate) enum TraderMutation {
     },
 }
 
-/// Sprite/id prefix for a render-actor by its actor-id namespace.
-/// Commuter actors (>= COMMUTER_ACTOR_OFFSET = 3<<32) and shopper actors
-/// (>= SHOPPER_ACTOR_OFFSET = 2<<32) both render as `shopper:`.
-/// Everything else (demo traders + flow shipments) renders as `trader:`.
+/// Sprite/id prefix for a render-actor by its actor-id namespace. Checked highest
+/// band first: commuters (>= COMMUTER_ACTOR_OFFSET = 3<<32) → `commuter:`, shoppers
+/// (>= SHOPPER_ACTOR_OFFSET = 2<<32) → `shopper:`, everything else (demo traders +
+/// flow shipments) → `trader:`. The three namespaces are distinct on the wire.
 pub(crate) fn id_prefix(actor: EconomicActorId) -> &'static str {
-    if actor.0 >= crate::economy::shoppers::SHOPPER_ACTOR_OFFSET {
+    if actor.0 >= crate::economy::commuters::COMMUTER_ACTOR_OFFSET {
+        "commuter:"
+    } else if actor.0 >= crate::economy::shoppers::SHOPPER_ACTOR_OFFSET {
         "shopper:"
     } else {
         "trader:"
