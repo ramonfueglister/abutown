@@ -304,8 +304,8 @@ fn pair_fills(bids: &[Bid], bid_alloc: &[i64], asks: &[Ask], ask_alloc: &[i64]) 
 }
 
 use crate::economy::{
-    AccountBook, EconomyEvent, InventoryBook, MarketGoodState, MarketGoods, OrderBook, TradeLedger,
-    checked_order_value,
+    AccountBook, EconomicActorId, EconomyEvent, InventoryBook, MarketGoodState, MarketGoods,
+    MarketId, OrderBook, TradeLedger, checked_order_value,
 };
 
 pub fn clear_market_good(
@@ -339,6 +339,32 @@ pub fn clear_market_good_with_policy(
     key: MarketGoodKey,
     current_tick: u64,
     policy: SettlementPolicy,
+) -> Result<(), EconomyError> {
+    let mut discard = std::collections::BTreeMap::new();
+    clear_market_good_with_receipts(
+        accounts,
+        inventory,
+        orders,
+        ledger,
+        market_goods,
+        key,
+        current_tick,
+        policy,
+        &mut discard,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn clear_market_good_with_receipts(
+    accounts: &mut AccountBook,
+    inventory: &mut InventoryBook,
+    orders: &mut OrderBook,
+    ledger: &mut TradeLedger,
+    market_goods: &mut MarketGoods,
+    key: MarketGoodKey,
+    current_tick: u64,
+    policy: SettlementPolicy,
+    receipts: &mut std::collections::BTreeMap<(EconomicActorId, MarketId), Money>,
 ) -> Result<(), EconomyError> {
     // Get-or-create the market-good state so a freshly-dirtied key (the system
     // path) clears instead of failing with InvalidOrder. A never-traded market
@@ -377,6 +403,8 @@ pub fn clear_market_good_with_policy(
     let mut next_orders = orders.clone();
     let mut trade_events = Vec::new();
     let mut traded_qty = Quantity::ZERO;
+    let mut scratch_receipts: std::collections::BTreeMap<(EconomicActorId, MarketId), Money> =
+        std::collections::BTreeMap::new();
 
     for fill in &plan.fills {
         let bid = next_orders
@@ -398,6 +426,11 @@ pub fn clear_market_good_with_policy(
             next_accounts.deposit(bid.owner, refund)?;
         }
         next_accounts.deposit(ask.owner, actual_cost)?;
+        // Accumulate seller revenue into scratch receipts.
+        let slot = scratch_receipts
+            .entry((ask.owner, key.market))
+            .or_insert(Money::ZERO);
+        *slot = slot.checked_add(actual_cost)?;
         next_inventory.debit_locked_goods(ask.owner, ask.good, fill.qty)?;
         next_inventory.deposit(bid.owner, bid.good, fill.qty)?;
 
@@ -433,6 +466,12 @@ pub fn clear_market_good_with_policy(
     *inventory = next_inventory;
     *orders = next_orders;
     ledger.0.extend(trade_events);
+    // Fold scratch_receipts into the caller's receipts map atomically with the
+    // money commit above.
+    for (k, v) in scratch_receipts {
+        let slot = receipts.entry(k).or_insert(Money::ZERO);
+        *slot = slot.checked_add(v)?;
+    }
     if let Some(state) = market_goods.0.get_mut(&key) {
         state.last_settlement_price = price;
         state.traded_qty_last_tick = traded_qty;

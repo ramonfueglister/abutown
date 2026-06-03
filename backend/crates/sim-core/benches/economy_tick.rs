@@ -124,6 +124,7 @@ fn run_once(f: &mut FlowFixture) {
         &mut NextShipmentId::default(),
         &mut OrderBook::default(),
         &mut NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 }

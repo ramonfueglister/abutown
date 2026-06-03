@@ -1147,6 +1147,7 @@ fn macro_flow_only_fires_on_interval() {
         &mut crate::economy::NextShipmentId::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
     assert!(led.0.is_empty(), "no flow off-interval");
@@ -1167,6 +1168,7 @@ fn macro_flow_only_fires_on_interval() {
         &mut crate::economy::NextShipmentId::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
     assert!(
@@ -1204,6 +1206,7 @@ fn macro_flow_idle_interval_is_a_noop() {
         &mut crate::economy::NextShipmentId::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
     assert_eq!(acc, before_acc, "books byte-identical on idle interval");
@@ -1351,6 +1354,7 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
         &mut crate::economy::NextShipmentId::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 
@@ -1522,6 +1526,7 @@ fn run_flow(s: &mut DormantScenario, tick: u64) -> Result<(), EconomyError> {
         &mut crate::economy::NextShipmentId::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
 }
 
@@ -2614,6 +2619,7 @@ fn macro_flow_threads_orderbook_and_counter_unchanged() {
         &mut crate::economy::NextShipmentId::default(),
         &mut orders,
         &mut next_oid,
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 
@@ -3092,6 +3098,7 @@ fn active_flow_conserves_and_drains_residual_orders() {
         &mut crate::economy::NextShipmentId::default(),
         &mut orders,
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 
@@ -3178,6 +3185,7 @@ fn active_residual_with_no_cross_edge_is_not_drained() {
         &mut crate::economy::NextShipmentId::default(),
         &mut orders,
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 
@@ -3361,6 +3369,7 @@ fn active_multi_ask_partial_export_settles_not_faults() {
         &mut crate::economy::NextShipmentId::default(),
         &mut orders,
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 

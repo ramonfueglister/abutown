@@ -20,3 +20,4 @@ mod settlement_policy;
 mod shoppers;
 mod systems;
 mod transport;
+mod wages;

@@ -6,10 +6,10 @@ use bevy_ecs::query::Or;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
-    Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SettlementPolicy, SupplyPools,
-    TradeLedger, clear_market_good_with_policy, expire_orders_at_tick,
-    generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick, run_macro_flow_at_tick,
-    run_production_at_tick,
+    Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SellerReceipts,
+    SettlementPolicy, SupplyPools, TradeLedger, clear_market_good_with_receipts,
+    expire_orders_at_tick, generate_pool_orders_at_tick,
+    integer_ewma, run_consumption_at_tick, run_macro_flow_at_tick, run_production_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -17,6 +17,7 @@ use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
+    ResetReceipts,
     RefreshLod,
     ExpireOrders,
     Production,
@@ -71,6 +72,7 @@ impl Default for EconomyConfig {
 pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.configure_sets(
         (
+            EconomySet::ResetReceipts,
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
             EconomySet::Production,
@@ -94,6 +96,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
     schedule.add_systems(
         (
+            reset_seller_receipts_system.in_set(EconomySet::ResetReceipts),
             refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
             run_production_system.in_set(EconomySet::Production),
@@ -123,6 +126,12 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             .in_set(EconomySet::Materialize)
             .before(crate::mobility::systems::tick_increment_system),
     );
+}
+
+/// Tick-start: clear `SellerReceipts` so the settle points accumulate exactly one
+/// tick of revenue (mirrors `run_consumption_at_tick`'s reset-all-then-accumulate).
+pub fn reset_seller_receipts_system(mut receipts: ResMut<SellerReceipts>) {
+    receipts.0.clear();
 }
 
 /// Exclusive system: fill `ShopperVisits` from observed markets' unmet demand.
@@ -286,11 +295,12 @@ pub fn clear_dirty_markets_system(
     mut ledger: ResMut<TradeLedger>,
     mut goods: ResMut<MarketGoods>,
     mut dirty: ResMut<DirtyMarketGoods>,
+    mut receipts: ResMut<SellerReceipts>,
 ) {
     let keys: Vec<_> = dirty.0.iter().copied().collect();
     dirty.0.clear();
     for key in keys {
-        if let Err(reason) = clear_market_good_with_policy(
+        if let Err(reason) = clear_market_good_with_receipts(
             &mut accounts,
             &mut inventory,
             &mut orders,
@@ -299,6 +309,7 @@ pub fn clear_dirty_markets_system(
             key,
             tick.0,
             config.settlement_policy,
+            &mut receipts.0,
         ) {
             ledger.0.push(EconomyEvent::MarketClearFailed {
                 market: key.market,
@@ -372,6 +383,7 @@ pub fn run_macro_flow_system(
     mut next_shipment_id: ResMut<NextShipmentId>,
     mut orders: ResMut<OrderBook>,
     mut next_order_id: ResMut<NextOrderId>,
+    mut receipts: ResMut<SellerReceipts>,
 ) {
     if let Err(reason) = run_macro_flow_at_tick(
         &mut accounts,
@@ -389,6 +401,7 @@ pub fn run_macro_flow_system(
         &mut next_shipment_id,
         &mut orders,
         &mut next_order_id,
+        &mut receipts.0,
     ) {
         // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
         // atomic boundary left the books unchanged. Per-edge settle faults are

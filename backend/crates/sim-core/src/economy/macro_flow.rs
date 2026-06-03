@@ -624,6 +624,44 @@ pub fn settle_flow(
     preserve_price_src: bool,
     preserve_price_dst: bool,
 ) -> Result<EconomyEvent, EconomyError> {
+    let mut discard = BTreeMap::new();
+    settle_flow_with_receipts(
+        accounts,
+        inventory,
+        market_goods,
+        flow,
+        sellers,
+        buyers,
+        eff_demand_src,
+        eff_supply_src,
+        eff_demand_dst,
+        eff_supply_dst,
+        config,
+        current_tick,
+        preserve_price_src,
+        preserve_price_dst,
+        &mut discard,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn settle_flow_with_receipts(
+    accounts: &mut AccountBook,
+    inventory: &mut InventoryBook,
+    market_goods: &mut MarketGoods,
+    flow: &PlannedFlow,
+    sellers: &[(EconomicActorId, i64)],
+    buyers: &[(EconomicActorId, i64)],
+    eff_demand_src: i64,
+    eff_supply_src: i64,
+    eff_demand_dst: i64,
+    eff_supply_dst: i64,
+    config: &EconomyConfig,
+    current_tick: u64,
+    preserve_price_src: bool,
+    preserve_price_dst: bool,
+    receipts: &mut BTreeMap<(EconomicActorId, MarketId), Money>,
+) -> Result<EconomyEvent, EconomyError> {
     let q = flow.q;
     let src_revenue = checked_order_value(flow.p_src, Quantity(q))?;
     let transport_total =
@@ -644,6 +682,11 @@ pub fn settle_flow(
         let receipt = Money(seller_cash[idx]);
         if receipt.0 > 0 {
             accounts.deposit(*actor, receipt)?;
+            // Accumulate seller revenue into receipts (non-monetary statistic).
+            let slot = receipts
+                .entry((*actor, flow.src))
+                .or_insert(Money::ZERO);
+            *slot = slot.checked_add(receipt)?;
         }
     }
 
@@ -827,6 +870,7 @@ pub fn run_macro_flow_at_tick(
     next_shipment_id: &mut crate::economy::NextShipmentId,
     orders: &mut crate::economy::OrderBook,
     next_order_id: &mut crate::economy::NextOrderId,
+    receipts: &mut BTreeMap<(EconomicActorId, MarketId), Money>,
 ) -> Result<(), EconomyError> {
     if config.macro_flow_interval_ticks == 0
         || !current_tick.is_multiple_of(config.macro_flow_interval_ticks)
@@ -868,6 +912,7 @@ pub fn run_macro_flow_at_tick(
     // outside it. S1 mutates neither — both round-trip unchanged (guarded by test).
     let mut next_orders = orders.clone();
     let next_oid = *next_order_id;
+    let mut next_receipts = receipts.clone();
     let mut events: Vec<EconomyEvent> = Vec::new();
 
     // Per-market effective demand/supply for the write-back residuals (bucket-time).
@@ -944,6 +989,7 @@ pub fn run_macro_flow_at_tick(
         let mut scratch_inventory = next_inventory.clone();
         let mut scratch_goods = next_goods.clone();
         let mut scratch_orders = next_orders.clone();
+        let mut scratch_receipts = next_receipts.clone();
 
         if let Err(reason) = drain_active_endpoints(
             &mut scratch_orders,
@@ -965,7 +1011,7 @@ pub fn run_macro_flow_at_tick(
             continue;
         }
 
-        match settle_flow(
+        match settle_flow_with_receipts(
             &mut scratch_accounts,
             &mut scratch_inventory,
             &mut scratch_goods,
@@ -980,12 +1026,14 @@ pub fn run_macro_flow_at_tick(
             current_tick,
             src_active,
             dst_active,
+            &mut scratch_receipts,
         ) {
             Ok(event) => {
                 next_accounts = scratch_accounts;
                 next_inventory = scratch_inventory;
                 next_goods = scratch_goods;
                 next_orders = scratch_orders;
+                next_receipts = scratch_receipts;
                 if eflow.src != eflow.dst {
                     let id = next_shipment_id.next();
                     let travel_ticks =
@@ -1020,6 +1068,7 @@ pub fn run_macro_flow_at_tick(
     *market_goods = next_goods;
     *orders = next_orders;
     *next_order_id = next_oid;
+    *receipts = next_receipts;
     ledger.0.extend(events);
     Ok(())
 }

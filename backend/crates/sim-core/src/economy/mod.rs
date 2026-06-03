@@ -19,6 +19,7 @@ pub mod shoppers;
 pub mod systems;
 pub mod trader_render;
 pub mod transport;
+pub mod wages;
 
 pub use accounts::*;
 pub use auction::*;
@@ -40,6 +41,7 @@ pub use shoppers::*;
 pub use systems::*;
 pub use trader_render::*;
 pub use transport::*;
+pub use wages::*;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::Schedule;
@@ -73,6 +75,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::flow_shipments::NextShipmentId::default());
         world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
         world.insert_resource(crate::economy::shoppers::NextShopperId::default());
+        world.insert_resource(crate::economy::wages::SellerReceipts::default());
         install_systems(schedule);
     }
 }
