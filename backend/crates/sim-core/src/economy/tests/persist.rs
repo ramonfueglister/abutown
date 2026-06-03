@@ -302,6 +302,40 @@ fn provider_collects_single_economy_item() {
 }
 
 #[test]
+fn demand_pool_wage_fields_round_trip() {
+    let mut world = install_economy();
+    let actor = EconomicActorId(42);
+    world.resource_mut::<DemandPools>().0.insert(
+        actor,
+        DemandPool {
+            actor,
+            market: crate::economy::MarketId(9_002),
+            good: GOOD_TOOLS,
+            desired_qty_per_tick: Quantity(7),
+            max_price: crate::economy::Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: Some(3),
+            last_consumed_tick: Some(2),
+            income_last_tick: crate::economy::Money(1_234),
+            mpc_bps: 7_500,
+            autonomous: crate::economy::Money(4_321),
+        },
+    );
+    let snap = extract_from_world(&world);
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+    let restored = fresh.resource::<DemandPools>().0[&actor];
+    assert_eq!(restored.income_last_tick, crate::economy::Money(1_234));
+    assert_eq!(restored.mpc_bps, 7_500);
+    assert_eq!(restored.autonomous, crate::economy::Money(4_321));
+    assert_eq!(snap, extract_from_world(&fresh), "identity round-trip");
+}
+
+#[test]
 fn ledger_tail_is_capped_and_round_trips() {
     use crate::economy::{EconomyEvent, GoodId, PERSISTED_LEDGER_TAIL, Quantity, TradeLedger};
 

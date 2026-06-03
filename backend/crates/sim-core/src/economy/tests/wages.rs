@@ -7,11 +7,11 @@ use crate::economy::auction::SettlementPolicy;
 use crate::economy::macro_flow::PlannedFlow;
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig,
-    EconomyEvent, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR, HouseholdSector, InventoryBook,
-    MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
-    NextOrderId, OrderBook, Quantity, SellerReceipts, SupplyPool, SupplyPools, TradeLedger,
-    WageTelemetry, clear_market_good_with_receipts, create_ask, create_bid, run_pay_wages_at_tick,
-    settle_flow_with_receipts,
+    EconomyEvent, EconomyPersistSnapshot, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR, HouseholdSector,
+    InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods,
+    MarketId, Money, NextOrderId, OrderBook, Quantity, SellerReceipts, SupplyPool, SupplyPools,
+    TradeLedger, WageTelemetry, apply_into_world, clear_market_good_with_receipts, create_ask,
+    create_bid, extract_from_world, run_pay_wages_at_tick, settle_flow_with_receipts,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -1043,4 +1043,101 @@ fn closed_loop_bootstraps_from_autonomous_and_lags_one_tick() {
         saw_income,
         "the wage→income→consumption loop closed (income became positive)"
     );
+}
+
+#[test]
+fn determinism_same_snapshot_same_tick_yields_identical_desired_qty() {
+    // Build a closed-loop world, run a few ticks to non-trivial income, snapshot it,
+    // then run ONE more tick from the snapshot — twice, and across a serde round-trip —
+    // and assert byte-identical desired_qty_per_tick per pool.
+    fn build() -> (World, bevy_ecs::schedule::Schedule) {
+        let (mut world, schedule) = full_economy_world();
+        let supplier = EconomicActorId(8_001);
+        let consumer = EconomicActorId(8_002);
+        let m = MarketId(1);
+        world
+            .resource_mut::<InventoryBook>()
+            .deposit(supplier, GOOD_TOOLS, Quantity(1_000_000))
+            .unwrap();
+        world
+            .resource_mut::<AccountBook>()
+            .deposit(consumer, Money(1_000_000))
+            .unwrap();
+        world.resource_mut::<SupplyPools>().0.insert(
+            supplier,
+            SupplyPool {
+                actor: supplier,
+                market: m,
+                good: GOOD_TOOLS,
+                offered_qty_per_tick: Quantity(1_000),
+                min_price: Money(500),
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+        let mut pool = consumer_pool(consumer, m);
+        pool.good = GOOD_TOOLS;
+        world.resource_mut::<DemandPools>().0.insert(consumer, pool);
+        world.insert_resource(HouseholdSector {
+            population: 1_000_000,
+            pool_weights: BTreeMap::from([(consumer, 1_i64)]),
+        });
+        // Register the market so the auction settle path fires.
+        world.resource_mut::<crate::economy::Markets>().0.insert(
+            m,
+            crate::economy::MarketSite {
+                id: m,
+                node_id: crate::routing::NodeId(0),
+                name: "Test Market".to_string(),
+            },
+        );
+        // Seed the opening reference price for the consumer's (m, GOOD_TOOLS) so that
+        // run_consumption_update_at_tick (which .expects a real price) does not panic.
+        {
+            let key = MarketGoodKey {
+                market: m,
+                good: GOOD_TOOLS,
+            };
+            let mut goods = world.resource_mut::<MarketGoods>();
+            let state = goods
+                .0
+                .entry(key)
+                .or_insert_with(|| MarketGoodState::new(key));
+            state.ewma_reference_price = Money(1_000);
+            state.last_settlement_price = Money(1_000);
+        }
+        (world, schedule)
+    }
+
+    let (mut warm, mut warm_sched) = build();
+    for _ in 0..5 {
+        warm_sched.run(&mut warm);
+    }
+    let snap = extract_from_world(&warm);
+
+    // Run one more tick from the snapshot, into a fresh fully-wired world.
+    let run_one_more = |snap: &EconomyPersistSnapshot| -> BTreeMap<EconomicActorId, i64> {
+        let mut world = World::new();
+        let mut schedule = bevy_ecs::schedule::Schedule::default();
+        CorePlugin::default().install(&mut world, &mut schedule);
+        crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+        EconomyPlugin.install(&mut world, &mut schedule);
+        apply_into_world(&mut world, snap);
+        schedule.run(&mut world);
+        world
+            .resource::<DemandPools>()
+            .0
+            .iter()
+            .map(|(a, p)| (*a, p.desired_qty_per_tick.0))
+            .collect()
+    };
+
+    let a = run_one_more(&snap);
+    let b = run_one_more(&snap);
+    assert_eq!(a, b, "same snapshot + same tick → identical desired_qty");
+
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let c = run_one_more(&decoded);
+    assert_eq!(a, c, "serde round-trip preserves determinism");
 }
