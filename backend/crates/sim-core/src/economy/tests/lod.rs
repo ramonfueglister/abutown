@@ -64,6 +64,9 @@ fn seeded_demand_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {
         interval_ticks: 1,
         last_generated_tick: None,
         last_consumed_tick: None,
+        income_last_tick: Money::ZERO,
+        mpc_bps: 8_000,
+        autonomous: Money(5_000),
     }
 }
 
@@ -301,6 +304,9 @@ fn asleep_anchored_market_DOES_flow() {
                 interval_ticks: 1,
                 last_generated_tick: None,
                 last_consumed_tick: None,
+                income_last_tick: Money::ZERO,
+                mpc_bps: 8_000,
+                autonomous: Money(5_000),
             },
         );
     }
@@ -504,6 +510,9 @@ fn active_to_dormant_handoff_conserves() {
                 interval_ticks: 1,
                 last_generated_tick: None,
                 last_consumed_tick: None,
+                income_last_tick: Money::ZERO,
+                mpc_bps: 8_000,
+                autonomous: Money(5_000),
             },
         );
     }

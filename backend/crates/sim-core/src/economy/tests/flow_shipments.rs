@@ -69,6 +69,9 @@ fn macro_flow_captures_one_shipment_per_cross_edge() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
 
@@ -221,6 +224,9 @@ fn flow_shipments_capture_is_deterministic() {
                 interval_ticks: 1,
                 last_generated_tick: None,
                 last_consumed_tick: None,
+                income_last_tick: Money::ZERO,
+                mpc_bps: 8_000,
+                autonomous: Money(5_000),
             },
         );
 

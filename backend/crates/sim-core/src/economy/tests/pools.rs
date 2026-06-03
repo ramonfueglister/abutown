@@ -33,6 +33,9 @@ fn demand_pool_caps_order_to_affordable_quantity() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
 
@@ -129,6 +132,9 @@ fn rejected_pool_order_leaves_books_unchanged() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
 
@@ -166,6 +172,9 @@ fn consume_pool(actor: u64, market: u32, want: i64) -> DemandPool {
         interval_ticks: 1,
         last_generated_tick: None,
         last_consumed_tick: None,
+        income_last_tick: Money::ZERO,
+        mpc_bps: 8_000,
+        autonomous: Money(5_000),
     }
 }
 

@@ -72,6 +72,9 @@ fn build_fixture(m: u32, g: u16) -> FlowFixture {
                         interval_ticks: 1,
                         last_generated_tick: None,
                         last_consumed_tick: None,
+                        income_last_tick: Money::ZERO,
+                        mpc_bps: 8_000,
+                        autonomous: Money(5_000),
                     },
                 );
             }

@@ -117,6 +117,9 @@ fn seed(world: &mut World) {
             interval_ticks: 1,
             last_generated_tick: Some(3),
             last_consumed_tick: None,
+            income_last_tick: crate::economy::Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: crate::economy::Money(5_000),
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(

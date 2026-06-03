@@ -23,6 +23,19 @@ pub struct DemandPool {
     /// `last_generated_tick` (which gates bidding). `Option<u64>: Copy` keeps `DemandPool`
     /// `Copy`; persists for free inside `demand_pools`.
     pub last_consumed_tick: Option<u64>,
+    /// Wage Money this household pool received in the PREVIOUS tick (a period FLOW,
+    /// not a balance). Zeroed every tick before the wage split accumulates. Drives the
+    /// consumption function (Part B). `Money: Copy` keeps `DemandPool` `Copy`; persists
+    /// for free in `demand_pools`. Conservation contract: credited ONLY from the `to`
+    /// side of a COMPLETED `transfer(HOUSEHOLD_SECTOR, consumer, share)` — never minted.
+    pub income_last_tick: Money,
+    /// Marginal propensity to consume (basis points, validated `0..=10_000`). Keynesian
+    /// `C = autonomous + mpc_bps*income/10_000`. Default 8_000 (0.8). Persisted per-pool.
+    pub mpc_bps: i32,
+    /// Autonomous (subsistence) consumption spend per tick, financed from wealth. `> 0`
+    /// breaks the zero-trap (income=0 ⇒ C=autonomous ⇒ a floor bid keeps the loop alive).
+    /// Persisted per-pool.
+    pub autonomous: Money,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

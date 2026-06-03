@@ -121,6 +121,9 @@ fn build_macro_buckets_caps_effective_demand_and_supply() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
     let mut supply = SupplyPools::default();
@@ -1089,6 +1092,9 @@ fn surplus_deficit_world() -> (
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
     let mut supply = SupplyPools::default();
@@ -1272,6 +1278,9 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
     demand.0.insert(
@@ -1287,6 +1296,9 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
             interval_ticks: 1,
             last_generated_tick: None,
             last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
         },
     );
     let mut supply = SupplyPools::default();
@@ -1431,6 +1443,9 @@ fn dp(actor: u64, market: MarketId, qty: i64, max_price: i64) -> DemandPool {
         interval_ticks: 1,
         last_generated_tick: None,
         last_consumed_tick: None,
+        income_last_tick: Money::ZERO,
+        mpc_bps: 8_000,
+        autonomous: Money(5_000),
     }
 }
 fn sp(actor: u64, market: MarketId, qty: i64, min_price: i64) -> SupplyPool {
@@ -2468,6 +2483,9 @@ fn macro_flow_replays_across_restart() {
                 interval_ticks: 1,
                 last_generated_tick: None,
                 last_consumed_tick: None,
+                income_last_tick: Money::ZERO,
+                mpc_bps: 8_000,
+                autonomous: Money(5_000),
             },
         );
         w2.resource_mut::<MarketChunks>()

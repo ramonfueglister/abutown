@@ -8,8 +8,8 @@ use crate::economy::{
     FlowShipments, GoodId, InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId,
     Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools, SellerReceipts,
     SettlementPolicy, SupplyPools, TradeLedger, clear_market_good_with_receipts,
-    expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_consumption_at_tick, run_macro_flow_at_tick, run_production_at_tick,
+    expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
+    run_macro_flow_at_tick, run_production_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -49,6 +49,21 @@ pub struct EconomyConfig {
     /// residual orders into the inter-market flow (S3). FALSE keeps the flow
     /// dormant-only (S1/S2 land dark). Defaulted FALSE; S3 flips it.
     pub drain_active_residual: bool,
+    /// Labor share of value added (basis points, 0..=10_000). Default 6_000 = 0.60
+    /// (Kaldor stylized fact). VALIDATED `0..=10_000` so `wage <= revenue` ⇒ no overdraft.
+    pub labor_share_bps: u16,
+}
+
+impl EconomyConfig {
+    /// `labor_share_bps` as an i128, refusing `> 10_000` (a config bug that would
+    /// over-pay). Exposed for the pure `run_pay_wages_at_tick` core. Boundary
+    /// `== 10_000` is allowed (full labor share).
+    pub fn validated_labor_share_bps(&self) -> Result<i128, crate::economy::EconomyError> {
+        if self.labor_share_bps > 10_000 {
+            return Err(crate::economy::EconomyError::InvalidOrder);
+        }
+        Ok(self.labor_share_bps as i128)
+    }
 }
 
 impl Default for EconomyConfig {
@@ -65,6 +80,7 @@ impl Default for EconomyConfig {
             max_shoppers_per_market: 4,
             shopper_radius_tiles: 24.0,
             drain_active_residual: true,
+            labor_share_bps: 6_000,
         }
     }
 }

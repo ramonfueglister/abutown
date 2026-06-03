@@ -683,9 +683,7 @@ pub fn settle_flow_with_receipts(
         if receipt.0 > 0 {
             accounts.deposit(*actor, receipt)?;
             // Accumulate seller revenue into receipts (non-monetary statistic).
-            let slot = receipts
-                .entry((*actor, flow.src))
-                .or_insert(Money::ZERO);
+            let slot = receipts.entry((*actor, flow.src)).or_insert(Money::ZERO);
             *slot = slot.checked_add(receipt)?;
         }
     }
