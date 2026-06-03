@@ -36,6 +36,7 @@ fn seed_trading_pair(
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(

@@ -63,6 +63,7 @@ fn seeded_demand_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {
         elasticity_bps: 0,
         interval_ticks: 1,
         last_generated_tick: None,
+        last_consumed_tick: None,
     }
 }
 
@@ -299,6 +300,7 @@ fn asleep_anchored_market_DOES_flow() {
                 elasticity_bps: 0,
                 interval_ticks: 1,
                 last_generated_tick: None,
+                last_consumed_tick: None,
             },
         );
     }
@@ -487,6 +489,7 @@ fn active_to_dormant_handoff_conserves() {
                 elasticity_bps: 0,
                 interval_ticks: 1,
                 last_generated_tick: None,
+                last_consumed_tick: None,
             },
         );
     }

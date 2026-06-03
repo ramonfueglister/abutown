@@ -120,6 +120,7 @@ fn build_macro_buckets_caps_effective_demand_and_supply() {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     let mut supply = SupplyPools::default();
@@ -1087,6 +1088,7 @@ fn surplus_deficit_world() -> (
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     let mut supply = SupplyPools::default();
@@ -1266,6 +1268,7 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     demand.0.insert(
@@ -1280,6 +1283,7 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
     let mut supply = SupplyPools::default();
@@ -1422,6 +1426,7 @@ fn dp(actor: u64, market: MarketId, qty: i64, max_price: i64) -> DemandPool {
         elasticity_bps: 0,
         interval_ticks: 1,
         last_generated_tick: None,
+        last_consumed_tick: None,
     }
 }
 fn sp(actor: u64, market: MarketId, qty: i64, min_price: i64) -> SupplyPool {
@@ -2457,6 +2462,7 @@ fn macro_flow_replays_across_restart() {
                 elasticity_bps: 0,
                 interval_ticks: 1,
                 last_generated_tick: None,
+                last_consumed_tick: None,
             },
         );
         w2.resource_mut::<MarketChunks>()

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyEvent,
     GOOD_FOOD, InventoryBook, MarketId, Money, NextOrderId, OrderBook, Quantity, SupplyPool,
-    SupplyPools, TradeLedger, generate_pool_orders_at_tick,
+    SupplyPools, TradeLedger, generate_pool_orders_at_tick, run_consumption_at_tick,
 };
 
 #[test]
@@ -31,6 +31,7 @@ fn demand_pool_caps_order_to_affordable_quantity() {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
 
@@ -126,6 +127,7 @@ fn rejected_pool_order_leaves_books_unchanged() {
             elasticity_bps: 0,
             interval_ticks: 1,
             last_generated_tick: None,
+            last_consumed_tick: None,
         },
     );
 
@@ -149,4 +151,98 @@ fn rejected_pool_order_leaves_books_unchanged() {
     assert!(
         matches!(ledger.0.last(), Some(EconomyEvent::OrderRejected { actor: rejected, .. }) if *rejected == actor)
     );
+}
+
+fn consume_pool(actor: u64, market: u32, want: i64) -> DemandPool {
+    DemandPool {
+        actor: EconomicActorId(actor),
+        market: MarketId(market),
+        good: GOOD_FOOD,
+        desired_qty_per_tick: Quantity(want),
+        max_price: Money(1_000),
+        urgency_bps: 0,
+        elasticity_bps: 0,
+        interval_ticks: 1,
+        last_generated_tick: None,
+        last_consumed_tick: None,
+    }
+}
+
+#[test]
+fn consumption_removes_min_held_want_and_emits_finalconsumed() {
+    let owner = EconomicActorId(1);
+    let mut inv = InventoryBook::default();
+    inv.deposit(owner, GOOD_FOOD, Quantity(4)).unwrap(); // held 4 < want 10
+    let mut ledger = TradeLedger::default();
+    let mut demand = DemandPools::default();
+    demand.0.insert(owner, consume_pool(1, 10, 10));
+    let good_before = inv.total_good(GOOD_FOOD).unwrap();
+
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 0).unwrap();
+
+    assert_eq!(inv.balance(owner, GOOD_FOOD).available, Quantity(0));
+    assert_eq!(
+        inv.total_good(GOOD_FOOD).unwrap().0,
+        good_before.0 - 4,
+        "goods removed by exactly consumed (clamped to held)"
+    );
+    assert!(
+        ledger.0.iter().any(|e| matches!(e,
+            EconomyEvent::FinalConsumed { actor, qty, .. }
+            if *actor == owner && *qty == Quantity(4))),
+        "a clamped FinalConsumed(4) event is pushed"
+    );
+    assert_eq!(
+        demand.0[&owner].last_consumed_tick,
+        Some(0),
+        "cursor advanced"
+    );
+}
+
+#[test]
+fn consumption_conserves_money_and_is_deterministic() {
+    let build = || {
+        let mut inv = InventoryBook::default();
+        for a in [1_u64, 2] {
+            inv.deposit(EconomicActorId(a), GOOD_FOOD, Quantity(10))
+                .unwrap();
+        }
+        let mut acc = AccountBook::default();
+        acc.deposit(EconomicActorId(1), Money(500)).unwrap();
+        let mut ledger = TradeLedger::default();
+        let mut demand = DemandPools::default();
+        demand.0.insert(EconomicActorId(1), consume_pool(1, 10, 3));
+        demand.0.insert(EconomicActorId(2), consume_pool(2, 11, 5));
+        let m0 = acc.total_money().unwrap();
+        run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 0).unwrap();
+        assert_eq!(
+            acc.total_money().unwrap(),
+            m0,
+            "money invariant across consume"
+        );
+        ledger.0
+    };
+    assert_eq!(build(), build(), "consumption is deterministic");
+}
+
+#[test]
+fn consumption_respects_interval_cursor() {
+    let owner = EconomicActorId(1);
+    let mut inv = InventoryBook::default();
+    inv.deposit(owner, GOOD_FOOD, Quantity(100)).unwrap();
+    let mut ledger = TradeLedger::default();
+    let mut demand = DemandPools::default();
+    let mut p = consume_pool(1, 10, 4);
+    p.interval_ticks = 5;
+    demand.0.insert(owner, p);
+
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 0).unwrap(); // cursor None -> consumes 4
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 2).unwrap(); // 2 < interval 5 -> skip
+    assert_eq!(
+        inv.balance(owner, GOOD_FOOD).available,
+        Quantity(96),
+        "only one interval consumed"
+    );
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 5).unwrap(); // elapsed -> consumes 4
+    assert_eq!(inv.balance(owner, GOOD_FOOD).available, Quantity(92));
 }

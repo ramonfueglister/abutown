@@ -19,6 +19,10 @@ pub struct DemandPool {
     pub elasticity_bps: i32,
     pub interval_ticks: u64,
     pub last_generated_tick: Option<u64>,
+    /// Cursor for the consumption sink (`run_consumption_at_tick`). MUST be separate from
+    /// `last_generated_tick` (which gates bidding). `Option<u64>: Copy` keeps `DemandPool`
+    /// `Copy`; persists for free inside `demand_pools`.
+    pub last_consumed_tick: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -150,5 +154,42 @@ pub fn generate_pool_orders_at_tick(
         supply.0.insert(actor, pool);
     }
 
+    Ok(())
+}
+
+/// The demand-side SINK (mirror of `run_production_at_tick`): each consumer consumes
+/// `min(held available, desired_qty_per_tick)` of its good per interval, emitting a
+/// `FinalConsumed` event. Pure, deterministic (keys-first iteration, no clone — `DemandPool`
+/// is `Copy`), in-place. The `min` clamp guarantees `qty <= available`, so `consume` can
+/// never fault (the `?` is dead-but-typed-for-symmetry). NOT gated on `DormantMarkets`: the
+/// sink is an aggregate authority that runs for ALL markets (viewport-independent), so the
+/// economy keeps flowing instead of accumulating forever. Conservation: `total_good` drops
+/// by exactly `Σ qty`; money is untouched (the consumer already paid on delivery).
+pub fn run_consumption_at_tick(
+    inventory: &mut InventoryBook,
+    ledger: &mut TradeLedger,
+    demand: &mut DemandPools,
+    current_tick: u64,
+) -> Result<(), EconomyError> {
+    let actors: Vec<EconomicActorId> = demand.0.keys().copied().collect();
+    for actor in actors {
+        let pool = demand.0[&actor];
+        if !interval_elapsed(pool.last_consumed_tick, current_tick, pool.interval_ticks) {
+            continue;
+        }
+        let available = inventory.balance(actor, pool.good).available;
+        let qty = Quantity(pool.desired_qty_per_tick.0.min(available.0));
+        if qty.0 > 0 {
+            inventory.consume(actor, pool.good, qty)?;
+            ledger.0.push(EconomyEvent::FinalConsumed {
+                actor,
+                good: pool.good,
+                qty,
+            });
+        }
+        if let Some(p) = demand.0.get_mut(&actor) {
+            p.last_consumed_tick = Some(current_tick);
+        }
+    }
     Ok(())
 }
