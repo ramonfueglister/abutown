@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyEvent,
-    GOOD_FOOD, InventoryBook, MarketId, Money, NextOrderId, OrderBook, Quantity, SupplyPool,
-    SupplyPools, TradeLedger, generate_pool_orders_at_tick, run_consumption_at_tick,
+    GOOD_FOOD, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
+    NextOrderId, OrderBook, Quantity, SupplyPool, SupplyPools, TradeLedger,
+    generate_pool_orders_at_tick, run_consumption_at_tick,
 };
 
 #[test]
@@ -177,8 +178,9 @@ fn consumption_removes_min_held_want_and_emits_finalconsumed() {
     let mut demand = DemandPools::default();
     demand.0.insert(owner, consume_pool(1, 10, 10));
     let good_before = inv.total_good(GOOD_FOOD).unwrap();
+    let mut mg = MarketGoods::default();
 
-    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 0).unwrap();
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, &mut mg, 0).unwrap();
 
     assert_eq!(inv.balance(owner, GOOD_FOOD).available, Quantity(0));
     assert_eq!(
@@ -213,8 +215,9 @@ fn consumption_conserves_money_and_is_deterministic() {
         let mut demand = DemandPools::default();
         demand.0.insert(EconomicActorId(1), consume_pool(1, 10, 3));
         demand.0.insert(EconomicActorId(2), consume_pool(2, 11, 5));
+        let mut mg = MarketGoods::default();
         let m0 = acc.total_money().unwrap();
-        run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 0).unwrap();
+        run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, &mut mg, 0).unwrap();
         assert_eq!(
             acc.total_money().unwrap(),
             m0,
@@ -235,14 +238,54 @@ fn consumption_respects_interval_cursor() {
     let mut p = consume_pool(1, 10, 4);
     p.interval_ticks = 5;
     demand.0.insert(owner, p);
+    let mut mg = MarketGoods::default();
 
-    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 0).unwrap(); // cursor None -> consumes 4
-    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 2).unwrap(); // 2 < interval 5 -> skip
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, &mut mg, 0).unwrap(); // cursor None -> consumes 4
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, &mut mg, 2).unwrap(); // 2 < interval 5 -> skip
     assert_eq!(
         inv.balance(owner, GOOD_FOOD).available,
         Quantity(96),
         "only one interval consumed"
     );
-    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, 5).unwrap(); // elapsed -> consumes 4
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, &mut mg, 5).unwrap(); // elapsed -> consumes 4
     assert_eq!(inv.balance(owner, GOOD_FOOD).available, Quantity(92));
+}
+
+#[test]
+fn consumption_attributes_to_market_and_resets_stale() {
+    let owner = EconomicActorId(1);
+    let m = MarketId(7);
+    let mut inv = InventoryBook::default();
+    inv.deposit(owner, GOOD_FOOD, Quantity(10)).unwrap();
+    let mut ledger = TradeLedger::default();
+    let mut demand = DemandPools::default();
+    demand.0.insert(owner, consume_pool(1, 7, 4));
+
+    // A stale market-good carrying last tick's consumption MUST be reset (the sink is the
+    // sole writer; reset-all-then-accumulate avoids phantom carry-over).
+    let mut mg = MarketGoods::default();
+    let stale_key = MarketGoodKey {
+        market: MarketId(99),
+        good: GOOD_FOOD,
+    };
+    let mut stale = MarketGoodState::new(stale_key);
+    stale.consumed_qty_last_tick = Quantity(123);
+    mg.0.insert(stale_key, stale);
+
+    run_consumption_at_tick(&mut inv, &mut ledger, &mut demand, &mut mg, 0).unwrap();
+
+    let key = MarketGoodKey {
+        market: m,
+        good: GOOD_FOOD,
+    };
+    assert_eq!(
+        mg.0[&key].consumed_qty_last_tick,
+        Quantity(4),
+        "consumption attributed to its (market, good)"
+    );
+    assert_eq!(
+        mg.0[&stale_key].consumed_qty_last_tick,
+        Quantity(0),
+        "stale market-good's consumed_qty reset to 0"
+    );
 }

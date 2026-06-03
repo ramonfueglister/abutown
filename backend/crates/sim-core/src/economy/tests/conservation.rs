@@ -15,6 +15,7 @@ fn seeded_market_state(market: MarketId) -> MarketGoodState {
         traded_qty_last_tick: Quantity(0),
         unmet_demand_last_tick: Quantity(0),
         unsold_supply_last_tick: Quantity(0),
+        consumed_qty_last_tick: Quantity::ZERO,
         dirty: true,
         last_cleared_tick: 0,
     }

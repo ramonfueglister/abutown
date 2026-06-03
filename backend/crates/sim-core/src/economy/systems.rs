@@ -326,8 +326,15 @@ pub fn run_consumption_system(
     mut inventory: ResMut<InventoryBook>,
     mut ledger: ResMut<TradeLedger>,
     mut demand: ResMut<DemandPools>,
+    mut market_goods: ResMut<MarketGoods>,
 ) {
-    let _ = run_consumption_at_tick(&mut inventory, &mut ledger, &mut demand, tick.0);
+    let _ = run_consumption_at_tick(
+        &mut inventory,
+        &mut ledger,
+        &mut demand,
+        &mut market_goods,
+        tick.0,
+    );
 }
 
 pub fn update_market_telemetry(

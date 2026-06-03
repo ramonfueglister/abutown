@@ -28,6 +28,10 @@ pub struct MarketGoodState {
     pub traded_qty_last_tick: Quantity,
     pub unmet_demand_last_tick: Quantity,
     pub unsold_supply_last_tick: Quantity,
+    /// Goods finally consumed at this market-good last tick (the demand-side sink).
+    /// Written ONLY by `run_consumption_at_tick` (reset-all-then-accumulate); the visible
+    /// shopper count projects this (economically-real demand realized as consumption).
+    pub consumed_qty_last_tick: Quantity,
     pub dirty: bool,
     pub last_cleared_tick: u64,
 }
@@ -44,6 +48,7 @@ impl MarketGoodState {
             traded_qty_last_tick: Quantity::ZERO,
             unmet_demand_last_tick: Quantity::ZERO,
             unsold_supply_last_tick: Quantity::ZERO,
+            consumed_qty_last_tick: Quantity::ZERO,
             dirty: false,
             last_cleared_tick: 0,
         }

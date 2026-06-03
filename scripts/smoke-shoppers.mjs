@@ -1,13 +1,16 @@
 // Shoppers browser smoke: verify that the demand-side shopper agents render
 // and walk toward the observed market m_b (REF_B, tile (13,3) → chunk (0,0))
-// when it has unmet FOOD demand.
+// when it CONSUMES FOOD. Since the consumption-slice re-pointing, shoppers project
+// realized end-consumption (consumed_qty_last_tick), not unserved demand — so the
+// observed market must RECEIVE FOOD (via the macro flow from a supplier) and consume
+// it for shoppers to appear (the demand-side sink, run_consumption_at_tick).
 //
 // Strategy:
 //   1. Launch headless Chromium against the dev stack.
 //   2. ZOOM OUT (positive deltaY, like smoke-visible-traders) so the subscription
 //      rectangle covers a wide area including chunk (0,0) where m_b lives.
-//      m_b is thereby OBSERVED, its FOOD demand is unmet, and shopper agents
-//      are spawned by the simulation.
+//      m_b is thereby OBSERVED; the flow imports FOOD to it and the consumer
+//      consumes it each tick, so shopper agents are spawned by the simulation.
 //   3. Observe for ~12 s (≥120 ticks at 100 ms/tick) to give shoppers time to
 //      spawn and walk.  Collect every agent whose id starts `shopper:` from
 //      decoded mobility snapshot/delta frames; track world_coord over time.

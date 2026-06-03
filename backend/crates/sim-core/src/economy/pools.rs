@@ -4,8 +4,8 @@ use bevy_ecs::prelude::*;
 
 use crate::economy::{
     AccountBook, DirtyMarketGoods, ECONOMY_SCALE, EconomicActorId, EconomyError, EconomyEvent,
-    GoodId, InventoryBook, MarketId, Money, NextOrderId, OrderBook, Quantity, TradeLedger,
-    create_ask, create_bid,
+    GoodId, InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, Money,
+    NextOrderId, OrderBook, Quantity, TradeLedger, create_ask, create_bid,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -165,12 +165,19 @@ pub fn generate_pool_orders_at_tick(
 /// sink is an aggregate authority that runs for ALL markets (viewport-independent), so the
 /// economy keeps flowing instead of accumulating forever. Conservation: `total_good` drops
 /// by exactly `Σ qty`; money is untouched (the consumer already paid on delivery).
+/// Also attributes consumption to the market (`MarketGoodState.consumed_qty_last_tick`, the
+/// shopper-projection telemetry): zero it on EVERY present market-good first (the sink is its
+/// SOLE writer — reset-all avoids phantom carry-over), then accumulate per pool.
 pub fn run_consumption_at_tick(
     inventory: &mut InventoryBook,
     ledger: &mut TradeLedger,
     demand: &mut DemandPools,
+    market_goods: &mut MarketGoods,
     current_tick: u64,
 ) -> Result<(), EconomyError> {
+    for state in market_goods.0.values_mut() {
+        state.consumed_qty_last_tick = Quantity::ZERO;
+    }
     let actors: Vec<EconomicActorId> = demand.0.keys().copied().collect();
     for actor in actors {
         let pool = demand.0[&actor];
@@ -186,6 +193,15 @@ pub fn run_consumption_at_tick(
                 good: pool.good,
                 qty,
             });
+            let key = MarketGoodKey {
+                market: pool.market,
+                good: pool.good,
+            };
+            let state = market_goods
+                .0
+                .entry(key)
+                .or_insert_with(|| MarketGoodState::new(key));
+            state.consumed_qty_last_tick = state.consumed_qty_last_tick.checked_add(qty)?;
         }
         if let Some(p) = demand.0.get_mut(&actor) {
             p.last_consumed_tick = Some(current_tick);

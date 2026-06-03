@@ -1,7 +1,8 @@
-//! Render-only projection of aggregate DEMAND (twin of flow_shipments.rs): an
-//! observed market with unmet demand spawns shopper visits that the materialize
-//! system draws as pedestrians walking to the market. PURE VIEW — no economic
-//! state, NOT persisted (ephemeral, regenerated from resumed demand on restart).
+//! Render-only projection of realized CONSUMPTION (twin of flow_shipments.rs): an
+//! observed market that consumed goods last tick spawns shopper visits that the
+//! materialize system draws as pedestrians walking to the market — economically-real
+//! demand, realized as end-consumption by the demand-side sink (run_consumption_at_tick).
+//! PURE VIEW — no economic state, NOT persisted (ephemeral, regenerated on restart).
 
 use bevy_ecs::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -58,10 +59,11 @@ pub fn shopper_travel_ticks(dist: i64, config: &EconomyConfig) -> u64 {
 }
 
 /// Pure capture core (no `World`): reconcile `ShopperVisits` against observed
-/// markets' unmet demand. For each observed `(market, good)` in `MarketGoods` with
-/// `unmet_demand_last_tick > 0`, compute `target = min(unmet / per_unit, cap)`,
+/// markets' realized CONSUMPTION. For each observed `(market, good)` in `MarketGoods` with
+/// `consumed_qty_last_tick > 0`, compute `target = min(consumed / per_unit, cap)`,
 /// count this market's current visits, and top up the shortfall with new visits
-/// taking the first-N candidates from `origins`.
+/// taking the first-N candidates from `origins`. Economically-real: each visible shopper
+/// projects actual end-consumption (the demand-side sink), not unserved demand.
 ///
 /// `origins(market_node)` MUST return candidate origin nodes that are already
 /// SORTED deterministically (by `NodeId`), have the market node EXCLUDED, and have
@@ -72,7 +74,7 @@ pub fn shopper_travel_ticks(dist: i64, config: &EconomyConfig) -> u64 {
 ///
 /// Deterministic: BTreeMap/BTreeSet iteration + the sorted candidate order + the
 /// monotone `NextShopperId`. No RNG, no float. PURE VIEW — never touches
-/// `AccountBook`/`InventoryBook`/`MarketGoods` (reads `unmet_demand_last_tick` only).
+/// `AccountBook`/`InventoryBook`/`MarketGoods` (reads `consumed_qty_last_tick` only).
 #[allow(clippy::too_many_arguments)]
 pub fn capture_shopper_visits(
     market_goods: &MarketGoods,
@@ -89,14 +91,14 @@ pub fn capture_shopper_visits(
         if !observed.contains(&key.market) {
             continue;
         }
-        let unmet = state.unmet_demand_last_tick.0;
-        if unmet <= 0 {
+        let consumed = state.consumed_qty_last_tick.0;
+        if consumed <= 0 {
             continue;
         }
         let Some(site) = markets.0.get(&key.market) else {
             continue;
         };
-        let target = (unmet / per_unit).clamp(0, config.max_shoppers_per_market as i64) as usize;
+        let target = (consumed / per_unit).clamp(0, config.max_shoppers_per_market as i64) as usize;
         // Scope the in-flight count to THIS (market, good): the cap is per-good, so a
         // multi-good market attracts foot traffic for each unmet good independently
         // (not just the lowest GoodId). Deterministic + conservation-safe either way.

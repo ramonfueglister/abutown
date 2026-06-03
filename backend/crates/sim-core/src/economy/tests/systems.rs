@@ -183,6 +183,7 @@ fn telemetry_updates_ewma_with_basis_points() {
             traded_qty_last_tick: Quantity(1_000),
             unmet_demand_last_tick: Quantity(0),
             unsold_supply_last_tick: Quantity(0),
+            consumed_qty_last_tick: Quantity::ZERO,
             dirty: false,
             last_cleared_tick: 1,
         },
