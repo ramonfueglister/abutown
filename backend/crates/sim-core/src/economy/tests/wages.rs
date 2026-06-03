@@ -778,11 +778,8 @@ fn full_tick_wage_loop_conserves_total_money_auction_path() {
         pool_weights: BTreeMap::from([(consumer, 1)]),
     });
 
-    // Anchor the market to a chunk that is NOT active → market stays dormant for
-    // the auction path. Actually for the auction path the market must be active.
-    // Use NO anchor so the market is never in DormantMarkets (the auction fires
-    // because the market IS in DirtyMarketGoods after pool-order generation).
-    // No MarketChunks entry → market absent from DormantMarkets → auction fires.
+    // The market has NO MarketChunks entry, so it is never marked dormant and the
+    // auction clears it every tick (the auction settle path → SellerReceipts → PayWages).
     world.resource_mut::<crate::economy::Markets>().0.insert(
         market,
         crate::economy::MarketSite {
@@ -823,6 +820,21 @@ fn full_tick_wage_loop_conserves_total_money_auction_path() {
         "total_money byte-invariant over 6 ticks (auction path)"
     );
     assert!(earned_income, "consumer earned income at least once");
+
+    // Non-vacuity: auction settle path must have emitted WagePaid events.
+    let total_wages_paid: i64 = world
+        .resource::<TradeLedger>()
+        .0
+        .iter()
+        .filter_map(|e| match e {
+            EconomyEvent::WagePaid { amount, .. } => Some(amount.0),
+            _ => None,
+        })
+        .sum();
+    assert!(
+        total_wages_paid > 0,
+        "auction settle path produced wages through PayWages"
+    );
 }
 
 /// MacroFlow path: dormant supply@src / demand@dst pair — the auction never clears
