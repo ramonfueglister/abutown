@@ -1115,6 +1115,19 @@ fn determinism_same_snapshot_same_tick_yields_identical_desired_qty() {
     }
     let snap = extract_from_world(&warm);
 
+    // Non-vacuity guard: the warm-up must have produced genuine wage income, otherwise
+    // the determinism equality below would pass trivially on the pure-autonomous floor.
+    let snap_income = snap
+        .demand_pools
+        .iter()
+        .find(|(a, _)| *a == EconomicActorId(8_002))
+        .map(|(_, p)| p.income_last_tick.0)
+        .expect("consumer pool present in snapshot");
+    assert!(
+        snap_income > 0,
+        "warm-up must produce non-zero wage income (got {snap_income}); else determinism is vacuous"
+    );
+
     // Run one more tick from the snapshot, into a fresh fully-wired world.
     let run_one_more = |snap: &EconomyPersistSnapshot| -> BTreeMap<EconomicActorId, i64> {
         let mut world = World::new();
