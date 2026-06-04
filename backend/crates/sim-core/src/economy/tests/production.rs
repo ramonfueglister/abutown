@@ -402,3 +402,119 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
     run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap(); // same tick, interval not elapsed
     assert_eq!(inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available, Quantity(10), "no double-produce");
 }
+
+#[test]
+fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
+    use crate::economy::production::{ProductionPools, RawDeposits};
+    use crate::economy::{
+        DemandPools, GoodId, MarketDistances, MarketId, SupplyPools,
+    };
+
+    // Helper: for a given world's pools/deposits, for every consumer DemandPool compute the
+    // continuous faucet supply of its good reachable from its demand-market and assert >= demand.
+    // "Reachable" = same market, or a supply market s with a MarketDistances entry (s, d).
+    // Returns the list of (consumer_market, good, demand, reachable_faucet) for inspection.
+    fn check(
+        demand: &DemandPools,
+        supply: &SupplyPools,
+        deposits: &RawDeposits,
+        production: &ProductionPools,
+        distances: &MarketDistances,
+    ) -> Vec<(MarketId, GoodId, i64, i64)> {
+        let mut rows = Vec::new();
+        for (&actor, dp) in demand.0.iter() {
+            let d_market = dp.market;
+            let g = dp.good;
+            let need = dp.desired_qty_per_tick.0;
+            let mut reachable_faucet: i64 = 0;
+            for (&s_actor, sp) in supply.0.iter() {
+                if sp.good != g {
+                    continue;
+                }
+                // Only count CONTINUOUS supply (an extractor faucet), not finite endowment.
+                let Some(dep) = deposits.0.get(&s_actor) else { continue };
+                // The faucet feeds a recipe whose output is this good at this supply pool.
+                let produces_g = production
+                    .0
+                    .get(&s_actor)
+                    .map(|p| p.recipe.outputs.iter().any(|(og, _)| *og == g))
+                    .unwrap_or(false);
+                if !produces_g {
+                    continue;
+                }
+                let s_market = sp.market;
+                let reaches = s_market == d_market
+                    || distances.0.contains_key(&(s_market, d_market));
+                if reaches {
+                    reachable_faucet += dep.qty_per_interval.0 / dep.interval_ticks.max(1) as i64;
+                }
+            }
+            let _ = actor;
+            rows.push((d_market, g, need, reachable_faucet));
+        }
+        rows
+    }
+
+    // Build the live seed world (same builder as the sizing test above).
+    let mut world = bevy_ecs::world::World::new();
+    {
+        use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
+        let node = |id: u32, x: f32, y: f32| Node { id: NodeId(id), position: (x, y), kind: NodeKind::Intersection, legacy_id: None };
+        let nodes = vec![node(0, 2.0, 3.0), node(1, 13.0, 3.0), node(2, 16.0, 48.0), node(3, 208.0, 48.0)];
+        world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
+        world.insert_resource(Graph::new(nodes, vec![]));
+        world.insert_resource(crate::economy::Markets::default());
+        world.insert_resource(crate::economy::MarketChunks::default());
+        world.insert_resource(crate::economy::AccountBook::default());
+        world.insert_resource(crate::economy::InventoryBook::default());
+        world.insert_resource(SupplyPools::default());
+        world.insert_resource(DemandPools::default());
+        world.insert_resource(MarketDistances::default());
+        world.insert_resource(crate::economy::MarketGoods::default());
+        world.insert_resource(ProductionPools::default());
+        world.insert_resource(RawDeposits::default());
+    }
+    crate::economy::seed::seed_demo_economy(&mut world);
+
+    let rows = check(
+        world.resource::<DemandPools>(),
+        world.resource::<SupplyPools>(),
+        world.resource::<RawDeposits>(),
+        world.resource::<ProductionPools>(),
+        world.resource::<MarketDistances>(),
+    );
+    assert!(!rows.is_empty(), "non-vacuous: there are consumer pools to check");
+    for (market, good, need, faucet) in &rows {
+        assert!(
+            faucet >= need,
+            "consumer @ {market:?} for {good:?} demands {need}/tick but reachable continuous faucet is {faucet}/tick",
+        );
+    }
+
+    // NEGATIVE CONTROL — prove the invariant is not vacuous: move BOTH FOOD faucets to m_a.
+    // Then 8_022's demand @ m_fb (reachable only from m_fa) loses its faucet and the check must
+    // report a shortfall (reachable_faucet == 0 for that FOOD pool).
+    {
+        use crate::economy::production::EXTRACTOR_FOOD_FA;
+        let mut sp = world.resource_mut::<SupplyPools>();
+        sp.0.get_mut(&EXTRACTOR_FOOD_FA).unwrap().market = MarketId(9_001); // move m_fa -> m_a
+    }
+    let broken = check(
+        world.resource::<DemandPools>(),
+        world.resource::<SupplyPools>(),
+        world.resource::<RawDeposits>(),
+        world.resource::<ProductionPools>(),
+        world.resource::<MarketDistances>(),
+    );
+    use crate::economy::GOOD_FOOD;
+    let fb_food = broken
+        .iter()
+        .find(|(m, g, _, _)| *m == MarketId(9_004) && *g == GOOD_FOOD)
+        .expect("there is a FOOD consumer @ m_fb");
+    assert!(
+        fb_food.2 > fb_food.3,
+        "negative control: FOOD @ m_fb demand {} must now EXCEED reachable faucet {} (proves the check binds on routing)",
+        fb_food.2,
+        fb_food.3,
+    );
+}
