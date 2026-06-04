@@ -169,7 +169,10 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
 
     run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 5).unwrap();
 
-    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available, Quantity(100));
+    assert_eq!(
+        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
+        Quantity(100)
+    );
     assert_eq!(deposits.0[&EXTRACTOR_TOOLS].last_regen_tick, Some(5));
     assert!(ledger.0.contains(&EconomyEvent::Regenerated {
         actor: EXTRACTOR_TOOLS,
@@ -230,7 +233,10 @@ fn regen_is_flow_capped_not_capacity_capped() {
     for t in 0..3 {
         run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, t).unwrap();
     }
-    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available, Quantity(300));
+    assert_eq!(
+        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
+        Quantity(300)
+    );
 }
 
 #[test]
@@ -328,8 +334,8 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
 
 #[test]
 fn food_extractor_ids_are_free_and_distinct() {
-    use crate::economy::production::{EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS};
     use crate::economy::EconomicActorId;
+    use crate::economy::production::{EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS};
     // Distinct from the TOOLS extractor and from each other.
     assert_ne!(EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS);
     assert_ne!(EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS);
@@ -359,13 +365,21 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
     for (actor, out) in [(EXTRACTOR_TOOLS, GOOD_TOOLS), (EXTRACTOR_FOOD_A, GOOD_FOOD)] {
         deposits.0.insert(
             actor,
-            RawDeposit { good: GOOD_RAW, qty_per_interval: Quantity(10), interval_ticks: 1, last_regen_tick: None },
+            RawDeposit {
+                good: GOOD_RAW,
+                qty_per_interval: Quantity(10),
+                interval_ticks: 1,
+                last_regen_tick: None,
+            },
         );
         prod.0.insert(
             actor,
             ProductionPool {
                 actor,
-                recipe: Recipe { inputs: vec![(GOOD_RAW, Quantity(10))], outputs: vec![(out, Quantity(10))] },
+                recipe: Recipe {
+                    inputs: vec![(GOOD_RAW, Quantity(10))],
+                    outputs: vec![(out, Quantity(10))],
+                },
                 interval_ticks: 1,
                 last_generated_tick: None,
             },
@@ -377,38 +391,75 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
     run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap();
 
     // Each extractor produced its OWN good...
-    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_TOOLS).available, Quantity(10));
-    assert_eq!(inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available, Quantity(10));
+    assert_eq!(
+        inv.balance(EXTRACTOR_TOOLS, GOOD_TOOLS).available,
+        Quantity(10)
+    );
+    assert_eq!(
+        inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available,
+        Quantity(10)
+    );
     // ...and the FOOD extractor made NO tools, the TOOLS extractor made NO food.
-    assert_eq!(inv.balance(EXTRACTOR_FOOD_A, GOOD_TOOLS).available, Quantity(0));
-    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_FOOD).available, Quantity(0));
+    assert_eq!(
+        inv.balance(EXTRACTOR_FOOD_A, GOOD_TOOLS).available,
+        Quantity(0)
+    );
+    assert_eq!(
+        inv.balance(EXTRACTOR_TOOLS, GOOD_FOOD).available,
+        Quantity(0)
+    );
 
     // Per-actor RAW balance: each regenerated 10 and consumed 10 -> net 0 on hand.
     for actor in [EXTRACTOR_TOOLS, EXTRACTOR_FOOD_A] {
-        let regen: i64 = ledger.0.iter().filter_map(|e| match e {
-            EconomyEvent::Regenerated { actor: a, good: GOOD_RAW, qty } if *a == actor => Some(qty.0),
-            _ => None,
-        }).sum();
-        let consumed: i64 = ledger.0.iter().filter_map(|e| match e {
-            EconomyEvent::Consumed { actor: a, good: GOOD_RAW, qty } if *a == actor => Some(qty.0),
-            _ => None,
-        }).sum();
-        assert_eq!(regen, consumed, "actor {actor:?} RAW regenerated == consumed");
-        assert_eq!(inv.balance(actor, GOOD_RAW).available, Quantity(0), "actor {actor:?} RAW on-hand 0");
+        let regen: i64 = ledger
+            .0
+            .iter()
+            .filter_map(|e| match e {
+                EconomyEvent::Regenerated {
+                    actor: a,
+                    good: GOOD_RAW,
+                    qty,
+                } if *a == actor => Some(qty.0),
+                _ => None,
+            })
+            .sum();
+        let consumed: i64 = ledger
+            .0
+            .iter()
+            .filter_map(|e| match e {
+                EconomyEvent::Consumed {
+                    actor: a,
+                    good: GOOD_RAW,
+                    qty,
+                } if *a == actor => Some(qty.0),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(
+            regen, consumed,
+            "actor {actor:?} RAW regenerated == consumed"
+        );
+        assert_eq!(
+            inv.balance(actor, GOOD_RAW).available,
+            Quantity(0),
+            "actor {actor:?} RAW on-hand 0"
+        );
     }
 
     // Throttle: with RAW exhausted (consumed this tick) and no regen on a within-interval
     // call, no further FOOD/TOOLS is produced.
     run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap(); // same tick, interval not elapsed
-    assert_eq!(inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available, Quantity(10), "no double-produce");
+    assert_eq!(
+        inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available,
+        Quantity(10),
+        "no double-produce"
+    );
 }
 
 #[test]
 fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
     use crate::economy::production::{ProductionPools, RawDeposits};
-    use crate::economy::{
-        DemandPools, GoodId, MarketDistances, MarketId, SupplyPools,
-    };
+    use crate::economy::{DemandPools, GoodId, MarketDistances, MarketId, SupplyPools};
 
     // Helper: for a given world's pools/deposits, for every consumer DemandPool compute the
     // continuous faucet supply of its good reachable from its demand-market and assert >= demand.
@@ -432,7 +483,9 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
                     continue;
                 }
                 // Only count CONTINUOUS supply (an extractor faucet), not finite endowment.
-                let Some(dep) = deposits.0.get(&s_actor) else { continue };
+                let Some(dep) = deposits.0.get(&s_actor) else {
+                    continue;
+                };
                 // The faucet feeds a recipe whose output is this good at this supply pool.
                 let produces_g = production
                     .0
@@ -443,8 +496,8 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
                     continue;
                 }
                 let s_market = sp.market;
-                let reaches = s_market == d_market
-                    || distances.0.contains_key(&(s_market, d_market));
+                let reaches =
+                    s_market == d_market || distances.0.contains_key(&(s_market, d_market));
                 if reaches {
                     reachable_faucet += dep.qty_per_interval.0 / dep.interval_ticks.max(1) as i64;
                 }
@@ -459,8 +512,18 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
     let mut world = bevy_ecs::world::World::new();
     {
         use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
-        let node = |id: u32, x: f32, y: f32| Node { id: NodeId(id), position: (x, y), kind: NodeKind::Intersection, legacy_id: None };
-        let nodes = vec![node(0, 2.0, 3.0), node(1, 13.0, 3.0), node(2, 16.0, 48.0), node(3, 208.0, 48.0)];
+        let node = |id: u32, x: f32, y: f32| Node {
+            id: NodeId(id),
+            position: (x, y),
+            kind: NodeKind::Intersection,
+            legacy_id: None,
+        };
+        let nodes = vec![
+            node(0, 2.0, 3.0),
+            node(1, 13.0, 3.0),
+            node(2, 16.0, 48.0),
+            node(3, 208.0, 48.0),
+        ];
         world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
         world.insert_resource(Graph::new(nodes, vec![]));
         world.insert_resource(crate::economy::Markets::default());
@@ -483,7 +546,10 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
         world.resource::<ProductionPools>(),
         world.resource::<MarketDistances>(),
     );
-    assert!(!rows.is_empty(), "non-vacuous: there are consumer pools to check");
+    assert!(
+        !rows.is_empty(),
+        "non-vacuous: there are consumer pools to check"
+    );
     for (market, good, need, faucet) in &rows {
         assert!(
             faucet >= need,

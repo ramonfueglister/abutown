@@ -826,7 +826,7 @@ git commit -m "test(economy): three-extractor raw_deposits persist round-trip"
 ```bash
 cd /Users/ramonfuglister/Coding/abutown-vtraders
 TMPDIR=/tmp/abutown-vtraders-tmp CARGO_TARGET_DIR=/tmp/abutown-vtraders-target \
-  scripts/cargo-serial.sh fmt --manifest-path backend/Cargo.toml -- --check
+  scripts/cargo-serial.sh fmt --manifest-path backend/Cargo.toml --all -- --check   # --all: workspace root has no package target
 TMPDIR=/tmp/abutown-vtraders-tmp CARGO_TARGET_DIR=/tmp/abutown-vtraders-target \
   scripts/cargo-serial.sh clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
 TMPDIR=/tmp/abutown-vtraders-tmp CARGO_TARGET_DIR=/tmp/abutown-vtraders-target \
