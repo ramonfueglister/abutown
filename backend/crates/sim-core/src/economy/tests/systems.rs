@@ -536,3 +536,30 @@ fn pay_wages_then_profit_then_rebate_order_within_schedule() {
     assert!(i_p < i_r, "rebate AFTER profit: {log:?}");
     assert!(i_r < i_c, "rebate BEFORE consume: {log:?}");
 }
+
+#[test]
+fn price_adjust_config_defaults_and_validation() {
+    use crate::economy::systems::EconomyConfig;
+    use crate::economy::Money;
+    let c = EconomyConfig::default();
+    assert_eq!(c.price_adjust_k_bps, 500);
+    assert_eq!(c.price_adjust_max_step_bps, 100);
+    assert_eq!(c.price_floor, Money(1));
+    assert_eq!(c.price_ceiling, Money(100_000));
+    // Validated getters accept the defaults...
+    assert_eq!(c.validated_price_adjust_k_bps().unwrap(), 500);
+    assert_eq!(c.validated_price_adjust_max_step_bps().unwrap(), 100);
+    assert_eq!(c.validated_price_band().unwrap(), (1, 100_000));
+    // Inclusive boundary == 10_000 PASSES (mirrors validated_labor_share_bps).
+    let edge_k = EconomyConfig { price_adjust_k_bps: 10_000, ..c };
+    assert_eq!(edge_k.validated_price_adjust_k_bps().unwrap(), 10_000);
+    // ...and reject out-of-band config (NO-FALLBACK: honest Err, no silent clamp).
+    let bad_k = EconomyConfig { price_adjust_k_bps: 10_001, ..c };
+    assert!(bad_k.validated_price_adjust_k_bps().is_err());
+    let bad_step = EconomyConfig { price_adjust_max_step_bps: 10_001, ..c };
+    assert!(bad_step.validated_price_adjust_max_step_bps().is_err());
+    let bad_floor0 = EconomyConfig { price_floor: Money(0), ..c };
+    assert!(bad_floor0.validated_price_band().is_err(), "floor must be > 0 (else ZeroPrice)");
+    let bad_order = EconomyConfig { price_floor: Money(100_000), price_ceiling: Money(1), ..c };
+    assert!(bad_order.validated_price_band().is_err(), "floor must be < ceiling");
+}

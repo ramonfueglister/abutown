@@ -71,6 +71,18 @@ pub struct EconomyConfig {
     /// tick (no retained earnings, no capitalist class — lead decision). A value < 10_000
     /// would strand profit in firm accounts and the loop would NOT be self-sustaining.
     pub dividend_share_bps: u16,
+    /// Tâtonnement gain (basis points) applied to the normalized excess-demand intensity
+    /// when nudging reservation prices. Default 500 = 5%. VALIDATED `0..=10_000`.
+    pub price_adjust_k_bps: u16,
+    /// Hard per-interval speed limit on a reservation-price move (basis points of the
+    /// current price). Default 100 = 1%/interval — the load-bearing anti-oscillation guard.
+    /// VALIDATED `0..=10_000`.
+    pub price_adjust_max_step_bps: u16,
+    /// Absolute lower guardrail for any reservation price (MUST be > 0 so a price never
+    /// reaches 0 and trips ZeroPrice). Default Money(1).
+    pub price_floor: Money,
+    /// Absolute upper guardrail for any reservation price. Default Money(100_000).
+    pub price_ceiling: Money,
 }
 
 impl EconomyConfig {
@@ -93,6 +105,31 @@ impl EconomyConfig {
         }
         Ok(self.dividend_share_bps as i128)
     }
+
+    /// `price_adjust_k_bps` as i128, refusing `> 10_000`. Boundary `== 10_000` allowed.
+    pub fn validated_price_adjust_k_bps(&self) -> Result<i128, crate::economy::EconomyError> {
+        if self.price_adjust_k_bps > 10_000 {
+            return Err(crate::economy::EconomyError::InvalidOrder);
+        }
+        Ok(self.price_adjust_k_bps as i128)
+    }
+
+    /// `price_adjust_max_step_bps` as i128, refusing `> 10_000`.
+    pub fn validated_price_adjust_max_step_bps(&self) -> Result<i128, crate::economy::EconomyError> {
+        if self.price_adjust_max_step_bps > 10_000 {
+            return Err(crate::economy::EconomyError::InvalidOrder);
+        }
+        Ok(self.price_adjust_max_step_bps as i128)
+    }
+
+    /// `(price_floor, price_ceiling)` as i64s, refusing `floor <= 0` or `floor >= ceiling`
+    /// (a config bug that would allow a 0/negative price or an empty guardrail band).
+    pub fn validated_price_band(&self) -> Result<(i64, i64), crate::economy::EconomyError> {
+        if self.price_floor.0 <= 0 || self.price_floor.0 >= self.price_ceiling.0 {
+            return Err(crate::economy::EconomyError::InvalidOrder);
+        }
+        Ok((self.price_floor.0, self.price_ceiling.0))
+    }
 }
 
 impl Default for EconomyConfig {
@@ -113,6 +150,10 @@ impl Default for EconomyConfig {
             commuters_per_wage_unit: 100,
             max_commuters_per_market: 4,
             dividend_share_bps: 10_000,
+            price_adjust_k_bps: 500,
+            price_adjust_max_step_bps: 100,
+            price_floor: Money(1),
+            price_ceiling: Money(100_000),
         }
     }
 }
