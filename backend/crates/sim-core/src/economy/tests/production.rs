@@ -340,3 +340,65 @@ fn food_extractor_ids_are_free_and_distinct() {
         assert_ne!(EXTRACTOR_FOOD_FA, EconomicActorId(seeded));
     }
 }
+
+#[test]
+fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
+    use crate::economy::production::{
+        EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit,
+        RawDeposits, Recipe, run_production_at_tick, run_regen_at_tick,
+    };
+    use crate::economy::{
+        EconomyEvent, GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, InventoryBook, Quantity, TradeLedger,
+    };
+    use std::collections::BTreeMap;
+
+    let mut inv = InventoryBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut deposits = RawDeposits(BTreeMap::new());
+    let mut prod = ProductionPools::default();
+    for (actor, out) in [(EXTRACTOR_TOOLS, GOOD_TOOLS), (EXTRACTOR_FOOD_A, GOOD_FOOD)] {
+        deposits.0.insert(
+            actor,
+            RawDeposit { good: GOOD_RAW, qty_per_interval: Quantity(10), interval_ticks: 1, last_regen_tick: None },
+        );
+        prod.0.insert(
+            actor,
+            ProductionPool {
+                actor,
+                recipe: Recipe { inputs: vec![(GOOD_RAW, Quantity(10))], outputs: vec![(out, Quantity(10))] },
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+    }
+
+    // One tick: regen (deposits RAW) then production (consumes RAW, emits goods).
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0).unwrap();
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap();
+
+    // Each extractor produced its OWN good...
+    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_TOOLS).available, Quantity(10));
+    assert_eq!(inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available, Quantity(10));
+    // ...and the FOOD extractor made NO tools, the TOOLS extractor made NO food.
+    assert_eq!(inv.balance(EXTRACTOR_FOOD_A, GOOD_TOOLS).available, Quantity(0));
+    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_FOOD).available, Quantity(0));
+
+    // Per-actor RAW balance: each regenerated 10 and consumed 10 -> net 0 on hand.
+    for actor in [EXTRACTOR_TOOLS, EXTRACTOR_FOOD_A] {
+        let regen: i64 = ledger.0.iter().filter_map(|e| match e {
+            EconomyEvent::Regenerated { actor: a, good: GOOD_RAW, qty } if *a == actor => Some(qty.0),
+            _ => None,
+        }).sum();
+        let consumed: i64 = ledger.0.iter().filter_map(|e| match e {
+            EconomyEvent::Consumed { actor: a, good: GOOD_RAW, qty } if *a == actor => Some(qty.0),
+            _ => None,
+        }).sum();
+        assert_eq!(regen, consumed, "actor {actor:?} RAW regenerated == consumed");
+        assert_eq!(inv.balance(actor, GOOD_RAW).available, Quantity(0), "actor {actor:?} RAW on-hand 0");
+    }
+
+    // Throttle: with RAW exhausted (consumed this tick) and no regen on a within-interval
+    // call, no further FOOD/TOOLS is produced.
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap(); // same tick, interval not elapsed
+    assert_eq!(inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available, Quantity(10), "no double-produce");
+}
