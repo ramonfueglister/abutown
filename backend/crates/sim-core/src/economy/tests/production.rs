@@ -325,3 +325,18 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
         aggregate_tools_demand
     );
 }
+
+#[test]
+fn food_extractor_ids_are_free_and_distinct() {
+    use crate::economy::production::{EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS};
+    use crate::economy::EconomicActorId;
+    // Distinct from the TOOLS extractor and from each other.
+    assert_ne!(EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS);
+    assert_ne!(EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS);
+    assert_ne!(EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA);
+    // Distinct from every seeded actor id (8_001..8_022, 8_031).
+    for seeded in [8_001u64, 8_002, 8_011, 8_012, 8_021, 8_022, 8_031] {
+        assert_ne!(EXTRACTOR_FOOD_A, EconomicActorId(seeded));
+        assert_ne!(EXTRACTOR_FOOD_FA, EconomicActorId(seeded));
+    }
+}

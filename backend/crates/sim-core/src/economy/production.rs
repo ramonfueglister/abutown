@@ -71,6 +71,12 @@ pub fn run_production_at_tick(
 /// adjacent to the other seeded actor ids (8_001..8_022) but well clear of them.
 pub const EXTRACTOR_TOOLS: EconomicActorId = EconomicActorId(8_031);
 
+/// FOOD self-sufficiency: one continuous RAW->FOOD extractor co-located at each FOOD
+/// supply market. `_A` sits at m_a (backs finite supplier 8_011), `_FA` at m_fa (backs
+/// finite flow supplier 8_021). Adjacent to EXTRACTOR_TOOLS (8_031), clear of 8_001..8_022.
+pub const EXTRACTOR_FOOD_A: EconomicActorId = EconomicActorId(8_032);
+pub const EXTRACTOR_FOOD_FA: EconomicActorId = EconomicActorId(8_033);
+
 /// A standing raw-goods faucet for one actor. PERSISTED (mirrors `ProductionPool`).
 /// `last_regen_tick` is the interval cursor (gates deposits, persists for free since
 /// `Option<u64>: Copy` keeps `RawDeposit` `Copy`).
