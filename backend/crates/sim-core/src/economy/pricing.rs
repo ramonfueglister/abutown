@@ -35,7 +35,9 @@ fn nudge_price(
     let delta = ((price.0 as i128) * step_bps) / 10_000;
     let raw = (price.0 as i128) + delta;
     let clamped = raw.clamp(floor as i128, ceiling as i128);
-    Ok(Money(i64::try_from(clamped).map_err(|_| EconomyError::Overflow)?))
+    Ok(Money(
+        i64::try_from(clamped).map_err(|_| EconomyError::Overflow)?,
+    ))
 }
 
 /// For every demand pool, nudge `max_price`; for every supply pool, nudge `min_price` — each by
@@ -54,15 +56,23 @@ pub fn run_adjust_reservation_prices_at_tick(
     let (floor, ceiling) = config.validated_price_band()?;
 
     for pool in demand.0.values_mut() {
-        let key = MarketGoodKey { market: pool.market, good: pool.good };
+        let key = MarketGoodKey {
+            market: pool.market,
+            good: pool.good,
+        };
         if let Some(state) = market_goods.0.get(&key) {
-            pool.max_price = nudge_price(pool.max_price, state, k_bps, max_step_bps, floor, ceiling)?;
+            pool.max_price =
+                nudge_price(pool.max_price, state, k_bps, max_step_bps, floor, ceiling)?;
         }
     }
     for pool in supply.0.values_mut() {
-        let key = MarketGoodKey { market: pool.market, good: pool.good };
+        let key = MarketGoodKey {
+            market: pool.market,
+            good: pool.good,
+        };
         if let Some(state) = market_goods.0.get(&key) {
-            pool.min_price = nudge_price(pool.min_price, state, k_bps, max_step_bps, floor, ceiling)?;
+            pool.min_price =
+                nudge_price(pool.min_price, state, k_bps, max_step_bps, floor, ceiling)?;
         }
     }
     Ok(())

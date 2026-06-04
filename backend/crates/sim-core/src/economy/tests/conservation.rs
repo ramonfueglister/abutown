@@ -936,5 +936,8 @@ fn steady_state_multi_tick() {
     let mp_lo = *max_price_tail.iter().min().unwrap();
     let mp_hi = *max_price_tail.iter().max().unwrap();
     assert!(mp_lo > 0, "reservation price stays positive (no ZeroPrice)");
-    assert!(mp_hi - mp_lo < 2_000, "reservation-price tail bounded (no runaway/oscillation): lo={mp_lo} hi={mp_hi}");
+    assert!(
+        mp_hi - mp_lo < 2_000,
+        "reservation-price tail bounded (no runaway/oscillation): lo={mp_lo} hi={mp_hi}"
+    );
 }

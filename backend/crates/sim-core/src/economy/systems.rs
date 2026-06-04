@@ -116,7 +116,9 @@ impl EconomyConfig {
     }
 
     /// `price_adjust_max_step_bps` as i128, refusing `> 10_000`.
-    pub fn validated_price_adjust_max_step_bps(&self) -> Result<i128, crate::economy::EconomyError> {
+    pub fn validated_price_adjust_max_step_bps(
+        &self,
+    ) -> Result<i128, crate::economy::EconomyError> {
         if self.price_adjust_max_step_bps > 10_000 {
             return Err(crate::economy::EconomyError::InvalidOrder);
         }
