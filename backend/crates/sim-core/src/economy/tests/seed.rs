@@ -190,63 +190,44 @@ fn seed_adds_flow_demo_markets_for_dormant_cross_flow() {
 }
 
 #[test]
-fn seed_installs_extractor_with_raw_faucet_recipe_and_tools_supply_but_never_lists_raw() {
-    use crate::economy::production::{EXTRACTOR_TOOLS, ProductionPools, RawDeposits};
-    use crate::economy::{GOOD_RAW, GOOD_TOOLS, HouseholdSector, InventoryBook};
+fn seed_installs_three_extractors_tools_and_two_food_but_never_lists_raw() {
+    use crate::economy::production::{
+        EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS, ProductionPools, RawDeposits,
+    };
+    use crate::economy::{GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, HouseholdSector, InventoryBook, MarketId};
 
     let mut world = seed_world();
     seed_demo_economy(&mut world);
 
-    // RawDeposit for EXTRACTOR_TOOLS exists and faucets GOOD_RAW at the sized rate.
-    let dep = world.resource::<RawDeposits>().0[&EXTRACTOR_TOOLS];
-    assert_eq!(dep.good, GOOD_RAW);
-    assert_eq!(dep.qty_per_interval.0, 10, "fixed by the A5a Sizing-Sim");
-    assert_eq!(dep.interval_ticks, 1);
+    // (market, output-good) expected for each extractor.
+    let expected = [
+        (EXTRACTOR_TOOLS, MarketId(9_001), GOOD_TOOLS),   // m_a
+        (EXTRACTOR_FOOD_A, MarketId(9_001), GOOD_FOOD),   // m_a
+        (EXTRACTOR_FOOD_FA, MarketId(9_003), GOOD_FOOD),  // m_fa
+    ];
+    for (actor, market, out_good) in expected {
+        let dep = world.resource::<RawDeposits>().0[&actor];
+        assert_eq!(dep.good, GOOD_RAW, "{actor:?} faucets RAW");
+        assert_eq!(dep.qty_per_interval.0, 10, "{actor:?} faucet rate 10");
+        assert_eq!(dep.interval_ticks, 1);
 
-    // EXTRACTOR_TOOLS has a RAW->TOOLS recipe.
-    let pool = world.resource::<ProductionPools>().0[&EXTRACTOR_TOOLS].clone();
-    assert_eq!(pool.recipe.inputs, vec![(GOOD_RAW, dep.qty_per_interval)]);
-    assert_eq!(pool.recipe.outputs.len(), 1);
-    assert_eq!(pool.recipe.outputs[0].0, GOOD_TOOLS);
+        let pool = world.resource::<ProductionPools>().0[&actor].clone();
+        assert_eq!(pool.recipe.inputs, vec![(GOOD_RAW, dep.qty_per_interval)], "{actor:?} consumes RAW");
+        assert_eq!(pool.recipe.outputs.len(), 1);
+        assert_eq!(pool.recipe.outputs[0].0, out_good, "{actor:?} outputs the right good");
 
-    // EXTRACTOR_TOOLS sells TOOLS (the tradable), never RAW.
-    let sp = world.resource::<SupplyPools>().0[&EXTRACTOR_TOOLS];
-    assert_eq!(sp.good, GOOD_TOOLS);
+        let sp = world.resource::<SupplyPools>().0[&actor];
+        assert_eq!(sp.good, out_good, "{actor:?} sells its output good");
+        assert_eq!(sp.market, market, "{actor:?} sells at the right market");
+        assert_eq!(sp.offered_qty_per_tick.0, 10);
+
+        assert!(world.resource::<InventoryBook>().balance(actor, GOOD_RAW).available.0 > 0,
+            "{actor:?} holds opening RAW so production fires on tick 0");
+        assert!(!world.resource::<HouseholdSector>().pool_weights.contains_key(&actor),
+            "{actor:?} is a firm, not a labor household");
+    }
 
     // GOOD_RAW is NEVER on any SupplyPool or DemandPool (structural non-tradability).
-    assert!(
-        world
-            .resource::<SupplyPools>()
-            .0
-            .values()
-            .all(|p| p.good != GOOD_RAW),
-        "RAW must never be on a SupplyPool"
-    );
-    assert!(
-        world
-            .resource::<DemandPools>()
-            .0
-            .values()
-            .all(|p| p.good != GOOD_RAW),
-        "RAW must never be on a DemandPool"
-    );
-
-    // EXTRACTOR_TOOLS is NOT in pool_weights (it is a firm, not a consumer household).
-    assert!(
-        !world
-            .resource::<HouseholdSector>()
-            .pool_weights
-            .contains_key(&EXTRACTOR_TOOLS),
-        "EXTRACTOR_TOOLS is a firm, not a labor household"
-    );
-
-    // EXTRACTOR_TOOLS holds an opening RAW endowment so production fires on tick 0.
-    assert!(
-        world
-            .resource::<InventoryBook>()
-            .balance(EXTRACTOR_TOOLS, GOOD_RAW)
-            .available
-            .0
-            > 0
-    );
+    assert!(world.resource::<SupplyPools>().0.values().all(|p| p.good != GOOD_RAW), "RAW never on a SupplyPool");
+    assert!(world.resource::<DemandPools>().0.values().all(|p| p.good != GOOD_RAW), "RAW never on a DemandPool");
 }
