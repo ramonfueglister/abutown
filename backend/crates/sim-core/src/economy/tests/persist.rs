@@ -383,11 +383,11 @@ fn ledger_tail_is_capped_and_round_trips() {
 #[test]
 fn raw_deposits_round_trip() {
     use crate::economy::GOOD_RAW;
-    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits};
+    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits};
 
     let mut world = install_economy();
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -400,7 +400,7 @@ fn raw_deposits_round_trip() {
     assert_eq!(
         snap.raw_deposits,
         vec![(
-            EXTRACTOR,
+            EXTRACTOR_TOOLS,
             RawDeposit {
                 good: GOOD_RAW,
                 qty_per_interval: Quantity(10),
@@ -416,7 +416,7 @@ fn raw_deposits_round_trip() {
     let mut fresh = install_economy();
     apply_into_world(&mut fresh, &decoded);
 
-    let restored = fresh.resource::<RawDeposits>().0[&EXTRACTOR];
+    let restored = fresh.resource::<RawDeposits>().0[&EXTRACTOR_TOOLS];
     assert_eq!(restored.last_regen_tick, Some(42));
     assert_eq!(restored.qty_per_interval, Quantity(10));
     assert_eq!(

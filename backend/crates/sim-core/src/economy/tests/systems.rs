@@ -423,11 +423,11 @@ fn raw_deposits_resource_is_installed_by_plugin() {
 
 #[test]
 fn regenerate_system_feeds_input_gated_production_same_tick() {
-    // EXTRACTOR has a RAW faucet + a RAW->TOOLS recipe. After one schedule run, the RAW
+    // EXTRACTOR_TOOLS has a RAW faucet + a RAW->TOOLS recipe. After one schedule run, the RAW
     // deposited this tick is immediately consumed by the recipe → TOOLS appears; net RAW
     // on hand is bounded (deposit qty minus what the recipe took).
     use crate::economy::production::{
-        EXTRACTOR, ProductionPool, ProductionPools, RawDeposit, RawDeposits, Recipe,
+        EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits, Recipe,
     };
     use crate::economy::{EconomyPlugin, GOOD_RAW, GOOD_TOOLS, InventoryBook, Quantity};
 
@@ -438,7 +438,7 @@ fn regenerate_system_feeds_input_gated_production_same_tick() {
     EconomyPlugin.install(&mut world, &mut schedule);
 
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(100),
@@ -447,9 +447,9 @@ fn regenerate_system_feeds_input_gated_production_same_tick() {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR,
+            actor: EXTRACTOR_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(100))],
                 outputs: vec![(GOOD_TOOLS, Quantity(100))],
@@ -463,12 +463,12 @@ fn regenerate_system_feeds_input_gated_production_same_tick() {
 
     let inv = world.resource::<InventoryBook>();
     assert_eq!(
-        inv.balance(EXTRACTOR, GOOD_TOOLS).available,
+        inv.balance(EXTRACTOR_TOOLS, GOOD_TOOLS).available,
         Quantity(100),
         "Regenerate deposited RAW before Production consumed it (same-tick ordering)"
     );
     assert_eq!(
-        inv.balance(EXTRACTOR, GOOD_RAW).available,
+        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
         Quantity(0),
         "the recipe drained the freshly-deposited RAW this tick"
     );

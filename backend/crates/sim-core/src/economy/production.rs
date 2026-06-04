@@ -69,7 +69,7 @@ pub fn run_production_at_tick(
 
 /// The single named primary-resource extractor. ONE faucet (not N scattered ones),
 /// adjacent to the other seeded actor ids (8_001..8_022) but well clear of them.
-pub const EXTRACTOR: EconomicActorId = EconomicActorId(8_031);
+pub const EXTRACTOR_TOOLS: EconomicActorId = EconomicActorId(8_031);
 
 /// A standing raw-goods faucet for one actor. PERSISTED (mirrors `ProductionPool`).
 /// `last_regen_tick` is the interval cursor (gates deposits, persists for free since

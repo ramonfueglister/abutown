@@ -191,26 +191,26 @@ fn seed_adds_flow_demo_markets_for_dormant_cross_flow() {
 
 #[test]
 fn seed_installs_extractor_with_raw_faucet_recipe_and_tools_supply_but_never_lists_raw() {
-    use crate::economy::production::{EXTRACTOR, ProductionPools, RawDeposits};
+    use crate::economy::production::{EXTRACTOR_TOOLS, ProductionPools, RawDeposits};
     use crate::economy::{GOOD_RAW, GOOD_TOOLS, HouseholdSector, InventoryBook};
 
     let mut world = seed_world();
     seed_demo_economy(&mut world);
 
-    // RawDeposit for EXTRACTOR exists and faucets GOOD_RAW at the sized rate.
-    let dep = world.resource::<RawDeposits>().0[&EXTRACTOR];
+    // RawDeposit for EXTRACTOR_TOOLS exists and faucets GOOD_RAW at the sized rate.
+    let dep = world.resource::<RawDeposits>().0[&EXTRACTOR_TOOLS];
     assert_eq!(dep.good, GOOD_RAW);
     assert_eq!(dep.qty_per_interval.0, 10, "fixed by the A5a Sizing-Sim");
     assert_eq!(dep.interval_ticks, 1);
 
-    // EXTRACTOR has a RAW->TOOLS recipe.
-    let pool = world.resource::<ProductionPools>().0[&EXTRACTOR].clone();
+    // EXTRACTOR_TOOLS has a RAW->TOOLS recipe.
+    let pool = world.resource::<ProductionPools>().0[&EXTRACTOR_TOOLS].clone();
     assert_eq!(pool.recipe.inputs, vec![(GOOD_RAW, dep.qty_per_interval)]);
     assert_eq!(pool.recipe.outputs.len(), 1);
     assert_eq!(pool.recipe.outputs[0].0, GOOD_TOOLS);
 
-    // EXTRACTOR sells TOOLS (the tradable), never RAW.
-    let sp = world.resource::<SupplyPools>().0[&EXTRACTOR];
+    // EXTRACTOR_TOOLS sells TOOLS (the tradable), never RAW.
+    let sp = world.resource::<SupplyPools>().0[&EXTRACTOR_TOOLS];
     assert_eq!(sp.good, GOOD_TOOLS);
 
     // GOOD_RAW is NEVER on any SupplyPool or DemandPool (structural non-tradability).
@@ -231,20 +231,20 @@ fn seed_installs_extractor_with_raw_faucet_recipe_and_tools_supply_but_never_lis
         "RAW must never be on a DemandPool"
     );
 
-    // EXTRACTOR is NOT in pool_weights (it is a firm, not a consumer household).
+    // EXTRACTOR_TOOLS is NOT in pool_weights (it is a firm, not a consumer household).
     assert!(
         !world
             .resource::<HouseholdSector>()
             .pool_weights
-            .contains_key(&EXTRACTOR),
-        "EXTRACTOR is a firm, not a labor household"
+            .contains_key(&EXTRACTOR_TOOLS),
+        "EXTRACTOR_TOOLS is a firm, not a labor household"
     );
 
-    // EXTRACTOR holds an opening RAW endowment so production fires on tick 0.
+    // EXTRACTOR_TOOLS holds an opening RAW endowment so production fires on tick 0.
     assert!(
         world
             .resource::<InventoryBook>()
-            .balance(EXTRACTOR, GOOD_RAW)
+            .balance(EXTRACTOR_TOOLS, GOOD_RAW)
             .available
             .0
             > 0

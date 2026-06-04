@@ -150,7 +150,7 @@ fn regenerated_event_type_tag_is_stable() {
 
 #[test]
 fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
-    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
     use crate::economy::{EconomyEvent, GOOD_RAW, InventoryBook, Quantity, TradeLedger};
     use std::collections::BTreeMap;
 
@@ -158,7 +158,7 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(100),
@@ -169,10 +169,10 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
 
     run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 5).unwrap();
 
-    assert_eq!(inv.balance(EXTRACTOR, GOOD_RAW).available, Quantity(100));
-    assert_eq!(deposits.0[&EXTRACTOR].last_regen_tick, Some(5));
+    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available, Quantity(100));
+    assert_eq!(deposits.0[&EXTRACTOR_TOOLS].last_regen_tick, Some(5));
     assert!(ledger.0.contains(&EconomyEvent::Regenerated {
-        actor: EXTRACTOR,
+        actor: EXTRACTOR_TOOLS,
         good: GOOD_RAW,
         qty: Quantity(100),
     }));
@@ -180,7 +180,7 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
 
 #[test]
 fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
-    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
     use crate::economy::{GOOD_RAW, InventoryBook, Quantity, TradeLedger};
     use std::collections::BTreeMap;
 
@@ -188,7 +188,7 @@ fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(100),
@@ -199,17 +199,17 @@ fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
     run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0).unwrap(); // fires (last=None)
     run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 3).unwrap(); // interval not elapsed
     assert_eq!(
-        inv.balance(EXTRACTOR, GOOD_RAW).available,
+        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
         Quantity(100),
         "only one deposit within the interval"
     );
     // On a skip the gate returns BEFORE stamping, so the cursor stays at the firing tick.
-    assert_eq!(deposits.0[&EXTRACTOR].last_regen_tick, Some(0));
+    assert_eq!(deposits.0[&EXTRACTOR_TOOLS].last_regen_tick, Some(0));
 }
 
 #[test]
 fn regen_is_flow_capped_not_capacity_capped() {
-    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
     use crate::economy::{GOOD_RAW, InventoryBook, Quantity, TradeLedger};
     use std::collections::BTreeMap;
 
@@ -219,7 +219,7 @@ fn regen_is_flow_capped_not_capacity_capped() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(100),
@@ -230,7 +230,7 @@ fn regen_is_flow_capped_not_capacity_capped() {
     for t in 0..3 {
         run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, t).unwrap();
     }
-    assert_eq!(inv.balance(EXTRACTOR, GOOD_RAW).available, Quantity(300));
+    assert_eq!(inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available, Quantity(300));
 }
 
 #[test]
@@ -263,11 +263,11 @@ fn regen_is_deterministic_keys_first() {
 
 #[test]
 fn regen_rate_covers_aggregate_tools_demand_at_seed() {
-    // §15.2 Sizing-Sim: the EXTRACTOR's faucet (and its same-rate recipe + SupplyPool)
+    // §15.2 Sizing-Sim: the EXTRACTOR_TOOLS's faucet (and its same-rate recipe + SupplyPool)
     // MUST cover aggregate per-tick TOOLS demand at seed prices, else static prices leave
     // chronic TOOLS scarcity (§8). Build the live demo world, measure aggregate TOOLS
     // demand, and assert the seeded faucet rate >= that demand.
-    use crate::economy::production::{EXTRACTOR, RawDeposits};
+    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposits};
     use crate::economy::{DemandPools, GOOD_TOOLS};
 
     // Reuse the seed-test world builder (added/extended in tests/seed.rs is a sibling
@@ -315,10 +315,10 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
         "seed has exactly one TOOLS consumer @ 10/tick (sizing baseline)"
     );
 
-    let faucet = world.resource::<RawDeposits>().0[&EXTRACTOR];
+    let faucet = world.resource::<RawDeposits>().0[&EXTRACTOR_TOOLS];
     assert!(
         faucet.qty_per_interval.0 >= aggregate_tools_demand && faucet.interval_ticks == 1,
-        "EXTRACTOR faucet rate ({} per {} tick(s)) must cover aggregate TOOLS demand ({}/tick) \
+        "EXTRACTOR_TOOLS faucet rate ({} per {} tick(s)) must cover aggregate TOOLS demand ({}/tick) \
          at seed prices, else chronic scarcity (§8/§15.2)",
         faucet.qty_per_interval.0,
         faucet.interval_ticks,
