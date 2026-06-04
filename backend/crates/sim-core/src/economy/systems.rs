@@ -36,6 +36,7 @@ pub enum EconomySet {
     CommuterCapture,
     Materialize,
     Telemetry,
+    AdjustReservationPrices,
     UpdateConsumption,
 }
 
@@ -176,6 +177,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::CommuterCapture,
             EconomySet::Materialize,
             EconomySet::Telemetry,
+            EconomySet::AdjustReservationPrices,
             EconomySet::UpdateConsumption,
         )
             .chain(),
@@ -202,6 +204,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             run_transport_rebate_system.in_set(EconomySet::TransportRebate),
             run_consumption_system.in_set(EconomySet::Consume),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
+            run_adjust_reservation_prices_system.in_set(EconomySet::AdjustReservationPrices),
             run_consumption_update_system.in_set(EconomySet::UpdateConsumption),
         )
             .before(crate::mobility::systems::tick_increment_system),
@@ -632,6 +635,37 @@ pub fn run_macro_flow_system(
 pub fn run_consumption_update_system(mut demand: ResMut<DemandPools>, goods: Res<MarketGoods>) {
     run_consumption_update_at_tick(&mut demand, &goods)
         .expect("run_consumption_update_at_tick is infallible once every consumer market has a seeded opening price; an Err is a bug");
+}
+
+/// Cadence-gated reservation-price nudge. Runs every `macro_flow_interval_ticks` (same slow
+/// timescale as macro_flow, so the fast EWMA quantity loop settles between nudges). Surfaces a
+/// genuine Err (config-validation / overflow) as an audited `MarketClearFailed` — never `let _`,
+/// never a silent default.
+pub fn run_adjust_reservation_prices_system(
+    tick: Res<Tick>,
+    config: Res<EconomyConfig>,
+    market_goods: Res<MarketGoods>,
+    mut demand: ResMut<DemandPools>,
+    mut supply: ResMut<SupplyPools>,
+    mut ledger: ResMut<TradeLedger>,
+) {
+    if config.macro_flow_interval_ticks == 0
+        || !tick.0.is_multiple_of(config.macro_flow_interval_ticks)
+    {
+        return;
+    }
+    if let Err(reason) = crate::economy::pricing::run_adjust_reservation_prices_at_tick(
+        &mut demand,
+        &mut supply,
+        &market_goods,
+        &config,
+    ) {
+        ledger.0.push(EconomyEvent::MarketClearFailed {
+            market: MarketId(0),
+            good: GoodId(0),
+            reason,
+        });
+    }
 }
 
 /// Exclusive system: fill `CommuterTrips` from observed markets' realized WAGES.
