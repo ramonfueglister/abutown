@@ -14,6 +14,7 @@ mod overflow;
 mod persist;
 mod plugin;
 mod pools;
+mod pricing;
 mod production;
 mod rationing;
 mod seed;
