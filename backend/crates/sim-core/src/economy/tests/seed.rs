@@ -224,11 +224,16 @@ fn seed_installs_three_extractors_tools_and_two_food_but_never_lists_raw() {
             pool.recipe.outputs[0].0, out_good,
             "{actor:?} outputs the right good"
         );
+        assert_eq!(
+            pool.recipe.outputs[0].1, dep.qty_per_interval,
+            "{actor:?} produces 1:1 (output qty == faucet rate), else RAW unbounded/scarce"
+        );
 
         let sp = world.resource::<SupplyPools>().0[&actor];
         assert_eq!(sp.good, out_good, "{actor:?} sells its output good");
         assert_eq!(sp.market, market, "{actor:?} sells at the right market");
         assert_eq!(sp.offered_qty_per_tick.0, 10);
+        assert_eq!(sp.min_price.0, 500, "{actor:?} opening min_price pinned");
 
         assert!(
             world
