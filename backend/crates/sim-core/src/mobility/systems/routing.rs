@@ -48,6 +48,26 @@ fn destination_for_stage(
     }
 }
 
+/// Economic destination override: an attributed citizen's `activity:destination`
+/// leg routes to its bound market node (from `CitizenEconomicTargets`) instead of
+/// the geometric corridor endpoint. The `home` leg and unattributed citizens keep
+/// `geometric`.
+pub(crate) fn economic_destination(
+    stage: &PlanStage,
+    agent: &crate::ids::AgentId,
+    geometric: crate::routing::NodeId,
+    targets: Option<&crate::mobility::resources::CitizenEconomicTargets>,
+) -> crate::routing::NodeId {
+    if let PlanStage::WalkToActivity { activity_id, .. } = stage
+        && activity_id == "activity:destination"
+        && let Some(t) = targets
+        && let Some(node) = t.0.get(agent)
+    {
+        return *node;
+    }
+    geometric
+}
+
 pub(crate) fn materialize_route_steps(
     graph: &crate::routing::Graph,
     field: &crate::routing::FlowField,
@@ -167,6 +187,7 @@ pub fn route_assignment_system(
     mut dirty: ResMut<DirtyAgents>,
     mut commands: Commands,
     waypoints: Res<crate::mobility::resources::ActivityWaypoints>,
+    targets: Option<Res<crate::mobility::resources::CitizenEconomicTargets>>,
 ) {
     for (entity, pos, stable, mut state, mut plan) in query.iter_mut() {
         let AgentMobilityState::Walking { link_id, progress } = &state.0 else {
@@ -204,12 +225,19 @@ pub fn route_assignment_system(
             stats.skipped += 1;
             continue;
         };
-        let Some(destination) =
+        let Some(geometric_destination) =
             destination_for_stage(&graph, &stage, spatial.as_deref(), &waypoints)
         else {
             stats.failed += 1;
             continue;
         };
+        // Deterministic one-tick lag: EconomySet::Attribution and MobilitySet::Advance
+        // have no explicit ordering edge in the schedule (both only constrain themselves
+        // before tick_increment_system / MobilitySet::Bookkeeping). CitizenEconomicTargets
+        // reflects last tick's attribution. This is acceptable — economic destination
+        // assignments are stable across ticks and the one-tick lag is deterministic.
+        let destination =
+            economic_destination(&stage, &stable.0, geometric_destination, targets.as_deref());
         let Some(origin) = current_route_origin(&graph, &link_id, progress) else {
             stats.failed += 1;
             continue;
@@ -513,6 +541,69 @@ mod tests {
         assert_eq!(
             destination_for_stage(&graph, &stage, Some(&spatial), &wp),
             None
+        );
+    }
+
+    #[test]
+    fn home_leg_is_never_overridden() {
+        // A `WalkToActivity{activity_id:"activity:home"}` stage must NOT be overridden
+        // even when `CitizenEconomicTargets` maps the agent to a market node.
+        let agent = crate::ids::AgentId("agent-1".into());
+        let market_node = crate::routing::NodeId(99);
+        let geometric = crate::routing::NodeId(1);
+        let stage = PlanStage::WalkToActivity {
+            link_id: "walk:test".into(),
+            activity_id: "activity:home".into(),
+        };
+        let mut targets = crate::mobility::resources::CitizenEconomicTargets::default();
+        targets.0.insert(agent.clone(), market_node);
+        let result = economic_destination(&stage, &agent, geometric, Some(&targets));
+        assert_eq!(result, geometric, "home leg must not be overridden");
+    }
+
+    #[test]
+    fn destination_leg_with_target_is_overridden() {
+        // A `WalkToActivity{activity_id:"activity:destination"}` stage for an attributed
+        // citizen must route to its bound market node.
+        let agent = crate::ids::AgentId("agent-2".into());
+        let market_node = crate::routing::NodeId(42);
+        let geometric = crate::routing::NodeId(7);
+        let stage = PlanStage::WalkToActivity {
+            link_id: "walk:test".into(),
+            activity_id: "activity:destination".into(),
+        };
+        let mut targets = crate::mobility::resources::CitizenEconomicTargets::default();
+        targets.0.insert(agent.clone(), market_node);
+        let result = economic_destination(&stage, &agent, geometric, Some(&targets));
+        assert_eq!(
+            result, market_node,
+            "destination leg must be overridden to market node"
+        );
+    }
+
+    #[test]
+    fn destination_leg_without_target_is_geometric() {
+        // A `WalkToActivity{activity_id:"activity:destination"}` stage for an unattributed
+        // citizen (not in CitizenEconomicTargets) must fall back to the geometric endpoint.
+        let agent = crate::ids::AgentId("agent-3".into());
+        let geometric = crate::routing::NodeId(5);
+        let stage = PlanStage::WalkToActivity {
+            link_id: "walk:test".into(),
+            activity_id: "activity:destination".into(),
+        };
+        // Empty targets: agent is not attributed.
+        let targets = crate::mobility::resources::CitizenEconomicTargets::default();
+        let result = economic_destination(&stage, &agent, geometric, Some(&targets));
+        assert_eq!(
+            result, geometric,
+            "unattributed citizen must use geometric destination"
+        );
+
+        // Also test with None targets (economy plugin absent).
+        let result_no_targets = economic_destination(&stage, &agent, geometric, None);
+        assert_eq!(
+            result_no_targets, geometric,
+            "None targets must use geometric destination"
         );
     }
 }
