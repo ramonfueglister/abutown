@@ -93,6 +93,8 @@ pub struct AgentRecord {
     pub parent_id: Option<AgentId>,
     #[serde(default)]
     pub cyclic: bool,
+    pub home_market: u32,
+    pub work_market: u32,
 }
 
 impl AgentRecord {
@@ -127,6 +129,8 @@ impl AgentRecord {
             sex: crate::mobility::components::Sex::default(),
             parent_id: None,
             cyclic: false,
+            home_market: 0,
+            work_market: 0,
         }
     }
 }
@@ -232,7 +236,9 @@ mod route_execution_tests {
             "plan":[],
             "plan_cursor":0,
             "walk_speed_per_tick":1.0,
-            "birth_tick":123
+            "birth_tick":123,
+            "home_market":0,
+            "work_market":0
         }"#;
 
         let decoded: AgentRecord =
@@ -248,7 +254,9 @@ mod route_execution_tests {
             "state":{"AtActivity":{"activity_id":"home"}},
             "plan":[],
             "plan_cursor":0,
-            "walk_speed_per_tick":1.0
+            "walk_speed_per_tick":1.0,
+            "home_market":0,
+            "work_market":0
         }"#;
 
         let error = serde_json::from_str::<AgentRecord>(json)

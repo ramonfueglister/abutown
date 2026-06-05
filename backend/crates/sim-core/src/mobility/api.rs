@@ -435,6 +435,8 @@ fn spawn_agent_from_record_with_position(
         sex,
         parent_id,
         cyclic,
+        home_market,
+        work_market,
     } = record;
     let id = record_id.clone();
     let sprite_key = compute_agent_sprite_key(&id);
@@ -471,6 +473,10 @@ fn spawn_agent_from_record_with_position(
             Position { x: px, y: py },
             Direction(abutown_protocol::DirectionDto::S),
             SpriteKey(sprite_key),
+            crate::mobility::MarketBinding {
+                home_market,
+                work_market,
+            },
         ))
         .id();
     if let Some(active_route) = active_route {
@@ -563,6 +569,7 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
     let parent_id = world
         .get::<crate::mobility::components::ParentId>(entity)
         .and_then(|p| p.0.clone());
+    let binding = world.get::<crate::mobility::MarketBinding>(entity);
     Some(AgentRecord {
         id: stable.0.clone(),
         state: state.0.clone(),
@@ -574,6 +581,8 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
         sex,
         parent_id,
         cyclic: plan.cyclic,
+        home_market: binding.map(|b| b.home_market).unwrap_or(0),
+        work_market: binding.map(|b| b.work_market).unwrap_or(0),
     })
 }
 
@@ -1073,5 +1082,55 @@ pub fn seed_chunk_subscriber_count(world: &mut World, chunk: crate::ids::ChunkCo
         .get_mut::<crate::world::components::ChunkSubscriberCount>()
     {
         sub.0 = count;
+    }
+}
+
+#[cfg(test)]
+mod market_binding_roundtrip_tests {
+    use super::*;
+    use crate::ids::AgentId;
+    use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage};
+
+    /// Reuse the `empty_world_and_schedule` fixture (same pattern as
+    /// `mod.rs::empty_world`). Seed a single activity waypoint so
+    /// `AtActivity` resolves to a known coord without a graph lookup.
+    #[test]
+    fn market_binding_round_trips_through_spawn_and_extract() {
+        let (mut world, _schedule) = empty_world_and_schedule();
+
+        // Prime the activity waypoint so `initial_agent_position` can resolve it.
+        world
+            .resource_mut::<crate::mobility::resources::ActivityWaypoints>()
+            .0
+            .insert("activity:home".to_string(), (10.0, 20.0));
+
+        let agent_id = AgentId("agent:binding:test".to_string());
+        let mut record = AgentRecord::new(
+            agent_id.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".to_string(),
+            },
+            vec![PlanStage::Activity {
+                activity_id: "activity:home".to_string(),
+            }],
+            1.0,
+        );
+        record.home_market = 9001;
+        record.work_market = 9002;
+
+        let entity = spawn_agent_from_record(&mut world, record);
+
+        // Verify the component was inserted on the entity.
+        let binding = world
+            .get::<crate::mobility::MarketBinding>(entity)
+            .expect("MarketBinding component must be present after spawn");
+        assert_eq!(binding.home_market, 9001);
+        assert_eq!(binding.work_market, 9002);
+
+        // Verify the round-trip via agent_record_from_entity.
+        let extracted =
+            agent_record_from_entity(&world, entity).expect("agent record must be extractable");
+        assert_eq!(extracted.home_market, 9001);
+        assert_eq!(extracted.work_market, 9002);
     }
 }
