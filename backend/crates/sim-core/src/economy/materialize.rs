@@ -376,8 +376,8 @@ pub fn materialize_traders_system(world: &mut World) {
         q.iter(world).map(|c| c.0).collect()
     };
 
-    // Build owned render inputs (actor, polyline, progress) for flow shipments and
-    // shopper visits inside one cache scope, then plan + apply.
+    // Build owned render inputs (actor, polyline, progress) for flow shipments
+    // inside one cache scope, then plan + apply.
     let render_inputs: Vec<RenderInput> =
         world.resource_scope(|world: &mut World, mut cache: Mut<FlowFieldCache>| {
             let graph = world.resource::<Graph>();
