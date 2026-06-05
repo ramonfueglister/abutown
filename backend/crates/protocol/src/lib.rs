@@ -7,7 +7,7 @@ pub mod v1 {
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -441,7 +441,7 @@ mod tests {
 
         assert_eq!(
             json,
-            r#"{"type":"set_tile_kind","protocol_version":1,"world_id":"abutopia","command_id":"command:test:1","coord":{"x":4,"y":4},"local_index":11,"kind":"water"}"#
+            r#"{"type":"set_tile_kind","protocol_version":16,"world_id":"abutopia","command_id":"command:test:1","coord":{"x":4,"y":4},"local_index":11,"kind":"water"}"#
         );
     }
 

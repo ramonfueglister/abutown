@@ -11,10 +11,10 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = dotenvy::dotenv();
     let config = ServerConfig::from_env().context("load server config")?;
-    let port: u16 = std::env::var("LISTEN_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(8080);
+    let port: u16 = match std::env::var("LISTEN_PORT") {
+        Err(_) => 8080,
+        Ok(v) => v.parse().context("LISTEN_PORT must be a valid u16")?,
+    };
     let addr: SocketAddr = format!("127.0.0.1:{port}")
         .parse()
         .context("parse listen address")?;
