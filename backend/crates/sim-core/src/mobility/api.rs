@@ -1212,7 +1212,7 @@ mod market_binding_roundtrip_tests {
 
         // --- Test 1: Assign when unassigned (home_market == 0) ---
         let id1 = AgentId("agent:assign:unassigned".to_string());
-        let mut rec1 = AgentRecord::new(
+        let rec1 = AgentRecord::new(
             id1.clone(),
             AgentMobilityState::AtActivity {
                 activity_id: "activity:home".to_string(),
@@ -1230,8 +1230,13 @@ mod market_binding_roundtrip_tests {
             .expect("binding must be present after spawn");
         assert!(
             binding1.home_market >= 9001,
-            "unassigned agent must be assigned a real market id >= 9001, got {}",
+            "unassigned agent must be assigned a real home_market >= 9001, got {}",
             binding1.home_market
+        );
+        assert!(
+            binding1.work_market >= 9001,
+            "unassigned agent must be assigned a real work_market >= 9001, got {}",
+            binding1.work_market
         );
 
         // --- Test 2: Preserve when already assigned (restore-safety) ---
