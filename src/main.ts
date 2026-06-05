@@ -494,11 +494,13 @@ installRuntimeDiagnostics(window, {
     treeBuildingOverlap: treeBuildingOverlapCount(),
   }),
   getEconomyMarketCount: () => economyState.markets.size,
+  getEconomyMarkets: () => [...economyState.markets.values()],
   getSelected: () => ({
     agentId: entitySelection.selectedAgentId(),
     vehicleId: entitySelection.selectedVehicleId(),
     agentInspector: buildBackendPedestrianInspector(selectedBackendPedestrian()),
     vehicleInspector: buildBackendCarInspector(selectedBackendCar()),
+    selectedMarketCoord: entitySelection.selectedMarketCoord(),
   }),
   projectEntityScreen: (coord) => ({
     x: camera.x + iso(coord).x * camera.scale,
