@@ -276,11 +276,14 @@ git commit -m "feat(mobility): carry MarketBinding through AgentRecord + spawn b
 
 ---
 
-### Task 3: Assign `MarketBinding` at SEED, inherit at BIRTH
+### Task 3: Assign `MarketBinding` at SEED (in the spawn path), inherit at BIRTH
+
+**Why assignment lives in the spawn function, not `seed.rs` (corrected after tracing the runtime):** pedestrians are NOT seeded directly into the live world. The runtime builds them in a temp world WITHOUT the economy (`initial_mobility_snapshot_for_base_world` → `mobility::seed::from_base_world_bundle`, which installs no `EconomyPlugin` and no markets), extracts a snapshot (records with `home_market == 0`), then `apply_into_world` spawns them into the LIVE world — which DOES have markets (`seed_from_markets_layer` ran at `sim-server/src/runtime/mod.rs:221`, before the `apply_into_world` at line 230). So assigning inside `seed_pedestrians_from_bundle` would never fire (no `Markets` there). Instead, assign inside the **single spawn function** `spawn_agent_from_record_with_position` when the record is still unassigned (`home_market == 0`) AND `Markets` is present. That one location covers: initial seed (via snapshot apply, records are 0 → assigned), restore (saved records carry real ids ≠ 0 → preserved, NOT recomputed from a since-moved position), and birth (child inherits mother's binding ≠ 0 → preserved).
 
 **Files:**
-- Modify: `backend/crates/sim-core/src/mobility/seed.rs:554-585`
-- Modify: `backend/crates/sim-core/src/population/mod.rs:158-247`
+- Modify: `backend/crates/sim-core/src/mobility/market_binding.rs` (add `markets_with_positions` helper)
+- Modify: `backend/crates/sim-core/src/mobility/api.rs` (assign-when-unassigned inside `spawn_agent_from_record_with_position`)
+- Modify: `backend/crates/sim-core/src/population/mod.rs:158-247` (birth inheritance)
 
 - [ ] **Step 1: Helper to read markets-with-positions from the World**
 
@@ -305,24 +308,28 @@ pub fn markets_with_positions(world: &bevy_ecs::world::World) -> Vec<(u32, (f32,
 }
 ```
 
-- [ ] **Step 2: Assign binding after each SEED spawn**
+- [ ] **Step 2: Assign binding inside the spawn function when unassigned**
 
-In `backend/crates/sim-core/src/mobility/seed.rs`, the loop calls `api::spawn_agent_from_record(world, rec);` (line ~583). Replace that call with one that captures the entity and assigns the binding from the spawned position:
+In `backend/crates/sim-core/src/mobility/api.rs`, inside `spawn_agent_from_record_with_position`, REPLACE Task 2's unconditional component values with a computed-when-unassigned version. Task 2 destructured `home_market`/`work_market` locals from `record`; after the spawn position `(px, py)` is known and BEFORE the `world.spawn((...))` tuple, recompute them when unassigned:
 
 ```rust
-            let entity = api::spawn_agent_from_record(world, rec);
+        // Assign the market binding from spawn position the first time only
+        // (record carries 0 = unassigned at initial seed). On restore/birth the
+        // record already carries real ids (>= 9001), which we PRESERVE — never
+        // recompute from a since-moved position.
+        let (home_market, work_market) = if home_market == 0 {
             let markets = crate::mobility::market_binding::markets_with_positions(world);
-            if !markets.is_empty()
-                && let Some(pos) = world
-                    .get::<crate::mobility::components::Position>(entity)
-                    .map(|p| (p.x, p.y))
-                && let Some(binding) = crate::mobility::market_binding::assign_binding(pos, &markets)
-            {
-                world.entity_mut(entity).insert(binding);
-            }
+            crate::mobility::market_binding::assign_binding((px, py), &markets)
+                .map(|b| (b.home_market, b.work_market))
+                .unwrap_or((home_market, work_market))
+        } else {
+            (home_market, work_market)
+        };
 ```
 
-> The spawn computes the citizen's initial `Position` from corridor progress (code-map: `initial_agent_position`), so it is available immediately after spawn. `seed_from_markets_layer` runs before pedestrian seeding (runtime ordering verified), so `Markets` is populated.
+The bundle then inserts `crate::mobility::MarketBinding { home_market, work_market }` using these (possibly-reassigned) locals.
+
+> Borrow discipline: read `markets_with_positions(world)` (immutable borrow, released before `world.spawn`). If `home_market`/`work_market` were destructured by value and `record` is partially moved later, capture them into `let mut` locals as needed so the recompute compiles. `markets_with_positions` returns empty when the economy isn't installed (the temp seed world) — there the binding stays the record's value (0), and gets assigned later when the snapshot is applied to the market-bearing live world.
 
 - [ ] **Step 3: Inherit the mother's binding at BIRTH**
 
@@ -351,53 +358,32 @@ Then in the spawn loop (lines ~231-246), set the child record's binding before s
 
 (`spawn_agent_from_record_at_position` then inserts the `MarketBinding` component via the Task-2 bundle change.)
 
-- [ ] **Step 4: Add an inline seed-binding integration test (`seed.rs`)**
+- [ ] **Step 4: Add an inline assign-in-spawn test (`api.rs`)**
 
-Add at the end of `backend/crates/sim-core/src/mobility/seed.rs`:
+Add a `#[cfg(test)]` test in `api.rs` that builds a World with a routing `Graph` + a seeded `Markets` resource (REUSE the existing economy seed fixture — `economy/tests/seed.rs` builds a routed world and calls `seed_from_markets_layer`; or take `from_base_world_bundle(&bundle)` then `crate::economy::seed_from_markets_layer(&mut world, &bundle.markets)` so `Markets` + `Graph` both exist). Then assert TWO behaviors:
 
-```rust
-#[cfg(test)]
-mod seed_binding_tests {
-    use super::*;
+1. **Assign-when-unassigned:** spawn an `AgentRecord` with `home_market = 0` whose spawn position is near a known market anchor; assert the spawned entity's `MarketBinding.home_market` equals that nearest market id (and is `>= 9001`, i.e. ≠ 0).
+2. **Preserve-when-assigned (restore safety):** spawn an `AgentRecord` with `home_market = 9003, work_market = 9004` whose spawn position is nearest a DIFFERENT market; assert the spawned `MarketBinding` is still `{9003, 9004}` (NOT recomputed).
 
-    #[test]
-    fn seeded_citizens_get_a_market_binding() {
-        // Build the abutopia base world bundle + seed it the way the runtime does.
-        let bundle = crate::base_world::BaseWorldBundle::load_abutopia()
-            .expect("load abutopia bundle");
-        let (mut world, _schedule) =
-            crate::mobility::seed::from_base_world_bundle(&bundle).expect("seed world");
-        // Seed the economy markets the way the runtime does (RoutingPlugin already
-        // populated NodeSpatialIndex inside from_base_world_bundle).
-        crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
-        // Re-seed pedestrians is NOT needed; assert at least one seeded walker has a binding.
-        let mut q = world.query_filtered::<&crate::mobility::MarketBinding, bevy_ecs::prelude::With<crate::mobility::components::AgentMarker>>();
-        let count = q.iter(&world).count();
-        assert!(count > 0, "at least one seeded citizen carries a MarketBinding");
-        for b in q.iter(&world) {
-            assert!(b.home_market >= 9001, "home_market is a real market id");
-        }
-    }
-}
-```
+Use the real fixture; do not invent a world builder. If positioning a spawn precisely near a chosen market is awkward through `AgentRecord` state, assert behavior 1 more loosely as "binding is assigned to some real market id (`>= 9001`)" and keep behavior 2 (the exact preserve assertion) strict — behavior 2 is the one that proves restore-safety.
 
-> If `from_base_world_bundle` seeds pedestrians BEFORE `seed_from_markets_layer` can run here (so bindings are empty), instead mirror the runtime order: use the lower-level seed entry points so markets seed first. Confirm the order against `sim-server/src/runtime/mod.rs:207-221` (markets seed at line 221, pedestrians after) and replicate it. Do NOT assert a binding on citizens seeded before markets existed.
+> Note: `agent_record_from_entity` keeps its `unwrap_or(0)` from Task 2 — the `MarketBinding` component is always inserted for citizens spawned via this path, but raw-spawn test entities and temp-world (no-market) citizens legitimately carry/lack a binding with value `0`. `0` is a meaningful "unassigned" sentinel here, not a guard against an unreachable state, so it stays.
 
 - [ ] **Step 5: Add an inline birth-inheritance test (`population/mod.rs`)**
 
 Add at the end of `backend/crates/sim-core/src/population/mod.rs` a `#[cfg(test)]` test that: spawns one female citizen with `MarketBinding{home_market:9001, work_market:9002}`, advances `population_monthly_system` far enough to force one birth (reuse the existing population test fixture/harness in this file — search its current `#[cfg(test)]` module for the helper that drives a birth), then asserts the newborn entity (the one with `ParentId(Some(mother))`) carries the SAME binding. Use the existing harness; do not invent a new clock/world builder.
 
-- [ ] **Step 6: Run both tests**
+- [ ] **Step 6: Run the tests**
 
-Run: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core seed_binding_tests -- --nocapture`
+Run: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core market_binding -- --nocapture` (covers the assign-in-spawn test in api.rs and the helper)
 Run: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core population -- --nocapture`
-Expected: both PASS (seeded citizens bound; newborn inherits mother's binding).
+Expected: both PASS (spawn assigns when unassigned + preserves when assigned; newborn inherits mother's binding). Also keep the broader spawn/persist tests green: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core persist -- --nocapture`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/crates/sim-core/src/mobility/seed.rs backend/crates/sim-core/src/mobility/market_binding.rs backend/crates/sim-core/src/population/mod.rs
-git commit -m "feat: assign MarketBinding at seed (nearest markets) and inherit at birth"
+git add backend/crates/sim-core/src/mobility/api.rs backend/crates/sim-core/src/mobility/market_binding.rs backend/crates/sim-core/src/population/mod.rs
+git commit -m "feat: assign MarketBinding in spawn (when unassigned) and inherit at birth"
 ```
 
 ---
