@@ -14,6 +14,23 @@ pub struct MarketBinding {
     pub work_market: u32,
 }
 
+/// Collect `(market_id, anchor_position)` for every seeded market, reading the
+/// economy `Markets` resource and the routing `Graph` for each market node's
+/// position. Returns an empty vec if the economy is not installed.
+pub fn markets_with_positions(world: &bevy_ecs::world::World) -> Vec<(u32, (f32, f32))> {
+    let Some(markets) = world.get_resource::<crate::economy::Markets>() else {
+        return Vec::new();
+    };
+    let Some(graph) = world.get_resource::<crate::routing::Graph>() else {
+        return Vec::new();
+    };
+    markets
+        .0
+        .iter()
+        .map(|(id, site)| (id.0, graph.node(site.node_id).position))
+        .collect()
+}
+
 /// Deterministically choose (home_market, work_market) for a citizen at `pos`
 /// from `markets` (each `(market_id, market_position)`).
 ///

@@ -162,6 +162,7 @@ pub fn population_monthly_system(world: &mut World) {
             mother_plan: Vec<crate::mobility::PlanStage>,
             mother_plan_cursor: usize,
             walk_speed: f32,
+            mother_binding: Option<crate::mobility::MarketBinding>,
         }
         let mut candidates: Vec<BirthCandidate> = Vec::new();
         for (agent_id, entity) in &agent_entries {
@@ -203,6 +204,9 @@ pub fn population_monthly_system(world: &mut World) {
                 .get::<crate::mobility::components::WalkSpeed>(*entity)
                 .map(|ws| ws.0)
                 .unwrap_or(walk_speed);
+            let mother_binding = world
+                .get::<crate::mobility::MarketBinding>(*entity)
+                .copied();
             candidates.push(BirthCandidate {
                 mother_id: agent_id.clone(),
                 mother_pos: pos,
@@ -210,6 +214,7 @@ pub fn population_monthly_system(world: &mut World) {
                 mother_plan,
                 mother_plan_cursor,
                 walk_speed,
+                mother_binding,
             });
         }
 
@@ -238,6 +243,10 @@ pub fn population_monthly_system(world: &mut World) {
             child_record.plan_cursor = candidate.mother_plan_cursor;
             child_record.sex = child_sex;
             child_record.parent_id = Some(candidate.mother_id.clone());
+            if let Some(b) = candidate.mother_binding {
+                child_record.home_market = b.home_market;
+                child_record.work_market = b.work_market;
+            }
 
             crate::mobility::api::spawn_agent_from_record_at_position(
                 world,
@@ -593,6 +602,130 @@ mod tests {
         assert!(
             born,
             "mother must give birth in an early fertile month (per-month age)"
+        );
+    }
+
+    /// Birth inherits mother's MarketBinding: a mother with `{9001, 9002}` must
+    /// produce a newborn that carries the same binding without recomputing it.
+    #[test]
+    fn birth_inherits_mother_market_binding() {
+        use crate::ids::AgentId;
+        use crate::mobility::MarketBinding;
+        use crate::mobility::components::{
+            AgentMarker, AgentMobilityStateComponent, BirthTick, ParentId, Sex, StableAgentId,
+            WalkPlan, WalkSpeed,
+        };
+        use crate::mobility::resources::{AgentIdIndex, Tick};
+        use crate::mobility::{AgentMobilityState, PlanStage};
+        use crate::time::SimClock;
+        use bevy_ecs::prelude::*;
+        use bevy_ecs::schedule::Schedule;
+
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+
+        world.insert_resource(SimClock::default());
+        world.insert_resource(PopulationConfig {
+            tfr: 100.0,
+            ..PopulationConfig::default()
+        });
+        world.insert_resource(LastProcessedMonth::default());
+        world.insert_resource(Tick(0));
+        world.insert_resource(AgentIdIndex::default());
+
+        schedule.add_systems(population_monthly_system);
+
+        let ticks_per_year: i64 =
+            i64::try_from(crate::time::SECONDS_PER_YEAR / 200).expect("test tick rate fits i64");
+        let age_ticks = 28 * ticks_per_year;
+        let now_tick = 100 * ticks_per_year;
+        let mother_birth_tick = now_tick - age_ticks;
+
+        let mother_id = AgentId("agent:mother:binding".to_string());
+        let state = AgentMobilityState::AtActivity {
+            activity_id: "home".to_string(),
+        };
+        let plan = vec![PlanStage::Activity {
+            activity_id: "home".to_string(),
+        }];
+        let mother_entity = world
+            .spawn((
+                AgentMarker,
+                StableAgentId(mother_id.clone()),
+                BirthTick(mother_birth_tick),
+                Sex::Female,
+                AgentMobilityStateComponent(state),
+                WalkPlan {
+                    stages: plan,
+                    cursor: 0,
+                    cyclic: false,
+                },
+                WalkSpeed(1.0),
+                crate::mobility::components::Position { x: 16.0, y: 16.0 },
+                // Mother already has a real market binding.
+                MarketBinding {
+                    home_market: 9001,
+                    work_market: 9002,
+                },
+            ))
+            .id();
+        world
+            .resource_mut::<AgentIdIndex>()
+            .0
+            .insert(mother_id.clone(), mother_entity);
+
+        let clock = *world.resource::<SimClock>();
+        let now_tick_u64 = u64::try_from(now_tick).expect("test tick fits u64");
+        let now_month = clock.month_index(now_tick_u64);
+        world.resource_mut::<LastProcessedMonth>().0 = now_month - 1;
+        world.resource_mut::<Tick>().0 = now_tick_u64;
+
+        let ticks_per_month = crate::time::SECONDS_PER_MONTH / 200;
+
+        // Run up to 20 months — birth is near-certain at TFR=100.
+        let mut child_entity_opt: Option<Entity> = None;
+        for _iter in 0..20 {
+            schedule.run(&mut world);
+            let child_entry = {
+                let index = world.resource::<AgentIdIndex>();
+                index
+                    .0
+                    .iter()
+                    .filter(|(id, _)| **id != mother_id)
+                    .map(|(_, entity)| *entity)
+                    .next()
+            };
+            if let Some(e) = child_entry {
+                child_entity_opt = Some(e);
+                break;
+            }
+            let cur = world.resource::<Tick>().0;
+            world.resource_mut::<Tick>().0 = cur + ticks_per_month;
+        }
+
+        let child_entity = child_entity_opt.expect("child must be born within 20 months");
+
+        // Verify parent_id points to mother.
+        let parent = world
+            .get::<ParentId>(child_entity)
+            .expect("child must have ParentId");
+        assert_eq!(
+            parent.0,
+            Some(mother_id.clone()),
+            "child parent_id must be mother"
+        );
+
+        // Critical: child must inherit EXACTLY the mother's binding without recomputation.
+        let binding = world
+            .get::<MarketBinding>(child_entity)
+            .expect("child must have MarketBinding after birth");
+        assert_eq!(
+            binding.home_market, 9001,
+            "child must inherit mother's home_market exactly"
+        );
+        assert_eq!(
+            binding.work_market, 9002,
+            "child must inherit mother's work_market exactly"
         );
     }
 }
