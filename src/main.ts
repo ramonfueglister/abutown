@@ -97,11 +97,15 @@ let mobilityBackendBridge: MobilityBackendBridge | null = null;
 const entitySelection = createEntitySelection<BackendPedestrian, BackendCar>({
   getPedestrians: () => pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs),
   getVehicles: () => carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs),
+  // C5 will supply markets from the economy overlay state; stub empty until then.
+  getMarkets: () => [],
   screenToWorld,
   projectPedestrian: (agent) => iso(agent.path[0]),
   projectVehicle: (car) => carVisualWorldPoint(car, camera.scale, tileSize),
+  projectMarket: (market) => iso(market),
   pedestrianRadius: () => Math.max(8, 20 / camera.scale),
   vehicleRadius: () => Math.max(10, 24 / camera.scale),
+  marketRadius: () => Math.max(12, 28 / camera.scale),
 });
 
 void startRuntime();

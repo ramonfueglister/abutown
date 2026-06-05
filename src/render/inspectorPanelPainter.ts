@@ -1,5 +1,6 @@
 import type { EntityInspector } from './entityInspector';
 import { roundedRectPath } from './canvasPrimitives';
+import type { MarketLocationDto, MarketGoodDto } from '../backend/mobilityProtocol';
 
 export type InspectorPanelTheme = {
   x: number;
@@ -32,6 +33,16 @@ export const VEHICLE_INSPECTOR_PANEL: InspectorPanelTheme = {
   accent: '#75d7ff',
   stroke: 'rgba(117, 215, 255, 0.8)',
 };
+
+export const MARKET_INSPECTOR_PANEL: InspectorPanelTheme = {
+  x: 12,
+  y: 244,
+  accent: '#f0a85a',
+  stroke: 'rgba(240,168,90,0.8)',
+};
+
+/** Divisor for converting internal money units (integer * 1000) to display values. */
+export const MONEY_DISPLAY_SCALE = 1000;
 
 type InspectorPanelContent = NonNullable<EntityInspector>;
 
@@ -89,4 +100,58 @@ export function drawInspectorPanel(
     ctx.fillText(row.value, row.valueX, row.y);
   }
   ctx.restore();
+}
+
+/** Maps well-known economy good IDs to human-readable labels. */
+const GOOD_LABELS: Readonly<Record<number, string>> = {
+  1: 'FOOD',
+  4: 'TOOLS',
+  5: 'RAW',
+};
+
+function goodLabel(goodId: number): string {
+  return GOOD_LABELS[goodId] ?? `good ${goodId}`;
+}
+
+function formatMoney(raw: number): string {
+  return (raw / MONEY_DISPLAY_SCALE).toFixed(2);
+}
+
+/**
+ * Pure formatter: returns the market panel title as the first element, then one
+ * row string per good, then a wages line.
+ *
+ * Row format: "<GOOD>  p=<settlement/MONEY_DISPLAY_SCALE>  short=<unmet>  glut=<unsold>"
+ * Wages line: "wages=<wagePaidLastTick/MONEY_DISPLAY_SCALE>"
+ */
+export function marketInspectorRows(market: MarketLocationDto, goods: MarketGoodDto[]): string[] {
+  const rows: string[] = [market.name];
+  for (const g of goods) {
+    rows.push(
+      `${goodLabel(g.goodId)}  p=${formatMoney(g.lastSettlementPrice)}  short=${g.unmetDemandLastTick}  glut=${g.unsoldSupplyLastTick}`,
+    );
+  }
+  rows.push(`wages=${formatMoney(market.wagePaidLastTick)}`);
+  return rows;
+}
+
+/**
+ * Draws the read-only market inspector panel using the existing HUD idiom
+ * (setTransform pixelRatio + inspectorPanelLayout).
+ */
+export function drawMarketInspectorPanel(
+  ctx: CanvasRenderingContext2D,
+  market: MarketLocationDto,
+  goods: MarketGoodDto[],
+  theme: InspectorPanelTheme,
+  pixelRatio: number,
+): void {
+  const rows = marketInspectorRows(market, goods);
+  // rows[0] is the title; rows[1..] are content rows (no label/value split — single string per row).
+  const [title, ...contentRows] = rows;
+  const inspector: NonNullable<EntityInspector> = {
+    title: title ?? market.name,
+    rows: contentRows.map((row) => ({ label: row, value: '' })),
+  };
+  drawInspectorPanel(ctx, inspector, theme, pixelRatio);
 }
