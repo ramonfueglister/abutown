@@ -274,6 +274,58 @@ impl AppState {
     }
 }
 
+fn build_economy_snapshot(
+    world: &sim_core::bevy_ecs::world::World,
+    world_id: &abutown_protocol::WorldId,
+    tick: u64,
+) -> w::EconomySnapshot {
+    use sim_core::economy::{MarketGoods, Markets, WageTelemetry};
+    use sim_core::routing::Graph;
+    let markets_res = world.resource::<Markets>();
+    let goods_res = world.resource::<MarketGoods>();
+    let wages = world.resource::<WageTelemetry>();
+    let graph = world.resource::<Graph>();
+    let markets = markets_res
+        .0
+        .iter()
+        .map(|(id, site)| {
+            let pos = graph.node(site.node_id).position; // (f32, f32) tile coords
+            w::EconomyMarket {
+                market_id: id.0,
+                name: site.name.clone(),
+                tile_x: pos.0.floor() as i32,
+                tile_y: pos.1.floor() as i32,
+                wage_paid_last_tick: wages
+                    .0
+                    .get(id)
+                    .copied()
+                    .unwrap_or(sim_core::economy::Money::ZERO)
+                    .0,
+            }
+        })
+        .collect();
+    let goods = goods_res
+        .0
+        .iter()
+        .map(|(key, st)| w::EconomyMarketGood {
+            market_id: key.market.0,
+            good_id: u32::from(key.good.0),
+            last_settlement_price: st.last_settlement_price.0,
+            ewma_reference_price: st.ewma_reference_price.0,
+            traded_qty_last_tick: st.traded_qty_last_tick.0,
+            unmet_demand_last_tick: st.unmet_demand_last_tick.0,
+            unsold_supply_last_tick: st.unsold_supply_last_tick.0,
+        })
+        .collect();
+    w::EconomySnapshot {
+        protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
+        world_id: world_id.0.clone(),
+        tick,
+        markets,
+        goods,
+    }
+}
+
 fn build_read_view_from_runtime(
     runtime: &SimulationRuntime,
     per_chunk: &std::collections::HashMap<
@@ -329,6 +381,7 @@ fn build_read_view_from_runtime(
     let mobility_full_dto = mobility_snapshot_dto_to_proto(&mobility_full_legacy);
     let health_legacy = runtime.health();
     let health = health_dto_to_proto(&health_legacy);
+    let economy = build_economy_snapshot(mobility, &world_id, mobility_tick);
 
     crate::runtime_view::RuntimeReadView {
         tick: mobility_tick,
@@ -342,6 +395,7 @@ fn build_read_view_from_runtime(
         per_chunk_deltas,
         pulse_sequence,
         chunk_subscriber_counts,
+        economy,
     }
 }
 

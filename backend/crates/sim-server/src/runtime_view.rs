@@ -83,4 +83,7 @@ pub struct RuntimeReadView {
     /// Subscriber-counts snapshot for chunk channels — moved into the view so
     /// WS chunk_unsubscribe can reap chunk channels without a runtime read-lock.
     pub chunk_subscriber_counts: HashMap<ChunkCoord, u8>,
+    /// Pre-materialized economy snapshot for the current tick: all markets and
+    /// per-(market,good) state, ready to send on connect and per-tick broadcast.
+    pub economy: w::EconomySnapshot,
 }
