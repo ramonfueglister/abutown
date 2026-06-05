@@ -644,6 +644,62 @@ mod tests {
     }
 
     #[test]
+    fn markets_layer_rejects_malformed_json() {
+        // The serde Parse path (NO-FALLBACK): a markets.json with a TYPE MISMATCH
+        // (market id is "not-a-number" instead of u32) must fail closed with
+        // BaseWorldError::Parse — it must not reach validate() at all.
+        let bundle_src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap()
+            .join("data/worlds/abutopia");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let tmp_path = tmp.path();
+
+        // Copy manifest.json
+        std::fs::copy(
+            bundle_src.join("manifest.json"),
+            tmp_path.join("manifest.json"),
+        )
+        .expect("copy manifest");
+
+        // Copy layers directory with all layer files
+        let layers_src = bundle_src.join("layers");
+        let layers_dst = tmp_path.join("layers");
+        std::fs::create_dir(&layers_dst).expect("create layers dir");
+        for entry in std::fs::read_dir(&layers_src).expect("read layers dir") {
+            let entry = entry.expect("dir entry");
+            std::fs::copy(entry.path(), layers_dst.join(entry.file_name()))
+                .expect("copy layer file");
+        }
+
+        // Overwrite markets.json with valid JSON that has a type mismatch:
+        // `id` is u32 but we supply a string — serde rejects this before validate().
+        std::fs::write(
+            layers_dst.join("markets.json"),
+            r#"{
+  "schema_version": 2,
+  "world_id": "abutopia",
+  "markets": [{"id": "not-a-number", "name": "Bad Market", "anchor": [0.0, 0.0]}],
+  "distances": [],
+  "supply": [],
+  "demand": [],
+  "extractors": [],
+  "household": {"population": 1000},
+  "opening_prices": []
+}"#,
+        )
+        .expect("write malformed markets.json");
+
+        let result = BaseWorldBundle::load_from_dir(tmp_path);
+        assert!(
+            matches!(result, Err(BaseWorldError::Parse { .. })),
+            "expected BaseWorldError::Parse for malformed markets.json, got: {result:?}"
+        );
+    }
+
+    #[test]
     fn markets_layer_rejects_wrong_world_id() {
         // A markets layer with a mismatched world_id must surface BaseWorldError::WorldIdMismatch
         // (NO-FALLBACK: validate() fails closed).
