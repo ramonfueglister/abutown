@@ -256,7 +256,9 @@ mod tests {
                     "state": {"AtActivity": {"activity_id": "activity:home"}},
                     "plan": [],
                     "plan_cursor": 0,
-                    "walk_speed_per_tick": 1.0
+                    "walk_speed_per_tick": 1.0,
+                    "home_market": 0,
+                    "work_market": 0
                 },
                 existing_id.0.clone(): {
                     "id": existing_id.0.clone(),
@@ -264,7 +266,9 @@ mod tests {
                     "plan": [],
                     "plan_cursor": 0,
                     "walk_speed_per_tick": 1.0,
-                    "birth_tick": 7
+                    "birth_tick": 7,
+                    "home_market": 0,
+                    "work_market": 0
                 }
             },
             "vehicles": {},

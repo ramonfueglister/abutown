@@ -14,9 +14,15 @@ pub struct MarketBinding {
     pub work_market: u32,
 }
 
-/// Collect `(market_id, anchor_position)` for every seeded market, reading the
-/// economy `Markets` resource and the routing `Graph` for each market node's
-/// position. Returns an empty vec if the economy is not installed.
+/// Collect `(market_id, anchor_position)` for every seeded market whose node is
+/// present in the current routing `Graph`, reading the economy `Markets` resource
+/// and the `Graph` for each market node's position. Returns an empty vec if the
+/// economy is not installed.
+///
+/// Markets whose `node_id` is out of the live graph's range are skipped: the graph
+/// can be rebuilt smaller than the one markets were snapped against (e.g.
+/// `apply_into_world` reinstalls a snapshot graph), so a stale market node cannot
+/// be located — it simply contributes no binding candidate rather than panicking.
 pub fn markets_with_positions(world: &bevy_ecs::world::World) -> Vec<(u32, (f32, f32))> {
     let Some(markets) = world.get_resource::<crate::economy::Markets>() else {
         return Vec::new();
@@ -27,6 +33,7 @@ pub fn markets_with_positions(world: &bevy_ecs::world::World) -> Vec<(u32, (f32,
     markets
         .0
         .iter()
+        .filter(|(_, site)| (site.node_id.0 as usize) < graph.node_count())
         .map(|(id, site)| (id.0, graph.node(site.node_id).position))
         .collect()
 }
