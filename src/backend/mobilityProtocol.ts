@@ -354,6 +354,7 @@ import type {
   AgentMobility as AgentMobilityProto,
   AgentState as AgentStateProto,
   ChunkCoord as ChunkCoordProto,
+  EconomySnapshot,
   HealthResponse as HealthResponseProto,
   MobilityChunkDelta as MobilityChunkDeltaProto,
   MobilityChunkSnapshot as MobilityChunkSnapshotProto,
@@ -556,5 +557,21 @@ export function mobilitySnapshotFromProto(p: MobilitySnapshotProto): MobilitySna
     agents: p.agents.map(agentMobilityFromProto),
     vehicles: p.vehicles.map(vehicleMobilityFromProto),
     stops: p.stops.map(stopFromProto),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Economy DTO types + proto → DTO converter
+// ---------------------------------------------------------------------------
+
+export type MarketLocationDto = { marketId: number; name: string; tileX: number; tileY: number; wagePaidLastTick: number };
+export type MarketGoodDto = { marketId: number; goodId: number; lastSettlementPrice: number; ewmaReferencePrice: number; tradedQtyLastTick: number; unmetDemandLastTick: number; unsoldSupplyLastTick: number };
+export type EconomySnapshotDto = { tick: number; markets: MarketLocationDto[]; goods: MarketGoodDto[] };
+
+export function economySnapshotFromProto(p: EconomySnapshot): EconomySnapshotDto {
+  return {
+    tick: Number(p.tick),
+    markets: p.markets.map((m) => ({ marketId: m.marketId, name: m.name, tileX: m.tileX, tileY: m.tileY, wagePaidLastTick: Number(m.wagePaidLastTick) })),
+    goods: p.goods.map((g) => ({ marketId: g.marketId, goodId: g.goodId, lastSettlementPrice: Number(g.lastSettlementPrice), ewmaReferencePrice: Number(g.ewmaReferencePrice), tradedQtyLastTick: Number(g.tradedQtyLastTick), unmetDemandLastTick: Number(g.unmetDemandLastTick), unsoldSupplyLastTick: Number(g.unsoldSupplyLastTick) })),
   };
 }
