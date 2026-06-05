@@ -195,3 +195,39 @@ fn sfc_audit_primitives_exist() {
     // The ephemeral baseline defaults to None.
     assert_eq!(LastTickMoney::default().0, None);
 }
+
+#[test]
+fn tick_audit_emits_event_and_tracks_baseline_when_conserved() {
+    use crate::economy::audit::{run_tick_audit_at_tick, LastTickMoney};
+    use crate::economy::{AccountBook, EconomicActorId, EconomyEvent, Money, TradeLedger};
+    let mut accounts = AccountBook::default();
+    accounts.deposit(EconomicActorId(1), Money(1_000)).unwrap();
+    let mut ledger = TradeLedger::default();
+    let mut last = LastTickMoney::default();
+
+    // First tick: no prior baseline → initialize, emit event, no check.
+    run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, 0).unwrap();
+    assert_eq!(last.0, Some(Money(1_000)));
+    assert_eq!(ledger.0, vec![EconomyEvent::TickAudit { tick: 0, total_money: Money(1_000) }]);
+
+    // Second tick, unchanged total → Ok, second event, baseline unchanged.
+    run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, 1).unwrap();
+    assert_eq!(last.0, Some(Money(1_000)));
+    assert_eq!(ledger.0.len(), 2);
+}
+
+#[test]
+fn tick_audit_returns_err_on_money_drift() {
+    use crate::economy::audit::{run_tick_audit_at_tick, LastTickMoney};
+    use crate::economy::{AccountBook, EconomicActorId, EconomyError, Money, TradeLedger};
+    let mut accounts = AccountBook::default();
+    accounts.deposit(EconomicActorId(1), Money(1_000)).unwrap();
+    let mut ledger = TradeLedger::default();
+    let mut last = LastTickMoney::default();
+    run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, 0).unwrap(); // baseline = 1_000
+
+    // Mint money (a conservation violation) → next audit detects drift.
+    accounts.deposit(EconomicActorId(2), Money(500)).unwrap();
+    let r = run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, 1);
+    assert_eq!(r, Err(EconomyError::ConservationViolation));
+}
