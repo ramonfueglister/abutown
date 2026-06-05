@@ -172,24 +172,8 @@ describe('backend startup gate', () => {
     expect(status.persistence?.status).toBe('starting');
   });
 
-  it('fails closed when persistence is degraded', async () => {
-    await expect(requireBackend({
-      fetchImpl: async () =>
-        healthProtoResponse({
-          service: 'abutown-sim',
-          world_id: 'abutopia',
-          ok: false,
-          protocol_version: 1,
-          persistence: {
-            status: PersistenceHealthStatus.DEGRADED,
-            last_error: 'mobility write failed',
-          },
-        }),
-    })).rejects.toThrow('Backend health not OK: persistence degraded: mobility write failed');
-  });
-
-  it('fails closed when ok=true health reports degraded persistence', async () => {
-    await expect(requireBackend({
+  it('accepts degraded persistence (non-blocking banner, map stays rendered)', async () => {
+    const status = await requireBackend({
       fetchImpl: async () =>
         healthProtoResponse({
           service: 'abutown-sim',
@@ -201,7 +185,27 @@ describe('backend startup gate', () => {
             last_error: 'mobility write failed',
           },
         }),
-    })).rejects.toThrow('Backend health not OK: persistence degraded: mobility write failed');
+    });
+    expect(status.persistence?.status).toBe('degraded');
+  });
+
+  it('accepts degraded persistence with error details (map stays rendered, banner shown)', async () => {
+    const status = await requireBackend({
+      fetchImpl: async () =>
+        healthProtoResponse({
+          service: 'abutown-sim',
+          world_id: 'abutopia',
+          ok: true,
+          protocol_version: 1,
+          persistence: {
+            status: PersistenceHealthStatus.DEGRADED,
+            consecutive_failures: 3,
+            last_error: 'transient db error',
+          },
+        }),
+    });
+    expect(status.persistence?.status).toBe('degraded');
+    expect(status.persistence?.consecutive_failures).toBe(3);
   });
 
   it('fails closed when persistence is stale', async () => {
