@@ -151,3 +151,88 @@ pub fn run_pay_wages_at_tick(
     );
     Ok(())
 }
+
+/// Full profit distribution to the labor households (no owner/capitalist class, v0).
+/// For each `(firm, market)` in `receipts` (keys-first → ascending): recompute the wage
+/// the SAME way `run_pay_wages_at_tick` did (`wage_for_revenue(revenue, labor_share)`,
+/// identical flooring), so `profit = revenue − wage`; the dividend to distribute is
+/// `floor(profit * dividend_share_bps / 10_000)`. With the default `dividend_share_bps =
+/// 10_000` the dividend == profit and the firm nets to zero (wages + profit == revenue).
+///
+/// FALLIBLE / AUDITED (no-fallback discipline): a firm that BOTH sold and bought (via
+/// macro_flow) this tick can hold `< dividend` at distribution time. We do NOT `.expect`
+/// (latent process panic) and do NOT silently skip (stranded profit, broken loop).
+/// Instead we book ONLY the amount the firm actually HOLDS (`min(dividend, available)`)
+/// and, when that is short of the intended dividend, push an audited
+/// `MarketClearFailed { market, good=GoodId(0), reason: InsufficientFunds }` event. The
+/// covered amount flows firm → HOUSEHOLD_SECTOR → households via `apportion_cash` over the
+/// SAME `pool_weights` as wages, crediting `income_last_tick` (ADD, not reset — wages
+/// credited it first). Conservation: only `transfer`s ⇒ `total_money` byte-invariant.
+/// Own independent `HOUSEHOLD_SECTOR` net-zero `debug_assert`.
+pub fn run_distribute_profit_at_tick(
+    accounts: &mut AccountBook,
+    receipts: &SellerReceipts,
+    demand: &mut DemandPools,
+    household: &HouseholdSector,
+    ledger: &mut TradeLedger,
+    config: &EconomyConfig,
+) -> Result<(), EconomyError> {
+    let labor_share = config.validated_labor_share_bps()?;
+    let dividend_share = config.validated_dividend_share_bps()?;
+
+    let payees: Vec<EconomicActorId> = household.pool_weights.keys().copied().collect();
+    let weights: Vec<i64> = household.pool_weights.values().copied().collect();
+    let weight_sum: i128 = weights.iter().map(|w| *w as i128).sum();
+
+    for (&(firm, market), &revenue) in receipts.0.iter() {
+        let wage = wage_for_revenue(revenue, labor_share)?;
+        let profit = revenue.checked_sub(wage)?; // wage <= revenue ⇒ profit >= 0
+        let dividend_raw = i64::try_from((profit.0 as i128) * dividend_share / 10_000)
+            .map_err(|_| EconomyError::Overflow)?;
+        let intended = Money(dividend_raw);
+        if intended.0 <= 0 || weight_sum <= 0 {
+            continue; // nothing to distribute, or no payout target
+        }
+        // Book only what the firm actually holds; surface any shortfall loudly.
+        let held = accounts.account(firm).available;
+        let covered = Money(intended.0.min(held.0));
+        if covered.0 < intended.0 {
+            ledger.0.push(EconomyEvent::MarketClearFailed {
+                market,
+                good: crate::economy::GoodId(0),
+                reason: EconomyError::InsufficientFunds,
+            });
+        }
+        if covered.0 <= 0 {
+            continue;
+        }
+        // LEG 1: firm → HOUSEHOLD_SECTOR. `covered <= held` ⇒ cannot fault.
+        accounts.transfer(firm, HOUSEHOLD_SECTOR, covered)?;
+        // LEG 2: HOUSEHOLD_SECTOR → households (largest-remainder, sum-preserving).
+        let splits = apportion_cash(&weights, covered.0);
+        for (idx, actor) in payees.iter().enumerate() {
+            let share = Money(splits[idx]);
+            if share.0 <= 0 {
+                continue;
+            }
+            let pool = demand
+                .0
+                .get_mut(actor)
+                .expect("pool_weights key must reference a seeded demand pool");
+            accounts.transfer(HOUSEHOLD_SECTOR, *actor, share)?;
+            pool.income_last_tick = pool.income_last_tick.checked_add(share)?;
+        }
+        ledger.0.push(EconomyEvent::ProfitDistributed {
+            firm,
+            market,
+            amount: covered,
+        });
+    }
+
+    debug_assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "HOUSEHOLD_SECTOR must net to zero after profit distribution (sentinel-stranded cash)"
+    );
+    Ok(())
+}

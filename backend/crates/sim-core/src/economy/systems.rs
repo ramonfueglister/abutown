@@ -4,14 +4,16 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
 use crate::economy::commuters::{CommuterTrips, NextCommuterId, capture_commuter_trips};
+use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
     FlowShipments, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
     MarketGoods, MarketId, Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools,
     SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
     clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick, run_macro_flow_at_tick,
-    run_pay_wages_at_tick, run_production_at_tick,
+    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick,
+    run_distribute_profit_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
+    run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -22,11 +24,13 @@ pub enum EconomySet {
     ResetReceipts,
     RefreshLod,
     ExpireOrders,
+    Regenerate,
     Production,
     GeneratePoolOrders,
     ClearMarkets,
     MacroFlow,
     PayWages,
+    TransportRebate,
     Consume,
     ShopperCapture,
     CommuterCapture,
@@ -62,6 +66,11 @@ pub struct EconomyConfig {
     /// Absolute cap on simultaneous commuters rendered per market (viewport-bounded;
     /// NEVER derived from the wage magnitude, else the 1M population would leak in).
     pub max_commuters_per_market: usize,
+    /// Share of firm PROFIT (revenue − wage) distributed to labor households (basis
+    /// points, 0..=10_000). Default 10_000 = full distribution: firms net to zero each
+    /// tick (no retained earnings, no capitalist class — lead decision). A value < 10_000
+    /// would strand profit in firm accounts and the loop would NOT be self-sustaining.
+    pub dividend_share_bps: u16,
 }
 
 impl EconomyConfig {
@@ -73,6 +82,16 @@ impl EconomyConfig {
             return Err(crate::economy::EconomyError::InvalidOrder);
         }
         Ok(self.labor_share_bps as i128)
+    }
+
+    /// `dividend_share_bps` as an i128, refusing `> 10_000` (a config bug that would
+    /// over-distribute). Boundary `== 10_000` allowed (full distribution). Mirrors
+    /// `validated_labor_share_bps`.
+    pub fn validated_dividend_share_bps(&self) -> Result<i128, crate::economy::EconomyError> {
+        if self.dividend_share_bps > 10_000 {
+            return Err(crate::economy::EconomyError::InvalidOrder);
+        }
+        Ok(self.dividend_share_bps as i128)
     }
 }
 
@@ -93,6 +112,7 @@ impl Default for EconomyConfig {
             labor_share_bps: 6_000,
             commuters_per_wage_unit: 100,
             max_commuters_per_market: 4,
+            dividend_share_bps: 10_000,
         }
     }
 }
@@ -103,11 +123,13 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::ResetReceipts,
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
+            EconomySet::Regenerate,
             EconomySet::Production,
             EconomySet::GeneratePoolOrders,
             EconomySet::ClearMarkets,
             EconomySet::MacroFlow,
             EconomySet::PayWages,
+            EconomySet::TransportRebate,
             EconomySet::Consume,
             EconomySet::ShopperCapture,
             EconomySet::CommuterCapture,
@@ -130,15 +152,28 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             reset_seller_receipts_system.in_set(EconomySet::ResetReceipts),
             refresh_dormant_markets_system.in_set(EconomySet::RefreshLod),
             expire_orders_system.in_set(EconomySet::ExpireOrders),
+            run_regen_system.in_set(EconomySet::Regenerate),
             run_production_system.in_set(EconomySet::Production),
             generate_pool_orders_system.in_set(EconomySet::GeneratePoolOrders),
             clear_dirty_markets_system.in_set(EconomySet::ClearMarkets),
             run_macro_flow_system.in_set(EconomySet::MacroFlow),
             run_pay_wages_system.in_set(EconomySet::PayWages),
+            run_transport_rebate_system.in_set(EconomySet::TransportRebate),
             run_consumption_system.in_set(EconomySet::Consume),
             update_market_telemetry_system.in_set(EconomySet::Telemetry),
             run_consumption_update_system.in_set(EconomySet::UpdateConsumption),
         )
+            .before(crate::mobility::systems::tick_increment_system),
+    );
+    // Profit distribution: registered separately so the .after(run_pay_wages_system) edge
+    // is unambiguously applied (intra-tuple .after is not always enforced in Bevy 0.18
+    // when the tuple also carries a .before combinator). Placed in PayWages set, after wages,
+    // before tick_increment — deterministic income accumulation: wage credit fires first,
+    // profit credit adds on top.
+    schedule.add_systems(
+        run_distribute_profit_system
+            .in_set(EconomySet::PayWages)
+            .after(run_pay_wages_system)
             .before(crate::mobility::systems::tick_increment_system),
     );
     // Shopper capture is an exclusive system (it reads the spatial Graph +
@@ -361,6 +396,20 @@ pub fn clear_dirty_markets_system(
     }
 }
 
+/// The goods-only raw faucet. Surfaces an invariant break (an inventory.deposit overflow)
+/// via `.expect` — matching the run_pay_wages_system/run_consumption_update_system convention,
+/// NOT the pre-existing `let _` wart in run_production_system. The flow-capped faucet cannot
+/// overflow a sane i64 balance, so `.expect` is a loud bug-surface, not a silent discard.
+pub fn run_regen_system(
+    tick: Res<Tick>,
+    mut inventory: ResMut<InventoryBook>,
+    mut ledger: ResMut<TradeLedger>,
+    mut deposits: ResMut<RawDeposits>,
+) {
+    run_regen_at_tick(&mut inventory, &mut ledger, &mut deposits, tick.0)
+        .expect("run_regen_at_tick is infallible by construction (flow-capped faucet deposit cannot overflow a sane i64 balance); an Err is a bug");
+}
+
 pub fn run_production_system(
     tick: Res<Tick>,
     mut inventory: ResMut<InventoryBook>,
@@ -411,6 +460,60 @@ pub fn run_pay_wages_system(
         &config,
     )
     .expect("run_pay_wages_at_tick is infallible by construction (wage <= just-credited revenue, Σweights guards); an Err is a bug");
+}
+
+/// Profit distribution: runs in the PayWages set with an explicit `.after(run_pay_wages_system)`
+/// edge so the wage net-zero assert fires first and income accumulates wage→profit in a
+/// deterministic order. Fallible/audited at the per-firm level inside the core; the wrapper
+/// surfaces a whole-call Err (only a config-validation failure can produce one) as an audited
+/// MarketClearFailed event — never `let _` (which would swallow a config bug), never `.expect`
+/// (the call is genuinely fallible).
+pub fn run_distribute_profit_system(
+    config: Res<EconomyConfig>,
+    receipts: Res<SellerReceipts>,
+    household: Res<HouseholdSector>,
+    mut accounts: ResMut<AccountBook>,
+    mut demand: ResMut<DemandPools>,
+    mut ledger: ResMut<TradeLedger>,
+) {
+    if let Err(reason) = run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+    ) {
+        ledger.0.push(EconomyEvent::MarketClearFailed {
+            market: MarketId(0),
+            good: GoodId(0),
+            reason,
+        });
+    }
+}
+
+/// Transport rebate: gated on the SAME `tick.0.is_multiple_of(macro_flow_interval_ticks)`
+/// modulo as the operator CREDIT in macro_flow (which is itself inside that gate at
+/// macro_flow.rs:712), so credit and rebate are phase-locked — stateless, NO persisted
+/// cursor. Mid-interval the operator balance may be `> 0`; at every interval boundary it
+/// drains to zero. `run_transport_rebate_at_tick` is conservative-by-construction (it
+/// drains exactly the held operator balance via `transfer`), so `.expect` here is genuinely
+/// infallible — mirroring the spec-endorsed `run_pay_wages_system` wrapper convention.
+pub fn run_transport_rebate_system(
+    tick: Res<Tick>,
+    config: Res<EconomyConfig>,
+    household: Res<HouseholdSector>,
+    mut accounts: ResMut<AccountBook>,
+    mut demand: ResMut<DemandPools>,
+    mut ledger: ResMut<TradeLedger>,
+) {
+    if config.macro_flow_interval_ticks == 0
+        || !tick.0.is_multiple_of(config.macro_flow_interval_ticks)
+    {
+        return;
+    }
+    run_transport_rebate_at_tick(&mut accounts, &mut demand, &household, &mut ledger)
+        .expect("run_transport_rebate_at_tick is infallible by construction (drains exactly the held operator balance via transfer); an Err is a bug");
 }
 
 pub fn update_market_telemetry(

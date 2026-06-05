@@ -7,12 +7,16 @@
 
 use bevy_ecs::prelude::*;
 
+use crate::economy::production::{
+    EXTRACTOR, ProductionPool, ProductionPools, RawDeposit, RawDeposits, Recipe,
+};
 use crate::economy::systems::EconomyConfig;
 use crate::economy::transport::manhattan_tiles;
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR,
-    HouseholdSector, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState,
-    MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools,
+    AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_FOOD, GOOD_RAW, GOOD_TOOLS,
+    HOUSEHOLD_SECTOR, HouseholdSector, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey,
+    MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
+    SupplyPools,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
 
@@ -111,6 +115,53 @@ pub fn seed_demo_economy(world: &mut World) {
             market: m_a,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    // ── Continuous goods source: the EXTRACTOR (Sub-Slice A) ──────────────────
+    // A standing faucet of GOOD_RAW (non-tradable) + a RAW->TOOLS recipe + a TOOLS
+    // SupplyPool at m_a. Seeded ALONGSIDE the finite supplier 8_001: the 1M TOOLS
+    // endowment drains, the EXTRACTOR becomes the standing source. RAW is NEVER placed
+    // on a pool/market (structurally non-tradable). REGEN_QTY=10 is fixed by the §15.2
+    // Sizing-Sim (tests/production.rs::regen_rate_covers_aggregate_tools_demand_at_seed):
+    // aggregate seed TOOLS demand is 10/tick (consumer 8_002), so 10/tick exactly covers
+    // it and matches the finite supplier's offered rate. FOOD is intentionally left on
+    // the draining 1M endowment (no RAW->FOOD extractor this slice — recorded decision).
+    const REGEN_QTY: Quantity = Quantity(10);
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(EXTRACTOR, GOOD_RAW, REGEN_QTY)
+        .expect("seed: extractor opening raw stock");
+    world.resource_mut::<RawDeposits>().0.insert(
+        EXTRACTOR,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: REGEN_QTY,
+            interval_ticks: 1,
+            last_regen_tick: None,
+        },
+    );
+    world.resource_mut::<ProductionPools>().0.insert(
+        EXTRACTOR,
+        ProductionPool {
+            actor: EXTRACTOR,
+            recipe: Recipe {
+                inputs: vec![(GOOD_RAW, REGEN_QTY)],
+                outputs: vec![(GOOD_TOOLS, REGEN_QTY)],
+            },
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<SupplyPools>().0.insert(
+        EXTRACTOR,
+        SupplyPool {
+            actor: EXTRACTOR,
+            market: m_a,
+            good: GOOD_TOOLS,
+            offered_qty_per_tick: REGEN_QTY,
             min_price: Money(500),
             interval_ticks: 1,
             last_generated_tick: None,

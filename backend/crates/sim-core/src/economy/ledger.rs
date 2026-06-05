@@ -92,6 +92,25 @@ pub enum EconomyEvent {
         market: MarketId,
         amount: Money,
     },
+    /// The `EXTRACTOR` faucet deposited `qty` of a raw good this interval (goods-only,
+    /// no money). The sole source of new `GOOD_RAW`; pairs with the recipe `Consumed`
+    /// events in the per-good conservation balance.
+    Regenerated {
+        actor: EconomicActorId,
+        good: GoodId,
+        qty: Quantity,
+    },
+    /// One firm's profit (revenue − wage) distributed to the labor households this tick.
+    /// Full-distribution v0: no owner/capitalist actor — profit flows to the existing
+    /// consumer pools via the SAME pool_weights as wages. Emitted per (firm, market).
+    ProfitDistributed {
+        firm: EconomicActorId,
+        market: MarketId,
+        amount: Money,
+    },
+    /// The accumulated TRANSPORT_OPERATOR balance rebated to the labor households at a
+    /// macro-flow interval boundary (the buyers paid the fee; it returns to them).
+    TransportRebate { amount: Money },
 }
 
 impl EconomyEvent {
@@ -115,6 +134,9 @@ impl EconomyEvent {
             Self::TransportPaid { .. } => "transport_paid",
             Self::MacroFlow { .. } => "macro_flow",
             Self::WagePaid { .. } => "wage_paid",
+            Self::Regenerated { .. } => "regenerated",
+            Self::ProfitDistributed { .. } => "profit_distributed",
+            Self::TransportRebate { .. } => "transport_rebate",
         }
     }
 }

@@ -66,3 +66,60 @@ pub fn run_production_at_tick(
     }
     Ok(())
 }
+
+/// The single named primary-resource extractor. ONE faucet (not N scattered ones),
+/// adjacent to the other seeded actor ids (8_001..8_022) but well clear of them.
+pub const EXTRACTOR: EconomicActorId = EconomicActorId(8_031);
+
+/// A standing raw-goods faucet for one actor. PERSISTED (mirrors `ProductionPool`).
+/// `last_regen_tick` is the interval cursor (gates deposits, persists for free since
+/// `Option<u64>: Copy` keeps `RawDeposit` `Copy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RawDeposit {
+    pub good: GoodId,
+    pub qty_per_interval: Quantity,
+    pub interval_ticks: u64,
+    pub last_regen_tick: Option<u64>,
+}
+
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct RawDeposits(pub BTreeMap<EconomicActorId, RawDeposit>);
+
+/// Flow-capped faucet: for each deposit whose `interval_ticks` have elapsed, deposit
+/// `qty_per_interval` of `good` into the actor's inventory (goods-only — NEVER touches
+/// money) and emit `Regenerated`. Deterministic, keys-first (ascending `EconomicActorId`).
+/// Honest wording: deposits unconditionally on the interval (does NOT read the raw stock),
+/// so RAW grows without a level cap here — the `RAW->good` recipe in `run_production_at_tick`
+/// bounds it (RAW stays `<= 2*qty_per_interval` in the live loop). Stamps `last_regen_tick`
+/// ONLY when the deposit fires (the gate returns before stamping on a skip), so a within-
+/// interval skip is a true no-op.
+pub fn run_regen_at_tick(
+    inventory: &mut InventoryBook,
+    ledger: &mut TradeLedger,
+    deposits: &mut RawDeposits,
+    current_tick: u64,
+) -> Result<(), EconomyError> {
+    let actors: Vec<EconomicActorId> = deposits.0.keys().copied().collect();
+    for actor in actors {
+        let dep = deposits.0[&actor];
+        if !interval_elapsed(dep.last_regen_tick, current_tick, dep.interval_ticks) {
+            continue;
+        }
+        inventory.deposit(actor, dep.good, dep.qty_per_interval)?;
+        ledger.0.push(EconomyEvent::Regenerated {
+            actor,
+            good: dep.good,
+            qty: dep.qty_per_interval,
+        });
+        // NO-FALLBACK: the actor came from keys() of the same map this iteration with no
+        // removal, so get_mut is infallible. Use .expect (fail loud on the impossible) NOT
+        // `if let Some {…}` — a silent skip would drop the cursor stamp and cause a
+        // double-deposit next tick.
+        deposits
+            .0
+            .get_mut(&actor)
+            .expect("regen deposit actor from keys() must still exist")
+            .last_regen_tick = Some(current_tick);
+    }
+    Ok(())
+}

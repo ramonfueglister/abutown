@@ -1046,6 +1046,44 @@ fn closed_loop_bootstraps_from_autonomous_and_lags_one_tick() {
 }
 
 #[test]
+fn profit_and_rebate_event_type_tags_are_stable() {
+    use crate::economy::{EconomicActorId, EconomyEvent, MarketId, Money};
+    let p = EconomyEvent::ProfitDistributed {
+        firm: EconomicActorId(8_001),
+        market: MarketId(9_001),
+        amount: Money(400),
+    };
+    assert_eq!(p.event_type(), "profit_distributed");
+    let r = EconomyEvent::TransportRebate { amount: Money(123) };
+    assert_eq!(r.event_type(), "transport_rebate");
+}
+
+#[test]
+fn dividend_share_default_is_full_and_validates_bounds() {
+    use crate::economy::{EconomyConfig, EconomyError};
+    let cfg = EconomyConfig::default();
+    assert_eq!(
+        cfg.dividend_share_bps, 10_000,
+        "default is full distribution"
+    );
+    assert_eq!(cfg.validated_dividend_share_bps().unwrap(), 10_000_i128);
+    let bad = EconomyConfig {
+        dividend_share_bps: 10_001,
+        ..EconomyConfig::default()
+    };
+    assert_eq!(
+        bad.validated_dividend_share_bps(),
+        Err(EconomyError::InvalidOrder),
+        "share > 10_000 is a config bug"
+    );
+    let zero = EconomyConfig {
+        dividend_share_bps: 0,
+        ..EconomyConfig::default()
+    };
+    assert_eq!(zero.validated_dividend_share_bps().unwrap(), 0_i128);
+}
+
+#[test]
 fn determinism_same_snapshot_same_tick_yields_identical_desired_qty() {
     // Build a closed-loop world, run a few ticks to non-trivial income, snapshot it,
     // then run ONE more tick from the snapshot — twice, and across a serde round-trip —
@@ -1153,4 +1191,396 @@ fn determinism_same_snapshot_same_tick_yields_identical_desired_qty() {
     let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
     let c = run_one_more(&decoded);
     assert_eq!(a, c, "serde round-trip preserves determinism");
+}
+
+#[test]
+fn distribute_profit_conserves_money_and_drains_firm_to_zero() {
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    use crate::economy::{EconomyConfig, EconomyError};
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let c2 = EconomicActorId(8_012);
+    // Firm sold 1_000; PayWages already paid wage=600 and left 400 in the firm account.
+    // Here we model the post-wage state: firm holds the 400 profit.
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000)); // gross revenue captured this tick
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    demand.0.insert(c2, consumer_pool(c2, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1), (c2, 1)]),
+    };
+    let config = EconomyConfig::default(); // labor_share=6_000, dividend_share=10_000
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+    )
+    .unwrap();
+
+    // wage = floor(1000*0.6)=600; profit = 1000-600 = 400; dividend = floor(400*1.0)=400.
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant total money"
+    );
+    assert_eq!(
+        accounts.account(f1).available,
+        Money::ZERO,
+        "full distribution drains the firm"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    assert_eq!(demand.0[&c1].income_last_tick, Money(200));
+    assert_eq!(demand.0[&c2].income_last_tick, Money(200));
+    assert!(ledger.0.contains(&EconomyEvent::ProfitDistributed {
+        firm: f1,
+        market: MarketId(9_001),
+        amount: Money(400),
+    }));
+    let _ = EconomyError::InvalidOrder; // import sanity
+}
+
+#[test]
+fn distribute_profit_underfunded_firm_books_only_covered_and_audits() {
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    // Receipts say revenue=1_000 (profit target = 400), but the firm only HOLDS 150
+    // (it spent the rest buying inputs via macro_flow this tick). We must book 150 and
+    // audit the shortfall — never panic, never silently skip.
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(150)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default();
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(&mut accounts, &receipts, &mut demand, &household, &mut ledger, &config)
+        .expect("the function itself returns Ok — the shortfall is surfaced via an audited event, not an Err");
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant even under shortfall"
+    );
+    assert_eq!(
+        accounts.account(f1).available,
+        Money::ZERO,
+        "all the firm HELD was distributed"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(150),
+        "only the covered amount reached the household"
+    );
+    // Audited shortfall event (MarketClearFailed-style), NOT a panic, NOT a silent drop.
+    let audited = ledger.0.iter().any(|e| matches!(
+        e,
+        EconomyEvent::MarketClearFailed { market, reason, .. }
+            if *market == MarketId(9_001) && *reason == crate::economy::EconomyError::InsufficientFunds
+    ));
+    assert!(
+        audited,
+        "an underfunded profit distribution must surface an audited event"
+    );
+    // The covered amount is still booked as ProfitDistributed.
+    assert!(ledger.0.contains(&EconomyEvent::ProfitDistributed {
+        firm: f1,
+        market: MarketId(9_001),
+        amount: Money(150),
+    }));
+}
+
+#[test]
+fn distribute_profit_zero_dividend_share_is_noop() {
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig {
+        dividend_share_bps: 0,
+        ..EconomyConfig::default()
+    };
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+    )
+    .unwrap();
+    assert_eq!(accounts.total_money().unwrap(), before);
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(400),
+        "0 share retains profit at the firm"
+    );
+    assert_eq!(demand.0[&c1].income_last_tick, Money::ZERO);
+}
+
+#[test]
+fn distribute_profit_does_not_reset_income() {
+    // Profit distribution ADDS to income_last_tick (wages credited it first); it must not
+    // zero it. Seed a non-zero income and assert it accumulates.
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, MarketId(9_001)), Money(1_000));
+    let mut demand = DemandPools::default();
+    let mut pool = consumer_pool(c1, MarketId(9_002));
+    pool.income_last_tick = Money(600); // wages already credited this tick
+    demand.0.insert(c1, pool);
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+    )
+    .unwrap();
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(1_000),
+        "wage 600 + dividend 400, accumulated"
+    );
+}
+
+#[test]
+fn full_tick_wage_profit_rebate_all_net_household_sector_to_zero() {
+    // One world where a firm sells (auction path → revenue → wage + profit) AND transport
+    // accrues (a dormant macro-flow pair → operator fee). Run past a macro-flow interval so
+    // wage, profit, AND rebate all fire. Assert: total_money byte-invariant every tick AND
+    // HOUSEHOLD_SECTOR == 0 after every tick (each of the three legs nets it independently).
+    let (mut world, mut schedule) = full_economy_world();
+
+    // Auction-path firm: supplier sells TOOLS at active market m1, consumer buys there.
+    let supplier = EconomicActorId(8_001);
+    let consumer = EconomicActorId(8_002);
+    let m1 = MarketId(1);
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(supplier, GOOD_TOOLS, Quantity(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(consumer, Money(10_000_000))
+        .unwrap();
+    world.resource_mut::<SupplyPools>().0.insert(
+        supplier,
+        SupplyPool {
+            actor: supplier,
+            market: m1,
+            good: GOOD_TOOLS,
+            offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world
+        .resource_mut::<DemandPools>()
+        .0
+        .insert(consumer, consumer_pool(consumer, m1));
+    world.resource_mut::<crate::economy::Markets>().0.insert(
+        m1,
+        crate::economy::MarketSite {
+            id: m1,
+            node_id: crate::routing::NodeId(0),
+            name: "M1".to_string(),
+        },
+    );
+
+    // Dormant macro-flow pair (GOOD_FOOD) → accrues a TRANSPORT_OPERATOR fee each interval.
+    // Use ids in the 8_0xx labor band for consistency with the rest of the economy.
+    let f_supplier = EconomicActorId(8_041);
+    let f_consumer = EconomicActorId(8_042);
+    let m_src = MarketId(9_401);
+    let m_dst = MarketId(9_402);
+    let chunk_src = ChunkCoord { x: 5, y: 5 };
+    let chunk_dst = ChunkCoord { x: 9, y: 5 };
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(f_supplier, GOOD_FOOD, Quantity(1_000_000))
+        .unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(f_consumer, Money(1_000_000_000))
+        .unwrap();
+    world.resource_mut::<SupplyPools>().0.insert(
+        f_supplier,
+        SupplyPool {
+            actor: f_supplier,
+            market: m_src,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(200),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<DemandPools>().0.insert(
+        f_consumer,
+        DemandPool {
+            actor: f_consumer,
+            market: m_dst,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(200),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        },
+    );
+    world
+        .resource_mut::<MarketChunks>()
+        .0
+        .insert(m_src, chunk_src);
+    world
+        .resource_mut::<MarketChunks>()
+        .0
+        .insert(m_dst, chunk_dst);
+    let mut dist = MarketDistances(BTreeMap::new());
+    dist.0.insert((m_src, m_dst), 4);
+    dist.0.insert((m_dst, m_src), 4);
+    world.insert_resource(dist);
+    world
+        .resource_mut::<EconomyConfig>()
+        .transport_cost_per_tile_unit = Money(50);
+    world.spawn((ChunkCoordComp(chunk_src), AsleepChunk));
+    world.spawn((ChunkCoordComp(chunk_dst), AsleepChunk));
+
+    // Household pays BOTH consumers (the labor households).
+    world.insert_resource(HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(consumer, 1), (f_consumer, 1)]),
+    });
+
+    // Seed opening prices for both consumer (market, good)s.
+    for (mk, good) in [(m1, GOOD_TOOLS), (m_dst, GOOD_FOOD)] {
+        let key = MarketGoodKey { market: mk, good };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let state = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        state.ewma_reference_price = Money(1_000);
+        state.last_settlement_price = Money(1_000);
+    }
+
+    let before = world.resource::<AccountBook>().total_money().unwrap();
+    let interval = world.resource::<EconomyConfig>().macro_flow_interval_ticks;
+
+    // Run enough loop iterations that at least one rebate-boundary tick is reached. Because
+    // tick_world DOUBLE-increments Tick (schedule's own tick_increment + the helper's +=1),
+    // Tick.0 advances by 2 per iteration, so the loop counter is NOT Tick.0. We therefore
+    // pin every boundary assertion against the REAL Tick.0 read inside the loop, never the
+    // loop index. Run generously past one interval.
+    let mut saw_operator_drained_on_boundary = false;
+    for _ in 0..(interval as usize + 4) {
+        tick_world(&mut world, &mut schedule);
+        assert_eq!(
+            world.resource::<AccountBook>().total_money().unwrap(),
+            before,
+            "total_money byte-invariant across wage+profit+rebate legs"
+        );
+        assert_eq!(
+            world
+                .resource::<AccountBook>()
+                .account(HOUSEHOLD_SECTOR)
+                .available,
+            Money::ZERO,
+            "HOUSEHOLD_SECTOR nets to zero after the full tick (all three legs)"
+        );
+        // The rebate system gates on Tick.0 % interval == 0 (phase-locked to the operator
+        // credit). On any such boundary tick the operator must read zero AFTER the tick.
+        let now = world.resource::<crate::mobility::resources::Tick>().0;
+        if interval != 0 && now % interval == 0 {
+            assert_eq!(
+                world
+                    .resource::<AccountBook>()
+                    .account(crate::economy::TRANSPORT_OPERATOR)
+                    .available,
+                Money::ZERO,
+                "operator drained at the interval boundary Tick.0={now}"
+            );
+            saw_operator_drained_on_boundary = true;
+        }
+    }
+    assert!(
+        saw_operator_drained_on_boundary,
+        "the run must cross at least one rebate boundary (Tick.0 multiple of {interval})"
+    );
+
+    // Non-vacuity: all three event kinds must have fired at least once.
+    let ev = &world.resource::<TradeLedger>().0;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, EconomyEvent::WagePaid { .. })),
+        "wages fired"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, EconomyEvent::ProfitDistributed { .. })),
+        "profit fired"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, EconomyEvent::TransportRebate { .. })),
+        "rebate fired"
+    );
 }
