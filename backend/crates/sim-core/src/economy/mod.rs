@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod attribution;
 pub mod auction;
 pub mod audit;
 pub mod commuters;
