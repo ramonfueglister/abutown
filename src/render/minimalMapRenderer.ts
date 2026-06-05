@@ -1,6 +1,7 @@
 import type { CameraState } from '../cameraController';
 import type { TerrainKind, WorldDetail } from '../city/worldTypes';
 import { formatSimDate } from '../backend/simTime';
+import type { MarketLocationDto } from '../backend/mobilityProtocol';
 import type {
   RuntimeBuilding,
   RuntimeRailStation,
@@ -77,6 +78,7 @@ export type MinimalMapRendererState = {
   selectedVehicleId: string | null;
   now: () => number;
   simTime: number;
+  markets?: readonly MarketLocationDto[];
 };
 
 type GridRect = {
@@ -99,6 +101,9 @@ type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: Backen
 type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 type TileFillStyle = { color: string; alpha: number };
 type TileFillBatch = TileFillStyle & { coords: Coord[] };
+
+const ECONOMY_SCALE = 1000;
+const MARKET_COLOR = '#d98c3a';
 
 export const MAP_BACKGROUND = '#182018';
 const MAP_GRASS = '#91c86f';
@@ -178,6 +183,7 @@ function drawScene(state: MinimalMapRendererState): void {
     .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
     .filter((item) => isCoordVisible(item.coord, visibleGrid))
     .sort((a, b) => compareDrawables(state, a, b));
+  drawEconomyMarkets(state, visibleGrid);
   drawRoads(state, [...state.roads.values()].filter((road) => isCoordVisible(road.coord, visibleGrid)));
   for (const path of state.railPaths) drawRailPath(state, path);
   drawEdgeConnections(state, visibleGrid);
@@ -597,6 +603,35 @@ function drawEdgeConnections(state: MinimalMapRendererState, visibleGrid: GridRe
       }
     }
   }
+}
+
+export function visibleMarketGlyphs(
+  markets: readonly MarketLocationDto[] | undefined,
+  visibleGrid: GridRect,
+): MarketLocationDto[] {
+  if (!markets) return [];
+  return markets.filter((m) => isCoordVisible({ x: m.tileX, y: m.tileY }, visibleGrid));
+}
+
+function drawEconomyMarkets(state: MinimalMapRendererState, visibleGrid: GridRect): void {
+  for (const m of visibleMarketGlyphs(state.markets, visibleGrid)) {
+    drawMarketGlyph(state, { x: m.tileX, y: m.tileY }, MARKET_COLOR);
+  }
+}
+
+function drawMarketGlyph(state: MinimalMapRendererState, coord: Coord, color: string): void {
+  const { ctx, camera } = state;
+  const point = iso(state, coord);
+  // A zoom-stable flat marker: slightly smaller than a small building, no roof.
+  const size = screenStableWorldSize(ECONOMY_SCALE / 100, camera.scale, { minWorld: 7, maxWorld: 11 });
+  const x = point.x - size / 2;
+  const y = point.y - size / 2;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.globalAlpha *= 0.82;
+  roundedRectPath(ctx, x, y, size, size, 1.4);
+  ctx.fill();
+  ctx.restore();
 }
 
 function visibleGridRect(state: MinimalMapRendererState): GridRect {
