@@ -111,6 +111,9 @@ pub enum EconomyEvent {
     /// The accumulated TRANSPORT_OPERATOR balance rebated to the labor households at a
     /// macro-flow interval boundary (the buyers paid the fee; it returns to them).
     TransportRebate { amount: Money },
+    /// Per-tick SFC conservation heartbeat: the total money in circulation at the end of
+    /// this tick. Emitted every tick by the audit system; the queryable conservation trace.
+    TickAudit { tick: u64, total_money: Money },
 }
 
 impl EconomyEvent {
@@ -137,6 +140,7 @@ impl EconomyEvent {
             Self::Regenerated { .. } => "regenerated",
             Self::ProfitDistributed { .. } => "profit_distributed",
             Self::TransportRebate { .. } => "transport_rebate",
+            Self::TickAudit { .. } => "tick_audit",
         }
     }
 }

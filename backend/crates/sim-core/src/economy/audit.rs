@@ -5,13 +5,43 @@
 
 use bevy_ecs::prelude::*;
 
-use crate::economy::{EconomyEvent, PERSISTED_LEDGER_TAIL, TradeLedger};
+use crate::economy::{AccountBook, EconomyError, EconomyEvent, PERSISTED_LEDGER_TAIL, TradeLedger};
 use crate::mobility::resources::Tick;
 
 /// Index into `TradeLedger.0` of the first event NOT yet durably appended to the
 /// audit store. Everything before it is durable.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct LedgerAuditCursor(pub usize);
+
+/// The previous tick's `total_money`, for the per-tick byte-invariance check. EPHEMERAL —
+/// NOT persisted (re-initialized from the restored, conserved `total_money` on the first audit
+/// tick after a hydrate, so it stays consistent across restarts without a snapshot field).
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LastTickMoney(pub Option<crate::economy::Money>);
+
+/// Per-tick SFC conservation audit (pure over its refs). Reads `total_money` (= Σ available+locked,
+/// which is byte-CONSTANT after seed since every runtime money move is a conservative transfer),
+/// asserts it equals the prior tick's value (drift ⇒ `Err(ConservationViolation)`), emits a
+/// `TickAudit` heartbeat event, and updates the ephemeral baseline. Moves NO money. Deterministic.
+pub fn run_tick_audit_at_tick(
+    accounts: &AccountBook,
+    ledger: &mut TradeLedger,
+    last: &mut LastTickMoney,
+    current_tick: u64,
+) -> Result<(), EconomyError> {
+    let total = accounts.total_money()?;
+    if let Some(prev) = last.0
+        && total != prev
+    {
+        return Err(EconomyError::ConservationViolation);
+    }
+    ledger.0.push(EconomyEvent::TickAudit {
+        tick: current_tick,
+        total_money: total,
+    });
+    last.0 = Some(total);
+    Ok(())
+}
 
 /// The un-appended tail of the ledger + the current tick. Non-mutating: only
 /// `commit_ledger_audit` advances the cursor / trims, so a failed append (no

@@ -144,11 +144,11 @@ pub fn run_pay_wages_at_tick(
         }
     }
 
-    debug_assert_eq!(
-        accounts.account(HOUSEHOLD_SECTOR).available,
-        Money::ZERO,
-        "HOUSEHOLD_SECTOR must net to zero after PayWages (sentinel-stranded cash)"
-    );
+    if accounts.account(HOUSEHOLD_SECTOR).available != Money::ZERO {
+        // HOUSEHOLD_SECTOR must net to zero after PayWages — stranded sentinel cash is a
+        // conservation violation. Release-grade (the wrapper .expect surfaces it fail-fast).
+        return Err(EconomyError::ConservationViolation);
+    }
     Ok(())
 }
 
@@ -229,10 +229,10 @@ pub fn run_distribute_profit_at_tick(
         });
     }
 
-    debug_assert_eq!(
-        accounts.account(HOUSEHOLD_SECTOR).available,
-        Money::ZERO,
-        "HOUSEHOLD_SECTOR must net to zero after profit distribution (sentinel-stranded cash)"
-    );
+    if accounts.account(HOUSEHOLD_SECTOR).available != Money::ZERO {
+        // HOUSEHOLD_SECTOR must net to zero after profit distribution — stranded sentinel cash
+        // is a conservation violation. Surfaced fail-fast by the wrapper (see Step 5).
+        return Err(EconomyError::ConservationViolation);
+    }
     Ok(())
 }

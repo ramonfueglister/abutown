@@ -1584,3 +1584,40 @@ fn full_tick_wage_profit_rebate_all_net_household_sector_to_zero() {
         "rebate fired"
     );
 }
+
+#[test]
+fn nonzero_household_sentinel_is_release_grade_err() {
+    use crate::economy::systems::EconomyConfig;
+    use crate::economy::wages::{
+        HOUSEHOLD_SECTOR, HouseholdSector, SellerReceipts, WageTelemetry, run_pay_wages_at_tick,
+    };
+    use crate::economy::{AccountBook, DemandPools, EconomyError, Money, TradeLedger};
+    use std::collections::BTreeMap;
+    // No receipts → no wage transfers → both legs skip; we pre-strand cash in the sentinel so
+    // the net-zero check at the end is violated.
+    let mut accounts = AccountBook::default();
+    accounts.deposit(HOUSEHOLD_SECTOR, Money(123)).unwrap(); // stranded sentinel cash
+    let receipts = SellerReceipts::default();
+    let mut demand = DemandPools::default();
+    let household = HouseholdSector {
+        population: 1,
+        pool_weights: BTreeMap::new(),
+    };
+    let mut wt = WageTelemetry::default();
+    let mut ledger = TradeLedger::default();
+    let cfg = EconomyConfig::default();
+    let r = run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wt,
+        &mut ledger,
+        &cfg,
+    );
+    assert_eq!(
+        r,
+        Err(EconomyError::ConservationViolation),
+        "non-zero sentinel → release-grade Err, not a debug_assert"
+    );
+}

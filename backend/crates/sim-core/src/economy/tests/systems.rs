@@ -516,7 +516,8 @@ fn pay_wages_then_profit_then_rebate_order_within_schedule() {
     schedule.add_systems((
         rec_wages
             .in_set(EconomySet::PayWages)
-            .after(run_pay_wages_system),
+            .after(run_pay_wages_system)
+            .before(run_distribute_profit_system),
         rec_profit
             .in_set(EconomySet::PayWages)
             .after(run_distribute_profit_system),
