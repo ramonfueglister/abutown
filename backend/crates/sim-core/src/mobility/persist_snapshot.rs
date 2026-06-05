@@ -901,3 +901,110 @@ mod tests {
         let _ = initial_mode_for_profile(RoutingProfileKey::Tram);
     }
 }
+
+#[cfg(test)]
+mod market_binding_persistence_tests {
+    use std::collections::HashMap;
+
+    use crate::ids::AgentId;
+    use crate::mobility::MarketBinding;
+    use crate::mobility::api::empty_world_and_schedule;
+    use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage};
+    use crate::mobility::resources::AgentIdIndex;
+
+    use super::{MobilityPersistSnapshot, apply_into_world};
+
+    fn minimal_snap_with_bound_agent() -> (MobilityPersistSnapshot, AgentId) {
+        let agent_id = AgentId("agent:persist:market".to_string());
+        let mut record = AgentRecord::new_born_at(
+            agent_id.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".to_string(),
+            },
+            vec![PlanStage::Activity {
+                activity_id: "activity:home".to_string(),
+            }],
+            1.0,
+            0,
+        );
+        record.home_market = 9003;
+        record.work_market = 9004;
+
+        let mut agents = HashMap::new();
+        agents.insert(agent_id.clone(), record);
+
+        let snap = MobilityPersistSnapshot {
+            tick: 0,
+            last_processed_month: 0,
+            agents,
+            vehicles: HashMap::new(),
+            stops: HashMap::new(),
+            routes: HashMap::new(),
+            link_polylines: HashMap::new(),
+            flow_cells: HashMap::new(),
+            chunk_activities: HashMap::new(),
+        };
+        (snap, agent_id)
+    }
+
+    /// Payload-level: the exact path used by `PostgresMobilitySnapshotStore`
+    /// (`serde_json::from_value`). Proves `home_market`/`work_market` survive
+    /// JSON serialisation → deserialisation.
+    #[test]
+    fn market_binding_survives_json_round_trip() {
+        let (snap, agent_id) = minimal_snap_with_bound_agent();
+
+        let v = serde_json::to_value(&snap).unwrap();
+        let back: MobilityPersistSnapshot = serde_json::from_value(v).unwrap();
+
+        let rec = back
+            .agents
+            .get(&agent_id)
+            .expect("agent present after round-trip");
+        assert_eq!(
+            rec.home_market, 9003,
+            "home_market must survive JSON round-trip"
+        );
+        assert_eq!(
+            rec.work_market, 9004,
+            "work_market must survive JSON round-trip"
+        );
+    }
+
+    /// Hydrate-level: proves `apply_into_world` preserves a pre-assigned
+    /// `MarketBinding` and that the assign-when-0 guard does NOT clobber an
+    /// already-assigned binding.
+    #[test]
+    fn market_binding_preserved_through_apply_into_world() {
+        let (snap, agent_id) = minimal_snap_with_bound_agent();
+
+        // fresh world — mobility installed but no markets seeded. The record's
+        // binding is already assigned (9003/9004 != 0), so the spawn's
+        // assign-when-0 guard is skipped entirely and the binding is preserved.
+        let (mut world, _schedule) = empty_world_and_schedule();
+        // Prime the activity waypoint so `AtActivity` resolves to a position.
+        world
+            .resource_mut::<crate::mobility::resources::ActivityWaypoints>()
+            .0
+            .insert("activity:home".to_string(), (10.0, 20.0));
+
+        apply_into_world(&mut world, snap);
+
+        let index = world.resource::<AgentIdIndex>();
+        let entity = *index
+            .0
+            .get(&agent_id)
+            .expect("agent must be indexed after hydrate");
+        let binding = world
+            .get::<MarketBinding>(entity)
+            .expect("MarketBinding component must be present after hydrate");
+        assert_eq!(
+            binding.home_market, 9003,
+            "hydrate must preserve home_market; assign-when-0 must not clobber"
+        );
+        assert_eq!(
+            binding.work_market, 9004,
+            "hydrate must preserve work_market; assign-when-0 must not clobber"
+        );
+    }
+}

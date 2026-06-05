@@ -7,11 +7,14 @@ pub use dto::*;
 pub mod api;
 pub mod components;
 pub mod lod;
+pub mod market_binding;
 pub mod persist_snapshot;
 pub mod resources;
 pub mod seed;
 pub mod snapshot_provider;
 pub mod systems;
+
+pub use market_binding::MarketBinding;
 
 pub use api::install_mobility;
 pub use persist_snapshot::{MobilityPersistSnapshot, apply_into_world, extract_from_world};

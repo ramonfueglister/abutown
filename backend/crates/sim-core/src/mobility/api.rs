@@ -55,6 +55,9 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     world.insert_resource(PreviousVehicleChunks::default());
     world.insert_resource(AgentIdIndex::default());
     world.insert_resource(VehicleIdIndex::default());
+    // Lives in the mobility plugin so it always exists even when the economy is
+    // absent; the attribution system only populates it.
+    world.insert_resource(crate::mobility::resources::CitizenEconomicTargets::default());
     world.insert_resource(PreviousChunkByEntity::default());
     world.insert_resource(PreviousFlowCellContrib::default());
     world.insert_resource(PendingPerChunkDeltas::default());
@@ -435,10 +438,26 @@ fn spawn_agent_from_record_with_position(
         sex,
         parent_id,
         cyclic,
+        home_market,
+        work_market,
     } = record;
     let id = record_id.clone();
     let sprite_key = compute_agent_sprite_key(&id);
     let (px, py) = position.unwrap_or_else(|| initial_agent_position(world, &state));
+
+    // Assign the market binding from spawn position the first time only
+    // (record carries 0 = unassigned at initial seed). On restore/birth the
+    // record already carries real ids (>= 9001), which we PRESERVE — never
+    // recompute from a since-moved position.
+    let (home_market, work_market) = if home_market == 0 {
+        let markets = crate::mobility::market_binding::markets_with_positions(world);
+        crate::mobility::market_binding::assign_binding((px, py), &markets)
+            .map(|b| (b.home_market, b.work_market))
+            .unwrap_or((home_market, work_market))
+    } else {
+        (home_market, work_market)
+    };
+
     let active_route = active_route.map(|route| ActiveRoute {
         destination: crate::routing::NodeId(route.destination_node),
         profile: route.profile,
@@ -471,6 +490,10 @@ fn spawn_agent_from_record_with_position(
             Position { x: px, y: py },
             Direction(abutown_protocol::DirectionDto::S),
             SpriteKey(sprite_key),
+            crate::mobility::MarketBinding {
+                home_market,
+                work_market,
+            },
         ))
         .id();
     if let Some(active_route) = active_route {
@@ -563,6 +586,7 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
     let parent_id = world
         .get::<crate::mobility::components::ParentId>(entity)
         .and_then(|p| p.0.clone());
+    let binding = world.get::<crate::mobility::MarketBinding>(entity);
     Some(AgentRecord {
         id: stable.0.clone(),
         state: state.0.clone(),
@@ -574,6 +598,8 @@ fn agent_record_from_entity(world: &World, entity: Entity) -> Option<AgentRecord
         sex,
         parent_id,
         cyclic: plan.cyclic,
+        home_market: binding.map(|b| b.home_market).unwrap_or(0),
+        work_market: binding.map(|b| b.work_market).unwrap_or(0),
     })
 }
 
@@ -1073,5 +1099,174 @@ pub fn seed_chunk_subscriber_count(world: &mut World, chunk: crate::ids::ChunkCo
         .get_mut::<crate::world::components::ChunkSubscriberCount>()
     {
         sub.0 = count;
+    }
+}
+
+#[cfg(test)]
+mod market_binding_roundtrip_tests {
+    use super::*;
+    use crate::ids::AgentId;
+    use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage};
+
+    /// Reuse the `empty_world_and_schedule` fixture (same pattern as
+    /// `mod.rs::empty_world`). Seed a single activity waypoint so
+    /// `AtActivity` resolves to a known coord without a graph lookup.
+    #[test]
+    fn market_binding_round_trips_through_spawn_and_extract() {
+        let (mut world, _schedule) = empty_world_and_schedule();
+
+        // Prime the activity waypoint so `initial_agent_position` can resolve it.
+        world
+            .resource_mut::<crate::mobility::resources::ActivityWaypoints>()
+            .0
+            .insert("activity:home".to_string(), (10.0, 20.0));
+
+        let agent_id = AgentId("agent:binding:test".to_string());
+        let mut record = AgentRecord::new(
+            agent_id.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".to_string(),
+            },
+            vec![PlanStage::Activity {
+                activity_id: "activity:home".to_string(),
+            }],
+            1.0,
+        );
+        record.home_market = 9001;
+        record.work_market = 9002;
+
+        let entity = spawn_agent_from_record(&mut world, record);
+
+        // Verify the component was inserted on the entity.
+        let binding = world
+            .get::<crate::mobility::MarketBinding>(entity)
+            .expect("MarketBinding component must be present after spawn");
+        assert_eq!(binding.home_market, 9001);
+        assert_eq!(binding.work_market, 9002);
+
+        // Verify the round-trip via agent_record_from_entity.
+        let extracted =
+            agent_record_from_entity(&world, entity).expect("agent record must be extractable");
+        assert_eq!(extracted.home_market, 9001);
+        assert_eq!(extracted.work_market, 9002);
+    }
+
+    /// Build a world with both `Graph` + `Markets` seeded (via the economy
+    /// seed_world fixture path) then validate:
+    /// 1. An agent with `home_market == 0` gets assigned a real market id at spawn.
+    /// 2. An agent with `home_market == 9003` keeps it (restore-safety).
+    #[test]
+    fn assign_on_unassigned_and_preserve_on_assigned() {
+        use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
+        use crate::world::schedule::SimPlugin;
+
+        // Build a world with the EconomyPlugin + mobility plugin, mirroring the
+        // economy/tests/seed.rs fixture so both `Graph` and `Markets` exist.
+        let mut world = World::new();
+        let mut schedule = bevy_ecs::schedule::Schedule::default();
+        use crate::world::plugin::CorePlugin;
+        CorePlugin::default().install(&mut world, &mut schedule);
+        crate::time::TimePlugin.install(&mut world, &mut schedule);
+        crate::population::PopulationPlugin.install(&mut world, &mut schedule);
+        install_mobility(&mut world, &mut schedule);
+        crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
+
+        // Install graph nodes matching the abutopia market anchor positions.
+        let nodes = vec![
+            Node {
+                id: NodeId(0),
+                position: (2.0, 3.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(1),
+                position: (13.0, 3.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(2),
+                position: (16.0, 48.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(3),
+                position: (208.0, 48.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+        ];
+        world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
+        world.insert_resource(Graph::new(nodes, vec![]));
+
+        // Seed the economy (4 markets from the abutopia markets layer).
+        let bundle =
+            crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
+                .expect("abutopia bundle loads");
+        crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
+
+        // Prime an activity waypoint near node 0 so initial_agent_position resolves.
+        world
+            .resource_mut::<crate::mobility::resources::ActivityWaypoints>()
+            .0
+            .insert("activity:home".to_string(), (2.0, 3.0));
+
+        // --- Test 1: Assign when unassigned (home_market == 0) ---
+        let id1 = AgentId("agent:assign:unassigned".to_string());
+        let rec1 = AgentRecord::new(
+            id1.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".to_string(),
+            },
+            vec![PlanStage::Activity {
+                activity_id: "activity:home".to_string(),
+            }],
+            1.0,
+        );
+        // home_market == 0 means unassigned — spawn should assign it.
+        assert_eq!(rec1.home_market, 0);
+        let entity1 = spawn_agent_from_record(&mut world, rec1);
+        let binding1 = world
+            .get::<crate::mobility::MarketBinding>(entity1)
+            .expect("binding must be present after spawn");
+        assert!(
+            binding1.home_market >= 9001,
+            "unassigned agent must be assigned a real home_market >= 9001, got {}",
+            binding1.home_market
+        );
+        assert!(
+            binding1.work_market >= 9001,
+            "unassigned agent must be assigned a real work_market >= 9001, got {}",
+            binding1.work_market
+        );
+
+        // --- Test 2: Preserve when already assigned (restore-safety) ---
+        let id2 = AgentId("agent:assign:preserved".to_string());
+        let mut rec2 = AgentRecord::new(
+            id2.clone(),
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".to_string(),
+            },
+            vec![PlanStage::Activity {
+                activity_id: "activity:home".to_string(),
+            }],
+            1.0,
+        );
+        rec2.home_market = 9003;
+        rec2.work_market = 9004;
+        let entity2 = spawn_agent_from_record(&mut world, rec2);
+        let binding2 = world
+            .get::<crate::mobility::MarketBinding>(entity2)
+            .expect("binding must be present after spawn");
+        assert_eq!(
+            binding2.home_market, 9003,
+            "pre-assigned home_market must NOT be recomputed"
+        );
+        assert_eq!(
+            binding2.work_market, 9004,
+            "pre-assigned work_market must NOT be recomputed"
+        );
     }
 }

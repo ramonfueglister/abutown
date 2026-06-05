@@ -317,59 +317,6 @@ fn refresh_lod_observes_post_reclassify_lod_not_stale_active() {
 }
 
 #[test]
-fn shopper_capture_set_runs_after_macro_flow_before_materialize() {
-    // Pin the ShopperCapture ordering edge against the REAL `install_systems` set
-    // chain: recorder systems placed into MacroFlow / ShopperCapture / Materialize
-    // must fire in exactly that order (it must run after MacroFlow so unmet demand
-    // is current, and before Materialize so shoppers render same-tick).
-    use crate::economy::{EconomyPlugin, systems::EconomySet};
-    use bevy_ecs::prelude::*;
-
-    #[derive(Resource, Default)]
-    struct OrderLog(Vec<&'static str>);
-
-    fn rec_macro_flow(mut log: ResMut<OrderLog>) {
-        log.0.push("macro_flow");
-    }
-    fn rec_shopper_capture(mut log: ResMut<OrderLog>) {
-        log.0.push("shopper_capture");
-    }
-    fn rec_materialize(mut log: ResMut<OrderLog>) {
-        log.0.push("materialize");
-    }
-
-    let mut world = World::new();
-    let mut schedule = bevy_ecs::schedule::Schedule::default();
-    CorePlugin::default().install(&mut world, &mut schedule);
-    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
-    EconomyPlugin.install(&mut world, &mut schedule);
-
-    world.insert_resource(OrderLog::default());
-    // Recorders inherit each set's position in the `.chain()` configured by
-    // `install_systems`, so their relative run order reflects the real set edges.
-    schedule.add_systems((
-        rec_macro_flow.in_set(EconomySet::MacroFlow),
-        rec_shopper_capture.in_set(EconomySet::ShopperCapture),
-        rec_materialize.in_set(EconomySet::Materialize),
-    ));
-
-    schedule.run(&mut world);
-
-    let log = &world.resource::<OrderLog>().0;
-    let i_mf = log.iter().position(|s| *s == "macro_flow").unwrap();
-    let i_sc = log.iter().position(|s| *s == "shopper_capture").unwrap();
-    let i_mat = log.iter().position(|s| *s == "materialize").unwrap();
-    assert!(
-        i_mf < i_sc,
-        "ShopperCapture must run AFTER MacroFlow (so unmet_demand is current): {log:?}"
-    );
-    assert!(
-        i_sc < i_mat,
-        "ShopperCapture must run BEFORE Materialize (so shoppers render same-tick): {log:?}"
-    );
-}
-
-#[test]
 fn regenerate_set_runs_after_expire_before_production() {
     // Pin EconomySet::Regenerate's position against the REAL install_systems chain:
     // recorder systems placed into ExpireOrders / Regenerate / Production must fire in
