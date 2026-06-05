@@ -13,6 +13,12 @@ use crate::mobility::resources::Tick;
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct LedgerAuditCursor(pub usize);
 
+/// The previous tick's `total_money`, for the per-tick byte-invariance check. EPHEMERAL —
+/// NOT persisted (re-initialized from the restored, conserved `total_money` on the first audit
+/// tick after a hydrate, so it stays consistent across restarts without a snapshot field).
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LastTickMoney(pub Option<crate::economy::Money>);
+
 /// The un-appended tail of the ledger + the current tick. Non-mutating: only
 /// `commit_ledger_audit` advances the cursor / trims, so a failed append (no
 /// commit) leaves all state unchanged — the events are retried next cycle.

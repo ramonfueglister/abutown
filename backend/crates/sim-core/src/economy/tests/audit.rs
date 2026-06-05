@@ -182,3 +182,16 @@ fn final_consumed_event_tag() {
     };
     assert_eq!(e.event_type(), "final_consumed");
 }
+
+#[test]
+fn sfc_audit_primitives_exist() {
+    use crate::economy::audit::LastTickMoney;
+    use crate::economy::{EconomyError, EconomyEvent, Money};
+    // The new honest error variant.
+    let _ = EconomyError::ConservationViolation;
+    // The TickAudit event + its stable tag.
+    let e = EconomyEvent::TickAudit { tick: 7, total_money: Money(12_345) };
+    assert_eq!(e.event_type(), "tick_audit");
+    // The ephemeral baseline defaults to None.
+    assert_eq!(LastTickMoney::default().0, None);
+}

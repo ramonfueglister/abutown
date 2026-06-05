@@ -9,6 +9,9 @@ pub enum EconomyError {
     InsufficientFunds,
     InsufficientGoods,
     InvalidOrder,
+    /// A runtime SFC conservation invariant was violated (money minted/destroyed, or a
+    /// net-zero sentinel held stranded cash). UNRECOVERABLE — surfaced fail-fast.
+    ConservationViolation,
 }
 
 use serde::{Deserialize, Serialize};

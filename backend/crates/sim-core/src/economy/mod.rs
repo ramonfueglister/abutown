@@ -76,6 +76,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(MarketDistances::default());
         world.insert_resource(crate::economy::materialize::MaterializedTraders::default());
         world.insert_resource(crate::economy::audit::LedgerAuditCursor::default());
+        world.insert_resource(crate::economy::audit::LastTickMoney::default());
         world.insert_resource(crate::economy::flow_shipments::FlowShipments::default());
         world.insert_resource(crate::economy::flow_shipments::NextShipmentId::default());
         world.insert_resource(crate::economy::shoppers::ShopperVisits::default());
