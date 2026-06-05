@@ -102,7 +102,7 @@ type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 type TileFillStyle = { color: string; alpha: number };
 type TileFillBatch = TileFillStyle & { coords: Coord[] };
 
-const ECONOMY_SCALE = 1000;
+const MARKET_GLYPH_WORLD_SIZE = 10;
 const MARKET_COLOR = '#d98c3a';
 
 export const MAP_BACKGROUND = '#182018';
@@ -623,7 +623,7 @@ function drawMarketGlyph(state: MinimalMapRendererState, coord: Coord, color: st
   const { ctx, camera } = state;
   const point = iso(state, coord);
   // A zoom-stable flat marker: slightly smaller than a small building, no roof.
-  const size = screenStableWorldSize(ECONOMY_SCALE / 100, camera.scale, { minWorld: 7, maxWorld: 11 });
+  const size = screenStableWorldSize(MARKET_GLYPH_WORLD_SIZE, camera.scale, { minWorld: 7, maxWorld: 11 });
   const x = point.x - size / 2;
   const y = point.y - size / 2;
   ctx.save();

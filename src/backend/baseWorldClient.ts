@@ -75,7 +75,7 @@ function validateBaseWorld(payload: BaseWorldResponse): void {
     throw new Error(`Unexpected base world id: ${payload.world_id}`);
   }
   // schema_version 2 added the authored markets layer (economy on-map view).
-  if (payload.schema_version !== 1 && payload.schema_version !== 2) throw new Error(`Unexpected base world schema: ${payload.schema_version}`);
+  if (payload.schema_version !== 2) throw new Error(`Unexpected base world schema: ${payload.schema_version}`);
   if (payload.chunk_size !== 32) throw new Error(`Unexpected base world chunk size: ${payload.chunk_size}`);
   if (payload.world_tiles.width !== 224 || payload.world_tiles.height !== 128) {
     throw new Error('Unexpected base world dimensions');

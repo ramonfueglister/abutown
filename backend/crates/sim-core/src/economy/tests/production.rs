@@ -276,9 +276,8 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
     use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposits};
     use crate::economy::{DemandPools, GOOD_TOOLS};
 
-    // Reuse the seed-test world builder (added/extended in tests/seed.rs is a sibling
-    // module; here we build a minimal spatial world the same way the seeder needs).
-    // Build the world inline so this test does not depend on the seed test module.
+    // Build the world inline with the same minimal spatial scaffold the seeder needs,
+    // keeping this test self-contained and independent of the seed test module.
     let mut world = bevy_ecs::world::World::new();
     {
         use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};

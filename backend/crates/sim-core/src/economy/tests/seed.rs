@@ -37,7 +37,7 @@ fn seed_world() -> World {
 }
 
 #[test]
-fn seed_demo_economy_creates_four_markets() {
+fn factory_seeds_four_markets_and_two_distance_pairs() {
     let world = seed_world();
 
     assert_eq!(world.resource::<Markets>().0.len(), 4, "four demo markets");
