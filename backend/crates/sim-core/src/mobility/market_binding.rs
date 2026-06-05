@@ -1,8 +1,8 @@
-//! Static citizen↔market binding: each citizen shops at `home_market` and earns
-//! wages at `work_market`. Assigned deterministically at seed from market anchor
-//! positions; inherited by newborns; persisted in `AgentRecord`. Market ids are
-//! raw `u32` (matching `MarketSpec.id` and the persisted record) so this mobility
-//! module carries no dependency on `economy::MarketId`.
+//! Static citizen↔market binding: `assign_binding` deterministically chooses a
+//! citizen's `(home_market, work_market)` pair from market anchor positions at
+//! seed time. Market ids are raw `u32` (matching `MarketSpec.id`) so this
+//! mobility module carries no dependency on `economy::MarketId`.
+//! (Birth-inheritance and persistence are wired in later tasks.)
 
 use bevy_ecs::prelude::Component;
 
@@ -22,7 +22,11 @@ pub struct MarketBinding {
 ///   id); if only one market exists, `work_market == home_market`.
 ///
 /// Returns `None` only when `markets` is empty. Pure: no RNG, no wall-clock.
-pub fn assign_binding(pos: (f32, f32), markets: &[(u32, (f32, f32))]) -> Option<MarketBinding> {
+#[allow(dead_code)] // caller wired in Task 2 (seed/birth assignment)
+pub(crate) fn assign_binding(
+    pos: (f32, f32),
+    markets: &[(u32, (f32, f32))],
+) -> Option<MarketBinding> {
     fn dist2(a: (f32, f32), b: (f32, f32)) -> f32 {
         let dx = a.0 - b.0;
         let dy = a.1 - b.1;
@@ -33,11 +37,7 @@ pub fn assign_binding(pos: (f32, f32), markets: &[(u32, (f32, f32))]) -> Option<
         .iter()
         .map(|(id, mp)| (*id, dist2(pos, *mp)))
         .collect();
-    ranked.sort_by(|a, b| {
-        a.1.partial_cmp(&b.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.0.cmp(&b.0))
-    });
+    ranked.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
     let home_market = ranked.first()?.0;
     let work_market = ranked
         .iter()
@@ -87,5 +87,21 @@ mod tests {
         let b = assign_binding((0.0, 0.0), &markets).unwrap();
         assert_eq!(b.home_market, 9001, "equal distance → lower id wins");
         assert_eq!(b.work_market, 9002);
+    }
+
+    #[test]
+    fn deterministic_work_tie_break_by_id() {
+        // home=9001 nearest; 9002 and 9003 equidistant from pos → work=9002 (lower id).
+        let markets = vec![
+            (9001u32, (0.0f32, 0.0f32)),
+            (9003u32, (10.0, 0.0)),
+            (9002u32, (-10.0, 0.0)),
+        ];
+        let b = assign_binding((0.0, 5.0), &markets).unwrap();
+        assert_eq!(b.home_market, 9001);
+        assert_eq!(
+            b.work_market, 9002,
+            "equal distance for work candidates → lower id"
+        );
     }
 }
