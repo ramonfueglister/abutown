@@ -48,9 +48,11 @@ pub struct EconomyConfig {
     pub trader_default_ref_price: Money,
     pub macro_flow_interval_ticks: u64,
     pub settlement_policy: SettlementPolicy,
-    /// How many unmet-demand units one visible shopper represents.
+    /// How many consumed-good units one attributed shopper-role citizen represents
+    /// (the divisor in attribution's per-market cohort size).
     pub shoppers_per_unit: i64,
-    /// Cap on simultaneous shoppers rendered per market (keeps it a handful, not hundreds).
+    /// Absolute cap on attributed shopper-role citizens per market (keeps the cohort
+    /// a handful, not hundreds; never derived from magnitude → population can't leak in).
     pub max_shoppers_per_market: usize,
     /// When TRUE, the macro flow drains active/observed markets' post-auction
     /// residual orders into the inter-market flow (S3). FALSE keeps the flow
@@ -59,9 +61,10 @@ pub struct EconomyConfig {
     /// Labor share of value added (basis points, 0..=10_000). Default 6_000 = 0.60
     /// (Kaldor stylized fact). VALIDATED `0..=10_000` so `wage <= revenue` ⇒ no overdraft.
     pub labor_share_bps: u16,
-    /// How many wage-Money units one visible commuter represents.
+    /// How many wage-Money units one attributed commuter-role citizen represents
+    /// (the divisor in attribution's per-market wage cohort size).
     pub commuters_per_wage_unit: i64,
-    /// Absolute cap on simultaneous commuters rendered per market (viewport-bounded;
+    /// Absolute cap on attributed commuter-role citizens per market (viewport-bounded;
     /// NEVER derived from the wage magnitude, else the 1M population would leak in).
     pub max_commuters_per_market: usize,
     /// Share of firm PROFIT (revenue − wage) distributed to labor households (basis
@@ -229,9 +232,8 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
     // Citizen attribution is an exclusive system (it reads the spatial Graph and
     // the observed-chunk set plus realized consumption/wage telemetry, then queries
-    // citizen components). Registered separately like the capture systems. The set
-    // chain places it after Consume (so consumed_qty_last_tick is valid) and before
-    // the capture phases — both coexist this tick (Task 8 deletes the captures).
+    // citizen components). Registered separately (exclusive). The set chain places it
+    // after Consume (so consumed_qty_last_tick is valid) and before Materialize.
     schedule.add_systems(
         crate::economy::attribution::run_citizen_attribution_system
             .in_set(EconomySet::Attribution)
