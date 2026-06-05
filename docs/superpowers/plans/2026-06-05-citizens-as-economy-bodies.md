@@ -388,102 +388,51 @@ git commit -m "feat: assign MarketBinding in spawn (when unassigned) and inherit
 
 ---
 
-### Task 4: Persist the binding + one-time mobility reset (schema bump, no shim)
+### Task 4: Persist the binding + one-time mobility reset (snapshot round-trip + documented DELETE)
 
-The binding is already in `AgentRecord` (Task 2). `AgentRecord` derives `Serialize/Deserialize`, so the new fields serialize automatically. Per project rule (no serde-default legacy shim, no heal-on-restore), the fields are **required**, and a schema bump discards old (v1) snapshots.
+The binding is already in `AgentRecord` as REQUIRED fields (Task 2), and the AgentRecord-level required-field tests already exist (`agent_record_rejects_missing_market_binding`, plus round-trips, Task 2). `AgentRecord` derives `Serialize/Deserialize`, so bindings persist automatically. This task adds a **snapshot-level** round-trip test and documents the operational one-time reset.
+
+**Verified persistence facts (do not re-derive):**
+- The live server uses `PostgresMobilitySnapshotStore` (`sim-server/src/app/mod.rs:434`). Its load (`postgres_mobility.rs:199-224`) selects the row `WHERE world_id = $1 AND base_world_schema_version = $3`, then `serde_json::from_value::<MobilityPersistSnapshot>(payload)`, returning a `MobilitySnapshotStoreError::unavailable(...)` (an error, fail-fast) if the payload won't deserialize.
+- The `SnapshotProvider::schema_version()`/`migrate()` trait (`world/persistence.rs`) is **NOT wired into the mobility postgres load path** — it is used only by tests and the economy/chunk provider abstraction. Therefore **bumping `MobilitySnapshotProvider::schema_version()` would be inert** and must NOT be done (it would be misleading dead config).
+- Adding the required binding fields means pre-existing mobility snapshots (lacking the fields) will fail `from_value` on load → fail-fast `unavailable`.
+- The codebase's clean reset for this (matching the established `DELETE FROM economy_snapshots` practice and the approved spec's "one-time mobility-state reset; existing dev saves lose accumulated ages/births") is a one-time **`DELETE FROM mobility_snapshots`** before deploying this slice. We do NOT add a serde-default shim, NOT a `migrate_legacy_agent_birth_ticks`-style SQL backfill (that is a heal-on-restore the project rule forbids), and NOT the inert provider schema bump.
 
 **Files:**
-- Modify: `backend/crates/sim-core/src/mobility/snapshot_provider.rs:14-40`
-- Verify: `backend/crates/sim-core/src/mobility/persist_snapshot.rs` round-trip (extract→apply via `AgentRecord`).
+- Modify: `backend/crates/sim-core/src/mobility/persist_snapshot.rs` (add a snapshot-level round-trip test)
+- Docs: deploy note (this plan + the PR) for the one-time `DELETE FROM mobility_snapshots`.
 
-- [ ] **Step 1: Confirm the host's version-gate behavior (read-only)**
+- [ ] **Step 1: (already verified above) — no code; the load gate is `base_world_schema_version` + `from_value`, and the reset is the documented DELETE. Proceed to the test.**
 
-Read `backend/crates/sim-core/src/world/persistence.rs` (the `SnapshotProvider` trait + `MigrationError`) and the sim-server snapshot store that loads snapshots (search for `schema_version` / `migrate(` usage in `backend/crates/sim-server/`). Confirm: when a stored item's `schema_version` is below the provider's current version, the host calls `migrate(raw, from_version)`; an `Err` from `migrate` means the snapshot is discarded and the world reseeds fresh. Note the exact `MigrationError` variant to return for "cannot migrate, reset."
+- [ ] **Step 2: Add a snapshot-level round-trip test (inline in `persist_snapshot.rs`)**
 
-- [ ] **Step 2: Write a failing serialization round-trip test (inline in `persist_snapshot.rs`)**
+The AgentRecord-level required-field + round-trip tests already exist (Task 2: `agent_record_rejects_missing_market_binding`, `market_binding_round_trips_through_spawn_and_extract`). This adds the FULL snapshot cycle: a citizen with a real binding survives `extract_from_world` → serialize → `from_value` → `apply_into_world`.
 
-Add at the end of `backend/crates/sim-core/src/mobility/persist_snapshot.rs`:
+Add a `#[cfg(test)]` test in `persist_snapshot.rs` that REUSES the existing persistence round-trip harness in `backend/crates/sim-core/src/tests/mobility_persistence_round_trip.rs` (or the `extract_from_world`/`apply_into_world` pattern used there). Concretely:
+1. Build a market-bearing source world (seed routing + `seed_from_markets_layer` + spawn at least one citizen so it gets a real binding `>= 9001`), OR construct a `MobilityPersistSnapshot` whose `agents` map contains an `AgentRecord` with `home_market = 9003, work_market = 9004`.
+2. `serde_json::to_value(&snap)` then `serde_json::from_value::<MobilityPersistSnapshot>(value)` and assert the agent record's `home_market`/`work_market` survive (proves payload-level persistence — the exact path `postgres_mobility.rs` uses).
+3. Then `apply_into_world(&mut fresh_world, snap)` into a freshly-installed mobility world that ALSO has markets seeded, and assert the spawned citizen entity carries the SAME `MarketBinding` (proves hydrate preserves it, and the spawn's assign-when-0 does NOT clobber an already-assigned binding).
+Use the real harness/fixtures; do not invent a world builder. If full `apply_into_world` setup is heavy, the `to_value`→`from_value` payload assertion (step 2) is the must-have; the `apply_into_world` assertion (step 3) is the strong form — include it if the existing harness makes it straightforward.
 
-```rust
-#[cfg(test)]
-mod binding_persistence_tests {
-    use super::*;
+- [ ] **Step 3: Run the test + the existing persistence suite**
 
-    #[test]
-    fn agent_record_roundtrips_market_binding() {
-        let mut rec = crate::mobility::AgentRecord::new_born_at(
-            crate::ids::AgentId("agent:walk:7".to_string()),
-            crate::mobility::AgentMobilityState::Walking {
-                link_id: "link:walk:corridor:0".to_string(),
-                progress: 0.0,
-            },
-            vec![],
-            0.05,
-            0,
-        );
-        rec.home_market = 9003;
-        rec.work_market = 9004;
-        let json = serde_json::to_string(&rec).unwrap();
-        let back: crate::mobility::AgentRecord = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.home_market, 9003);
-        assert_eq!(back.work_market, 9004);
-    }
-
-    #[test]
-    fn old_v1_record_without_binding_fails_to_deserialize() {
-        // A v1 AgentRecord JSON lacks home_market/work_market. Without serde-default,
-        // deserialization MUST fail — proving we rely on the schema bump, not a shim.
-        let v1 = r#"{"id":"agent:walk:7","state":{"Walking":{"link_id":"l","progress":0.0}},"plan":[],"plan_cursor":0,"walk_speed_per_tick":0.05,"birth_tick":0}"#;
-        let parsed: Result<crate::mobility::AgentRecord, _> = serde_json::from_str(v1);
-        assert!(parsed.is_err(), "v1 record must NOT deserialize (no serde-default shim)");
-    }
-}
-```
-
-- [ ] **Step 3: Run the test to verify it passes (fields required, v1 rejected)**
-
-Run: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core binding_persistence_tests -- --nocapture`
-Expected: both PASS. If `old_v1_record_without_binding_fails_to_deserialize` FAILS, a `#[serde(default)]` leaked onto the new fields — remove it (the fields must be required).
-
-- [ ] **Step 4: Bump the mobility schema version and refuse v1 migration**
-
-In `backend/crates/sim-core/src/mobility/snapshot_provider.rs`:
-
-```rust
-    fn schema_version(&self) -> u32 {
-        2
-    }
-```
-
-In `collect`, change the hardcoded `schema_version: 1` in the emitted `SnapshotItem` to `2`.
-
-In `migrate`, refuse anything older than 2 so the host discards it (use the variant confirmed in Step 1; shown here as `Unsupported`):
-
-```rust
-    fn migrate(&self, raw: SnapshotItem, from: u32) -> Result<SnapshotItem, MigrationError> {
-        if from >= 2 {
-            Ok(raw)
-        } else {
-            // v1 mobility snapshots predate MarketBinding. No shim, no heal-on-restore:
-            // discard and reseed fresh (one-time mobility-state reset).
-            Err(MigrationError::Unsupported { from, to: 2 })
-        }
-    }
-```
-
-> If the host does NOT auto-discard on `migrate` error, instead perform the documented one-time `DELETE FROM mobility_snapshots` in the sim-server store load path before accepting v2. Pick whichever the store actually supports (confirmed in Step 1). Either way: no serde-default, no heal-on-restore.
-
-- [ ] **Step 5: Run the snapshot-provider tests**
-
-Run: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core snapshot_provider -- --nocapture`
 Run: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core persist -- --nocapture`
-Expected: PASS (existing persistence tests still green; provider reports version 2).
+Run: `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p sim-core mobility_persistence -- --nocapture`
+Expected: PASS, including the new snapshot round-trip and all existing persistence tests (which Task 2 already updated for the required fields). Keep fmt + scoped clippy clean.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Document the one-time reset (no code shim)**
+
+Do NOT bump `MobilitySnapshotProvider::schema_version()` (inert for the postgres load path — see verified facts above). Instead, add a deploy note to this plan's final section and to the PR body:
+
+> **Deploy step (one-time):** before deploying this slice, run `DELETE FROM mobility_snapshots;` (per-world: `DELETE FROM mobility_snapshots WHERE world_id = '<id>';`). Existing mobility snapshots predate the required `home_market`/`work_market` fields and will fail to deserialize on load (`PostgresMobilitySnapshotStore` returns `unavailable`, fail-fast). This is the approved one-time mobility-state reset (existing dev saves lose accumulated ages/births). No serde-default shim, no SQL backfill, no schema-version bump.
+
+(There is nothing to implement in this step beyond the documentation; the fail-fast behavior is the intended surfacing of the consequence.)
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/crates/sim-core/src/mobility/snapshot_provider.rs backend/crates/sim-core/src/mobility/persist_snapshot.rs
-git commit -m "feat(persistence): persist MarketBinding; bump mobility schema v1→2 with one-time reset (no shim)"
+git add backend/crates/sim-core/src/mobility/persist_snapshot.rs docs/superpowers/plans/2026-06-05-citizens-as-economy-bodies.md
+git commit -m "test(persistence): snapshot-level MarketBinding round-trip; document one-time mobility-snapshots reset"
 ```
 
 ---
