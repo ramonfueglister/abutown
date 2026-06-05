@@ -536,10 +536,7 @@ fn health_response_for_state(state: &AppState) -> w::HealthResponse {
     let runtime_agents_ok = view.mobility_full_dto.agents.len() >= state.expected_base_world_agents;
     health.ok = health.ok
         && runtime_agents_ok
-        && !matches!(
-            persistence.status,
-            MobilityPersistenceHealthStatus::Degraded | MobilityPersistenceHealthStatus::Stale
-        );
+        && persistence.status != MobilityPersistenceHealthStatus::Stale;
     health.persistence = Some(persistence_health_to_proto(persistence));
     health
 }
