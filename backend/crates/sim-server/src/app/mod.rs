@@ -800,6 +800,14 @@ async fn stream_world_deltas(mut socket: WebSocket, state: AppState) {
     if send_server_message(&mut socket, hello).await.is_err() {
         return;
     }
+    let economy_msg = w::ServerMessage {
+        body: Some(w::server_message::Body::EconomySnapshot(
+            state.view().load().economy.clone(),
+        )),
+    };
+    if send_server_message(&mut socket, economy_msg).await.is_err() {
+        return;
+    }
 
     let mut connection = ConnectionState::new();
 
@@ -1126,6 +1134,12 @@ async fn tick_once(
         }
     };
     let _ = deltas.send(pulse_msg);
+    let economy_msg = w::ServerMessage {
+        body: Some(w::server_message::Body::EconomySnapshot(
+            view.load().economy.clone(),
+        )),
+    };
+    let _ = deltas.send(economy_msg);
 }
 
 fn chunk_snapshot_to_dto(
