@@ -68,6 +68,7 @@ function baseOptions(): RuntimeDiagnosticsOptions {
       agentInspector: null,
       vehicleInspector: null,
     }),
+    getEconomyMarketCount: () => 0,
     projectEntityScreen: (coord) => ({ x: coord.x + 100, y: coord.y + 200 }),
     carVisualWorldPoint: (vehicle) => vehicle.path[0],
     now: () => 1234,

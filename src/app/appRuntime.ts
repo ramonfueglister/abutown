@@ -15,6 +15,7 @@ import {
   type RequiredMobility,
 } from '../backend/mobilityClient';
 import type { MobilityOverlayState } from '../backend/mobilityState';
+import type { EconomyOverlayState } from '../backend/economyState';
 import {
   mountCardHandView as mountCardHandViewRuntime,
   type CardHandViewOptions,
@@ -49,6 +50,7 @@ export type StartAppRuntimeOptions = {
   viewport: MobilityViewportGetters;
   onInitialState: (initialState: AppRuntimeInitialState) => void;
   onMobilityState: (state: MobilityOverlayState) => void;
+  onEconomyState?: (state: EconomyOverlayState) => void;
   dependencies: AppRuntimeDependencies;
 };
 
@@ -94,6 +96,7 @@ export async function startAppRuntime(options: StartAppRuntimeOptions): Promise<
       baseUrl: backendBaseUrl,
       initialState: required.state,
       onState: options.onMobilityState,
+      onEconomyState: options.onEconomyState,
       viewport: options.viewport,
     });
 

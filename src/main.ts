@@ -18,6 +18,7 @@ import type { BaseWorldResponse, BaseWorldTerrainKind } from './backend/baseWorl
 import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, type MobilityOverlayState } from './backend/mobilityState';
+import { createEconomyOverlayState, type EconomyOverlayState } from './backend/economyState';
 import {
   createCameraState,
   dampCamera,
@@ -44,6 +45,10 @@ import {
   buildBackendCarInspector,
   buildBackendPedestrianInspector,
 } from './render/entityInspector';
+import {
+  MARKET_INSPECTOR_PANEL,
+  drawMarketInspectorPanel,
+} from './render/inspectorPanelPainter';
 import { carVisualWorldPoint } from './render/entityRenderStyle';
 import type { TerrainKind, WorldDetail } from './city/worldTypes';
 
@@ -91,14 +96,14 @@ let pedestrianSprites: MinimalPedestrianSprite[] = [];
 let previousTime = performance.now();
 let backendStatus: BackendHealthDto | null = null;
 let mobilityState: MobilityOverlayState = createMobilityOverlayState();
+let economyState: EconomyOverlayState = createEconomyOverlayState();
 let mobilityTickPeriodMs = 100;
 let simTime = 0;
 let mobilityBackendBridge: MobilityBackendBridge | null = null;
 const entitySelection = createEntitySelection<BackendPedestrian, BackendCar>({
   getPedestrians: () => pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs),
   getVehicles: () => carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs),
-  // C5 will supply markets from the economy overlay state; stub empty until then.
-  getMarkets: () => [],
+  getMarkets: () => [...economyState.markets.values()].map((m) => ({ x: m.tileX, y: m.tileY })),
   screenToWorld,
   projectPedestrian: (agent) => iso(agent.path[0]),
   projectVehicle: (car) => carVisualWorldPoint(car, camera.scale, tileSize),
@@ -116,6 +121,9 @@ async function startRuntime(): Promise<void> {
     onInitialState: applyInitialRuntimeState,
     onMobilityState: (state) => {
       mobilityState = state;
+    },
+    onEconomyState: (state) => {
+      economyState = state;
     },
     viewport: {
       // Compose screen → render-world → tile so visibleChunks gets coords
@@ -231,9 +239,25 @@ function render(): void {
     pedestrianSprites,
     selectedAgentId: entitySelection.selectedAgentId(),
     selectedVehicleId: entitySelection.selectedVehicleId(),
+    markets: [...economyState.markets.values()],
     now: Date.now,
     simTime,
   });
+
+  // Draw the market inspector panel in screen space after the main scene,
+  // mirroring how agent/vehicle inspector panels are drawn inside renderMinimalMap.
+  const selectedMarketCoord = entitySelection.selectedMarketCoord();
+  if (selectedMarketCoord !== null) {
+    const market = [...economyState.markets.values()].find(
+      (m) => m.tileX === selectedMarketCoord.x && m.tileY === selectedMarketCoord.y,
+    );
+    if (market) {
+      const goods = [...economyState.goods.entries()]
+        .filter(([k]) => k.startsWith(`${market.marketId}:`))
+        .map(([, v]) => v);
+      drawMarketInspectorPanel(ctx, market, goods, MARKET_INSPECTOR_PANEL, window.devicePixelRatio || 1);
+    }
+  }
 }
 
 function applyBaseWorld(baseWorld: BaseWorldResponse): void {
@@ -469,6 +493,7 @@ installRuntimeDiagnostics(window, {
     invalidBuildings: invalidBuildingCount(),
     treeBuildingOverlap: treeBuildingOverlapCount(),
   }),
+  getEconomyMarketCount: () => economyState.markets.size,
   getSelected: () => ({
     agentId: entitySelection.selectedAgentId(),
     vehicleId: entitySelection.selectedVehicleId(),

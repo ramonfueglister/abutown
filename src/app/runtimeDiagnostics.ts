@@ -75,6 +75,7 @@ export type RuntimeDiagnosticsOptions = {
     agentInspector: RuntimeInspector;
     vehicleInspector: RuntimeInspector;
   };
+  getEconomyMarketCount: () => number;
   projectEntityScreen: (coord: Coord) => Coord;
   carVisualWorldPoint: (vehicle: BackendCar) => Coord;
   now: () => number;
@@ -182,6 +183,7 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       },
       agentInspector: selected.agentInspector,
       vehicleInspector: selected.vehicleInspector,
+      economyMarketCount: options.getEconomyMarketCount(),
       railStations: counts.railStations,
       railYardTracks: counts.railYardTracks,
       details: detailCounts,
