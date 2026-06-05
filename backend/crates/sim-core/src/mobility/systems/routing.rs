@@ -58,6 +58,10 @@ pub(crate) fn economic_destination(
     geometric: crate::routing::NodeId,
     targets: Option<&crate::mobility::resources::CitizenEconomicTargets>,
 ) -> crate::routing::NodeId {
+    // "activity:destination" is the canonical id for the economic (away-from-home)
+    // leg, authored by `mobility::seed` (and inherited by births). No shared const
+    // exists yet — the seeder builds the id inline across several sites — so this
+    // string match couples the override to that naming by convention (Slice 1 scope).
     if let PlanStage::WalkToActivity { activity_id, .. } = stage
         && activity_id == "activity:destination"
         && let Some(t) = targets
@@ -233,9 +237,10 @@ pub fn route_assignment_system(
         };
         // Deterministic one-tick lag: EconomySet::Attribution and MobilitySet::Advance
         // have no explicit ordering edge in the schedule (both only constrain themselves
-        // before tick_increment_system / MobilitySet::Bookkeeping). CitizenEconomicTargets
-        // reflects last tick's attribution. This is acceptable — economic destination
-        // assignments are stable across ticks and the one-tick lag is deterministic.
+        // before tick_increment_system / MobilitySet::Bookkeeping), so this may read the
+        // prior tick's CitizenEconomicTargets. CitizenEconomicTargets is written exactly
+        // once per tick by EconomySet::Attribution and read once here, so the lag is
+        // deterministic and bounded to one tick — acceptable for Slice 1.
         let destination =
             economic_destination(&stage, &stable.0, geometric_destination, targets.as_deref());
         let Some(origin) = current_route_origin(&graph, &link_id, progress) else {
