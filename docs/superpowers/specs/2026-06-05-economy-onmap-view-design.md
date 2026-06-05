@@ -140,10 +140,11 @@ byte-identical round-trip test (§Testing) guards this.
 
 ### B.1 Protocol
 
-Add a new `ServerMessage` oneof **case tag 6** (`EconomySnapshot` /
-`EconomyDelta`, **global** not per-chunk — see B.3) in
-`backend/crates/protocol/proto/abutown.proto` (tags 1–5 are
-taken: chunk snapshot, TilePulse, mobility delta, mobility snapshot, WorldEvent).
+Add a new `ServerMessage` oneof **case tag 7** (`EconomySnapshot`, **global**
+not per-chunk — see B.3; the plan ships one thin snapshot on connect + per tick
+rather than a separate delta) in
+`backend/crates/protocol/proto/abutown.proto` (tags 1–6 are
+taken: Hello, TilePulse, mobility delta, mobility snapshot, WorldEvent, ServerError).
 Bump `PROTOCOL_VERSION`. Populate from a **new economy field on `RuntimeReadView`**
 (`backend/crates/sim-server/src/runtime_view.rs`, currently mobility-only).
 
