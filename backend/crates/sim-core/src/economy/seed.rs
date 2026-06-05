@@ -8,7 +8,8 @@
 use bevy_ecs::prelude::*;
 
 use crate::economy::production::{
-    EXTRACTOR, ProductionPool, ProductionPools, RawDeposit, RawDeposits, Recipe,
+    EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS, ProductionPool, ProductionPools,
+    RawDeposit, RawDeposits, Recipe,
 };
 use crate::economy::systems::EconomyConfig;
 use crate::economy::transport::manhattan_tiles;
@@ -120,22 +121,22 @@ pub fn seed_demo_economy(world: &mut World) {
             last_generated_tick: None,
         },
     );
-    // ── Continuous goods source: the EXTRACTOR (Sub-Slice A) ──────────────────
+    // ── Continuous goods source: the EXTRACTOR_TOOLS (Sub-Slice A) ──────────────────
     // A standing faucet of GOOD_RAW (non-tradable) + a RAW->TOOLS recipe + a TOOLS
     // SupplyPool at m_a. Seeded ALONGSIDE the finite supplier 8_001: the 1M TOOLS
-    // endowment drains, the EXTRACTOR becomes the standing source. RAW is NEVER placed
+    // endowment drains, the EXTRACTOR_TOOLS becomes the standing source. RAW is NEVER placed
     // on a pool/market (structurally non-tradable). REGEN_QTY=10 is fixed by the §15.2
     // Sizing-Sim (tests/production.rs::regen_rate_covers_aggregate_tools_demand_at_seed):
     // aggregate seed TOOLS demand is 10/tick (consumer 8_002), so 10/tick exactly covers
-    // it and matches the finite supplier's offered rate. FOOD is intentionally left on
-    // the draining 1M endowment (no RAW->FOOD extractor this slice — recorded decision).
+    // it and matches the finite supplier's offered rate. FOOD gets its OWN two co-located
+    // extractors below (one per FOOD supply market m_a/m_fa) — see the FOOD-extractor block.
     const REGEN_QTY: Quantity = Quantity(10);
     world
         .resource_mut::<InventoryBook>()
-        .deposit(EXTRACTOR, GOOD_RAW, REGEN_QTY)
+        .deposit(EXTRACTOR_TOOLS, GOOD_RAW, REGEN_QTY)
         .expect("seed: extractor opening raw stock");
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: REGEN_QTY,
@@ -144,9 +145,9 @@ pub fn seed_demo_economy(world: &mut World) {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR,
+            actor: EXTRACTOR_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, REGEN_QTY)],
                 outputs: vec![(GOOD_TOOLS, REGEN_QTY)],
@@ -156,9 +157,9 @@ pub fn seed_demo_economy(world: &mut World) {
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR,
+            actor: EXTRACTOR_TOOLS,
             market: m_a,
             good: GOOD_TOOLS,
             offered_qty_per_tick: REGEN_QTY,
@@ -326,6 +327,56 @@ pub fn seed_demo_economy(world: &mut World) {
             autonomous: Money(5_000),
         },
     );
+    // ── Continuous FOOD source: two co-located extractors (FOOD self-sufficiency) ──────
+    // Mirror of EXTRACTOR_TOOLS, one per FOOD supply market (m_a, m_fa), seeded ALONGSIDE
+    // the finite food suppliers 8_011/8_021 (drain-then-handover). Reuses GOOD_RAW (per-actor
+    // faucet — no contention; each extractor regens+consumes its own RAW the same tick). RAW
+    // is NEVER placed on a pool/market. REGEN_QTY_FOOD=10 covers the 10/tick demand routed to
+    // each supply market via MarketDistances (8_012@m_b sourced from m_a; 8_022@m_fb from m_fa).
+    // Supply and demand are CROSS-market: m_a feeds m_b, m_fa feeds m_fb (no m_a<->m_fb distance).
+    // These extractors are FIRMS (sellers): their FOOD-sale revenue flows through the existing
+    // #75 money circuit (run_pay_wages_at_tick + run_distribute_profit_at_tick -> households),
+    // so FOOD's money loop closes like TOOLS. They are NOT in pool_weights (firms, not households).
+    const REGEN_QTY_FOOD: Quantity = Quantity(10);
+    for (extractor, supply_market) in [(EXTRACTOR_FOOD_A, m_a), (EXTRACTOR_FOOD_FA, m_fa)] {
+        world
+            .resource_mut::<InventoryBook>()
+            .deposit(extractor, GOOD_RAW, REGEN_QTY_FOOD)
+            .expect("seed: food extractor opening raw stock");
+        world.resource_mut::<RawDeposits>().0.insert(
+            extractor,
+            RawDeposit {
+                good: GOOD_RAW,
+                qty_per_interval: REGEN_QTY_FOOD,
+                interval_ticks: 1,
+                last_regen_tick: None,
+            },
+        );
+        world.resource_mut::<ProductionPools>().0.insert(
+            extractor,
+            ProductionPool {
+                actor: extractor,
+                recipe: Recipe {
+                    inputs: vec![(GOOD_RAW, REGEN_QTY_FOOD)],
+                    outputs: vec![(GOOD_FOOD, REGEN_QTY_FOOD)],
+                },
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+        world.resource_mut::<SupplyPools>().0.insert(
+            extractor,
+            SupplyPool {
+                actor: extractor,
+                market: supply_market,
+                good: GOOD_FOOD,
+                offered_qty_per_tick: REGEN_QTY_FOOD,
+                min_price: Money(500),
+                interval_ticks: 1,
+                last_generated_tick: None,
+            },
+        );
+    }
     // ── SFC household sector: equal-weight payout across ALL seeded consumer pools ──
     // Placed AFTER all DemandPool insertions (consumer 8_002, food_consumer 8_012,
     // flow_consumer 8_022) so that every pool is captured in pool_weights.

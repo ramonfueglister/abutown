@@ -298,11 +298,12 @@ fn partial_fill_conserves_money_and_goods() {
 #[test]
 fn conservation_full_plugin_multi_tick() {
     use crate::economy::production::{
-        EXTRACTOR, ProductionPool, ProductionPools, RawDeposit, RawDeposits, Recipe,
+        EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit,
+        RawDeposits, Recipe,
     };
     use crate::economy::{
         AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyEvent, EconomyPlugin,
-        GOOD_RAW, GOOD_TOOLS, GoodId, HouseholdSector, InventoryBook, MarketGoodKey,
+        GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, GoodId, HouseholdSector, InventoryBook, MarketGoodKey,
         MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
         SupplyPools, TradeLedger,
     };
@@ -322,7 +323,7 @@ fn conservation_full_plugin_multi_tick() {
     let market = MarketId(1);
 
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -331,9 +332,9 @@ fn conservation_full_plugin_multi_tick() {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR,
+            actor: EXTRACTOR_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(10))],
                 outputs: vec![(GOOD_TOOLS, Quantity(10))],
@@ -343,9 +344,9 @@ fn conservation_full_plugin_multi_tick() {
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR,
+            actor: EXTRACTOR_TOOLS,
             market,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),
@@ -376,6 +377,64 @@ fn conservation_full_plugin_multi_tick() {
             autonomous: Money(5_000),
         },
     );
+    // FOOD self-sufficiency: a parallel FOOD extractor + FOOD consumer at the SAME market
+    // (single-market auction), proving FOOD conserves and flows exactly like TOOLS.
+    let food_consumer = EconomicActorId(8_012);
+    world.resource_mut::<RawDeposits>().0.insert(
+        EXTRACTOR_FOOD_A,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: Quantity(10),
+            interval_ticks: 1,
+            last_regen_tick: None,
+        },
+    );
+    world.resource_mut::<ProductionPools>().0.insert(
+        EXTRACTOR_FOOD_A,
+        ProductionPool {
+            actor: EXTRACTOR_FOOD_A,
+            recipe: Recipe {
+                inputs: vec![(GOOD_RAW, Quantity(10))],
+                outputs: vec![(GOOD_FOOD, Quantity(10))],
+            },
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<SupplyPools>().0.insert(
+        EXTRACTOR_FOOD_A,
+        SupplyPool {
+            actor: EXTRACTOR_FOOD_A,
+            market,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(food_consumer, Money(10_000_000))
+        .unwrap();
+    world.resource_mut::<DemandPools>().0.insert(
+        food_consumer,
+        DemandPool {
+            actor: food_consumer,
+            market,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(10),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        },
+    );
     world.resource_mut::<Markets>().0.insert(
         market,
         MarketSite {
@@ -386,7 +445,7 @@ fn conservation_full_plugin_multi_tick() {
     );
     world.insert_resource(HouseholdSector {
         population: 1_000_000,
-        pool_weights: BTreeMap::from([(consumer, 1_i64)]),
+        pool_weights: BTreeMap::from([(consumer, 1_i64), (food_consumer, 1_i64)]),
     });
     {
         let key = MarketGoodKey {
@@ -401,8 +460,21 @@ fn conservation_full_plugin_multi_tick() {
         st.ewma_reference_price = Money(1_000);
         st.last_settlement_price = Money(1_000);
     }
+    {
+        let key = MarketGoodKey {
+            market,
+            good: GOOD_FOOD,
+        };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let st = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        st.ewma_reference_price = Money(1_000);
+        st.last_settlement_price = Money(1_000);
+    }
 
-    let goods_to_track = [GOOD_RAW, GOOD_TOOLS];
+    let goods_to_track = [GOOD_RAW, GOOD_TOOLS, GOOD_FOOD];
     let money_before = world.resource::<AccountBook>().total_money().unwrap();
     let mut good_before: BTreeMap<GoodId, i64> = BTreeMap::new();
     for g in goods_to_track {
@@ -454,6 +526,50 @@ fn conservation_full_plugin_multi_tick() {
         );
     }
 
+    // Per-actor RAW balance: with two extractors sharing GOOD_RAW, each must have regenerated
+    // exactly as much RAW as it consumed (no shared-RAW double-spend / cross-actor leak).
+    for actor in [EXTRACTOR_TOOLS, EXTRACTOR_FOOD_A] {
+        let regen: i64 = world
+            .resource::<TradeLedger>()
+            .0
+            .iter()
+            .filter_map(|e| match e {
+                EconomyEvent::Regenerated {
+                    actor: a,
+                    good,
+                    qty,
+                } if *a == actor && *good == GOOD_RAW => Some(qty.0),
+                _ => None,
+            })
+            .sum();
+        let consumed: i64 = world
+            .resource::<TradeLedger>()
+            .0
+            .iter()
+            .filter_map(|e| match e {
+                EconomyEvent::Consumed {
+                    actor: a,
+                    good,
+                    qty,
+                } if *a == actor && *good == GOOD_RAW => Some(qty.0),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(
+            regen, consumed,
+            "actor {actor:?}: RAW regenerated == consumed over the run"
+        );
+    }
+    // FOOD flowed (non-vacuity for the new good).
+    assert!(
+        world
+            .resource::<TradeLedger>()
+            .0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::Produced { good, .. } if *good == GOOD_FOOD)),
+        "FOOD was produced"
+    );
+
     // Non-vacuity: at least some ledger events must have been emitted (goods flowed).
     // Net-ledger values balance to 0 in a working system (Regenerated+Consumed cancel,
     // Produced+FinalConsumed cancel), so we check that ANY events were recorded, not
@@ -468,7 +584,7 @@ fn conservation_full_plugin_multi_tick() {
             .0
             .iter()
             .any(|e| matches!(e, EconomyEvent::Regenerated { .. })),
-        "EXTRACTOR regenerated RAW"
+        "EXTRACTOR_TOOLS regenerated RAW"
     );
     assert!(
         world
@@ -483,13 +599,14 @@ fn conservation_full_plugin_multi_tick() {
 #[test]
 fn steady_state_multi_tick() {
     use crate::economy::production::{
-        EXTRACTOR, ProductionPool, ProductionPools, RawDeposit, RawDeposits, Recipe,
+        EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit,
+        RawDeposits, Recipe,
     };
     use crate::economy::{
         AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyEvent, EconomyPlugin,
-        GOOD_RAW, GOOD_TOOLS, HouseholdSector, InventoryBook, MarketGoodKey, MarketGoodState,
-        MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools,
-        TradeLedger,
+        GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, HouseholdSector, InventoryBook, MarketGoodKey,
+        MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
+        SupplyPools, TradeLedger,
     };
     use crate::mobility::resources::Tick;
     use crate::world::plugin::CorePlugin;
@@ -514,9 +631,9 @@ fn steady_state_multi_tick() {
     let consumer = EconomicActorId(8_002);
     let market = MarketId(1);
 
-    // EXTRACTOR is the ONLY supplier (no finite 1M endowment to mask steady state).
+    // EXTRACTOR_TOOLS is the ONLY supplier (no finite 1M endowment to mask steady state).
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -525,9 +642,9 @@ fn steady_state_multi_tick() {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR,
+            actor: EXTRACTOR_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(10))],
                 outputs: vec![(GOOD_TOOLS, Quantity(10))],
@@ -537,9 +654,9 @@ fn steady_state_multi_tick() {
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR,
+            actor: EXTRACTOR_TOOLS,
             market,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),
@@ -571,6 +688,62 @@ fn steady_state_multi_tick() {
             autonomous: Money(5_000),
         },
     );
+    let food_consumer = EconomicActorId(8_012);
+    world.resource_mut::<RawDeposits>().0.insert(
+        EXTRACTOR_FOOD_A,
+        RawDeposit {
+            good: GOOD_RAW,
+            qty_per_interval: Quantity(10),
+            interval_ticks: 1,
+            last_regen_tick: None,
+        },
+    );
+    world.resource_mut::<ProductionPools>().0.insert(
+        EXTRACTOR_FOOD_A,
+        ProductionPool {
+            actor: EXTRACTOR_FOOD_A,
+            recipe: Recipe {
+                inputs: vec![(GOOD_RAW, Quantity(10))],
+                outputs: vec![(GOOD_FOOD, Quantity(10))],
+            },
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world.resource_mut::<SupplyPools>().0.insert(
+        EXTRACTOR_FOOD_A,
+        SupplyPool {
+            actor: EXTRACTOR_FOOD_A,
+            market,
+            good: GOOD_FOOD,
+            offered_qty_per_tick: Quantity(10),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(food_consumer, Money(1_000_000))
+        .unwrap();
+    world.resource_mut::<DemandPools>().0.insert(
+        food_consumer,
+        DemandPool {
+            actor: food_consumer,
+            market,
+            good: GOOD_FOOD,
+            desired_qty_per_tick: Quantity(0),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        },
+    );
     world.resource_mut::<Markets>().0.insert(
         market,
         MarketSite {
@@ -581,12 +754,25 @@ fn steady_state_multi_tick() {
     );
     world.insert_resource(HouseholdSector {
         population: 1_000_000,
-        pool_weights: BTreeMap::from([(consumer, 1_i64)]),
+        pool_weights: BTreeMap::from([(consumer, 1_i64), (food_consumer, 1_i64)]),
     });
     {
         let key = MarketGoodKey {
             market,
             good: GOOD_TOOLS,
+        };
+        let mut goods = world.resource_mut::<MarketGoods>();
+        let st = goods
+            .0
+            .entry(key)
+            .or_insert_with(|| MarketGoodState::new(key));
+        st.ewma_reference_price = Money(1_000);
+        st.last_settlement_price = Money(1_000);
+    }
+    {
+        let key = MarketGoodKey {
+            market,
+            good: GOOD_FOOD,
         };
         let mut goods = world.resource_mut::<MarketGoods>();
         let st = goods
@@ -604,6 +790,7 @@ fn steady_state_multi_tick() {
     let mut consumer_bal_tail: Vec<i64> = Vec::new();
     let mut ext_bal_tail: Vec<i64> = Vec::new();
     let mut traded_tail: Vec<i64> = Vec::new();
+    let mut food_traded_tail: Vec<i64> = Vec::new();
     let mut tools_total_tail: Vec<i64> = Vec::new();
 
     for i in 0..n {
@@ -618,9 +805,9 @@ fn steady_state_multi_tick() {
         if i >= n - k {
             let accounts = world.resource::<AccountBook>();
             consumer_bal_tail.push(accounts.account(consumer).available.0);
-            // EXTRACTOR is the sole firm seller. With full distribution it nets ~0 each tick;
+            // EXTRACTOR_TOOLS is the sole firm seller. With full distribution it nets ~0 each tick;
             // the tail spread bounds "no unbounded retained earnings".
-            ext_bal_tail.push(accounts.account(EXTRACTOR).available.0);
+            ext_bal_tail.push(accounts.account(EXTRACTOR_TOOLS).available.0);
 
             let key = MarketGoodKey {
                 market,
@@ -633,6 +820,18 @@ fn steady_state_multi_tick() {
                 .map(|s| s.traded_qty_last_tick.0)
                 .unwrap_or(0);
             traded_tail.push(traded);
+
+            let food_key = MarketGoodKey {
+                market,
+                good: GOOD_FOOD,
+            };
+            let food_traded = world
+                .resource::<MarketGoods>()
+                .0
+                .get(&food_key)
+                .map(|s| s.traded_qty_last_tick.0)
+                .unwrap_or(0);
+            food_traded_tail.push(food_traded);
 
             tools_total_tail.push(
                 world
@@ -647,13 +846,13 @@ fn steady_state_multi_tick() {
     let min = |v: &[i64]| *v.iter().min().unwrap();
     let max = |v: &[i64]| *v.iter().max().unwrap();
 
-    // (b) EXTRACTOR balance bounded over the tail (no unbounded retained earnings).
+    // (b) EXTRACTOR_TOOLS balance bounded over the tail (no unbounded retained earnings).
     // Full distribution ⇒ the firm nets to ~zero each tick; allow a small epsilon for
     // intra-tick rounding remainders left by floor wage/dividend (never minted).
     let seller_eps: i64 = 1_000;
     assert!(
         max(&ext_bal_tail) - min(&ext_bal_tail) < seller_eps,
-        "EXTRACTOR balance bounded over tail (max-min={} < {seller_eps}); tail={:?}",
+        "EXTRACTOR_TOOLS balance bounded over tail (max-min={} < {seller_eps}); tail={:?}",
         max(&ext_bal_tail) - min(&ext_bal_tail),
         ext_bal_tail
     );
@@ -682,6 +881,22 @@ fn steady_state_multi_tick() {
         "traded_qty band ratio hi/lo < 5 (hi={tr_hi}, lo={tr_lo})"
     );
 
+    // FOOD market also lives in a bounded band (lo > 0) — FOOD self-sustains identically.
+    // PRECONDITION (spec §8): TOOLS and FOOD share identical opening prices (Money(1_000))
+    // and equal pool_weights, so the two goods stay symmetric and these bands mirror TOOLS'.
+    // If a band fails, a REAL asymmetry exists (e.g. divergent ewma_reference_price) — STOP
+    // and investigate; do NOT loosen the band to force green.
+    let f_lo = min(&food_traded_tail);
+    let f_hi = max(&food_traded_tail);
+    assert!(
+        f_lo > 0,
+        "FOOD market traded every tick in steady state (lo={f_lo})"
+    );
+    assert!(
+        (f_hi as i128) < (f_lo as i128) * 5,
+        "FOOD traded_qty band hi/lo < 5 (hi={f_hi}, lo={f_lo})"
+    );
+
     // (d) total_good(GOOD_TOOLS) bounded (not monotonic growth/collapse). With regen=10 and
     // consumption ~10/tick the on-hand TOOLS stays small and bounded.
     let tools_lo = min(&tools_total_tail);
@@ -706,5 +921,10 @@ fn steady_state_multi_tick() {
     assert!(
         ev.iter().any(|e| matches!(e, EconomyEvent::Trade { .. })),
         "trades cleared"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, EconomyEvent::Produced { good, .. } if *good == GOOD_FOOD)),
+        "food produced"
     );
 }

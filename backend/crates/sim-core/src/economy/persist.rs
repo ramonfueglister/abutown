@@ -44,7 +44,7 @@ pub struct EconomyPersistSnapshot {
     pub demand_pools: Vec<(EconomicActorId, DemandPool)>,
     pub supply_pools: Vec<(EconomicActorId, SupplyPool)>,
     pub production_pools: Vec<(EconomicActorId, ProductionPool)>,
-    /// The raw-goods faucets (EXTRACTOR + future extractors). Mirrors `production_pools`;
+    /// The raw-goods faucets (EXTRACTOR_TOOLS + future extractors). Mirrors `production_pools`;
     /// persisted so the `last_regen_tick` cursor survives restart (frozen-time model). New
     /// non-default snapshot field; old rows fail to deserialize (one-time
     /// `DELETE FROM economy_snapshots` before deploy). NO serde-default.

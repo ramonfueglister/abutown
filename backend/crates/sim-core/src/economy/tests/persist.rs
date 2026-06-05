@@ -383,11 +383,11 @@ fn ledger_tail_is_capped_and_round_trips() {
 #[test]
 fn raw_deposits_round_trip() {
     use crate::economy::GOOD_RAW;
-    use crate::economy::production::{EXTRACTOR, RawDeposit, RawDeposits};
+    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits};
 
     let mut world = install_economy();
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR,
+        EXTRACTOR_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -400,7 +400,7 @@ fn raw_deposits_round_trip() {
     assert_eq!(
         snap.raw_deposits,
         vec![(
-            EXTRACTOR,
+            EXTRACTOR_TOOLS,
             RawDeposit {
                 good: GOOD_RAW,
                 qty_per_interval: Quantity(10),
@@ -416,13 +416,64 @@ fn raw_deposits_round_trip() {
     let mut fresh = install_economy();
     apply_into_world(&mut fresh, &decoded);
 
-    let restored = fresh.resource::<RawDeposits>().0[&EXTRACTOR];
+    let restored = fresh.resource::<RawDeposits>().0[&EXTRACTOR_TOOLS];
     assert_eq!(restored.last_regen_tick, Some(42));
     assert_eq!(restored.qty_per_interval, Quantity(10));
     assert_eq!(
         snap,
         extract_from_world(&fresh),
         "full snapshot identity with raw_deposits"
+    );
+}
+
+#[test]
+fn three_extractor_raw_deposits_round_trip() {
+    use crate::economy::GOOD_RAW;
+    use crate::economy::production::{
+        EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS, RawDeposit, RawDeposits,
+    };
+
+    let mut world = install_economy();
+    for (actor, cursor) in [
+        (EXTRACTOR_TOOLS, Some(7u64)),
+        (EXTRACTOR_FOOD_A, Some(11)),
+        (EXTRACTOR_FOOD_FA, None),
+    ] {
+        world.resource_mut::<RawDeposits>().0.insert(
+            actor,
+            RawDeposit {
+                good: GOOD_RAW,
+                qty_per_interval: Quantity(10),
+                interval_ticks: 1,
+                last_regen_tick: cursor,
+            },
+        );
+    }
+
+    let snap = extract_from_world(&world);
+    assert_eq!(
+        snap.raw_deposits.len(),
+        3,
+        "all three extractor deposits persist"
+    );
+    // Sorted by EconomicActorId (8_031, 8_032, 8_033).
+    assert_eq!(snap.raw_deposits[0].0, EXTRACTOR_TOOLS);
+    assert_eq!(snap.raw_deposits[1].0, EXTRACTOR_FOOD_A);
+    assert_eq!(snap.raw_deposits[2].0, EXTRACTOR_FOOD_FA);
+
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+    assert_eq!(fresh.resource::<RawDeposits>().0.len(), 3);
+    assert_eq!(
+        fresh.resource::<RawDeposits>().0[&EXTRACTOR_FOOD_A].last_regen_tick,
+        Some(11)
+    );
+    assert_eq!(
+        snap,
+        extract_from_world(&fresh),
+        "full snapshot identity with three raw_deposits"
     );
 }
 
