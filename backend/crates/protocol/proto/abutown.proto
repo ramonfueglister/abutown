@@ -59,7 +59,34 @@ message ServerMessage {
     MobilityChunkSnapshot mobility_chunk_snapshot = 4;
     WorldEvent world_event = 5;
     ServerError error = 6;
+    EconomySnapshot economy_snapshot = 7;
   }
+}
+
+message EconomySnapshot {
+  uint32 protocol_version = 1;
+  string world_id = 2;
+  uint64 tick = 3;
+  repeated EconomyMarket markets = 4;
+  repeated EconomyMarketGood goods = 5;
+}
+
+message EconomyMarket {
+  uint32 market_id = 1;
+  string name = 2;
+  sint32 tile_x = 3;
+  sint32 tile_y = 4;
+  int64 wage_paid_last_tick = 5; // raw i64; client divides by ECONOMY_SCALE (1000) for display
+}
+
+message EconomyMarketGood {
+  uint32 market_id = 1;
+  uint32 good_id = 2;
+  int64 last_settlement_price = 3;
+  int64 ewma_reference_price = 4;
+  int64 traded_qty_last_tick = 5;
+  int64 unmet_demand_last_tick = 6;
+  int64 unsold_supply_last_tick = 7;
 }
 
 message ServerError {

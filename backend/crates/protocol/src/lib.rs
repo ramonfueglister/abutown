@@ -713,6 +713,34 @@ mod proto_roundtrip_tests {
     }
 
     #[test]
+    fn roundtrip_economy_snapshot() {
+        let msg = ServerMessage {
+            body: Some(server_message::Body::EconomySnapshot(EconomySnapshot {
+                protocol_version: u32::from(super::PROTOCOL_VERSION),
+                world_id: "abutopia".into(),
+                tick: 42,
+                markets: vec![EconomyMarket {
+                    market_id: 9001,
+                    name: "Demo A".into(),
+                    tile_x: 2,
+                    tile_y: 3,
+                    wage_paid_last_tick: 320,
+                }],
+                goods: vec![EconomyMarketGood {
+                    market_id: 9002,
+                    good_id: 4,
+                    last_settlement_price: 5000,
+                    ewma_reference_price: 5100,
+                    traded_qty_last_tick: 10,
+                    unmet_demand_last_tick: 0,
+                    unsold_supply_last_tick: 0,
+                }],
+            })),
+        };
+        assert_roundtrip(&msg);
+    }
+
+    #[test]
     fn roundtrip_world_summary() {
         let msg = WorldSummary {
             protocol_version: 16,
