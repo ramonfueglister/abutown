@@ -22,6 +22,11 @@ import {
   markMobilityDisconnected,
   type MobilityOverlayState,
 } from './mobilityState';
+import {
+  applyEconomyServerMessage,
+  createEconomyOverlayState,
+  type EconomyOverlayState,
+} from './economyState';
 import { visibleChunks } from '../render/viewportChunks';
 
 export type MobilityBackendBridge = {
@@ -47,6 +52,7 @@ export type MobilityBackendBridgeOptions = {
   fetchImpl?: typeof fetch;
   WebSocketImpl?: typeof WebSocket;
   onState?: (state: MobilityOverlayState) => void;
+  onEconomyState?: (state: EconomyOverlayState) => void;
   initialState?: MobilityOverlayState;
   now?: () => number;
   setTimeoutImpl?: typeof setTimeout;
@@ -117,6 +123,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
   const clearIntervalFn = options.clearIntervalImpl ?? globalThis.clearInterval.bind(globalThis);
 
   let currentState = options.initialState ?? markMobilityConnecting(createMobilityOverlayState(), now());
+  let currentEconomyState = createEconomyOverlayState();
   let stopped = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -203,6 +210,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
       try {
         const message = fromBinary(ServerMessageSchema, bytes);
         currentState = applyServerMessage(currentState, message, now());
+        currentEconomyState = applyEconomyServerMessage(currentEconomyState, message);
         notify();
       } catch (err) {
         // Don't tear down the socket on one bad frame — surface via diagnostics.
@@ -272,6 +280,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
 
   function notify(): void {
     options.onState?.(currentState);
+    options.onEconomyState?.(currentEconomyState);
   }
 }
 

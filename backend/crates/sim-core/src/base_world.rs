@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BaseWorldError {
@@ -65,6 +65,7 @@ pub struct BaseWorldLayerFiles {
     pub buildings: String,
     pub decorations: String,
     pub spawns: String,
+    pub markets: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -190,6 +191,76 @@ pub struct TramLineSpawn {
     pub trams: u32,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MarketLayer {
+    pub schema_version: u32,
+    pub world_id: String,
+    pub markets: Vec<MarketSpec>,
+    pub distances: Vec<MarketDistanceSpec>,
+    pub supply: Vec<SupplySpec>,
+    pub demand: Vec<DemandSpec>,
+    pub extractors: Vec<ExtractorSpec>,
+    pub household: HouseholdSpec,
+    pub opening_prices: Vec<OpeningPriceSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MarketSpec {
+    pub id: u32,
+    pub name: String,
+    pub anchor: [f32; 2],
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MarketDistanceSpec {
+    pub from: u32,
+    pub to: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SupplySpec {
+    pub actor: u64,
+    pub market: u32,
+    pub good: u16,
+    pub qty: i64,
+    pub min_price: i64,
+    pub opening_inventory: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DemandSpec {
+    pub actor: u64,
+    pub market: u32,
+    pub good: u16,
+    pub qty: i64,
+    pub max_price: i64,
+    pub mpc_bps: i32,
+    pub autonomous: i64,
+    pub opening_cash: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExtractorSpec {
+    pub actor: u64,
+    pub market: u32,
+    pub in_good: u16,
+    pub out_good: u16,
+    pub qty: i64,
+    pub min_price: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HouseholdSpec {
+    pub population: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OpeningPriceSpec {
+    pub market: u32,
+    pub good: u16,
+    pub price: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct BaseWorldBundle {
     pub manifest: BaseWorldManifest,
@@ -198,6 +269,7 @@ pub struct BaseWorldBundle {
     pub buildings: BuildingLayer,
     pub decorations: DecorationLayer,
     pub spawns: SpawnLayer,
+    pub markets: MarketLayer,
 }
 
 impl BaseWorldBundle {
@@ -214,6 +286,7 @@ impl BaseWorldBundle {
         let buildings: BuildingLayer = read_json(&root.join(&manifest.layers.buildings))?;
         let decorations: DecorationLayer = read_json(&root.join(&manifest.layers.decorations))?;
         let spawns: SpawnLayer = read_json(&root.join(&manifest.layers.spawns))?;
+        let markets: MarketLayer = read_json(&root.join(&manifest.layers.markets))?;
 
         let bundle = Self {
             manifest,
@@ -222,6 +295,7 @@ impl BaseWorldBundle {
             buildings,
             decorations,
             spawns,
+            markets,
         };
         bundle.validate()?;
         Ok(bundle)
@@ -234,11 +308,13 @@ impl BaseWorldBundle {
         validate_schema(self.buildings.schema_version)?;
         validate_schema(self.decorations.schema_version)?;
         validate_schema(self.spawns.schema_version)?;
+        validate_schema(self.markets.schema_version)?;
         self.validate_world_id(&self.terrain.world_id)?;
         self.validate_world_id(&self.transport.world_id)?;
         self.validate_world_id(&self.buildings.world_id)?;
         self.validate_world_id(&self.decorations.world_id)?;
         self.validate_world_id(&self.spawns.world_id)?;
+        self.validate_world_id(&self.markets.world_id)?;
 
         if i32::try_from(self.manifest.world_tiles.width).is_err()
             || i32::try_from(self.manifest.world_tiles.height).is_err()
@@ -257,6 +333,9 @@ impl BaseWorldBundle {
         }
         if self.buildings.footprints.is_empty() {
             return Err(BaseWorldError::EmptyLayer("buildings.footprints"));
+        }
+        if self.markets.markets.is_empty() {
+            return Err(BaseWorldError::EmptyLayer("markets.markets"));
         }
 
         for tile in &self.terrain.tiles {
@@ -547,6 +626,103 @@ mod tests {
     }
 
     #[test]
+    fn loads_markets_layer_from_abutopia_bundle() {
+        let bundle = load_abutopia();
+        assert_eq!(bundle.manifest.schema_version, 2);
+        // Four authored markets, ids 9001..9004, ascending.
+        let ids: Vec<u32> = bundle.markets.markets.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![9001, 9002, 9003, 9004]);
+        // Cross-market distances: ONLY the two intended pairs (each one entry; the
+        // factory mirrors both directions at seed time).
+        let pairs: Vec<(u32, u32)> = bundle
+            .markets
+            .distances
+            .iter()
+            .map(|d| (d.from, d.to))
+            .collect();
+        assert_eq!(pairs, vec![(9001, 9002), (9003, 9004)]);
+    }
+
+    #[test]
+    fn markets_layer_rejects_malformed_json() {
+        // The serde Parse path (NO-FALLBACK): a markets.json with a TYPE MISMATCH
+        // (market id is "not-a-number" instead of u32) must fail closed with
+        // BaseWorldError::Parse — it must not reach validate() at all.
+        let bundle_src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap()
+            .join("data/worlds/abutopia");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let tmp_path = tmp.path();
+
+        // Copy manifest.json
+        std::fs::copy(
+            bundle_src.join("manifest.json"),
+            tmp_path.join("manifest.json"),
+        )
+        .expect("copy manifest");
+
+        // Copy layers directory with all layer files
+        let layers_src = bundle_src.join("layers");
+        let layers_dst = tmp_path.join("layers");
+        std::fs::create_dir(&layers_dst).expect("create layers dir");
+        for entry in std::fs::read_dir(&layers_src).expect("read layers dir") {
+            let entry = entry.expect("dir entry");
+            std::fs::copy(entry.path(), layers_dst.join(entry.file_name()))
+                .expect("copy layer file");
+        }
+
+        // Overwrite markets.json with valid JSON that has a type mismatch:
+        // `id` is u32 but we supply a string — serde rejects this before validate().
+        std::fs::write(
+            layers_dst.join("markets.json"),
+            r#"{
+  "schema_version": 2,
+  "world_id": "abutopia",
+  "markets": [{"id": "not-a-number", "name": "Bad Market", "anchor": [0.0, 0.0]}],
+  "distances": [],
+  "supply": [],
+  "demand": [],
+  "extractors": [],
+  "household": {"population": 1000},
+  "opening_prices": []
+}"#,
+        )
+        .expect("write malformed markets.json");
+
+        let result = BaseWorldBundle::load_from_dir(tmp_path);
+        assert!(
+            matches!(result, Err(BaseWorldError::Parse { .. })),
+            "expected BaseWorldError::Parse for malformed markets.json, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn markets_layer_rejects_wrong_world_id() {
+        // A markets layer with a mismatched world_id must surface BaseWorldError::WorldIdMismatch
+        // (NO-FALLBACK: validate() fails closed).
+        let mut b = load_abutopia();
+        b.markets.world_id = "not-abutopia".into();
+        assert!(matches!(
+            b.validate(),
+            Err(BaseWorldError::WorldIdMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn markets_layer_rejects_empty_markets() {
+        // A markets layer with no markets must surface BaseWorldError::EmptyLayer.
+        let mut b = load_abutopia();
+        b.markets.markets.clear();
+        assert!(matches!(
+            b.validate(),
+            Err(BaseWorldError::EmptyLayer("markets.markets"))
+        ));
+    }
+
+    #[test]
     fn validate_accepts_real_abutopia() {
         assert!(load_abutopia().validate().is_ok());
     }
@@ -589,7 +765,7 @@ mod tests {
     fn bundle_with_pedestrian_points(points: Vec<NetworkPoint>) -> BaseWorldBundle {
         BaseWorldBundle {
             manifest: BaseWorldManifest {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "test".into(),
                 display_name: "Test".into(),
                 chunk_size: 32,
@@ -603,15 +779,16 @@ mod tests {
                     buildings: "buildings.json".into(),
                     decorations: "decorations.json".into(),
                     spawns: "spawns.json".into(),
+                    markets: "markets.json".into(),
                 },
             },
             terrain: TerrainLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "test".into(),
                 tiles: Vec::new(),
             },
             transport: TransportLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "test".into(),
                 roads: vec![RoadTile {
                     x: 3,
@@ -628,7 +805,7 @@ mod tests {
                 }],
             },
             buildings: BuildingLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "test".into(),
                 footprints: vec![BuildingFootprint {
                     id: "building:test".into(),
@@ -639,17 +816,32 @@ mod tests {
                 }],
             },
             decorations: DecorationLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "test".into(),
                 trees: Vec::new(),
                 details: Vec::new(),
             },
             spawns: SpawnLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "test".into(),
                 pedestrian_groups: Vec::new(),
                 car_groups: Vec::new(),
                 tram_lines: Vec::new(),
+            },
+            markets: MarketLayer {
+                schema_version: 2,
+                world_id: "test".into(),
+                markets: vec![MarketSpec {
+                    id: 1,
+                    name: "Test Market".into(),
+                    anchor: [2.0, 3.0],
+                }],
+                distances: Vec::new(),
+                supply: Vec::new(),
+                demand: Vec::new(),
+                extractors: Vec::new(),
+                household: HouseholdSpec { population: 1000 },
+                opening_prices: Vec::new(),
             },
         }
     }

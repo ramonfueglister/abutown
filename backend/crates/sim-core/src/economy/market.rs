@@ -79,7 +79,7 @@ pub struct DormantMarkets(pub BTreeSet<MarketId>);
 
 /// MarketId-pair -> Manhattan distance in whole tiles, stored DIRECTED both
 /// ways ((a,b) and (b,a) both present) for O(1) symmetric lookup. Baked once
-/// in `seed_demo_economy` from the routing `Graph`; persisted (the economy
+/// by `seed_from_markets_layer` from the routing `Graph`; persisted (the economy
 /// core is graph-free at hydrate, so it cannot be recomputed on restore).
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct MarketDistances(pub BTreeMap<(MarketId, MarketId), i64>);

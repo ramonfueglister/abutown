@@ -217,10 +217,8 @@ impl SimulationRuntime {
         MobilityPlugin.install(&mut world, &mut schedule);
         sim_core::mobility::seed::insert_activity_waypoints_from_base_world(&mut world, &bundle)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
-        // Seed a small visible demo economy (markets + a trader). Idempotent: it
-        // no-ops once a world already has markets (so it never duplicates). The
-        // hydrate path seeds the same way for already-persisted worlds.
-        sim_core::economy::seed::seed_demo_economy(&mut world);
+        // Seed the economy from the authored markets layer in the world bundle.
+        sim_core::economy::seed_from_markets_layer(&mut world, &bundle.markets);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: bundle.world_id().to_owned(),
@@ -390,10 +388,9 @@ impl SimulationRuntime {
             sim_core::economy::apply_into_world(&mut world, &econ_snap);
         }
 
-        // Bootstrap the demo economy into a world that has none yet (idempotent:
-        // no-ops when an economy was restored above). This is what makes the demo
-        // trader visible in the always-hydrated live server.
-        sim_core::economy::seed::seed_demo_economy(&mut world);
+        // Seed the economy from the authored markets layer (idempotent: no-ops
+        // when an economy was already restored from a snapshot above).
+        sim_core::economy::seed_from_markets_layer(&mut world, &base_world.markets);
 
         // Treat the restored ledger tail as already durably appended so the audit
         // flush only persists events produced after this boot. Must run after the

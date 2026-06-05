@@ -276,9 +276,8 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
     use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposits};
     use crate::economy::{DemandPools, GOOD_TOOLS};
 
-    // Reuse the seed-test world builder (added/extended in tests/seed.rs is a sibling
-    // module; here we build a minimal spatial world the same way the seeder needs).
-    // Build the world inline so this test does not depend on the seed test module.
+    // Build the world inline with the same minimal spatial scaffold the seeder needs,
+    // keeping this test self-contained and independent of the seed test module.
     let mut world = bevy_ecs::world::World::new();
     {
         use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
@@ -307,7 +306,9 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
         world.insert_resource(crate::economy::production::ProductionPools::default());
         world.insert_resource(crate::economy::production::RawDeposits::default());
     }
-    crate::economy::seed::seed_demo_economy(&mut world);
+    let bundle = crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
+        .expect("abutopia bundle loads");
+    crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
 
     let aggregate_tools_demand: i64 = world
         .resource::<DemandPools>()
@@ -537,7 +538,9 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
         world.insert_resource(ProductionPools::default());
         world.insert_resource(RawDeposits::default());
     }
-    crate::economy::seed::seed_demo_economy(&mut world);
+    let bundle = crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
+        .expect("abutopia bundle loads");
+    crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
 
     let rows = check(
         world.resource::<DemandPools>(),

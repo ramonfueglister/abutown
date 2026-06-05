@@ -194,6 +194,8 @@ export function applyServerMessage(
     case 'tilePulse':
       // Consumed elsewhere (tile rendering); mobility overlay ignores it.
       return state;
+    case 'economySnapshot':
+      return state; // economy rides a separate overlay state; mobility ignores it
     case 'worldEvent':
       // No mobility-side reducer; tile-kind set events are handled by the
       // tile/chunk layer.

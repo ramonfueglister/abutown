@@ -653,8 +653,9 @@ mod tests {
     use super::*;
     use crate::base_world::{
         BaseWorldBundle, BaseWorldLayerFiles, BaseWorldManifest, BuildingFootprint, BuildingLayer,
-        CarSpawnGroup, DecorationLayer, PedestrianSpawnGroup, RoadTile, SpawnLayer, TerrainKind,
-        TerrainLayer, TerrainTile, TransportLayer, TransportPath,
+        CarSpawnGroup, DecorationLayer, HouseholdSpec, MarketLayer, MarketSpec,
+        PedestrianSpawnGroup, RoadTile, SpawnLayer, TerrainKind, TerrainLayer, TerrainTile,
+        TransportLayer, TransportPath,
     };
     use crate::city_network::{NetworkCoord, NetworkPoint, WorldTiles};
 
@@ -741,7 +742,7 @@ mod tests {
     fn walkability_bundle() -> BaseWorldBundle {
         BaseWorldBundle {
             manifest: BaseWorldManifest {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "walkability-test".into(),
                 display_name: "Walkability Test".into(),
                 chunk_size: 32,
@@ -755,10 +756,11 @@ mod tests {
                     buildings: "buildings.json".into(),
                     decorations: "decorations.json".into(),
                     spawns: "spawns.json".into(),
+                    markets: "markets.json".into(),
                 },
             },
             terrain: TerrainLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "walkability-test".into(),
                 tiles: vec![TerrainTile {
                     x: 1,
@@ -767,7 +769,7 @@ mod tests {
                 }],
             },
             transport: TransportLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "walkability-test".into(),
                 roads: vec![RoadTile {
                     x: 0,
@@ -787,7 +789,7 @@ mod tests {
                 }],
             },
             buildings: BuildingLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "walkability-test".into(),
                 footprints: vec![BuildingFootprint {
                     id: "building:test".into(),
@@ -798,13 +800,13 @@ mod tests {
                 }],
             },
             decorations: DecorationLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "walkability-test".into(),
                 trees: Vec::new(),
                 details: Vec::new(),
             },
             spawns: SpawnLayer {
-                schema_version: 1,
+                schema_version: 2,
                 world_id: "walkability-test".into(),
                 pedestrian_groups: vec![PedestrianSpawnGroup {
                     id: "spawn:test".into(),
@@ -813,6 +815,21 @@ mod tests {
                 }],
                 car_groups: Vec::<CarSpawnGroup>::new(),
                 tram_lines: Vec::new(),
+            },
+            markets: MarketLayer {
+                schema_version: 2,
+                world_id: "walkability-test".into(),
+                markets: vec![MarketSpec {
+                    id: 1,
+                    name: "Test Market".into(),
+                    anchor: [0.5, 1.5],
+                }],
+                distances: Vec::new(),
+                supply: Vec::new(),
+                demand: Vec::new(),
+                extractors: Vec::new(),
+                household: HouseholdSpec { population: 1000 },
+                opening_prices: Vec::new(),
             },
         }
     }

@@ -74,7 +74,10 @@ export type RuntimeDiagnosticsOptions = {
     vehicleId: string | null;
     agentInspector: RuntimeInspector;
     vehicleInspector: RuntimeInspector;
+    selectedMarketCoord: { x: number; y: number } | null;
   };
+  getEconomyMarketCount: () => number;
+  getEconomyMarkets: () => readonly { tileX: number; tileY: number }[];
   projectEntityScreen: (coord: Coord) => Coord;
   carVisualWorldPoint: (vehicle: BackendCar) => Coord;
   now: () => number;
@@ -114,8 +117,14 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
     tickPeriodMs,
   );
   const selected = options.getSelected();
+  const economyMarkets = options.getEconomyMarkets();
   const mobilityAgentEntries = projectedPedestrians.map((agent) => mobilityAgentEntry(agent, options));
   const mobilityVehicleEntries = projectedCars.map((vehicle) => mobilityVehicleEntry(vehicle, options));
+  const economyMarketEntries = economyMarkets.map((m) => ({
+    tileX: m.tileX,
+    tileY: m.tileY,
+    screen: options.projectEntityScreen({ x: m.tileX, y: m.tileY }),
+  }));
   const selectedMobilityAgentEntry = selected.agentId === null
     ? null
     : mobilityAgentEntries.find((entry) => entry.id === selected.agentId) ?? null;
@@ -182,6 +191,9 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       },
       agentInspector: selected.agentInspector,
       vehicleInspector: selected.vehicleInspector,
+      selectedMarketCoord: selected.selectedMarketCoord,
+      economyMarketCount: options.getEconomyMarketCount(),
+      economyMarkets: economyMarketEntries,
       railStations: counts.railStations,
       railYardTracks: counts.railYardTracks,
       details: detailCounts,

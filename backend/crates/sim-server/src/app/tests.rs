@@ -910,6 +910,43 @@ async fn economy_endpoint_returns_json_snapshot() {
     );
 }
 
+#[tokio::test]
+async fn read_view_economy_snapshot_exposes_four_markets_and_known_goods() {
+    // After one tick, the published read view must carry a pre-built
+    // EconomySnapshot with the 4 demo markets seeded from the abutopia bundle
+    // and at least the three opening-priced goods (market 9002 TOOLS/FOOD,
+    // market 9004 FOOD).
+    let state = AppState::new(SimulationRuntime::new());
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    let view = state.view().load();
+    assert_eq!(
+        view.economy.markets.len(),
+        4,
+        "economy snapshot must expose exactly 4 demo markets"
+    );
+    // The three opening-priced goods (market_id, good_id): (9002,4), (9002,1), (9004,1).
+    let goods: std::collections::HashSet<(u32, u32)> = view
+        .economy
+        .goods
+        .iter()
+        .map(|g| (g.market_id, g.good_id))
+        .collect();
+    assert!(
+        goods.contains(&(9002, 4)),
+        "view.economy.goods must include (market=9002, good=TOOLS=4)"
+    );
+    assert!(
+        goods.contains(&(9002, 1)),
+        "view.economy.goods must include (market=9002, good=FOOD=1)"
+    );
+    assert!(
+        goods.contains(&(9004, 1)),
+        "view.economy.goods must include (market=9004, good=FOOD=1)"
+    );
+}
+
 #[cfg(test)]
 mod cors_tests {
     use super::*;
