@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sim_core::economy::EconomyEvent;
 use sim_core::persistence::{EconomyEventStore, EconomyEventStoreError};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::PgPool;
 
 const ECONOMY_EVENTS_MIGRATION: &str =
     include_str!("../migrations/202605310001_economy_events.sql");
@@ -16,13 +16,7 @@ pub struct PostgresEconomyEventStore {
 }
 
 impl PostgresEconomyEventStore {
-    pub async fn connect(database_url: &str) -> Result<Self, EconomyEventStoreError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .map_err(|error| EconomyEventStoreError::unavailable(error.to_string()))?;
-
+    pub async fn with_pool(pool: PgPool) -> Result<Self, EconomyEventStoreError> {
         for statement in ECONOMY_EVENTS_MIGRATION
             .split(';')
             .map(str::trim)
@@ -104,9 +98,10 @@ mod tests {
             return;
         };
 
-        let mut store = PostgresEconomyEventStore::connect(&database_url)
+        let pool = crate::db::connect_shared_pool(&database_url)
             .await
-            .unwrap();
+            .expect("connect shared pool");
+        let mut store = PostgresEconomyEventStore::with_pool(pool).await.unwrap();
         let world_id = format!("test:economy-events:{}", uuid::Uuid::now_v7());
 
         store

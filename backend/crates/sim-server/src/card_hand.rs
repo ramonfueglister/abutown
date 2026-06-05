@@ -7,7 +7,7 @@ use arc_swap::ArcSwap;
 use axum::http::HeaderMap;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::PgPool;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -70,13 +70,7 @@ impl CardHandStore {
         }
     }
 
-    pub async fn postgres(database_url: &str) -> Result<Self, CardHandError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .map_err(|error| CardHandError::Database(error.to_string()))?;
-
+    pub async fn with_pool(pool: PgPool) -> Result<Self, CardHandError> {
         for statement in CARD_HAND_MIGRATION
             .split(';')
             .map(str::trim)

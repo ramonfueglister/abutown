@@ -5,7 +5,7 @@ use sim_core::{
     ids::ChunkCoord,
     persistence::{ChunkSnapshotStore, ChunkSnapshotStoreError, SnapshotCompatibility},
 };
-use sqlx::{PgPool, Row, postgres::PgPoolOptions};
+use sqlx::{PgPool, Row};
 
 const CHUNK_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605150003_chunk_snapshots.sql");
@@ -65,17 +65,11 @@ pub struct PostgresChunkSnapshotStore {
 }
 
 impl PostgresChunkSnapshotStore {
-    pub async fn connect(
-        database_url: &str,
+    pub async fn with_pool(
+        pool: PgPool,
         world_id: WorldId,
         _compatibility: SnapshotCompatibility,
     ) -> Result<Self, ChunkSnapshotStoreError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .map_err(|error| ChunkSnapshotStoreError::unavailable(error.to_string()))?;
-
         for statement in CHUNK_SNAPSHOTS_MIGRATION
             .split(';')
             .chain(SNAPSHOT_COMPATIBILITY_MIGRATION.split(';'))
@@ -89,6 +83,10 @@ impl PostgresChunkSnapshotStore {
         }
 
         Ok(Self { pool, world_id })
+    }
+
+    pub fn pool_for_test(&self) -> &sqlx::PgPool {
+        &self.pool
     }
 }
 
@@ -250,13 +248,13 @@ mod integration_tests {
         };
         let world_id = WorldId(format!("test:{}", uuid::Uuid::now_v7()));
         let compatibility = SnapshotCompatibility::new(world_id.0.clone(), 1);
-        let mut store = PostgresChunkSnapshotStore::connect(
-            &database_url,
-            world_id.clone(),
-            compatibility.clone(),
-        )
-        .await
-        .expect("connect postgres snapshot store");
+        let pool = crate::db::connect_shared_pool(&database_url)
+            .await
+            .expect("connect shared pool");
+        let mut store =
+            PostgresChunkSnapshotStore::with_pool(pool, world_id.clone(), compatibility.clone())
+                .await
+                .expect("with_pool postgres snapshot store");
         let snapshot = snapshot(world_id);
         let coord = ChunkCoord { x: 4, y: 4 };
 

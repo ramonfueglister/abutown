@@ -96,7 +96,7 @@ function formatBackendHealthError(health: BackendHealthResponseDto): string {
 }
 
 function isAcceptableBackendPersistenceHealth(value: BackendPersistenceHealthDto | undefined): boolean {
-  return value === undefined || value.status === 'starting' || value.status === 'healthy';
+  return value === undefined || value.status === 'starting' || value.status === 'healthy' || value.status === 'degraded';
 }
 
 function isBackendPersistenceHealthDto(value: unknown): value is BackendPersistenceHealthDto {

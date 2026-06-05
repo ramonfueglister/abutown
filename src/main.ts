@@ -15,7 +15,8 @@ import type {
   RuntimeTerrain,
 } from './render/worldRuntimeTypes';
 import type { BaseWorldResponse, BaseWorldTerrainKind } from './backend/baseWorldClient';
-import { resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
+import { requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
+import { setPersistenceBanner } from './app/persistenceBanner';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, type MobilityOverlayState } from './backend/mobilityState';
 import { createEconomyOverlayState, type EconomyOverlayState } from './backend/economyState';
@@ -139,6 +140,39 @@ async function startRuntime(): Promise<void> {
     dependencies: defaultAppRuntimeDependencies(boot, renderBackendRequired),
   });
   mobilityBackendBridge = handle.mobilityBackendBridge;
+  // Only start the re-poll if boot succeeded (mobilityBackendBridge non-null = healthy start).
+  if (handle.mobilityBackendBridge !== null) {
+    startHealthRePoll();
+  }
+}
+
+const HEALTH_REPOLL_INTERVAL_MS = 5_000;
+
+function startHealthRePoll(): void {
+  let repollActive = true;
+
+  async function poll(): Promise<void> {
+    if (!repollActive) return;
+    try {
+      const health = await requireBackend({ baseUrl: backendBaseUrl });
+      const persistenceStatus = health.persistence?.status;
+      if (persistenceStatus === 'degraded') {
+        setPersistenceBanner(document, 'degraded');
+      } else {
+        setPersistenceBanner(document, persistenceStatus ?? 'healthy');
+      }
+    } catch (error) {
+      // HTTP error or stale persistence → escalate to full hard gate.
+      repollActive = false;
+      renderBackendRequired(error);
+      return;
+    }
+    if (repollActive) {
+      setTimeout(() => { void poll(); }, HEALTH_REPOLL_INTERVAL_MS);
+    }
+  }
+
+  setTimeout(() => { void poll(); }, HEALTH_REPOLL_INTERVAL_MS);
 }
 
 function applyInitialRuntimeState(initial: AppRuntimeInitialState): void {

@@ -53,6 +53,8 @@ pub use base_world_response::*;
 mod proto_convert;
 use proto_convert::*;
 
+use crate::db::connect_shared_pool;
+
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
@@ -421,19 +423,18 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
     let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())?;
-    let event_store = PostgresWorldEventStore::connect(&config.database_url).await?;
-    let snapshot_store = PostgresChunkSnapshotStore::connect(
-        &config.database_url,
+    let pool = connect_shared_pool(&config.database_url).await?;
+    let event_store = PostgresWorldEventStore::with_pool(pool.clone()).await?;
+    let snapshot_store = PostgresChunkSnapshotStore::with_pool(
+        pool.clone(),
         abutown_protocol::WorldId(base_world.world_id().to_owned()),
         base_world.snapshot_compatibility(),
     )
     .await?;
-    let mobility_snapshot_store =
-        PostgresMobilitySnapshotStore::connect(&config.database_url).await?;
-    let economy_snapshot_store =
-        PostgresEconomySnapshotStore::connect(&config.database_url).await?;
-    let economy_event_store = PostgresEconomyEventStore::connect(&config.database_url).await?;
-    let card_hands = CardHandStore::postgres(&config.database_url).await?;
+    let mobility_snapshot_store = PostgresMobilitySnapshotStore::with_pool(pool.clone()).await?;
+    let economy_snapshot_store = PostgresEconomySnapshotStore::with_pool(pool.clone()).await?;
+    let economy_event_store = PostgresEconomyEventStore::with_pool(pool.clone()).await?;
+    let card_hands = CardHandStore::with_pool(pool.clone()).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
 
     let (runtime, snapshot_store, mobility_snapshot_store, economy_snapshot_store) =
@@ -535,10 +536,7 @@ fn health_response_for_state(state: &AppState) -> w::HealthResponse {
     let runtime_agents_ok = view.mobility_full_dto.agents.len() >= state.expected_base_world_agents;
     health.ok = health.ok
         && runtime_agents_ok
-        && !matches!(
-            persistence.status,
-            MobilityPersistenceHealthStatus::Degraded | MobilityPersistenceHealthStatus::Stale
-        );
+        && persistence.status != MobilityPersistenceHealthStatus::Stale;
     health.persistence = Some(persistence_health_to_proto(persistence));
     health
 }

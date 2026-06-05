@@ -372,7 +372,7 @@ impl MobilitySnapshotStore for FailingMobilitySnapshotStore {
 }
 
 #[tokio::test]
-async fn failing_mobility_write_marks_health_degraded_with_redacted_error() {
+async fn failing_mobility_write_marks_health_stale_with_redacted_error() {
     let mut runtime = SimulationRuntime::new();
     mutate_runtime_tile(&mut runtime, "command:app-persist-health-fail:1").await;
     let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
@@ -400,12 +400,9 @@ async fn failing_mobility_write_marks_health_degraded_with_redacted_error() {
     let persistence = health.persistence.expect("persistence health present");
     assert!(
         !health.ok,
-        "degraded persistence should make /health unhealthy"
+        "stale persistence (never succeeded) should make /health unhealthy"
     );
-    assert_eq!(
-        persistence.status,
-        w::PersistenceHealthStatus::Degraded as i32
-    );
+    assert_eq!(persistence.status, w::PersistenceHealthStatus::Stale as i32);
     assert_eq!(persistence.world_id, "abutopia");
     assert!(persistence.mobility_tick > 0);
     assert_eq!(persistence.consecutive_failures, 1);
@@ -414,6 +411,53 @@ async fn failing_mobility_write_marks_health_degraded_with_redacted_error() {
     assert!(persistence.last_error.contains("<redacted>"));
     assert!(!persistence.last_error.contains("password"));
     assert!(!persistence.last_error.contains("sb_secret_test"));
+}
+
+#[tokio::test]
+async fn degraded_persistence_keeps_health_ok() {
+    use sim_core::persistence::InMemoryMobilitySnapshotStore;
+
+    // Scenario: one successful persist followed by >PERSIST_FAILURE_TOLERANCE failures
+    // while the freshness window has not expired → status Degraded, health.ok still true.
+    let mut runtime = SimulationRuntime::new();
+    mutate_runtime_tile(&mut runtime, "command:app-persist-health-degraded:1").await;
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+
+    // First pass: succeed with an InMemory store to record a success.
+    let state = AppState::new_with_stores(
+        runtime,
+        &base_world,
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(InMemoryEconomyEventStore::default()),
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    );
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+    persist_snapshots_once(&state).await.unwrap();
+
+    // Directly exercise the liveness tracker: record a prior success, then 3 failures.
+    let liveness = state.mobility_liveness();
+    let a = liveness.begin_attempt("abutopia", 99, SystemTime::now());
+    liveness.record_success(a, SystemTime::now());
+    for _ in 0..3 {
+        let a = liveness.begin_attempt("abutopia", 100, SystemTime::now());
+        liveness.record_failure(a, "transient error", SystemTime::now());
+    }
+
+    let health = health_response_for_state(&state);
+    let persistence = health.persistence.expect("persistence health present");
+    assert!(
+        health.ok,
+        "degraded persistence (prior success + >tolerance failures, still fresh) should keep /health OK"
+    );
+    assert_eq!(
+        persistence.status,
+        w::PersistenceHealthStatus::Degraded as i32
+    );
 }
 
 #[tokio::test]
@@ -524,10 +568,7 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
     let health = health_response_for_state(&state);
     let persistence = health.persistence.expect("persistence health present");
     assert!(!health.ok);
-    assert_eq!(
-        persistence.status,
-        w::PersistenceHealthStatus::Degraded as i32
-    );
+    assert_eq!(persistence.status, w::PersistenceHealthStatus::Stale as i32);
     assert!(persistence.last_error.contains("expected at least 300"));
 }
 

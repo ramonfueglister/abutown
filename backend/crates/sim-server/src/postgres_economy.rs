@@ -4,7 +4,7 @@ use sim_core::economy::EconomyPersistSnapshot;
 use sim_core::persistence::{
     EconomySnapshotStore, EconomySnapshotStoreError, SnapshotCompatibility,
 };
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::PgPool;
 
 const ECONOMY_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605300001_economy_snapshots.sql");
@@ -15,13 +15,7 @@ pub struct PostgresEconomySnapshotStore {
 }
 
 impl PostgresEconomySnapshotStore {
-    pub async fn connect(database_url: &str) -> Result<Self, EconomySnapshotStoreError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .map_err(|error| EconomySnapshotStoreError::unavailable(error.to_string()))?;
-
+    pub async fn with_pool(pool: PgPool) -> Result<Self, EconomySnapshotStoreError> {
         for statement in ECONOMY_SNAPSHOTS_MIGRATION
             .split(';')
             .map(str::trim)
@@ -138,9 +132,10 @@ mod tests {
             return;
         };
 
-        let mut store = PostgresEconomySnapshotStore::connect(&database_url)
+        let pool = crate::db::connect_shared_pool(&database_url)
             .await
-            .unwrap();
+            .expect("connect shared pool");
+        let mut store = PostgresEconomySnapshotStore::with_pool(pool).await.unwrap();
         let snap = EconomyPersistSnapshot {
             next_order_id: 7,
             ..Default::default()

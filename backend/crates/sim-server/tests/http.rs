@@ -521,6 +521,7 @@ async fn command_store_failure_returns_rejection_and_preserves_snapshot() {
 async fn postgres_world_state_survives_runtime_restart() {
     use abutown_protocol::{ChunkCoordDto, ClientCommandDto, SetTileKindCommandDto};
     use sim_core::ids::ChunkCoord;
+    use sim_server::db::connect_shared_pool;
     use sim_server::postgres_economy::PostgresEconomySnapshotStore;
     use sim_server::postgres_events::PostgresWorldEventStore;
     use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
@@ -546,22 +547,25 @@ async fn postgres_world_state_survives_runtime_restart() {
     // ---- First runtime: hydrate, apply a command, persist snapshot, drop.
     {
         let base_world = base_world_fixture();
-        let event_store = PostgresWorldEventStore::connect(&database_url)
+        let pool = connect_shared_pool(&database_url)
             .await
-            .expect("connect postgres event store");
-        let snapshot_store = PostgresChunkSnapshotStore::connect(
-            &database_url,
+            .expect("connect shared pool");
+        let event_store = PostgresWorldEventStore::with_pool(pool.clone())
+            .await
+            .expect("with_pool postgres event store");
+        let snapshot_store = PostgresChunkSnapshotStore::with_pool(
+            pool.clone(),
             SimulationRuntime::default_world_id(),
             base_world.snapshot_compatibility(),
         )
         .await
-        .expect("connect postgres snapshot store");
-        let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
+        .expect("with_pool postgres snapshot store");
+        let mobility_snapshot_store = PostgresMobilitySnapshotStore::with_pool(pool.clone())
             .await
-            .expect("connect postgres mobility snapshot store");
-        let economy_snapshot_store = PostgresEconomySnapshotStore::connect(&database_url)
+            .expect("with_pool postgres mobility snapshot store");
+        let economy_snapshot_store = PostgresEconomySnapshotStore::with_pool(pool.clone())
             .await
-            .expect("connect postgres economy snapshot store");
+            .expect("with_pool postgres economy snapshot store");
         let (mut runtime, mut snapshot_store_box, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
@@ -610,22 +614,25 @@ async fn postgres_world_state_survives_runtime_restart() {
     // ---- Second runtime: hydrate fresh from the same database.
     {
         let base_world = base_world_fixture();
-        let event_store = PostgresWorldEventStore::connect(&database_url)
+        let pool = connect_shared_pool(&database_url)
             .await
-            .expect("connect postgres event store (restart)");
-        let snapshot_store = PostgresChunkSnapshotStore::connect(
-            &database_url,
+            .expect("connect shared pool (restart)");
+        let event_store = PostgresWorldEventStore::with_pool(pool.clone())
+            .await
+            .expect("with_pool postgres event store (restart)");
+        let snapshot_store = PostgresChunkSnapshotStore::with_pool(
+            pool.clone(),
             SimulationRuntime::default_world_id(),
             base_world.snapshot_compatibility(),
         )
         .await
-        .expect("connect postgres snapshot store (restart)");
-        let mobility_snapshot_store = PostgresMobilitySnapshotStore::connect(&database_url)
+        .expect("with_pool postgres snapshot store (restart)");
+        let mobility_snapshot_store = PostgresMobilitySnapshotStore::with_pool(pool.clone())
             .await
-            .expect("connect postgres mobility snapshot store (restart)");
-        let economy_snapshot_store = PostgresEconomySnapshotStore::connect(&database_url)
+            .expect("with_pool postgres mobility snapshot store (restart)");
+        let economy_snapshot_store = PostgresEconomySnapshotStore::with_pool(pool.clone())
             .await
-            .expect("connect postgres economy snapshot store (restart)");
+            .expect("with_pool postgres economy snapshot store (restart)");
         let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
             Box::new(event_store),
             Box::new(snapshot_store),
@@ -730,6 +737,7 @@ async fn postgres_duplicate_command_returns_same_response() {
 #[tokio::test]
 async fn postgres_mobility_state_survives_runtime_restart() {
     use sim_core::persistence::MobilitySnapshotStore;
+    use sim_server::db::connect_shared_pool;
     use sim_server::postgres_mobility::PostgresMobilitySnapshotStore;
     use sim_server::runtime::SimulationRuntime;
 
@@ -747,9 +755,12 @@ async fn postgres_mobility_state_survives_runtime_restart() {
     let persisted_tick;
     let persisted_world;
     {
-        let mut mobility_store = PostgresMobilitySnapshotStore::connect(&database_url)
+        let pool = connect_shared_pool(&database_url)
             .await
-            .expect("connect mobility store (first runtime)");
+            .expect("connect shared pool (mobility first)");
+        let mut mobility_store = PostgresMobilitySnapshotStore::with_pool(pool)
+            .await
+            .expect("with_pool mobility store (first runtime)");
         let mut runtime = SimulationRuntime::new();
 
         runtime.override_world_id_for_test(&world_id);
@@ -771,9 +782,12 @@ async fn postgres_mobility_state_survives_runtime_restart() {
         .expect("persist mobility snapshot");
     }
 
-    let store = PostgresMobilitySnapshotStore::connect(&database_url)
+    let pool2 = connect_shared_pool(&database_url)
         .await
-        .expect("connect mobility store (second runtime)");
+        .expect("connect shared pool (mobility second)");
+    let store = PostgresMobilitySnapshotStore::with_pool(pool2)
+        .await
+        .expect("with_pool mobility store (second runtime)");
     let (tick, restored) = MobilitySnapshotStore::read(&store, &world_id, &compatibility)
         .await
         .expect("read mobility snapshot")

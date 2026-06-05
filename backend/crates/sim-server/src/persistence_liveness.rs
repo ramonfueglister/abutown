@@ -1,6 +1,10 @@
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 
+/// Consecutive failed persist cycles tolerated while a recent success still holds
+/// before the status drops from Healthy to Degraded.
+const PERSIST_FAILURE_TOLERANCE: u32 = 2;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MobilityPersistenceHealthStatus {
     Starting,
@@ -112,18 +116,15 @@ impl MobilityPersistenceLiveness {
         let freshness = inner
             .last_success
             .and_then(|last_success| now.duration_since(last_success).ok());
-        let status = match (
-            inner.last_attempt,
-            inner.last_success,
-            inner.consecutive_failures,
-        ) {
-            (None, None, _) => MobilityPersistenceHealthStatus::Starting,
-            (_, _, failures) if failures > 0 => MobilityPersistenceHealthStatus::Degraded,
-            (_, Some(_), 0) if freshness.is_some_and(|age| age <= self.freshness_window) => {
+        let fresh = freshness.is_some_and(|age| age <= self.freshness_window);
+        let status = match (inner.last_attempt, inner.last_success) {
+            (None, None) => MobilityPersistenceHealthStatus::Starting,
+            (_, Some(_)) if fresh && inner.consecutive_failures <= PERSIST_FAILURE_TOLERANCE => {
                 MobilityPersistenceHealthStatus::Healthy
             }
-            (_, Some(_), 0) => MobilityPersistenceHealthStatus::Stale,
-            _ => MobilityPersistenceHealthStatus::Degraded,
+            (_, Some(_)) if fresh => MobilityPersistenceHealthStatus::Degraded, // recent success but currently failing > tolerance
+            (_, Some(_)) => MobilityPersistenceHealthStatus::Stale, // last success older than the window
+            (Some(_), None) => MobilityPersistenceHealthStatus::Stale, // attempted, never succeeded → real outage
         };
 
         MobilityPersistenceHealth {
@@ -195,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn failure_after_attempt_is_degraded_and_redacted() {
+    fn failure_without_prior_success_is_stale_and_redacted() {
         let tracker = MobilityPersistenceLiveness::new(Duration::from_secs(15));
 
         let attempt = tracker.begin_attempt("abutopia", 7, at(1_000));
@@ -207,13 +208,52 @@ mod tests {
 
         let status = tracker.snapshot_at(at(1_100));
 
-        assert_eq!(status.status, MobilityPersistenceHealthStatus::Degraded);
+        assert_eq!(status.status, MobilityPersistenceHealthStatus::Stale);
         assert_eq!(status.consecutive_failures, 1);
         assert_eq!(status.world_id.as_deref(), Some("abutopia"));
         assert_eq!(status.mobility_tick, Some(7));
         assert_eq!(
             status.last_error.as_deref(),
             Some("postgres://<redacted>@example.test/db failed with token secret-token-123")
+        );
+    }
+
+    #[test]
+    fn transient_failures_after_success_stay_healthy_within_tolerance() {
+        let t = MobilityPersistenceLiveness::new(Duration::from_secs(15));
+        let a = t.begin_attempt("abutopia", 1, at(0));
+        t.record_success(a, at(0));
+        let a = t.begin_attempt("abutopia", 2, at(1_000));
+        t.record_failure(a, "boom", at(1_000)); // 1 failure, fresh success
+        assert_eq!(
+            t.snapshot_at(at(2_000)).status,
+            MobilityPersistenceHealthStatus::Healthy
+        );
+    }
+
+    #[test]
+    fn sustained_failures_after_success_are_degraded_not_stale() {
+        let t = MobilityPersistenceLiveness::new(Duration::from_secs(15));
+        let a = t.begin_attempt("abutopia", 1, at(0));
+        t.record_success(a, at(0));
+        for ms in [1_000u64, 2_000, 3_000] {
+            let a = t.begin_attempt("abutopia", 2, at(ms));
+            t.record_failure(a, "boom", at(ms));
+        }
+        assert_eq!(
+            t.snapshot_at(at(4_000)).status,
+            MobilityPersistenceHealthStatus::Degraded // >2 failures, still fresh
+        );
+    }
+
+    #[test]
+    fn stale_success_is_stale_even_with_no_failures() {
+        let t = MobilityPersistenceLiveness::new(Duration::from_secs(15));
+        let a = t.begin_attempt("abutopia", 1, at(0));
+        t.record_success(a, at(0));
+        assert_eq!(
+            t.snapshot_at(at(16_001)).status,
+            MobilityPersistenceHealthStatus::Stale
         );
     }
 
