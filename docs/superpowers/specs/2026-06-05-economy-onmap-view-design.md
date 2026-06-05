@@ -277,3 +277,27 @@ Guarded by a byte-identical snapshot round-trip test + the #78 SFC audit.
 No interactivity / client→server commands · no ambient heatmap · no goods-flow
 lines · no new art style or perspective · no per-agent buying simulation · no new
 world instances · no per-chunk economy replication (scale-out path only).
+
+## Deployment (one-time migration — required on the FIRST deploy past this branch)
+
+This is a clean schema cutover with **no compatibility path** (intentional, per the
+NO-FALLBACK rule). On the **first** deploy of this branch, two one-time operational
+steps are required; **subsequent** deploys need nothing (the authored data is
+unchanged and byte-identical to the old seed).
+
+1. **`DELETE FROM economy_snapshots;` once.** Markets are now sourced from the
+   authored `markets.json` layer via `seed_from_markets_layer`, which is **byte-identical**
+   to the deleted legacy `seed_demo_economy`. A persisted economy snapshot from before
+   this branch still carries the old code-seeded markets and would shadow the authored
+   loader. Clearing it once lets the authored loader become source-of-truth on the
+   canonical world. Because the data is identical, this is **lossless** — it changes
+   nothing in the economy.
+2. **Base-world bundle must be at `schema_version: 2`.** `SUPPORTED_SCHEMA_VERSION` is
+   now `2` (the markets layer was added) and the client (`baseWorldClient.ts`) accepts
+   **only** schema 2. Any persisted/served base-world record still at schema 1 fails to
+   load **loudly**. The authored `data/worlds/abutopia/*` is already at schema 2; if a
+   deployment caches/persists a base-world bundle elsewhere, regenerate it at schema 2.
+
+Note: `PROTOCOL_VERSION` was reconciled to `16` (the value the frontend already sends);
+the additive `economy_snapshot` message rides oneof tag 7 and is backward-compatible
+(old clients ignore the unknown tag).
