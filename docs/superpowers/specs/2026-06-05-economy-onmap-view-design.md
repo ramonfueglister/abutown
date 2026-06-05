@@ -298,6 +298,4 @@ unchanged and byte-identical to the old seed).
    load **loudly**. The authored `data/worlds/abutopia/*` is already at schema 2; if a
    deployment caches/persists a base-world bundle elsewhere, regenerate it at schema 2.
 
-Note: `PROTOCOL_VERSION` was reconciled to `16` (the value the frontend already sends);
-the additive `economy_snapshot` message rides oneof tag 7 and is backward-compatible
-(old clients ignore the unknown tag).
+Note: the additive `economy_snapshot` message rides oneof tag 7 and is fully backward-compatible (old clients ignore the unknown tag), so **no `PROTOCOL_VERSION` bump is required** and none is made — the backend stays at protocol version 1. (Observation, out of scope for this feature: the frontend command client hardcodes a different protocol-version value than the backend reports — a pre-existing mismatch on `origin/main`, not introduced here; worth a separate follow-up.)
