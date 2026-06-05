@@ -541,6 +541,11 @@ pub fn run_distribute_profit_system(
         &mut ledger,
         &config,
     ) {
+        assert_ne!(
+            reason,
+            EconomyError::ConservationViolation,
+            "CONSERVATION VIOLATION: HOUSEHOLD_SECTOR sentinel non-zero after profit distribution (sentinel-stranded cash) — the SFC invariant is broken; halting. This must never happen."
+        );
         ledger.0.push(EconomyEvent::MarketClearFailed {
             market: MarketId(0),
             good: GoodId(0),
