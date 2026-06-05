@@ -975,7 +975,7 @@ git add -A
 git commit -m "test: verify citizens-as-economy-bodies slice — audit byte-invariant, smoke green, 300-pin holds" || echo "nothing to commit"
 ```
 
-The branch `feat/citizens-as-economy-bodies` is now ready for the finishing-a-development-branch flow (PR to `origin/main`). Deploy note for the PR: this slice bumps the **mobility** snapshot schema (v1→2, one-time reset; existing dev saves lose accumulated ages/births) and introduces **no** `economy_snapshots` change (no `DELETE FROM economy_snapshots` needed).
+The branch `feat/citizens-as-economy-bodies` is now ready for the finishing-a-development-branch flow (PR to `origin/main`). Deploy note for the PR: this slice adds **required** `home_market`/`work_market` fields to the persisted citizen record, so a one-time **`DELETE FROM mobility_snapshots`** is required before deploy (old snapshots predate the fields and fail-fast on load; existing dev saves lose accumulated ages/births — no serde-default shim, no SQL backfill, no schema-version bump). It introduces **no** `economy_snapshots` change (no `DELETE FROM economy_snapshots` needed). The full **e2e browser-smoke is owed pre-merge**, run in isolation (separate DB) after the `DELETE`, since it cannot run safely against the shared dev DB.
 
 ---
 
