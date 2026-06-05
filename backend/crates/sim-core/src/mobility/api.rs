@@ -55,6 +55,9 @@ pub fn install_mobility(world: &mut World, schedule: &mut Schedule) {
     world.insert_resource(PreviousVehicleChunks::default());
     world.insert_resource(AgentIdIndex::default());
     world.insert_resource(VehicleIdIndex::default());
+    // Lives in the mobility plugin so it always exists even when the economy is
+    // absent; the attribution system only populates it.
+    world.insert_resource(crate::mobility::resources::CitizenEconomicTargets::default());
     world.insert_resource(PreviousChunkByEntity::default());
     world.insert_resource(PreviousFlowCellContrib::default());
     world.insert_resource(PendingPerChunkDeltas::default());

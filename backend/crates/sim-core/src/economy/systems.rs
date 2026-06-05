@@ -32,6 +32,7 @@ pub enum EconomySet {
     PayWages,
     TransportRebate,
     Consume,
+    Attribution,
     ShopperCapture,
     CommuterCapture,
     Materialize,
@@ -176,6 +177,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::PayWages,
             EconomySet::TransportRebate,
             EconomySet::Consume,
+            EconomySet::Attribution,
             EconomySet::ShopperCapture,
             EconomySet::CommuterCapture,
             EconomySet::Materialize,
@@ -231,6 +233,16 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
         run_distribute_profit_system
             .in_set(EconomySet::PayWages)
             .after(run_pay_wages_system)
+            .before(crate::mobility::systems::tick_increment_system),
+    );
+    // Citizen attribution is an exclusive system (it reads the spatial Graph and
+    // the observed-chunk set plus realized consumption/wage telemetry, then queries
+    // citizen components). Registered separately like the capture systems. The set
+    // chain places it after Consume (so consumed_qty_last_tick is valid) and before
+    // the capture phases — both coexist this tick (Task 8 deletes the captures).
+    schedule.add_systems(
+        crate::economy::attribution::run_citizen_attribution_system
+            .in_set(EconomySet::Attribution)
             .before(crate::mobility::systems::tick_increment_system),
     );
     // Shopper capture is an exclusive system (it reads the spatial Graph +

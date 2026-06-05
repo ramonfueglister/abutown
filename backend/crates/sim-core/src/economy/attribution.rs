@@ -46,6 +46,150 @@ pub fn attribute_channel(
     }
 }
 
+use bevy_ecs::world::World;
+
+/// Exclusive system (EconomySet::Attribution). Reads realized consumption
+/// (`MarketGoods.consumed_qty_last_tick`, valid after Consume) and wages
+/// (`WageTelemetry`, valid after PayWages); restricts to observed markets (those
+/// whose market node is in an Active/Hot chunk — identical test to the former
+/// capture systems); selects the attributed cohort from observed, bound citizens;
+/// and writes their economic target node into `CitizenEconomicTargets`. READ-ONLY
+/// over economy state — mints and moves NO money (the `#78` audit is unaffected).
+pub fn run_citizen_attribution_system(world: &mut World) {
+    use crate::economy::{EconomyConfig, MarketGoods, Markets, WageTelemetry};
+    use crate::ids::ChunkCoord;
+    use crate::mobility::resources::CitizenEconomicTargets;
+    use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
+    use bevy_ecs::prelude::{Or, With};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    if world.get_resource::<Markets>().is_none()
+        || world.get_resource::<crate::routing::Graph>().is_none()
+        || world.get_resource::<CitizenEconomicTargets>().is_none()
+    {
+        return;
+    }
+
+    // (1) Observed chunks — query borrow released after collect.
+    let observed_chunks: BTreeSet<ChunkCoord> = {
+        let mut q =
+            world.query_filtered::<&ChunkCoordComp, Or<(With<ActiveChunk>, With<HotChunk>)>>();
+        q.iter(world).map(|c| c.0).collect()
+    };
+
+    // (2) Observed markets + target nodes + realized telemetry + config — immutable
+    //     resource borrows, cloned into owned locals before release.
+    let (observed_markets, market_nodes, consumed_by_market, wage_by_market, config) = {
+        let graph = world.resource::<crate::routing::Graph>();
+        let markets = world.resource::<Markets>();
+        let observed_markets: BTreeSet<u32> = markets
+            .0
+            .iter()
+            .filter(|(_, site)| {
+                let pos = graph.node(site.node_id).position;
+                observed_chunks.contains(&crate::mobility::chunk_of(pos.0, pos.1, 32))
+            })
+            .map(|(id, _)| id.0)
+            .collect();
+        let market_nodes: BTreeMap<u32, crate::routing::NodeId> = markets
+            .0
+            .iter()
+            .map(|(id, site)| (id.0, site.node_id))
+            .collect();
+        let mut consumed_by_market: BTreeMap<u32, i64> = BTreeMap::new();
+        for (key, st) in world.resource::<MarketGoods>().0.iter() {
+            if observed_markets.contains(&key.market.0) {
+                *consumed_by_market.entry(key.market.0).or_default() += st.consumed_qty_last_tick.0;
+            }
+        }
+        let wage_by_market: BTreeMap<u32, i64> = world
+            .resource::<WageTelemetry>()
+            .0
+            .iter()
+            .filter(|(m, _)| observed_markets.contains(&m.0))
+            .map(|(m, w)| (m.0, w.0))
+            .collect();
+        let config = *world.resource::<EconomyConfig>();
+        (
+            observed_markets,
+            market_nodes,
+            consumed_by_market,
+            wage_by_market,
+            config,
+        )
+    };
+
+    if observed_markets.is_empty() {
+        world.resource_mut::<CitizenEconomicTargets>().0.clear();
+        return;
+    }
+
+    // (3) Candidate citizens per market — query borrow released after collect.
+    let (shop_candidates, work_candidates) = {
+        let mut shop: BTreeMap<u32, Vec<crate::ids::AgentId>> = BTreeMap::new();
+        let mut work: BTreeMap<u32, Vec<crate::ids::AgentId>> = BTreeMap::new();
+        let mut q = world.query_filtered::<(
+            &crate::mobility::components::StableAgentId,
+            &crate::mobility::MarketBinding,
+        ), With<crate::mobility::components::AgentMarker>>();
+        for (id, binding) in q.iter(world) {
+            if observed_markets.contains(&binding.home_market) {
+                shop.entry(binding.home_market)
+                    .or_default()
+                    .push(id.0.clone());
+            }
+            if observed_markets.contains(&binding.work_market) {
+                work.entry(binding.work_market)
+                    .or_default()
+                    .push(id.0.clone());
+            }
+        }
+        for v in shop.values_mut() {
+            v.sort();
+        }
+        for v in work.values_mut() {
+            v.sort();
+        }
+        (shop, work)
+    };
+
+    // (4) Compute targets — pure, no world borrow.
+    let mut targets: BTreeMap<crate::ids::AgentId, crate::routing::NodeId> = BTreeMap::new();
+    for (market_id, realized) in consumed_by_market {
+        let Some(&node) = market_nodes.get(&market_id) else {
+            continue;
+        };
+        let cands = shop_candidates.get(&market_id).cloned().unwrap_or_default();
+        let res = attribute_channel(
+            realized,
+            config.shoppers_per_unit,
+            config.max_shoppers_per_market,
+            &cands,
+        );
+        for id in res.attributed {
+            targets.insert(id, node);
+        }
+    }
+    for (market_id, realized) in wage_by_market {
+        let Some(&node) = market_nodes.get(&market_id) else {
+            continue;
+        };
+        let cands = work_candidates.get(&market_id).cloned().unwrap_or_default();
+        let res = attribute_channel(
+            realized,
+            config.commuters_per_wage_unit,
+            config.max_commuters_per_market,
+            &cands,
+        );
+        for id in res.attributed {
+            targets.entry(id).or_insert(node);
+        }
+    }
+
+    // (5) Write.
+    world.resource_mut::<CitizenEconomicTargets>().0 = targets;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +264,102 @@ mod tests {
                 AgentId("agent:walk:2".into())
             ],
         );
+    }
+
+    // ---- exclusive-system test -------------------------------------------------
+
+    use crate::economy::{
+        EconomyConfig, GoodId, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, MarketSite,
+        Markets, Quantity, WageTelemetry,
+    };
+    use crate::mobility::MarketBinding;
+    use crate::mobility::components::{AgentMarker, StableAgentId};
+    use crate::mobility::resources::CitizenEconomicTargets;
+    use crate::routing::{Graph, Node, NodeId, NodeKind};
+    use crate::world::components::{ActiveChunk, ChunkCoordComp};
+    use bevy_ecs::world::World;
+
+    /// Mirrors `economy/tests/materialize.rs::routed_shipment_world`'s observed-chunk
+    /// setup: one market node at (1,1) inside chunk (0,0), with chunk (0,0) marked
+    /// Active. Trimmed to exactly the resources `run_citizen_attribution_system`
+    /// reads (no HpaIndex / spatial — those are the capture systems' concern).
+    #[test]
+    fn system_attributes_min_of_magnitude_cap_and_candidates() {
+        let mut world = World::new();
+
+        // Routing graph: a single market node at (1,1) — inside chunk (0,0).
+        let graph = Graph::new(
+            vec![Node {
+                id: NodeId(0),
+                position: (1.0, 1.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            }],
+            vec![],
+        );
+        world.insert_resource(graph);
+
+        // One market anchored to that node.
+        let market_id = MarketId(9001);
+        let mut markets = Markets::default();
+        markets.0.insert(
+            market_id,
+            MarketSite {
+                id: market_id,
+                node_id: NodeId(0),
+                name: "M".to_string(),
+            },
+        );
+        world.insert_resource(markets);
+
+        // Realized consumption of 9 units at (market, good).
+        let mut goods = MarketGoods::default();
+        let key = MarketGoodKey {
+            market: market_id,
+            good: GoodId(0),
+        };
+        let mut state = MarketGoodState::new(key);
+        state.consumed_qty_last_tick = Quantity(9);
+        goods.0.insert(key, state);
+        world.insert_resource(goods);
+
+        world.insert_resource(EconomyConfig::default());
+        world.insert_resource(WageTelemetry::default());
+        world.insert_resource(CitizenEconomicTargets::default());
+
+        // Chunk (0,0) is observed (Active). The market node sits inside it.
+        world.spawn((
+            ChunkCoordComp(crate::ids::ChunkCoord { x: 0, y: 0 }),
+            ActiveChunk,
+        ));
+
+        // 5 citizens, all bound (home == work == this market).
+        for i in 0..5 {
+            world.spawn((
+                AgentMarker,
+                StableAgentId(AgentId(format!("agent:walk:{i}"))),
+                MarketBinding {
+                    home_market: market_id.0,
+                    work_market: market_id.0,
+                },
+            ));
+        }
+
+        run_citizen_attribution_system(&mut world);
+
+        // min(9/3, 4, 5) = 3 attributed, each mapped to the market's node.
+        let targets = &world.resource::<CitizenEconomicTargets>().0;
+        assert_eq!(
+            targets.len(),
+            3,
+            "min(magnitude 3, cap 4, candidates 5) == 3"
+        );
+        for (_, node) in targets.iter() {
+            assert_eq!(
+                *node,
+                NodeId(0),
+                "each attributed citizen targets the market node"
+            );
+        }
     }
 }
