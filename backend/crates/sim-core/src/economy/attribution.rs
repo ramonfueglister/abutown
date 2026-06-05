@@ -86,8 +86,13 @@ pub fn run_citizen_attribution_system(world: &mut World) {
             .0
             .iter()
             .filter(|(_, site)| {
-                let pos = graph.node(site.node_id).position;
-                observed_chunks.contains(&crate::mobility::chunk_of(pos.0, pos.1, 32))
+                // A market whose node is not in the graph cannot be spatially
+                // located, hence cannot be observed — skip it (and avoid the
+                // out-of-bounds panic in economy-only worlds without a full graph).
+                (site.node_id.0 as usize) < graph.node_count() && {
+                    let pos = graph.node(site.node_id).position;
+                    observed_chunks.contains(&crate::mobility::chunk_of(pos.0, pos.1, 32))
+                }
             })
             .map(|(id, _)| id.0)
             .collect();
