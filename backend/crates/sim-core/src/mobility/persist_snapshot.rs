@@ -978,8 +978,9 @@ mod market_binding_persistence_tests {
     fn market_binding_preserved_through_apply_into_world() {
         let (snap, agent_id) = minimal_snap_with_bound_agent();
 
-        // fresh world — mobility installed but no markets seeded, so the
-        // assign-when-0 path would produce (0,0) if it ran (it must not).
+        // fresh world — mobility installed but no markets seeded. The record's
+        // binding is already assigned (9003/9004 != 0), so the spawn's
+        // assign-when-0 guard is skipped entirely and the binding is preserved.
         let (mut world, _schedule) = empty_world_and_schedule();
         // Prime the activity waypoint so `AtActivity` resolves to a position.
         world
