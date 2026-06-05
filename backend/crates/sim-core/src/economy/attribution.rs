@@ -159,12 +159,15 @@ pub fn run_citizen_attribution_system(world: &mut World) {
         let Some(&node) = market_nodes.get(&market_id) else {
             continue;
         };
-        let cands = shop_candidates.get(&market_id).cloned().unwrap_or_default();
+        let cands = shop_candidates
+            .get(&market_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let res = attribute_channel(
             realized,
             config.shoppers_per_unit,
             config.max_shoppers_per_market,
-            &cands,
+            cands,
         );
         for id in res.attributed {
             targets.insert(id, node);
@@ -174,12 +177,15 @@ pub fn run_citizen_attribution_system(world: &mut World) {
         let Some(&node) = market_nodes.get(&market_id) else {
             continue;
         };
-        let cands = work_candidates.get(&market_id).cloned().unwrap_or_default();
+        let cands = work_candidates
+            .get(&market_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let res = attribute_channel(
             realized,
             config.commuters_per_wage_unit,
             config.max_commuters_per_market,
-            &cands,
+            cands,
         );
         for id in res.attributed {
             targets.entry(id).or_insert(node);
@@ -361,5 +367,218 @@ mod tests {
                 "each attributed citizen targets the market node"
             );
         }
+    }
+
+    /// Off-screen market (chunk not marked Active/Hot) → nobody attributed, even
+    /// with non-zero consumption and bound citizens.  Locks the invariant: only
+    /// markets whose node sits inside a visible chunk produce attribution.
+    #[test]
+    fn system_off_screen_market_attributes_nobody() {
+        let mut world = World::new();
+
+        // Routing graph: market node at (1,1) inside chunk (0,0).
+        let graph = Graph::new(
+            vec![Node {
+                id: NodeId(0),
+                position: (1.0, 1.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            }],
+            vec![],
+        );
+        world.insert_resource(graph);
+
+        // One market anchored to that node.
+        let market_id = MarketId(9002);
+        let mut markets = Markets::default();
+        markets.0.insert(
+            market_id,
+            MarketSite {
+                id: market_id,
+                node_id: NodeId(0),
+                name: "OffScreen".to_string(),
+            },
+        );
+        world.insert_resource(markets);
+
+        // Non-zero consumption.
+        let mut goods = MarketGoods::default();
+        let key = MarketGoodKey {
+            market: market_id,
+            good: GoodId(0),
+        };
+        let mut state = MarketGoodState::new(key);
+        state.consumed_qty_last_tick = Quantity(9);
+        goods.0.insert(key, state);
+        world.insert_resource(goods);
+
+        world.insert_resource(EconomyConfig::default());
+        world.insert_resource(WageTelemetry::default());
+        world.insert_resource(CitizenEconomicTargets::default());
+
+        // NOTE: intentionally NO ActiveChunk or HotChunk entity spawned →
+        // chunk (0,0) is NOT observed → market is off-screen.
+
+        // 5 citizens bound to the off-screen market.
+        for i in 0..5 {
+            world.spawn((
+                AgentMarker,
+                StableAgentId(AgentId(format!("agent:walk:{i}"))),
+                MarketBinding {
+                    home_market: market_id.0,
+                    work_market: market_id.0,
+                },
+            ));
+        }
+
+        run_citizen_attribution_system(&mut world);
+
+        assert!(
+            world.resource::<CitizenEconomicTargets>().0.is_empty(),
+            "off-screen market must attribute nobody"
+        );
+    }
+
+    /// Wage channel: a citizen bound by work_market to a wage-paying observed
+    /// market gets attributed to that market's node.
+    ///
+    /// Two-market setup to exercise the shop-wins-tie rule: citizen 0 has
+    /// home_market = A (consuming) and work_market = B (wage-paying, no consumption).
+    /// shop channel attributes citizen 0 to A's node; wage channel also wants to
+    /// attribute citizen 0 (only worker at B), but `or_insert` means shop wins.
+    /// Citizens 1-4 are bound only to A (home+work), so they are eligible for shop
+    /// at A and are attributed there.  After the run:
+    ///   - citizen 0 → node A  (shop wins over wage because `or_insert` skips
+    ///     already-inserted keys)
+    ///   - 2 more citizens from A's shop channel → node A
+    ///   - no citizen is mapped to B's node (citizen 0 was the only B-worker, but
+    ///     or_insert did not overwrite the shop attribution)
+    #[test]
+    fn system_wage_channel_and_shop_wins_tie() {
+        use crate::economy::Money;
+
+        let mut world = World::new();
+
+        // Two nodes: node 0 for market A at (1,1), node 1 for market B at (33,33).
+        // Both inside chunk (0,0) and chunk (1,1) respectively.
+        let graph = Graph::new(
+            vec![
+                Node {
+                    id: NodeId(0),
+                    position: (1.0, 1.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+                Node {
+                    id: NodeId(1),
+                    position: (33.0, 33.0),
+                    kind: NodeKind::Intersection,
+                    legacy_id: None,
+                },
+            ],
+            vec![],
+        );
+        world.insert_resource(graph);
+
+        let market_a = MarketId(8001);
+        let market_b = MarketId(8002);
+
+        let mut markets = Markets::default();
+        markets.0.insert(
+            market_a,
+            MarketSite {
+                id: market_a,
+                node_id: NodeId(0),
+                name: "A".to_string(),
+            },
+        );
+        markets.0.insert(
+            market_b,
+            MarketSite {
+                id: market_b,
+                node_id: NodeId(1),
+                name: "B".to_string(),
+            },
+        );
+        world.insert_resource(markets);
+
+        // Market A: 9 units consumed (shop channel).
+        let mut goods = MarketGoods::default();
+        let key_a = MarketGoodKey {
+            market: market_a,
+            good: GoodId(0),
+        };
+        let mut state_a = MarketGoodState::new(key_a);
+        state_a.consumed_qty_last_tick = Quantity(9);
+        goods.0.insert(key_a, state_a);
+        world.insert_resource(goods);
+
+        // Market B: 1000 Money wages paid (wage channel).
+        // With default commuters_per_wage_unit=100 → magnitude = 10, cap=4 → 4 commuters.
+        // Citizen 0 is the only worker at B, so 1 attributed by wage channel.
+        let mut wages = WageTelemetry::default();
+        wages.0.insert(market_b, Money(1000));
+        world.insert_resource(wages);
+
+        world.insert_resource(EconomyConfig::default());
+        world.insert_resource(CitizenEconomicTargets::default());
+
+        // Both chunks observed (Active).
+        world.spawn((
+            ChunkCoordComp(crate::ids::ChunkCoord { x: 0, y: 0 }),
+            ActiveChunk,
+        ));
+        world.spawn((
+            ChunkCoordComp(crate::ids::ChunkCoord { x: 1, y: 1 }),
+            ActiveChunk,
+        ));
+
+        // Citizen 0: home=A, work=B → shop-candidate at A, wage-candidate at B.
+        world.spawn((
+            AgentMarker,
+            StableAgentId(AgentId("agent:walk:0".to_string())),
+            MarketBinding {
+                home_market: market_a.0,
+                work_market: market_b.0,
+            },
+        ));
+        // Citizens 1-4: home=work=A → shop+wage candidates at A.
+        for i in 1..5 {
+            world.spawn((
+                AgentMarker,
+                StableAgentId(AgentId(format!("agent:walk:{i}"))),
+                MarketBinding {
+                    home_market: market_a.0,
+                    work_market: market_a.0,
+                },
+            ));
+        }
+
+        run_citizen_attribution_system(&mut world);
+
+        let targets = &world.resource::<CitizenEconomicTargets>().0;
+
+        // Shop channel at A: min(9/3=3, cap 4, 5 candidates) = 3 attributed.
+        // Attributed citizens are the deterministic prefix [0,1,2] (sorted AgentId).
+        // Wage channel at B: only citizen 0 is a B-worker → 1 attributed, but
+        // citizen 0 is already in targets (shop) → or_insert is a no-op.
+        // Net: exactly 3 citizens (0,1,2), all mapped to NodeId(0) (market A's node).
+        assert_eq!(
+            targets.len(),
+            3,
+            "3 from shop channel; wage adds no new entry"
+        );
+
+        let citizen_0 = AgentId("agent:walk:0".to_string());
+        assert_eq!(
+            targets.get(&citizen_0).copied(),
+            Some(NodeId(0)),
+            "citizen 0 stays at market A's node (shop wins over wage)"
+        );
+        // Market B's node should have no attributed citizens.
+        assert!(
+            !targets.values().any(|&n| n == NodeId(1)),
+            "market B's node (NodeId 1) has no attributed citizens"
+        );
     }
 }
