@@ -2,7 +2,7 @@ use abutown_protocol::WorldEventDto;
 use async_trait::async_trait;
 use serde_json::Value;
 use sim_core::events::{WorldEventMetadata, WorldEventStore, WorldEventStoreError};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::PgPool;
 
 const WORLD_EVENTS_MIGRATION: &str = include_str!("../migrations/202605150001_world_events.sql");
 const CHUNK_RECOVERY_MIGRATION: &str =
@@ -31,13 +31,7 @@ pub struct PostgresWorldEventStore {
 }
 
 impl PostgresWorldEventStore {
-    pub async fn connect(database_url: &str) -> Result<Self, WorldEventStoreError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .map_err(|error| WorldEventStoreError::unavailable(error.to_string()))?;
-
+    pub async fn with_pool(pool: PgPool) -> Result<Self, WorldEventStoreError> {
         for statement in WORLD_EVENTS_MIGRATION
             .split(';')
             .map(str::trim)
@@ -61,6 +55,10 @@ impl PostgresWorldEventStore {
         }
 
         Ok(Self { pool })
+    }
+
+    pub fn pool_for_test(&self) -> &sqlx::PgPool {
+        &self.pool
     }
 }
 
@@ -250,9 +248,12 @@ mod integration_tests {
             return;
         };
 
-        let mut store = PostgresWorldEventStore::connect(&database_url)
+        let pool = crate::db::connect_shared_pool(&database_url)
             .await
-            .expect("connect postgres event store");
+            .expect("connect shared pool");
+        let mut store = PostgresWorldEventStore::with_pool(pool)
+            .await
+            .expect("with_pool postgres event store");
         let event = tile_event(&format!("event:{}", uuid::Uuid::now_v7()), 1);
 
         store.append(event).await.expect("append event");

@@ -7,7 +7,7 @@ use sim_core::persistence::{
     MobilitySnapshotStore, MobilitySnapshotStoreError, SnapshotCompatibility,
 };
 use sim_core::time::SimClock;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::PgPool;
 
 const MOBILITY_SNAPSHOTS_MIGRATION: &str =
     include_str!("../migrations/202605160002_mobility_snapshots.sql");
@@ -26,13 +26,7 @@ pub struct PostgresMobilitySnapshotStore {
 }
 
 impl PostgresMobilitySnapshotStore {
-    pub async fn connect(database_url: &str) -> Result<Self, MobilitySnapshotStoreError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .map_err(|error| MobilitySnapshotStoreError::unavailable(error.to_string()))?;
-
+    pub async fn with_pool(pool: PgPool) -> Result<Self, MobilitySnapshotStoreError> {
         for statement in MOBILITY_SNAPSHOTS_MIGRATION
             .split(';')
             .map(str::trim)
@@ -315,7 +309,10 @@ mod tests {
             return;
         };
 
-        let mut store = PostgresMobilitySnapshotStore::connect(&database_url)
+        let pool = crate::db::connect_shared_pool(&database_url)
+            .await
+            .expect("connect shared pool");
+        let mut store = PostgresMobilitySnapshotStore::with_pool(pool)
             .await
             .unwrap();
         let snap = crate::runtime::SimulationRuntime::new().mobility_persist_snapshot();
@@ -338,7 +335,7 @@ mod tests {
         // Best-effort cleanup of the test row
         let _ = sqlx::query("DELETE FROM mobility_snapshots WHERE world_id = $1")
             .bind(&world_id)
-            .execute(&store.pool)
+            .execute(store.pool_for_test())
             .await;
     }
 
@@ -349,9 +346,12 @@ mod tests {
             return;
         };
 
-        let bootstrap = PostgresMobilitySnapshotStore::connect(&database_url)
+        let pool = crate::db::connect_shared_pool(&database_url)
             .await
-            .expect("connect mobility store for bootstrap");
+            .expect("connect shared pool");
+        let bootstrap = PostgresMobilitySnapshotStore::with_pool(pool)
+            .await
+            .expect("with_pool mobility store for bootstrap");
         let world_id = format!("test:mobility:legacy-month:{}", uuid::Uuid::now_v7());
         let compatibility = SnapshotCompatibility::new("abutopia", 1);
         let tick = 26_280_i64;
@@ -385,9 +385,12 @@ mod tests {
         .await
         .expect("insert legacy mobility snapshot");
 
-        let store = PostgresMobilitySnapshotStore::connect(&database_url)
+        let pool2 = crate::db::connect_shared_pool(&database_url)
             .await
-            .expect("connect mobility store runs migrations");
+            .expect("connect shared pool for migration store");
+        let store = PostgresMobilitySnapshotStore::with_pool(pool2)
+            .await
+            .expect("with_pool mobility store runs migrations");
         let (_tick, restored) = MobilitySnapshotStore::read(&store, &world_id, &compatibility)
             .await
             .expect("legacy snapshot is migrated before strict deserialization")
@@ -408,9 +411,12 @@ mod tests {
             return;
         };
 
-        let bootstrap = PostgresMobilitySnapshotStore::connect(&database_url)
+        let pool = crate::db::connect_shared_pool(&database_url)
             .await
-            .expect("connect mobility store for bootstrap");
+            .expect("connect shared pool");
+        let bootstrap = PostgresMobilitySnapshotStore::with_pool(pool)
+            .await
+            .expect("with_pool mobility store for bootstrap");
         let world_id = format!("test:mobility:legacy-birth:{}", uuid::Uuid::now_v7());
         let compatibility = SnapshotCompatibility::new("abutopia", 1);
         let tick = 26_280_i64;
@@ -456,9 +462,12 @@ mod tests {
         .await
         .expect("insert legacy mobility snapshot");
 
-        let store = PostgresMobilitySnapshotStore::connect(&database_url)
+        let pool2 = crate::db::connect_shared_pool(&database_url)
             .await
-            .expect("connect mobility store runs migrations");
+            .expect("connect shared pool for migration store");
+        let store = PostgresMobilitySnapshotStore::with_pool(pool2)
+            .await
+            .expect("with_pool mobility store runs migrations");
         let (_tick, restored) = MobilitySnapshotStore::read(&store, &world_id, &compatibility)
             .await
             .expect("legacy snapshot is migrated before strict deserialization")
