@@ -22,11 +22,7 @@ pub struct MarketBinding {
 ///   id); if only one market exists, `work_market == home_market`.
 ///
 /// Returns `None` only when `markets` is empty. Pure: no RNG, no wall-clock.
-#[allow(dead_code)] // caller wired in Task 2 (seed/birth assignment)
-pub(crate) fn assign_binding(
-    pos: (f32, f32),
-    markets: &[(u32, (f32, f32))],
-) -> Option<MarketBinding> {
+pub fn assign_binding(pos: (f32, f32), markets: &[(u32, (f32, f32))]) -> Option<MarketBinding> {
     fn dist2(a: (f32, f32), b: (f32, f32)) -> f32 {
         let dx = a.0 - b.0;
         let dy = a.1 - b.1;
