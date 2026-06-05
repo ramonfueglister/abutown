@@ -307,7 +307,9 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
         world.insert_resource(crate::economy::production::ProductionPools::default());
         world.insert_resource(crate::economy::production::RawDeposits::default());
     }
-    crate::economy::seed::seed_demo_economy(&mut world);
+    let bundle = crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
+        .expect("abutopia bundle loads");
+    crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
 
     let aggregate_tools_demand: i64 = world
         .resource::<DemandPools>()
@@ -537,7 +539,9 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
         world.insert_resource(ProductionPools::default());
         world.insert_resource(RawDeposits::default());
     }
-    crate::economy::seed::seed_demo_economy(&mut world);
+    let bundle = crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
+        .expect("abutopia bundle loads");
+    crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
 
     let rows = check(
         world.resource::<DemandPools>(),

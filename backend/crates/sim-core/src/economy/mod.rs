@@ -17,7 +17,6 @@ pub mod persist;
 pub mod pools;
 pub mod pricing;
 pub mod production;
-pub mod seed;
 pub mod shoppers;
 pub mod systems;
 pub mod trader_render;
