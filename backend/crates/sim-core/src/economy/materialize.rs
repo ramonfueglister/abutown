@@ -70,18 +70,10 @@ pub(crate) enum TraderMutation {
     },
 }
 
-/// Sprite/id prefix for a render-actor by its actor-id namespace. Checked highest
-/// band first: commuters (>= COMMUTER_ACTOR_OFFSET = 3<<32) → `commuter:`, shoppers
-/// (>= SHOPPER_ACTOR_OFFSET = 2<<32) → `shopper:`, everything else (demo traders +
-/// flow shipments) → `trader:`. The three namespaces are distinct on the wire.
-pub(crate) fn id_prefix(actor: EconomicActorId) -> &'static str {
-    if actor.0 >= crate::economy::commuters::COMMUTER_ACTOR_OFFSET {
-        "commuter:"
-    } else if actor.0 >= crate::economy::shoppers::SHOPPER_ACTOR_OFFSET {
-        "shopper:"
-    } else {
-        "trader:"
-    }
+/// Sprite/id prefix for a render-actor by its actor-id namespace.
+/// Only flow-traders remain: everything maps to `trader:`.
+pub(crate) fn id_prefix(_actor: EconomicActorId) -> &'static str {
+    "trader:"
 }
 
 /// Deterministic sprite-variant index for a trader id (FNV-1a, 8 variants).
@@ -343,39 +335,7 @@ fn rendering_shipment_ids(materialized: &MaterializedTraders) -> BTreeSet<u64> {
     materialized
         .0
         .keys()
-        .filter(|a| a.0 < crate::economy::shoppers::SHOPPER_ACTOR_OFFSET)
         .filter_map(|a| a.0.checked_sub(SHIPMENT_ACTOR_OFFSET))
-        .collect()
-}
-
-/// The set of shopper-visit ids that currently have a live materialized
-/// render-agent (their reserved actor id is `SHOPPER_ACTOR_OFFSET + id`). Used by
-/// `expire_arrived_shoppers` to retain an arrived visit until its agent has
-/// finished the ghost-free leave->despawn lifecycle. Bounded below COMMUTER_ACTOR_OFFSET
-/// so commuter ids (3<<32+n) are not wrongly captured (they would survive the checked_sub
-/// because 3<<32 > 2<<32).
-fn rendering_shopper_ids(materialized: &MaterializedTraders) -> std::collections::BTreeSet<u64> {
-    use crate::economy::commuters::COMMUTER_ACTOR_OFFSET;
-    use crate::economy::shoppers::SHOPPER_ACTOR_OFFSET;
-    materialized
-        .0
-        .keys()
-        .filter(|a| a.0 >= SHOPPER_ACTOR_OFFSET && a.0 < COMMUTER_ACTOR_OFFSET)
-        .filter_map(|a| a.0.checked_sub(SHOPPER_ACTOR_OFFSET))
-        .collect()
-}
-
-/// The set of commuter-trip ids that currently have a live materialized
-/// render-agent (their reserved actor id is `COMMUTER_ACTOR_OFFSET + id`). Used by
-/// `expire_arrived_commuters` to retain an arrived trip until its agent has
-/// finished the ghost-free leave->despawn lifecycle.
-fn rendering_commuter_ids(materialized: &MaterializedTraders) -> std::collections::BTreeSet<u64> {
-    use crate::economy::commuters::COMMUTER_ACTOR_OFFSET;
-    materialized
-        .0
-        .keys()
-        .filter(|a| a.0 >= COMMUTER_ACTOR_OFFSET)
-        .filter_map(|a| a.0.checked_sub(COMMUTER_ACTOR_OFFSET))
         .collect()
 }
 
@@ -396,18 +356,6 @@ pub fn materialize_traders_system(world: &mut World) {
             &mut world.resource_mut::<crate::economy::FlowShipments>(),
             tick,
             &rendering,
-        );
-        let s_rendering = rendering_shopper_ids(world.resource::<MaterializedTraders>());
-        crate::economy::shoppers::expire_arrived_shoppers(
-            &mut world.resource_mut::<crate::economy::ShopperVisits>(),
-            tick,
-            &s_rendering,
-        );
-        let c_rendering = rendering_commuter_ids(world.resource::<MaterializedTraders>());
-        crate::economy::commuters::expire_arrived_commuters(
-            &mut world.resource_mut::<crate::economy::CommuterTrips>(),
-            tick,
-            &c_rendering,
         );
     }
 
@@ -457,44 +405,6 @@ pub fn materialize_traders_system(world: &mut World) {
                     ));
                 }
             }
-            // shopper visits (demand-side twin of flow shipments). Route the
-            // visit's origin footway node -> its market node, linear progress,
-            // reserved shopper actor id. Arrived visits are fed in (arrived=true) so
-            // the lifecycle walks them through the ghost-free leave->despawn path.
-            for v in world.resource::<crate::economy::ShopperVisits>().0.values() {
-                let Some(market) = markets.0.get(&v.market) else {
-                    continue;
-                };
-                if let Some(poly) =
-                    leg_polyline(graph, hpa, &mut cache, v.origin_node, market.node_id)
-                {
-                    out.push((
-                        EconomicActorId(crate::economy::shoppers::SHOPPER_ACTOR_OFFSET + v.id),
-                        poly,
-                        v.progress(tick),
-                        v.arrived(tick),
-                    ));
-                }
-            }
-            // commuter trips (supply-side wage projection). Route the trip's origin
-            // footway node -> its market node, linear progress, reserved commuter
-            // actor id. Arrived trips are fed in (arrived=true) so the lifecycle
-            // walks them through the ghost-free leave->despawn path.
-            for c in world.resource::<crate::economy::CommuterTrips>().0.values() {
-                let Some(market) = markets.0.get(&c.market) else {
-                    continue;
-                };
-                if let Some(poly) =
-                    leg_polyline(graph, hpa, &mut cache, c.origin_node, market.node_id)
-                {
-                    out.push((
-                        EconomicActorId(crate::economy::commuters::COMMUTER_ACTOR_OFFSET + c.id),
-                        poly,
-                        c.progress(tick),
-                        c.arrived(tick),
-                    ));
-                }
-            }
             out
         });
 
@@ -522,17 +432,5 @@ pub fn materialize_traders_system(world: &mut World) {
         &mut world.resource_mut::<crate::economy::FlowShipments>(),
         tick,
         &rendering,
-    );
-    let s_rendering = rendering_shopper_ids(world.resource::<MaterializedTraders>());
-    crate::economy::shoppers::expire_arrived_shoppers(
-        &mut world.resource_mut::<crate::economy::ShopperVisits>(),
-        tick,
-        &s_rendering,
-    );
-    let c_rendering = rendering_commuter_ids(world.resource::<MaterializedTraders>());
-    crate::economy::commuters::expire_arrived_commuters(
-        &mut world.resource_mut::<crate::economy::CommuterTrips>(),
-        tick,
-        &c_rendering,
     );
 }
