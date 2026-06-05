@@ -43,6 +43,46 @@ fn seed_world() -> World {
     world
 }
 
+/// The full scaffold both seeders need to produce a snapshot-comparable world:
+/// the 4 reference footway nodes (`Graph` + `NodeSpatialIndex`) plus a complete
+/// `EconomyPlugin` install (which inserts EVERY resource `extract_from_world`
+/// reads — `OrderBook`, `NextOrderId`, `TradeLedger`, `HouseholdSector`, … — that
+/// `seed_world()` omits). No seed is run here; the caller seeds the bare world.
+fn unseeded_world() -> World {
+    use crate::world::schedule::SimPlugin;
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
+    let nodes = vec![
+        node(0, 2.0, 3.0),
+        node(1, 13.0, 3.0),
+        node(2, 16.0, 48.0),
+        node(3, 208.0, 48.0),
+    ];
+    world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
+    world.insert_resource(Graph::new(nodes, vec![]));
+    world
+}
+
+#[test]
+fn layer_seed_matches_legacy_seed_byte_for_byte() {
+    use crate::economy::persist::extract_from_world;
+    // World 1: legacy code seed on the full EconomyPlugin scaffold.
+    let mut legacy = unseeded_world();
+    crate::economy::seed::seed_demo_economy(&mut legacy);
+    let snap_legacy = extract_from_world(&legacy);
+    // World 2: layer-driven seed using the authored abutopia markets layer.
+    // CWD for sim-core unit tests is the crate root (backend/crates/sim-core),
+    // so the repo-root data/ dir is three levels up.
+    let bundle =
+        crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia").unwrap();
+    let mut authored = unseeded_world();
+    crate::economy::seed_from_markets_layer(&mut authored, &bundle.markets);
+    let snap_authored = extract_from_world(&authored);
+    // ledger_tail is empty pre-tick-0 in both; EconomyPersistSnapshot derives PartialEq.
+    assert_eq!(snap_authored, snap_legacy);
+}
+
 #[test]
 fn seed_demo_economy_creates_four_markets() {
     let mut world = seed_world();
