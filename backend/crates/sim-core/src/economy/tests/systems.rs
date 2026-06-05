@@ -536,3 +536,159 @@ fn pay_wages_then_profit_then_rebate_order_within_schedule() {
     assert!(i_p < i_r, "rebate AFTER profit: {log:?}");
     assert!(i_r < i_c, "rebate BEFORE consume: {log:?}");
 }
+
+#[test]
+fn price_adjust_config_defaults_and_validation() {
+    use crate::economy::Money;
+    use crate::economy::systems::EconomyConfig;
+    let c = EconomyConfig::default();
+    assert_eq!(c.price_adjust_k_bps, 500);
+    assert_eq!(c.price_adjust_max_step_bps, 100);
+    assert_eq!(c.price_floor, Money(1));
+    assert_eq!(c.price_ceiling, Money(100_000));
+    // Validated getters accept the defaults...
+    assert_eq!(c.validated_price_adjust_k_bps().unwrap(), 500);
+    assert_eq!(c.validated_price_adjust_max_step_bps().unwrap(), 100);
+    assert_eq!(c.validated_price_band().unwrap(), (1, 100_000));
+    // Inclusive boundary == 10_000 PASSES (mirrors validated_labor_share_bps).
+    let edge_k = EconomyConfig {
+        price_adjust_k_bps: 10_000,
+        ..c
+    };
+    assert_eq!(edge_k.validated_price_adjust_k_bps().unwrap(), 10_000);
+    // ...and reject out-of-band config (NO-FALLBACK: honest Err, no silent clamp).
+    let bad_k = EconomyConfig {
+        price_adjust_k_bps: 10_001,
+        ..c
+    };
+    assert!(bad_k.validated_price_adjust_k_bps().is_err());
+    let bad_step = EconomyConfig {
+        price_adjust_max_step_bps: 10_001,
+        ..c
+    };
+    assert!(bad_step.validated_price_adjust_max_step_bps().is_err());
+    let bad_floor0 = EconomyConfig {
+        price_floor: Money(0),
+        ..c
+    };
+    assert!(
+        bad_floor0.validated_price_band().is_err(),
+        "floor must be > 0 (else ZeroPrice)"
+    );
+    let bad_order = EconomyConfig {
+        price_floor: Money(100_000),
+        price_ceiling: Money(1),
+        ..c
+    };
+    assert!(
+        bad_order.validated_price_band().is_err(),
+        "floor must be < ceiling"
+    );
+}
+
+#[test]
+fn adjust_reservation_prices_fires_on_cadence_boundary_only() {
+    use crate::economy::EconomyPlugin;
+    use crate::economy::systems::{EconomySet, run_adjust_reservation_prices_system};
+    use crate::economy::{
+        AccountBook, DemandPool, DemandPools, EconomicActorId, GOOD_TOOLS, HouseholdSector,
+        InventoryBook, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, MarketSite, Markets,
+        Money, Quantity, SupplyPool, SupplyPools,
+    };
+    use crate::mobility::resources::Tick;
+    use crate::world::plugin::CorePlugin;
+    use bevy_ecs::prelude::*;
+    use std::collections::BTreeMap;
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+
+    let m = MarketId(1);
+    let consumer = EconomicActorId(8_002);
+    let supplier = EconomicActorId(8_001);
+    world.resource_mut::<DemandPools>().0.insert(
+        consumer,
+        DemandPool {
+            actor: consumer,
+            market: m,
+            good: GOOD_TOOLS,
+            desired_qty_per_tick: Quantity(10),
+            max_price: Money(2_000),
+            urgency_bps: 0,
+            elasticity_bps: 0,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            last_consumed_tick: None,
+            income_last_tick: Money::ZERO,
+            mpc_bps: 8_000,
+            autonomous: Money(5_000),
+        },
+    );
+    world.resource_mut::<SupplyPools>().0.insert(
+        supplier,
+        SupplyPool {
+            actor: supplier,
+            market: m,
+            good: GOOD_TOOLS,
+            offered_qty_per_tick: Quantity(5),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(consumer, Money(10_000_000))
+        .unwrap();
+    world
+        .resource_mut::<InventoryBook>()
+        .deposit(supplier, GOOD_TOOLS, Quantity(1_000_000))
+        .unwrap();
+    world.resource_mut::<Markets>().0.insert(
+        m,
+        MarketSite {
+            id: m,
+            node_id: crate::routing::NodeId(0),
+            name: "M1".to_string(),
+        },
+    );
+    world.insert_resource(HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(consumer, 1_i64)]),
+    });
+    {
+        let key = MarketGoodKey {
+            market: m,
+            good: GOOD_TOOLS,
+        };
+        let mut g = world.resource_mut::<MarketGoods>();
+        let st = g.0.entry(key).or_insert_with(|| MarketGoodState::new(key));
+        st.ewma_reference_price = Money(1_000);
+        st.last_settlement_price = Money(1_000);
+    }
+
+    world.insert_resource(Tick(0));
+    schedule.run(&mut world);
+    let after_fire = world.resource::<DemandPools>().0[&consumer].max_price.0;
+    assert!(
+        after_fire > 2_000,
+        "nudge fired on cadence boundary (tick 0), read post-clear unmet: {after_fire}"
+    );
+
+    world.insert_resource(Tick(3));
+    let before_noop = world.resource::<DemandPools>().0[&consumer].max_price.0;
+    schedule.run(&mut world);
+    let after_noop = world.resource::<DemandPools>().0[&consumer].max_price.0;
+    assert_eq!(
+        after_noop, before_noop,
+        "no nudge off the cadence boundary (tick 3)"
+    );
+
+    let _ = (
+        run_adjust_reservation_prices_system,
+        EconomySet::AdjustReservationPrices,
+    );
+}

@@ -792,6 +792,7 @@ fn steady_state_multi_tick() {
     let mut traded_tail: Vec<i64> = Vec::new();
     let mut food_traded_tail: Vec<i64> = Vec::new();
     let mut tools_total_tail: Vec<i64> = Vec::new();
+    let mut max_price_tail: Vec<i64> = Vec::new();
 
     for i in 0..n {
         schedule.run(&mut world);
@@ -840,6 +841,7 @@ fn steady_state_multi_tick() {
                     .unwrap()
                     .0,
             );
+            max_price_tail.push(world.resource::<DemandPools>().0[&consumer].max_price.0);
         }
     }
 
@@ -926,5 +928,16 @@ fn steady_state_multi_tick() {
         ev.iter()
             .any(|e| matches!(e, EconomyEvent::Produced { good, .. } if *good == GOOD_FOOD)),
         "food produced"
+    );
+
+    // Free-prices nudge is active in the default schedule. In the converged steady state the
+    // excess-demand signal is ~0, so the reservation price must settle into a bounded band
+    // (it neither runs to the ceiling nor oscillates wildly). This is the stability guard.
+    let mp_lo = *max_price_tail.iter().min().unwrap();
+    let mp_hi = *max_price_tail.iter().max().unwrap();
+    assert!(mp_lo > 0, "reservation price stays positive (no ZeroPrice)");
+    assert!(
+        mp_hi - mp_lo < 2_000,
+        "reservation-price tail bounded (no runaway/oscillation): lo={mp_lo} hi={mp_hi}"
     );
 }
