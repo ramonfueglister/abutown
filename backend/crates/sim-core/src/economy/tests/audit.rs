@@ -231,3 +231,52 @@ fn tick_audit_returns_err_on_money_drift() {
     let r = run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, 1);
     assert_eq!(r, Err(EconomyError::ConservationViolation));
 }
+
+#[test]
+fn tick_audit_fires_every_tick_under_full_plugin() {
+    use crate::economy::systems::{run_tick_audit_system, EconomySet};
+    use crate::economy::{EconomyEvent, EconomyPlugin, TradeLedger};
+    use crate::mobility::resources::Tick;
+    use crate::world::plugin::CorePlugin;
+    use crate::world::schedule::SimPlugin;
+    use bevy_ecs::prelude::*;
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+    world.insert_resource(Tick(0));
+
+    for _ in 0..3 {
+        schedule.run(&mut world);
+        world.resource_mut::<Tick>().0 += 1;
+    }
+    let n_audit = world.resource::<TradeLedger>().0.iter()
+        .filter(|e| matches!(e, EconomyEvent::TickAudit { .. })).count();
+    assert!(n_audit >= 3, "a TickAudit event per tick: {n_audit}");
+    let _ = (run_tick_audit_system, EconomySet::TickAudit);
+}
+
+#[test]
+#[should_panic(expected = "CONSERVATION VIOLATION")]
+fn injected_money_drift_panics_the_audit() {
+    use crate::economy::{AccountBook, EconomicActorId, EconomyPlugin, Money};
+    use crate::mobility::resources::Tick;
+    use crate::world::plugin::CorePlugin;
+    use crate::world::schedule::SimPlugin;
+    use bevy_ecs::prelude::*;
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    CorePlugin::default().install(&mut world, &mut schedule);
+    crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
+    EconomyPlugin.install(&mut world, &mut schedule);
+    world.insert_resource(Tick(0));
+
+    schedule.run(&mut world); // tick 0: audit sets the baseline
+    world.resource_mut::<Tick>().0 += 1;
+    // MINT money (a conservation violation) between ticks.
+    world.resource_mut::<AccountBook>().deposit(EconomicActorId(42), Money(1_000)).unwrap();
+    schedule.run(&mut world); // tick 1: audit sees total changed → .expect panics
+}

@@ -38,6 +38,7 @@ pub enum EconomySet {
     Telemetry,
     AdjustReservationPrices,
     UpdateConsumption,
+    TickAudit,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
@@ -181,6 +182,7 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             EconomySet::Telemetry,
             EconomySet::AdjustReservationPrices,
             EconomySet::UpdateConsumption,
+            EconomySet::TickAudit,
         )
             .chain(),
     );
@@ -209,6 +211,15 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
             run_adjust_reservation_prices_system.in_set(EconomySet::AdjustReservationPrices),
             run_consumption_update_system.in_set(EconomySet::UpdateConsumption),
         )
+            .before(crate::mobility::systems::tick_increment_system),
+    );
+    // Tick-audit: registered separately (mirrors run_distribute_profit_system pattern —
+    // keeps the main tuple at its original size so intra-tuple scheduling is unaffected)
+    // and anchored to the TickAudit set (last in the chain, after UpdateConsumption) and
+    // before tick_increment so it fires after ALL money moves this tick.
+    schedule.add_systems(
+        run_tick_audit_system
+            .in_set(EconomySet::TickAudit)
             .before(crate::mobility::systems::tick_increment_system),
     );
     // Profit distribution: registered separately so the .after(run_pay_wages_system) edge
@@ -668,6 +679,20 @@ pub fn run_adjust_reservation_prices_system(
             reason,
         });
     }
+}
+
+/// End-of-tick SFC conservation audit. Runs LAST (after UpdateConsumption, so all of this tick's
+/// money moves are settled). Fail-fast: a drift is an unrecoverable invariant break, so a returned
+/// Err panics — exactly like the codebase's other "this is impossible" .expect points. Emits a
+/// TickAudit heartbeat every tick (the queryable conservation trace).
+pub fn run_tick_audit_system(
+    tick: Res<Tick>,
+    accounts: Res<AccountBook>,
+    mut ledger: ResMut<TradeLedger>,
+    mut last: ResMut<crate::economy::audit::LastTickMoney>,
+) {
+    crate::economy::audit::run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, tick.0)
+        .expect("CONSERVATION VIOLATION: total_money changed between ticks (money minted/destroyed) — the SFC byte-invariant is broken; halting the tick. This must never happen.");
 }
 
 /// Exclusive system: fill `CommuterTrips` from observed markets' realized WAGES.
