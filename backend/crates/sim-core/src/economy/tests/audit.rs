@@ -190,7 +190,10 @@ fn sfc_audit_primitives_exist() {
     // The new honest error variant.
     let _ = EconomyError::ConservationViolation;
     // The TickAudit event + its stable tag.
-    let e = EconomyEvent::TickAudit { tick: 7, total_money: Money(12_345) };
+    let e = EconomyEvent::TickAudit {
+        tick: 7,
+        total_money: Money(12_345),
+    };
     assert_eq!(e.event_type(), "tick_audit");
     // The ephemeral baseline defaults to None.
     assert_eq!(LastTickMoney::default().0, None);
@@ -198,7 +201,7 @@ fn sfc_audit_primitives_exist() {
 
 #[test]
 fn tick_audit_emits_event_and_tracks_baseline_when_conserved() {
-    use crate::economy::audit::{run_tick_audit_at_tick, LastTickMoney};
+    use crate::economy::audit::{LastTickMoney, run_tick_audit_at_tick};
     use crate::economy::{AccountBook, EconomicActorId, EconomyEvent, Money, TradeLedger};
     let mut accounts = AccountBook::default();
     accounts.deposit(EconomicActorId(1), Money(1_000)).unwrap();
@@ -208,7 +211,13 @@ fn tick_audit_emits_event_and_tracks_baseline_when_conserved() {
     // First tick: no prior baseline → initialize, emit event, no check.
     run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, 0).unwrap();
     assert_eq!(last.0, Some(Money(1_000)));
-    assert_eq!(ledger.0, vec![EconomyEvent::TickAudit { tick: 0, total_money: Money(1_000) }]);
+    assert_eq!(
+        ledger.0,
+        vec![EconomyEvent::TickAudit {
+            tick: 0,
+            total_money: Money(1_000)
+        }]
+    );
 
     // Second tick, unchanged total → Ok, second event, baseline unchanged.
     run_tick_audit_at_tick(&accounts, &mut ledger, &mut last, 1).unwrap();
@@ -218,7 +227,7 @@ fn tick_audit_emits_event_and_tracks_baseline_when_conserved() {
 
 #[test]
 fn tick_audit_returns_err_on_money_drift() {
-    use crate::economy::audit::{run_tick_audit_at_tick, LastTickMoney};
+    use crate::economy::audit::{LastTickMoney, run_tick_audit_at_tick};
     use crate::economy::{AccountBook, EconomicActorId, EconomyError, Money, TradeLedger};
     let mut accounts = AccountBook::default();
     accounts.deposit(EconomicActorId(1), Money(1_000)).unwrap();
@@ -234,7 +243,7 @@ fn tick_audit_returns_err_on_money_drift() {
 
 #[test]
 fn tick_audit_fires_every_tick_under_full_plugin() {
-    use crate::economy::systems::{run_tick_audit_system, EconomySet};
+    use crate::economy::systems::{EconomySet, run_tick_audit_system};
     use crate::economy::{EconomyEvent, EconomyPlugin, TradeLedger};
     use crate::mobility::resources::Tick;
     use crate::world::plugin::CorePlugin;
@@ -252,8 +261,12 @@ fn tick_audit_fires_every_tick_under_full_plugin() {
         schedule.run(&mut world);
         world.resource_mut::<Tick>().0 += 1;
     }
-    let n_audit = world.resource::<TradeLedger>().0.iter()
-        .filter(|e| matches!(e, EconomyEvent::TickAudit { .. })).count();
+    let n_audit = world
+        .resource::<TradeLedger>()
+        .0
+        .iter()
+        .filter(|e| matches!(e, EconomyEvent::TickAudit { .. }))
+        .count();
     assert!(n_audit >= 3, "a TickAudit event per tick: {n_audit}");
     let _ = (run_tick_audit_system, EconomySet::TickAudit);
 }
@@ -277,6 +290,9 @@ fn injected_money_drift_panics_the_audit() {
     schedule.run(&mut world); // tick 0: audit sets the baseline
     world.resource_mut::<Tick>().0 += 1;
     // MINT money (a conservation violation) between ticks.
-    world.resource_mut::<AccountBook>().deposit(EconomicActorId(42), Money(1_000)).unwrap();
+    world
+        .resource_mut::<AccountBook>()
+        .deposit(EconomicActorId(42), Money(1_000))
+        .unwrap();
     schedule.run(&mut world); // tick 1: audit sees total changed → .expect panics
 }

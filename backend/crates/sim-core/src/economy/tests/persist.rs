@@ -496,16 +496,31 @@ fn snapshot_without_raw_deposits_field_fails_to_deserialize() {
 fn tick_audit_event_round_trips_in_ledger_tail() {
     use crate::economy::{EconomyEvent, EconomyPersistSnapshot, Money, TradeLedger};
     let mut world = install_economy();
-    world.resource_mut::<TradeLedger>().0.push(EconomyEvent::TickAudit { tick: 5, total_money: Money(99_999) });
+    world
+        .resource_mut::<TradeLedger>()
+        .0
+        .push(EconomyEvent::TickAudit {
+            tick: 5,
+            total_money: Money(99_999),
+        });
     let snap = extract_from_world(&world);
     let bytes = serde_json::to_vec(&snap).unwrap();
     let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
     let mut fresh = install_economy();
     apply_into_world(&mut fresh, &decoded);
     assert!(
-        fresh.resource::<TradeLedger>().0.iter().any(|e|
-            matches!(e, EconomyEvent::TickAudit { tick: 5, total_money: Money(99_999) })),
+        fresh.resource::<TradeLedger>().0.iter().any(|e| matches!(
+            e,
+            EconomyEvent::TickAudit {
+                tick: 5,
+                total_money: Money(99_999)
+            }
+        )),
         "TickAudit survives the ledger_tail round-trip"
     );
-    assert_eq!(snap, extract_from_world(&fresh), "full snapshot identity with a TickAudit event");
+    assert_eq!(
+        snap,
+        extract_from_world(&fresh),
+        "full snapshot identity with a TickAudit event"
+    );
 }

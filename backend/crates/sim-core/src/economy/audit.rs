@@ -30,12 +30,15 @@ pub fn run_tick_audit_at_tick(
     current_tick: u64,
 ) -> Result<(), EconomyError> {
     let total = accounts.total_money()?;
-    if let Some(prev) = last.0 {
-        if total != prev {
-            return Err(EconomyError::ConservationViolation);
-        }
+    if let Some(prev) = last.0
+        && total != prev
+    {
+        return Err(EconomyError::ConservationViolation);
     }
-    ledger.0.push(EconomyEvent::TickAudit { tick: current_tick, total_money: total });
+    ledger.0.push(EconomyEvent::TickAudit {
+        tick: current_tick,
+        total_money: total,
+    });
     last.0 = Some(total);
     Ok(())
 }
