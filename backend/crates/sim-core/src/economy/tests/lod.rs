@@ -99,6 +99,7 @@ fn dormant_market_generates_no_orders() {
         0,
         5,
         &dormant,
+        1,
     )
     .unwrap();
 
@@ -142,6 +143,7 @@ fn awake_market_still_generates_orders() {
         0,
         5,
         &dormant,
+        1,
     )
     .unwrap();
 
@@ -178,6 +180,7 @@ fn market_resumes_with_single_order_no_burst() {
             tick,
             5,
             &dormant,
+            1,
         )
         .unwrap();
     }
@@ -197,6 +200,7 @@ fn market_resumes_with_single_order_no_burst() {
         100,
         5,
         &awake,
+        1,
     )
     .unwrap();
     assert_eq!(orders.bids.len(), 1, "wake emits exactly one order");

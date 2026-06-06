@@ -20,6 +20,7 @@ use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
+    RefreshCapita,
     ResetReceipts,
     RefreshLod,
     ExpireOrders,
@@ -51,8 +52,10 @@ pub struct EconomyConfig {
     /// How many consumed-good units one attributed shopper-role citizen represents
     /// (the divisor in attribution's per-market cohort size).
     pub shoppers_per_unit: i64,
-    /// Absolute cap on attributed shopper-role citizens per market (keeps the cohort
-    /// a handful, not hundreds; never derived from magnitude → population can't leak in).
+    /// Per-market BASELINE cap on attributed shopper-role citizens. Since 2d the
+    /// EFFECTIVE cap is `max_shoppers_per_market * CapitaFactor` (scales with the live
+    /// population), so visible density grows with the citizenry. Still derived from the
+    /// POPULATION factor, never from the consumption magnitude (viewport-independent).
     pub max_shoppers_per_market: usize,
     /// When TRUE, the macro flow drains active/observed markets' post-auction
     /// residual orders into the inter-market flow (S3). FALSE keeps the flow
@@ -64,8 +67,10 @@ pub struct EconomyConfig {
     /// How many wage-Money units one attributed commuter-role citizen represents
     /// (the divisor in attribution's per-market wage cohort size).
     pub commuters_per_wage_unit: i64,
-    /// Absolute cap on attributed commuter-role citizens per market (viewport-bounded;
-    /// NEVER derived from the wage magnitude, else the 1M population would leak in).
+    /// Per-market BASELINE cap on attributed commuter-role citizens. Since 2d the
+    /// EFFECTIVE cap is `max_commuters_per_market * CapitaFactor` (scales with the live
+    /// population). Still derived from the POPULATION factor, NEVER from the wage
+    /// magnitude (viewport-independent — observation can't widen it).
     pub max_commuters_per_market: usize,
     /// Share of firm PROFIT (revenue − wage) distributed to labor households (basis
     /// points, 0..=10_000). Default 10_000 = full distribution: firms net to zero each
@@ -84,6 +89,12 @@ pub struct EconomyConfig {
     pub price_floor: Money,
     /// Absolute upper guardrail for any reservation price. Default Money(100_000).
     pub price_ceiling: Money,
+    /// Per-capita scaling baseline: `capita_factor = max(1, live_count / capita_baseline)`,
+    /// recomputed each tick by `refresh_capita_factor_system` from the live `AgentMarker`
+    /// citizen count. Default 1_000_000 keeps the factor at 1 (identity) at the ~300-citizen
+    /// seed scale; LOWER it to ramp throughput up (e.g. 10 -> ~30x at 300 citizens). Raising
+    /// it above the default is a no-op at seed scale (factor stays clamped at 1).
+    pub capita_baseline: i64,
 }
 
 impl EconomyConfig {
@@ -156,6 +167,7 @@ impl Default for EconomyConfig {
             price_adjust_max_step_bps: 100,
             price_floor: Money(1),
             price_ceiling: Money(100_000),
+            capita_baseline: 1_000_000,
         }
     }
 }
@@ -163,6 +175,7 @@ impl Default for EconomyConfig {
 pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.configure_sets(
         (
+            EconomySet::RefreshCapita,
             EconomySet::ResetReceipts,
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
@@ -190,6 +203,15 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     // only in the full SimPlugin stack, where it removes a classify/mutate race.
     schedule.configure_sets(
         EconomySet::RefreshLod.after(crate::world::schedule::CoreSet::LodReclassify),
+    );
+    // RefreshCapita: exclusive system, registered separately (mirrors
+    // run_citizen_attribution_system / run_tick_audit_system). First in the chain
+    // so the factor is current before Regenerate/Production/GeneratePoolOrders/
+    // UpdateConsumption read it this tick.
+    schedule.add_systems(
+        crate::economy::capita::refresh_capita_factor_system
+            .in_set(EconomySet::RefreshCapita)
+            .before(crate::mobility::systems::tick_increment_system),
     );
     schedule.add_systems(
         (
@@ -297,6 +319,7 @@ pub fn generate_pool_orders_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
     dormant: Res<DormantMarkets>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut accounts: ResMut<AccountBook>,
     mut inventory: ResMut<InventoryBook>,
     mut orders: ResMut<OrderBook>,
@@ -306,7 +329,7 @@ pub fn generate_pool_orders_system(
     mut demand: ResMut<DemandPools>,
     mut supply: ResMut<SupplyPools>,
 ) {
-    let _ = generate_pool_orders_at_tick(
+    generate_pool_orders_at_tick(
         &mut accounts,
         &mut inventory,
         &mut orders,
@@ -318,6 +341,10 @@ pub fn generate_pool_orders_system(
         tick.0,
         config.default_order_ttl_ticks,
         &dormant.0,
+        capita.0,
+    )
+    .expect(
+        "generate_pool_orders_at_tick: an Err (Overflow from a too-large capita_factor, or ZeroPrice) is a bug/mis-scale — fail loud rather than silently drop orders (OrderRejected for insufficient funds/goods is a ledger event, not an Err)",
     );
 }
 
@@ -357,26 +384,38 @@ pub fn clear_dirty_markets_system(
 }
 
 /// The goods-only raw faucet. Surfaces an invariant break (an inventory.deposit overflow)
-/// via `.expect` — matching the run_pay_wages_system/run_consumption_update_system convention,
-/// NOT the pre-existing `let _` wart in run_production_system. The flow-capped faucet cannot
-/// overflow a sane i64 balance, so `.expect` is a loud bug-surface, not a silent discard.
+/// via `.expect` — matching the fail-fast convention now shared by run_pay_wages_system,
+/// run_consumption_update_system, run_production_system, and generate_pool_orders_system.
+/// The flow-capped faucet cannot overflow a sane i64 balance, so `.expect` is a loud
+/// bug-surface, not a silent discard.
 pub fn run_regen_system(
     tick: Res<Tick>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut inventory: ResMut<InventoryBook>,
     mut ledger: ResMut<TradeLedger>,
     mut deposits: ResMut<RawDeposits>,
 ) {
-    run_regen_at_tick(&mut inventory, &mut ledger, &mut deposits, tick.0)
+    run_regen_at_tick(&mut inventory, &mut ledger, &mut deposits, tick.0, capita.0)
         .expect("run_regen_at_tick is infallible by construction (flow-capped faucet deposit cannot overflow a sane i64 balance); an Err is a bug");
 }
 
 pub fn run_production_system(
     tick: Res<Tick>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut inventory: ResMut<InventoryBook>,
     mut ledger: ResMut<TradeLedger>,
     mut production: ResMut<ProductionPools>,
 ) {
-    let _ = run_production_at_tick(&mut inventory, &mut ledger, &mut production, tick.0);
+    run_production_at_tick(
+        &mut inventory,
+        &mut ledger,
+        &mut production,
+        tick.0,
+        capita.0,
+    )
+    .expect(
+        "run_production_at_tick: an Err (Overflow from a too-large capita_factor scale) is a bug/mis-scale — fail loud, never silently skip production (which would diverge inventory the money audit cannot catch)",
+    );
 }
 
 /// The demand-side sink (mirror of `run_production_system`): consume delivered goods,
@@ -553,8 +592,12 @@ pub fn run_macro_flow_system(
 /// the FINAL smoothed reference price. Runs after PayWages (income) and after
 /// Telemetry (the ewma write). The new desired_qty becomes a bid in NEXT tick's
 /// GeneratePoolOrders — the explicit 1-tick income→consumption lag.
-pub fn run_consumption_update_system(mut demand: ResMut<DemandPools>, goods: Res<MarketGoods>) {
-    run_consumption_update_at_tick(&mut demand, &goods)
+pub fn run_consumption_update_system(
+    mut demand: ResMut<DemandPools>,
+    goods: Res<MarketGoods>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
+) {
+    run_consumption_update_at_tick(&mut demand, &goods, capita.0)
         .expect("run_consumption_update_at_tick is infallible once every consumer market has a seeded opening price; an Err is a bug");
 }
 

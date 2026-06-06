@@ -29,6 +29,7 @@ pub fn run_production_at_tick(
     ledger: &mut TradeLedger,
     production: &mut ProductionPools,
     current_tick: u64,
+    capita_factor: i64,
 ) -> Result<(), EconomyError> {
     let actors: Vec<EconomicActorId> = production.0.keys().copied().collect();
     for actor in actors {
@@ -37,26 +38,42 @@ pub fn run_production_at_tick(
             continue;
         }
         // All inputs must be covered before consuming any (atomic per pool).
-        let can_produce = pool
+        // Scale each qty by capita_factor (factor 1 is byte-identical to pre-scaling).
+        // Scale the inputs ONCE and reuse for both the can_produce check and the
+        // consume loop, so check == consume by construction (no recompute drift).
+        let factor = capita_factor.max(1);
+        let scaled_inputs: Vec<(GoodId, Quantity)> = pool
             .recipe
             .inputs
             .iter()
-            .all(|(good, qty)| inventory.balance(actor, *good).available >= *qty);
+            .map(|(good, qty)| {
+                let scaled = i64::try_from((qty.0 as i128) * (factor as i128))
+                    .map_err(|_| EconomyError::Overflow)?;
+                Ok((*good, Quantity(scaled)))
+            })
+            .collect::<Result<Vec<_>, EconomyError>>()?;
+        let can_produce = scaled_inputs
+            .iter()
+            .all(|(good, scaled_qty)| inventory.balance(actor, *good).available >= *scaled_qty);
         if can_produce {
-            for (good, qty) in &pool.recipe.inputs {
-                inventory.consume(actor, *good, *qty)?;
+            for (good, scaled_qty) in &scaled_inputs {
+                inventory.consume(actor, *good, *scaled_qty)?;
                 ledger.0.push(EconomyEvent::Consumed {
                     actor,
                     good: *good,
-                    qty: *qty,
+                    qty: *scaled_qty,
                 });
             }
             for (good, qty) in &pool.recipe.outputs {
-                inventory.deposit(actor, *good, *qty)?;
+                let scaled_qty = Quantity(
+                    i64::try_from((qty.0 as i128) * (factor as i128))
+                        .map_err(|_| EconomyError::Overflow)?,
+                );
+                inventory.deposit(actor, *good, scaled_qty)?;
                 ledger.0.push(EconomyEvent::Produced {
                     actor,
                     good: *good,
-                    qty: *qty,
+                    qty: scaled_qty,
                 });
             }
         }
@@ -104,6 +121,7 @@ pub fn run_regen_at_tick(
     ledger: &mut TradeLedger,
     deposits: &mut RawDeposits,
     current_tick: u64,
+    capita_factor: i64,
 ) -> Result<(), EconomyError> {
     let actors: Vec<EconomicActorId> = deposits.0.keys().copied().collect();
     for actor in actors {
@@ -111,11 +129,15 @@ pub fn run_regen_at_tick(
         if !interval_elapsed(dep.last_regen_tick, current_tick, dep.interval_ticks) {
             continue;
         }
-        inventory.deposit(actor, dep.good, dep.qty_per_interval)?;
+        let scaled = Quantity(
+            i64::try_from((dep.qty_per_interval.0 as i128) * (capita_factor.max(1) as i128))
+                .map_err(|_| EconomyError::Overflow)?,
+        );
+        inventory.deposit(actor, dep.good, scaled)?;
         ledger.0.push(EconomyEvent::Regenerated {
             actor,
             good: dep.good,
-            qty: dep.qty_per_interval,
+            qty: scaled,
         });
         // NO-FALLBACK: the actor came from keys() of the same map this iteration with no
         // removal, so get_mut is infallible. Use .expect (fail loud on the impossible) NOT
