@@ -218,6 +218,9 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
             population: layer.household.population,
             pool_weights: weights,
         });
+        if let Some(mut cfg) = world.get_resource_mut::<crate::economy::EconomyConfig>() {
+            cfg.capita_baseline = layer.household.capita_baseline;
+        }
     }
 
     // ── 7) Opening reference prices for each authored (market, good). ──

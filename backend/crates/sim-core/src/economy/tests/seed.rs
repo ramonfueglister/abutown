@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 
-use crate::economy::{DemandPools, MarketChunks, MarketId, Markets, SupplyPools};
+use crate::base_world::HouseholdSpec;
+use crate::economy::{DemandPools, EconomyConfig, MarketChunks, MarketId, Markets, SupplyPools};
 use crate::ids::ChunkCoord;
 use crate::routing::{Graph, Node, NodeId, NodeKind, NodeSpatialIndex};
 
@@ -257,5 +258,55 @@ fn seed_installs_three_extractors_tools_and_two_food_but_never_lists_raw() {
             .values()
             .all(|p| p.good != GOOD_RAW),
         "RAW never on a DemandPool"
+    );
+}
+
+/// Authored `capita_baseline` from the markets layer reaches `EconomyConfig`.
+///
+/// Seeds a world from the abutopia bundle, but overrides `household.capita_baseline = 10`
+/// before calling `seed_from_markets_layer`. After seeding,
+/// `EconomyConfig::capita_baseline` must equal 10.
+#[test]
+fn authored_capita_baseline_reaches_economy_config() {
+    use crate::world::schedule::SimPlugin;
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
+    let nodes = vec![
+        node(0, 2.0, 3.0),
+        node(1, 13.0, 3.0),
+        node(2, 16.0, 48.0),
+        node(3, 208.0, 48.0),
+    ];
+    world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
+    world.insert_resource(Graph::new(nodes, vec![]));
+
+    // Load the real abutopia bundle, then override capita_baseline to a non-default value.
+    let mut bundle =
+        crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
+            .expect("abutopia bundle loads");
+    bundle.markets.household.capita_baseline = 10;
+
+    crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
+
+    assert_eq!(
+        world.resource::<EconomyConfig>().capita_baseline,
+        10,
+        "authored capita_baseline=10 must be written into EconomyConfig after seeding"
+    );
+}
+
+/// Serde-default for `HouseholdSpec.capita_baseline` is 1_000_000 (identity).
+///
+/// A JSON household object that omits `capita_baseline` must deserialize with the
+/// identity default so that worlds not yet updated to author this field keep the
+/// same behaviour (no per-capita scaling).
+#[test]
+fn household_spec_serde_default_capita_baseline_is_identity() {
+    let spec: HouseholdSpec =
+        serde_json::from_str(r#"{"population":1000000}"#).expect("deserializes without field");
+    assert_eq!(
+        spec.capita_baseline, 1_000_000,
+        "omitted capita_baseline must default to 1_000_000 (identity)"
     );
 }

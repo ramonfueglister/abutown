@@ -249,9 +249,19 @@ pub struct ExtractorSpec {
     pub min_price: i64,
 }
 
+fn default_capita_baseline() -> i64 {
+    1_000_000
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HouseholdSpec {
     pub population: u64,
+    /// Per-capita scaling baseline (`capita_factor = max(1, live_count / capita_baseline)`).
+    /// Authored per world; LOWER it to ramp economic throughput + visible density up
+    /// (e.g. 10 → ~30x at 300 citizens). Defaults to 1_000_000 = identity for worlds that
+    /// omit it. Loaded as world data (serde-default is fine here — not a persisted snapshot).
+    #[serde(default = "default_capita_baseline")]
+    pub capita_baseline: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -840,7 +850,10 @@ mod tests {
                 supply: Vec::new(),
                 demand: Vec::new(),
                 extractors: Vec::new(),
-                household: HouseholdSpec { population: 1000 },
+                household: HouseholdSpec {
+                    population: 1000,
+                    capita_baseline: default_capita_baseline(),
+                },
                 opening_prices: Vec::new(),
             },
         }

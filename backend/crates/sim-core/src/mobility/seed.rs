@@ -828,7 +828,10 @@ mod tests {
                 supply: Vec::new(),
                 demand: Vec::new(),
                 extractors: Vec::new(),
-                household: HouseholdSpec { population: 1000 },
+                household: HouseholdSpec {
+                    population: 1000,
+                    capita_baseline: 1_000_000,
+                },
                 opening_prices: Vec::new(),
             },
         }
