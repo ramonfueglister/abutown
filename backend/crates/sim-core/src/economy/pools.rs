@@ -64,8 +64,11 @@ pub(crate) fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ti
 
 /// Keynesian consumption target (Money): `C = capita_factor*autonomous + floor(mpc_bps * income / 10_000)`.
 /// `mpc_bps` validated `0..=10_000`. i128 intermediate, floor, `try_from` → Overflow.
-/// `capita_factor` scales only the autonomous floor (the induced `mpc·income` term already
-/// scales because income scales with the larger revenue at higher factor).
+/// `capita_factor` scales only the autonomous floor. The induced `mpc·income` term scales
+/// indirectly: at a higher factor the scaled demand drives larger revenue → larger wages →
+/// larger `income_last_tick`, so the loop reaches a ~factor× steady state over the first few
+/// ticks (income lags one tick; the induced term is NOT pre-scaled, so cold-start demand is
+/// the scaled-autonomous floor until wages spin up).
 pub(crate) fn target_spend(
     autonomous: Money,
     mpc_bps: i32,
