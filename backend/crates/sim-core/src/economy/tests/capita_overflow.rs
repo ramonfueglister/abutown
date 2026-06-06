@@ -101,8 +101,8 @@ fn generate_pool_orders_supply_overflow_returns_err() {
     let market = MarketId(1);
     let mut accounts = AccountBook::default();
     let mut inventory = InventoryBook::default();
-    // Pre-load inventory so the pool has goods to offer (the overflow happens BEFORE the cap).
-    // We use a large but representable amount: i64::MAX / 2.
+    // Inventory is irrelevant here: the scaled-offer multiply overflows (returns Err)
+    // BEFORE the `min(available)` inventory clamp is ever reached. Present for realism only.
     inventory
         .deposit(actor, GOOD_TOOLS, Quantity(i64::MAX / 2))
         .unwrap();
@@ -362,7 +362,7 @@ fn production_at_tick_realistic_factor_30_is_ok() {
 //
 // SAFETY MARGIN NOTE: at factor 30 the largest scaled quantity in the demo
 // seed is 10 × 30 = 300 (well within i64's ~9.2×10^18 range). The realistic
-// ceiling is at least ~3×10^17× above any value this fixture can produce.
+// ceiling is ~9.2×10^18 / 300 ≈ 3×10^16× above any value this fixture can produce.
 #[test]
 fn conservation_holds_at_factor_30_for_50_ticks() {
     use crate::economy::systems::EconomyConfig;
