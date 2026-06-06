@@ -260,6 +260,7 @@ pub struct HouseholdSpec {
     /// Authored per world; LOWER it to ramp economic throughput + visible density up
     /// (e.g. 10 → ~30x at 300 citizens). Defaults to 1_000_000 = identity for worlds that
     /// omit it. Loaded as world data (serde-default is fine here — not a persisted snapshot).
+    /// Values ≤ 0 are treated as identity (factor 1) by `capita_factor` — no panic.
     #[serde(default = "default_capita_baseline")]
     pub capita_baseline: i64,
 }
