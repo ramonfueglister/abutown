@@ -86,7 +86,10 @@ pub struct EconomyConfig {
     pub price_ceiling: Money,
     /// Per-capita scaling baseline: `capita_factor = max(1, live_count / capita_baseline)`.
     /// Default 1_000_000 keeps the factor at 1 (identity) at the ~300-citizen seed scale;
-    /// LOWER it to ramp throughput up (e.g. 10 -> ~30x at 300 citizens). Never raise it.
+    /// LOWER it to ramp throughput up (e.g. 10 -> ~30x at 300 citizens). Raising it above
+    /// the default is a no-op at seed scale (factor stays clamped at 1).
+    /// NOTE: consumed by `refresh_capita_factor_system` (Task 2c); inert until that lands —
+    /// in 2a/2b the `CapitaFactor` resource is a plain config knob (default 1).
     pub capita_baseline: i64,
 }
 

@@ -309,6 +309,19 @@ fn target_spend_is_autonomous_plus_mpc_times_income() {
     );
 }
 #[test]
+fn target_spend_scales_only_autonomous_by_capita_factor() {
+    // factor 2: autonomous doubles (2*5_000=10_000); induced (0.8*10_000=8_000) unchanged.
+    assert_eq!(
+        target_spend(Money(5_000), 8_000, Money(10_000), 2).unwrap(),
+        Money(18_000)
+    );
+    // factor 10, zero income: pure scaled-autonomous floor, no induced term.
+    assert_eq!(
+        target_spend(Money(5_000), 8_000, Money::ZERO, 10).unwrap(),
+        Money(50_000)
+    );
+}
+#[test]
 fn target_spend_at_zero_income_is_autonomous() {
     assert_eq!(
         target_spend(Money(5_000), 8_000, Money::ZERO, 1).unwrap(),
