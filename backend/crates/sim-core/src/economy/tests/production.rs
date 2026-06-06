@@ -32,7 +32,7 @@ fn production_consumes_inputs_and_produces_outputs() {
     inv.deposit(actor, GOOD_IRON, Quantity(1_000)).unwrap();
     let mut ledger = TradeLedger::default();
     let mut prod = seed(actor, 1);
-    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 5).unwrap();
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 5, 1).unwrap();
     assert_eq!(inv.balance(actor, GOOD_WOOD).available, Quantity(0));
     assert_eq!(inv.balance(actor, GOOD_IRON).available, Quantity(0));
     assert_eq!(inv.balance(actor, GOOD_TOOLS).available, Quantity(1_000));
@@ -60,7 +60,7 @@ fn production_skips_when_inputs_insufficient() {
     inv.deposit(actor, GOOD_WOOD, Quantity(2_000)).unwrap(); // no IRON
     let mut ledger = TradeLedger::default();
     let mut prod = seed(actor, 1);
-    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 5).unwrap();
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 5, 1).unwrap();
     assert_eq!(inv.balance(actor, GOOD_WOOD).available, Quantity(2_000)); // unchanged
     assert_eq!(inv.balance(actor, GOOD_TOOLS).available, Quantity(0));
     assert!(ledger.0.is_empty());
@@ -75,8 +75,8 @@ fn production_respects_interval() {
     inv.deposit(actor, GOOD_IRON, Quantity(2_000)).unwrap();
     let mut ledger = TradeLedger::default();
     let mut prod = seed(actor, 10);
-    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap(); // produces (last=None)
-    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 3).unwrap(); // interval not elapsed → skip
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0, 1).unwrap(); // produces (last=None)
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 3, 1).unwrap(); // interval not elapsed → skip
     assert_eq!(inv.balance(actor, GOOD_TOOLS).available, Quantity(1_000)); // only one batch
 }
 
@@ -92,7 +92,7 @@ fn production_conserves_money() {
     let before = accounts.total_money().unwrap();
     let mut ledger = TradeLedger::default();
     let mut prod = seed(actor, 1);
-    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 1).unwrap();
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 1, 1).unwrap();
     assert_eq!(accounts.total_money().unwrap(), before); // production never touches money
 }
 
@@ -119,7 +119,7 @@ fn production_is_deterministic() {
                 },
             );
         }
-        run_production_at_tick(&mut inv, &mut ledger, &mut prod, 1).unwrap();
+        run_production_at_tick(&mut inv, &mut ledger, &mut prod, 1, 1).unwrap();
         ledger.0
     };
     assert_eq!(run(), run());
@@ -167,7 +167,7 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
         },
     );
 
-    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 5).unwrap();
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 5, 1).unwrap();
 
     assert_eq!(
         inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
@@ -199,8 +199,8 @@ fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
             last_regen_tick: None,
         },
     );
-    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0).unwrap(); // fires (last=None)
-    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 3).unwrap(); // interval not elapsed
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0, 1).unwrap(); // fires (last=None)
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 3, 1).unwrap(); // interval not elapsed
     assert_eq!(
         inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
         Quantity(100),
@@ -231,7 +231,7 @@ fn regen_is_flow_capped_not_capacity_capped() {
         },
     );
     for t in 0..3 {
-        run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, t).unwrap();
+        run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, t, 1).unwrap();
     }
     assert_eq!(
         inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
@@ -261,7 +261,7 @@ fn regen_is_deterministic_keys_first() {
                 },
             );
         }
-        run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 1).unwrap();
+        run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 1, 1).unwrap();
         ledger.0
     };
     assert_eq!(run(), run());
@@ -388,8 +388,8 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
     }
 
     // One tick: regen (deposits RAW) then production (consumes RAW, emits goods).
-    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0).unwrap();
-    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap();
+    run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0, 1).unwrap();
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0, 1).unwrap();
 
     // Each extractor produced its OWN good...
     assert_eq!(
@@ -449,7 +449,7 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
 
     // Throttle: with RAW exhausted (consumed this tick) and no regen on a within-interval
     // call, no further FOOD/TOOLS is produced.
-    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0).unwrap(); // same tick, interval not elapsed
+    run_production_at_tick(&mut inv, &mut ledger, &mut prod, 0, 1).unwrap(); // same tick, interval not elapsed
     assert_eq!(
         inv.balance(EXTRACTOR_FOOD_A, GOOD_FOOD).available,
         Quantity(10),

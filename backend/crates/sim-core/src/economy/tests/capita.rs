@@ -415,22 +415,20 @@ fn run_solvency_scenario(factor: i64, n: u64) -> (i64, usize) {
     (total_final_consumed, total_trade_events)
 }
 
-/// Solvency at the realistic factor 30 (~300 citizens / baseline 10).
+/// Solvency + throughput scaling at factor 30 (~300 citizens / baseline 10).
 ///
-/// With supply-side scaling (2b), the extractor's offered_qty_per_tick scales 10→300
-/// per tick, but the actual throughput is capped by the production rate (regen=10/tick
-/// → inventory ≤ ~10 at any time). As a result the market clears ~10 goods/tick at
-/// BOTH factor-1 and factor-30 — they are SUPPLY-CONSTRAINED, not demand-constrained.
-/// The solvency question is: does the loop STAY ALIVE (trades keep firing, no
-/// InsufficientFunds collapse) at the realistic 1_000_000 opening_cash?
+/// After production-chain scaling (regen + recipe both scale by capita_factor), the
+/// extractor faucet deposits 300 RAW/tick at factor 30 (vs 10 at factor 1), the recipe
+/// consumes 300 RAW→300 goods/tick, and the supply offer places 300 units/tick on the
+/// market. Throughput therefore ACTUALLY scales ~30×.
 ///
 /// (a) audit stays byte-invariant every tick — asserted inside run_solvency_scenario
 ///     via .expect in run_tick_audit_system (a conservation violation would panic).
 /// (b) FinalConsumed and Trade events keep firing at factor 30 (loop not starved).
-/// (c) Factor-30 Trade count is in the same ballpark as factor-1 (both are bounded
-///     by supply, not cash — proves no cash-starvation / no InsufficientFunds spiral).
+/// (c) THROUGHPUT SCALES: consumed_30 >= consumed_1 * 10 (robust ~30× assertion).
 ///
 /// SOLVENCY VERDICT: SOLVENT at factor 30 / opening_cash=1_000_000.
+/// Cash circulates via wages → no InsufficientFunds collapse at 30× throughput.
 /// Seed scaling unnecessary at factor 30 — no economy_snapshots migration.
 #[test]
 fn factor_30_solvency_at_fixed_opening_cash() {
@@ -447,22 +445,27 @@ fn factor_30_solvency_at_fixed_opening_cash() {
         "factor-30: FinalConsumed events must have fired; got consumed_30={consumed_30}"
     );
 
-    // (c) Supply-constrained: both runs clear ~10 goods/tick (production rate limited,
-    // not cash-limited). Confirm factor-30 is NOT demand-collapsed vs factor-1:
-    // consumed_30 must be at least half of consumed_1 (same supply, different demand
-    // pressure — both should trade the full supply every tick).
+    // (c) Throughput must ACTUALLY SCALE: production chain (regen + recipe) both scale by
+    // capita_factor, so factor-30 should clear ~30× as many goods as factor-1.
+    // Assert >= 10× (robust lower bound, tolerant of warm-up and round-off).
     assert!(
-        consumed_30 * 2 >= consumed_1,
-        "factor-30 should not be demand-collapsed vs factor-1: \
+        consumed_30 >= consumed_1 * 10,
+        "factor-30 throughput must be materially larger than factor-1 (~30×, assert >=10×): \
          consumed_30={consumed_30}, consumed_1={consumed_1}, \
          trades_30={trades_30}, trades_1={trades_1}"
     );
 
-    // Emit diagnostic so the solvency evidence is readable in --nocapture output.
+    // Emit diagnostic so the throughput evidence and solvency verdict are readable.
     println!(
-        "SOLVENCY VERDICT factor=30 / opening_cash=1_000_000: SOLVENT (supply-constrained) — \
+        "THROUGHPUT SCALING VERIFIED factor=30 / opening_cash=1_000_000: \
          consumed_30={consumed_30} consumed_1={consumed_1} \
-         trades_30={trades_30} trades_1={trades_1}; \
-         seed scaling unnecessary at factor 30 — no economy_snapshots migration."
+         (ratio={:.1}×) trades_30={trades_30} trades_1={trades_1}; \
+         SOLVENCY VERDICT: SOLVENT — seed scaling unnecessary at factor 30 — \
+         no economy_snapshots migration.",
+        if consumed_1 > 0 {
+            consumed_30 as f64 / consumed_1 as f64
+        } else {
+            0.0
+        }
     );
 }

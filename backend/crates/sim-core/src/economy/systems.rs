@@ -372,21 +372,29 @@ pub fn clear_dirty_markets_system(
 /// overflow a sane i64 balance, so `.expect` is a loud bug-surface, not a silent discard.
 pub fn run_regen_system(
     tick: Res<Tick>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut inventory: ResMut<InventoryBook>,
     mut ledger: ResMut<TradeLedger>,
     mut deposits: ResMut<RawDeposits>,
 ) {
-    run_regen_at_tick(&mut inventory, &mut ledger, &mut deposits, tick.0)
+    run_regen_at_tick(&mut inventory, &mut ledger, &mut deposits, tick.0, capita.0)
         .expect("run_regen_at_tick is infallible by construction (flow-capped faucet deposit cannot overflow a sane i64 balance); an Err is a bug");
 }
 
 pub fn run_production_system(
     tick: Res<Tick>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut inventory: ResMut<InventoryBook>,
     mut ledger: ResMut<TradeLedger>,
     mut production: ResMut<ProductionPools>,
 ) {
-    let _ = run_production_at_tick(&mut inventory, &mut ledger, &mut production, tick.0);
+    let _ = run_production_at_tick(
+        &mut inventory,
+        &mut ledger,
+        &mut production,
+        tick.0,
+        capita.0,
+    );
 }
 
 /// The demand-side sink (mirror of `run_production_system`): consume delivered goods,
