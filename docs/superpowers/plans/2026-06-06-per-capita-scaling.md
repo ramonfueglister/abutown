@@ -186,10 +186,12 @@ git commit -m "feat(economy): CapitaFactor resource + demand-side per-capita sca
 
 ### Task 2b: supply-side scaling + (conditional) seed scaling + solvency check
 
-Scale supply `offered_qty` by the factor so revenue grows with demand (keeping the loop balanced and prices stable), then empirically decide whether `opening_cash` needs scaling.
+Scale the **whole real-quantity supply chain** by the factor (production faucet → recipe → supply offer) so revenue grows with demand, then empirically confirm throughput actually scales AND the loop stays solvent.
+
+**CORRECTION (found by 2b's empirical test):** scaling the supply *offer* alone is throughput-inert — the economy is **production-constrained** (the extractor faucet regenerates only ~10 RAW/tick → recipe makes ~10 out/tick → the supply offer's clamp by `available` inventory caps it). So per-capita throughput requires scaling the production chain: `run_regen_at_tick`'s `qty_per_interval` AND `run_production_at_tick`'s recipe quantities, in addition to the supply offer. Both are **goods-only** (never touch money), so the #78 money audit is unaffected.
 
 **Files:**
-- Modify: `economy/pools.rs` (`generate_pool_orders_at_tick` supply branch), `systems.rs` (thread factor), `economy/markets_layer.rs` (conditional seed scaling)
+- Modify: `economy/pools.rs` (`generate_pool_orders_at_tick` supply branch), `economy/production.rs` (`run_regen_at_tick` + `run_production_at_tick`), `systems.rs` (thread factor into the GeneratePoolOrders / Regenerate / Production systems), `economy/markets_layer.rs` (conditional seed scaling)
 
 - [ ] **Step 1: Scale supply `offered_qty` (`pools.rs`)**
 
@@ -201,11 +203,24 @@ In `generate_pool_orders_at_tick`, add a `capita_factor: i64` parameter and scal
             .map_err(|_| EconomyError::Overflow)?;
         let capped = Quantity(scaled_offer.min(available.0));
 ```
-Thread `capita_factor` from the calling system (the `GeneratePoolOrders` set) reading `CapitaFactor`; pass `1` in tests not exercising scaling. (Demand bids are already scaled via `desired_qty_per_tick` from 2a; leave the demand branch's `affordable_qty` clamp as-is — it correctly bounds bids by cash.)
+Thread `capita_factor` from the `GeneratePoolOrders` system reading `Res<CapitaFactor>`; pass `1` in tests. (Demand bids are already scaled via `desired_qty_per_tick` from 2a; leave the demand branch's `affordable_qty` clamp as-is.)
 
-- [ ] **Step 2: Solvency test at the target factor (`economy/tests/`)**
+- [ ] **Step 1b: Scale the production chain (`production.rs`) — the actual throughput lever**
 
-Add a test that runs the full economy schedule for ~50 ticks at `CapitaFactor(30)` (the realistic ramp target) with **`opening_cash` unchanged** and asserts: (a) the audit stays byte-invariant; (b) demand does NOT collapse — i.e. `FinalConsumed`/`Trade` events keep firing (no run of all-`OrderRejected{InsufficientFunds}`), proving the circulating wage loop keeps the fixed `opening_cash` solvent at 30x. Capture the steady-state consumed-qty to confirm it scaled ~30x vs factor 1.
+Add a `capita_factor: i64` param to `run_regen_at_tick` and scale the faucet deposit:
+```rust
+        let scaled = Quantity(i64::try_from((dep.qty_per_interval.0 as i128) * (capita_factor.max(1) as i128)).map_err(|_| EconomyError::Overflow)?);
+        inventory.deposit(actor, dep.good, scaled)?;
+        // emit Regenerated { qty: scaled }
+```
+Add a `capita_factor: i64` param to `run_production_at_tick` and scale BOTH recipe inputs and outputs by the factor (preserving the input:output ratio, just bigger throughput) in the `can_produce` check, the `consume`, and the `deposit`. Use checked i128 arithmetic; emit `Consumed`/`Produced` with the scaled quantities. Thread `capita_factor` from the `Regenerate` and `Production` systems (`Res<CapitaFactor>`); pass `1` in tests. This makes the faucet→recipe→supply chain scale together so inventory keeps up with the scaled supply offer.
+
+- [ ] **Step 2: Throughput + solvency test at the target factor (`economy/tests/`)**
+
+Add a test running the full economy schedule for ~50 ticks at `CapitaFactor(30)` with **`opening_cash` unchanged**, asserting:
+(a) the audit stays byte-invariant every tick;
+(b) **throughput actually scales** — steady-state consumed-qty (and `Trade`/`FinalConsumed` volume) at factor 30 is **materially larger (≈30×, allowing for the warm-up/round-off)** than a factor-1 run. This is the key assertion that the production-chain scaling works (the prior offer-only version left consumed flat → that was the bug);
+(c) demand does NOT collapse (no tail of only `OrderRejected{InsufficientFunds}`), proving the fixed 1M `opening_cash` stays solvent via the circulating wage loop at 30×.
 
 - [ ] **Step 3: Conditional seed scaling (only if Step 2 shows starvation)**
 
@@ -215,8 +230,8 @@ If and only if Step 2 shows cash-starvation/demand-collapse at the target factor
 
 Run the solvency test + full economy suite + the audit/conservation tests; fmt + clippy clean.
 ```bash
-git add backend/crates/sim-core/src/economy/pools.rs backend/crates/sim-core/src/economy/systems.rs backend/crates/sim-core/src/economy/markets_layer.rs
-git commit -m "feat(economy): supply-side per-capita scaling + solvency-verified (seed scaling conditional)"
+git add backend/crates/sim-core/src/economy/pools.rs backend/crates/sim-core/src/economy/production.rs backend/crates/sim-core/src/economy/systems.rs backend/crates/sim-core/src/economy/markets_layer.rs
+git commit -m "feat(economy): per-capita scaling of the production chain + supply offer; throughput- and solvency-verified"
 ```
 
 ---
