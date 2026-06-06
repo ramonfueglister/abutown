@@ -1,5 +1,6 @@
 mod auction;
 mod audit;
+mod capita;
 mod conservation;
 mod determinism;
 mod drain;

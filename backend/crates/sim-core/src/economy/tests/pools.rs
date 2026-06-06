@@ -304,14 +304,14 @@ fn consumption_attributes_to_market_and_resets_stale() {
 #[test]
 fn target_spend_is_autonomous_plus_mpc_times_income() {
     assert_eq!(
-        target_spend(Money(5_000), 8_000, Money(10_000)).unwrap(),
+        target_spend(Money(5_000), 8_000, Money(10_000), 1).unwrap(),
         Money(13_000)
     );
 }
 #[test]
 fn target_spend_at_zero_income_is_autonomous() {
     assert_eq!(
-        target_spend(Money(5_000), 8_000, Money::ZERO).unwrap(),
+        target_spend(Money(5_000), 8_000, Money::ZERO, 1).unwrap(),
         Money(5_000)
     );
 }
@@ -319,25 +319,25 @@ fn target_spend_at_zero_income_is_autonomous() {
 fn target_spend_floors_the_induced_term() {
     // 0.8 * 12_345 = 9_876.0 floors to 9_876; + 1 autonomous = 9_877.
     assert_eq!(
-        target_spend(Money(1), 8_000, Money(12_345)).unwrap(),
+        target_spend(Money(1), 8_000, Money(12_345), 1).unwrap(),
         Money(9_877)
     );
 }
 #[test]
 fn target_spend_rejects_out_of_band_mpc() {
     assert_eq!(
-        target_spend(Money(1), -1, Money(1)),
+        target_spend(Money(1), -1, Money(1), 1),
         Err(EconomyError::InvalidOrder)
     );
     assert_eq!(
-        target_spend(Money(1), 10_001, Money(1)),
+        target_spend(Money(1), 10_001, Money(1), 1),
         Err(EconomyError::InvalidOrder)
     );
 }
 #[test]
 fn target_spend_full_mpc_passes_all_income() {
     assert_eq!(
-        target_spend(Money(0), 10_000, Money(7_000)).unwrap(),
+        target_spend(Money(0), 10_000, Money(7_000), 1).unwrap(),
         Money(7_000)
     );
 }
@@ -404,7 +404,7 @@ fn consumption_update_sets_desired_qty_from_income_and_ref_price() {
     let mut state = MarketGoodState::new(key);
     state.ewma_reference_price = Money(1_000);
     goods.0.insert(key, state);
-    run_consumption_update_at_tick(&mut demand, &goods).unwrap();
+    run_consumption_update_at_tick(&mut demand, &goods, 1).unwrap();
     // C = 5_000 + 0.8*10_000 = 13_000; qty = 13_000 * 1_000 / 1_000 = 13_000.
     assert_eq!(demand.0[&actor].desired_qty_per_tick, Quantity(13_000));
 }
@@ -421,7 +421,7 @@ fn consumption_update_errors_when_market_has_no_price() {
     demand.0.insert(actor, pool);
     let goods = MarketGoods::default(); // no MarketGoodState for (market, GOOD_TOOLS)
     assert_eq!(
-        run_consumption_update_at_tick(&mut demand, &goods),
+        run_consumption_update_at_tick(&mut demand, &goods, 1),
         Err(EconomyError::ZeroPrice),
         "absent market-good must yield ZeroPrice, not a silent default"
     );

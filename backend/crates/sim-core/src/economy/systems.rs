@@ -84,6 +84,10 @@ pub struct EconomyConfig {
     pub price_floor: Money,
     /// Absolute upper guardrail for any reservation price. Default Money(100_000).
     pub price_ceiling: Money,
+    /// Per-capita scaling baseline: `capita_factor = max(1, live_count / capita_baseline)`.
+    /// Default 1_000_000 keeps the factor at 1 (identity) at the ~300-citizen seed scale;
+    /// LOWER it to ramp throughput up (e.g. 10 -> ~30x at 300 citizens). Never raise it.
+    pub capita_baseline: i64,
 }
 
 impl EconomyConfig {
@@ -156,6 +160,7 @@ impl Default for EconomyConfig {
             price_adjust_max_step_bps: 100,
             price_floor: Money(1),
             price_ceiling: Money(100_000),
+            capita_baseline: 1_000_000,
         }
     }
 }
@@ -553,8 +558,12 @@ pub fn run_macro_flow_system(
 /// the FINAL smoothed reference price. Runs after PayWages (income) and after
 /// Telemetry (the ewma write). The new desired_qty becomes a bid in NEXT tick's
 /// GeneratePoolOrders — the explicit 1-tick income→consumption lag.
-pub fn run_consumption_update_system(mut demand: ResMut<DemandPools>, goods: Res<MarketGoods>) {
-    run_consumption_update_at_tick(&mut demand, &goods)
+pub fn run_consumption_update_system(
+    mut demand: ResMut<DemandPools>,
+    goods: Res<MarketGoods>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
+) {
+    run_consumption_update_at_tick(&mut demand, &goods, capita.0)
         .expect("run_consumption_update_at_tick is infallible once every consumer market has a seeded opening price; an Err is a bug");
 }
 

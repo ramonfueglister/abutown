@@ -62,19 +62,24 @@ pub(crate) fn interval_elapsed(last: Option<u64>, current_tick: u64, interval_ti
     }
 }
 
-/// Keynesian consumption target (Money): `C = autonomous + floor(mpc_bps * income / 10_000)`.
+/// Keynesian consumption target (Money): `C = capita_factor*autonomous + floor(mpc_bps * income / 10_000)`.
 /// `mpc_bps` validated `0..=10_000`. i128 intermediate, floor, `try_from` → Overflow.
+/// `capita_factor` scales only the autonomous floor (the induced `mpc·income` term already
+/// scales because income scales with the larger revenue at higher factor).
 pub(crate) fn target_spend(
     autonomous: Money,
     mpc_bps: i32,
     income_last_tick: Money,
+    capita_factor: i64,
 ) -> Result<Money, EconomyError> {
     if !(0..=10_000).contains(&mpc_bps) {
         return Err(EconomyError::InvalidOrder);
     }
+    let scaled_autonomous = i64::try_from((autonomous.0 as i128) * (capita_factor.max(1) as i128))
+        .map_err(|_| EconomyError::Overflow)?;
     let induced = i64::try_from((income_last_tick.0 as i128) * (mpc_bps as i128) / 10_000)
         .map_err(|_| EconomyError::Overflow)?;
-    autonomous.checked_add(Money(induced))
+    Money(scaled_autonomous).checked_add(Money(induced))
 }
 
 /// Map a target SPEND (Money) to a desired Quantity at a reference price, inverting
@@ -97,16 +102,23 @@ pub(crate) fn spend_to_qty(spend: Money, p_ref: Money) -> Result<Quantity, Econo
 /// validated; `?` surfaces a genuine bug instead of silently freezing a pool's demand.
 /// Pre-condition: every consumer pool's `(market, good)` MUST have a `MarketGoodState`
 /// with a positive `ewma_reference_price` (seeded at world creation).
+/// `capita_factor` is threaded from the `CapitaFactor` resource (default 1 = identity).
 pub fn run_consumption_update_at_tick(
     demand: &mut DemandPools,
     market_goods: &MarketGoods,
+    capita_factor: i64,
 ) -> Result<(), EconomyError> {
     for pool in demand.0.values_mut() {
         let key = MarketGoodKey {
             market: pool.market,
             good: pool.good,
         };
-        let spend = target_spend(pool.autonomous, pool.mpc_bps, pool.income_last_tick)?;
+        let spend = target_spend(
+            pool.autonomous,
+            pool.mpc_bps,
+            pool.income_last_tick,
+            capita_factor,
+        )?;
         // The reference price is the market's seeded/traded ewma. A missing market-good
         // or a non-positive price is an honest `ZeroPrice` error (propagated), never a
         // default — every consumer market is seeded with an opening price.
