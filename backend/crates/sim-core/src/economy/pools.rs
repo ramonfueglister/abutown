@@ -155,6 +155,7 @@ pub fn generate_pool_orders_at_tick(
     current_tick: u64,
     ttl_ticks: u64,
     dormant: &BTreeSet<MarketId>,
+    capita_factor: i64,
 ) -> Result<(), EconomyError> {
     let demand_ids: Vec<_> = demand.0.keys().copied().collect();
     for actor in demand_ids {
@@ -205,7 +206,10 @@ pub fn generate_pool_orders_at_tick(
             continue;
         }
         let available = inventory.balance(actor, pool.good).available;
-        let capped = Quantity(pool.offered_qty_per_tick.0.min(available.0));
+        let scaled_offer =
+            i64::try_from((pool.offered_qty_per_tick.0 as i128) * (capita_factor.max(1) as i128))
+                .map_err(|_| EconomyError::Overflow)?;
+        let capped = Quantity(scaled_offer.min(available.0));
         if capped.0 <= 0 {
             ledger.0.push(EconomyEvent::OrderRejected {
                 actor,

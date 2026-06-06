@@ -305,6 +305,7 @@ pub fn generate_pool_orders_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
     dormant: Res<DormantMarkets>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut accounts: ResMut<AccountBook>,
     mut inventory: ResMut<InventoryBook>,
     mut orders: ResMut<OrderBook>,
@@ -326,6 +327,7 @@ pub fn generate_pool_orders_system(
         tick.0,
         config.default_order_ttl_ticks,
         &dormant.0,
+        capita.0,
     );
 }
 

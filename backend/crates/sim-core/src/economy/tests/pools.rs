@@ -53,6 +53,7 @@ fn demand_pool_caps_order_to_affordable_quantity() {
         10,
         5,
         &BTreeSet::new(),
+        1,
     )
     .unwrap();
 
@@ -101,6 +102,7 @@ fn supply_pool_caps_order_to_available_inventory() {
         10,
         5,
         &BTreeSet::new(),
+        1,
     )
     .unwrap();
 
@@ -152,6 +154,7 @@ fn rejected_pool_order_leaves_books_unchanged() {
         1,
         5,
         &BTreeSet::new(),
+        1,
     )
     .unwrap();
 
