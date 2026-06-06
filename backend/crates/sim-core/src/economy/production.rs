@@ -39,32 +39,29 @@ pub fn run_production_at_tick(
         }
         // All inputs must be covered before consuming any (atomic per pool).
         // Scale each qty by capita_factor (factor 1 is byte-identical to pre-scaling).
+        // Scale the inputs ONCE and reuse for both the can_produce check and the
+        // consume loop, so check == consume by construction (no recompute drift).
         let factor = capita_factor.max(1);
-        let can_produce = pool
+        let scaled_inputs: Vec<(GoodId, Quantity)> = pool
             .recipe
             .inputs
             .iter()
             .map(|(good, qty)| {
-                let scaled_qty = Quantity(
-                    i64::try_from((qty.0 as i128) * (factor as i128))
-                        .map_err(|_| EconomyError::Overflow)?,
-                );
-                Ok((*good, scaled_qty))
+                let scaled = i64::try_from((qty.0 as i128) * (factor as i128))
+                    .map_err(|_| EconomyError::Overflow)?;
+                Ok((*good, Quantity(scaled)))
             })
-            .collect::<Result<Vec<_>, EconomyError>>()?
+            .collect::<Result<Vec<_>, EconomyError>>()?;
+        let can_produce = scaled_inputs
             .iter()
             .all(|(good, scaled_qty)| inventory.balance(actor, *good).available >= *scaled_qty);
         if can_produce {
-            for (good, qty) in &pool.recipe.inputs {
-                let scaled_qty = Quantity(
-                    i64::try_from((qty.0 as i128) * (factor as i128))
-                        .map_err(|_| EconomyError::Overflow)?,
-                );
-                inventory.consume(actor, *good, scaled_qty)?;
+            for (good, scaled_qty) in &scaled_inputs {
+                inventory.consume(actor, *good, *scaled_qty)?;
                 ledger.0.push(EconomyEvent::Consumed {
                     actor,
                     good: *good,
-                    qty: scaled_qty,
+                    qty: *scaled_qty,
                 });
             }
             for (good, qty) in &pool.recipe.outputs {

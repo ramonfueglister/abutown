@@ -315,7 +315,7 @@ pub fn generate_pool_orders_system(
     mut demand: ResMut<DemandPools>,
     mut supply: ResMut<SupplyPools>,
 ) {
-    let _ = generate_pool_orders_at_tick(
+    generate_pool_orders_at_tick(
         &mut accounts,
         &mut inventory,
         &mut orders,
@@ -328,6 +328,9 @@ pub fn generate_pool_orders_system(
         config.default_order_ttl_ticks,
         &dormant.0,
         capita.0,
+    )
+    .expect(
+        "generate_pool_orders_at_tick: an Err (Overflow from a too-large capita_factor, or ZeroPrice) is a bug/mis-scale — fail loud rather than silently drop orders (OrderRejected for insufficient funds/goods is a ledger event, not an Err)",
     );
 }
 
@@ -367,9 +370,10 @@ pub fn clear_dirty_markets_system(
 }
 
 /// The goods-only raw faucet. Surfaces an invariant break (an inventory.deposit overflow)
-/// via `.expect` — matching the run_pay_wages_system/run_consumption_update_system convention,
-/// NOT the pre-existing `let _` wart in run_production_system. The flow-capped faucet cannot
-/// overflow a sane i64 balance, so `.expect` is a loud bug-surface, not a silent discard.
+/// via `.expect` — matching the fail-fast convention now shared by run_pay_wages_system,
+/// run_consumption_update_system, run_production_system, and generate_pool_orders_system.
+/// The flow-capped faucet cannot overflow a sane i64 balance, so `.expect` is a loud
+/// bug-surface, not a silent discard.
 pub fn run_regen_system(
     tick: Res<Tick>,
     capita: Res<crate::economy::capita::CapitaFactor>,
@@ -388,12 +392,15 @@ pub fn run_production_system(
     mut ledger: ResMut<TradeLedger>,
     mut production: ResMut<ProductionPools>,
 ) {
-    let _ = run_production_at_tick(
+    run_production_at_tick(
         &mut inventory,
         &mut ledger,
         &mut production,
         tick.0,
         capita.0,
+    )
+    .expect(
+        "run_production_at_tick: an Err (Overflow from a too-large capita_factor scale) is a bug/mis-scale — fail loud, never silently skip production (which would diverge inventory the money audit cannot catch)",
     );
 }
 
