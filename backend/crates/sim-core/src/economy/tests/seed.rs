@@ -338,19 +338,23 @@ fn capita_baseline_reapplies_on_hydrate_even_when_state_already_seeded() {
         crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
             .expect("abutopia bundle loads");
 
-    // First seed (fresh world): the bundle omits capita_baseline → identity default; the
-    // economy STATE (markets/pools) is populated.
+    // Phase 1 — fresh world: author an explicit baseline and confirm the fresh seed
+    // applies it (and populates economy STATE). Set it explicitly rather than relying on
+    // whatever abutopia's markets.json happens to author, so this test stays independent
+    // of the live world-data value.
+    bundle.markets.household.capita_baseline = 1_000_000;
     crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
     let markets_after_first = world.resource::<Markets>().0.len();
     assert_eq!(markets_after_first, 4, "fresh seed populates the 4 markets");
     assert_eq!(
         world.resource::<EconomyConfig>().capita_baseline,
         1_000_000,
-        "fresh seed with no authored value yields the identity default"
+        "fresh seed applies the authored baseline"
     );
 
-    // Simulate a restart where markets.json now authors capita_baseline = 10, on a world
-    // whose economy STATE is already populated (as after a hydrate from snapshot).
+    // Phase 2 — simulate a restart where markets.json now authors a DIFFERENT baseline,
+    // on a world whose economy STATE is already populated (as after a hydrate from a
+    // snapshot). The idempotent state-seed guard returns early, but config must re-apply.
     bundle.markets.household.capita_baseline = 10;
     crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
 
