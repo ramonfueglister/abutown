@@ -830,8 +830,7 @@ mod tests {
                 extractors: Vec::new(),
                 household: HouseholdSpec {
                     population: 1000,
-                    // identity default — keep in sync with base_world::default_capita_baseline()
-                    capita_baseline: 1_000_000,
+                    capita_baseline: crate::economy::capita::CAPITA_BASELINE_IDENTITY,
                 },
                 opening_prices: Vec::new(),
             },

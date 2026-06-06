@@ -250,7 +250,7 @@ pub struct ExtractorSpec {
 }
 
 fn default_capita_baseline() -> i64 {
-    1_000_000
+    crate::economy::capita::CAPITA_BASELINE_IDENTITY
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
