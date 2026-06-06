@@ -25,9 +25,21 @@ use crate::routing::{Graph, NodeSpatialIndex};
 /// host distinct reachable nodes for every market (mirrors the legacy "graph too
 /// small" early-return).
 pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
-    // Idempotent bootstrap: seed only when the world has no economy yet. Once seeded
-    // it persists, so subsequent hydrates find markets and skip (no double-seed guard,
-    // no heal-on-restore shim).
+    // Authored economy CONFIG is re-applied on every boot, BEFORE the idempotent
+    // state-seed guard below. `capita_baseline` lives in `EconomyConfig`, which is rebuilt
+    // from defaults each start and is NOT part of the economy snapshot — so unless it is
+    // re-read from the layer here, a hydrated world (non-empty `Markets` → early return)
+    // would silently fall back to the default identity baseline, turning the per-capita
+    // ramp OFF on the first restart after seeding. Applying it here makes "edit
+    // markets.json + restart" actually retune a persisted world, and keeps config
+    // tracking the authored data rather than a stale snapshot-era default.
+    if let Some(mut cfg) = world.get_resource_mut::<crate::economy::EconomyConfig>() {
+        cfg.capita_baseline = layer.household.capita_baseline;
+    }
+
+    // Idempotent STATE bootstrap: seed markets/pools/accounts only when the world has no
+    // economy yet. Once seeded it persists, so subsequent hydrates find markets and skip
+    // (no double-seed guard, no heal-on-restore shim) — state comes from the snapshot.
     if !world.resource::<Markets>().0.is_empty() {
         return;
     }
@@ -218,9 +230,6 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
             population: layer.household.population,
             pool_weights: weights,
         });
-        if let Some(mut cfg) = world.get_resource_mut::<crate::economy::EconomyConfig>() {
-            cfg.capita_baseline = layer.household.capita_baseline;
-        }
     }
 
     // ── 7) Opening reference prices for each authored (market, good). ──
