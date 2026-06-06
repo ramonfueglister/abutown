@@ -201,6 +201,17 @@ pub fn run_citizen_attribution_system(world: &mut World) {
 
     // (5) Write.
     world.resource_mut::<CitizenEconomicTargets>().0 = targets;
+
+    // Liveness heartbeat: how many citizens are economically routed this tick. Logged
+    // every 60 ticks (not per-tick) so it's a gauge, not spam. Read-only.
+    let tick = world
+        .get_resource::<crate::mobility::resources::Tick>()
+        .map(|t| t.0)
+        .unwrap_or(0);
+    if tick.is_multiple_of(60) {
+        let routed = world.resource::<CitizenEconomicTargets>().0.len();
+        tracing::info!(target: "economy::liveness", tick, routed, "citizens economically routed");
+    }
 }
 
 #[cfg(test)]
