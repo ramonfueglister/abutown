@@ -1,23 +1,25 @@
 use bevy_ecs::prelude::*;
 
-use crate::economy::capita::CapitaFactor;
 use crate::economy::production::{
     EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
     Recipe,
 };
+use crate::economy::systems::EconomyConfig;
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyEvent, EconomyPlugin, GOOD_FOOD,
     GOOD_RAW, GOOD_TOOLS, HouseholdSector, MarketGoodKey, MarketGoodState, MarketGoods, MarketId,
     MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools, TradeLedger,
 };
+use crate::mobility::components::AgentMarker;
 use crate::mobility::resources::Tick;
 use crate::world::plugin::CorePlugin;
 use crate::world::schedule::SimPlugin;
 use std::collections::BTreeMap;
 
 /// Build the same minimal two-extractor economy used in `conservation_full_plugin_multi_tick`,
-/// inserting a custom `CapitaFactor` value before running `n` ticks, then asserting
-/// `total_money` is byte-invariant throughout.
+/// deriving the requested `CapitaFactor` value from live citizens (2c: `refresh_capita_factor_system`
+/// now owns the factor). `capita_baseline=1` is used so that spawning exactly `factor` AgentMarker
+/// entities yields `floor(factor/1) = factor`. Asserts `total_money` is byte-invariant throughout.
 fn run_conservation_with_factor(factor: i64, n: u64) {
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
@@ -25,8 +27,14 @@ fn run_conservation_with_factor(factor: i64, n: u64) {
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
     EconomyPlugin.install(&mut world, &mut schedule);
 
-    // Override the default CapitaFactor(1) with the requested factor.
-    world.insert_resource(CapitaFactor(factor));
+    // Drive CapitaFactor via citizens: capita_baseline=1 → factor = live count.
+    world.insert_resource(EconomyConfig {
+        capita_baseline: 1,
+        ..EconomyConfig::default()
+    });
+    for _ in 0..factor {
+        world.spawn(AgentMarker);
+    }
 
     let consumer = EconomicActorId(8_002);
     let market = MarketId(1);
@@ -222,6 +230,10 @@ fn capita_factor_10_conserves_total_money() {
 /// Run the full economy schedule for `n` ticks with the given `factor` and a FIXED
 /// opening_cash of `Money(1_000_000)` (the realistic seeded amount). Returns:
 /// `(total_final_consumed, total_trade_events)` across the run.
+///
+/// Since 2c, `CapitaFactor` is derived by `refresh_capita_factor_system` from the
+/// live citizen count. `capita_baseline=1` is used so that spawning exactly `factor`
+/// AgentMarker entities yields `floor(factor/1) = factor`.
 fn run_solvency_scenario(factor: i64, n: u64) -> (i64, usize) {
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
@@ -229,7 +241,14 @@ fn run_solvency_scenario(factor: i64, n: u64) -> (i64, usize) {
     crate::mobility::MobilityPlugin.install(&mut world, &mut schedule);
     EconomyPlugin.install(&mut world, &mut schedule);
 
-    world.insert_resource(CapitaFactor(factor));
+    // Drive CapitaFactor via citizens: capita_baseline=1 → factor = live count.
+    world.insert_resource(EconomyConfig {
+        capita_baseline: 1,
+        ..EconomyConfig::default()
+    });
+    for _ in 0..factor {
+        world.spawn(AgentMarker);
+    }
 
     let consumer = EconomicActorId(8_002);
     let market = MarketId(1);

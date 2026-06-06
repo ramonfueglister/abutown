@@ -20,6 +20,7 @@ use crate::world::components::{ActiveChunk, ChunkCoordComp, HotChunk};
 
 #[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
 pub enum EconomySet {
+    RefreshCapita,
     ResetReceipts,
     RefreshLod,
     ExpireOrders,
@@ -171,6 +172,7 @@ impl Default for EconomyConfig {
 pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.configure_sets(
         (
+            EconomySet::RefreshCapita,
             EconomySet::ResetReceipts,
             EconomySet::RefreshLod,
             EconomySet::ExpireOrders,
@@ -198,6 +200,15 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     // only in the full SimPlugin stack, where it removes a classify/mutate race.
     schedule.configure_sets(
         EconomySet::RefreshLod.after(crate::world::schedule::CoreSet::LodReclassify),
+    );
+    // RefreshCapita: exclusive system, registered separately (mirrors
+    // run_citizen_attribution_system / run_tick_audit_system). First in the chain
+    // so the factor is current before Regenerate/Production/GeneratePoolOrders/
+    // UpdateConsumption read it this tick.
+    schedule.add_systems(
+        crate::economy::capita::refresh_capita_factor_system
+            .in_set(EconomySet::RefreshCapita)
+            .before(crate::mobility::systems::tick_increment_system),
     );
     schedule.add_systems(
         (
