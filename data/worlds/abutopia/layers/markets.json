@@ -23,7 +23,7 @@
     { "actor": 8032, "market": 9001, "in_good": 5, "out_good": 1, "qty": 10, "min_price": 500 },
     { "actor": 8033, "market": 9003, "in_good": 5, "out_good": 1, "qty": 10, "min_price": 500 }
   ],
-  "household": { "population": 1000000 },
+  "household": { "population": 1000000, "capita_baseline": 10 },
   "opening_prices": [
     { "market": 9002, "good": 4, "price": 1000 },
     { "market": 9002, "good": 1, "price": 1000 },

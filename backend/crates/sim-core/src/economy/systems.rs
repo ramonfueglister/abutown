@@ -167,7 +167,7 @@ impl Default for EconomyConfig {
             price_adjust_max_step_bps: 100,
             price_floor: Money(1),
             price_ceiling: Money(100_000),
-            capita_baseline: 1_000_000,
+            capita_baseline: crate::economy::capita::CAPITA_BASELINE_IDENTITY,
         }
     }
 }

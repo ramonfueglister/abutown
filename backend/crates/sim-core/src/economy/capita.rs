@@ -17,6 +17,13 @@ impl Default for CapitaFactor {
     }
 }
 
+/// The identity `capita_baseline`: large enough that `capita_factor` stays at `1`
+/// (the un-scaled economy) at realistic citizen counts. Single source of truth for
+/// the identity default — `EconomyConfig::default()` and the `markets.json`
+/// serde-default (`base_world::default_capita_baseline`) both reference this. Lower
+/// the authored baseline to ramp the factor up.
+pub const CAPITA_BASELINE_IDENTITY: i64 = 1_000_000;
+
 /// Derive the factor from the live citizen count and the configured baseline.
 /// Floor division, clamped to `>= 1`. `capita_baseline <= 0` is treated as the
 /// neutral 1 (never divide by zero, never invert the meaning).
