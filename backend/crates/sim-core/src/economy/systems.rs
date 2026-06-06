@@ -52,8 +52,10 @@ pub struct EconomyConfig {
     /// How many consumed-good units one attributed shopper-role citizen represents
     /// (the divisor in attribution's per-market cohort size).
     pub shoppers_per_unit: i64,
-    /// Absolute cap on attributed shopper-role citizens per market (keeps the cohort
-    /// a handful, not hundreds; never derived from magnitude → population can't leak in).
+    /// Per-market BASELINE cap on attributed shopper-role citizens. Since 2d the
+    /// EFFECTIVE cap is `max_shoppers_per_market * CapitaFactor` (scales with the live
+    /// population), so visible density grows with the citizenry. Still derived from the
+    /// POPULATION factor, never from the consumption magnitude (viewport-independent).
     pub max_shoppers_per_market: usize,
     /// When TRUE, the macro flow drains active/observed markets' post-auction
     /// residual orders into the inter-market flow (S3). FALSE keeps the flow
@@ -65,8 +67,10 @@ pub struct EconomyConfig {
     /// How many wage-Money units one attributed commuter-role citizen represents
     /// (the divisor in attribution's per-market wage cohort size).
     pub commuters_per_wage_unit: i64,
-    /// Absolute cap on attributed commuter-role citizens per market (viewport-bounded;
-    /// NEVER derived from the wage magnitude, else the 1M population would leak in).
+    /// Per-market BASELINE cap on attributed commuter-role citizens. Since 2d the
+    /// EFFECTIVE cap is `max_commuters_per_market * CapitaFactor` (scales with the live
+    /// population). Still derived from the POPULATION factor, NEVER from the wage
+    /// magnitude (viewport-independent — observation can't widen it).
     pub max_commuters_per_market: usize,
     /// Share of firm PROFIT (revenue − wage) distributed to labor households (basis
     /// points, 0..=10_000). Default 10_000 = full distribution: firms net to zero each
