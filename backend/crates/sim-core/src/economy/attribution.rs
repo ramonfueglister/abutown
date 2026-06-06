@@ -124,6 +124,13 @@ pub fn run_citizen_attribution_system(world: &mut World) {
         )
     };
 
+    let capita = world
+        .resource::<crate::economy::capita::CapitaFactor>()
+        .0
+        .max(1) as usize;
+    let shopper_cap = config.max_shoppers_per_market.saturating_mul(capita);
+    let commuter_cap = config.max_commuters_per_market.saturating_mul(capita);
+
     if observed_markets.is_empty() {
         world.resource_mut::<CitizenEconomicTargets>().0.clear();
         return;
@@ -168,12 +175,7 @@ pub fn run_citizen_attribution_system(world: &mut World) {
             .get(&market_id)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        let res = attribute_channel(
-            realized,
-            config.shoppers_per_unit,
-            config.max_shoppers_per_market,
-            cands,
-        );
+        let res = attribute_channel(realized, config.shoppers_per_unit, shopper_cap, cands);
         for id in res.attributed {
             targets.insert(id, node);
         }
@@ -189,7 +191,7 @@ pub fn run_citizen_attribution_system(world: &mut World) {
         let res = attribute_channel(
             realized,
             config.commuters_per_wage_unit,
-            config.max_commuters_per_market,
+            commuter_cap,
             cands,
         );
         for id in res.attributed {
@@ -335,6 +337,7 @@ mod tests {
         world.insert_resource(goods);
 
         world.insert_resource(EconomyConfig::default());
+        world.insert_resource(crate::economy::capita::CapitaFactor::default());
         world.insert_resource(WageTelemetry::default());
         world.insert_resource(CitizenEconomicTargets::default());
 
@@ -418,6 +421,7 @@ mod tests {
         world.insert_resource(goods);
 
         world.insert_resource(EconomyConfig::default());
+        world.insert_resource(crate::economy::capita::CapitaFactor::default());
         world.insert_resource(WageTelemetry::default());
         world.insert_resource(CitizenEconomicTargets::default());
 
@@ -526,6 +530,7 @@ mod tests {
         world.insert_resource(wages);
 
         world.insert_resource(EconomyConfig::default());
+        world.insert_resource(crate::economy::capita::CapitaFactor::default());
         world.insert_resource(CitizenEconomicTargets::default());
 
         // Both chunks observed (Active).
@@ -584,6 +589,150 @@ mod tests {
         assert!(
             !targets.values().any(|&n| n == NodeId(1)),
             "market B's node (NodeId 1) has no attributed citizens"
+        );
+    }
+
+    // ── population-aware cap tests (2d) ──────────────────────────────────────
+
+    /// Helper: build a minimal world with one observed market having `consumed_qty`
+    /// consumption, `num_citizens` citizens bound to it, and the given `CapitaFactor`.
+    fn build_attribution_world(
+        consumed_qty: i64,
+        num_citizens: usize,
+        capita: crate::economy::capita::CapitaFactor,
+    ) -> World {
+        let mut world = World::new();
+
+        let graph = Graph::new(
+            vec![Node {
+                id: NodeId(0),
+                position: (1.0, 1.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            }],
+            vec![],
+        );
+        world.insert_resource(graph);
+
+        let market_id = MarketId(7001);
+        let mut markets = Markets::default();
+        markets.0.insert(
+            market_id,
+            MarketSite {
+                id: market_id,
+                node_id: NodeId(0),
+                name: "TestMarket".to_string(),
+            },
+        );
+        world.insert_resource(markets);
+
+        let mut goods = MarketGoods::default();
+        let key = MarketGoodKey {
+            market: market_id,
+            good: GoodId(0),
+        };
+        let mut state = MarketGoodState::new(key);
+        state.consumed_qty_last_tick = Quantity(consumed_qty);
+        goods.0.insert(key, state);
+        world.insert_resource(goods);
+
+        world.insert_resource(EconomyConfig::default());
+        world.insert_resource(capita);
+        world.insert_resource(WageTelemetry::default());
+        world.insert_resource(CitizenEconomicTargets::default());
+
+        world.spawn((
+            ChunkCoordComp(crate::ids::ChunkCoord { x: 0, y: 0 }),
+            ActiveChunk,
+        ));
+
+        for i in 0..num_citizens {
+            world.spawn((
+                AgentMarker,
+                StableAgentId(AgentId(format!("agent:walk:{i}"))),
+                MarketBinding {
+                    home_market: market_id.0,
+                    work_market: market_id.0,
+                },
+            ));
+        }
+
+        world
+    }
+
+    /// (a) Identity: CapitaFactor(1) → cap unchanged (=4), realized/per_unit > 4,
+    /// candidates > 4 → cohort == 4 (same as Slice-1 absolute cap).
+    ///
+    /// Default EconomyConfig: shoppers_per_unit=3, max_shoppers_per_market=4.
+    /// realized=60, per_unit=3 → magnitude=20; cap=4*1=4; candidates=10 → cohort=4.
+    #[test]
+    fn system_capita_factor_one_preserves_absolute_cap() {
+        let mut world = build_attribution_world(
+            60, // realized: magnitude 60/3=20
+            10, // candidates > 4
+            crate::economy::capita::CapitaFactor(1),
+        );
+
+        run_citizen_attribution_system(&mut world);
+
+        let targets = &world.resource::<CitizenEconomicTargets>().0;
+        assert_eq!(
+            targets.len(),
+            4,
+            "CapitaFactor(1): cohort == absolute cap 4, unchanged from Slice-1"
+        );
+    }
+
+    /// (b) Density: CapitaFactor(30) → cap=4*30=120; realized=600, per_unit=3 →
+    /// magnitude=200; candidates=50 → cohort==min(200,120,50)==50
+    /// (tracks candidates, NOT clamped at 4).
+    #[test]
+    fn system_capita_factor_30_scales_cap_to_120_cohort_tracks_candidates() {
+        let mut world = build_attribution_world(
+            600, // realized: magnitude 600/3=200
+            50,  // candidates=50, < 120 cap
+            crate::economy::capita::CapitaFactor(30),
+        );
+
+        run_citizen_attribution_system(&mut world);
+
+        let targets = &world.resource::<CitizenEconomicTargets>().0;
+        assert_eq!(
+            targets.len(),
+            50,
+            "CapitaFactor(30): scaled cap 120, cohort tracks candidates (50), not clamped at 4"
+        );
+    }
+
+    /// (c) No-money-mutation: the system must not alter any AccountBook or
+    /// InventoryBook.  It only writes CitizenEconomicTargets. The world has no
+    /// AccountBook/InventoryBook, so a successful run without panic is the proof
+    /// (the system is documented READ-ONLY over economy quantities).
+    ///
+    /// Also verifies the conservation identity at the attribution function level:
+    /// attributed_amount + unobserved_amount == realized for any CapitaFactor.
+    #[test]
+    fn system_attribution_writes_no_money_and_conservation_holds() {
+        // CapitaFactor(5): cap=4*5=20; realized=45, per_unit=3 → magnitude=15;
+        // candidates=10 → cohort=min(15,20,10)=10; attributed_amount=30; unobserved=15.
+        let channel = attribute_channel(45, 3, 20, &ids(10));
+        assert_eq!(channel.attributed.len(), 10, "candidates is binding");
+        assert_eq!(
+            channel.attributed_amount + channel.unobserved_amount,
+            45,
+            "conservation identity holds at scaled cap"
+        );
+
+        // Run the full system at CapitaFactor(5) — must not panic, no money mutations.
+        let mut world = build_attribution_world(45, 10, crate::economy::capita::CapitaFactor(5));
+        run_citizen_attribution_system(&mut world);
+        // System completed without panic: READ-ONLY property verified.
+        // No AccountBook/InventoryBook were inserted, so none can be mutated.
+        let targets = &world.resource::<CitizenEconomicTargets>().0;
+        assert_eq!(
+            targets.len(),
+            10,
+            "all 10 candidates attributed when cap=20 > magnitude=15 > candidates=10"
         );
     }
 }
