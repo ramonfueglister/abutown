@@ -866,10 +866,12 @@ pub fn run_macro_flow_at_tick(
     current_tick: u64,
     shipments: &mut crate::economy::FlowShipments,
     next_shipment_id: &mut crate::economy::NextShipmentId,
+    realized: &mut crate::economy::RealizedFlows,
     orders: &mut crate::economy::OrderBook,
     next_order_id: &mut crate::economy::NextOrderId,
     receipts: &mut BTreeMap<(EconomicActorId, MarketId), Money>,
 ) -> Result<(), EconomyError> {
+    realized.0.clear();
     if config.macro_flow_interval_ticks == 0
         || !current_tick.is_multiple_of(config.macro_flow_interval_ticks)
     {
@@ -1048,6 +1050,16 @@ pub fn run_macro_flow_at_tick(
                             travel_ticks,
                         },
                     );
+                }
+                if eflow.q > 0 {
+                    realized.0.push(crate::economy::RealizedFlow {
+                        src: eflow.src,
+                        dst: eflow.dst,
+                        good: eflow.good,
+                        p_src: eflow.p_src,
+                        p_dst: eflow.p_dst,
+                        dist: eflow.dist,
+                    });
                 }
                 events.push(event);
             }

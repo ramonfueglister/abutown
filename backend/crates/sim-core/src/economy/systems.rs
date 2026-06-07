@@ -6,13 +6,12 @@ use bevy_ecs::query::Or;
 use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    FlowShipments, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
-    MarketGoods, MarketId, Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools,
-    SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
-    clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick,
-    run_distribute_profit_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
-    run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
+    FlowShipmentParams, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
+    MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProductionPools, SellerReceipts,
+    SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry, clear_market_good_with_receipts,
+    expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
+    run_consumption_update_at_tick, run_distribute_profit_at_tick, run_macro_flow_at_tick,
+    run_pay_wages_at_tick, run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -551,8 +550,7 @@ pub fn run_macro_flow_system(
     demand: Res<DemandPools>,
     supply: Res<SupplyPools>,
     mut market_goods: ResMut<MarketGoods>,
-    mut shipments: ResMut<FlowShipments>,
-    mut next_shipment_id: ResMut<NextShipmentId>,
+    mut flow: FlowShipmentParams,
     mut orders: ResMut<OrderBook>,
     mut next_order_id: ResMut<NextOrderId>,
     mut receipts: ResMut<SellerReceipts>,
@@ -569,8 +567,9 @@ pub fn run_macro_flow_system(
         &distances,
         &config,
         tick.0,
-        &mut shipments,
-        &mut next_shipment_id,
+        &mut flow.shipments,
+        &mut flow.next_id,
+        &mut flow.realized,
         &mut orders,
         &mut next_order_id,
         &mut receipts.0,

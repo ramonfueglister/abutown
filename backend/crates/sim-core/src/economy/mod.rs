@@ -79,6 +79,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::capita::CapitaFactor::default());
         world.insert_resource(crate::economy::flow_shipments::FlowShipments::default());
         world.insert_resource(crate::economy::flow_shipments::NextShipmentId::default());
+        world.insert_resource(crate::economy::flow_shipments::RealizedFlows::default());
         world.insert_resource(crate::economy::wages::SellerReceipts::default());
         world.insert_resource(crate::economy::wages::WageTelemetry::default());
         world.insert_resource(crate::economy::wages::HouseholdSector {

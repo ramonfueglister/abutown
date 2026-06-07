@@ -4,9 +4,10 @@
 //! persisted (ephemeral, regenerated from the resumed flow on restart).
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::economy::{EconomyConfig, GoodId, MarketId, Quantity};
+use crate::economy::{EconomyConfig, GoodId, MarketId, Money, Quantity};
 
 /// Reserved actor-id offset for shipment-traders so they never collide with
 /// seeded economic actors (8001-8012) or the demo trader (8003).
@@ -58,6 +59,31 @@ impl NextShipmentId {
 pub fn shipment_travel_ticks(dist: i64, config: &EconomyConfig) -> u64 {
     let speed = config.trader_tiles_per_tick.max(1);
     (dist.max(0) as u64).div_ceil(speed).max(1)
+}
+
+/// Per-cadence record of a single realized macro-flow edge (q > 0 settled successfully).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RealizedFlow {
+    pub src: MarketId,
+    pub dst: MarketId,
+    pub good: GoodId,
+    pub p_src: Money,
+    pub p_dst: Money,
+    pub dist: i64,
+}
+
+/// Per-cadence collection of realized macro-flows. Cleared and repopulated each
+/// MacroFlow run; NOT persisted (transient signal for the flow-margin price nudge).
+#[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
+pub struct RealizedFlows(pub Vec<RealizedFlow>);
+
+/// Bundled system params for the three flow-shipment resources, keeping
+/// `run_macro_flow_system` within Bevy's 16-param limit.
+#[derive(SystemParam)]
+pub struct FlowShipmentParams<'w> {
+    pub shipments: ResMut<'w, FlowShipments>,
+    pub next_id: ResMut<'w, NextShipmentId>,
+    pub realized: ResMut<'w, RealizedFlows>,
 }
 
 /// Drop arrived shipments that no longer have a live render-agent.
