@@ -289,7 +289,7 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
         };
         let nodes = vec![
             node(0, 2.0, 3.0),
-            node(1, 13.0, 3.0),
+            node(1, 111.5, 64.51),
             node(2, 16.0, 48.0),
             node(3, 208.0, 48.0),
         ];
@@ -521,7 +521,7 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
         };
         let nodes = vec![
             node(0, 2.0, 3.0),
-            node(1, 13.0, 3.0),
+            node(1, 111.5, 64.51),
             node(2, 16.0, 48.0),
             node(3, 208.0, 48.0),
         ];

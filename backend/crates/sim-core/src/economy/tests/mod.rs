@@ -1,3 +1,4 @@
+mod abutopia_visible;
 mod auction;
 mod audit;
 mod capita;
