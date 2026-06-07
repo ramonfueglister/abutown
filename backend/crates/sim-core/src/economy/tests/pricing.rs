@@ -488,7 +488,6 @@ fn make_demand_pool_for_flow(
     }
 }
 
-
 /// Complementarity test — empty RealizedFlows → margin pass makes NO change.
 #[test]
 fn flow_margin_skips_when_no_realized_flow() {
