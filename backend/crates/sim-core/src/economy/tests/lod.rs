@@ -353,10 +353,13 @@ fn asleep_anchored_market_DOES_flow() {
     }
 
     // Hand-computed flow per fire (q = min(surplus 100, deficit 100, q_cap 100)):
-    //   p_src (A, supply-only) = ask_floor = 1000; p_dst (B, demand-only) =
-    //   bid_ceiling = 2000. src_revenue = 1000*100/1000 = 100; transport =
-    //   (50*100/1000)*2 = 10; dst_payment = 110; net_gain = 200-100-10 = 90 > 0.
-    // Two fires -> 200 FOOD moved A->B, B traded 200 @ 2000, A traded 200 @ 1000.
+    //   p_src (A, supply-only) = ask_floor = 1000; p_dst (B, demand-only) initial =
+    //   bid_ceiling = 2000. First fire: settles @ 2000. Then the flow-margin feedback
+    //   (Task 3) nudges B's max_price toward target = p_src + rate·dist = 1000 + 50*2
+    //   = 1100 (LoOP convergence), speed-limited 1%: 2000→1980. Second fire (tick 10)
+    //   settles @ 1980. src_revenue = 1000*100/1000 = 100; transport =
+    //   (50*100/1000)*2 = 10; dst_payment = 110; net_gain > 0 (both fires accepted).
+    // Two fires -> 200 FOOD moved A->B; price after both fires = 1980.
     let goods = &world.resource::<MarketGoods>().0;
     let state_a = &goods[&MarketGoodKey {
         market: a,
@@ -366,17 +369,31 @@ fn asleep_anchored_market_DOES_flow() {
         market: b,
         good: GOOD_FOOD,
     }];
+    // Exact settled values (deterministic):
+    //   B (sink, initial max_price=2000): flow-margin feedback nudges toward target_d =
+    //   p_src + rate·dist = 1000 + 50*2 = 1100; 1% speed limit applied on first fire:
+    //   2000 → 2000 - 2000/100 = 1980. Second fire settles at 1980.
+    //   A (source, initial min_price=1000): nudged toward target_s = p_dst - rate·dist =
+    //   2000 - 100 = 1900; 1% up on first fire: 1000 → 1010. Second fire settles at 1010.
+    //   These exact values FAIL if the LoOP nudge is absent (unnudged B=2000, A=1000).
     assert_eq!(
+        state_b.last_settlement_price.0, 1_980,
+        "B's settlement must be 1980 (2000 nudged 1% toward LoOP target 1100); \
+         would be 2000 without the flow-margin feedback — got {:?}",
         state_b.last_settlement_price,
-        Money(2_000),
-        "B's price was discovered by the macro flow (changed from ZERO default)"
     );
     assert_eq!(
         state_b.traded_qty_last_tick,
         Quantity(200),
         "B imported 100 FOOD per fire across the two interval boundaries"
     );
-    assert_eq!(state_a.last_settlement_price, Money(1_000));
+    // A's settlement: 1010 (1000 nudged 1% toward target_s=1900). Would be 1000 without nudge.
+    assert_eq!(
+        state_a.last_settlement_price.0, 1_010,
+        "A's settlement must be 1010 (1000 nudged 1% toward LoOP target 1900); \
+         would be 1000 without the flow-margin feedback — got {:?}",
+        state_a.last_settlement_price,
+    );
     assert_eq!(state_a.traded_qty_last_tick, Quantity(200));
 
     // Goods MOVED A->B (traded_qty=200 above proves the flow). The buyer received 200

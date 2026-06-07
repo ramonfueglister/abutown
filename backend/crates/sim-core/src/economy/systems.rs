@@ -6,13 +6,12 @@ use bevy_ecs::query::Or;
 use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    FlowShipments, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
-    MarketGoods, MarketId, Money, NextOrderId, NextShipmentId, OrderBook, ProductionPools,
-    SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
-    clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick,
-    run_distribute_profit_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
-    run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
+    FlowShipmentParams, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
+    MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProductionPools, SellerReceipts,
+    SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry, clear_market_good_with_receipts,
+    expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
+    run_consumption_update_at_tick, run_distribute_profit_at_tick, run_macro_flow_at_tick,
+    run_pay_wages_at_tick, run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -551,8 +550,7 @@ pub fn run_macro_flow_system(
     demand: Res<DemandPools>,
     supply: Res<SupplyPools>,
     mut market_goods: ResMut<MarketGoods>,
-    mut shipments: ResMut<FlowShipments>,
-    mut next_shipment_id: ResMut<NextShipmentId>,
+    mut flow: FlowShipmentParams,
     mut orders: ResMut<OrderBook>,
     mut next_order_id: ResMut<NextOrderId>,
     mut receipts: ResMut<SellerReceipts>,
@@ -569,8 +567,9 @@ pub fn run_macro_flow_system(
         &distances,
         &config,
         tick.0,
-        &mut shipments,
-        &mut next_shipment_id,
+        &mut flow.shipments,
+        &mut flow.next_id,
+        &mut flow.realized,
         &mut orders,
         &mut next_order_id,
         &mut receipts.0,
@@ -605,10 +604,17 @@ pub fn run_consumption_update_system(
 /// timescale as macro_flow, so the fast EWMA quantity loop settles between nudges). Surfaces a
 /// genuine Err (config-validation / overflow) as an audited `MarketClearFailed` — never `let _`,
 /// never a silent default.
+///
+/// Two-pass structure: first, compute the flow-coupled key sets from `RealizedFlows`; then run
+/// the local-unmet tâtonnement (skipping flow-coupled pools so the margin anchors them); then run
+/// the flow-margin feedback that nudges those pools toward the spatial LoOP target. Either pass's
+/// Err is surfaced as a `MarketClearFailed` audit event and the other pass is still attempted
+/// (independent operations, neither moves money, either partial result is safe).
 pub fn run_adjust_reservation_prices_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
     market_goods: Res<MarketGoods>,
+    realized: Res<crate::economy::RealizedFlows>,
     mut demand: ResMut<DemandPools>,
     mut supply: ResMut<SupplyPools>,
     mut ledger: ResMut<TradeLedger>,
@@ -618,10 +624,25 @@ pub fn run_adjust_reservation_prices_system(
     {
         return;
     }
+    let (skip_demand, skip_supply) = crate::economy::pricing::flow_coupled_keys(&realized);
     if let Err(reason) = crate::economy::pricing::run_adjust_reservation_prices_at_tick(
         &mut demand,
         &mut supply,
         &market_goods,
+        &config,
+        &skip_demand,
+        &skip_supply,
+    ) {
+        ledger.0.push(EconomyEvent::MarketClearFailed {
+            market: MarketId(0),
+            good: GoodId(0),
+            reason,
+        });
+    }
+    if let Err(reason) = crate::economy::pricing::run_flow_margin_feedback_at_tick(
+        &mut demand,
+        &mut supply,
+        &realized,
         &config,
     ) {
         ledger.0.push(EconomyEvent::MarketClearFailed {
