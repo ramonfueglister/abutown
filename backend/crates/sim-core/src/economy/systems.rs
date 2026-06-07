@@ -604,10 +604,17 @@ pub fn run_consumption_update_system(
 /// timescale as macro_flow, so the fast EWMA quantity loop settles between nudges). Surfaces a
 /// genuine Err (config-validation / overflow) as an audited `MarketClearFailed` — never `let _`,
 /// never a silent default.
+///
+/// Two-pass structure: first, compute the flow-coupled key sets from `RealizedFlows`; then run
+/// the local-unmet tâtonnement (skipping flow-coupled pools so the margin anchors them); then run
+/// the flow-margin feedback that nudges those pools toward the spatial LoOP target. Either pass's
+/// Err is surfaced as a `MarketClearFailed` audit event and the other pass is still attempted
+/// (independent operations, neither moves money, either partial result is safe).
 pub fn run_adjust_reservation_prices_system(
     tick: Res<Tick>,
     config: Res<EconomyConfig>,
     market_goods: Res<MarketGoods>,
+    realized: Res<crate::economy::RealizedFlows>,
     mut demand: ResMut<DemandPools>,
     mut supply: ResMut<SupplyPools>,
     mut ledger: ResMut<TradeLedger>,
@@ -617,10 +624,26 @@ pub fn run_adjust_reservation_prices_system(
     {
         return;
     }
+    let (skip_demand, skip_supply) = crate::economy::pricing::flow_coupled_keys(&realized);
     if let Err(reason) = crate::economy::pricing::run_adjust_reservation_prices_at_tick(
         &mut demand,
         &mut supply,
         &market_goods,
+        &config,
+        &skip_demand,
+        &skip_supply,
+    ) {
+        ledger.0.push(EconomyEvent::MarketClearFailed {
+            market: MarketId(0),
+            good: GoodId(0),
+            reason,
+        });
+    }
+    if let Err(reason) = crate::economy::pricing::run_flow_margin_feedback_at_tick(
+        &mut demand,
+        &mut supply,
+        &market_goods,
+        &realized,
         &config,
     ) {
         ledger.0.push(EconomyEvent::MarketClearFailed {
