@@ -293,7 +293,7 @@ mod tests {
             },
             Node {
                 id: NodeId(1),
-                position: (13.0, 3.0),
+                position: (111.5, 64.51),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },

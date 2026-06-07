@@ -25,7 +25,7 @@ fn seed_world() -> World {
     crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
     let nodes = vec![
         node(0, 2.0, 3.0),
-        node(1, 13.0, 3.0),
+        node(1, 111.5, 64.51),
         node(2, 16.0, 48.0),
         node(3, 208.0, 48.0),
     ];
@@ -274,7 +274,7 @@ fn authored_capita_baseline_reaches_economy_config() {
     crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
     let nodes = vec![
         node(0, 2.0, 3.0),
-        node(1, 13.0, 3.0),
+        node(1, 111.5, 64.51),
         node(2, 16.0, 48.0),
         node(3, 208.0, 48.0),
     ];
@@ -327,7 +327,7 @@ fn capita_baseline_reapplies_on_hydrate_even_when_state_already_seeded() {
     crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
     let nodes = vec![
         node(0, 2.0, 3.0),
-        node(1, 13.0, 3.0),
+        node(1, 111.5, 64.51),
         node(2, 16.0, 48.0),
         node(3, 208.0, 48.0),
     ];

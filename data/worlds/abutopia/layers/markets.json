@@ -3,7 +3,7 @@
   "world_id": "abutopia",
   "markets": [
     { "id": 9001, "name": "Demo A",      "anchor": [2.0, 3.0] },
-    { "id": 9002, "name": "Demo B",      "anchor": [13.0, 3.0] },
+    { "id": 9002, "name": "Demo B",      "anchor": [111.5, 64.51] },
     { "id": 9003, "name": "Flow Demo A", "anchor": [16.0, 48.0] },
     { "id": 9004, "name": "Flow Demo B", "anchor": [208.0, 48.0] }
   ],
