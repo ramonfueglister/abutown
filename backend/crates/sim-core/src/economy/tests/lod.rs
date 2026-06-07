@@ -369,9 +369,17 @@ fn asleep_anchored_market_DOES_flow() {
         market: b,
         good: GOOD_FOOD,
     }];
-    assert!(
-        state_b.last_settlement_price.0 > 0 && state_b.last_settlement_price.0 <= 2_000,
-        "B's price was discovered by the macro flow (>0) and nudged toward LoOP target by flow-margin feedback (<=initial); got {:?}",
+    // Exact settled values (deterministic):
+    //   B (sink, initial max_price=2000): flow-margin feedback nudges toward target_d =
+    //   p_src + rate·dist = 1000 + 50*2 = 1100; 1% speed limit applied on first fire:
+    //   2000 → 2000 - 2000/100 = 1980. Second fire settles at 1980.
+    //   A (source, initial min_price=1000): nudged toward target_s = p_dst - rate·dist =
+    //   2000 - 100 = 1900; 1% up on first fire: 1000 → 1010. Second fire settles at 1010.
+    //   These exact values FAIL if the LoOP nudge is absent (unnudged B=2000, A=1000).
+    assert_eq!(
+        state_b.last_settlement_price.0, 1_980,
+        "B's settlement must be 1980 (2000 nudged 1% toward LoOP target 1100); \
+         would be 2000 without the flow-margin feedback — got {:?}",
         state_b.last_settlement_price,
     );
     assert_eq!(
@@ -379,12 +387,11 @@ fn asleep_anchored_market_DOES_flow() {
         Quantity(200),
         "B imported 100 FOOD per fire across the two interval boundaries"
     );
-    // A's min_price starts at 1000; the flow-margin feedback nudges it toward
-    // target_s = p_dst - rate·dist = 2000 - 100 = 1900 (upward, 1% speed limit: →1010).
-    // So after two fires the settlement price is between 1000 and 1100.
-    assert!(
-        state_a.last_settlement_price.0 >= 1_000 && state_a.last_settlement_price.0 <= 1_100,
-        "A's settlement price started at 1000 and nudged upward by flow-margin; got {:?}",
+    // A's settlement: 1010 (1000 nudged 1% toward target_s=1900). Would be 1000 without nudge.
+    assert_eq!(
+        state_a.last_settlement_price.0, 1_010,
+        "A's settlement must be 1010 (1000 nudged 1% toward LoOP target 1900); \
+         would be 1000 without the flow-margin feedback — got {:?}",
         state_a.last_settlement_price,
     );
     assert_eq!(state_a.traded_qty_last_tick, Quantity(200));

@@ -151,7 +151,6 @@ pub fn flow_coupled_keys(realized: &RealizedFlows) -> (MarketGoodKeySet, MarketG
 pub fn run_flow_margin_feedback_at_tick(
     demand: &mut DemandPools,
     supply: &mut SupplyPools,
-    _market_goods: &MarketGoods,
     realized: &RealizedFlows,
     config: &EconomyConfig,
 ) -> Result<(), EconomyError> {

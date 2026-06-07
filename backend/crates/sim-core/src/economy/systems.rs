@@ -642,7 +642,6 @@ pub fn run_adjust_reservation_prices_system(
     if let Err(reason) = crate::economy::pricing::run_flow_margin_feedback_at_tick(
         &mut demand,
         &mut supply,
-        &market_goods,
         &realized,
         &config,
     ) {

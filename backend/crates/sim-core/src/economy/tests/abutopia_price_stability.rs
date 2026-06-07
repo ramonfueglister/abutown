@@ -77,6 +77,21 @@ fn price_9002(world: &World) -> i64 {
     max
 }
 
+/// Max ewma_reference_price across 9001's supply goods (the spatial LoOP source price).
+fn price_9001(world: &World) -> i64 {
+    let goods = world.resource::<MarketGoods>();
+    let mut max = 0i64;
+    for g in [GOOD_TOOLS, GOOD_FOOD] {
+        if let Some(st) = goods.0.get(&crate::economy::MarketGoodKey {
+            market: MarketId(9001),
+            good: g,
+        }) {
+            max = max.max(st.ewma_reference_price.0);
+        }
+    }
+    max
+}
+
 #[test]
 fn abutopia_prices_stay_in_band_and_9002_consumes_over_long_run() {
     const N: u64 = 2000; // 200 tâtonnement cadences (macro_flow_interval_ticks = 10)
@@ -122,11 +137,20 @@ fn abutopia_prices_stay_in_band_and_9002_consumes_over_long_run() {
     }
 
     let final_price_9002 = price_9002(&world);
+    let p_src = price_9001(&world);
+    let rate = config.transport_cost_per_tile_unit.0;
+    let dist = 172i64; // rounded Manhattan of 9001 (2,3) ↔ 9002 (111.5,64.51): |2-112|+|3-65|
+    let loop_target = p_src + rate * dist;
     println!(
         "ABUTOPIA STABILITY: consumed_first_half={consumed_first_half} \
          consumed_last_quarter={consumed_last_quarter} peak_price_9002={peak_price_9002} \
          final_price_9002={final_price_9002} ceiling={}",
         config.price_ceiling.0
+    );
+    println!(
+        "CONVERGENCE: final_9002={final_price_9002} p_9001={p_src} loop_target={loop_target} \
+         (rate*dist={})",
+        rate * dist
     );
 
     assert!(
@@ -135,10 +159,18 @@ fn abutopia_prices_stay_in_band_and_9002_consumes_over_long_run() {
          consumed_last_quarter={consumed_last_quarter}, consumed_first_half={consumed_first_half}"
     );
 
+    // Spatial LoOP convergence: 9002's final price must be near p_9001 + rate·dist
+    // (Samuelson 1952). ±25% band is non-vacuous (the unnudged price would ratchet to
+    // ~99_961, the ceiling; even peak=1938 shows the nudge is working; the band excludes
+    // the failure mode and is loose enough not to be flaky across minor EWMA drift).
     assert!(
-        peak_price_9002 < config.price_ceiling.0 / 10,
-        "market 9002 price must not ratchet toward the ceiling (no divergence); \
-         peak_price_9002={peak_price_9002}, ceiling={}",
-        config.price_ceiling.0
+        (final_price_9002 - loop_target).abs() <= loop_target / 4,
+        "9002 must CONVERGE to the spatial-LoOP target p_9001 + rate*dist (Samuelson 1952); \
+         final_9002={final_price_9002}, loop_target={loop_target} (p_9001={p_src}, rate*dist={})",
+        rate * dist
+    );
+    assert!(
+        final_price_9002 < config.price_ceiling.0 / 10,
+        "and stays far below the ceiling"
     );
 }

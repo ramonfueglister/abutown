@@ -488,22 +488,6 @@ fn make_demand_pool_for_flow(
     }
 }
 
-fn make_supply_pool_for_flow(
-    actor: u64,
-    market: MarketId,
-    good: GoodId,
-    min_price: i64,
-) -> SupplyPool {
-    SupplyPool {
-        actor: EconomicActorId(actor),
-        market,
-        good,
-        offered_qty_per_tick: Quantity(10),
-        min_price: Money(min_price),
-        interval_ticks: 1,
-        last_generated_tick: None,
-    }
-}
 
 /// Complementarity test — empty RealizedFlows → margin pass makes NO change.
 #[test]
@@ -515,12 +499,10 @@ fn flow_margin_skips_when_no_realized_flow() {
         make_demand_pool_for_flow(8002, m, g, 5_000),
     )]));
     let mut supply = SupplyPools::default();
-    let goods = MarketGoods::default();
     let realized = RealizedFlows::default();
     run_flow_margin_feedback_at_tick(
         &mut demand,
         &mut supply,
-        &goods,
         &realized,
         &EconomyConfig::default(),
     )
@@ -546,7 +528,6 @@ fn flow_margin_pulls_sink_down_toward_loop_target() {
         make_demand_pool_for_flow(8002, m_dst, g, 5_000),
     )]));
     let mut supply = SupplyPools::default();
-    let goods = MarketGoods::default();
     let realized = RealizedFlows(vec![RealizedFlow {
         src: m_src,
         dst: m_dst,
@@ -558,7 +539,6 @@ fn flow_margin_pulls_sink_down_toward_loop_target() {
     run_flow_margin_feedback_at_tick(
         &mut demand,
         &mut supply,
-        &goods,
         &realized,
         &EconomyConfig::default(),
     )
