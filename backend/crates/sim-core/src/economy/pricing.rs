@@ -40,6 +40,34 @@ fn nudge_price(
     ))
 }
 
+/// Nudge `price` toward a spatial-equilibrium `target` (Law of One Price: target =
+/// source_price + rate·dist). Signed, speed-limited, clamped — the inter-market
+/// arbitrage term that anchors a one-sided market's price (Samuelson, 1952; Takayama
+/// & Judge, 1971). `step_bps = clamp(k_bps · gap_bps / 10_000, ±max_step_bps)` where
+/// `gap_bps = (target − price)·10_000 / max(1, price)`; `new = price + price·step/10_000`,
+/// clamped into `[floor, ceiling]`. Above target → pulls down (the recovery force a
+/// pure-sink's local-unmet term lacks); below → pulls up. Conservation-trivial
+/// (writes no money). Checked i128, floor.
+pub fn nudge_price_toward_target(
+    price: Money,
+    target: Money,
+    k_bps: i128,
+    max_step_bps: i128,
+    floor: i64,
+    ceiling: i64,
+) -> Result<Money, EconomyError> {
+    let p = price.0 as i128;
+    let denom = p.max(1);
+    let gap_bps = ((target.0 as i128 - p) * 10_000) / denom;
+    let step_bps = ((k_bps * gap_bps) / 10_000).clamp(-max_step_bps, max_step_bps);
+    let delta = (p * step_bps) / 10_000;
+    let raw = p + delta;
+    let clamped = raw.clamp(floor as i128, ceiling as i128);
+    Ok(Money(
+        i64::try_from(clamped).map_err(|_| EconomyError::Overflow)?,
+    ))
+}
+
 /// For every demand pool, nudge `max_price`; for every supply pool, nudge `min_price` — each by
 /// the excess-demand signal of ITS OWN `(market, good)` state (shortage→up, glut→down: both walls
 /// translate the same direction). A pool whose `(market, good)` has no `MarketGoodState` yet (a

@@ -358,3 +358,34 @@ fn cross_market_source_sink_gap_is_logged_and_stays_bounded() {
         "source price fell under glut"
     );
 }
+
+#[test]
+fn nudge_toward_target_pulls_down_when_above_and_is_speed_limited() {
+    use crate::economy::Money;
+    use crate::economy::pricing::nudge_price_toward_target;
+    let out = nudge_price_toward_target(Money(10_000), Money(1_360), 500, 100, 1, 100_000).unwrap();
+    assert!(out.0 < 10_000, "above target → nudged down");
+    assert!(
+        out.0 >= 10_000 - 10_000 / 100,
+        "down-step capped at 1% (max_step_bps=100)"
+    );
+}
+
+#[test]
+fn nudge_toward_target_pulls_up_when_below_and_clamps_floor_ceiling() {
+    use crate::economy::Money;
+    use crate::economy::pricing::nudge_price_toward_target;
+    let up = nudge_price_toward_target(Money(500), Money(1_360), 500, 100, 1, 100_000).unwrap();
+    assert!(up.0 > 500, "below target → nudged up");
+    let c =
+        nudge_price_toward_target(Money(99_999), Money(1_000_000), 500, 100, 1, 100_000).unwrap();
+    assert!(c.0 <= 100_000, "clamped to ceiling");
+}
+
+#[test]
+fn nudge_toward_target_at_target_is_noop() {
+    use crate::economy::Money;
+    use crate::economy::pricing::nudge_price_toward_target;
+    let out = nudge_price_toward_target(Money(1_360), Money(1_360), 500, 100, 1, 100_000).unwrap();
+    assert_eq!(out.0, 1_360, "at target → no move (gap 0)");
+}
