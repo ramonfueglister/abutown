@@ -23,6 +23,7 @@ fly auth login                      # interactive — run via `! fly auth login`
 fly launch --no-deploy --copy-config --name abutown-abutopia --region lhr
 fly secrets set \
   DATABASE_URL='postgresql://…@…pooler.supabase.com:5432/postgres?sslmode=verify-full' \
+  SUPABASE_URL='https://<project>.supabase.co' \
   CORS_ALLOWED_ORIGINS='https://PLACEHOLDER-set-after-vercel' \
   ABUTOWN_DB_MAX_CONNECTIONS='8'
 fly deploy
@@ -30,7 +31,10 @@ fly deploy
 curl -s https://abutown-abutopia.fly.dev/health -o /dev/null -w '%{http_code}\n'   # expect 200
 ```
 
-`PGSSLROOTCERT`, `LISTEN_HOST`, `LISTEN_PORT`, `RUST_LOG` come from the image `ENV`.
+`ServerConfig::from_env` REQUIRES both `DATABASE_URL` and `SUPABASE_URL` — omitting
+`SUPABASE_URL` crash-loops the machine with "SUPABASE_URL is required".
+`PGSSLROOTCERT`, `ABUTOWN_BASE_WORLD_PATH`, `LISTEN_HOST`, `LISTEN_PORT`, `RUST_LOG`
+come from the image `ENV`.
 Confirm the largest safe `ABUTOWN_DB_MAX_CONNECTIONS` against the Supabase dashboard
 pooler ceiling (8 is conservative-safe).
 
