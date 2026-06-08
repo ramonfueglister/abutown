@@ -600,6 +600,68 @@ fn tile_pulse(message: ServerMessageDto) -> TilePulseDeltaDto {
     delta
 }
 
+/// Regression for the live `routed=0` bug: the production hydrate path
+/// (`hydrate_from_stores`, used by every running server) must seed the economy
+/// markets BEFORE spawning agents, so the spawn-time binding guard in
+/// `mobility::api::spawn_agent_from_record` can resolve each citizen's
+/// home/work market from the (now-present) `Markets` resource.
+///
+/// Before the fix `seed_from_markets_layer` ran AFTER `apply_into_world`, so
+/// every seeded pedestrian was spawned into a world with an empty `Markets`
+/// resource and frozen at `home_market = 0` (unbound) — which then persisted and
+/// survived every restart. Economy attribution filters candidates by
+/// `observed_markets.contains(home_market)`, and 0 is never a market id, so the
+/// on-map economy reported `routed = 0` forever even though the corridor
+/// pedestrians stand on market 9002's tile. The fresh `new()` path already
+/// seeded before spawning, which is why this only reproduced live (and why the
+/// economy tests, which spawn fresh citizens after seeding, masked it).
+#[tokio::test]
+async fn hydrate_binds_seed_pedestrians_to_their_home_market() {
+    let base_world = base_world_fixture();
+
+    let (mut runtime, _chunk_store, _mobility_store, _economy_store) =
+        SimulationRuntime::hydrate_from_stores(
+            Box::new(InMemoryWorldEventStore::default()),
+            Box::new(InMemoryChunkSnapshotStore::default()),
+            Box::new(InMemoryMobilitySnapshotStore::default()),
+            Box::new(InMemoryEconomySnapshotStore::default()),
+            &base_world,
+        )
+        .await
+        .expect("hydrate abutopia from empty stores");
+
+    // Only agents carry `MarketBinding`, so an unfiltered query enumerates the
+    // seeded pedestrians' home-market bindings.
+    let mut binding_query = runtime.world.query::<&sim_core::mobility::MarketBinding>();
+    let home_markets: Vec<u32> = binding_query
+        .iter(&runtime.world)
+        .map(|binding| binding.home_market)
+        .collect();
+
+    assert!(
+        !home_markets.is_empty(),
+        "abutopia seeds corridor pedestrians"
+    );
+    assert!(
+        home_markets.iter().all(|&m| m != 0),
+        "no seeded pedestrian may be left unbound (home_market=0); {} of {} were unbound",
+        home_markets.iter().filter(|&&m| m == 0).count(),
+        home_markets.len(),
+    );
+    // Every `corridor:sidewalk:south` pedestrian (x 106..=115 at y 64.51) is
+    // nearest to market 9002 ([111.5, 64.51]); 9001/9003/9004 are far away.
+    assert!(
+        home_markets.iter().all(|&m| m == 9002),
+        "corridor pedestrians must bind to market 9002; distinct home markets seen: {:?}",
+        {
+            let mut distinct: Vec<u32> = home_markets.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            distinct
+        },
+    );
+}
+
 #[test]
 fn runtime_summarizes_abutopia_loaded_chunk() {
     let runtime = SimulationRuntime::new();
