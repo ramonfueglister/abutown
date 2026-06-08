@@ -503,6 +503,51 @@ fn spawn_agent_from_record_with_position(
     entity
 }
 
+/// Re-resolve `MarketBinding` for every agent still carrying the unassigned
+/// sentinel (`home_market == 0`), using the seeded `Markets` and each agent's
+/// spawn `Position`.
+///
+/// The runtime constructors install the authoritative routing graph through
+/// `apply_into_world` — which ALSO spawns the seeded agents — and the economy
+/// markets only resolve to correct positions when seeded AGAINST that graph
+/// (each `MarketSite` stores a `node_id`, and `markets_with_positions` reads
+/// `graph.node(node_id)`; a market seeded against the pre-`apply` plugin graph
+/// has a node_id that is stale once the snapshot graph replaces it). So the
+/// economy must be seeded after `apply`, which means the seeded agents are
+/// necessarily spawned before any market exists and freeze at `home_market = 0`.
+/// This runs once, right after `seed_from_markets_layer`, applying the same
+/// nearest-market rule as the spawn-time guard in `spawn_agent_from_record`.
+///
+/// Idempotent: agents already bound (`home_market >= 1`, e.g. restored from a
+/// snapshot or born after seeding) are left untouched, so re-hydrating an
+/// already-bound world is a no-op.
+pub fn rebind_unassigned_market_agents(world: &mut World) {
+    let markets = crate::mobility::market_binding::markets_with_positions(world);
+    if markets.is_empty() {
+        return;
+    }
+    let mut rebinds: Vec<(Entity, crate::mobility::MarketBinding)> = Vec::new();
+    {
+        let mut query =
+            world.query_filtered::<(Entity, &crate::mobility::MarketBinding, &Position), With<AgentMarker>>();
+        for (entity, binding, position) in query.iter(world) {
+            if binding.home_market != 0 {
+                continue;
+            }
+            if let Some(rebound) =
+                crate::mobility::market_binding::assign_binding((position.x, position.y), &markets)
+            {
+                rebinds.push((entity, rebound));
+            }
+        }
+    }
+    for (entity, rebound) in rebinds {
+        if let Some(mut binding) = world.get_mut::<crate::mobility::MarketBinding>(entity) {
+            *binding = rebound;
+        }
+    }
+}
+
 /// Spawn a vehicle entity from a record. Updates `VehicleIdIndex`.
 ///
 pub fn spawn_vehicle_from_record(world: &mut World, record: VehicleRecord) -> Entity {

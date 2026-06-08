@@ -217,8 +217,6 @@ impl SimulationRuntime {
         MobilityPlugin.install(&mut world, &mut schedule);
         sim_core::mobility::seed::insert_activity_waypoints_from_base_world(&mut world, &bundle)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
-        // Seed the economy from the authored markets layer in the world bundle.
-        sim_core::economy::seed_from_markets_layer(&mut world, &bundle.markets);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
         crate::persistence_plugin::PersistencePlugin {
             world_id: bundle.world_id().to_owned(),
@@ -229,6 +227,15 @@ impl SimulationRuntime {
         let mobility_snap = initial_mobility_snapshot_for_base_world(&bundle)?;
         apply_into_world(&mut world, mobility_snap);
         pin_base_world_mobility_chunks(&mut world, &bundle);
+
+        // Seed the economy from the authored markets layer AFTER `apply_into_world`
+        // so each `MarketSite`'s node_id resolves against the graph apply installs
+        // (seeding earlier leaves stale node_ids — see `hydrate_from_stores`), then
+        // rebind the agents apply just spawned (each is `home_market = 0` until the
+        // markets exist).
+        sim_core::economy::seed_from_markets_layer(&mut world, &bundle.markets);
+        sim_core::mobility::api::rebind_unassigned_market_agents(&mut world);
+
         sim_core::routing::HierarchicalRoutingPlugin::default().install(&mut world, &mut schedule);
         refresh_flow_field_resources(&mut world);
 
@@ -376,6 +383,7 @@ impl SimulationRuntime {
             Some((_tick, _snap)) => initial_mobility_snapshot_for_base_world(base_world)
                 .map_err(HydrationError::Seed)?,
         };
+
         apply_into_world(&mut world, mobility_snap);
         pin_base_world_mobility_chunks(&mut world, base_world);
 
@@ -388,9 +396,20 @@ impl SimulationRuntime {
             sim_core::economy::apply_into_world(&mut world, &econ_snap);
         }
 
-        // Seed the economy from the authored markets layer (idempotent: no-ops
-        // when an economy was already restored from a snapshot above).
+        // Seed the economy from the authored markets layer AFTER `apply_into_world`:
+        // each `MarketSite` stores a graph `node_id`, and the authoritative routing
+        // graph is the one `apply_into_world` installs from the mobility snapshot.
+        // Seeding against the pre-apply plugin graph would leave stale node_ids whose
+        // positions scramble once the snapshot graph replaces them (markets resolve
+        // to the wrong tiles). Idempotent: no-ops when an economy was already
+        // restored from a snapshot above.
         sim_core::economy::seed_from_markets_layer(&mut world, &base_world.markets);
+
+        // `apply_into_world` spawns the seeded agents BEFORE any market exists, so
+        // each freezes at `home_market = 0` (unbound); with markets now seeded
+        // (against the correct graph), rebind them — otherwise economy attribution
+        // routes nobody (`routed=0`).
+        sim_core::mobility::api::rebind_unassigned_market_agents(&mut world);
 
         // Treat the restored ledger tail as already durably appended so the audit
         // flush only persists events produced after this boot. Must run after the
