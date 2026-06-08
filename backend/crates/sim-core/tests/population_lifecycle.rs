@@ -40,6 +40,8 @@ fn aggressive_config() -> PopulationConfig {
         fert_spread: 6.0,
         fertile_min: 15.0,
         fertile_max: 49.0,
+        carrying_capacity: 0.0,
+        capacity_overshoot: 1.25,
     }
 }
 

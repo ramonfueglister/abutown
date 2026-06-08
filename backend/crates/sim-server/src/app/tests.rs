@@ -461,7 +461,7 @@ async fn degraded_persistence_keeps_health_ok() {
 }
 
 #[tokio::test]
-async fn health_degrades_when_base_world_agents_are_missing_from_published_mobility() {
+async fn health_degrades_when_published_mobility_is_empty() {
     let state = AppState::new(SimulationRuntime::new());
     let mut view = state.view().load().as_ref().clone();
     view.mobility_full_dto.agents.clear();
@@ -471,7 +471,37 @@ async fn health_degrades_when_base_world_agents_are_missing_from_published_mobil
 
     assert!(
         !health.ok,
-        "health must fail when the published mobility view has fewer concrete agents than base-world spawns"
+        "health must fail when the published mobility view is empty (0 agents)"
+    );
+}
+
+#[tokio::test]
+async fn below_seed_count_population_is_healthy_empty_is_not() {
+    // A living population below the base-world seed count is valid — the
+    // guard must only reject a completely empty world (0 agents).
+    let make_state_with_agents = |n: usize| {
+        let state = AppState::new(SimulationRuntime::new());
+        let mut view = state.view().load().as_ref().clone();
+        view.mobility_full_dto.agents = (0..n)
+            .map(|i| w::AgentMobility {
+                id: format!("agent-{i}"),
+                ..Default::default()
+            })
+            .collect();
+        state.view().store(Arc::new(view));
+        state
+    };
+
+    let state_285 = make_state_with_agents(285);
+    assert!(
+        health_response_for_state(&state_285).ok,
+        "285 agents (<300 seed) but >0 must be healthy"
+    );
+
+    let state_0 = make_state_with_agents(0);
+    assert!(
+        !health_response_for_state(&state_0).ok,
+        "0 agents must be unhealthy"
     );
 }
 
@@ -507,7 +537,7 @@ impl MobilitySnapshotStore for CountingMobilitySnapshotStore {
 }
 
 #[tokio::test]
-async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agents() {
+async fn persist_snapshots_once_rejects_empty_mobility_snapshots() {
     let runtime = SimulationRuntime::new();
     let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
         .expect("base world bundle present for test");
@@ -555,7 +585,6 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
         mobility_liveness: Arc::new(MobilityPersistenceLiveness::new(
             MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
         )),
-        expected_base_world_agents: crate::runtime::expected_base_world_agent_count(&base_world),
     };
 
     assert_eq!(persist_snapshots_once(&state).await.unwrap(), 0);
@@ -569,7 +598,7 @@ async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agen
     let persistence = health.persistence.expect("persistence health present");
     assert!(!health.ok);
     assert_eq!(persistence.status, w::PersistenceHealthStatus::Stale as i32);
-    assert!(persistence.last_error.contains("expected at least 300"));
+    assert!(persistence.last_error.contains("0 agents"));
 }
 
 /// A snapshot store that sleeps during writes to simulate slow DB I/O.
@@ -796,7 +825,6 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
         mobility_liveness: Arc::new(MobilityPersistenceLiveness::new(
             MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
         )),
-        expected_base_world_agents: 1,
     }
 }
 
