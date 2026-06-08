@@ -1633,6 +1633,15 @@ async fn hydrate_restores_economy_snapshot() {
     );
 }
 
+#[test]
+fn runtime_sets_population_carrying_capacity_from_base_world_seed_count() {
+    let runtime = SimulationRuntime::new(); // fresh path, abutopia
+    let cfg = runtime.world.resource::<sim_core::population::PopulationConfig>();
+    let expected = expected_base_world_agent_count(&base_world_fixture()) as f32;
+    assert!(expected > 0.0, "abutopia seeds >0 agents");
+    assert_eq!(cfg.carrying_capacity, expected, "carrying capacity = base-world seed count");
+}
+
 #[tokio::test]
 async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
     // A world with no persisted economy (brand-new, or created before the economy

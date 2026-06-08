@@ -218,6 +218,9 @@ impl SimulationRuntime {
         sim_core::mobility::seed::insert_activity_waypoints_from_base_world(&mut world, &bundle)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
+        if let Some(mut pcfg) = world.get_resource_mut::<sim_core::population::PopulationConfig>() {
+            pcfg.carrying_capacity = expected_base_world_agent_count(&bundle) as f32;
+        }
         crate::persistence_plugin::PersistencePlugin {
             world_id: bundle.world_id().to_owned(),
         }
@@ -362,6 +365,9 @@ impl SimulationRuntime {
             .map_err(HydrationError::Seed)?;
         sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
         sim_core::population::PopulationPlugin.install(&mut world, &mut schedule);
+        if let Some(mut pcfg) = world.get_resource_mut::<sim_core::population::PopulationConfig>() {
+            pcfg.carrying_capacity = expected_base_world_agent_count(base_world) as f32;
+        }
         crate::persistence_plugin::PersistencePlugin {
             world_id: world_id.0.clone(),
         }
