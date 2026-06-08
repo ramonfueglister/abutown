@@ -66,6 +66,25 @@ pub fn birth_probability_month(age_years: f32, c: &PopulationConfig) -> f32 {
     fertility_rate(age_years, c) / 12.0
 }
 
+/// Density-dependent fertility multiplier in `[0,1]`. Full fertility (1.0) while
+/// the active population `n` is at or below the carrying capacity `K`; linear ramp
+/// 1→0 across `[K, K_hard]` where `K_hard = K * capacity_overshoot`; 0 at/above
+/// `K_hard`. `K <= 0` disables regulation (returns 1.0 — unbounded).
+///
+/// NOTE: deliberately NOT `1 - n/K`. The base schedule is only mildly
+/// super-replacement (NRR≈1.044), so a linear-from-zero suppression would balance
+/// at ~4% of K and collapse the population; the ceiling form keeps full fertility
+/// until `n` nears `K`, so the bounded equilibrium sits just above `K`.
+pub fn fertility_density_factor(n: usize, c: &PopulationConfig) -> f32 {
+    let k = c.carrying_capacity;
+    if k <= 0.0 {
+        return 1.0;
+    }
+    let k_hard = k * c.capacity_overshoot.max(1.0);
+    let n = n as f32;
+    ((k_hard - n) / (k_hard - k)).clamp(0.0, 1.0)
+}
+
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct PopulationConfig {
     pub mort_a: f32,
@@ -76,6 +95,12 @@ pub struct PopulationConfig {
     pub fert_spread: f32,
     pub fertile_min: f32,
     pub fertile_max: f32,
+    /// Active-population carrying capacity K. Fertility is full at/below K and
+    /// ramps to zero across [K, K*capacity_overshoot]. `<= 0.0` disables
+    /// regulation (unbounded growth). Set per-world by the runtime.
+    pub carrying_capacity: f32,
+    /// Upper band as a multiple of K: hard fertility ceiling K_hard = K*overshoot.
+    pub capacity_overshoot: f32,
 }
 impl Default for PopulationConfig {
     fn default() -> Self {
@@ -88,6 +113,8 @@ impl Default for PopulationConfig {
             fert_spread: 6.0,
             fertile_min: 15.0,
             fertile_max: 49.0,
+            carrying_capacity: 0.0, // unbounded by default; the runtime sets it per-world
+            capacity_overshoot: 1.25,
         }
     }
 }
@@ -292,6 +319,25 @@ impl crate::world::schedule::SimPlugin for PopulationPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn density_factor_unbounded_when_capacity_non_positive() {
+        let c = PopulationConfig { carrying_capacity: 0.0, ..PopulationConfig::default() };
+        assert_eq!(fertility_density_factor(0, &c), 1.0);
+        assert_eq!(fertility_density_factor(100_000, &c), 1.0);
+    }
+
+    #[test]
+    fn density_factor_full_below_k_zero_at_hard_ceiling() {
+        // K=100, overshoot 1.25 => K_hard=125.
+        let c = PopulationConfig { carrying_capacity: 100.0, capacity_overshoot: 1.25, ..PopulationConfig::default() };
+        assert_eq!(fertility_density_factor(50, &c), 1.0, "full fertility well below K");
+        assert_eq!(fertility_density_factor(100, &c), 1.0, "full fertility at K");
+        let mid = fertility_density_factor(112, &c); // ~halfway through [100,125]
+        assert!(mid > 0.4 && mid < 0.6, "linear ramp in the band, got {mid}");
+        assert_eq!(fertility_density_factor(125, &c), 0.0, "zero at K_hard");
+        assert_eq!(fertility_density_factor(200, &c), 0.0, "zero above K_hard");
+    }
+
     #[test]
     fn unit_draw_is_in_range_and_deterministic() {
         let a = unit_draw(7, 3, 1);
