@@ -461,7 +461,7 @@ async fn degraded_persistence_keeps_health_ok() {
 }
 
 #[tokio::test]
-async fn health_degrades_when_base_world_agents_are_missing_from_published_mobility() {
+async fn health_degrades_when_published_mobility_is_empty() {
     let state = AppState::new(SimulationRuntime::new());
     let mut view = state.view().load().as_ref().clone();
     view.mobility_full_dto.agents.clear();
@@ -471,7 +471,7 @@ async fn health_degrades_when_base_world_agents_are_missing_from_published_mobil
 
     assert!(
         !health.ok,
-        "health must fail when the published mobility view has fewer concrete agents than base-world spawns"
+        "health must fail when the published mobility view is empty (0 agents)"
     );
 }
 
@@ -537,7 +537,7 @@ impl MobilitySnapshotStore for CountingMobilitySnapshotStore {
 }
 
 #[tokio::test]
-async fn persist_snapshots_once_rejects_mobility_snapshots_below_base_world_agents() {
+async fn persist_snapshots_once_rejects_empty_mobility_snapshots() {
     let runtime = SimulationRuntime::new();
     let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
         .expect("base world bundle present for test");
