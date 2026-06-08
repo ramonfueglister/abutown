@@ -1,0 +1,12 @@
+# Keep the Docker build context lean. The image needs: backend/ (sans target),
+# data/worlds/abutopia, deploy/supabase-prod-ca.crt. Everything else is excluded.
+.git
+.worktrees
+backend/target
+node_modules
+dist
+.playwright-mcp
+**/*.png
+.certs
+public/simutrans-assets
+docs
