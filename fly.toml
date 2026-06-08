@@ -1,0 +1,25 @@
+# Single-instance, stateful sim-server. The in-memory world is the SOLE writer —
+# NEVER scale count > 1 (a second machine would double-write the same world_id).
+app = "abutown-abutopia"
+primary_region = "lhr"  # EU, near Supabase eu-west-1 (cuts persist write latency)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "get"
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
