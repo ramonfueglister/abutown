@@ -175,6 +175,7 @@ pub fn population_monthly_system(world: &mut World) {
                 victims.push((*entity, agent_id.clone()));
             }
         }
+        let deaths = victims.len();
         for (entity, agent_id) in victims {
             world.despawn(entity);
             world
@@ -183,7 +184,9 @@ pub fn population_monthly_system(world: &mut World) {
                 .remove(&agent_id);
         }
 
-        // ---- Fertility ----
+        // ---- Fertility (density-regulated) ----
+        let live_n = world.resource::<crate::mobility::resources::AgentIdIndex>().0.len();
+        let density = fertility_density_factor(live_n, &cfg);
         // Collect living females in fertile window; also grab their position
         // and a copy of their mobility state so we can spawn at the mother's
         // exact location without needing activity geometry resolution.
@@ -214,7 +217,7 @@ pub fn population_monthly_system(world: &mut World) {
                 continue;
             }
             let draw = unit_draw(stable_agent_hash(agent_id), m, 1);
-            if draw >= birth_probability_month(age, &cfg) {
+            if draw >= birth_probability_month(age, &cfg) * density {
                 continue;
             }
             // Candidate gives birth this month-step.
@@ -252,6 +255,7 @@ pub fn population_monthly_system(world: &mut World) {
 
         // Spawn children after collecting all candidates to avoid borrow
         // conflicts on the world.
+        let births = candidates.len();
         for candidate in candidates {
             let child_id =
                 crate::ids::AgentId(format!("agent:born:{}:{}", candidate.mother_id.0, m));
@@ -286,6 +290,16 @@ pub fn population_monthly_system(world: &mut World) {
                 (candidate.mother_pos.x, candidate.mother_pos.y),
             );
         }
+
+        let live_after = world.resource::<crate::mobility::resources::AgentIdIndex>().0.len();
+        tracing::info!(
+            target: "population::liveness",
+            month = m,
+            n = live_after,
+            births = births,
+            deaths = deaths,
+            "population month"
+        );
     }
 
     world.resource_mut::<LastProcessedMonth>().0 = current_month;
@@ -670,6 +684,173 @@ mod tests {
             "mother must give birth in an early fertile month (per-month age)"
         );
     }
+
+    // ---- Reusable test harness -----------------------------------------------
+
+    struct PopulationTestHarness {
+        world: bevy_ecs::world::World,
+        schedule: bevy_ecs::schedule::Schedule,
+        /// Monotonically-increasing synthetic agent counter, used to generate
+        /// unique deterministic AgentIds for `seed_agents`.
+        next_seed_id: usize,
+    }
+
+    impl PopulationTestHarness {
+        fn new(cfg: PopulationConfig) -> Self {
+            use crate::mobility::resources::{AgentIdIndex, Tick};
+            use crate::time::SimClock;
+            use bevy_ecs::prelude::*;
+            use bevy_ecs::schedule::Schedule;
+
+            let mut world = World::new();
+            let mut schedule = Schedule::default();
+
+            world.insert_resource(SimClock::default());
+            world.insert_resource(cfg);
+            world.insert_resource(super::LastProcessedMonth::default());
+            world.insert_resource(Tick(0));
+            world.insert_resource(AgentIdIndex::default());
+
+            schedule.add_systems(population_monthly_system);
+
+            // Set the tick to 1 full sim-year in so there is a valid "current
+            // month" to process, and set LastProcessedMonth so the FIRST
+            // advance_one_month call processes exactly one month.
+            let clock = *world.resource::<SimClock>();
+            let ticks_per_year = crate::time::SECONDS_PER_YEAR / clock.sim_seconds_per_tick;
+            let now_tick = ticks_per_year; // 1 year in
+            let current_month = clock.month_index(now_tick);
+            world.resource_mut::<super::LastProcessedMonth>().0 = current_month; // nothing to process yet
+            world.resource_mut::<Tick>().0 = now_tick;
+
+            Self { world, schedule, next_seed_id: 0 }
+        }
+
+        /// Spawn `n` agents with deterministic ids, `Sex::Female` (fertile),
+        /// and `BirthTick` chosen so each agent's age falls inside `age_range`
+        /// (at the current `now_tick`). Ages are distributed evenly across the
+        /// range by cycling through it.
+        fn seed_agents(&mut self, n: usize, age_range: std::ops::Range<u32>) {
+            use crate::ids::AgentId;
+            use crate::mobility::components::{
+                AgentMarker, AgentMobilityStateComponent, BirthTick, Sex, StableAgentId, WalkPlan,
+                WalkSpeed,
+            };
+            use crate::mobility::resources::Tick;
+            use crate::mobility::{AgentMobilityState, PlanStage};
+
+            let clock = *self.world.resource::<crate::time::SimClock>();
+            let now_tick_u64 = self.world.resource::<Tick>().0;
+            let ticks_per_year =
+                i64::try_from(crate::time::SECONDS_PER_YEAR / clock.sim_seconds_per_tick)
+                    .expect("test tick rate fits i64");
+            let range_len = (age_range.end - age_range.start).max(1) as usize;
+
+            for i in 0..n {
+                let age_years = age_range.start as i64
+                    + (i % range_len) as i64;
+                let birth_tick =
+                    i64::try_from(now_tick_u64).expect("test tick fits i64")
+                        - age_years * ticks_per_year;
+
+                let id = AgentId(format!("agent:seed:{}", self.next_seed_id));
+                self.next_seed_id += 1;
+
+                let entity = self
+                    .world
+                    .spawn((
+                        AgentMarker,
+                        StableAgentId(id.clone()),
+                        BirthTick(birth_tick),
+                        Sex::Female,
+                        AgentMobilityStateComponent(AgentMobilityState::AtActivity {
+                            activity_id: "home".to_string(),
+                        }),
+                        WalkPlan {
+                            stages: vec![PlanStage::Activity {
+                                activity_id: "home".to_string(),
+                            }],
+                            cursor: 0,
+                            cyclic: false,
+                        },
+                        WalkSpeed(1.0),
+                        crate::mobility::components::Position { x: 16.0, y: 16.0 },
+                    ))
+                    .id();
+                self.world
+                    .resource_mut::<crate::mobility::resources::AgentIdIndex>()
+                    .0
+                    .insert(id, entity);
+            }
+        }
+
+        /// Advance the sim-clock by exactly one month and run the monthly system.
+        fn advance_one_month(&mut self) {
+            use crate::mobility::resources::Tick;
+            let ticks_per_month = crate::time::SECONDS_PER_MONTH
+                / self.world.resource::<crate::time::SimClock>().sim_seconds_per_tick;
+            let cur = self.world.resource::<Tick>().0;
+            self.world.resource_mut::<Tick>().0 = cur + ticks_per_month;
+            self.schedule.run(&mut self.world);
+        }
+
+        fn active_agent_count(&self) -> usize {
+            self.world
+                .resource::<crate::mobility::resources::AgentIdIndex>()
+                .0
+                .len()
+        }
+    }
+
+    // ---- Carrying-capacity integration tests ---------------------------------
+
+    #[test]
+    fn carrying_capacity_bounds_population_in_a_band() {
+        let k = 80.0_f32;
+        let overshoot = 1.25_f32;
+        let k_hard = (k * overshoot).ceil() as usize; // 100
+        let mut h = PopulationTestHarness::new(PopulationConfig {
+            carrying_capacity: k,
+            capacity_overshoot: overshoot,
+            ..PopulationConfig::default()
+        });
+        h.seed_agents(60, 20..35); // 60 fertile-age agents, below K
+        let mut max_n = 0usize;
+        for _ in 0..(40 * 12) {
+            // 40 sim-years of monthly steps
+            h.advance_one_month();
+            let n = h.active_agent_count();
+            assert!(n > 0, "population must never reach 0 within the band");
+            assert!(n <= k_hard, "must never exceed K_hard={k_hard}, got {n}");
+            max_n = max_n.max(n);
+        }
+        assert!(
+            h.active_agent_count() >= 40,
+            "should settle near K, not collapse"
+        );
+        assert!(
+            max_n >= 70,
+            "should grow up toward K from the seed (saw max {max_n})"
+        );
+    }
+
+    #[test]
+    fn zero_capacity_is_unbounded() {
+        let mut h = PopulationTestHarness::new(PopulationConfig {
+            carrying_capacity: 0.0,
+            ..PopulationConfig::default()
+        });
+        h.seed_agents(60, 20..35);
+        for _ in 0..(60 * 12) {
+            h.advance_one_month();
+        }
+        assert!(
+            h.active_agent_count() > 60,
+            "unbounded schedule should grow above seed"
+        );
+    }
+
+    // ---- End carrying-capacity tests -----------------------------------------
 
     /// Birth inherits mother's MarketBinding: a mother with `{9001, 9002}` must
     /// produce a newborn that carries the same binding without recomputing it.
