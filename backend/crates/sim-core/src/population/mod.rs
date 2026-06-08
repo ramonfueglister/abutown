@@ -185,7 +185,10 @@ pub fn population_monthly_system(world: &mut World) {
         }
 
         // ---- Fertility (density-regulated) ----
-        let live_n = world.resource::<crate::mobility::resources::AgentIdIndex>().0.len();
+        let live_n = world
+            .resource::<crate::mobility::resources::AgentIdIndex>()
+            .0
+            .len();
         let density = fertility_density_factor(live_n, &cfg);
         // Collect living females in fertile window; also grab their position
         // and a copy of their mobility state so we can spawn at the mother's
@@ -291,7 +294,10 @@ pub fn population_monthly_system(world: &mut World) {
             );
         }
 
-        let live_after = world.resource::<crate::mobility::resources::AgentIdIndex>().0.len();
+        let live_after = world
+            .resource::<crate::mobility::resources::AgentIdIndex>()
+            .0
+            .len();
         tracing::info!(
             target: "population::liveness",
             month = m,
@@ -340,7 +346,10 @@ mod tests {
     use super::*;
     #[test]
     fn density_factor_unbounded_when_capacity_non_positive() {
-        let c = PopulationConfig { carrying_capacity: 0.0, ..PopulationConfig::default() };
+        let c = PopulationConfig {
+            carrying_capacity: 0.0,
+            ..PopulationConfig::default()
+        };
         assert_eq!(fertility_density_factor(0, &c), 1.0);
         assert_eq!(fertility_density_factor(100_000, &c), 1.0);
     }
@@ -348,9 +357,21 @@ mod tests {
     #[test]
     fn density_factor_full_below_k_zero_at_hard_ceiling() {
         // K=100, overshoot 1.25 => K_hard=125.
-        let c = PopulationConfig { carrying_capacity: 100.0, capacity_overshoot: 1.25, ..PopulationConfig::default() };
-        assert_eq!(fertility_density_factor(50, &c), 1.0, "full fertility well below K");
-        assert_eq!(fertility_density_factor(100, &c), 1.0, "full fertility at K");
+        let c = PopulationConfig {
+            carrying_capacity: 100.0,
+            capacity_overshoot: 1.25,
+            ..PopulationConfig::default()
+        };
+        assert_eq!(
+            fertility_density_factor(50, &c),
+            1.0,
+            "full fertility well below K"
+        );
+        assert_eq!(
+            fertility_density_factor(100, &c),
+            1.0,
+            "full fertility at K"
+        );
         let mid = fertility_density_factor(112, &c); // ~halfway through [100,125]
         assert!(mid > 0.4 && mid < 0.6, "linear ramp in the band, got {mid}");
         assert_eq!(fertility_density_factor(125, &c), 0.0, "zero at K_hard");
@@ -361,14 +382,24 @@ mod tests {
     fn density_factor_zero_width_band_is_hard_cap_not_nan() {
         // capacity_overshoot <= 1.0 ⇒ K_hard == K (zero-width band): must degenerate
         // to a clean hard cap at K (1.0 below, 0.0 at/above), never NaN.
-        let c = PopulationConfig { carrying_capacity: 100.0, capacity_overshoot: 1.0, ..PopulationConfig::default() };
+        let c = PopulationConfig {
+            carrying_capacity: 100.0,
+            capacity_overshoot: 1.0,
+            ..PopulationConfig::default()
+        };
         for n in [0usize, 50, 99] {
             let f = fertility_density_factor(n, &c);
-            assert!(f.is_finite() && f == 1.0, "n={n} below K must be 1.0, got {f}");
+            assert!(
+                f.is_finite() && f == 1.0,
+                "n={n} below K must be 1.0, got {f}"
+            );
         }
         for n in [100usize, 101, 500] {
             let f = fertility_density_factor(n, &c);
-            assert!(f.is_finite() && f == 0.0, "n={n} at/above K must be 0.0, got {f}");
+            assert!(
+                f.is_finite() && f == 0.0,
+                "n={n} at/above K must be 0.0, got {f}"
+            );
         }
     }
 
@@ -723,7 +754,11 @@ mod tests {
             world.resource_mut::<super::LastProcessedMonth>().0 = current_month; // nothing to process yet
             world.resource_mut::<Tick>().0 = now_tick;
 
-            Self { world, schedule, next_seed_id: 0 }
+            Self {
+                world,
+                schedule,
+                next_seed_id: 0,
+            }
         }
 
         /// Spawn `n` agents with deterministic ids, `Sex::Female` (fertile),
@@ -747,11 +782,9 @@ mod tests {
             let range_len = (age_range.end - age_range.start).max(1) as usize;
 
             for i in 0..n {
-                let age_years = age_range.start as i64
-                    + (i % range_len) as i64;
-                let birth_tick =
-                    i64::try_from(now_tick_u64).expect("test tick fits i64")
-                        - age_years * ticks_per_year;
+                let age_years = age_range.start as i64 + (i % range_len) as i64;
+                let birth_tick = i64::try_from(now_tick_u64).expect("test tick fits i64")
+                    - age_years * ticks_per_year;
 
                 let id = AgentId(format!("agent:seed:{}", self.next_seed_id));
                 self.next_seed_id += 1;
@@ -788,7 +821,10 @@ mod tests {
         fn advance_one_month(&mut self) {
             use crate::mobility::resources::Tick;
             let ticks_per_month = crate::time::SECONDS_PER_MONTH
-                / self.world.resource::<crate::time::SimClock>().sim_seconds_per_tick;
+                / self
+                    .world
+                    .resource::<crate::time::SimClock>()
+                    .sim_seconds_per_tick;
             let cur = self.world.resource::<Tick>().0;
             self.world.resource_mut::<Tick>().0 = cur + ticks_per_month;
             self.schedule.run(&mut self.world);
