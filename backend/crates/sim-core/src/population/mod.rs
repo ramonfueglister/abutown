@@ -68,8 +68,10 @@ pub fn birth_probability_month(age_years: f32, c: &PopulationConfig) -> f32 {
 
 /// Density-dependent fertility multiplier in `[0,1]`. Full fertility (1.0) while
 /// the active population `n` is at or below the carrying capacity `K`; linear ramp
-/// 1→0 across `[K, K_hard]` where `K_hard = K * capacity_overshoot`; 0 at/above
-/// `K_hard`. `K <= 0` disables regulation (returns 1.0 — unbounded).
+/// 1→0 across `[K, K_hard]` where `K_hard = K * max(capacity_overshoot, 1.0)`; 0
+/// at/above `K_hard`. `K <= 0` disables regulation (returns 1.0 — unbounded). A
+/// zero-width band (`capacity_overshoot <= 1.0` ⇒ `K_hard == K`) degenerates to a
+/// clean hard cap exactly at `K` (1.0 below, 0.0 at/above) — never NaN.
 ///
 /// NOTE: deliberately NOT `1 - n/K`. The base schedule is only mildly
 /// super-replacement (NRR≈1.044), so a linear-from-zero suppression would balance
@@ -82,7 +84,10 @@ pub fn fertility_density_factor(n: usize, c: &PopulationConfig) -> f32 {
     }
     let k_hard = k * c.capacity_overshoot.max(1.0);
     let n = n as f32;
-    ((k_hard - n) / (k_hard - k)).clamp(0.0, 1.0)
+    // Floor the divisor so a zero-width band (k_hard == k) yields a hard step at K
+    // instead of 0.0/0.0 = NaN.
+    let denom = (k_hard - k).max(f32::EPSILON);
+    ((k_hard - n) / denom).clamp(0.0, 1.0)
 }
 
 #[derive(Resource, Debug, Clone, Copy)]
@@ -336,6 +341,21 @@ mod tests {
         assert!(mid > 0.4 && mid < 0.6, "linear ramp in the band, got {mid}");
         assert_eq!(fertility_density_factor(125, &c), 0.0, "zero at K_hard");
         assert_eq!(fertility_density_factor(200, &c), 0.0, "zero above K_hard");
+    }
+
+    #[test]
+    fn density_factor_zero_width_band_is_hard_cap_not_nan() {
+        // capacity_overshoot <= 1.0 ⇒ K_hard == K (zero-width band): must degenerate
+        // to a clean hard cap at K (1.0 below, 0.0 at/above), never NaN.
+        let c = PopulationConfig { carrying_capacity: 100.0, capacity_overshoot: 1.0, ..PopulationConfig::default() };
+        for n in [0usize, 50, 99] {
+            let f = fertility_density_factor(n, &c);
+            assert!(f.is_finite() && f == 1.0, "n={n} below K must be 1.0, got {f}");
+        }
+        for n in [100usize, 101, 500] {
+            let f = fertility_density_factor(n, &c);
+            assert!(f.is_finite() && f == 0.0, "n={n} at/above K must be 0.0, got {f}");
+        }
     }
 
     #[test]
