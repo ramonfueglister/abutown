@@ -86,14 +86,13 @@ pub fn stationary_age_sample(u01: f64, c: &PopulationConfig) -> u32 {
         let annual_survival = (1.0 - death_probability_month((a - 1) as f32, c) as f64).powi(12);
         l[a] = l[a - 1] * annual_survival;
     }
+    // total >= 1.0 always (l[0] = 1.0 unconditionally), so there is no zero/degenerate
+    // total to guard against and `threshold` is well-defined.
     let total: f64 = l.iter().sum();
-    if !(total > 0.0) {
-        return 0; // degenerate schedule — fall back to youngest
-    }
     let threshold = u01.clamp(0.0, 1.0) * total;
     let mut acc = 0.0;
-    for a in 0..=n {
-        acc += l[a];
+    for (a, &weight) in l.iter().enumerate() {
+        acc += weight;
         if acc >= threshold {
             return a as u32;
         }
