@@ -66,6 +66,41 @@ pub fn birth_probability_month(age_years: f32, c: &PopulationConfig) -> f32 {
     fertility_rate(age_years, c) / 12.0
 }
 
+/// Maximum seeded founding-agent age in years (single source of truth; `mobility::seed`
+/// uses this via `stationary_age_sample`).
+pub const MAX_SEED_AGE_YEARS: u32 = 90;
+
+/// Sample an integer age (years, `0..=MAX_SEED_AGE_YEARS`) from the STATIONARY age
+/// distribution implied by the mortality schedule: `P(age = a) ∝ l(a)`, the
+/// survivorship to age `a`. `u01` ∈ `[0,1]` → inverse-CDF age (the smallest `a` whose
+/// cumulative weight ≥ `u01`). Mortality-only (stationary, `r = 0`) — the model's
+/// intrinsic growth is negligible and the carrying capacity sets the level. Pure and
+/// deterministic.
+pub fn stationary_age_sample(u01: f64, c: &PopulationConfig) -> u32 {
+    let n = MAX_SEED_AGE_YEARS as usize;
+    // Survivorship l(a): l(0)=1; l(a)=l(a-1)*annual_survival(a-1), where annual
+    // survival = (1 - monthly death prob)^12 — consistent with the monthly model.
+    let mut l = vec![0.0f64; n + 1];
+    l[0] = 1.0;
+    for a in 1..=n {
+        let annual_survival = (1.0 - death_probability_month((a - 1) as f32, c) as f64).powi(12);
+        l[a] = l[a - 1] * annual_survival;
+    }
+    let total: f64 = l.iter().sum();
+    if !(total > 0.0) {
+        return 0; // degenerate schedule — fall back to youngest
+    }
+    let threshold = u01.clamp(0.0, 1.0) * total;
+    let mut acc = 0.0;
+    for a in 0..=n {
+        acc += l[a];
+        if acc >= threshold {
+            return a as u32;
+        }
+    }
+    MAX_SEED_AGE_YEARS
+}
+
 /// Density-dependent fertility multiplier in `[0,1]`. Full fertility (1.0) while
 /// the active population `n` is at or below the carrying capacity `K`; linear ramp
 /// 1→0 across `[K, K_hard]` where `K_hard = K * max(capacity_overshoot, 1.0)`; 0
@@ -887,6 +922,103 @@ mod tests {
     }
 
     // ---- End carrying-capacity tests -----------------------------------------
+
+    #[test]
+    fn stationary_age_sample_bounds_and_monotone() {
+        let c = PopulationConfig::default();
+        assert_eq!(stationary_age_sample(0.0, &c), 0, "u01=0 -> youngest");
+        assert_eq!(
+            stationary_age_sample(1.0, &c),
+            MAX_SEED_AGE_YEARS,
+            "u01->1 -> oldest bucket"
+        );
+        let mut prev = 0u32;
+        for k in 0..=100 {
+            let u = (k as f64) / 100.0;
+            let a = stationary_age_sample(u, &c);
+            assert!(
+                a >= prev,
+                "inverse-CDF must be monotone non-decreasing in u01 (k={k})"
+            );
+            prev = a;
+        }
+    }
+
+    #[test]
+    fn stationary_age_sample_not_uniform_more_young_than_old() {
+        // The spec's "not uniform" check: the stationary seed must put MATERIALLY more
+        // mass in 0–60 than 70–90 — strictly more young-skewed than a flat 0..=90 seed.
+        // We compare ratios against the uniform baseline (not a magic constant): the
+        // stationary young/old ratio must exceed uniform's, because survivorship l(a)
+        // declines with age while a uniform draw is flat per decade.
+        let c = PopulationConfig::default();
+        let samples = 100_000usize;
+        let bucket = |a: u32| -> i32 {
+            if a < 60 {
+                1 // young
+            } else if a >= 70 {
+                -1 // old
+            } else {
+                0 // 60–69, neither bin
+            }
+        };
+        let max = MAX_SEED_AGE_YEARS as f64;
+        let (mut s_young, mut s_old, mut u_young, mut u_old) = (0u32, 0u32, 0u32, 0u32);
+        for i in 0..samples {
+            let u = (i as f64 + 0.5) / samples as f64;
+            match bucket(stationary_age_sample(u, &c)) {
+                1 => s_young += 1,
+                -1 => s_old += 1,
+                _ => {}
+            }
+            // Uniform baseline over the same 0..=MAX grid the old seed used.
+            let uniform_age = ((u * (max + 1.0)).floor() as u32).min(MAX_SEED_AGE_YEARS);
+            match bucket(uniform_age) {
+                1 => u_young += 1,
+                -1 => u_old += 1,
+                _ => {}
+            }
+        }
+        let stationary_ratio = s_young as f64 / s_old as f64;
+        let uniform_ratio = u_young as f64 / u_old as f64;
+        assert!(
+            stationary_ratio > uniform_ratio,
+            "stationary seed must be MORE young-skewed than uniform: \
+             stationary young/old={stationary_ratio:.2} (young={s_young} old={s_old}) \
+             vs uniform young/old={uniform_ratio:.2} (young={u_young} old={u_old})"
+        );
+    }
+
+    #[test]
+    fn stationary_age_sample_deterministic() {
+        let c = PopulationConfig::default();
+        assert_eq!(
+            stationary_age_sample(0.37, &c),
+            stationary_age_sample(0.37, &c)
+        );
+    }
+
+    #[test]
+    fn stationary_age_sample_empirical_mean_matches_l_a() {
+        let c = PopulationConfig::default();
+        let n = MAX_SEED_AGE_YEARS as usize;
+        let mut l = vec![0.0f64; n + 1];
+        l[0] = 1.0;
+        for a in 1..=n {
+            l[a] = l[a - 1] * (1.0 - death_probability_month((a - 1) as f32, &c) as f64).powi(12);
+        }
+        let total: f64 = l.iter().sum();
+        let expected_mean: f64 = (0..=n).map(|a| a as f64 * l[a]).sum::<f64>() / total;
+        let samples = 200_000usize;
+        let emp: f64 = (0..samples)
+            .map(|i| stationary_age_sample((i as f64 + 0.5) / samples as f64, &c) as f64)
+            .sum::<f64>()
+            / samples as f64;
+        assert!(
+            (emp - expected_mean).abs() < 1.5,
+            "empirical mean {emp} ≈ stationary mean {expected_mean}"
+        );
+    }
 
     /// Birth inherits mother's MarketBinding: a mother with `{9001, 9002}` must
     /// produce a newborn that carries the same binding without recomputing it.
