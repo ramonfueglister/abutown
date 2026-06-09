@@ -747,8 +747,7 @@ mod tests {
         // ages. A poorly-mixed u01 (e.g. reading FNV-1a's weak high bits directly)
         // collapsed ~97% of the cohort into one age bucket — caught here, not just by
         // the life-stage spot-checks above.
-        let distinct: std::collections::BTreeSet<u32> =
-            ages.iter().map(|a| *a as u32).collect();
+        let distinct: std::collections::BTreeSet<u32> = ages.iter().map(|a| *a as u32).collect();
         assert!(
             distinct.len() >= 40,
             "seeded cohort must span many distinct ages (got {} of up to 91)",
