@@ -207,7 +207,6 @@ fn sex_from_id(agent_id_str: &str) -> crate::mobility::components::Sex {
     }
 }
 
-const MAX_SEED_AGENT_AGE_YEARS: u64 = 90;
 const SEED_AGENT_AGE_HASH_SALT: u64 = 0xA9E7_1D3C_5B29_0F17;
 
 fn stable_seed_hash(input: &str, salt: u64) -> u64 {
@@ -219,13 +218,40 @@ fn stable_seed_hash(input: &str, salt: u64) -> u64 {
     hash
 }
 
+/// Map a 64-bit hash to a uniform `f64` in `[0,1)`. Applies a splitmix64 avalanche
+/// finalizer before taking the top 53 bits, because the FNV-1a `stable_seed_hash` has
+/// poor HIGH-bit avalanche for short, sequential ids ("agent:walk:0", "1", …): reading
+/// the high bits directly (`h / u64::MAX`) clusters ~97% of a 300-agent cohort into a
+/// single age bucket. The low bits the old `% 91` used were fine; this restores a
+/// uniform draw for the inverse-CDF in `stationary_age_sample`. Deterministic.
+fn u01_from_hash(h: u64) -> f64 {
+    let mut z = h;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    // Top 53 bits → an exactly-representable uniform double in [0,1) (f64 mantissa = 53).
+    ((z >> 11) as f64) / ((1u64 << 53) as f64)
+}
+
 pub fn seeded_birth_tick_for_agent_id(
     agent_id: &AgentId,
     now_tick: u64,
     clock: &crate::time::SimClock,
 ) -> i64 {
-    let age_years =
-        stable_seed_hash(&agent_id.0, SEED_AGENT_AGE_HASH_SALT) % (MAX_SEED_AGENT_AGE_YEARS + 1);
+    // Seed the founding-agent age from the STATIONARY age distribution (∝ survivorship
+    // l(a)) implied by the mortality schedule, not a flat 0..90 — this starts the
+    // population near demographic equilibrium and suppresses the multi-generation
+    // population wave (see the stationary-age-seed spec). The stable per-agent hash
+    // becomes a uniform u01 draw, then the inverse-CDF maps it to an age.
+    // `PopulationConfig::default()` is used because mortality is not world-authored
+    // (only `carrying_capacity` is, and that's applied after seeding); thread the real
+    // config here if mortality ever becomes authored.
+    let h = stable_seed_hash(&agent_id.0, SEED_AGENT_AGE_HASH_SALT);
+    let u01 = u01_from_hash(h);
+    let age_years = crate::population::stationary_age_sample(
+        u01,
+        &crate::population::PopulationConfig::default(),
+    ) as u64;
     let age_seconds = age_years.saturating_mul(crate::time::SECONDS_PER_YEAR);
     let age_ticks = age_seconds / clock.sim_seconds_per_tick.max(1);
     let age_ticks = i64::try_from(age_ticks).unwrap_or(i64::MAX);
@@ -716,6 +742,17 @@ mod tests {
         assert!(
             ages.iter().any(|age| *age >= 70.0),
             "seeded cohort must include elder agents"
+        );
+        // Anti-clustering guard: the inverse-CDF must spread the cohort across many
+        // ages. A poorly-mixed u01 (e.g. reading FNV-1a's weak high bits directly)
+        // collapsed ~97% of the cohort into one age bucket — caught here, not just by
+        // the life-stage spot-checks above.
+        let distinct: std::collections::BTreeSet<u32> =
+            ages.iter().map(|a| *a as u32).collect();
+        assert!(
+            distinct.len() >= 40,
+            "seeded cohort must span many distinct ages (got {} of up to 91)",
+            distinct.len()
         );
     }
 
