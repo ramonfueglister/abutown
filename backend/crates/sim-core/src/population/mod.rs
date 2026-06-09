@@ -801,9 +801,33 @@ mod tests {
         /// (at the current `now_tick`). Ages are distributed evenly across the
         /// range by cycling through it.
         fn seed_agents(&mut self, n: usize, age_range: std::ops::Range<u32>) {
+            let range_len = (age_range.end - age_range.start).max(1);
+            let ages: Vec<u32> = (0..n as u32)
+                .map(|i| age_range.start + (i % range_len))
+                .collect();
+            self.seed_agents_with_ages(&ages);
+        }
+
+        /// Spawn one `Sex::Female` agent per entry in `ages` (years), with
+        /// `BirthTick` set so each agent has exactly that age at the current
+        /// `now_tick`. Lets a test seed an arbitrary age distribution (e.g. uniform
+        /// vs. the stationary `l(a)`).
+        fn seed_agents_with_ages(&mut self, ages: &[u32]) {
+            use crate::mobility::components::Sex;
+            let agents: Vec<(u32, Sex)> = ages.iter().map(|&a| (a, Sex::Female)).collect();
+            self.seed_agents_with_ages_and_sexes(&agents);
+        }
+
+        /// Spawn one agent per `(age_years, sex)` entry, with `BirthTick` set so each
+        /// has exactly that age at the current `now_tick`. Lets a test control the sex
+        /// ratio (only `Female`s give birth) as well as the age distribution.
+        fn seed_agents_with_ages_and_sexes(
+            &mut self,
+            agents: &[(u32, crate::mobility::components::Sex)],
+        ) {
             use crate::ids::AgentId;
             use crate::mobility::components::{
-                AgentMarker, AgentMobilityStateComponent, BirthTick, Sex, StableAgentId, WalkPlan,
+                AgentMarker, AgentMobilityStateComponent, BirthTick, StableAgentId, WalkPlan,
                 WalkSpeed,
             };
             use crate::mobility::resources::Tick;
@@ -814,12 +838,10 @@ mod tests {
             let ticks_per_year =
                 i64::try_from(crate::time::SECONDS_PER_YEAR / clock.sim_seconds_per_tick)
                     .expect("test tick rate fits i64");
-            let range_len = (age_range.end - age_range.start).max(1) as usize;
 
-            for i in 0..n {
-                let age_years = age_range.start as i64 + (i % range_len) as i64;
+            for &(age, sex) in agents {
                 let birth_tick = i64::try_from(now_tick_u64).expect("test tick fits i64")
-                    - age_years * ticks_per_year;
+                    - age as i64 * ticks_per_year;
 
                 let id = AgentId(format!("agent:seed:{}", self.next_seed_id));
                 self.next_seed_id += 1;
@@ -830,7 +852,7 @@ mod tests {
                         AgentMarker,
                         StableAgentId(id.clone()),
                         BirthTick(birth_tick),
-                        Sex::Female,
+                        sex,
                         AgentMobilityStateComponent(AgentMobilityState::AtActivity {
                             activity_id: "home".to_string(),
                         }),
@@ -871,6 +893,39 @@ mod tests {
                 .0
                 .len()
         }
+
+        /// Ages (years, as `f32`) of all living agents at the current `now_tick`.
+        fn ages(&mut self) -> Vec<f32> {
+            use crate::mobility::components::BirthTick;
+            let clock = *self.world.resource::<crate::time::SimClock>();
+            let now = self.world.resource::<crate::mobility::resources::Tick>().0;
+            let mut q = self.world.query::<&BirthTick>();
+            q.iter(&self.world)
+                .map(|bt| clock.age_years(now, bt.0))
+                .collect()
+        }
+    }
+
+    /// Normalized per-year age distribution over `0..=MAX_SEED_AGE_YEARS` (sums to 1).
+    #[cfg(test)]
+    fn normalized_age_hist(ages: &[f32]) -> Vec<f64> {
+        let n = MAX_SEED_AGE_YEARS as usize;
+        let mut h = vec![0.0f64; n + 1];
+        for &a in ages {
+            let b = (a.max(0.0) as usize).min(n);
+            h[b] += 1.0;
+        }
+        let total: f64 = ages.len().max(1) as f64;
+        for v in &mut h {
+            *v /= total;
+        }
+        h
+    }
+
+    /// Total-variation distance between two normalized distributions: ½·Σ|p−q| ∈ [0,1].
+    #[cfg(test)]
+    fn total_variation(p: &[f64], q: &[f64]) -> f64 {
+        0.5 * p.iter().zip(q).map(|(a, b)| (a - b).abs()).sum::<f64>()
     }
 
     // ---- Carrying-capacity integration tests ---------------------------------
@@ -918,6 +973,60 @@ mod tests {
         assert!(
             h.active_agent_count() > 60,
             "unbounded schedule should grow above seed"
+        );
+    }
+
+    /// Simulation-level value of the stationary seed (beyond the `stationary_age_sample`
+    /// unit tests): by strong ergodicity (Coale, 1972) every seed converges to the same
+    /// stable age structure, but the stationary seed STARTS at it, so its age
+    /// distribution relaxes LESS over a generation than the unphysical flat 0..90 seed.
+    /// We measure the total-variation shift of each seed's normalized age histogram from
+    /// t0 to one generation later, K=0 (the shape relaxes freely; count is normalized
+    /// away) with a realistic 50/50 sex ratio (so growth doesn't swamp the transient).
+    ///
+    /// The magnitude is intentionally modest: this schedule's mortality is light
+    /// (survival ≈ 95%/yr even at 90), so l(a) is itself near-flat and the stationary
+    /// seed differs only mildly from uniform; and the population *level* is governed by
+    /// the carrying capacity (PR #89), not the seed. The advantage is largest at ~1
+    /// generation and fades as both seeds converge. This is a correctness/realism
+    /// refinement of the founding age pyramid, not a population-count fix.
+    #[test]
+    fn stationary_seed_relaxes_less_than_uniform_over_a_generation() {
+        use crate::mobility::components::Sex;
+        let n = 600usize;
+        let one_generation_months = 30 * 12; // mean age of childbearing ≈ 30 yr
+        let with_sex = |ages: &[u32]| -> Vec<(u32, Sex)> {
+            ages.iter()
+                .enumerate()
+                .map(|(i, &a)| (a, if i % 2 == 0 { Sex::Female } else { Sex::Male }))
+                .collect()
+        };
+        let relaxation_shift = |ages: &[u32]| -> f64 {
+            let mut h = PopulationTestHarness::new(PopulationConfig {
+                carrying_capacity: 0.0,
+                ..PopulationConfig::default()
+            });
+            h.seed_agents_with_ages_and_sexes(&with_sex(ages));
+            let t0 = normalized_age_hist(&h.ages());
+            for _ in 0..one_generation_months {
+                h.advance_one_month();
+            }
+            total_variation(&t0, &normalized_age_hist(&h.ages()))
+        };
+        let uniform: Vec<u32> = (0..n as u32).map(|i| i % 91).collect();
+        let stationary: Vec<u32> = (0..n)
+            .map(|i| {
+                stationary_age_sample((i as f64 + 0.5) / n as f64, &PopulationConfig::default())
+            })
+            .collect();
+        let uniform_shift = relaxation_shift(&uniform);
+        let stationary_shift = relaxation_shift(&stationary);
+        // Deterministic (hash- and schedule-driven, no RNG). Require a real gap, not a
+        // hair: the stationary seed must relax at least 5% less than uniform.
+        assert!(
+            stationary_shift < uniform_shift * 0.95,
+            "stationary seed must relax less than uniform over a generation: \
+             stationary={stationary_shift:.4} vs uniform={uniform_shift:.4}"
         );
     }
 

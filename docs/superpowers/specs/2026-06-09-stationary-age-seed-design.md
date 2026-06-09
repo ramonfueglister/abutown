@@ -1,8 +1,21 @@
 # Stationary-Age Seed — Design
 
 **Date:** 2026-06-09
-**Status:** approved (brainstorming), pending spec review
-**Goal:** Seed abutopia's founding agents at the **stationary age distribution** implied by the mortality schedule (∝ survivorship `l(a)`), instead of the current uniform `0..90`. This starts the population near its demographic equilibrium and suppresses the multi-generation "population-wave"/echo-cohort transient (the local 300→428/463 birth-overshoot observed in the population-balance assessment). Deterministic, replay-safe, mortality-only. Bounded already by the carrying capacity (PR #89, K=300) + floor-at-0 guards.
+**Status:** implemented (reframed mid-implementation — see §0 Findings)
+**Goal:** Seed abutopia's founding agents at the **stationary age distribution** implied by the mortality schedule (∝ survivorship `l(a)`), instead of the current uniform `0..90` — a realistic founding age pyramid that starts the population near its demographic equilibrium. Deterministic, replay-safe, mortality-only. Bounded already by the carrying capacity (PR #89, K=300) + floor-at-0 guards.
+
+> **Note (reframe):** the original goal framing — "suppress the multi-generation population *wave*" — was **empirically refuted during implementation** once the carrying capacity (PR #89) was already in place. The population *level* is now governed by the regulator, not the seed; the value of this change is the realistic initial age *structure*, which is a correctness/realism refinement. See **§0 Findings** before reading the wave argument in §1.
+
+---
+
+## 0. Findings (empirical, 2026-06-09)
+
+Measured in `population::tests` (a deterministic harness: per-agent Gompertz–Makeham mortality + ASFR fertility, monthly steps):
+
+1. **Population-level overshoot is governed by the carrying capacity, not the seed.** With the live config (K=300, PR #89), uniform-0..90 and stationary seeds are population-indistinguishable: peak 347 vs 348, final 313 vs 314 over 60 yr. The only signal is timing (stationary settles ~6 yr earlier). With K=0 both simply grow (no damped wave settles in this per-agent model). The 300→428/463 overshoot that motivated this slice was observed **before** #89; the carrying capacity already solved it. The spec's original comparative-overshoot test therefore **cannot** assert "stationary peak < uniform peak" — it isn't true — so it was replaced (see §3).
+2. **The age-structure improvement is real but modest, because this schedule's `l(a)` is itself near-flat.** Mortality is light (annual survival ≈ 95% even at age 90), so survivorship barely declines across 0–90 and the stationary distribution differs only mildly from uniform: TV distance of each seed to the theoretical `l(a)` is ≈0.0144 (stationary) vs ≈0.0227 (uniform) — a ~1.6× improvement, not a dramatic one. Over one generation the stationary seed's age structure relaxes ~11% less than uniform's (0.105 vs 0.118 TV), an advantage that fades by two generations as both converge (strong ergodicity, Coale 1972).
+
+**Conclusion:** this slice is a small, principled correctness refinement — the founding age pyramid now matches the mortality schedule (∝ `l(a)`) instead of an unphysical flat 0–90 — not a behavioral fix for population dynamics. It ships because it is cheap, deterministic, literature-grounded, and strictly more correct; its effect size is intentionally modest and documented here so the framing is honest.
 
 ---
 
@@ -36,9 +49,11 @@ pub fn stationary_age_sample(u01: f64, c: &PopulationConfig) -> u32
 ### 2.2 Wire into the seed — `mobility/seed.rs`
 `seeded_birth_tick_for_agent_id` keeps its signature `(agent_id, now_tick, clock)`:
 - `let h = stable_seed_hash(&agent_id.0, SEED_AGENT_AGE_HASH_SALT);`
-- `let u01 = (h as f64) / (u64::MAX as f64 + 1.0);` (uniform `[0,1)`)
+- `let u01 = u01_from_hash(h);` — a splitmix64 avalanche finalizer over the top 53 bits, **not** the naive `h / u64::MAX`. (See the correctness note below.)
 - `let age_years = crate::population::stationary_age_sample(u01, &crate::population::PopulationConfig::default()) as u64;`
 - then the existing `age_years → age_seconds → age_ticks → now_tick − age_ticks`.
+
+**Correctness fix (u01 derivation).** The spec originally prescribed `u01 = h / (u64::MAX + 1)`. That is **broken** for this hash: `stable_seed_hash` is FNV-1a, which has weak avalanche in its HIGH bits for short, sequential ids (`agent:walk:0`, `1`, …). The old `% 91` read the well-mixed LOW bits, but `h / u64::MAX` reads the high bits — empirically clustering 290 of 300 agents into u01 ∈ [0.9, 1.0] (→ age 90) with **none** in the 15–49 fertile band, a *worse* seed than uniform. The fix runs `h` through a splitmix64 finalizer (`u01_from_hash`) so every bit is well-mixed before taking the top 53 bits as a uniform double. A `seed.rs` test guards this: a 300-agent cohort must span ≥40 distinct ages (anti-clustering), not just "include a fertile-age agent".
 
 Uses `PopulationConfig::default()` because mortality is not world-authored (only `carrying_capacity` is, and that's applied after seeding). A comment notes: thread the real config here if mortality ever becomes authored. The 4 call sites + the snapshot-generation path are unchanged.
 
@@ -49,9 +64,10 @@ Seed-age is computed once at world creation and persisted in the mobility snapsh
 
 ## 3. Testing
 
-- **Distribution (`population` unit test):** over many `u01` samples (or all agent ids of a seeded world), the age histogram matches `l(a)` — **not uniform**: materially more mass in 0–60 than 70–90 (uniform would be flat per-decade); monotone non-decreasing CDF; `u01=0.0 → age 0`; `u01→1.0 → MAX (90)`; deterministic (same `u01` → same age). A direct check that the empirical mean age ≈ the stationary mean (`Σ a·l(a) / Σ l(a)`) within tolerance.
-- **Comparative overshoot (the goal — `population` integration test):** seed N agents two ways under the SAME schedule + carrying capacity — (i) the old uniform `0..90`, (ii) `stationary_age_sample` — run both ~2 generations of monthly steps, and assert the **stationary seed's peak population overshoot above the seed size is strictly smaller** than the uniform seed's (the wave is suppressed). Both stay bounded by `K_hard` (regression with the carrying capacity).
-- **Determinism/replay:** existing seed/replay tests still pass; a seeded world's `birth_tick`s are identical across two fresh builds.
+- **Distribution (`population` unit tests — `stationary_age_sample_*`):** the age histogram matches `l(a)` — **not uniform**: strictly more young-skewed than the uniform baseline (young/old ratio compared against uniform, *not* a magic constant); monotone non-decreasing CDF; `u01=0.0 → age 0`; `u01→1.0 → MAX (90)`; deterministic; empirical mean age ≈ the stationary mean `Σ a·l(a) / Σ l(a)` within tolerance.
+- **Anti-clustering (`seed` test — `seeded_birth_ticks_are_deterministic_and_cover_life_stages`):** a 300-agent cohort is deterministic, spans `0..=90`, includes fertile (15–49) and elder (≥70) agents, **and spans ≥40 distinct ages** — the guard that caught the FNV high-bit clustering (see §2.2).
+- **Age-structure relaxation (the reframed goal — `population` integration test `stationary_seed_relaxes_less_than_uniform_over_a_generation`):** seed N agents two ways (uniform `0..90` vs `stationary_age_sample`) with a realistic 50/50 sex ratio, K=0 (so the *shape* relaxes freely — count normalized away), and assert the stationary seed's normalized age histogram shifts (total-variation) at least 5% **less** over one generation than uniform's — it starts nearer the equilibrium structure (strong ergodicity, Coale 1972). This replaces the original comparative-overshoot test, which §0 shows is not assertable. Boundedness under the carrying capacity is the existing `carrying_capacity_bounds_population_in_a_band` regression (seed-agnostic; the K=300 probe confirms the stationary seed peaks at 348 ≤ `K_hard`=375).
+- **Determinism/replay:** existing seed/replay tests still pass; a seeded world's `birth_tick`s are deterministic (hash-driven, no RNG).
 - **Full gate:** Rust fmt/clippy/test, frontend typecheck/vitest/build, e2e render-smoke.
 
 ---
