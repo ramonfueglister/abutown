@@ -36,6 +36,7 @@ import {
 } from './inspectorPanelPainter';
 import { coordKey as key } from './gridMath';
 import * as network from './drawNetwork';
+import { OUT_OF_WORLD } from './designTokens';
 import { layerBlend } from './layerBlend';
 import { drawFlows } from './drawFlows';
 import { drawMarketNodes } from './drawMarkets';
@@ -92,7 +93,7 @@ type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 export type TileFillStyle = { color: string; alpha: number };
 export type TileFillBatch = TileFillStyle & { coords: Coord[] };
 
-export const MAP_BACKGROUND = '#182018';
+export const MAP_BACKGROUND = OUT_OF_WORLD;
 const VIEWPORT_GRID_PADDING = 9;
 export const TERRAIN_TILE_OVERLAP = 0.6;
 export const OUTSKIRTS_TILES = 0;
