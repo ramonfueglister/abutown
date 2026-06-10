@@ -6,12 +6,12 @@ use crate::economy::EconomyPlugin;
 use crate::economy::auction::SettlementPolicy;
 use crate::economy::macro_flow::PlannedFlow;
 use crate::economy::{
-    AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig,
-    EconomyEvent, EconomyPersistSnapshot, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR, HouseholdSector,
-    InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods,
-    MarketId, Money, NextOrderId, OrderBook, Quantity, SellerReceipts, SupplyPool, SupplyPools,
-    TradeLedger, WageTelemetry, apply_into_world, clear_market_good_with_receipts, create_ask,
-    create_bid, extract_from_world, run_pay_wages_at_tick, settle_flow_with_receipts,
+    AccountBook, BuyerOutlays, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId,
+    EconomyConfig, EconomyEvent, EconomyPersistSnapshot, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR,
+    HouseholdSector, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState,
+    MarketGoods, MarketId, Money, NextOrderId, OrderBook, Quantity, SellerReceipts, SupplyPool,
+    SupplyPools, TradeLedger, WageTelemetry, apply_into_world, clear_market_good_with_receipts,
+    create_ask, create_bid, extract_from_world, run_pay_wages_at_tick, settle_flow_with_receipts,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -90,6 +90,7 @@ fn auction_captures_seller_revenue_into_receipts() {
 
     let before = accounts.total_money().unwrap();
     let mut receipts = SellerReceipts::default();
+    let mut outlays = BuyerOutlays::default();
     clear_market_good_with_receipts(
         &mut accounts,
         &mut inventory,
@@ -100,6 +101,7 @@ fn auction_captures_seller_revenue_into_receipts() {
         2,
         SettlementPolicy::Anchored,
         &mut receipts.0,
+        &mut outlays.0,
     )
     .unwrap();
 
@@ -129,6 +131,7 @@ fn auction_no_fills_produces_no_receipts() {
     let mut goods = MarketGoods::default();
     goods.0.insert(key, seeded_state(market));
     let mut receipts = SellerReceipts::default();
+    let mut outlays = BuyerOutlays::default();
     clear_market_good_with_receipts(
         &mut accounts,
         &mut inventory,
@@ -139,6 +142,7 @@ fn auction_no_fills_produces_no_receipts() {
         1,
         SettlementPolicy::Anchored,
         &mut receipts.0,
+        &mut outlays.0,
     )
     .unwrap();
     assert!(receipts.0.is_empty(), "no fills → no receipts");
@@ -169,6 +173,7 @@ fn settle_flow_captures_seller_revenue_into_receipts() {
     let config = EconomyConfig::default();
     let before = accounts.total_money().unwrap();
     let mut receipts = SellerReceipts::default();
+    let mut outlays = BuyerOutlays::default();
     settle_flow_with_receipts(
         &mut accounts,
         &mut inventory,
@@ -185,11 +190,166 @@ fn settle_flow_captures_seller_revenue_into_receipts() {
         false,
         false,
         &mut receipts.0,
+        &mut outlays.0,
     )
     .unwrap();
     assert_eq!(accounts.total_money().unwrap(), before, "money conserved");
     // src_revenue = value(1_000, 10) = 1_000*10/ECONOMY_SCALE(=1_000) = 10
     assert_eq!(receipts.0.get(&(seller, src)).copied(), Some(Money(10)));
+}
+
+#[test]
+fn auction_settle_records_buyer_outlay_at_actual_cost() {
+    // Same setup as `auction_captures_seller_revenue_into_receipts`: 1 bid, 1 ask, 1 fill.
+    // Settlement price is anchored to last_settlement_price=1_100 (clamped into [1_000,1_500]).
+    // actual_cost = value(1_100, 1_000) = 1_100*1_000/ECONOMY_SCALE = 1_100.
+    let buyer = EconomicActorId(1);
+    let seller = EconomicActorId(2);
+    let market = MarketId(1);
+    let key = MarketGoodKey {
+        market,
+        good: GOOD_FOOD,
+    };
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut goods = MarketGoods::default();
+    goods.0.insert(key, seeded_state(market));
+    accounts.deposit(buyer, Money(10_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(2_000))
+        .unwrap();
+    create_bid(
+        &mut accounts,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        1,
+        buyer,
+        market,
+        GOOD_FOOD,
+        Quantity(1_000),
+        Money(1_500),
+        10,
+    )
+    .unwrap();
+    create_ask(
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        1,
+        seller,
+        market,
+        GOOD_FOOD,
+        Quantity(1_000),
+        Money(1_000),
+        10,
+    )
+    .unwrap();
+
+    let before = accounts.total_money().unwrap();
+    let mut receipts = SellerReceipts::default();
+    let mut outlays = BuyerOutlays::default();
+    clear_market_good_with_receipts(
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut goods,
+        key,
+        2,
+        SettlementPolicy::Anchored,
+        &mut receipts.0,
+        &mut outlays.0,
+    )
+    .unwrap();
+
+    assert_eq!(accounts.total_money().unwrap(), before, "money conserved");
+    let actual_cost = Money(1_100); // settlement=1_100, qty=1_000, value=1_100
+    assert_eq!(
+        receipts.0.get(&(seller, market)).copied(),
+        Some(actual_cost),
+        "seller receipt == actual_cost"
+    );
+    assert_eq!(
+        outlays.0.get(&(buyer, market)).copied(),
+        Some(actual_cost),
+        "buyer outlay == actual_cost"
+    );
+    assert_eq!(
+        outlays.0.get(&(seller, market)).copied(),
+        None,
+        "sellers are not charged as buyers"
+    );
+}
+
+#[test]
+fn flow_settle_records_buyer_outlays_including_transport() {
+    // Same setup as `settle_flow_captures_seller_revenue_into_receipts` but with dist > 0
+    // so transport_total > 0. dst_payment = src_revenue + transport_total.
+    // Use q=200 so transport is non-zero:
+    //   per_tile = checked_order_value(rate=5, qty=200) = 5*200/1_000 = 1
+    //   transport = per_tile * dist = 1 * 20 = 20
+    //   src_revenue = value(1_000, 200) = 1_000*200/1_000 = 200
+    //   dst_payment = 200 + 20 = 220
+    let seller = EconomicActorId(2);
+    let buyer = EconomicActorId(1);
+    let src = MarketId(10);
+    let dst = MarketId(11);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut goods = MarketGoods::default();
+    accounts.deposit(buyer, Money(1_000_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(10_000))
+        .unwrap();
+    let flow = PlannedFlow {
+        good: GOOD_FOOD,
+        src,
+        dst,
+        q: 200,
+        p_src: Money(1_000),
+        p_dst: Money(1_200),
+        dist: 20,
+    };
+    let config = EconomyConfig::default(); // transport_cost_per_tile_unit = Money(5)
+    let before = accounts.total_money().unwrap();
+    let mut receipts = SellerReceipts::default();
+    let mut outlays = BuyerOutlays::default();
+    settle_flow_with_receipts(
+        &mut accounts,
+        &mut inventory,
+        &mut goods,
+        &flow,
+        &[(seller, 200)],
+        &[(buyer, 200)],
+        200,
+        200,
+        200,
+        200,
+        &config,
+        1,
+        false,
+        false,
+        &mut receipts.0,
+        &mut outlays.0,
+    )
+    .unwrap();
+    assert_eq!(accounts.total_money().unwrap(), before, "money conserved");
+    // src_revenue = value(1_000, 200) = 200; transport = transport_cost(20, 200, 5) = 20
+    // dst_payment = 200 + 20 = 220
+    assert_eq!(receipts.0.get(&(seller, src)).copied(), Some(Money(200)));
+    assert_eq!(
+        outlays.0.get(&(buyer, dst)).copied(),
+        Some(Money(220)),
+        "buyer outlay == dst_payment (src_revenue + transport)"
+    );
 }
 
 fn consumer_pool(actor: EconomicActorId, market: MarketId) -> DemandPool {

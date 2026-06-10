@@ -624,7 +624,8 @@ pub fn settle_flow(
     preserve_price_src: bool,
     preserve_price_dst: bool,
 ) -> Result<EconomyEvent, EconomyError> {
-    let mut discard = BTreeMap::new();
+    let mut discard_receipts = BTreeMap::new();
+    let mut discard_outlays = BTreeMap::new();
     settle_flow_with_receipts(
         accounts,
         inventory,
@@ -640,7 +641,8 @@ pub fn settle_flow(
         current_tick,
         preserve_price_src,
         preserve_price_dst,
-        &mut discard,
+        &mut discard_receipts,
+        &mut discard_outlays,
     )
 }
 
@@ -661,6 +663,7 @@ pub fn settle_flow_with_receipts(
     preserve_price_src: bool,
     preserve_price_dst: bool,
     receipts: &mut BTreeMap<(EconomicActorId, MarketId), Money>,
+    outlays: &mut BTreeMap<(EconomicActorId, MarketId), Money>,
 ) -> Result<EconomyEvent, EconomyError> {
     let q = flow.q;
     let src_revenue = checked_order_value(flow.p_src, Quantity(q))?;
@@ -701,6 +704,10 @@ pub fn settle_flow_with_receipts(
         if charge.0 > 0 {
             accounts.lock_cash(*actor, charge)?;
             accounts.debit_locked(*actor, charge)?;
+            // Accumulate buyer charge into outlays (non-monetary statistic).
+            // Booked AFTER the successful money move so a fault aborts both.
+            let slot = outlays.entry((*actor, flow.dst)).or_insert(Money::ZERO);
+            *slot = slot.checked_add(charge)?;
         }
         if goods > 0 {
             inventory.deposit(*actor, flow.good, Quantity(goods))?;
@@ -870,6 +877,7 @@ pub fn run_macro_flow_at_tick(
     orders: &mut crate::economy::OrderBook,
     next_order_id: &mut crate::economy::NextOrderId,
     receipts: &mut BTreeMap<(EconomicActorId, MarketId), Money>,
+    outlays: &mut BTreeMap<(EconomicActorId, MarketId), Money>,
 ) -> Result<(), EconomyError> {
     realized.0.clear();
     if config.macro_flow_interval_ticks == 0
@@ -913,6 +921,7 @@ pub fn run_macro_flow_at_tick(
     let mut next_orders = orders.clone();
     let next_oid = *next_order_id;
     let mut next_receipts = receipts.clone();
+    let mut next_outlays = outlays.clone();
     let mut events: Vec<EconomyEvent> = Vec::new();
 
     // Per-market effective demand/supply for the write-back residuals (bucket-time).
@@ -990,6 +999,7 @@ pub fn run_macro_flow_at_tick(
         let mut scratch_goods = next_goods.clone();
         let mut scratch_orders = next_orders.clone();
         let mut scratch_receipts = next_receipts.clone();
+        let mut scratch_outlays = next_outlays.clone();
 
         if let Err(reason) = drain_active_endpoints(
             &mut scratch_orders,
@@ -1027,6 +1037,7 @@ pub fn run_macro_flow_at_tick(
             src_active,
             dst_active,
             &mut scratch_receipts,
+            &mut scratch_outlays,
         ) {
             Ok(event) => {
                 next_accounts = scratch_accounts;
@@ -1034,6 +1045,7 @@ pub fn run_macro_flow_at_tick(
                 next_goods = scratch_goods;
                 next_orders = scratch_orders;
                 next_receipts = scratch_receipts;
+                next_outlays = scratch_outlays;
                 if eflow.src != eflow.dst {
                     let id = next_shipment_id.next();
                     let travel_ticks =
@@ -1080,6 +1092,7 @@ pub fn run_macro_flow_at_tick(
     *orders = next_orders;
     *next_order_id = next_oid;
     *receipts = next_receipts;
+    *outlays = next_outlays;
     ledger.0.extend(events);
     Ok(())
 }

@@ -84,6 +84,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::flow_shipments::RealizedFlows::default());
         world.insert_resource(crate::economy::flow_telemetry::FlowRateEwma::default());
         world.insert_resource(crate::economy::wages::SellerReceipts::default());
+        world.insert_resource(crate::economy::wages::BuyerOutlays::default());
         world.insert_resource(crate::economy::wages::WageTelemetry::default());
         world.insert_resource(crate::economy::wages::HouseholdSector {
             population: 0,

@@ -119,6 +119,7 @@ fn macro_flow_captures_one_shipment_per_cross_edge() {
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
         &mut std::collections::BTreeMap::new(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
 
@@ -272,6 +273,7 @@ fn flow_shipments_capture_is_deterministic() {
             &mut crate::economy::RealizedFlows::default(),
             &mut crate::economy::OrderBook::default(),
             &mut crate::economy::NextOrderId::default(),
+            &mut std::collections::BTreeMap::new(),
             &mut std::collections::BTreeMap::new(),
         )
         .unwrap();

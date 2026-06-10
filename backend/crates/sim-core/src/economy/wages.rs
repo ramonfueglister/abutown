@@ -29,6 +29,16 @@ pub const HOUSEHOLD_SECTOR: EconomicActorId = EconomicActorId(u64::MAX - 1);
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct SellerReceipts(pub BTreeMap<(EconomicActorId, MarketId), Money>);
 
+/// Buyer-side mirror of `SellerReceipts`: gross purchase charges debited from each
+/// `(buyer, market)` THIS tick (auction: actual cost; macro flow: full charge INCLUDING
+/// the transport premium — so chain input costs are transport-inclusive by construction).
+/// Captured UNCONDITIONALLY for every buyer (consumer outlays are a harmless unused
+/// statistic; only the PayWages join reads this). Non-monetary statistic, zeroed in
+/// `EconomySet::ResetReceipts`, NEVER persisted. Captured in the settle scratch zone,
+/// so a discarded settle discards its outlays too.
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct BuyerOutlays(pub BTreeMap<(EconomicActorId, MarketId), Money>);
+
 /// Wage Money paid per MARKET this tick (the commuter-projection driver). Ephemeral,
 /// NOT persisted, reset-all-then-accumulate by `run_pay_wages_at_tick`. NOT on
 /// `MarketGoodState` (avoids the constructor fan-out + an extra DELETE).

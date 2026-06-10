@@ -5,8 +5,9 @@ use bevy_ecs::query::Or;
 
 use crate::economy::production::RawDeposits;
 use crate::economy::{
-    AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    FlowRateEwma, FlowShipmentParams, GoodId, HouseholdSector, InventoryBook, MarketChunks,
+    AccountBook, BuyerOutlays, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError,
+    EconomyEvent, FlowRateEwma, FlowShipmentParams, GoodId, HouseholdSector, InventoryBook,
+    MarketChunks,
     MarketDistances, MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProductionPools,
     SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
     clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
@@ -271,10 +272,15 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
 }
 
-/// Tick-start: clear `SellerReceipts` so the settle points accumulate exactly one
-/// tick of revenue (mirrors `run_consumption_at_tick`'s reset-all-then-accumulate).
-pub fn reset_seller_receipts_system(mut receipts: ResMut<SellerReceipts>) {
+/// Tick-start: clear `SellerReceipts` and `BuyerOutlays` so the settle points accumulate
+/// exactly one tick of revenue/charges (mirrors `run_consumption_at_tick`'s
+/// reset-all-then-accumulate).
+pub fn reset_seller_receipts_system(
+    mut receipts: ResMut<SellerReceipts>,
+    mut outlays: ResMut<BuyerOutlays>,
+) {
     receipts.0.clear();
+    outlays.0.clear();
 }
 
 /// Bridge: derive `DormantMarkets` from chunk LOD. A market anchored (in
@@ -359,6 +365,7 @@ pub fn clear_dirty_markets_system(
     mut goods: ResMut<MarketGoods>,
     mut dirty: ResMut<DirtyMarketGoods>,
     mut receipts: ResMut<SellerReceipts>,
+    mut outlays: ResMut<BuyerOutlays>,
 ) {
     let keys: Vec<_> = dirty.0.iter().copied().collect();
     dirty.0.clear();
@@ -373,6 +380,7 @@ pub fn clear_dirty_markets_system(
             tick.0,
             config.settlement_policy,
             &mut receipts.0,
+            &mut outlays.0,
         ) {
             ledger.0.push(EconomyEvent::MarketClearFailed {
                 market: key.market,
@@ -556,6 +564,7 @@ pub fn run_macro_flow_system(
     mut next_order_id: ResMut<NextOrderId>,
     mut receipts: ResMut<SellerReceipts>,
     mut flow_ewma: ResMut<FlowRateEwma>,
+    mut outlays: ResMut<BuyerOutlays>,
 ) {
     match run_macro_flow_at_tick(
         &mut accounts,
@@ -575,6 +584,7 @@ pub fn run_macro_flow_system(
         &mut orders,
         &mut next_order_id,
         &mut receipts.0,
+        &mut outlays.0,
     ) {
         Ok(()) => {
             // Fold this interval's realized flows into the on-wire EWMA. Gated on
