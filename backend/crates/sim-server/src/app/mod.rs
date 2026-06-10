@@ -357,31 +357,18 @@ fn build_economy_snapshot(
             unsold_supply_last_tick: st.unsold_supply_last_tick.0,
         })
         .collect();
+    // Every caller's world installs EconomyPlugin + mobility (constructors at
+    // runtime/mod.rs:218/368), so absence of any of these resources is a
+    // programming error and must panic.
     let vitals = {
-        let routed = world
-            .get_resource::<CitizenEconomicTargets>()
-            .map(|t| t.0.len() as u64)
-            .unwrap_or(0);
-        let stats = world
-            .get_resource::<RouteAssignmentStats>()
-            .copied()
-            .unwrap_or_default();
-        // AgentIdIndex is the live agent map: it's always installed by install_mobility
-        // alongside CitizenEconomicTargets — use get_resource so callers that stand up
-        // a bare economy world (no mobility) gracefully produce population=0.
-        let population = world
-            .get_resource::<AgentIdIndex>()
-            .map(|idx| idx.0.len() as u64)
-            .unwrap_or(0);
-        // AccountBook is always present when EconomyPlugin is installed (the production
-        // path that calls this function). If for some reason it is absent, return 0
-        // rather than panicking — the per-tick conservation audit will catch any real
-        // violation independently.
         let total_money = world
-            .get_resource::<AccountBook>()
-            .and_then(|book| book.total_money().ok())
-            .map(|m| m.0)
-            .unwrap_or(0);
+            .resource::<AccountBook>()
+            .total_money()
+            .expect("tick audit guarantees a summable ledger")
+            .0;
+        let routed = world.resource::<CitizenEconomicTargets>().0.len() as u64;
+        let stats = *world.resource::<RouteAssignmentStats>();
+        let population = world.resource::<AgentIdIndex>().0.len() as u64;
         Some(w::EconomyVitals {
             population,
             routed_citizens: routed,
