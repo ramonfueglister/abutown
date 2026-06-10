@@ -321,6 +321,7 @@ fn build_economy_snapshot(
         tick,
         markets,
         goods,
+        flows: vec![], // populated in the next slice
     }
 }
 

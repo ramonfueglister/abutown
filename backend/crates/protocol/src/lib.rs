@@ -703,6 +703,12 @@ mod proto_roundtrip_tests {
                     unmet_demand_last_tick: 0,
                     unsold_supply_last_tick: 0,
                 }],
+                flows: vec![EconomyFlow {
+                    src_market_id: 9003,
+                    dst_market_id: 9004,
+                    good_id: 1,
+                    rate: 250,
+                }],
             })),
         };
         assert_roundtrip(&msg);

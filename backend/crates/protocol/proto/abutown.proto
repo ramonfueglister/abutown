@@ -69,6 +69,7 @@ message EconomySnapshot {
   uint64 tick = 3;
   repeated EconomyMarket markets = 4;
   repeated EconomyMarketGood goods = 5;
+  repeated EconomyFlow flows = 6;
 }
 
 message EconomyMarket {
@@ -87,6 +88,14 @@ message EconomyMarketGood {
   int64 traded_qty_last_tick = 5;
   int64 unmet_demand_last_tick = 6;
   int64 unsold_supply_last_tick = 7;
+}
+
+message EconomyFlow {
+  uint32 src_market_id = 1;
+  uint32 dst_market_id = 2;
+  uint32 good_id = 3;
+  // EWMA of shipped quantity per macro-flow interval (raw good units, NOT money).
+  int64 rate = 4;
 }
 
 message ServerError {
