@@ -8,10 +8,11 @@ use crate::economy::macro_flow::PlannedFlow;
 use crate::economy::{
     AccountBook, BuyerOutlays, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId,
     EconomyConfig, EconomyEvent, EconomyPersistSnapshot, GOOD_FOOD, GOOD_TOOLS, HOUSEHOLD_SECTOR,
-    HouseholdSector, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey, MarketGoodState,
-    MarketGoods, MarketId, Money, NextOrderId, OrderBook, Quantity, SellerReceipts, SupplyPool,
-    SupplyPools, TradeLedger, WageTelemetry, apply_into_world, clear_market_good_with_receipts,
-    create_ask, create_bid, extract_from_world, run_pay_wages_at_tick, settle_flow_with_receipts,
+    HouseholdSector, InputPools, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey,
+    MarketGoodState, MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProducerPolicies,
+    Quantity, SellerReceipts, SupplyPool, SupplyPools, TradeLedger, WageTelemetry,
+    apply_into_world, clear_market_good_with_receipts, create_ask, create_bid, extract_from_world,
+    run_pay_wages_at_tick, settle_flow_with_receipts,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -1393,6 +1394,9 @@ fn distribute_profit_conserves_money_and_drains_firm_to_zero() {
         &household,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
+        &ProducerPolicies::default(),
+        &InputPools::default(),
     )
     .unwrap();
 
@@ -1445,8 +1449,18 @@ fn distribute_profit_underfunded_firm_books_only_covered_and_audits() {
 
     let before = accounts.total_money().unwrap();
     let mut ledger = TradeLedger::default();
-    run_distribute_profit_at_tick(&mut accounts, &receipts, &mut demand, &household, &mut ledger, &config)
-        .expect("the function itself returns Ok — the shortfall is surfaced via an audited event, not an Err");
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+        &BuyerOutlays::default(),
+        &ProducerPolicies::default(),
+        &InputPools::default(),
+    )
+    .expect("the function itself returns Ok — the shortfall is surfaced via an audited event, not an Err");
 
     assert_eq!(
         accounts.total_money().unwrap(),
@@ -1515,6 +1529,9 @@ fn distribute_profit_zero_dividend_share_is_noop() {
         &household,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
+        &ProducerPolicies::default(),
+        &InputPools::default(),
     )
     .unwrap();
     assert_eq!(accounts.total_money().unwrap(), before);
@@ -1555,6 +1572,9 @@ fn distribute_profit_does_not_reset_income() {
         &household,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
+        &ProducerPolicies::default(),
+        &InputPools::default(),
     )
     .unwrap();
     assert_eq!(
@@ -1562,6 +1582,219 @@ fn distribute_profit_does_not_reset_income() {
         Money(1_000),
         "wage 600 + dividend 400, accumulated"
     );
+}
+
+/// Builds the shared θ-dividend fixture: policy θ=8_000, batches_target=2, and an
+/// InputPool with in_qty=1_000 @ max_price=300 → `wc_target = 300·2_000/1_000 = 600`
+/// (settle-identical scale arithmetic, see `producers::wc_target`).
+fn theta_policy_fixture(
+    firm: EconomicActorId,
+    market: MarketId,
+) -> (crate::economy::ProducerPolicies, crate::economy::InputPools) {
+    use crate::economy::producers::{InputPool, InputPools, ProducerPolicies, ProducerPolicy};
+    let mut policies = ProducerPolicies::default();
+    policies.0.insert(
+        firm,
+        ProducerPolicy {
+            theta_bps: 8_000,
+            batches_target: 2,
+        },
+    );
+    let mut input_pools = InputPools::default();
+    input_pools.0.insert(
+        firm,
+        InputPool {
+            actor: firm,
+            market,
+            good: GOOD_FOOD,
+            in_qty: Quantity(1_000),
+            out_qty: Quantity(500),
+            out_good: GOOD_TOOLS,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            max_price: Money(300),
+        },
+    );
+    (policies, input_pools)
+}
+
+#[test]
+fn dividend_theta_caps_at_working_capital_target() {
+    // policy θ=8_000, batches=2 → wc_target=600; cash=800; revenue=1_000 →
+    // wage=600, profit=400, intended=floor(400·0.8)=320 > cash − wc_target = 200
+    // → dividend == cash − wc_target = 200 (Kappung greift), Firma behält wc_target.
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(800)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, market), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default(); // labor_share=6_000, dividend_share=10_000
+    let (policies, input_pools) = theta_policy_fixture(f1, market);
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+        &BuyerOutlays::default(),
+        &policies,
+        &input_pools,
+    )
+    .unwrap();
+
+    assert_eq!(accounts.total_money().unwrap(), before, "byte-invariant");
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(600),
+        "the firm retains exactly wc_target = 600"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(200),
+        "households receive the capped dividend cash − wc_target"
+    );
+    assert!(ledger.0.contains(&EconomyEvent::ProfitDistributed {
+        firm: f1,
+        market,
+        amount: Money(200),
+    }));
+    // Policy capping is WANTED retention, not an anomaly — no audit event.
+    assert!(
+        !ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::MarketClearFailed { .. })),
+        "working-capital capping must NOT push an audited shortfall event"
+    );
+}
+
+#[test]
+fn dividend_zero_when_cash_below_target() {
+    // cash=100 < wc_target=600 → distributable=0 → dividend == 0, kein Transfer,
+    // kein Event (Aufbau des Liquiditätspuffers ist Policy-Verhalten). intended=320
+    // exceeds even the firm's full cash — the policy still explains the retention.
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(100)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, market), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default();
+    let (policies, input_pools) = theta_policy_fixture(f1, market);
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+        &BuyerOutlays::default(),
+        &policies,
+        &input_pools,
+    )
+    .unwrap();
+
+    assert_eq!(accounts.total_money().unwrap(), before, "byte-invariant");
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(100),
+        "cash below wc_target → the firm retains everything (buffer build-up)"
+    );
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money::ZERO,
+        "no dividend transfer"
+    );
+    assert!(
+        ledger.0.is_empty(),
+        "no ProfitDistributed and no MarketClearFailed — retention is policy, got {:?}",
+        ledger.0
+    );
+}
+
+#[test]
+fn actors_without_policy_distribute_like_before() {
+    // f1 has NO ProducerPolicies / InputPools entry (another actor's entries must not
+    // leak) → θ = config dividend_share (10_000), wc_target = 0 → byte-identical to
+    // the #75 full-payout behavior: firm drains to zero.
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, market), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default();
+    // Entries for a DIFFERENT firm: the lookup must miss for f1.
+    let (policies, input_pools) = theta_policy_fixture(EconomicActorId(8_009), market);
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+        &BuyerOutlays::default(),
+        &policies,
+        &input_pools,
+    )
+    .unwrap();
+
+    // wage=600, profit=400, θ=10_000 → dividend=400: exactly the #75 behavior.
+    assert_eq!(accounts.total_money().unwrap(), before, "byte-invariant");
+    assert_eq!(
+        accounts.account(f1).available,
+        Money::ZERO,
+        "no policy → full distribution drains the firm (#75 regression)"
+    );
+    assert_eq!(demand.0[&c1].income_last_tick, Money(400));
+    assert!(ledger.0.contains(&EconomyEvent::ProfitDistributed {
+        firm: f1,
+        market,
+        amount: Money(400),
+    }));
 }
 
 #[test]
@@ -1885,7 +2118,10 @@ fn negative_value_added_pays_zero_wage() {
     assert_eq!(inc, 0, "no income when value_added ≤ 0");
     // No WagePaid event must be emitted
     assert!(
-        ledger.0.iter().all(|e| !matches!(e, EconomyEvent::WagePaid { .. })),
+        ledger
+            .0
+            .iter()
+            .all(|e| !matches!(e, EconomyEvent::WagePaid { .. })),
         "no WagePaid event when wage == 0"
     );
 }
@@ -1933,7 +2169,6 @@ fn actors_without_outlays_unchanged() {
 /// not overwrite. This is a regression guard for entry().or_insert + checked_add vs. insert.
 #[test]
 fn outlays_accumulate_across_fills_for_same_buyer_market() {
-    use crate::economy::auction::SettlementPolicy;
     let buyer = EconomicActorId(1);
     let seller = EconomicActorId(2);
     let market = MarketId(1);
@@ -1957,39 +2192,109 @@ fn outlays_accumulate_across_fills_for_same_buyer_market() {
     // Create two bid+ask pairs and clear twice, each time hitting (buyer, market).
     // First pair: qty=1_000, settlement ~1_100
     create_bid(
-        &mut accounts, &mut orders, &mut ledger, &mut dirty, &mut next,
-        1, buyer, market, GOOD_FOOD, Quantity(1_000), Money(1_500), 10,
-    ).unwrap();
+        &mut accounts,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        1,
+        buyer,
+        market,
+        GOOD_FOOD,
+        Quantity(1_000),
+        Money(1_500),
+        10,
+    )
+    .unwrap();
     create_ask(
-        &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
-        1, seller, market, GOOD_FOOD, Quantity(1_000), Money(1_000), 10,
-    ).unwrap();
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        1,
+        seller,
+        market,
+        GOOD_FOOD,
+        Quantity(1_000),
+        Money(1_000),
+        10,
+    )
+    .unwrap();
 
     let mut receipts = SellerReceipts::default();
     let mut outlays = BuyerOutlays::default();
     clear_market_good_with_receipts(
-        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut goods,
-        key, 2, SettlementPolicy::Anchored, &mut receipts.0, &mut outlays.0,
-    ).unwrap();
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut goods,
+        key,
+        2,
+        SettlementPolicy::Anchored,
+        &mut receipts.0,
+        &mut outlays.0,
+    )
+    .unwrap();
 
-    let first_outlay = outlays.0.get(&(buyer, market)).copied().unwrap_or(Money::ZERO);
+    let first_outlay = outlays
+        .0
+        .get(&(buyer, market))
+        .copied()
+        .unwrap_or(Money::ZERO);
 
     // Second pair: qty=2_000
     create_bid(
-        &mut accounts, &mut orders, &mut ledger, &mut dirty, &mut next,
-        3, buyer, market, GOOD_FOOD, Quantity(2_000), Money(1_500), 10,
-    ).unwrap();
+        &mut accounts,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        3,
+        buyer,
+        market,
+        GOOD_FOOD,
+        Quantity(2_000),
+        Money(1_500),
+        10,
+    )
+    .unwrap();
     create_ask(
-        &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
-        3, seller, market, GOOD_FOOD, Quantity(2_000), Money(1_000), 10,
-    ).unwrap();
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        3,
+        seller,
+        market,
+        GOOD_FOOD,
+        Quantity(2_000),
+        Money(1_000),
+        10,
+    )
+    .unwrap();
 
     clear_market_good_with_receipts(
-        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut goods,
-        key, 4, SettlementPolicy::Anchored, &mut receipts.0, &mut outlays.0,
-    ).unwrap();
+        &mut accounts,
+        &mut inventory,
+        &mut orders,
+        &mut ledger,
+        &mut goods,
+        key,
+        4,
+        SettlementPolicy::Anchored,
+        &mut receipts.0,
+        &mut outlays.0,
+    )
+    .unwrap();
 
-    let total_outlay = outlays.0.get(&(buyer, market)).copied().unwrap_or(Money::ZERO);
+    let total_outlay = outlays
+        .0
+        .get(&(buyer, market))
+        .copied()
+        .unwrap_or(Money::ZERO);
 
     // Settlement price derivation (Anchored, seeded_state sets last=1_100):
     //   Round 1: last=1_100 ∈ [ask=1_000, bid=1_500] → price = last = 1_100
@@ -2003,7 +2308,7 @@ fn outlays_accumulate_across_fills_for_same_buyer_market() {
     let expected_second = Money(2_200);
     assert_eq!(
         first_outlay, expected_first,
-        "first settle outlay must be price*qty/SCALE = 1_000"
+        "first settle outlay must be price*qty/SCALE = 1_100"
     );
     assert_eq!(
         total_outlay,

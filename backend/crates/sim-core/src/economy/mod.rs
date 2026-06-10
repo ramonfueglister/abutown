@@ -18,6 +18,7 @@ pub mod orders;
 pub mod persist;
 pub mod pools;
 pub mod pricing;
+pub mod producers;
 pub mod production;
 pub mod systems;
 pub mod trader_render;
@@ -42,6 +43,7 @@ pub use orders::*;
 pub use persist::*;
 pub use pools::*;
 pub use pricing::*;
+pub use producers::*;
 pub use production::*;
 pub use systems::*;
 pub use trader_render::*;
@@ -85,6 +87,8 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::flow_telemetry::FlowRateEwma::default());
         world.insert_resource(crate::economy::wages::SellerReceipts::default());
         world.insert_resource(crate::economy::wages::BuyerOutlays::default());
+        world.insert_resource(crate::economy::producers::ProducerPolicies::default());
+        world.insert_resource(crate::economy::producers::InputPools::default());
         world.insert_resource(crate::economy::wages::WageTelemetry::default());
         world.insert_resource(crate::economy::wages::HouseholdSector {
             population: 0,

@@ -6,14 +6,13 @@ use bevy_ecs::query::Or;
 use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, BuyerOutlays, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError,
-    EconomyEvent, FlowRateEwma, FlowShipmentParams, GoodId, HouseholdSector, InventoryBook,
-    MarketChunks,
-    MarketDistances, MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProductionPools,
-    SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
-    clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick,
-    run_distribute_profit_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
-    run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
+    EconomyEvent, FlowRateEwma, FlowShipmentParams, GoodId, HouseholdSector, InputPools,
+    InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId, Money, NextOrderId,
+    OrderBook, ProducerPolicies, ProductionPools, SellerReceipts, SettlementPolicy, SupplyPools,
+    TradeLedger, WageTelemetry, clear_market_good_with_receipts, expire_orders_at_tick,
+    generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
+    run_consumption_update_at_tick, run_distribute_profit_at_tick, run_macro_flow_at_tick,
+    run_pay_wages_at_tick, run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -449,6 +448,7 @@ pub fn run_consumption_system(
 /// buyer outlays for the same (firm, market), floored at zero) into the household sector,
 /// apportioned to consumer pools (income). Runs after BOTH settle paths (ClearMarkets,
 /// MacroFlow) so all receipts AND outlays are fully booked, before Consume.
+#[allow(clippy::too_many_arguments)]
 pub fn run_pay_wages_system(
     config: Res<EconomyConfig>,
     receipts: Res<SellerReceipts>,
@@ -475,13 +475,17 @@ pub fn run_pay_wages_system(
 /// Profit distribution: runs in the PayWages set with an explicit `.after(run_pay_wages_system)`
 /// edge so the wage net-zero assert fires first and income accumulates wage→profit in a
 /// deterministic order. Fallible/audited at the per-firm level inside the core; the wrapper
-/// surfaces a whole-call Err (only a config-validation failure can produce one) as an audited
-/// MarketClearFailed event — never `let _` (which would swallow a config bug), never `.expect`
-/// (the call is genuinely fallible).
+/// surfaces a whole-call Err (a config-validation failure or a `wc_target` computation fault)
+/// as an audited MarketClearFailed event — never `let _` (which would swallow a config bug),
+/// never `.expect` (the call is genuinely fallible).
+#[allow(clippy::too_many_arguments)]
 pub fn run_distribute_profit_system(
     config: Res<EconomyConfig>,
     receipts: Res<SellerReceipts>,
     household: Res<HouseholdSector>,
+    outlays: Res<BuyerOutlays>,
+    policies: Res<ProducerPolicies>,
+    input_pools: Res<InputPools>,
     mut accounts: ResMut<AccountBook>,
     mut demand: ResMut<DemandPools>,
     mut ledger: ResMut<TradeLedger>,
@@ -493,6 +497,9 @@ pub fn run_distribute_profit_system(
         &household,
         &mut ledger,
         &config,
+        &outlays,
+        &policies,
+        &input_pools,
     ) {
         assert_ne!(
             reason,

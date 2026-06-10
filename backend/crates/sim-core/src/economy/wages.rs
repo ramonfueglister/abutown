@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use bevy_ecs::prelude::*;
 
+use crate::economy::producers::{InputPools, ProducerPolicies, wc_target};
 use crate::economy::{
     AccountBook, DemandPools, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent, MarketId,
     Money, TradeLedger, apportion_cash,
@@ -141,11 +142,13 @@ pub fn run_pay_wages_at_tick(
             if wage.0 <= 0 {
                 continue;
             }
-            // `wage <= revenue`: the firm was credited `revenue` as a SELLER this tick
-            // (ClearMarkets/MacroFlow run before PayWages) and spends nothing before
-            // wages settle, so it always holds the cash. The transfer is therefore
-            // total-conserving and cannot fault; `?` surfaces a genuine bug rather than
-            // papering over an unreachable state.
+            // `wage <= value_added = revenue − outlays`: the firm was credited `revenue`
+            // as a SELLER this tick (ClearMarkets/MacroFlow run before PayWages) and its
+            // same-tick purchases are already subtracted from the wage base, so even a
+            // firm that bought inputs still holds at least `value_added >= wage` when
+            // wages settle (balance = prior_cash + revenue − outlays >= value_added).
+            // The transfer is therefore total-conserving and cannot fault; `?` surfaces
+            // a genuine bug rather than papering over an unreachable state.
             accounts.transfer(firm, HOUSEHOLD_SECTOR, wage)?;
             wage_bill = wage_bill
                 .checked_add(wage.0)
@@ -188,23 +191,37 @@ pub fn run_pay_wages_at_tick(
     Ok(())
 }
 
-/// Full profit distribution to the labor households (no owner/capitalist class, v0).
-/// For each `(firm, market)` in `receipts` (keys-first → ascending): recompute the wage
-/// the SAME way `run_pay_wages_at_tick` did (`wage_for_revenue(revenue, labor_share)`,
-/// identical flooring), so `profit = revenue − wage`; the dividend to distribute is
-/// `floor(profit * dividend_share_bps / 10_000)`. With the default `dividend_share_bps =
-/// 10_000` the dividend == profit and the firm nets to zero (wages + profit == revenue).
+/// θ-dividend distribution to the labor households (no owner/capitalist class, v0),
+/// capped by the producer's working-capital target.
 ///
-/// FALLIBLE / AUDITED (no-fallback discipline): a firm that BOTH sold and bought (via
-/// macro_flow) this tick can hold `< dividend` at distribution time. We do NOT `.expect`
-/// (latent process panic) and do NOT silently skip (stranded profit, broken loop).
-/// Instead we book ONLY the amount the firm actually HOLDS (`min(dividend, available)`)
-/// and, when that is short of the intended dividend, push an audited
-/// `MarketClearFailed { market, good=GoodId(0), reason: InsufficientFunds }` event. The
-/// covered amount flows firm → HOUSEHOLD_SECTOR → households via `apportion_cash` over the
-/// SAME `pool_weights` as wages, crediting `income_last_tick` (ADD, not reset — wages
-/// credited it first). Conservation: only `transfer`s ⇒ `total_money` byte-invariant.
-/// Own independent `HOUSEHOLD_SECTOR` net-zero `debug_assert`.
+/// For each `(firm, market)` in `receipts` (keys-first → ascending): recompute the wage
+/// the SAME way `run_pay_wages_at_tick` did — on VALUE ADDED (`value_added_for`: revenue
+/// minus this tick's buyer outlays for the same `(firm, market)`, floored at zero) with
+/// identical flooring — so `profit = value_added − wage >= 0` (labor_share <= 10_000).
+/// The payout share θ comes from the firm's `ProducerPolicy.theta_bps`, and the firm
+/// retains a working-capital buffer `wc_target(policy, pool)` — the settle-value of
+/// `batches_target` input batches at the pool's participation bound (Caiani-style
+/// self-financing of next inputs): `intended = floor(profit·θ/10_000)`,
+/// `covered = min(intended, max(held − wc_target, 0))`. Actors WITHOUT a policy
+/// (no `ProducerPolicies` + `InputPools` entry) keep the #75 behavior byte-identically:
+/// θ = config `dividend_share_bps` (default 10_000 → dividend == profit, the firm
+/// drains to zero) and `wc_target = 0`.
+///
+/// SHORTFALL SEMANTICS (no-fallback discipline): withholding cash up to `wc_target` is
+/// the WANTED liquidity buffer, not an anomaly — a policy firm's shortfall is by
+/// construction always explained by it (when capped it retains exactly `wc_target`;
+/// while still below the target it retains everything), so it is NEVER audited. Only a
+/// NO-policy firm that holds `< intended` (it BOTH sold and bought via macro_flow this
+/// tick) books just what it holds and pushes the audited
+/// `MarketClearFailed { market, good=GoodId(0), reason: InsufficientFunds }` event —
+/// the unchanged #75 audit. We do NOT `.expect` (latent process panic) and do NOT
+/// silently skip (stranded profit, broken loop).
+///
+/// The covered amount flows firm → HOUSEHOLD_SECTOR → households via `apportion_cash`
+/// over the SAME `pool_weights` as wages, crediting `income_last_tick` (ADD, not reset —
+/// wages credited it first). Conservation: only `transfer`s ⇒ `total_money`
+/// byte-invariant; own independent `HOUSEHOLD_SECTOR` net-zero check (release-grade).
+#[allow(clippy::too_many_arguments)]
 pub fn run_distribute_profit_at_tick(
     accounts: &mut AccountBook,
     receipts: &SellerReceipts,
@@ -212,6 +229,9 @@ pub fn run_distribute_profit_at_tick(
     household: &HouseholdSector,
     ledger: &mut TradeLedger,
     config: &EconomyConfig,
+    outlays: &BuyerOutlays,
+    policies: &ProducerPolicies,
+    input_pools: &InputPools,
 ) -> Result<(), EconomyError> {
     let labor_share = config.validated_labor_share_bps()?;
     let dividend_share = config.validated_dividend_share_bps()?;
@@ -221,18 +241,32 @@ pub fn run_distribute_profit_at_tick(
     let weight_sum: i128 = weights.iter().map(|w| *w as i128).sum();
 
     for (&(firm, market), &revenue) in receipts.0.iter() {
-        let wage = wage_for_revenue(revenue, labor_share)?;
-        let profit = revenue.checked_sub(wage)?; // wage <= revenue ⇒ profit >= 0
-        let dividend_raw = i64::try_from((profit.0 as i128) * dividend_share / 10_000)
-            .map_err(|_| EconomyError::Overflow)?;
-        let intended = Money(dividend_raw);
+        let value_added = value_added_for(revenue, outlays, firm, market)?;
+        let wage = wage_for_revenue(value_added, labor_share)?;
+        let profit = value_added.checked_sub(wage)?; // wage <= value_added ⇒ profit >= 0
+        let (theta_bps, target, has_policy) =
+            match (policies.0.get(&firm), input_pools.0.get(&firm)) {
+                (Some(policy), Some(pool)) => (
+                    i128::from(policy.theta_bps),
+                    wc_target(*policy, pool)?,
+                    true,
+                ),
+                // No policy: config-θ (default 10_000) and no buffer — the #75 path.
+                _ => (dividend_share, Money::ZERO, false),
+            };
+        let intended = Money(
+            i64::try_from((profit.0 as i128) * theta_bps / 10_000)
+                .map_err(|_| EconomyError::Overflow)?,
+        );
         if intended.0 <= 0 || weight_sum <= 0 {
             continue; // nothing to distribute, or no payout target
         }
-        // Book only what the firm actually holds; surface any shortfall loudly.
+        // Book only what the firm holds ABOVE its working-capital target.
         let held = accounts.account(firm).available;
-        let covered = Money(intended.0.min(held.0));
-        if covered.0 < intended.0 {
+        let distributable = Money(held.0.saturating_sub(target.0).max(0));
+        let covered = Money(intended.0.min(distributable.0));
+        if covered.0 < intended.0 && !has_policy {
+            // Unexplained shortfall (the #75 audit): no policy, yet the firm cannot cover.
             ledger.0.push(EconomyEvent::MarketClearFailed {
                 market,
                 good: crate::economy::GoodId(0),
@@ -242,7 +276,7 @@ pub fn run_distribute_profit_at_tick(
         if covered.0 <= 0 {
             continue;
         }
-        // LEG 1: firm → HOUSEHOLD_SECTOR. `covered <= held` ⇒ cannot fault.
+        // LEG 1: firm → HOUSEHOLD_SECTOR. `covered <= distributable <= held` ⇒ cannot fault.
         accounts.transfer(firm, HOUSEHOLD_SECTOR, covered)?;
         // LEG 2: HOUSEHOLD_SECTOR → households (largest-remainder, sum-preserving).
         let splits = apportion_cash(&weights, covered.0);
