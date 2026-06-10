@@ -375,3 +375,282 @@ fn input_pool_without_policy_errors_loudly() {
         result
     );
 }
+
+/// Floor-to-zero participation bound on the ORDER side (producers.rs doc §"When
+/// `max_price.0 <= 0` after the bound computation"): a positive-but-tiny output
+/// reference price floors the bound to 0 — `floor(1 · 4_000/10_000) = 0` — which
+/// must silently skip ordering for this interval: NO bid, NO `OrderRejected`
+/// (the bound flooring is not an error; a zero reference price itself would be
+/// `Err(ZeroPrice)`), the floored bound IS written back to the pool (telemetry
+/// truth), and the cursor IS stamped so the next generation fires on schedule.
+#[test]
+fn tiny_reference_price_floors_bound_to_zero_skips_order_but_stamps_cursor() {
+    let actor = EconomicActorId(9_006);
+    let market = MarketId(6);
+    let mut accounts = AccountBook::default();
+    let inventory = InventoryBook::default(); // held = 0 → desired = 20 > 0
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut input_pools = InputPools::default();
+    let mut policies = ProducerPolicies::default();
+    let mut market_goods = MarketGoods::default();
+    let config = crate::economy::EconomyConfig::default(); // labor_share_bps=6_000
+
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+
+    // Positive but tiny reference price: bound = floor(1·4_000/10_000)·10/10 = 0.
+    let out_key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    let mut state = MarketGoodState::new(out_key);
+    state.ewma_reference_price = Money(1);
+    state.last_settlement_price = Money(1);
+    market_goods.0.insert(out_key, state);
+
+    policies.0.insert(actor, producer_policy());
+    input_pools.0.insert(actor, input_pool(actor, market));
+
+    run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        1,
+        10,
+        &BTreeSet::new(),
+        1,
+    )
+    .unwrap();
+
+    assert!(
+        orders.bids.is_empty(),
+        "bound floored to 0 → no bid this interval (starved production recovers \
+         next interval when the output price rises)"
+    );
+    assert!(
+        ledger.0.is_empty(),
+        "bound-zero is NOT an error: no OrderRejected, no event at all — got {:?}",
+        ledger.0
+    );
+    let pool = input_pools.0[&actor];
+    assert_eq!(
+        pool.max_price,
+        Money(0),
+        "the floored bound is written back to the pool (the wire telemetry must \
+         show the honest 0, and the dividend path's unpriced guard keys off it)"
+    );
+    assert_eq!(
+        pool.last_generated_tick,
+        Some(1),
+        "cursor IS stamped on the bound-zero skip — the next generation must fire \
+         on schedule, not retry every tick"
+    );
+}
+
+/// Dormant-market skip — this pins the ORDER path only
+/// (`run_generate_input_orders_at_tick`): the input pool must be left COMPLETELY
+/// untouched by it — no bid, no event, cursor NOT stamped, bound NOT rewritten
+/// (mirrors the consumer-pool dormant contract). Dormant pools are instead
+/// expressed (and their bound/cursor written) by the MACRO-FLOW path
+/// (`build_macro_buckets`' InputPools loop, macro_flow.rs) on the macro cadence —
+/// see `build_macro_buckets_sources_dormant_input_pool_demand` in
+/// tests/macro_flow.rs.
+#[test]
+fn input_order_dormant_market_leaves_pool_untouched() {
+    let actor = EconomicActorId(9_007);
+    let market = MarketId(7);
+    let mut accounts = AccountBook::default();
+    let inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut input_pools = InputPools::default();
+    let mut policies = ProducerPolicies::default();
+    let mut market_goods = MarketGoods::default();
+    let config = crate::economy::EconomyConfig::default();
+
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    let out_key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    market_goods.0.insert(out_key, seeded_market_good(market));
+
+    policies.0.insert(actor, producer_policy());
+    let original = input_pool(actor, market);
+    input_pools.0.insert(actor, original);
+
+    let dormant: BTreeSet<MarketId> = [market].into_iter().collect();
+    run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        1,
+        10,
+        &dormant,
+        1,
+    )
+    .unwrap();
+
+    assert!(orders.bids.is_empty(), "dormant market: no bid");
+    assert!(ledger.0.is_empty(), "dormant market: no events");
+    assert_eq!(
+        input_pools.0[&actor], original,
+        "dormant market: the pool must be byte-identical — cursor untouched (None) \
+         and the bound NOT rewritten, so the pool fires immediately when the \
+         market wakes"
+    );
+}
+
+/// Interval-not-elapsed skip: with `interval_ticks = 5` and a cursor at tick 10, a
+/// generation pass at tick 12 must leave the pool untouched (cursor stays Some(10),
+/// bound not rewritten), place no bid and emit no event — the within-interval skip
+/// is a true no-op, exactly like the consumer-pool counterpart.
+#[test]
+fn input_order_within_interval_leaves_pool_untouched() {
+    let actor = EconomicActorId(9_008);
+    let market = MarketId(8);
+    let mut accounts = AccountBook::default();
+    let inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut input_pools = InputPools::default();
+    let mut policies = ProducerPolicies::default();
+    let mut market_goods = MarketGoods::default();
+    let config = crate::economy::EconomyConfig::default();
+
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    let out_key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    market_goods.0.insert(out_key, seeded_market_good(market));
+
+    policies.0.insert(actor, producer_policy());
+    let mut pool = input_pool(actor, market);
+    pool.interval_ticks = 5;
+    pool.last_generated_tick = Some(10);
+    input_pools.0.insert(actor, pool);
+
+    run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        12, // 12 − 10 = 2 < interval 5 → not yet due
+        10,
+        &BTreeSet::new(),
+        1,
+    )
+    .unwrap();
+
+    assert!(orders.bids.is_empty(), "within interval: no bid");
+    assert!(ledger.0.is_empty(), "within interval: no events");
+    assert_eq!(
+        input_pools.0[&actor], pool,
+        "within interval: the pool must be byte-identical — cursor stays Some(10) \
+         and the bound is NOT rewritten"
+    );
+}
+
+/// Partial affordability: `0 < affordable < desired` → the bid is capped to exactly
+/// the affordable quantity (no OrderRejected — the rejection event is reserved for
+/// affordable == 0). cash 3 at bound 400 affords floor(3·1_000/400) = 7 units of the
+/// desired 20; the bid locks the order value floor(400·7/1_000) = 2.
+#[test]
+fn input_order_partial_affordability_caps_bid_to_affordable() {
+    let actor = EconomicActorId(9_009);
+    let market = MarketId(9);
+    let mut accounts = AccountBook::default();
+    let inventory = InventoryBook::default(); // held = 0 → desired = 2·10 = 20
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut input_pools = InputPools::default();
+    let mut policies = ProducerPolicies::default();
+    let mut market_goods = MarketGoods::default();
+    let config = crate::economy::EconomyConfig::default();
+
+    accounts.deposit(actor, Money(3)).unwrap(); // affords 7 of 20 at bound 400
+
+    let out_key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    market_goods.0.insert(out_key, seeded_market_good(market));
+
+    policies.0.insert(actor, producer_policy());
+    input_pools.0.insert(actor, input_pool(actor, market));
+
+    run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        1,
+        10,
+        &BTreeSet::new(),
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(orders.bids.len(), 1, "exactly one (capped) bid placed");
+    let bid = orders.bids.values().next().unwrap();
+    assert_eq!(
+        bid.qty_remaining,
+        Quantity(7),
+        "bid qty must be the affordable cap: floor(cash 3 · SCALE 1_000 / bound 400) \
+         = 7 < desired 20"
+    );
+    assert_eq!(bid.max_price, Money(400), "bid priced at the bound");
+    assert_eq!(
+        accounts.account(actor).locked,
+        Money(2),
+        "the bid locks exactly the order value floor(400·7/1_000) = 2"
+    );
+    assert!(
+        !ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::OrderRejected { .. })),
+        "partial affordability is NOT a rejection — OrderRejected is reserved for \
+         affordable == 0"
+    );
+    assert_eq!(
+        input_pools.0[&actor].last_generated_tick,
+        Some(1),
+        "cursor stamped after the capped bid"
+    );
+}

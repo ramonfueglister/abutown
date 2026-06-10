@@ -113,7 +113,11 @@ pub fn wc_target(
 /// A zero or negative reference price is an honest `ZeroPrice` error (propagated),
 /// never a default — every output market is seeded with a positive opening price.
 /// Zero or negative `in_qty` / `out_qty` is `InvalidOrder` (a seed bug).
-pub(crate) fn participation_bound(
+///
+/// Public: this bound IS the input-leg price at the single-firm fixed point
+/// (derived-demand/MRP pricing, spec §8) — the stationarity integration test
+/// recomputes it from live resources to anchor its price assertion.
+pub fn participation_bound(
     p_out_ref: Money,
     labor_share_bps: i128,
     out_qty: Quantity,

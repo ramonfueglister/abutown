@@ -2625,3 +2625,125 @@ fn unpriced_input_pool_retains_everything_without_event() {
         ledger.0
     );
 }
+
+/// M2 (review condition): wage AND θ-dividend in the SAME tick for a firm with BOTH
+/// revenue and nonzero `BuyerOutlays` — the live producer shape (8031 sells TOOLS and
+/// buys WOOD within one tick). Both steps must share the value-added base:
+///   value_added = revenue 1_000 − outlays 300 = 700
+///   wage        = floor(700 · 6_000/10_000)   = 420   (labor share)
+///   profit      = 700 − 420                    = 280
+///   intended    = floor(280 · 8_000/10_000)    = 224   (θ-dividend)
+///   distributable = cash_after_wage 1_080 − wc_target 600 = 480 ≥ 224 → covered = 224
+/// Exact-value assertions on every leg; `total_money` byte-invariant; the sentinel
+/// nets to zero after each step; household income accumulates wage→dividend.
+#[test]
+fn combined_dividend_with_outlays_pays_wage_and_theta_on_value_added() {
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::{run_distribute_profit_at_tick, run_pay_wages_at_tick};
+
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+
+    // Post-settle holding: the firm was credited revenue and debited outlays before
+    // PayWages runs; 1_500 stands in for that net position.
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(1_500)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, market), Money(1_000));
+    let mut outlays = BuyerOutlays::default();
+    outlays.0.insert((f1, market), Money(300));
+
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default(); // labor_share=6_000
+    let (policies, input_pools) = theta_policy_fixture(f1, market); // θ=8_000, wc_target=600
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    let mut wage_telemetry = WageTelemetry::default();
+
+    // Step 1 — wages on value added (NOT on gross revenue).
+    run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_telemetry,
+        &mut ledger,
+        &config,
+        &outlays,
+    )
+    .unwrap();
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(1_080),
+        "after wages the firm holds 1_500 − wage(420): wage is 60% of VALUE ADDED \
+         (700), not of gross revenue (which would be 600)"
+    );
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(420),
+        "household income after the wage leg is exactly the value-added wage"
+    );
+    assert!(ledger.0.contains(&EconomyEvent::WagePaid {
+        firm: f1,
+        market,
+        amount: Money(420),
+    }));
+
+    // Step 2 — θ-dividend on the SAME (receipts, outlays) base, with wc retention.
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+        &outlays,
+        &policies,
+        &input_pools,
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "total_money byte-invariant across wage + dividend (transfers only)"
+    );
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(856),
+        "firm keeps 1_080 − covered(224): θ-dividend is computed on value-added \
+         profit (280), uncapped because 1_080 − wc_target(600) = 480 ≥ 224 — and \
+         the firm still retains more than its working-capital target"
+    );
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(644),
+        "household income accumulates wage(420) + dividend(224) — distribution must \
+         ADD to, not reset, the wage credit"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero after both legs"
+    );
+    assert!(ledger.0.contains(&EconomyEvent::ProfitDistributed {
+        firm: f1,
+        market,
+        amount: Money(224),
+    }));
+    assert!(
+        !ledger
+            .0
+            .iter()
+            .any(|e| matches!(e, EconomyEvent::MarketClearFailed { .. })),
+        "fully covered payout must not push an audited shortfall event"
+    );
+}
