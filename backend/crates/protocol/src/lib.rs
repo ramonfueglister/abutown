@@ -677,6 +677,13 @@ mod proto_roundtrip_tests {
                     unmet_demand_last_tick: 0,
                     unsold_supply_last_tick: 0,
                 }],
+                vitals: Some(EconomyVitals {
+                    population: 300,
+                    routed_citizens: 13,
+                    total_money: 1_000_000,
+                    routes_assigned: 7,
+                    routes_failed: 1,
+                }),
             })),
         };
         assert_roundtrip(&msg);
