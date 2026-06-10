@@ -3,12 +3,15 @@
 //! Grounding: Caiani et al. (2016) dividend share θ + liquidity buffer;
 //! Carvalho & Tahbaz-Salehi (2019) fixed-coefficient input demand.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_ecs::prelude::*;
 
+use crate::economy::pools::{affordable_qty, interval_elapsed};
 use crate::economy::{
-    EconomicActorId, EconomyError, GoodId, MarketId, Money, Quantity, checked_order_value,
+    AccountBook, DirtyMarketGoods, EconomicActorId, EconomyConfig, EconomyError, EconomyEvent,
+    GoodId, InventoryBook, MarketGoodKey, MarketGoods, MarketId, Money, NextOrderId, OrderBook,
+    Quantity, TradeLedger, checked_order_value, create_bid,
 };
 
 /// Authored payout policy per producer. NOT persisted — re-applied from the
@@ -55,4 +58,144 @@ pub(crate) fn wc_target(policy: ProducerPolicy, pool: &InputPool) -> Result<Mone
         .checked_mul(pool.in_qty.0)
         .ok_or(EconomyError::Overflow)?;
     checked_order_value(pool.max_price, Quantity(batch_qty))
+}
+
+/// Participation bound (§5.4): never bid more per input unit than the expected
+/// output covers AFTER the labor share — keeps the wage flow payable at any
+/// accepted price.
+///
+/// Formula: `floor(p_out_ref * (10_000 − labor_share_bps) / 10_000 * out_qty / in_qty)`
+///
+/// A zero or negative reference price is an honest `ZeroPrice` error (propagated),
+/// never a default — every output market is seeded with a positive opening price.
+/// Zero or negative `in_qty` / `out_qty` is `InvalidOrder` (a seed bug).
+pub fn participation_bound(
+    p_out_ref: Money,
+    labor_share_bps: i128,
+    out_qty: Quantity,
+    in_qty: Quantity,
+) -> Result<Money, EconomyError> {
+    if p_out_ref.0 <= 0 {
+        return Err(EconomyError::ZeroPrice);
+    }
+    if in_qty.0 <= 0 || out_qty.0 <= 0 {
+        return Err(EconomyError::InvalidOrder);
+    }
+    let raw = (p_out_ref.0 as i128) * (10_000 - labor_share_bps) / 10_000 * (out_qty.0 as i128)
+        / (in_qty.0 as i128);
+    Ok(Money(
+        i64::try_from(raw).map_err(|_| EconomyError::Overflow)?,
+    ))
+}
+
+/// Leontief derived demand: for each input pool (keys-first iteration), rewrite
+/// `max_price` from the participation bound (§5.4), size `desired = batches_target *
+/// in_qty − held` (floored at 0), cap by affordability, and place a bid via the SAME
+/// `create_bid` path as consumer demand pools.
+///
+/// Mirrors the structure of `generate_pool_orders_at_tick`:
+/// - dormant-market skip (cursor untouched)
+/// - interval guard (cursor untouched)
+/// - `OrderRejected { reason: InsufficientFunds }` when affordable == 0 (cash=0 or
+///   max_price=0 after the bound computation)
+/// - cursor (`last_generated_tick`) stamped after the bid/rejection/stocked-skip
+///
+/// **Mismatch invariant (fail-fast):** every `InputPool` entry MUST have a matching
+/// `ProducerPolicy`. An absent policy is `Err(EconomyError::InvalidOrder)` — same
+/// doctrine as `run_distribute_profit_at_tick` (wages.rs): partial state is a
+/// config-revert (#83 class), surfaces as an error rather than a silent default.
+///
+/// **Zero desired = fully stocked:** when `held >= batches_target * in_qty`, `desired`
+/// is floored to 0 and the pool is skipped (no bid, no OrderRejected event). The
+/// cursor IS stamped so the next generation fires on schedule.
+#[allow(clippy::too_many_arguments)]
+pub fn run_generate_input_orders_at_tick(
+    accounts: &mut AccountBook,
+    orders: &mut OrderBook,
+    inventory: &InventoryBook,
+    ledger: &mut TradeLedger,
+    dirty: &mut DirtyMarketGoods,
+    next: &mut NextOrderId,
+    input_pools: &mut InputPools,
+    policies: &ProducerPolicies,
+    market_goods: &MarketGoods,
+    config: &EconomyConfig,
+    current_tick: u64,
+    ttl_ticks: u64,
+    dormant: &BTreeSet<MarketId>,
+) -> Result<(), EconomyError> {
+    let labor_share = config.validated_labor_share_bps()?;
+    let actors: Vec<EconomicActorId> = input_pools.0.keys().copied().collect();
+    for actor in actors {
+        let mut pool = input_pools.0[&actor];
+
+        // dormant-market skip: no orders, cursor untouched
+        if dormant.contains(&pool.market) {
+            continue;
+        }
+        // interval guard: not yet due, cursor untouched
+        if !interval_elapsed(pool.last_generated_tick, current_tick, pool.interval_ticks) {
+            continue;
+        }
+
+        // Mismatch fail-fast: InputPool without matching ProducerPolicy is a config bug.
+        let policy = policies
+            .0
+            .get(&actor)
+            .copied()
+            .ok_or(EconomyError::InvalidOrder)?;
+
+        // Participation bound from output reference price.
+        let p_out_ref = market_goods
+            .0
+            .get(&MarketGoodKey {
+                market: pool.market,
+                good: pool.out_good,
+            })
+            .ok_or(EconomyError::ZeroPrice)?
+            .ewma_reference_price;
+        pool.max_price = participation_bound(p_out_ref, labor_share, pool.out_qty, pool.in_qty)?;
+
+        // Leontief desired quantity: batches_target * in_qty − held (floored at 0).
+        let target_qty = Quantity(
+            i64::from(policy.batches_target)
+                .checked_mul(pool.in_qty.0)
+                .ok_or(EconomyError::Overflow)?,
+        );
+        let held = inventory.balance(actor, pool.good).available;
+        let desired = Quantity((target_qty.0 - held.0).max(0));
+
+        if desired.0 > 0 && pool.max_price.0 > 0 {
+            // Cap by what the actor can afford at max_price.
+            let affordable = affordable_qty(accounts.account(actor).available, pool.max_price)?;
+            let capped = Quantity(desired.0.min(affordable.0));
+            if capped.0 <= 0 {
+                ledger.0.push(EconomyEvent::OrderRejected {
+                    actor,
+                    market: pool.market,
+                    good: pool.good,
+                    reason: EconomyError::InsufficientFunds,
+                });
+            } else {
+                create_bid(
+                    accounts,
+                    orders,
+                    ledger,
+                    dirty,
+                    next,
+                    current_tick,
+                    actor,
+                    pool.market,
+                    pool.good,
+                    capped,
+                    pool.max_price,
+                    ttl_ticks,
+                )?;
+            }
+        }
+        // Stamp cursor: stocked (desired==0) OR bid/rejected — all paths stamp.
+        pool.last_generated_tick = Some(current_tick);
+        input_pools.0.insert(actor, pool);
+    }
+    Ok(())
 }

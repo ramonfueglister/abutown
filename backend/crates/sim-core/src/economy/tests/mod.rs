@@ -18,6 +18,7 @@ mod persist;
 mod plugin;
 mod pools;
 mod pricing;
+mod producers;
 mod production;
 mod rationing;
 mod seed;

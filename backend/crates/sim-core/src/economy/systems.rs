@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
 
+use crate::economy::producers::run_generate_input_orders_at_tick;
 use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, BuyerOutlays, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError,
@@ -319,6 +320,11 @@ pub fn expire_orders_system(
     );
 }
 
+/// Generate both consumer/supplier pool orders AND Leontief input orders in a single
+/// system, sharing the same dormant-market set and TTL. The two passes are independent
+/// (consumer/supply pools do not overlap with input pools) and use the same fail-fast
+/// `.expect` convention: an `Err` here is a bug (overflow, zero price, or mismatch)
+/// that must surface loudly rather than silently drop orders.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_pool_orders_system(
     tick: Res<Tick>,
@@ -333,6 +339,9 @@ pub fn generate_pool_orders_system(
     mut next: ResMut<NextOrderId>,
     mut demand: ResMut<DemandPools>,
     mut supply: ResMut<SupplyPools>,
+    mut input_pools: ResMut<InputPools>,
+    policies: Res<ProducerPolicies>,
+    market_goods: Res<MarketGoods>,
 ) {
     generate_pool_orders_at_tick(
         &mut accounts,
@@ -350,6 +359,24 @@ pub fn generate_pool_orders_system(
     )
     .expect(
         "generate_pool_orders_at_tick: an Err (Overflow from a too-large capita_factor, or ZeroPrice) is a bug/mis-scale — fail loud rather than silently drop orders (OrderRejected for insufficient funds/goods is a ledger event, not an Err)",
+    );
+    run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        tick.0,
+        config.default_order_ttl_ticks,
+        &dormant.0,
+    )
+    .expect(
+        "run_generate_input_orders_at_tick: an Err (ZeroPrice, Overflow, or InputPool/ProducerPolicy mismatch) is a bug — fail loud rather than silently drop input orders",
     );
 }
 
