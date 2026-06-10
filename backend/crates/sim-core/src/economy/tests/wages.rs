@@ -2458,3 +2458,106 @@ fn self_trade_nets_value_added_to_zero() {
     let inc: i64 = demand.0.values().map(|p| p.income_last_tick.0).sum();
     assert_eq!(inc, 0, "self-trade: value_added == 0 → no wage income");
 }
+
+/// When a policy firm's input pool has `max_price == 0` (participation bound not yet
+/// discovered — the market has been dormant since seed), `run_distribute_profit_at_tick`
+/// must retain everything conservatively: no transfer, no `ProfitDistributed` event, no
+/// `MarketClearFailed` event, and no `Err`. Distribution resumes once the
+/// order-generation pass writes a positive participation bound.
+#[test]
+fn unpriced_input_pool_retains_everything_without_event() {
+    use crate::economy::EconomyConfig;
+    use crate::economy::producers::{InputPool, InputPools, ProducerPolicies, ProducerPolicy};
+    use crate::economy::wages::run_distribute_profit_at_tick;
+
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+
+    // Firm has sold and holds post-wage profit.
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(400)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, market), Money(1_000));
+
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default();
+
+    // Policy is present but max_price == 0 (bound never computed — dormant market).
+    let mut policies = ProducerPolicies::default();
+    policies.0.insert(
+        f1,
+        ProducerPolicy {
+            theta_bps: 8_000,
+            batches_target: 2,
+        },
+    );
+    let mut input_pools = InputPools::default();
+    input_pools.0.insert(
+        f1,
+        InputPool {
+            actor: f1,
+            market,
+            good: GOOD_FOOD,
+            in_qty: Quantity(1_000),
+            out_qty: Quantity(500),
+            out_good: GOOD_TOOLS,
+            interval_ticks: 1,
+            last_generated_tick: None,
+            max_price: Money::ZERO, // bound never discovered
+        },
+    );
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+
+    // Must not return Err — the unpriced-pool path must silently skip distribution.
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+        &BuyerOutlays::default(),
+        &policies,
+        &input_pools,
+    )
+    .expect("unpriced pool must skip gracefully, not return Err");
+
+    // Money byte-invariant.
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant: no transfer when pool is unpriced"
+    );
+    // Firm retains everything — no distribution.
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(400),
+        "firm retains all cash when input pool has no priced bound"
+    );
+    // Sentinel cleared (no stranded cash).
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    // No income transferred to households.
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money::ZERO,
+        "no dividend income to household when pool is unpriced"
+    );
+    // No events emitted — retention is policy-explained, not an anomaly.
+    assert!(
+        ledger.0.is_empty(),
+        "no ProfitDistributed and no MarketClearFailed when pool is unpriced, got {:?}",
+        ledger.0
+    );
+}

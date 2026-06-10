@@ -267,3 +267,55 @@ fn input_order_rejected_without_funds() {
         "cursor stamped even after OrderRejected"
     );
 }
+
+/// An `InputPool` entry without a matching `ProducerPolicies` entry is a config-revert
+/// (#83 class). `run_generate_input_orders_at_tick` must fail fast with
+/// `Err(EconomyError::InvalidOrder)` — same fail-fast doctrine as the dividend path.
+#[test]
+fn input_pool_without_policy_errors_loudly() {
+    let actor = EconomicActorId(9_004);
+    let market = MarketId(4);
+    let mut accounts = AccountBook::default();
+    let inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut input_pools = InputPools::default();
+    let mut market_goods = MarketGoods::default();
+    let config = crate::economy::EconomyConfig::default();
+
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    let out_key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    market_goods.0.insert(out_key, seeded_market_good(market));
+
+    // InputPool present for actor — but NO ProducerPolicies entry.
+    input_pools.0.insert(actor, input_pool(actor, market));
+    let policies = ProducerPolicies::default(); // intentionally empty
+
+    let result = run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        1,
+        10,
+        &BTreeSet::new(),
+    );
+
+    assert_eq!(
+        result,
+        Err(crate::economy::EconomyError::InvalidOrder),
+        "InputPool without matching ProducerPolicy must fail fast (got {:?})",
+        result
+    );
+}

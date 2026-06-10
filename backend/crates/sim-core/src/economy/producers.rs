@@ -53,6 +53,12 @@ pub struct InputPools(pub BTreeMap<EconomicActorId, InputPool>);
 /// quantity product is `checked_mul`-guarded; a non-positive `max_price` surfaces
 /// loudly as `NegativeMoney`/`ZeroPrice` (a seeded pool's participation bound is
 /// validated/recomputed > 0 — anything else is a seed or generation bug).
+///
+/// **Callers must guard `max_price > 0` before invoking.** The dividend path
+/// (`run_distribute_profit_at_tick` in wages.rs) checks `pool.max_price.0 <= 0` and
+/// retains conservatively rather than calling this function, so `wc_target` itself
+/// stays strict: any `max_price <= 0` reaching it is a caller bug, not a recoverable
+/// state.
 pub(crate) fn wc_target(policy: ProducerPolicy, pool: &InputPool) -> Result<Money, EconomyError> {
     let batch_qty = i64::from(policy.batches_target)
         .checked_mul(pool.in_qty.0)
@@ -66,10 +72,17 @@ pub(crate) fn wc_target(policy: ProducerPolicy, pool: &InputPool) -> Result<Mone
 ///
 /// Formula: `floor(p_out_ref * (10_000 − labor_share_bps) / 10_000 * out_qty / in_qty)`
 ///
+/// **Double-floor note:** the integer division `/10_000` floors the labor-adjusted
+/// output price before multiplying by `out_qty/in_qty`, and then `/in_qty` floors
+/// again. This is intentional and conservative (the bound never over-estimates what
+/// the output covers), consistent with the "never overbid" doctrine. Callers that
+/// need the exact rational bound can reconstruct it, but for order placement the
+/// conservative floor is correct.
+///
 /// A zero or negative reference price is an honest `ZeroPrice` error (propagated),
 /// never a default — every output market is seeded with a positive opening price.
 /// Zero or negative `in_qty` / `out_qty` is `InvalidOrder` (a seed bug).
-pub fn participation_bound(
+pub(crate) fn participation_bound(
     p_out_ref: Money,
     labor_share_bps: i128,
     out_qty: Quantity,
@@ -96,8 +109,13 @@ pub fn participation_bound(
 /// Mirrors the structure of `generate_pool_orders_at_tick`:
 /// - dormant-market skip (cursor untouched)
 /// - interval guard (cursor untouched)
-/// - `OrderRejected { reason: InsufficientFunds }` when affordable == 0 (cash=0 or
-///   max_price=0 after the bound computation)
+/// - `OrderRejected { reason: InsufficientFunds }` when affordable == 0 (cash = 0).
+///   When `max_price.0 <= 0` after the bound computation the `if desired.0 > 0 &&
+///   pool.max_price.0 > 0` guard silently skips ordering for this interval; the cursor
+///   IS stamped so the next generation fires on schedule. This is not an error: it means
+///   the output reference price dropped to zero (market structurally unviable), which
+///   will surface downstream as starved production. Price signals can recover next
+///   interval when the output price rises.
 /// - cursor (`last_generated_tick`) stamped after the bid/rejection/stocked-skip
 ///
 /// **Mismatch invariant (fail-fast):** every `InputPool` entry MUST have a matching

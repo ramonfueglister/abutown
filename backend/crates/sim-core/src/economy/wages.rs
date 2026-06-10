@@ -213,6 +213,13 @@ pub fn run_pay_wages_at_tick(
 /// working capital. This function returns `EconomyError::InvalidOrder` for any such
 /// mismatch instead of falling back to #75 defaults.
 ///
+/// **Unpriced pool guard:** when `pool.max_price.0 <= 0` (bound never yet discovered
+/// because the market has been dormant since seed, or structurally zero), `wc_target`
+/// would receive a zero/negative price and surface `ZeroPrice` — a server panic via the
+/// caller's `?`. Instead: retain everything conservatively, emit no event (the retention
+/// is policy-explained: without a priced basis for a working-capital target, the
+/// distribution is deferred until the order-generation pass writes a positive bound).
+///
 /// SHORTFALL SEMANTICS (no-fallback discipline): withholding cash up to `wc_target` is
 /// the WANTED liquidity buffer, not an anomaly — a policy firm's shortfall is by
 /// construction always explained by it (when capped it retains exactly `wc_target`;
@@ -252,6 +259,14 @@ pub fn run_distribute_profit_at_tick(
         let profit = value_added.checked_sub(wage)?; // wage <= value_added ⇒ profit >= 0
         let (theta_bps, target, has_policy) =
             match (policies.0.get(&firm), input_pools.0.get(&firm)) {
+                (Some(_policy), Some(pool)) if pool.max_price.0 <= 0 => {
+                    // Participation bound never discovered (dormant-market seed state) or
+                    // structurally zero: retain everything conservatively. wc_target would
+                    // receive a zero/negative price and return ZeroPrice — a server panic.
+                    // No event: retention is policy-explained; distribution resumes once the
+                    // order-generation pass writes a positive participation bound.
+                    continue;
+                }
                 (Some(policy), Some(pool)) => (
                     i128::from(policy.theta_bps),
                     wc_target(*policy, pool)?,
