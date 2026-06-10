@@ -199,9 +199,10 @@ pub fn run_pay_wages_at_tick(
 /// minus this tick's buyer outlays for the same `(firm, market)`, floored at zero) with
 /// identical flooring — so `profit = value_added − wage >= 0` (labor_share <= 10_000).
 /// The payout share θ comes from the firm's `ProducerPolicy.theta_bps`, and the firm
-/// retains a working-capital buffer `wc_target(policy, pool)` — the settle-value of
-/// `batches_target` input batches at the pool's participation bound (Caiani-style
-/// self-financing of next inputs): `intended = floor(profit·θ/10_000)`,
+/// retains a working-capital buffer `wc_target(policy, pool, capita_factor)` — the
+/// settle-value of `batches_target` capita-scaled input batches at the pool's
+/// participation bound (Caiani-style self-financing of next inputs; factor 1 is
+/// byte-identical): `intended = floor(profit·θ/10_000)`,
 /// `covered = min(intended, max(held − wc_target, 0))`. Actors WITHOUT a policy
 /// (no `ProducerPolicies` + `InputPools` entry) keep the #75 behavior byte-identically:
 /// θ = config `dividend_share_bps` (default 10_000 → dividend == profit, the firm
@@ -245,6 +246,7 @@ pub fn run_distribute_profit_at_tick(
     outlays: &BuyerOutlays,
     policies: &ProducerPolicies,
     input_pools: &InputPools,
+    capita_factor: i64,
 ) -> Result<(), EconomyError> {
     let labor_share = config.validated_labor_share_bps()?;
     let dividend_share = config.validated_dividend_share_bps()?;
@@ -269,7 +271,7 @@ pub fn run_distribute_profit_at_tick(
                 }
                 (Some(policy), Some(pool)) => (
                     i128::from(policy.theta_bps),
-                    wc_target(*policy, pool)?,
+                    wc_target(*policy, pool, capita_factor)?,
                     true,
                 ),
                 // No policy AND no input-pool: config-θ (default 10_000) and no buffer —

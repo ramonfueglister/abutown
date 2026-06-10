@@ -1397,6 +1397,7 @@ fn distribute_profit_conserves_money_and_drains_firm_to_zero() {
         &BuyerOutlays::default(),
         &ProducerPolicies::default(),
         &InputPools::default(),
+        1,
     )
     .unwrap();
 
@@ -1459,6 +1460,7 @@ fn distribute_profit_underfunded_firm_books_only_covered_and_audits() {
         &BuyerOutlays::default(),
         &ProducerPolicies::default(),
         &InputPools::default(),
+        1,
     )
     .expect("the function itself returns Ok — the shortfall is surfaced via an audited event, not an Err");
 
@@ -1532,6 +1534,7 @@ fn distribute_profit_zero_dividend_share_is_noop() {
         &BuyerOutlays::default(),
         &ProducerPolicies::default(),
         &InputPools::default(),
+        1,
     )
     .unwrap();
     assert_eq!(accounts.total_money().unwrap(), before);
@@ -1575,6 +1578,7 @@ fn distribute_profit_does_not_reset_income() {
         &BuyerOutlays::default(),
         &ProducerPolicies::default(),
         &InputPools::default(),
+        1,
     )
     .unwrap();
     assert_eq!(
@@ -1653,6 +1657,7 @@ fn dividend_theta_caps_at_working_capital_target() {
         &BuyerOutlays::default(),
         &policies,
         &input_pools,
+        1,
     )
     .unwrap();
 
@@ -1684,6 +1689,60 @@ fn dividend_theta_caps_at_working_capital_target() {
             .iter()
             .any(|e| matches!(e, EconomyEvent::MarketClearFailed { .. })),
         "working-capital capping must NOT push an audited shortfall event"
+    );
+}
+
+#[test]
+fn dividend_retains_capita_scaled_working_capital_target() {
+    // Per-capita scaling: at capita_factor=3 the fixture's wc_target triples,
+    // 300·(2·1_000·3)/1_000 = 1_800 (production consumes in_qty×factor per batch, so
+    // the buffer must cover the scaled batches). cash=2_000; revenue=1_000 →
+    // wage=600, profit=400, intended=floor(400·0.8)=320 > cash − wc_target = 200
+    // → dividend == 200, the firm retains exactly the SCALED target 1_800.
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(f1, Money(2_000)).unwrap();
+    let mut receipts = SellerReceipts::default();
+    receipts.0.insert((f1, market), Money(1_000));
+    let mut demand = DemandPools::default();
+    demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+    let household = HouseholdSector {
+        population: 1_000_000,
+        pool_weights: BTreeMap::from([(c1, 1)]),
+    };
+    let config = EconomyConfig::default(); // labor_share=6_000, dividend_share=10_000
+    let (policies, input_pools) = theta_policy_fixture(f1, market);
+
+    let before = accounts.total_money().unwrap();
+    let mut ledger = TradeLedger::default();
+    run_distribute_profit_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut ledger,
+        &config,
+        &BuyerOutlays::default(),
+        &policies,
+        &input_pools,
+        3, // capita_factor
+    )
+    .unwrap();
+
+    assert_eq!(accounts.total_money().unwrap(), before, "byte-invariant");
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(1_800),
+        "the firm retains exactly the capita-scaled wc_target = 600 × 3"
+    );
+    assert_eq!(
+        demand.0[&c1].income_last_tick,
+        Money(200),
+        "households receive the capped dividend cash − scaled wc_target"
     );
 }
 
@@ -1722,6 +1781,7 @@ fn dividend_zero_when_cash_below_target() {
         &BuyerOutlays::default(),
         &policies,
         &input_pools,
+        1,
     )
     .unwrap();
 
@@ -1779,6 +1839,7 @@ fn actors_without_policy_distribute_like_before() {
         &BuyerOutlays::default(),
         &policies,
         &input_pools,
+        1,
     )
     .unwrap();
 
@@ -1846,6 +1907,7 @@ fn mismatched_policy_pool_state_errors_loudly() {
             &BuyerOutlays::default(),
             &policies,
             &input_pools,
+            1,
         );
         assert_eq!(
             result,
@@ -1885,6 +1947,7 @@ fn mismatched_policy_pool_state_errors_loudly() {
             &BuyerOutlays::default(),
             &policies,
             &input_pools,
+            1,
         );
         assert_eq!(
             result,
@@ -2527,6 +2590,7 @@ fn unpriced_input_pool_retains_everything_without_event() {
         &BuyerOutlays::default(),
         &policies,
         &input_pools,
+        1,
     )
     .expect("unpriced pool must skip gracefully, not return Err");
 

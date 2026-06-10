@@ -119,6 +119,7 @@ fn input_order_sizes_to_batches_target_minus_held() {
         1,
         10,
         &BTreeSet::new(),
+        1,
     )
     .unwrap();
 
@@ -136,6 +137,65 @@ fn input_order_sizes_to_batches_target_minus_held() {
         input_pools.0[&actor].last_generated_tick,
         Some(1),
         "cursor stamped on tick 1"
+    );
+}
+
+/// Per-capita scaling: at capita_factor=3 the Leontief target is
+/// batches_target*in_qty*3 = 2*10*3 = 60, so with held=5 the bid is 55. Production
+/// consumes in_qty×factor per batch (production.rs), so an unscaled order target
+/// would starve it — this is the live-world inertness regression (factor ~30).
+#[test]
+fn input_order_scales_target_by_capita_factor() {
+    let actor = EconomicActorId(9_005);
+    let market = MarketId(5);
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut input_pools = InputPools::default();
+    let mut policies = ProducerPolicies::default();
+    let mut market_goods = MarketGoods::default();
+    let config = crate::economy::EconomyConfig::default();
+
+    // Seed funds (large enough to afford desired=55 at bound=400: need 55*400/1000=22)
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    inventory.deposit(actor, GOOD_WOOD, Quantity(5)).unwrap();
+
+    let out_key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    market_goods.0.insert(out_key, seeded_market_good(market));
+
+    policies.0.insert(actor, producer_policy()); // batches_target=2
+    input_pools.0.insert(actor, input_pool(actor, market));
+
+    run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        1,
+        10,
+        &BTreeSet::new(),
+        3, // capita_factor
+    )
+    .unwrap();
+
+    assert_eq!(orders.bids.len(), 1, "exactly one bid placed");
+    let bid = orders.bids.values().next().unwrap();
+    assert_eq!(
+        bid.qty_remaining,
+        Quantity(55),
+        "bid qty = batches_target*in_qty*capita_factor - held = 2*10*3 - 5 = 55"
     );
 }
 
@@ -183,6 +243,7 @@ fn input_order_skipped_when_stocked() {
         1,
         10,
         &BTreeSet::new(),
+        1,
     )
     .unwrap();
 
@@ -244,6 +305,7 @@ fn input_order_rejected_without_funds() {
         1,
         10,
         &BTreeSet::new(),
+        1,
     )
     .unwrap();
 
@@ -310,6 +372,7 @@ fn input_pool_without_policy_errors_loudly() {
         1,
         10,
         &BTreeSet::new(),
+        1,
     );
 
     assert_eq!(

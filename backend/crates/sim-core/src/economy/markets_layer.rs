@@ -265,7 +265,13 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
         let out_good = GoodId(spec.out_good);
         world
             .resource_mut::<AccountBook>()
-            .deposit(actor, Money(spec.opening_cash))
+            .deposit(
+                actor,
+                Money(
+                    i64::try_from((spec.opening_cash as i128) * (seed_factor as i128))
+                        .expect("seed: producer opening_cash × capita factor overflows i64"),
+                ),
+            )
             .expect("seed: producer opening cash");
         world.resource_mut::<ProductionPools>().0.insert(
             actor,

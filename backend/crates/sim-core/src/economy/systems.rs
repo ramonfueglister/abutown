@@ -374,6 +374,7 @@ pub fn generate_pool_orders_system(
         tick.0,
         config.default_order_ttl_ticks,
         &dormant.0,
+        capita.0,
     )
     .expect(
         "run_generate_input_orders_at_tick: an Err (ZeroPrice, Overflow, or InputPool/ProducerPolicy mismatch) is a bug — fail loud rather than silently drop input orders",
@@ -515,6 +516,7 @@ pub fn run_distribute_profit_system(
     outlays: Res<BuyerOutlays>,
     policies: Res<ProducerPolicies>,
     input_pools: Res<InputPools>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut accounts: ResMut<AccountBook>,
     mut demand: ResMut<DemandPools>,
     mut ledger: ResMut<TradeLedger>,
@@ -529,6 +531,7 @@ pub fn run_distribute_profit_system(
         &outlays,
         &policies,
         &input_pools,
+        capita.0,
     ) {
         assert_ne!(
             reason,

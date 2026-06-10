@@ -50,19 +50,29 @@ pub struct InputPools(pub BTreeMap<EconomicActorId, InputPool>);
 /// at the current participation bound. Computed with the SAME scale arithmetic as
 /// order settlement (`checked_order_value`, `price·qty / ECONOMY_SCALE` in i128),
 /// so the buffer for n batches equals the settle value of buying them. The batch
-/// quantity product is `checked_mul`-guarded; a non-positive `max_price` surfaces
-/// loudly as `NegativeMoney`/`ZeroPrice` (a seeded pool's participation bound is
-/// validated/recomputed > 0 — anything else is a seed or generation bug).
+/// quantity is capita-scaled (`×capita_factor`, factor 1 byte-identical) because
+/// production consumes `in_qty·capita_factor` per batch (production.rs) — the buffer
+/// must cover the SCALED batches or the dividend drains the firm's input budget.
+/// A non-positive `max_price` surfaces loudly as `NegativeMoney`/`ZeroPrice` (a
+/// seeded pool's participation bound is validated/recomputed > 0 — anything else
+/// is a seed or generation bug).
 ///
 /// **Callers must guard `max_price > 0` before invoking.** The dividend path
 /// (`run_distribute_profit_at_tick` in wages.rs) checks `pool.max_price.0 <= 0` and
 /// retains conservatively rather than calling this function, so `wc_target` itself
 /// stays strict: any `max_price <= 0` reaching it is a caller bug, not a recoverable
 /// state.
-pub(crate) fn wc_target(policy: ProducerPolicy, pool: &InputPool) -> Result<Money, EconomyError> {
-    let batch_qty = i64::from(policy.batches_target)
-        .checked_mul(pool.in_qty.0)
-        .ok_or(EconomyError::Overflow)?;
+pub(crate) fn wc_target(
+    policy: ProducerPolicy,
+    pool: &InputPool,
+    capita_factor: i64,
+) -> Result<Money, EconomyError> {
+    let batch_qty = i64::try_from(
+        i128::from(policy.batches_target)
+            * (pool.in_qty.0 as i128)
+            * (capita_factor.max(1) as i128),
+    )
+    .map_err(|_| EconomyError::Overflow)?;
     checked_order_value(pool.max_price, Quantity(batch_qty))
 }
 
@@ -103,8 +113,11 @@ pub(crate) fn participation_bound(
 
 /// Leontief derived demand: for each input pool (keys-first iteration), rewrite
 /// `max_price` from the participation bound (§5.4), size `desired = batches_target *
-/// in_qty − held` (floored at 0), cap by affordability, and place a bid via the SAME
-/// `create_bid` path as consumer demand pools.
+/// in_qty * capita_factor − held` (floored at 0), cap by affordability, and place a
+/// bid via the SAME `create_bid` path as consumer demand pools. The target is
+/// capita-scaled (factor 1 byte-identical) because production consumes
+/// `in_qty·capita_factor` per batch (production.rs) — unscaled orders would top out
+/// below one scaled batch and production would never fire.
 ///
 /// Mirrors the structure of `generate_pool_orders_at_tick`:
 /// - dormant-market skip (cursor untouched)
@@ -141,6 +154,7 @@ pub fn run_generate_input_orders_at_tick(
     current_tick: u64,
     ttl_ticks: u64,
     dormant: &BTreeSet<MarketId>,
+    capita_factor: i64,
 ) -> Result<(), EconomyError> {
     let labor_share = config.validated_labor_share_bps()?;
     let actors: Vec<EconomicActorId> = input_pools.0.keys().copied().collect();
@@ -174,11 +188,15 @@ pub fn run_generate_input_orders_at_tick(
             .ewma_reference_price;
         pool.max_price = participation_bound(p_out_ref, labor_share, pool.out_qty, pool.in_qty)?;
 
-        // Leontief desired quantity: batches_target * in_qty − held (floored at 0).
+        // Leontief desired quantity: batches_target * in_qty * capita_factor − held
+        // (floored at 0). Same i128 scale pattern as pools.rs / production.rs.
         let target_qty = Quantity(
-            i64::from(policy.batches_target)
-                .checked_mul(pool.in_qty.0)
-                .ok_or(EconomyError::Overflow)?,
+            i64::try_from(
+                i128::from(policy.batches_target)
+                    * (pool.in_qty.0 as i128)
+                    * (capita_factor.max(1) as i128),
+            )
+            .map_err(|_| EconomyError::Overflow)?,
         );
         let held = inventory.balance(actor, pool.good).available;
         let desired = Quantity((target_qty.0 - held.0).max(0));

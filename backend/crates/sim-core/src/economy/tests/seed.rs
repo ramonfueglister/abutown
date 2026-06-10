@@ -342,12 +342,16 @@ fn seed_scales_opening_cash_and_inventory_by_capita_factor() {
 
     crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
 
-    // ── Cash: Σ(opening_cash × 3) across all demand specs ────────────────────
+    // ── Cash: Σ(opening_cash × 3) across all demand AND producer specs ───────
+    // Producers mint opening cash too (the only other seed-mint site); their
+    // input orders run at capita_factor× throughput, so the mint scales the
+    // same way as the demand actors'.
     let expected_cash: i64 = bundle
         .markets
         .demand
         .iter()
         .map(|d| d.opening_cash * 3)
+        .chain(bundle.markets.producers.iter().map(|p| p.opening_cash * 3))
         .sum();
     let total = world
         .resource::<AccountBook>()
