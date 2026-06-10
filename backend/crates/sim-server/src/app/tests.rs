@@ -1261,7 +1261,7 @@ fn economy_snapshot_carries_vitals() {
         .0;
     assert_eq!(
         actual_total, expected_total_money,
-        "seeded total_money must equal 3 × opening_cash × capita_factor"
+        "seeded total_money must equal (3 demand + 1 producer) × opening_cash × capita_factor"
     );
 
     let world_id = abutown_protocol::WorldId("abutopia".to_string());
