@@ -126,6 +126,11 @@ async function startRuntime(): Promise<void> {
     onEconomyState: (state) => {
       economyState = state;
     },
+    onTileKindSet: (event) => {
+      const key = `${event.x}:${event.y}`;
+      terrainKinds.set(key, { kind: event.kind as TerrainKind });
+      terrain.set(key, toRuntimeTerrain(event.kind as BaseWorldTerrainKind));
+    },
     viewport: {
       // Compose screen → render-world → tile so visibleChunks gets coords
       // in the same space the backend's `chunk_of` math operates on.

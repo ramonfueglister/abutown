@@ -331,10 +331,11 @@ import type {
   MobilityChunkSnapshot as MobilityChunkSnapshotProto,
   MobilitySnapshot as MobilitySnapshotProto,
   Stop as StopProto,
+  TileKindSetEvent,
   VehicleMobility as VehicleMobilityProto,
   WorldSummary as WorldSummaryProto,
 } from './proto/abutown_pb';
-import { Direction as DirectionProto, PersistenceHealthStatus, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
+import { Direction as DirectionProto, PersistenceHealthStatus, TileKind, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
 
 const DIRECTION_PROTO_TO_DTO: Record<number, DirectionDto> = {
   [DirectionProto.N]: 'n',
@@ -540,5 +541,56 @@ export function economySnapshotFromProto(p: EconomySnapshot): EconomySnapshotDto
     tick: Number(p.tick),
     markets: p.markets.map((m) => ({ marketId: m.marketId, name: m.name, tileX: m.tileX, tileY: m.tileY, wagePaidLastTick: Number(m.wagePaidLastTick) })),
     goods: p.goods.map((g) => ({ marketId: g.marketId, goodId: g.goodId, lastSettlementPrice: Number(g.lastSettlementPrice), ewmaReferencePrice: Number(g.ewmaReferencePrice), tradedQtyLastTick: Number(g.tradedQtyLastTick), unmetDemandLastTick: Number(g.unmetDemandLastTick), unsoldSupplyLastTick: Number(g.unsoldSupplyLastTick) })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WorldEvent DTO types + proto → DTO converter
+// ---------------------------------------------------------------------------
+
+export type TileKindSetEventDto = { x: number; y: number; kind: string; tick: number };
+
+/**
+ * Map the proto TileKind enum to the lowercase terrain string used by
+ * BaseWorldTerrainKind / TerrainKind in the frontend.
+ *
+ * ROAD and BUILDING_FOOTPRINT are not terrain-layer kinds — they travel on
+ * the transport/building layers. When a SetTileKindCommand resets the
+ * underlying terrain below those features, the proto sends GRASS (or WATER),
+ * not ROAD/BUILDING_FOOTPRINT. We fall back to 'grass' for completeness so
+ * the terrain map never holds a stale or undefined value.
+ */
+export function tileKindToTerrainString(kind: TileKind): string {
+  switch (kind) {
+    case TileKind.GRASS:
+      return 'grass';
+    case TileKind.WATER:
+      return 'water';
+    case TileKind.ROAD:
+    case TileKind.BUILDING_FOOTPRINT:
+    case TileKind.UNSPECIFIED:
+    default:
+      return 'grass';
+  }
+}
+
+/**
+ * Convert a `TileKindSetEvent` proto message to an absolute-coordinate DTO.
+ *
+ * Local index layout (verified against sim-core/src/base_world.rs:463-464):
+ *   for local_y in 0..chunk_size { for local_x in 0..chunk_size { … } }
+ * → row-major: local_index = local_y * chunk_size + local_x
+ * → local_x = local_index % chunk_size
+ * → local_y = Math.floor(local_index / chunk_size)
+ */
+export function tileKindSetEventFromProto(event: TileKindSetEvent, chunkSize: number): TileKindSetEventDto {
+  const coord = event.coord ?? { x: 0, y: 0 };
+  const localX = event.localIndex % chunkSize;
+  const localY = Math.floor(event.localIndex / chunkSize);
+  return {
+    x: coord.x * chunkSize + localX,
+    y: coord.y * chunkSize + localY,
+    kind: tileKindToTerrainString(event.kind),
+    tick: Number(event.tick),
   };
 }

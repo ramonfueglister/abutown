@@ -16,6 +16,7 @@ import {
 } from '../backend/mobilityClient';
 import type { MobilityOverlayState } from '../backend/mobilityState';
 import type { EconomyOverlayState } from '../backend/economyState';
+import type { TileKindSetEventDto } from '../backend/mobilityProtocol';
 import {
   mountCardHandView as mountCardHandViewRuntime,
   type CardHandViewOptions,
@@ -51,6 +52,7 @@ export type StartAppRuntimeOptions = {
   onInitialState: (initialState: AppRuntimeInitialState) => void;
   onMobilityState: (state: MobilityOverlayState) => void;
   onEconomyState?: (state: EconomyOverlayState) => void;
+  onTileKindSet?: (event: TileKindSetEventDto) => void;
   dependencies: AppRuntimeDependencies;
 };
 
@@ -97,6 +99,7 @@ export async function startAppRuntime(options: StartAppRuntimeOptions): Promise<
       initialState: required.state,
       onState: options.onMobilityState,
       onEconomyState: options.onEconomyState,
+      onTileKindSet: options.onTileKindSet,
       viewport: options.viewport,
     });
 

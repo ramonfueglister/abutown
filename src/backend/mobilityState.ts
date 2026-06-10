@@ -194,8 +194,9 @@ export function applyServerMessage(
     case 'economySnapshot':
       return state; // economy rides a separate overlay state; mobility ignores it
     case 'worldEvent':
-      // No mobility-side reducer; tile-kind set events are handled by the
-      // tile/chunk layer.
+      // No mobility-side reducer. TileKindSetEvent is consumed by the tile
+      // layer via the `onTileKindSet` bridge callback in mobilityClient.ts,
+      // which updates the `terrain` and `terrainKinds` maps in main.ts.
       return state;
     case 'error':
       // eslint-disable-next-line no-console
