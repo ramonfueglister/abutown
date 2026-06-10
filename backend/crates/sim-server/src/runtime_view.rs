@@ -10,6 +10,7 @@ use sim_core::economy::{EconomyEvent, EconomyPersistSnapshot};
 use sim_core::ids::ChunkCoord;
 use sim_core::mobility::MobilityPersistSnapshot;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::commands::{AppliedCommand, CommandRejection};
 use tokio::sync::oneshot;
@@ -75,7 +76,11 @@ pub struct RuntimeReadView {
     pub mobility_tick: u64,
     pub health: w::HealthResponse,
     pub world_summary: w::WorldSummary,
-    pub chunk_snapshots: HashMap<ChunkCoord, w::ChunkSnapshot>,
+    /// Tile snapshots are `Arc`-cached across views: a chunk whose
+    /// `ChunkVersion` is unchanged reuses the previous view's entry instead of
+    /// re-reading ~1024 tiles + re-encoding a proto every 100 ms tick
+    /// (2026-06-10 tick-cost design).
+    pub chunk_snapshots: HashMap<ChunkCoord, Arc<w::ChunkSnapshot>>,
     pub mobility_chunk_snapshots: HashMap<ChunkCoord, w::MobilityChunkSnapshot>,
     pub mobility_full_dto: w::MobilitySnapshot,
     pub per_chunk_deltas: Vec<w::MobilityChunkDelta>,

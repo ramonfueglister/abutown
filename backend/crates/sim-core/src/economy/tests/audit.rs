@@ -296,3 +296,241 @@ fn injected_money_drift_panics_the_audit() {
         .unwrap();
     schedule.run(&mut world); // tick 1: audit sees total changed → .expect panics
 }
+
+/// B1 (2026-06-10 tick-cost-and-event-retention design): the durable audit
+/// store keeps the financially meaningful events; high-frequency intra-tick
+/// mechanics stay in-memory/snapshot-tail only.
+#[test]
+fn is_audit_durable_classifies_every_variant() {
+    use crate::economy::{EconomyError, GoodId, OrderId};
+    let actor = EconomicActorId(1);
+    let market = MarketId(1);
+    let good = GoodId(1);
+
+    let durable = [
+        EconomyEvent::Trade {
+            market,
+            good,
+            buyer: actor,
+            seller: EconomicActorId(2),
+            qty: Quantity(1),
+            price: Money(1),
+            total: Money(1),
+        },
+        EconomyEvent::FinalConsumed {
+            actor,
+            good,
+            qty: Quantity(1),
+        },
+        EconomyEvent::OrderRejected {
+            actor,
+            market,
+            good,
+            reason: EconomyError::InsufficientFunds,
+        },
+        EconomyEvent::MarketClearFailed {
+            market,
+            good,
+            reason: EconomyError::InsufficientFunds,
+        },
+        EconomyEvent::TransportPaid {
+            actor,
+            amount: Money(1),
+        },
+        EconomyEvent::MacroFlow {
+            from_market: market,
+            to_market: MarketId(2),
+            good,
+            qty: Quantity(1),
+            price: Money(1),
+            transport: Money(0),
+        },
+        EconomyEvent::WagePaid {
+            firm: actor,
+            market,
+            amount: Money(1),
+        },
+        EconomyEvent::ProfitDistributed {
+            firm: actor,
+            market,
+            amount: Money(1),
+        },
+        EconomyEvent::TransportRebate { amount: Money(1) },
+        EconomyEvent::TickAudit {
+            tick: 1,
+            total_money: Money(1),
+        },
+    ];
+    for event in &durable {
+        assert!(
+            event.is_audit_durable(),
+            "{} must be audit-durable",
+            event.event_type()
+        );
+    }
+
+    let transient = [
+        EconomyEvent::OrderCreated {
+            order: OrderId(1),
+            actor,
+            market,
+            good,
+        },
+        EconomyEvent::OrderExpired {
+            order: OrderId(1),
+            actor,
+            market,
+            good,
+        },
+        EconomyEvent::CashLocked {
+            actor,
+            amount: Money(1),
+        },
+        EconomyEvent::CashReleased {
+            actor,
+            amount: Money(1),
+        },
+        EconomyEvent::GoodsLocked {
+            actor,
+            good,
+            qty: Quantity(1),
+        },
+        EconomyEvent::GoodsReleased {
+            actor,
+            good,
+            qty: Quantity(1),
+        },
+        EconomyEvent::Produced {
+            actor,
+            good,
+            qty: Quantity(1),
+        },
+        EconomyEvent::Consumed {
+            actor,
+            good,
+            qty: Quantity(1),
+        },
+        EconomyEvent::Regenerated {
+            actor,
+            good,
+            qty: Quantity(1),
+        },
+    ];
+    for event in &transient {
+        assert!(
+            !event.is_audit_durable(),
+            "{} must NOT be audit-durable",
+            event.event_type()
+        );
+    }
+}
+
+/// The flush-batch filter keeps durable events in order and collapses the
+/// per-tick `TickAudit` heartbeats to the LAST one of the batch — the durable
+/// conservation trace lands on the flush cadence (~5 s), not the tick cadence.
+#[test]
+fn durable_audit_subset_filters_and_keeps_last_tick_audit() {
+    use crate::economy::audit::durable_audit_subset;
+
+    let batch = vec![
+        EconomyEvent::TickAudit {
+            tick: 1,
+            total_money: Money(100),
+        },
+        EconomyEvent::CashLocked {
+            actor: EconomicActorId(1),
+            amount: Money(1),
+        },
+        EconomyEvent::WagePaid {
+            firm: EconomicActorId(2),
+            market: MarketId(1),
+            amount: Money(5),
+        },
+        EconomyEvent::TickAudit {
+            tick: 2,
+            total_money: Money(100),
+        },
+        EconomyEvent::Produced {
+            actor: EconomicActorId(3),
+            good: GOOD_TOOLS,
+            qty: Quantity(1),
+        },
+        EconomyEvent::TickAudit {
+            tick: 3,
+            total_money: Money(100),
+        },
+    ];
+
+    let durable = durable_audit_subset(&batch);
+    assert_eq!(
+        durable,
+        vec![
+            EconomyEvent::WagePaid {
+                firm: EconomicActorId(2),
+                market: MarketId(1),
+                amount: Money(5),
+            },
+            EconomyEvent::TickAudit {
+                tick: 3,
+                total_money: Money(100),
+            },
+        ],
+        "transient events dropped; only the last TickAudit of the batch survives"
+    );
+
+    assert!(
+        durable_audit_subset(&[]).is_empty(),
+        "empty batch stays empty"
+    );
+}
+
+/// B2 (2026-06-10 design): the audit store is prunable to a rolling row cap —
+/// `prune(world, keep_last)` retains only the most recent `keep_last` events.
+#[tokio::test]
+async fn in_memory_event_store_prune_keeps_last_n() {
+    use crate::persistence::EconomyEventStore;
+
+    let mut store = InMemoryEconomyEventStore::default();
+    let world = "test:prune";
+    for tick in 0..10u64 {
+        store
+            .append(
+                world,
+                tick,
+                &[EconomyEvent::WagePaid {
+                    firm: EconomicActorId(tick),
+                    market: MarketId(1),
+                    amount: Money(1),
+                }],
+            )
+            .await
+            .unwrap();
+    }
+    store
+        .append(
+            "test:other-world",
+            1,
+            &[EconomyEvent::TransportRebate { amount: Money(1) }],
+        )
+        .await
+        .unwrap();
+
+    let deleted = store.prune(world, 3).await.unwrap();
+    assert_eq!(deleted, 7, "prune reports the number of deleted rows");
+    let kept: Vec<u64> = store.events(world).iter().map(|(tick, _)| *tick).collect();
+    assert_eq!(
+        kept,
+        vec![7, 8, 9],
+        "only the newest keep_last events remain"
+    );
+    assert_eq!(
+        store.len("test:other-world"),
+        1,
+        "prune is scoped to the given world"
+    );
+
+    // Under-cap prune is a no-op.
+    let deleted = store.prune(world, 100).await.unwrap();
+    assert_eq!(deleted, 0);
+    assert_eq!(store.len(world), 3);
+}
