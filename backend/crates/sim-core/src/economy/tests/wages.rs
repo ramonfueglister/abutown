@@ -1991,16 +1991,27 @@ fn outlays_accumulate_across_fills_for_same_buyer_market() {
 
     let total_outlay = outlays.0.get(&(buyer, market)).copied().unwrap_or(Money::ZERO);
 
-    assert!(
-        first_outlay.0 > 0,
-        "first settle must record a positive outlay"
+    // Settlement price derivation (Anchored, seeded_state sets last=1_100):
+    //   Round 1: last=1_100 ∈ [ask=1_000, bid=1_500] → price = last = 1_100
+    //            outlay = price * qty / SCALE = 1_100 * 1_000 / 1_000 = 1_100
+    //   Round 2: last=1_100 ∈ [ask=1_000, bid=1_500] → price = last = 1_100
+    //            outlay = 1_100 * 2_000 / 1_000 = 2_200
+    // Accumulation must yield first + second = 1_100 + 2_200 = 3_300.
+    // An insert/overwrite bug would yield only the second fill's outlay (2_200),
+    // so the exact-sum assertion catches it while `total > first` would not.
+    let expected_first = Money(1_100);
+    let expected_second = Money(2_200);
+    assert_eq!(
+        first_outlay, expected_first,
+        "first settle outlay must be price*qty/SCALE = 1_000"
     );
-    assert!(
-        total_outlay.0 > first_outlay.0,
+    assert_eq!(
+        total_outlay,
+        Money(expected_first.0 + expected_second.0),
         "second settle must ACCUMULATE onto the existing outlay, not overwrite: \
-         total={} first={}",
-        total_outlay.0,
-        first_outlay.0
+         expected {}, got {}",
+        expected_first.0 + expected_second.0,
+        total_outlay.0
     );
 }
 
