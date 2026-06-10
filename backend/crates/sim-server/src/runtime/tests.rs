@@ -592,13 +592,6 @@ use sim_core::persistence::{
     build_chunk_snapshot,
 };
 
-fn tile_pulse(message: ServerMessageDto) -> TilePulseDeltaDto {
-    let ServerMessageDto::TilePulse(delta) = message else {
-        panic!("message should be a tile pulse");
-    };
-    delta
-}
-
 /// Regression for the live `routed=0` bug: the production hydrate path
 /// (`hydrate_from_stores`, used by every running server) must seed the economy
 /// markets BEFORE spawning agents, so the spawn-time binding guard in
@@ -684,27 +677,6 @@ fn runtime_returns_snapshot_for_abutopia_chunk() {
     assert!(runtime.chunk_snapshot(ChunkCoord { x: 0, y: 0 }).is_some());
     assert!(runtime.chunk_snapshot(ChunkCoord { x: 1, y: 0 }).is_some());
     assert!(runtime.chunk_snapshot(ChunkCoord { x: 7, y: 0 }).is_none());
-}
-
-#[test]
-fn runtime_pulses_loaded_abutopia_chunks_in_order() {
-    let mut runtime = SimulationRuntime::new();
-
-    let first = tile_pulse(runtime.next_pulse());
-    let second = tile_pulse(runtime.next_pulse());
-    let third = tile_pulse(runtime.next_pulse());
-    let fourth = tile_pulse(runtime.next_pulse());
-
-    assert_eq!(first.tick, 1);
-    assert_eq!(first.version, 1);
-    assert_eq!(first.coord, ChunkCoordDto { x: 0, y: 0 });
-    assert!(first.local_index < 1024);
-    assert_eq!(second.tick, 2);
-    assert_eq!(second.coord, ChunkCoordDto { x: 1, y: 0 });
-    assert_eq!(third.tick, 3);
-    assert_eq!(third.coord, ChunkCoordDto { x: 2, y: 0 });
-    assert_eq!(fourth.tick, 4);
-    assert_eq!(fourth.coord, ChunkCoordDto { x: 3, y: 0 });
 }
 
 #[tokio::test]

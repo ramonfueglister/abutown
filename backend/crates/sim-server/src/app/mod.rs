@@ -153,7 +153,7 @@ impl AppState {
     ) -> Self {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         let initial_view =
-            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None);
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), None);
         let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
         let view = Arc::new(arc_swap::ArcSwap::from_pointee(initial_view));
         let chunk_channels: Arc<DashMap<_, _>> = Arc::new(DashMap::new());
@@ -316,7 +316,10 @@ fn build_economy_snapshot(
     world_id: &abutown_protocol::WorldId,
     tick: u64,
 ) -> w::EconomySnapshot {
-    use sim_core::economy::{MarketGoods, Markets, WageTelemetry};
+    use sim_core::economy::{AccountBook, MarketGoods, Markets, WageTelemetry};
+    use sim_core::mobility::resources::{
+        AgentIdIndex, CitizenEconomicTargets, RouteAssignmentStats,
+    };
     use sim_core::routing::Graph;
     let markets_res = world.resource::<Markets>();
     let goods_res = world.resource::<MarketGoods>();
@@ -354,12 +357,33 @@ fn build_economy_snapshot(
             unsold_supply_last_tick: st.unsold_supply_last_tick.0,
         })
         .collect();
+    // Every caller's world installs EconomyPlugin + mobility (constructors at
+    // runtime/mod.rs:218/368), so absence of any of these resources is a
+    // programming error and must panic.
+    let vitals = {
+        let total_money = world
+            .resource::<AccountBook>()
+            .total_money()
+            .expect("tick audit guarantees a summable ledger")
+            .0;
+        let routed = world.resource::<CitizenEconomicTargets>().0.len() as u64;
+        let stats = *world.resource::<RouteAssignmentStats>();
+        let population = world.resource::<AgentIdIndex>().0.len() as u64;
+        Some(w::EconomyVitals {
+            population,
+            routed_citizens: routed,
+            total_money,
+            routes_assigned: stats.assigned,
+            routes_failed: stats.failed,
+        })
+    };
     w::EconomySnapshot {
         protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
         world_id: world_id.0.clone(),
         tick,
         markets,
         goods,
+        vitals,
     }
 }
 
@@ -369,7 +393,6 @@ fn build_read_view_from_runtime(
         sim_core::ids::ChunkCoord,
         sim_core::mobility::MobilityChunkDelta,
     >,
-    pulse_sequence: u64,
     prev: Option<&crate::runtime_view::RuntimeReadView>,
 ) -> crate::runtime_view::RuntimeReadView {
     let world_id = runtime.world_id_for_persist().clone();
@@ -453,7 +476,6 @@ fn build_read_view_from_runtime(
         mobility_chunk_snapshots,
         mobility_full_dto,
         per_chunk_deltas,
-        pulse_sequence,
         chunk_subscriber_counts,
         economy,
     }
@@ -1105,9 +1127,6 @@ async fn apply_mutation_owned(
     }
 }
 
-/// Sole owner of the SimulationRuntime. Drains pending mutations, ticks the
-/// world, fans out per-chunk deltas, publishes a new RuntimeReadView, and
-/// emits the legacy global tile pulse. All in one task so no lock is needed.
 /// Ticker for the simulation loop. `Delay` (instead of the tokio default
 /// `Burst`) means missed ticks accrue no catch-up debt: under sustained
 /// overload sim-time slows gracefully instead of queueing a backlog that
@@ -1131,6 +1150,9 @@ async fn pace_tick(ticker: &mut tokio::time::Interval) {
     tokio::task::yield_now().await;
 }
 
+/// Sole owner of the SimulationRuntime. Drains pending mutations, ticks the
+/// world, fans out per-chunk deltas, publishes a new RuntimeReadView, and
+/// broadcasts the per-tick economy snapshot. All in one task so no lock is needed.
 async fn tick_loop(
     mut runtime: SimulationRuntime,
     mut mutation_rx: tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>,
@@ -1189,40 +1211,10 @@ async fn tick_once(
     // Phase 3: publish the new RuntimeReadView for lock-free HTTP/WS readers.
     // The previous view feeds the version-gated tile-snapshot cache.
     let prev_view = view.load_full();
-    let new_view = build_read_view_from_runtime(
-        runtime,
-        &per_chunk,
-        prev_view.pulse_sequence + 1,
-        Some(&prev_view),
-    );
+    let new_view = build_read_view_from_runtime(runtime, &per_chunk, Some(&prev_view));
     view.store(Arc::new(new_view));
 
-    // Phase 4: legacy global tile pulse via the broadcast channel.
-    // next_pulse() still returns the serde DTO; convert it to the wire
-    // ServerMessage envelope here so the broadcast channel carries proto.
-    let pulse_legacy = runtime.next_pulse();
-    let pulse_msg = match pulse_legacy {
-        abutown_protocol::ServerMessageDto::TilePulse(p) => w::ServerMessage {
-            body: Some(w::server_message::Body::TilePulse(tile_pulse_dto_to_proto(
-                &p,
-            ))),
-        },
-        // next_pulse is documented to only return TilePulse; any other variant
-        // would be a programming error — emit an explicit Error envelope so
-        // it's visible on the wire rather than silently dropped.
-        other => {
-            tracing::error!(?other, "next_pulse returned non-TilePulse variant");
-            w::ServerMessage {
-                body: Some(w::server_message::Body::Error(w::ServerError {
-                    protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
-                    world_id: String::new(),
-                    code: "internal".into(),
-                    message: "next_pulse returned non-TilePulse variant".into(),
-                })),
-            }
-        }
-    };
-    let _ = deltas.send(pulse_msg);
+    // Phase 4: broadcast the per-tick economy snapshot.
     let economy_msg = w::ServerMessage {
         body: Some(w::server_message::Body::EconomySnapshot(
             view.load().economy.clone(),

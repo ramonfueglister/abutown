@@ -599,7 +599,7 @@ async fn persist_snapshots_once_rejects_empty_mobility_snapshots() {
         economy_event_store: Arc::new(Mutex::new(Box::new(InMemoryEconomyEventStore::default()))),
         chunk_channels: Arc::new(DashMap::new()),
         view: Arc::new(arc_swap::ArcSwap::from_pointee(
-            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None),
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), None),
         )),
         mutations: mutation_tx,
         base_world: Arc::new(BaseWorldResponse::from(&base_world)),
@@ -798,7 +798,7 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
 
     let runtime = SimulationRuntime::new();
     let initial_view =
-        build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None);
+        build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), None);
     let (deltas, _) = tokio::sync::broadcast::channel(DELTA_BROADCAST_CAPACITY);
     let (mutation_tx, mut mutation_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -897,12 +897,12 @@ fn profile_tick_phases() {
     let mobility_tick = runtime.mobility_tick();
 
     let t_full = time_n(K, || {
-        let v = build_read_view_from_runtime(&runtime, &per_chunk, 1, None);
+        let v = build_read_view_from_runtime(&runtime, &per_chunk, None);
         std::hint::black_box(v);
     });
-    let prev_view = build_read_view_from_runtime(&runtime, &per_chunk, 1, None);
+    let prev_view = build_read_view_from_runtime(&runtime, &per_chunk, None);
     let t_incremental = time_n(K, || {
-        let v = build_read_view_from_runtime(&runtime, &per_chunk, 2, Some(&prev_view));
+        let v = build_read_view_from_runtime(&runtime, &per_chunk, Some(&prev_view));
         std::hint::black_box(v);
     });
     let t_world_summary = time_n(K, || {
@@ -1144,6 +1144,63 @@ async fn read_view_economy_snapshot_exposes_four_markets_and_known_goods() {
     );
 }
 
+/// Verify that `build_economy_snapshot` always populates the `vitals` field.
+///
+/// The fixture is a fully-seeded `SimulationRuntime::new()` world (abutopia bundle
+/// with 300 agents, capita_baseline=10, so capita_factor=30).  The economy is seeded
+/// by `seed_from_markets_layer`:
+///   - 3 demand actors each receive `opening_cash=1_000_000 × factor=30 = 30_000_000`
+///   - Total seeded money = 3 × 30_000_000 = 90_000_000
+///
+/// At seeding time no ticks have run so no supply/demand actors have traded: the
+/// full 90_000_000 sits in `available` balances.  The route stats are all-zero because
+/// the route-assignment system hasn't been invoked, and there are no
+/// CitizenEconomicTargets yet (attribution runs later).
+#[test]
+fn economy_snapshot_carries_vitals() {
+    use sim_core::economy::AccountBook;
+
+    let runtime = SimulationRuntime::new();
+    let world = runtime.mobility();
+
+    // Sanity: the AccountBook exists and has the expected seeded total.
+    // 300 agents / 10 capita_baseline = factor 30.  3 demand specs × 1_000_000 × 30.
+    let expected_total_money: i64 = 3 * 1_000_000 * 30;
+    let actual_total = world
+        .resource::<AccountBook>()
+        .total_money()
+        .expect("AccountBook summation must not overflow on a freshly seeded world")
+        .0;
+    assert_eq!(
+        actual_total, expected_total_money,
+        "seeded total_money must equal 3 × opening_cash × capita_factor"
+    );
+
+    let world_id = abutown_protocol::WorldId("abutopia".to_string());
+    let snapshot = build_economy_snapshot(world, &world_id, 7);
+
+    let vitals = snapshot
+        .vitals
+        .expect("build_economy_snapshot must always populate vitals");
+    assert_eq!(
+        vitals.total_money, expected_total_money,
+        "vitals.total_money must match the AccountBook sum"
+    );
+    // No CitizenEconomicTargets written yet (attribution runs during ticks).
+    assert_eq!(
+        vitals.routed_citizens, 0,
+        "no routed citizens before first tick"
+    );
+    // 300 agents seeded from the abutopia bundle.
+    assert_eq!(
+        vitals.population, 300,
+        "300 agents seeded from abutopia spawns.json"
+    );
+    // Route-assignment stats are zero before any tick runs.
+    assert_eq!(vitals.routes_assigned, 0);
+    assert_eq!(vitals.routes_failed, 0);
+}
+
 #[cfg(test)]
 mod cors_tests {
     use super::*;
@@ -1317,7 +1374,7 @@ async fn read_view_reuses_unchanged_tile_snapshots_and_rebuilds_dirty_ones() {
     let empty = std::collections::HashMap::new();
     let mut runtime = SimulationRuntime::new();
 
-    let view1 = build_read_view_from_runtime(&runtime, &empty, 1, None);
+    let view1 = build_read_view_from_runtime(&runtime, &empty, None);
     assert!(
         !view1.chunk_snapshots.is_empty(),
         "fixture world must have loaded chunks"
@@ -1326,7 +1383,7 @@ async fn read_view_reuses_unchanged_tile_snapshots_and_rebuilds_dirty_ones() {
     // A plain mobility tick does not touch tiles: every tile snapshot must be
     // reused (pointer-equal), not rebuilt.
     let _ = runtime.tick_world_mobility();
-    let view2 = build_read_view_from_runtime(&runtime, &empty, 2, Some(&view1));
+    let view2 = build_read_view_from_runtime(&runtime, &empty, Some(&view1));
     for (coord, snap) in &view1.chunk_snapshots {
         let snap2 = view2
             .chunk_snapshots
@@ -1342,7 +1399,7 @@ async fn read_view_reuses_unchanged_tile_snapshots_and_rebuilds_dirty_ones() {
     // all other chunks keep their cached Arc.
     let dirty = ChunkCoord { x: 0, y: 0 };
     mutate_runtime_tile(&mut runtime, "command:view-reuse:1").await;
-    let view3 = build_read_view_from_runtime(&runtime, &empty, 3, Some(&view2));
+    let view3 = build_read_view_from_runtime(&runtime, &empty, Some(&view2));
     let before = view2.chunk_snapshots.get(&dirty).expect("dirty chunk");
     let after = view3.chunk_snapshots.get(&dirty).expect("dirty chunk");
     assert!(

@@ -5,8 +5,10 @@ import {
   isMobilitySnapshotDto,
   isWorldSummaryDto,
   mobilitySnapshotFromProto,
+  tileKindSetEventFromProto,
   worldSummaryFromProto,
   type MobilitySnapshotDto,
+  type TileKindSetEventDto,
   type WorldSummaryDto,
 } from './mobilityProtocol';
 import {
@@ -53,6 +55,7 @@ export type MobilityBackendBridgeOptions = {
   WebSocketImpl?: typeof WebSocket;
   onState?: (state: MobilityOverlayState) => void;
   onEconomyState?: (state: EconomyOverlayState) => void;
+  onTileKindSet?: (event: TileKindSetEventDto) => void;
   initialState?: MobilityOverlayState;
   now?: () => number;
   setTimeoutImpl?: typeof setTimeout;
@@ -211,6 +214,20 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
         const message = fromBinary(ServerMessageSchema, bytes);
         currentState = applyServerMessage(currentState, message, now());
         currentEconomyState = applyEconomyServerMessage(currentEconomyState, message);
+        if (
+          message.body.case === 'worldEvent' &&
+          message.body.value.event.case === 'tileKindSet' &&
+          options.onTileKindSet
+        ) {
+          const chunkSize = options.viewport.getWorldDims().chunkSize;
+          const tileEvent = tileKindSetEventFromProto(message.body.value.event.value, chunkSize);
+          if (tileEvent === null) {
+            // eslint-disable-next-line no-console
+            console.warn('worldEvent: unrenderable tile kind', message.body.value.event.value.kind, 'coord', message.body.value.event.value.coord, 'localIndex', message.body.value.event.value.localIndex);
+          } else {
+            options.onTileKindSet(tileEvent);
+          }
+        }
         notify();
       } catch (err) {
         // Don't tear down the socket on one bad frame — surface via diagnostics.

@@ -46,7 +46,6 @@ impl SimPlugin for CorePlugin {
             height_tiles: self.world_dimensions.1,
         });
         world.insert_resource(ChunksByCoord::default());
-        world.insert_resource(TickClock::default());
         world.insert_resource(EventCount::default());
         world.insert_resource(DirtyChunks::default());
         world.insert_resource(PinnedActiveChunks::default());
@@ -92,7 +91,6 @@ mod tests {
         let mut schedule = Schedule::default();
         CorePlugin::default().install(&mut world, &mut schedule);
         assert!(world.contains_resource::<ChunksByCoord>());
-        assert!(world.contains_resource::<TickClock>());
         assert!(world.contains_resource::<PinnedActiveChunks>());
         assert!(world.contains_resource::<DeterministicRng>());
         assert!(world.contains_resource::<Messages<ChunkLoaded>>());

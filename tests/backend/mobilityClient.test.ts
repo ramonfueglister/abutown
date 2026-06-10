@@ -12,6 +12,10 @@ import type { MobilitySnapshotDto, WorldSummaryDto } from '../../src/backend/mob
 import {
   ClientMessageSchema,
   MobilitySnapshotSchema,
+  ServerMessageSchema,
+  WorldEventSchema,
+  TileKindSetEventSchema,
+  TileKind,
   WorldSummarySchema,
   Direction as DirectionProto,
   VehicleKind as VehicleKindProto,
@@ -508,6 +512,95 @@ describe('mobility backend client', () => {
     const lastBytes = sockets[0].sent[sockets[0].sent.length - 1];
     const lastMsg = fromBinary(ClientMessageSchema, lastBytes);
     expect(lastMsg.body.case).toBe('chunkSubscribe');
+    bridge.stop();
+  });
+
+  it('dispatches onTileKindSet with converted DTO when worldEvent carries a renderable kind', async () => {
+    const { Impl, sockets } = mockWebSocketImpl();
+    const receivedEvents: unknown[] = [];
+
+    const bridge = connectMobilityBackend({
+      fetchImpl: snapshotFetch as unknown as typeof fetch,
+      WebSocketImpl: Impl,
+      viewport: stubViewport({}),
+      onTileKindSet: (event) => receivedEvents.push(event),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sockets[0].triggerOpen();
+
+    // Build a worldEvent ServerMessage frame with a GRASS TileKindSetEvent.
+    const tileKindSetEvent = create(TileKindSetEventSchema, {
+      protocolVersion: 1,
+      eventId: 'e-grass',
+      commandId: 'c-grass',
+      worldId: 'abutopia',
+      tick: 10n,
+      version: 1n,
+      coord: { x: 1, y: 2 },
+      localIndex: 5,
+      kind: TileKind.GRASS,
+    });
+    const worldEvent = create(WorldEventSchema, {
+      event: { case: 'tileKindSet', value: tileKindSetEvent },
+    });
+    const serverMsg = create(ServerMessageSchema, {
+      body: { case: 'worldEvent', value: worldEvent },
+    });
+    const bytes = toBinary(ServerMessageSchema, serverMsg);
+    sockets[0].onmessage?.({ data: bytes.buffer } as MessageEvent<ArrayBuffer>);
+
+    // absolute x = 1*32 + (5 % 32) = 37, y = 2*32 + floor(5/32) = 64
+    expect(receivedEvents).toEqual([{ x: 37, y: 64, kind: 'grass', tick: 10 }]);
+    bridge.stop();
+  });
+
+  it('fires console.warn and does not call onTileKindSet when worldEvent carries an unrenderable kind (ROAD)', async () => {
+    const { Impl, sockets } = mockWebSocketImpl();
+    const receivedEvents: unknown[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const bridge = connectMobilityBackend({
+      fetchImpl: snapshotFetch as unknown as typeof fetch,
+      WebSocketImpl: Impl,
+      viewport: stubViewport({}),
+      onTileKindSet: (event) => receivedEvents.push(event),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sockets[0].triggerOpen();
+
+    // Build a worldEvent ServerMessage frame with a ROAD TileKindSetEvent.
+    const tileKindSetEvent = create(TileKindSetEventSchema, {
+      protocolVersion: 1,
+      eventId: 'e-road',
+      commandId: 'c-road',
+      worldId: 'abutopia',
+      tick: 5n,
+      version: 1n,
+      coord: { x: 0, y: 0 },
+      localIndex: 0,
+      kind: TileKind.ROAD,
+    });
+    const worldEvent = create(WorldEventSchema, {
+      event: { case: 'tileKindSet', value: tileKindSetEvent },
+    });
+    const serverMsg = create(ServerMessageSchema, {
+      body: { case: 'worldEvent', value: worldEvent },
+    });
+    const bytes = toBinary(ServerMessageSchema, serverMsg);
+    sockets[0].onmessage?.({ data: bytes.buffer } as MessageEvent<ArrayBuffer>);
+
+    expect(receivedEvents).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'worldEvent: unrenderable tile kind',
+      TileKind.ROAD,
+      'coord',
+      expect.anything(),
+      'localIndex',
+      0,
+    );
+    warnSpy.mockRestore();
     bridge.stop();
   });
 

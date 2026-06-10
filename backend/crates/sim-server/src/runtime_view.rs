@@ -84,7 +84,6 @@ pub struct RuntimeReadView {
     pub mobility_chunk_snapshots: HashMap<ChunkCoord, w::MobilityChunkSnapshot>,
     pub mobility_full_dto: w::MobilitySnapshot,
     pub per_chunk_deltas: Vec<w::MobilityChunkDelta>,
-    pub pulse_sequence: u64,
     /// Subscriber-counts snapshot for chunk channels — moved into the view so
     /// WS chunk_unsubscribe can reap chunk channels without a runtime read-lock.
     pub chunk_subscriber_counts: HashMap<ChunkCoord, u8>,

@@ -82,16 +82,6 @@ export type ServerHelloDto = {
   chunk_size: number;
 };
 
-export type TilePulseDeltaDto = {
-  type: 'tile_pulse';
-  protocol_version: number;
-  world_id: string;
-  tick: number;
-  version: number;
-  coord: { x: number; y: number };
-  local_index: number;
-};
-
 export type ServerErrorDto = {
   type: 'error';
   protocol_version: number;
@@ -102,7 +92,6 @@ export type ServerErrorDto = {
 
 export type ServerMessageDto =
   | ServerHelloDto
-  | TilePulseDeltaDto
   | MobilityChunkDeltaDto
   | MobilityChunkSnapshotDto
   | ServerErrorDto;
@@ -282,20 +271,6 @@ function isServerHelloDto(value: Record<string, unknown>): value is ServerHelloD
   return value.type === 'hello' && isNumber(value.protocol_version) && isString(value.world_id) && isNonNegativeInteger(value.chunk_size);
 }
 
-function isTilePulseDeltaDto(value: Record<string, unknown>): value is TilePulseDeltaDto {
-  return (
-    value.type === 'tile_pulse' &&
-    isNumber(value.protocol_version) &&
-    isString(value.world_id) &&
-    isNumber(value.tick) &&
-    isNumber(value.version) &&
-    isObject(value.coord) &&
-    isNumber(value.coord.x) &&
-    isNumber(value.coord.y) &&
-    isNonNegativeInteger(value.local_index)
-  );
-}
-
 function isServerErrorDto(value: Record<string, unknown>): value is ServerErrorDto {
   return (
     value.type === 'error' &&
@@ -351,15 +326,17 @@ import type {
   AgentState as AgentStateProto,
   ChunkCoord as ChunkCoordProto,
   EconomySnapshot,
+  EconomyVitals as EconomyVitalsProto,
   HealthResponse as HealthResponseProto,
   MobilityChunkDelta as MobilityChunkDeltaProto,
   MobilityChunkSnapshot as MobilityChunkSnapshotProto,
   MobilitySnapshot as MobilitySnapshotProto,
   Stop as StopProto,
+  TileKindSetEvent,
   VehicleMobility as VehicleMobilityProto,
   WorldSummary as WorldSummaryProto,
 } from './proto/abutown_pb';
-import { Direction as DirectionProto, PersistenceHealthStatus, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
+import { Direction as DirectionProto, PersistenceHealthStatus, TileKind, VehicleKind as VehicleKindProto } from './proto/abutown_pb';
 
 const DIRECTION_PROTO_TO_DTO: Record<number, DirectionDto> = {
   [DirectionProto.N]: 'n',
@@ -558,12 +535,89 @@ export function mobilitySnapshotFromProto(p: MobilitySnapshotProto): MobilitySna
 
 export type MarketLocationDto = { marketId: number; name: string; tileX: number; tileY: number; wagePaidLastTick: number };
 export type MarketGoodDto = { marketId: number; goodId: number; lastSettlementPrice: number; ewmaReferencePrice: number; tradedQtyLastTick: number; unmetDemandLastTick: number; unsoldSupplyLastTick: number };
-export type EconomySnapshotDto = { tick: number; markets: MarketLocationDto[]; goods: MarketGoodDto[] };
+export type EconomyVitalsDto = {
+  population: number;
+  routedCitizens: number;
+  totalMoney: number;
+  routesAssigned: number;
+  routesFailed: number;
+};
+export type EconomySnapshotDto = { tick: number; markets: MarketLocationDto[]; goods: MarketGoodDto[]; vitals?: EconomyVitalsDto };
+
+function economyVitalsFromProto(p: EconomyVitalsProto): EconomyVitalsDto {
+  return {
+    population: Number(p.population),
+    routedCitizens: Number(p.routedCitizens),
+    totalMoney: Number(p.totalMoney),
+    routesAssigned: Number(p.routesAssigned),
+    routesFailed: Number(p.routesFailed),
+  };
+}
 
 export function economySnapshotFromProto(p: EconomySnapshot): EconomySnapshotDto {
   return {
     tick: Number(p.tick),
     markets: p.markets.map((m) => ({ marketId: m.marketId, name: m.name, tileX: m.tileX, tileY: m.tileY, wagePaidLastTick: Number(m.wagePaidLastTick) })),
     goods: p.goods.map((g) => ({ marketId: g.marketId, goodId: g.goodId, lastSettlementPrice: Number(g.lastSettlementPrice), ewmaReferencePrice: Number(g.ewmaReferencePrice), tradedQtyLastTick: Number(g.tradedQtyLastTick), unmetDemandLastTick: Number(g.unmetDemandLastTick), unsoldSupplyLastTick: Number(g.unsoldSupplyLastTick) })),
+    vitals: p.vitals !== undefined ? economyVitalsFromProto(p.vitals) : undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WorldEvent DTO types + proto → DTO converter
+// ---------------------------------------------------------------------------
+
+export type TileKindSetEventDto = { x: number; y: number; kind: 'grass' | 'water'; tick: number };
+
+/**
+ * Map the proto TileKind enum to the lowercase terrain string used by
+ * BaseWorldTerrainKind / TerrainKind in the frontend.
+ *
+ * Returns null for kinds that cannot be represented in the terrain layer:
+ * - ROAD: roads render from the separate `transport.roads` map, not the terrain layer.
+ * - BUILDING_FOOTPRINT: building footprints render from the buildings layer.
+ * - UNSPECIFIED: the backend rejects UNSPECIFIED commands, so this should not appear.
+ *
+ * The backend accepts and broadcasts ROAD/BUILDING_FOOTPRINT verbatim
+ * (protocol/src/lib.rs, sim-server/src/runtime/mod.rs apply_set_tile_kind has
+ * no kind restriction). Callers must handle null by skipping the terrain mutation.
+ */
+export function tileKindToTerrainString(kind: TileKind): 'grass' | 'water' | null {
+  switch (kind) {
+    case TileKind.GRASS:
+      return 'grass';
+    case TileKind.WATER:
+      return 'water';
+    case TileKind.ROAD:
+    case TileKind.BUILDING_FOOTPRINT:
+    case TileKind.UNSPECIFIED:
+    default:
+      return null;
+  }
+}
+
+/**
+ * Convert a `TileKindSetEvent` proto message to an absolute-coordinate DTO,
+ * or null if the tile kind cannot be represented in the terrain layer (see
+ * {@link tileKindToTerrainString} for the ROAD/BUILDING_FOOTPRINT rationale).
+ *
+ * Local index layout (verified against sim-core/src/base_world.rs:463-464):
+ *   for local_y in 0..chunk_size { for local_x in 0..chunk_size { … } }
+ * → row-major: local_index = local_y * chunk_size + local_x
+ * → local_x = local_index % chunk_size
+ * → local_y = Math.floor(local_index / chunk_size)
+ */
+export function tileKindSetEventFromProto(event: TileKindSetEvent, chunkSize: number): TileKindSetEventDto | null {
+  const terrainKind = tileKindToTerrainString(event.kind);
+  if (terrainKind === null) return null;
+  if (!event.coord) throw new Error('TileKindSetEvent missing coord');
+  const coord = event.coord;
+  const localX = event.localIndex % chunkSize;
+  const localY = Math.floor(event.localIndex / chunkSize);
+  return {
+    x: coord.x * chunkSize + localX,
+    y: coord.y * chunkSize + localY,
+    kind: terrainKind,
+    tick: Number(event.tick),
   };
 }

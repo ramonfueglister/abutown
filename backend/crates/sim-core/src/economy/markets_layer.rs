@@ -116,13 +116,35 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
         }
     }
 
+    // ── Per-capita seed scaling (spec 2026-06-06 §2b). Demand will run at
+    // capita_factor× throughput, so the seeded money/goods stock must be
+    // factor× too — money is still minted exactly once, only more of it.
+    // With no live agents (unit tests, economy-only worlds) the factor is 1
+    // and seeding stays byte-identical to the unscaled economy.
+    // Extractor opening RAW stock stays 1× deliberately: it is a 1-tick buffer;
+    // the regeneration faucet itself is capita-scaled at runtime (production.rs).
+    let seed_factor: i64 = {
+        let live = crate::economy::capita::live_agent_count(world);
+        let baseline = world
+            .resource::<crate::economy::systems::EconomyConfig>()
+            .capita_baseline;
+        crate::economy::capita::capita_factor(live, baseline)
+    };
+
     // ── 3) Supply pools: opening inventory + a standing SupplyPool. ──
     for spec in &layer.supply {
         let actor = EconomicActorId(spec.actor);
         let good = GoodId(spec.good);
         world
             .resource_mut::<InventoryBook>()
-            .deposit(actor, good, Quantity(spec.opening_inventory))
+            .deposit(
+                actor,
+                good,
+                Quantity(
+                    i64::try_from((spec.opening_inventory as i128) * (seed_factor as i128))
+                        .expect("seed: opening_inventory × capita factor overflows i64"),
+                ),
+            )
             .expect("seed: supplier goods");
         world.resource_mut::<SupplyPools>().0.insert(
             actor,
@@ -143,7 +165,13 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
         let actor = EconomicActorId(spec.actor);
         world
             .resource_mut::<AccountBook>()
-            .deposit(actor, Money(spec.opening_cash))
+            .deposit(
+                actor,
+                Money(
+                    i64::try_from((spec.opening_cash as i128) * (seed_factor as i128))
+                        .expect("seed: opening_cash × capita factor overflows i64"),
+                ),
+            )
             .expect("seed: consumer cash");
         world.resource_mut::<DemandPools>().0.insert(
             actor,

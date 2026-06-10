@@ -283,3 +283,16 @@ Slice 2 is complete when:
 3. **Multi-stage production chains** (firms-as-buyers) — the other major economy
    direction, independent of per-capita.
 4. **Distinct economic-citizen sprites** (shopping/commuting visual states).
+
+## References
+
+One modeled actor standing in for `capita_factor` real households is the
+standard agent-scaling compromise of computational economics: model agents are
+representative samples of a larger population, with flows scaled by the
+representation ratio.
+
+- Axtell, R. L., & Farmer, J. D. (2025). Agent-based modeling in economics and
+  finance: Past, present, and future. *Journal of Economic Literature, 63*(1),
+  197–287.
+- Tesfatsion, L., & Judd, K. L. (Eds.). (2006). *Handbook of computational
+  economics: Vol. 2. Agent-based computational economics*. North-Holland.

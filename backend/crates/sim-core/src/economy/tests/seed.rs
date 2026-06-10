@@ -296,6 +296,90 @@ fn authored_capita_baseline_reaches_economy_config() {
     );
 }
 
+/// Per-capita seed scaling: `opening_cash` and `opening_inventory` must both be
+/// multiplied by `capita_factor(live_count, capita_baseline)` at seed time, so the
+/// initial money/goods stock matches the scaled throughput that demand will generate.
+///
+/// With no live agents the factor is 1 → all existing tests stay byte-identical.
+/// Here we set `capita_baseline = 5` and spawn 15 `AgentMarker` entities so the
+/// factor is `floor(15 / 5) = 3`. Expected post-seed totals are 3× the authored values.
+#[test]
+fn seed_scales_opening_cash_and_inventory_by_capita_factor() {
+    use crate::economy::{AccountBook, InventoryBook};
+    use crate::mobility::components::AgentMarker;
+    use crate::world::schedule::SimPlugin;
+
+    let mut world = World::new();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
+    let nodes = vec![
+        node(0, 2.0, 3.0),
+        node(1, 111.5, 64.51),
+        node(2, 16.0, 48.0),
+        node(3, 208.0, 48.0),
+    ];
+    world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
+    world.insert_resource(Graph::new(nodes, vec![]));
+
+    let mut bundle =
+        crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
+            .expect("abutopia bundle loads");
+
+    // Override baseline to 5 so spawning 15 agents gives factor = floor(15/5) = 3.
+    bundle.markets.household.capita_baseline = 5;
+
+    // Spawn 15 AgentMarker entities BEFORE seeding (ordering mirrors PR #86 fix).
+    for _ in 0..15 {
+        world.spawn(AgentMarker);
+    }
+
+    crate::economy::seed_from_markets_layer(&mut world, &bundle.markets);
+
+    // ── Cash: Σ(opening_cash × 3) across all demand specs ────────────────────
+    let expected_cash: i64 = bundle
+        .markets
+        .demand
+        .iter()
+        .map(|d| d.opening_cash * 3)
+        .sum();
+    let total = world
+        .resource::<AccountBook>()
+        .total_money()
+        .expect("summable")
+        .0;
+    assert_eq!(
+        total, expected_cash,
+        "post-seed total_money == Σ(opening_cash × factor)"
+    );
+
+    // ── Inventory: Σ(opening_inventory × 3) across all supply specs ──────────
+    let expected_inventory: i64 = bundle
+        .markets
+        .supply
+        .iter()
+        .map(|s| s.opening_inventory * 3)
+        .sum();
+    let inv: i64 = bundle
+        .markets
+        .supply
+        .iter()
+        .map(|s| {
+            world
+                .resource::<InventoryBook>()
+                .balance(
+                    crate::economy::EconomicActorId(s.actor),
+                    crate::economy::GoodId(s.good),
+                )
+                .available
+                .0
+        })
+        .sum();
+    assert_eq!(
+        inv, expected_inventory,
+        "post-seed inventory == Σ(opening_inventory × factor)"
+    );
+}
+
 /// Serde-default for `HouseholdSpec.capita_baseline` is 1_000_000 (identity).
 ///
 /// A JSON household object that omits `capita_baseline` must deserialize with the
