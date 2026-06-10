@@ -483,9 +483,6 @@ fn edge_kind_for_mode(mode: ModeState) -> EdgeKind {
     match mode {
         ModeState::Walking => EdgeKind::Footway,
         ModeState::Driving => EdgeKind::Road,
-        ModeState::OnTram => {
-            panic!("apply_into_world: persisted active_route contains retired tram mode")
-        }
     }
 }
 
@@ -756,11 +753,8 @@ fn validate_active_route_mode(
 
 fn initial_mode_for_profile(profile: RoutingProfileKey) -> ModeState {
     match profile {
-        RoutingProfileKey::Walk | RoutingProfileKey::WalkTransit => ModeState::Walking,
+        RoutingProfileKey::Walk => ModeState::Walking,
         RoutingProfileKey::Car => ModeState::Driving,
-        RoutingProfileKey::Tram => {
-            panic!("apply_into_world: persisted active_route contains retired tram profile")
-        }
     }
 }
 
@@ -882,23 +876,6 @@ pub fn apply_into_world(world: &mut World, snap: MobilityPersistSnapshot) {
     // to live. Production hydration always installs CorePlugin first.
     for (coord, activity) in &snap.chunk_activities {
         crate::mobility::api::seed_chunk_activity(world, *coord, *activity);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[should_panic(expected = "retired tram mode")]
-    fn snapshot_restore_rejects_retired_tram_active_route_mode() {
-        let _ = edge_kind_for_mode(ModeState::OnTram);
-    }
-
-    #[test]
-    #[should_panic(expected = "retired tram profile")]
-    fn snapshot_restore_rejects_retired_tram_active_route_profile() {
-        let _ = initial_mode_for_profile(RoutingProfileKey::Tram);
     }
 }
 

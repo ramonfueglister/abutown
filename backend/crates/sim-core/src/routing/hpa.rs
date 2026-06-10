@@ -473,18 +473,10 @@ fn cluster_for_node(
 }
 
 fn profiles_for_cross_cluster_edge(_graph: &Graph, edge: &Edge) -> Vec<RoutingProfileKey> {
-    let mut profiles = Vec::new();
     match edge.kind {
-        EdgeKind::Footway => {
-            profiles.push(RoutingProfileKey::Walk);
-            profiles.push(RoutingProfileKey::WalkTransit);
-        }
-        EdgeKind::Road => {
-            profiles.push(RoutingProfileKey::Car);
-        }
-        EdgeKind::TramTrack => {}
+        EdgeKind::Footway => vec![RoutingProfileKey::Walk],
+        EdgeKind::Road => vec![RoutingProfileKey::Car],
     }
-    profiles
 }
 
 #[cfg(test)]
@@ -512,7 +504,6 @@ mod tests {
             speed_limit: match kind {
                 EdgeKind::Footway => 1.0,
                 EdgeKind::Road => 6.0,
-                EdgeKind::TramTrack => 4.0,
             },
             capacity: 1,
             legacy_id: None,
@@ -621,12 +612,10 @@ mod tests {
                 node(1, 12.0, 0.0, NodeKind::Intersection),
                 node(2, 0.0, 20.0, NodeKind::Intersection),
                 node(3, 12.0, 20.0, NodeKind::TransitStop),
-                node(4, 25.0, 20.0, NodeKind::TransitStop),
             ],
             vec![
                 edge(0, 0, 1, EdgeKind::Footway, 12.0),
                 edge(1, 2, 3, EdgeKind::Road, 12.0),
-                edge(2, 3, 4, EdgeKind::TramTrack, 13.0),
             ],
         );
         let index = HpaIndex::build(
@@ -642,7 +631,6 @@ mod tests {
         let c1 = index.cluster_id(ClusterCoord { x: 1, y: 0 }).unwrap();
         let c2 = index.cluster_id(ClusterCoord { x: 0, y: 2 }).unwrap();
         let c3 = index.cluster_id(ClusterCoord { x: 1, y: 2 }).unwrap();
-        let _c4 = index.cluster_id(ClusterCoord { x: 2, y: 2 }).unwrap();
 
         assert_eq!(index.adjacent_clusters(c0, RoutingProfileKey::Walk), &[c1]);
         assert!(
@@ -651,47 +639,6 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(index.adjacent_clusters(c2, RoutingProfileKey::Car), &[c3]);
-        assert!(
-            index
-                .adjacent_clusters(c3, RoutingProfileKey::Tram)
-                .is_empty()
-        );
-        assert!(
-            index
-                .adjacent_clusters(c3, RoutingProfileKey::WalkTransit)
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn rail_edges_are_not_route_adjacencies() {
-        let graph = Graph::new(
-            vec![
-                node(0, 0.0, 0.0, NodeKind::TransitStop),
-                node(1, 12.0, 0.0, NodeKind::TransitStop),
-            ],
-            vec![edge(0, 0, 1, EdgeKind::TramTrack, 12.0)],
-        );
-        let index = HpaIndex::build(
-            &graph,
-            HpaConfig {
-                cluster_size_tiles: 10,
-                corridor_margin_clusters: 0,
-            },
-        )
-        .expect("index builds");
-
-        let c0 = index.cluster_id(ClusterCoord { x: 0, y: 0 }).unwrap();
-        assert!(
-            index
-                .adjacent_clusters(c0, RoutingProfileKey::Tram)
-                .is_empty()
-        );
-        assert!(
-            index
-                .adjacent_clusters(c0, RoutingProfileKey::WalkTransit)
-                .is_empty()
-        );
     }
 
     #[test]

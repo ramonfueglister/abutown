@@ -38,26 +38,12 @@ impl From<&AgentMobilityState> for AgentMobilityStateDto {
             AgentMobilityState::WaitingAtStop { stop_id } => Self::WaitingAtStop {
                 stop_id: stop_id.clone(),
             },
-            AgentMobilityState::Boarding {
-                vehicle_id,
-                stop_id,
-            } => Self::Boarding {
-                vehicle_id: EntityId(vehicle_id.0.clone()),
-                stop_id: stop_id.clone(),
-            },
             AgentMobilityState::InVehicle {
                 vehicle_id,
                 seat_index,
             } => Self::InVehicle {
                 vehicle_id: EntityId(vehicle_id.0.clone()),
                 seat_index: *seat_index,
-            },
-            AgentMobilityState::Alighting {
-                vehicle_id,
-                stop_id,
-            } => Self::Alighting {
-                vehicle_id: EntityId(vehicle_id.0.clone()),
-                stop_id: stop_id.clone(),
             },
         }
     }

@@ -305,9 +305,7 @@ pub fn test_seed_world() -> (World, Schedule) {
     let vertical_route = "route:arterial:1".to_string();
 
     let horizontal_pickup = "stop:horizontal:pickup".to_string();
-    let horizontal_dropoff = "stop:horizontal:dropoff".to_string();
     let vertical_pickup = "stop:vertical:pickup".to_string();
-    let vertical_dropoff = "stop:vertical:dropoff".to_string();
 
     let walk_link = "link:walk:default".to_string();
     let work_activity = "activity:work".to_string();
@@ -340,10 +338,10 @@ pub fn test_seed_world() -> (World, Schedule) {
 
     for offset in 0..20u32 {
         let agent_id = AgentId(format!("agent:seed:{offset}"));
-        let (pickup, dropoff, route_id) = if offset % 2 == 0 {
-            (&horizontal_pickup, &horizontal_dropoff, &horizontal_route)
+        let pickup = if offset % 2 == 0 {
+            &horizontal_pickup
         } else {
-            (&vertical_pickup, &vertical_dropoff, &vertical_route)
+            &vertical_pickup
         };
 
         api::spawn_agent_from_record(
@@ -358,10 +356,6 @@ pub fn test_seed_world() -> (World, Schedule) {
                     PlanStage::WalkToStop {
                         link_id: walk_link.clone(),
                         stop_id: pickup.clone(),
-                    },
-                    PlanStage::RideToStop {
-                        route_id: route_id.clone(),
-                        stop_id: dropoff.clone(),
                     },
                     PlanStage::WalkToActivity {
                         link_id: walk_link.clone(),
@@ -850,7 +844,6 @@ mod tests {
                     agents_per_corridor: 2,
                 }],
                 car_groups: Vec::<CarSpawnGroup>::new(),
-                tram_lines: Vec::new(),
             },
             markets: MarketLayer {
                 schema_version: 2,
@@ -975,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn from_base_world_bundle_seeds_no_trams() {
+    fn from_base_world_bundle_seeds_no_vehicles() {
         let bundle = crate::base_world::BaseWorldBundle::load_from_dir(
             workspace_root().join("data/worlds/abutopia"),
         )
@@ -987,12 +980,6 @@ mod tests {
 
         assert_eq!(agents.len(), 300);
         assert!(vehicles.is_empty());
-        let tram_prefix = ["vehicle:", "tram:"].concat();
-        assert!(
-            vehicles
-                .iter()
-                .all(|vehicle| !vehicle.id.0.starts_with(&tram_prefix))
-        );
     }
 
     #[test]

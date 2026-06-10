@@ -488,23 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn builder_does_not_create_tram_track_edges_for_runtime_routes() {
-        let (graph, traffic_routes, _) = build_graph_from_city_network(&simple_network(), &[], &[]);
-
-        assert!(
-            graph
-                .edges()
-                .iter()
-                .all(|edge| edge.kind != EdgeKind::TramTrack),
-            "tram-track edges are not part of the mobility runtime graph"
-        );
-        assert_eq!(
-            traffic_routes.count(),
-            simple_network().arterial_paths.len()
-        );
-    }
-
-    #[test]
     fn polyline_length_is_arc_length() {
         let p = vec![(0.0, 0.0), (3.0, 4.0), (3.0, 8.0)];
         assert_eq!(polyline_length(&p), 5.0 + 4.0);

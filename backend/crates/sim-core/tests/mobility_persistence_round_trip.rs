@@ -14,12 +14,11 @@ use sim_core::routing::{
 // NOTE: the `phase3_snapshot_round_trips_byte_for_byte` test and its
 // `fixtures/phase3-mobility-snapshot.json` were retired on 2026-05-29. That
 // fixture was a pre-tram-retirement transit snapshot (tram vehicles, stops,
-// transit routes, ride-to-stop agent plans). Trams are gone from the runtime
-// (`VehicleKind` is car-only and hydration rejects retired tram modes), so the
-// fixture can no longer deserialize, let alone round-trip byte-for-byte. The
-// live car/walk persistence round-trip is covered by the `active_route_*`
-// tests below; tram rejection is covered by
-// `active_route_hydration_rejects_retired_tram_mode`.
+// transit routes, ride-to-stop agent plans). Tram state no longer exists in
+// the schema (`VehicleKind` is car-only, tram modes/profiles are deleted), so
+// the fixture can no longer deserialize, let alone round-trip byte-for-byte.
+// The live car/walk persistence round-trip is covered by the `active_route_*`
+// tests below.
 
 fn empty_world_with_activity(
     activity_id: &str,
@@ -367,22 +366,6 @@ fn active_route_hydration_normalizes_transient_destination_node() {
         .and_then(|agent| agent.active_route.as_ref())
         .expect("active route persists");
     assert_eq!(route.destination_node, 1);
-}
-
-#[test]
-#[should_panic(expected = "retired tram mode")]
-fn active_route_hydration_rejects_retired_tram_mode() {
-    let mut snap = active_route_snapshot();
-    let agent = snap
-        .agents
-        .get_mut(&AgentId("agent:active-route".to_string()))
-        .unwrap();
-    let route = agent.active_route.as_mut().unwrap();
-    route.profile = RoutingProfileKey::WalkTransit;
-    route.steps[0].mode = ModeState::OnTram;
-
-    let (mut world, _schedule) = empty_world_with_activity("activity:home");
-    apply_into_world(&mut world, snap);
 }
 
 #[test]

@@ -42,7 +42,7 @@ pub struct StableAgentId(pub AgentId);
 pub struct StableVehicleId(pub VehicleId);
 
 /// Wraps the existing `AgentMobilityState` enum (Walking, WaitingAtStop,
-/// Boarding, InVehicle, Alighting, AtActivity). Stored on agents only.
+/// InVehicle, AtActivity). Stored on agents only.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct AgentMobilityStateComponent(pub AgentMobilityState);
 

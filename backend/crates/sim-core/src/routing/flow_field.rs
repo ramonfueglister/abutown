@@ -437,8 +437,6 @@ fn terminal_destination_modes(profile: RoutingProfileKey) -> &'static [ModeState
     match profile {
         RoutingProfileKey::Walk => &[ModeState::Walking],
         RoutingProfileKey::Car => &[ModeState::Driving],
-        RoutingProfileKey::Tram => &[],
-        RoutingProfileKey::WalkTransit => &[ModeState::Walking],
     }
 }
 
@@ -485,15 +483,6 @@ mod tests {
             id: NodeId(id),
             position: (x, y),
             kind: NodeKind::Intersection,
-            legacy_id: None,
-        }
-    }
-
-    fn typed_node(id: u32, x: f32, y: f32, kind: NodeKind) -> Node {
-        Node {
-            id: NodeId(id),
-            position: (x, y),
-            kind,
             legacy_id: None,
         }
     }
@@ -636,27 +625,6 @@ mod tests {
                 actual: NodeId(2),
             })
         );
-    }
-
-    #[test]
-    fn walk_transit_field_rejects_rail_terminal_arrival() {
-        let graph = Graph::new(
-            vec![
-                typed_node(0, 0.0, 0.0, NodeKind::TransitStop),
-                typed_node(1, 1.0, 0.0, NodeKind::TransitStop),
-            ],
-            vec![edge(0, 0, 1, EdgeKind::TramTrack, "rail:0")],
-        );
-
-        let field = FlowFieldRouter::build(
-            &graph,
-            NodeId(1),
-            RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
-            FlowFieldScope::AllEdges,
-        )
-        .expect("walk-transit field should build");
-
-        assert!(field.entry(NodeId(0), ModeState::Walking).is_none());
     }
 
     #[test]

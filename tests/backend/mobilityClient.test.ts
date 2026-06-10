@@ -94,10 +94,6 @@ function agentStateToProto(state: MobilitySnapshotDto['agents'][number]['state']
       return { state: { case: 'waitingAtStop' as const, value: { stopId: state.stop_id } } };
     case 'in_vehicle':
       return { state: { case: 'inVehicle' as const, value: { vehicleId: state.vehicle_id, seatIndex: state.seat_index } } };
-    case 'boarding':
-      return { state: { case: 'boarding' as const, value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
-    case 'alighting':
-      return { state: { case: 'alighting' as const, value: { vehicleId: state.vehicle_id, stopId: state.stop_id } } };
     case 'at_activity':
       return { state: { case: 'atActivity' as const, value: { activityId: state.activity_id } } };
     default: {

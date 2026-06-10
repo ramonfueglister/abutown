@@ -6,9 +6,7 @@ export type AgentMobilityStateDto =
   | { type: 'at_activity'; activity_id: string }
   | { type: 'walking'; link_id: string; progress: number }
   | { type: 'waiting_at_stop'; stop_id: string }
-  | { type: 'boarding'; vehicle_id: string; stop_id: string }
-  | { type: 'in_vehicle'; vehicle_id: string; seat_index: number }
-  | { type: 'alighting'; vehicle_id: string; stop_id: string };
+  | { type: 'in_vehicle'; vehicle_id: string; seat_index: number };
 
 export type AgentMobilityDto = {
   id: string;
@@ -240,9 +238,7 @@ function isAgentMobilityStateDto(value: unknown): value is AgentMobilityStateDto
   if (value.type === 'at_activity') return isString(value.activity_id);
   if (value.type === 'walking') return isString(value.link_id) && isFiniteProgress(value.progress);
   if (value.type === 'waiting_at_stop') return isString(value.stop_id);
-  if (value.type === 'boarding') return isString(value.vehicle_id) && isString(value.stop_id);
   if (value.type === 'in_vehicle') return isString(value.vehicle_id) && isNonNegativeInteger(value.seat_index);
-  if (value.type === 'alighting') return isString(value.vehicle_id) && isString(value.stop_id);
   return false;
 }
 
@@ -412,10 +408,6 @@ function agentStateFromProto(state: AgentStateProto | undefined): AgentMobilityS
       return { type: 'waiting_at_stop', stop_id: state.state.value.stopId };
     case 'inVehicle':
       return { type: 'in_vehicle', vehicle_id: state.state.value.vehicleId, seat_index: state.state.value.seatIndex };
-    case 'boarding':
-      return { type: 'boarding', vehicle_id: state.state.value.vehicleId, stop_id: state.state.value.stopId };
-    case 'alighting':
-      return { type: 'alighting', vehicle_id: state.state.value.vehicleId, stop_id: state.state.value.stopId };
     case 'atActivity':
       return { type: 'at_activity', activity_id: state.state.value.activityId };
   }

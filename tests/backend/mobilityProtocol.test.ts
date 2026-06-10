@@ -332,10 +332,12 @@ describe('proto ↔ DTO converters', () => {
     });
   });
 
-  it('rejects tram vehicle proto values at the DTO boundary', () => {
+  it('rejects unknown vehicle kind wire values at the DTO boundary', () => {
+    // 2 is the reserved wire tag of the retired tram kind — an old peer
+    // could still send it.
     const proto = create(VehicleMobilitySchema, {
       id: 'vehicle:unsupported:0',
-      kind: VehicleKind.TRAM,
+      kind: 2 as VehicleKind,
       routeId: 'route:unsupported:0',
       linkIndex: 0,
       progress: 0.5,

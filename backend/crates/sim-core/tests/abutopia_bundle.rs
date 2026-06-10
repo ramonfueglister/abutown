@@ -25,7 +25,6 @@ fn loads_abutopia_base_world() {
     assert!(bundle.transport.rails.is_empty());
     assert!(bundle.transport.arterial_paths.is_empty());
     assert!(bundle.spawns.car_groups.is_empty());
-    assert!(bundle.spawns.tram_lines.is_empty());
 }
 
 #[test]

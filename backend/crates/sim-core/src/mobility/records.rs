@@ -28,17 +28,9 @@ pub enum AgentMobilityState {
     WaitingAtStop {
         stop_id: String,
     },
-    Boarding {
-        vehicle_id: VehicleId,
-        stop_id: String,
-    },
     InVehicle {
         vehicle_id: VehicleId,
         seat_index: u16,
-    },
-    Alighting {
-        vehicle_id: VehicleId,
-        stop_id: String,
     },
 }
 
@@ -46,10 +38,6 @@ pub enum AgentMobilityState {
 pub enum PlanStage {
     WalkToStop {
         link_id: String,
-        stop_id: String,
-    },
-    RideToStop {
-        route_id: String,
         stop_id: String,
     },
     WalkToActivity {

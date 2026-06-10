@@ -67,6 +67,6 @@ mod tests {
             routes.route_by_legacy("route:arterial:0"),
             Some(TrafficRouteId(0))
         );
-        assert!(routes.route_by_legacy("tram:rail:0").is_none());
+        assert!(routes.route_by_legacy("route:unknown:0").is_none());
     }
 }
