@@ -35,6 +35,16 @@ pub fn capita_factor(live_count: u64, capita_baseline: i64) -> i64 {
     i64::try_from(raw).unwrap_or(i64::MAX).max(1)
 }
 
+/// The live citizen count both the per-tick refresh AND the one-time seed
+/// scaling derive the capita factor from. One definition — if "live citizen"
+/// ever changes, seed-stock scaling and runtime flow scaling stay in lockstep.
+pub fn live_agent_count(world: &mut World) -> u64 {
+    use crate::mobility::components::AgentMarker;
+    use bevy_ecs::prelude::With;
+    let mut q = world.query_filtered::<(), With<AgentMarker>>();
+    q.iter(world).count() as u64
+}
+
 /// Exclusive system (EconomySet::RefreshCapita, FIRST in the chain). Derives
 /// `CapitaFactor` from the live citizen count each tick. The count only changes at
 /// monthly birth/death boundaries; reading it every tick is equivalent to a monthly
@@ -44,8 +54,6 @@ pub fn capita_factor(live_count: u64, capita_baseline: i64) -> i64 {
 /// economy-only worlds under test that have not installed the full mobility stack).
 pub fn refresh_capita_factor_system(world: &mut World) {
     use crate::economy::systems::EconomyConfig;
-    use crate::mobility::components::AgentMarker;
-    use bevy_ecs::prelude::With;
 
     if world.get_resource::<CapitaFactor>().is_none()
         || world.get_resource::<EconomyConfig>().is_none()
@@ -53,12 +61,9 @@ pub fn refresh_capita_factor_system(world: &mut World) {
         return;
     }
 
-    // Count live citizens. Query borrow is released (via collect) before the
-    // resource writes below, keeping the borrow checker happy.
-    let live: u64 = {
-        let mut q = world.query_filtered::<(), With<AgentMarker>>();
-        q.iter(world).count() as u64
-    };
+    // Count live citizens via the shared helper so seed-time and runtime use
+    // the same definition of "live citizen".
+    let live = live_agent_count(world);
 
     let baseline = world.resource::<EconomyConfig>().capita_baseline;
     let f = capita_factor(live, baseline);
