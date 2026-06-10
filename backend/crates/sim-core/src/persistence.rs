@@ -10,6 +10,21 @@ use crate::mobility::MobilityPersistSnapshot;
 use crate::scheduler::ChunkActivity;
 use crate::tile::TileKind;
 
+/// The sole gate deciding whether a persisted snapshot may be resumed into a
+/// freshly-installed world: a snapshot is compatible iff its `base_world_id`
+/// and `base_world_schema_version` match the booting base world. The runtime
+/// resumes ANY snapshot that passes this gate as-is — an evolved population
+/// (births, deaths, `AtActivity` states, economy routes) is the whole point of
+/// the frozen-time resume, never a reason to reseed.
+///
+/// **Operational contract:** `base_world_schema_version` comes from
+/// `manifest.json`'s `schema_version`. Re-authoring base-world *geometry* that
+/// a live snapshot encodes — chiefly the transport corridors/arterials whose
+/// polylines travel inside the mobility snapshot — MUST bump that
+/// `schema_version`. The bump invalidates the now-stale snapshots through this
+/// gate, so the next boot reseeds fresh geometry from the base world. (Authored
+/// data re-applied every boot regardless — e.g. `markets.json` via
+/// `seed_from_markets_layer` — does not require a bump.)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SnapshotCompatibility {
     pub base_world_id: String,

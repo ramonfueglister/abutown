@@ -8,83 +8,14 @@ pub(crate) fn initial_mobility_snapshot_for_base_world(
     Ok(extract_from_world(&seeded_world))
 }
 
-pub(crate) fn mobility_snapshot_matches_base_world(
-    snapshot: &MobilityPersistSnapshot,
-    base_world: &BaseWorldBundle,
-) -> bool {
-    let expected_cars = expected_base_world_car_routes(base_world);
-    if snapshot.vehicles.len() != expected_cars.len()
-        || !snapshot.vehicles.values().all(|vehicle| {
-            vehicle.kind == sim_core::mobility::VehicleKind::Car
-                && expected_cars
-                    .get(&vehicle.id.0)
-                    .is_some_and(|route_id| route_id == &vehicle.route_id)
-        })
-    {
-        return false;
-    }
-
-    let expected_pedestrians = expected_base_world_pedestrian_walks(base_world);
-    let expected_drivers = expected_base_world_driver_vehicles(base_world);
-    if snapshot.agents.len() != expected_pedestrians.len() + expected_drivers.len() {
-        return false;
-    }
-
-    snapshot.agents.values().all(|agent| {
-        if let Some(vehicle_id) = expected_drivers.get(&agent.id.0) {
-            return matches!(
-                &agent.state,
-                sim_core::mobility::AgentMobilityState::InVehicle { vehicle_id: actual, .. }
-                    if actual.0 == *vehicle_id
-            );
-        }
-
-        let Some(expected) = expected_pedestrians.get(&agent.id.0) else {
-            return false;
-        };
-        let sim_core::mobility::AgentMobilityState::Walking { link_id, .. } = &agent.state else {
-            return false;
-        };
-        link_id == &expected.link_id
-            && snapshot
-                .link_polylines
-                .get(link_id)
-                .is_none_or(|polyline| polylines_match(polyline, &expected.polyline))
-    })
+/// The authored base world's concrete agent count, used to size the population
+/// carrying capacity on every boot (the demographic ceiling, not a resume gate).
+pub(crate) fn expected_base_world_agent_count(base_world: &BaseWorldBundle) -> usize {
+    expected_base_world_pedestrian_count(base_world)
+        + expected_base_world_driver_vehicles(base_world).len()
 }
 
-pub(crate) fn normalize_seeded_agent_birth_ticks(
-    snapshot: &mut MobilityPersistSnapshot,
-    base_world: &BaseWorldBundle,
-) {
-    let mut seed_ids = std::collections::HashSet::new();
-    seed_ids.extend(
-        expected_base_world_pedestrian_walks(base_world)
-            .keys()
-            .cloned(),
-    );
-    seed_ids.extend(
-        expected_base_world_driver_vehicles(base_world)
-            .keys()
-            .cloned(),
-    );
-
-    let clock = sim_core::time::SimClock::default();
-    let now_tick = snapshot.tick;
-
-    for id in seed_ids {
-        let agent_id = sim_core::ids::AgentId(id);
-        let Some(agent) = snapshot.agents.get_mut(&agent_id) else {
-            continue;
-        };
-        if agent.birth_tick == 0 {
-            agent.birth_tick = sim_core::mobility::seed::seeded_birth_tick_for_agent_id(
-                &agent.id, now_tick, &clock,
-            );
-        }
-    }
-}
-
+#[cfg(test)]
 pub(crate) fn expected_base_world_car_routes(
     base_world: &BaseWorldBundle,
 ) -> std::collections::HashMap<String, String> {
@@ -107,11 +38,6 @@ pub(crate) fn expected_base_world_car_routes(
         }
     }
     expected
-}
-
-pub(crate) fn expected_base_world_agent_count(base_world: &BaseWorldBundle) -> usize {
-    expected_base_world_pedestrian_walks(base_world).len()
-        + expected_base_world_driver_vehicles(base_world).len()
 }
 
 fn expected_base_world_driver_vehicles(
@@ -139,54 +65,22 @@ fn expected_base_world_driver_vehicles(
     expected
 }
 
-struct ExpectedPedestrianWalk {
-    link_id: String,
-    polyline: Vec<(f32, f32)>,
-}
-
-fn expected_base_world_pedestrian_walks(
-    base_world: &BaseWorldBundle,
-) -> std::collections::HashMap<String, ExpectedPedestrianWalk> {
-    let mut expected = std::collections::HashMap::new();
-    let mut agent_index = 0u32;
-    for group in &base_world.spawns.pedestrian_groups {
-        let Some(corridor_index) = base_world
-            .transport
-            .pedestrian_corridors
-            .iter()
-            .position(|path| path.id == group.corridor_id)
-        else {
-            continue; // unreachable after validate(); skip defensively rather than abort
-        };
-        let corridor = &base_world.transport.pedestrian_corridors[corridor_index];
-        let polyline: Vec<(f32, f32)> = corridor
-            .points
-            .iter()
-            .map(|point| (point.x, point.y))
-            .collect();
-        for _ in 0..group.agents_per_corridor {
-            expected.insert(
-                format!("agent:walk:{agent_index}"),
-                ExpectedPedestrianWalk {
-                    link_id: format!("link:walk:corridor:{corridor_index}"),
-                    polyline: polyline.clone(),
-                },
-            );
-            agent_index += 1;
-        }
-    }
-    expected
-}
-
-fn polylines_match(actual: &[(f32, f32)], expected: &[(f32, f32)]) -> bool {
-    const EPSILON: f32 = 0.001;
-    actual.len() == expected.len()
-        && actual
-            .iter()
-            .zip(expected.iter())
-            .all(|(actual, expected)| {
-                (actual.0 - expected.0).abs() <= EPSILON && (actual.1 - expected.1).abs() <= EPSILON
-            })
+fn expected_base_world_pedestrian_count(base_world: &BaseWorldBundle) -> usize {
+    base_world
+        .spawns
+        .pedestrian_groups
+        .iter()
+        .filter(|group| {
+            // Skip a dangling corridor reference defensively (unreachable after
+            // validate()); it contributes no concrete agents.
+            base_world
+                .transport
+                .pedestrian_corridors
+                .iter()
+                .any(|path| path.id == group.corridor_id)
+        })
+        .map(|group| group.agents_per_corridor as usize)
+        .sum()
 }
 
 #[cfg(test)]

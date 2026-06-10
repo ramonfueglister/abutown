@@ -163,145 +163,6 @@ fn base_world_fixture() -> sim_core::base_world::BaseWorldBundle {
     .expect("base world fixture loads")
 }
 
-fn base_world_fixture_with_car_route() -> sim_core::base_world::BaseWorldBundle {
-    let mut base_world = base_world_fixture();
-    base_world
-        .transport
-        .arterial_paths
-        .push(sim_core::base_world::TransportPath {
-            id: "arterial:test".to_string(),
-            points: vec![
-                sim_core::city_network::NetworkPoint { x: 106.0, y: 64.0 },
-                sim_core::city_network::NetworkPoint { x: 117.0, y: 64.0 },
-            ],
-        });
-    base_world
-        .spawns
-        .car_groups
-        .push(sim_core::base_world::CarSpawnGroup {
-            id: "spawn:car:test".to_string(),
-            arterial_id: "arterial:test".to_string(),
-            cars_per_arterial: 1,
-        });
-    base_world
-}
-
-#[test]
-fn mobility_snapshot_base_world_match_rejects_stale_vehicle() {
-    use sim_core::mobility::{extract_from_world, seed};
-
-    let base_world = base_world_fixture();
-    let (authored, _) =
-        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-    let mut authored_snap = extract_from_world(&authored);
-    assert!(mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-
-    authored_snap.vehicles.insert(
-        sim_core::ids::VehicleId("vehicle:stale".to_string()),
-        sim_core::mobility::VehicleRecord {
-            id: sim_core::ids::VehicleId("vehicle:stale".to_string()),
-            kind: sim_core::mobility::VehicleKind::Car,
-            route_id: "route:arterial:stale".to_string(),
-            link_index: 0,
-            progress: 0.0,
-            speed_per_tick: 0.0,
-            capacity: 1,
-            occupants: Vec::new(),
-            dwell_ticks_remaining: 0,
-        },
-    );
-
-    assert!(!mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-}
-
-#[test]
-fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_link() {
-    use sim_core::ids::AgentId;
-    use sim_core::mobility::{AgentMobilityState, extract_from_world, seed};
-
-    let base_world = base_world_fixture();
-    let (authored, _) =
-        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-    let mut authored_snap = extract_from_world(&authored);
-    assert!(mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-
-    authored_snap
-        .agents
-        .get_mut(&AgentId("agent:walk:0".to_string()))
-        .expect("authored snapshot contains the seeded pedestrian")
-        .state = AgentMobilityState::Walking {
-        link_id: "link:walk:corridor:0".to_string(),
-        progress: 0.0,
-    };
-
-    assert!(!mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-}
-
-#[test]
-fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_polyline() {
-    use sim_core::mobility::{extract_from_world, seed};
-
-    let base_world = base_world_fixture();
-    let (authored, _) =
-        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-    let mut authored_snap = extract_from_world(&authored);
-    assert!(mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-
-    authored_snap.link_polylines.insert(
-        "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
-    );
-
-    assert!(!mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-}
-
-#[test]
-fn normalize_seeded_agent_birth_ticks_updates_legacy_zero_age_snapshot() {
-    let base_world = base_world_fixture();
-    let mut snap = initial_mobility_snapshot_for_base_world(&base_world)
-        .expect("base world mobility seed succeeds");
-    for agent in snap.agents.values_mut() {
-        agent.birth_tick = 0;
-    }
-
-    normalize_seeded_agent_birth_ticks(&mut snap, &base_world);
-
-    let clock = sim_core::time::SimClock::default();
-    let ages: Vec<f32> = snap
-        .agents
-        .values()
-        .map(|agent| clock.age_years(snap.tick, agent.birth_tick))
-        .collect();
-
-    assert!(ages.iter().any(|age| *age > 0.0));
-    assert!(
-        ages.iter().any(|age| (15.0..=49.0).contains(age)),
-        "normalized base-world cohort must include fertile-age agents"
-    );
-    assert!(
-        ages.iter().any(|age| *age >= 70.0),
-        "normalized base-world cohort must include elder agents"
-    );
-}
-
 #[test]
 fn runtime_has_populated_routing_graph() {
     let network = base_world_fixture().to_city_network();
@@ -590,7 +451,7 @@ fn hydration_spawns_chunk_entity_per_loaded_chunk() {
 }
 use sim_core::persistence::{
     InMemoryChunkSnapshotStore, InMemoryEconomySnapshotStore, InMemoryMobilitySnapshotStore,
-    build_chunk_snapshot,
+    MobilitySnapshotStore, build_chunk_snapshot,
 };
 
 fn tile_pulse(message: ServerMessageDto) -> TilePulseDeltaDto {
@@ -659,6 +520,90 @@ async fn hydrate_binds_seed_pedestrians_to_their_home_market() {
             distinct.dedup();
             distinct
         },
+    );
+}
+
+/// Regression for the live "Year 0, Day 14" bug: every server boot silently
+/// discarded the persisted mobility snapshot and reseeded the world from
+/// tick 0, killing the frozen-time resume contract.
+///
+/// `mobility_snapshot_matches_base_world` only accepted a snapshot in its
+/// pristine seeded state (exact static agent count, every pedestrian
+/// `Walking` on its seeded link). That invariant was valid for the
+/// pre-citizens eternal cyclic walkers, but since #81 the population is
+/// dynamic (births/deaths, `AtActivity` states, economy routes), so every
+/// evolved world failed the check and the third match arm in
+/// `hydrate_from_stores` reseeded — without a log line. Compatibility is
+/// already gated by `(world_id, base_world_id, base_world_schema_version)`
+/// on the read; a row that passes that gate must be resumed.
+#[tokio::test]
+async fn hydrate_resumes_evolved_world_instead_of_reseeding() {
+    let base_world = base_world_fixture();
+    let compatibility = base_world.snapshot_compatibility();
+
+    // Boot A: fresh seed, then capture its persist snapshot.
+    let (runtime_a, _, _, _) = SimulationRuntime::hydrate_from_stores(
+        Box::new(InMemoryWorldEventStore::default()),
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        &base_world,
+    )
+    .await
+    .expect("hydrate abutopia from empty stores");
+    let mut snap = runtime_a.mobility_persist_snapshot();
+
+    // Evolve it the way the live sim does between persists: a newborn
+    // citizen joins (population drifts off the static seed count) and sim
+    // time advances past the seed state.
+    let born_id = sim_core::ids::AgentId("agent:test:born".to_string());
+    let template = snap
+        .agents
+        .values()
+        .next()
+        .expect("abutopia seeds agents")
+        .clone();
+    let mut born = template;
+    born.id = born_id.clone();
+    born.birth_tick = 4_000;
+    snap.agents.insert(born_id.clone(), born);
+    snap.tick = 4_242;
+
+    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+    MobilitySnapshotStore::write(
+        &mut mobility_store,
+        "abutopia",
+        4_242,
+        &snap,
+        &compatibility,
+    )
+    .await
+    .expect("write evolved mobility snapshot");
+
+    // Boot B must RESUME this world, not discard it for a fresh seed.
+    let (runtime_b, _, _, _) = SimulationRuntime::hydrate_from_stores(
+        Box::new(InMemoryWorldEventStore::default()),
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        &base_world,
+    )
+    .await
+    .expect("hydrate abutopia from evolved snapshot");
+    let restored = runtime_b.mobility_persist_snapshot();
+
+    assert_eq!(
+        restored.tick, 4_242,
+        "resume must continue at the persisted tick, not restart at 0"
+    );
+    assert!(
+        restored.agents.contains_key(&born_id),
+        "citizens born since the seed must survive a restart"
+    );
+    assert_eq!(
+        restored.agents.len(),
+        snap.agents.len(),
+        "the evolved population must be restored as persisted, not reseeded"
     );
 }
 
@@ -1224,52 +1169,6 @@ async fn hydrate_restores_mobility_from_store_when_present() {
 }
 
 #[tokio::test]
-async fn hydrate_normalizes_legacy_zero_birth_ticks_for_base_world_snapshot() {
-    let base_world = base_world_fixture();
-    let mut authored_snap = initial_mobility_snapshot_for_base_world(&base_world)
-        .expect("base world mobility seed succeeds");
-    authored_snap.tick = 7;
-    for agent in authored_snap.agents.values_mut() {
-        agent.birth_tick = 0;
-    }
-
-    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
-    MobilitySnapshotStore::write(
-        &mut mobility_store,
-        "abutopia",
-        authored_snap.tick,
-        &authored_snap,
-        &base_world.snapshot_compatibility(),
-    )
-    .await
-    .unwrap();
-
-    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
-        Box::new(InMemoryWorldEventStore::default()),
-        Box::new(InMemoryChunkSnapshotStore::default()),
-        Box::new(mobility_store),
-        Box::new(InMemoryEconomySnapshotStore::default()),
-        &base_world,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(runtime.mobility_tick_for_test(), 7);
-
-    let snap = runtime.mobility_snapshot_for_persist();
-    let clock = sim_core::time::SimClock::default();
-    let ages: Vec<f32> = snap
-        .agents
-        .values()
-        .map(|agent| clock.age_years(snap.tick, agent.birth_tick))
-        .collect();
-
-    assert!(ages.iter().any(|age| *age > 0.0));
-    assert!(ages.iter().any(|age| (15.0..=49.0).contains(age)));
-    assert!(ages.iter().any(|age| *age >= 70.0));
-}
-
-#[tokio::test]
 async fn hydrate_restores_activity_waypoints_for_persisted_base_world_mobility() {
     use sim_core::mobility::{extract_from_world, seed};
 
@@ -1311,263 +1210,6 @@ async fn hydrate_restores_activity_waypoints_for_persisted_base_world_mobility()
         waypoints.0.get("activity:destination").copied(),
         Some((117.0, 64.51))
     );
-}
-
-#[tokio::test]
-async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_sidewalk_graph() {
-    use sim_core::mobility::api::tick_mobility as api_tick;
-    use sim_core::mobility::{extract_from_world, seed};
-
-    let base_world = base_world_fixture();
-    let (mut authored, mut sched) =
-        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-    let _ = api_tick(&mut authored, &mut sched);
-    let persisted_tick = sim_core::mobility::api::tick(&authored);
-    let mut authored_snap = extract_from_world(&authored);
-    assert!(
-        authored_snap.agents.is_empty(),
-        "the fixture snapshot should represent demoted LOD state"
-    );
-    authored_snap.link_polylines.insert(
-        "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
-    );
-    assert!(!mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-
-    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
-    MobilitySnapshotStore::write(
-        &mut mobility_store,
-        "abutopia",
-        persisted_tick,
-        &authored_snap,
-        &base_world.snapshot_compatibility(),
-    )
-    .await
-    .unwrap();
-
-    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
-        Box::new(InMemoryWorldEventStore::default()),
-        Box::new(InMemoryChunkSnapshotStore::default()),
-        Box::new(mobility_store),
-        Box::new(InMemoryEconomySnapshotStore::default()),
-        &base_world,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(runtime.mobility_tick_for_test(), 0);
-    let graph = runtime.world.resource::<sim_core::routing::Graph>();
-    let south_sidewalk = graph.edge(
-        graph
-            .edge_by_legacy("link:walk:corridor:1")
-            .expect("current south sidewalk footway is reseeded"),
-    );
-    assert_eq!(
-        south_sidewalk.polyline.first().copied(),
-        Some((106.0, 64.51))
-    );
-    assert_eq!(
-        south_sidewalk.polyline.last().copied(),
-        Some((117.0, 64.51))
-    );
-    assert!(
-        south_sidewalk
-            .polyline
-            .iter()
-            .all(|(_, y)| (*y - 64.51).abs() < 0.001)
-    );
-    let restored_snap = extract_from_world(&runtime.world);
-    assert_eq!(
-        restored_snap.link_polylines.get("link:walk:corridor:1"),
-        Some(&south_sidewalk.polyline)
-    );
-}
-
-#[tokio::test]
-async fn hydrate_rejects_routing_snapshot_with_demoted_pedestrians_and_reseeds() {
-    use sim_core::ids::AgentId;
-    use sim_core::mobility::{extract_from_world, seed};
-
-    let base_world = base_world_fixture_with_car_route();
-    let (authored, _) =
-        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-    let mut authored_snap = extract_from_world(&authored);
-    authored_snap
-        .agents
-        .remove(&AgentId("agent:walk:0".to_string()));
-    authored_snap.link_polylines.insert(
-        "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
-    );
-    authored_snap.tick = 17;
-    assert!(!mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
-
-    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
-    MobilitySnapshotStore::write(
-        &mut mobility_store,
-        "abutopia",
-        17,
-        &authored_snap,
-        &base_world.snapshot_compatibility(),
-    )
-    .await
-    .unwrap();
-
-    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
-        Box::new(InMemoryWorldEventStore::default()),
-        Box::new(InMemoryChunkSnapshotStore::default()),
-        Box::new(mobility_store),
-        Box::new(InMemoryEconomySnapshotStore::default()),
-        &base_world,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(runtime.mobility_tick_for_test(), 0);
-    let graph = runtime.world.resource::<sim_core::routing::Graph>();
-    let south_sidewalk = graph.edge(
-        graph
-            .edge_by_legacy("link:walk:corridor:1")
-            .expect("current south sidewalk footway is reseeded"),
-    );
-    assert_eq!(
-        south_sidewalk.polyline.first().copied(),
-        Some((106.0, 64.51))
-    );
-    assert_eq!(
-        south_sidewalk.polyline.last().copied(),
-        Some((117.0, 64.51))
-    );
-    assert!(
-        south_sidewalk
-            .polyline
-            .iter()
-            .all(|(_, y)| (*y - 64.51).abs() < 0.001)
-    );
-    let restored_snap = extract_from_world(&runtime.world);
-    assert_eq!(
-        restored_snap.link_polylines.get("link:walk:corridor:1"),
-        Some(&south_sidewalk.polyline)
-    );
-}
-
-#[tokio::test]
-async fn hydrate_ignores_snapshot_with_stale_vehicle_for_carless_abutopia() {
-    use sim_core::mobility::seed;
-
-    let base_world = base_world_fixture();
-    let (authored, _) =
-        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-    let mut authored_snap = extract_from_world(&authored);
-    authored_snap.vehicles.insert(
-        sim_core::ids::VehicleId("vehicle:stale".to_string()),
-        sim_core::mobility::VehicleRecord {
-            id: sim_core::ids::VehicleId("vehicle:stale".to_string()),
-            kind: sim_core::mobility::VehicleKind::Car,
-            route_id: "route:arterial:stale".to_string(),
-            link_index: 0,
-            progress: 0.0,
-            speed_per_tick: 0.0,
-            capacity: 1,
-            occupants: Vec::new(),
-            dwell_ticks_remaining: 0,
-        },
-    );
-
-    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
-    MobilitySnapshotStore::write(
-        &mut mobility_store,
-        "abutopia",
-        99,
-        &authored_snap,
-        &base_world.snapshot_compatibility(),
-    )
-    .await
-    .unwrap();
-
-    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
-        Box::new(InMemoryWorldEventStore::default()),
-        Box::new(InMemoryChunkSnapshotStore::default()),
-        Box::new(mobility_store),
-        Box::new(InMemoryEconomySnapshotStore::default()),
-        &base_world,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(runtime.mobility_tick_for_test(), 0);
-    assert_eq!(
-        runtime.mobility_vehicle_count_for_test(),
-        expected_base_world_car_count(&base_world)
-    );
-}
-
-#[tokio::test]
-async fn hydrate_ignores_snapshot_with_stale_pedestrian_polyline_for_abutopia() {
-    use sim_core::ids::AgentId;
-    use sim_core::mobility::components::Position;
-    use sim_core::mobility::resources::AgentIdIndex;
-    use sim_core::mobility::{AgentMobilityState, seed};
-
-    let base_world = base_world_fixture();
-    let (authored, _) =
-        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
-    let mut authored_snap = extract_from_world(&authored);
-    authored_snap.link_polylines.insert(
-        "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
-    );
-
-    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
-    MobilitySnapshotStore::write(
-        &mut mobility_store,
-        "abutopia",
-        99,
-        &authored_snap,
-        &base_world.snapshot_compatibility(),
-    )
-    .await
-    .unwrap();
-
-    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
-        Box::new(InMemoryWorldEventStore::default()),
-        Box::new(InMemoryChunkSnapshotStore::default()),
-        Box::new(mobility_store),
-        Box::new(InMemoryEconomySnapshotStore::default()),
-        &base_world,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(runtime.mobility_tick_for_test(), 0);
-    let agent_id = AgentId("agent:walk:0".to_string());
-    let agent = sim_core::mobility::api::agents(&runtime.world)
-        .into_iter()
-        .find(|agent| agent.id == agent_id)
-        .expect("runtime reseeds the authored pedestrian");
-    assert!(matches!(
-        agent.state,
-        AgentMobilityState::Walking { ref link_id, .. } if link_id == "link:walk:corridor:1"
-    ));
-
-    let entity = *runtime
-        .world
-        .resource::<AgentIdIndex>()
-        .0
-        .get(&agent_id)
-        .expect("runtime has an entity for the reseeded pedestrian");
-    let position = runtime
-        .world
-        .entity(entity)
-        .get::<Position>()
-        .expect("reseeded pedestrian has a position");
-    assert!((position.y - 64.51).abs() < 0.001);
 }
 
 #[test]
