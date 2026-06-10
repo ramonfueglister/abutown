@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 
 use crate::economy::production::{
-    EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
+    EXTRACTOR_FOOD_A, PRODUCER_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
     Recipe,
 };
 use crate::economy::systems::EconomyConfig;
@@ -38,7 +38,7 @@ fn seed_two_extractor_economy(
 
     // TOOLS chain.
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -47,9 +47,9 @@ fn seed_two_extractor_economy(
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(10))],
                 outputs: vec![(GOOD_TOOLS, Quantity(10))],
@@ -59,9 +59,9 @@ fn seed_two_extractor_economy(
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             market,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),

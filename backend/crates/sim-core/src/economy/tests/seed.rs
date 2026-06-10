@@ -180,23 +180,27 @@ fn seed_adds_flow_demo_markets_for_dormant_cross_flow() {
 }
 
 #[test]
-fn seed_installs_three_extractors_tools_and_two_food_but_never_lists_raw() {
+fn seed_installs_three_extractors_wood_and_two_food_but_never_lists_raw() {
     use crate::economy::production::{
-        EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS, ProductionPools, RawDeposits,
+        EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_WOOD, ProductionPools, RawDeposits,
     };
     use crate::economy::{
-        GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, HouseholdSector, InventoryBook, MarketId,
+        GOOD_FOOD, GOOD_RAW, GOOD_WOOD, HouseholdSector, InventoryBook, MarketId,
     };
 
     let world = seed_world();
 
-    // (market, output-good) expected for each extractor.
+    // (market, output-good, sell-side min_price) expected for each extractor.
+    // 8031 is NO LONGER an extractor (it is the buying TOOLS producer); the WOOD
+    // extractor 8041 backs its input. WOOD is authored cheap (50) so the landed
+    // cost 9003->9001 (50 + 5*59 = 345) stays under the TOOLS participation
+    // bound (400) and the chain can trade from tick 1.
     let expected = [
-        (EXTRACTOR_TOOLS, MarketId(9_001), GOOD_TOOLS),  // m_a
-        (EXTRACTOR_FOOD_A, MarketId(9_001), GOOD_FOOD),  // m_a
-        (EXTRACTOR_FOOD_FA, MarketId(9_003), GOOD_FOOD), // m_fa
+        (EXTRACTOR_FOOD_A, MarketId(9_001), GOOD_FOOD, 500), // m_a
+        (EXTRACTOR_FOOD_FA, MarketId(9_003), GOOD_FOOD, 500), // m_fa
+        (EXTRACTOR_WOOD, MarketId(9_003), GOOD_WOOD, 50),    // m_fa
     ];
-    for (actor, market, out_good) in expected {
+    for (actor, market, out_good, min_price) in expected {
         let dep = world.resource::<RawDeposits>().0[&actor];
         assert_eq!(dep.good, GOOD_RAW, "{actor:?} faucets RAW");
         assert_eq!(dep.qty_per_interval.0, 10, "{actor:?} faucet rate 10");
@@ -222,7 +226,10 @@ fn seed_installs_three_extractors_tools_and_two_food_but_never_lists_raw() {
         assert_eq!(sp.good, out_good, "{actor:?} sells its output good");
         assert_eq!(sp.market, market, "{actor:?} sells at the right market");
         assert_eq!(sp.offered_qty_per_tick.0, 10);
-        assert_eq!(sp.min_price.0, 500, "{actor:?} opening min_price pinned");
+        assert_eq!(
+            sp.min_price.0, min_price,
+            "{actor:?} opening min_price pinned"
+        );
 
         assert!(
             world

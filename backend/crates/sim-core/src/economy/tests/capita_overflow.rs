@@ -23,7 +23,7 @@ use std::collections::BTreeSet;
 use crate::economy::capita::capita_factor;
 use crate::economy::pools::target_spend;
 use crate::economy::production::{
-    EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
+    EXTRACTOR_FOOD_A, PRODUCER_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
     Recipe, run_production_at_tick, run_regen_at_tick,
 };
 use crate::economy::{
@@ -208,7 +208,7 @@ fn regen_at_tick_overflow_returns_err() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(i64::MAX),
@@ -233,7 +233,7 @@ fn regen_at_tick_realistic_factor_30_is_ok() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -247,11 +247,11 @@ fn regen_at_tick_realistic_factor_30_is_ok() {
 
     // 10 × 30 = 300 RAW deposited.
     assert_eq!(
-        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
+        inv.balance(PRODUCER_TOOLS, GOOD_RAW).available,
         Quantity(300)
     );
     assert!(ledger.0.contains(&EconomyEvent::Regenerated {
-        actor: EXTRACTOR_TOOLS,
+        actor: PRODUCER_TOOLS,
         good: GOOD_RAW,
         qty: Quantity(300),
     }));
@@ -393,7 +393,7 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
     let market = MarketId(1);
 
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -402,9 +402,9 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(10))],
                 outputs: vec![(GOOD_TOOLS, Quantity(10))],
@@ -414,9 +414,9 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             market,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),

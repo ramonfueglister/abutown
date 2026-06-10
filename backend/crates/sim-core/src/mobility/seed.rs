@@ -857,6 +857,7 @@ mod tests {
                 supply: Vec::new(),
                 demand: Vec::new(),
                 extractors: Vec::new(),
+                producers: Vec::new(),
                 household: HouseholdSpec {
                     population: 1000,
                     capita_baseline: crate::economy::capita::CAPITA_BASELINE_IDENTITY,
