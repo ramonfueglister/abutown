@@ -177,7 +177,6 @@ pub struct ChunkUnsubscribeDto {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerMessageDto {
     Hello(ServerHelloDto),
-    TilePulse(TilePulseDeltaDto),
     MobilityChunkDelta(MobilityChunkDeltaDto),
     MobilityChunkSnapshot(MobilityChunkSnapshotDto),
     WorldEvent { event: WorldEventDto },
@@ -189,16 +188,6 @@ pub struct ServerHelloDto {
     pub protocol_version: u16,
     pub world_id: WorldId,
     pub chunk_size: u16,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TilePulseDeltaDto {
-    pub protocol_version: u16,
-    pub world_id: WorldId,
-    pub tick: u64,
-    pub version: u64,
-    pub coord: ChunkCoordDto,
-    pub local_index: u16,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -501,21 +490,6 @@ mod proto_roundtrip_tests {
                 protocol_version: 16,
                 world_id: "abutopia".into(),
                 chunk_size: 32,
-            })),
-        };
-        assert_roundtrip(&msg);
-    }
-
-    #[test]
-    fn roundtrip_tile_pulse() {
-        let msg = ServerMessage {
-            body: Some(server_message::Body::TilePulse(TilePulse {
-                protocol_version: 16,
-                world_id: "abutopia".into(),
-                tick: 1234,
-                version: 5678,
-                coord: Some(sample_chunk()),
-                local_index: 11,
             })),
         };
         assert_roundtrip(&msg);

@@ -82,16 +82,6 @@ export type ServerHelloDto = {
   chunk_size: number;
 };
 
-export type TilePulseDeltaDto = {
-  type: 'tile_pulse';
-  protocol_version: number;
-  world_id: string;
-  tick: number;
-  version: number;
-  coord: { x: number; y: number };
-  local_index: number;
-};
-
 export type ServerErrorDto = {
   type: 'error';
   protocol_version: number;
@@ -102,7 +92,6 @@ export type ServerErrorDto = {
 
 export type ServerMessageDto =
   | ServerHelloDto
-  | TilePulseDeltaDto
   | MobilityChunkDeltaDto
   | MobilityChunkSnapshotDto
   | ServerErrorDto;
@@ -280,20 +269,6 @@ function isStopMobilityDto(value: unknown): value is StopMobilityDto {
 
 function isServerHelloDto(value: Record<string, unknown>): value is ServerHelloDto {
   return value.type === 'hello' && isNumber(value.protocol_version) && isString(value.world_id) && isNonNegativeInteger(value.chunk_size);
-}
-
-function isTilePulseDeltaDto(value: Record<string, unknown>): value is TilePulseDeltaDto {
-  return (
-    value.type === 'tile_pulse' &&
-    isNumber(value.protocol_version) &&
-    isString(value.world_id) &&
-    isNumber(value.tick) &&
-    isNumber(value.version) &&
-    isObject(value.coord) &&
-    isNumber(value.coord.x) &&
-    isNumber(value.coord.y) &&
-    isNonNegativeInteger(value.local_index)
-  );
 }
 
 function isServerErrorDto(value: Record<string, unknown>): value is ServerErrorDto {

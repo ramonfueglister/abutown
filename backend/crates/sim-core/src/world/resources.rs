@@ -12,7 +12,6 @@ pub struct ChunksByCoord(pub HashMap<ChunkCoord, Entity>);
 pub struct TickClock {
     pub tick: u64,
     pub version: u64,
-    pub pulse_sequence: u64,
 }
 
 #[derive(Resource, Default, Debug, Copy, Clone)]

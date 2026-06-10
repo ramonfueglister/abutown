@@ -599,7 +599,7 @@ async fn persist_snapshots_once_rejects_empty_mobility_snapshots() {
         economy_event_store: Arc::new(Mutex::new(Box::new(InMemoryEconomyEventStore::default()))),
         chunk_channels: Arc::new(DashMap::new()),
         view: Arc::new(arc_swap::ArcSwap::from_pointee(
-            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None),
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), None),
         )),
         mutations: mutation_tx,
         base_world: Arc::new(BaseWorldResponse::from(&base_world)),
@@ -798,7 +798,7 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
 
     let runtime = SimulationRuntime::new();
     let initial_view =
-        build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None);
+        build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), None);
     let (deltas, _) = tokio::sync::broadcast::channel(DELTA_BROADCAST_CAPACITY);
     let (mutation_tx, mut mutation_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -897,12 +897,12 @@ fn profile_tick_phases() {
     let mobility_tick = runtime.mobility_tick();
 
     let t_full = time_n(K, || {
-        let v = build_read_view_from_runtime(&runtime, &per_chunk, 1, None);
+        let v = build_read_view_from_runtime(&runtime, &per_chunk, None);
         std::hint::black_box(v);
     });
-    let prev_view = build_read_view_from_runtime(&runtime, &per_chunk, 1, None);
+    let prev_view = build_read_view_from_runtime(&runtime, &per_chunk, None);
     let t_incremental = time_n(K, || {
-        let v = build_read_view_from_runtime(&runtime, &per_chunk, 2, Some(&prev_view));
+        let v = build_read_view_from_runtime(&runtime, &per_chunk, Some(&prev_view));
         std::hint::black_box(v);
     });
     let t_world_summary = time_n(K, || {
@@ -1317,7 +1317,7 @@ async fn read_view_reuses_unchanged_tile_snapshots_and_rebuilds_dirty_ones() {
     let empty = std::collections::HashMap::new();
     let mut runtime = SimulationRuntime::new();
 
-    let view1 = build_read_view_from_runtime(&runtime, &empty, 1, None);
+    let view1 = build_read_view_from_runtime(&runtime, &empty, None);
     assert!(
         !view1.chunk_snapshots.is_empty(),
         "fixture world must have loaded chunks"
@@ -1326,7 +1326,7 @@ async fn read_view_reuses_unchanged_tile_snapshots_and_rebuilds_dirty_ones() {
     // A plain mobility tick does not touch tiles: every tile snapshot must be
     // reused (pointer-equal), not rebuilt.
     let _ = runtime.tick_world_mobility();
-    let view2 = build_read_view_from_runtime(&runtime, &empty, 2, Some(&view1));
+    let view2 = build_read_view_from_runtime(&runtime, &empty, Some(&view1));
     for (coord, snap) in &view1.chunk_snapshots {
         let snap2 = view2
             .chunk_snapshots
@@ -1342,7 +1342,7 @@ async fn read_view_reuses_unchanged_tile_snapshots_and_rebuilds_dirty_ones() {
     // all other chunks keep their cached Arc.
     let dirty = ChunkCoord { x: 0, y: 0 };
     mutate_runtime_tile(&mut runtime, "command:view-reuse:1").await;
-    let view3 = build_read_view_from_runtime(&runtime, &empty, 3, Some(&view2));
+    let view3 = build_read_view_from_runtime(&runtime, &empty, Some(&view2));
     let before = view2.chunk_snapshots.get(&dirty).expect("dirty chunk");
     let after = view3.chunk_snapshots.get(&dirty).expect("dirty chunk");
     assert!(

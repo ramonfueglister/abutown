@@ -191,9 +191,6 @@ export function applyServerMessage(
       // The bridge marks the connection live via markMobilityConnected on the
       // initial snapshot fetch; the wire Hello is informational for now.
       return state;
-    case 'tilePulse':
-      // Consumed elsewhere (tile rendering); mobility overlay ignores it.
-      return state;
     case 'economySnapshot':
       return state; // economy rides a separate overlay state; mobility ignores it
     case 'worldEvent':

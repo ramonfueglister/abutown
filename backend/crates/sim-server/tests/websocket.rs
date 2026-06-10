@@ -25,7 +25,7 @@ fn seeded_mobility_chunk() -> w::ChunkCoord {
 }
 
 #[tokio::test]
-async fn websocket_sends_hello_and_tile_pulse() {
+async fn websocket_sends_hello() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -45,85 +45,6 @@ async fn websocket_sends_hello_and_tile_pulse() {
         hello.body,
         Some(w::server_message::Body::Hello(_))
     ));
-
-    // Tile pulses are global; chunk subscriptions have their own snapshot tests.
-    let first_pulse =
-        tokio::time::timeout(Duration::from_secs(1), read_next_tile_pulse(&mut stream))
-            .await
-            .expect("first tile pulse must arrive within the bounded smoke window");
-    assert_eq!(first_pulse.world_id, "abutopia");
-    assert!(first_pulse.coord.is_some());
-    assert!(first_pulse.tick >= 1);
-    assert!(first_pulse.version >= 1);
-    assert!(first_pulse.local_index < 1024);
-
-    let next_pulse =
-        tokio::time::timeout(Duration::from_secs(1), read_next_tile_pulse(&mut stream))
-            .await
-            .expect("next tile pulse arrives within the bounded smoke window");
-    assert_eq!(next_pulse.tick, first_pulse.tick + 1);
-    assert_eq!(next_pulse.version, first_pulse.version + 1);
-
-    server.abort();
-}
-
-#[tokio::test]
-async fn websocket_pulses_loaded_abutopia_chunks_in_order() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, build_app()).await.unwrap();
-    });
-
-    let url = format!("ws://{addr}/ws");
-    let (mut stream, _) = connect_async(url).await.unwrap();
-
-    let hello = read_server_message(&mut stream).await;
-    assert!(matches!(
-        hello.body,
-        Some(w::server_message::Body::Hello(_))
-    ));
-
-    let first_delta = read_next_tile_pulse(&mut stream).await;
-    let second_delta = read_next_tile_pulse(&mut stream).await;
-    let third_delta = read_next_tile_pulse(&mut stream).await;
-
-    assert_eq!(first_delta.coord, Some(w::ChunkCoord { x: 0, y: 0 }));
-    assert_eq!(second_delta.coord, Some(w::ChunkCoord { x: 1, y: 0 }));
-    assert_eq!(third_delta.coord, Some(w::ChunkCoord { x: 2, y: 0 }));
-
-    server.abort();
-}
-
-#[tokio::test]
-async fn websocket_clients_receive_the_same_broadcast_tick() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, build_app()).await.unwrap();
-    });
-
-    let url = format!("ws://{addr}/ws");
-    let (mut first_stream, _) = connect_async(url.clone()).await.unwrap();
-    let (mut second_stream, _) = connect_async(url).await.unwrap();
-
-    let first_hello = read_server_message(&mut first_stream).await;
-    let second_hello = read_server_message(&mut second_stream).await;
-    assert!(matches!(
-        first_hello.body,
-        Some(w::server_message::Body::Hello(_))
-    ));
-    assert!(matches!(
-        second_hello.body,
-        Some(w::server_message::Body::Hello(_))
-    ));
-
-    let first_delta = read_next_tile_pulse(&mut first_stream).await;
-    let second_delta = read_next_tile_pulse(&mut second_stream).await;
-
-    assert_eq!(second_delta.tick, first_delta.tick);
-    assert_eq!(second_delta.version, first_delta.version);
-    assert_eq!(second_delta.local_index, first_delta.local_index);
 
     server.abort();
 }
@@ -275,7 +196,7 @@ async fn websocket_does_not_broadcast_failed_command_append() {
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
-    // Drain any background messages (tile pulses, mobility deltas) for one tick
+    // Drain any background messages (mobility deltas, economy snapshots) for one tick
     // and assert that none of them are a WorldEvent — that would indicate the rejected
     // command was broadcast despite the store failure.
     let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(250);
@@ -323,23 +244,6 @@ where
             return w::ServerMessage::decode(bytes.as_ref()).expect("decode server message");
         }
         // ignore Ping/Pong/Close/Text noise
-    }
-}
-
-async fn read_next_tile_pulse<S>(stream: &mut S) -> w::TilePulse
-where
-    S: futures_util::Stream<
-            Item = Result<
-                tokio_tungstenite::tungstenite::Message,
-                tokio_tungstenite::tungstenite::Error,
-            >,
-        > + Unpin,
-{
-    loop {
-        let message = read_server_message(stream).await;
-        if let Some(w::server_message::Body::TilePulse(delta)) = message.body {
-            return delta;
-        }
     }
 }
 

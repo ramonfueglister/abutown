@@ -114,7 +114,6 @@ const sentMessages = sentBinary.map(decodeClient).filter(Boolean);
 function summariseReceived(messages) {
   const out = {
     hello: 0,
-    tile_pulse: 0,
     mobility_chunk_snapshot: { count: 0, chunks: {} },
     mobility_chunk_delta: { count: 0, chunks: {} },
     world_event: 0,
@@ -124,7 +123,6 @@ function summariseReceived(messages) {
   for (const m of messages) {
     switch (m.body.case) {
       case 'hello': out.hello += 1; break;
-      case 'tilePulse': out.tile_pulse += 1; break;
       case 'mobilityChunkSnapshot': {
         out.mobility_chunk_snapshot.count += 1;
         const c = m.body.value.chunk;
