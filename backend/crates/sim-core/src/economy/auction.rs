@@ -340,7 +340,8 @@ pub fn clear_market_good_with_policy(
     current_tick: u64,
     policy: SettlementPolicy,
 ) -> Result<(), EconomyError> {
-    let mut discard = std::collections::BTreeMap::new();
+    let mut discard_receipts = std::collections::BTreeMap::new();
+    let mut discard_outlays = std::collections::BTreeMap::new();
     clear_market_good_with_receipts(
         accounts,
         inventory,
@@ -350,7 +351,8 @@ pub fn clear_market_good_with_policy(
         key,
         current_tick,
         policy,
-        &mut discard,
+        &mut discard_receipts,
+        &mut discard_outlays,
     )
 }
 
@@ -365,6 +367,7 @@ pub fn clear_market_good_with_receipts(
     current_tick: u64,
     policy: SettlementPolicy,
     receipts: &mut std::collections::BTreeMap<(EconomicActorId, MarketId), Money>,
+    outlays: &mut std::collections::BTreeMap<(EconomicActorId, MarketId), Money>,
 ) -> Result<(), EconomyError> {
     // Get-or-create the market-good state so a freshly-dirtied key (the system
     // path) clears instead of failing with InvalidOrder. A never-traded market
@@ -402,6 +405,7 @@ pub fn clear_market_good_with_receipts(
     let mut next_inventory = inventory.clone();
     let mut next_orders = orders.clone();
     let mut next_receipts = receipts.clone();
+    let mut next_outlays = outlays.clone();
     let mut trade_events = Vec::new();
     let mut traded_qty = Quantity::ZERO;
 
@@ -428,6 +432,11 @@ pub fn clear_market_good_with_receipts(
         // Accumulate seller revenue into next_receipts (scratch zone, before any commit).
         let slot = next_receipts
             .entry((ask.owner, key.market))
+            .or_insert(Money::ZERO);
+        *slot = slot.checked_add(actual_cost)?;
+        // Accumulate buyer charge into next_outlays (scratch zone, before any commit).
+        let slot = next_outlays
+            .entry((bid.owner, key.market))
             .or_insert(Money::ZERO);
         *slot = slot.checked_add(actual_cost)?;
         next_inventory.debit_locked_goods(ask.owner, ask.good, fill.qty)?;
@@ -467,6 +476,7 @@ pub fn clear_market_good_with_receipts(
     *inventory = next_inventory;
     *orders = next_orders;
     *receipts = next_receipts;
+    *outlays = next_outlays;
     ledger.0.extend(trade_events);
     if let Some(state) = market_goods.0.get_mut(&key) {
         state.last_settlement_price = price;

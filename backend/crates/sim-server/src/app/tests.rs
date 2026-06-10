@@ -1178,16 +1178,69 @@ fn economy_snapshot_includes_flow_rates() {
     );
 }
 
+#[test]
+fn economy_snapshot_includes_producers() {
+    // build_economy_snapshot must ship one EconomyProducer entry per InputPools
+    // key: recipe (in/out good + qty), firm cash, participation bound, and the
+    // working-capital target (0 while the bound is undiscovered — the dividend
+    // path's conservative semantics).
+    use sim_core::economy::{EconomicActorId, InputPools, Money, capita::CapitaFactor};
+
+    let mut runtime = SimulationRuntime::new();
+    let world_id = runtime.world_id_for_persist().clone();
+
+    // Seed state: producer 8031's participation bound starts at ZERO (discovered
+    // by the order-generation pass) → max_bid = 0 and wc_target = 0.
+    let snapshot = build_economy_snapshot(&runtime.world, &world_id, 0);
+    assert_eq!(
+        snapshot.producers.len(),
+        1,
+        "abutopia markets.json seeds exactly one producer (8031)"
+    );
+    let p = &snapshot.producers[0];
+    assert_eq!(p.actor_id, 8031);
+    assert_eq!(p.market_id, 9001);
+    assert_eq!(
+        (p.in_good, p.out_good, p.in_qty, p.out_qty),
+        (2, 4, 10, 10),
+        "recipe: 10 WOOD → 10 TOOLS"
+    );
+    // opening_cash 1_000_000 × seed capita factor 30 (300 agents / baseline 10).
+    assert_eq!(p.retained_earnings, 30_000_000);
+    assert_eq!(
+        (p.max_bid, p.wc_target),
+        (0, 0),
+        "unpriced pool → both zero"
+    );
+
+    // Priced path: write a positive bound + a pinned factor, rebuild.
+    runtime
+        .world
+        .resource_mut::<InputPools>()
+        .0
+        .get_mut(&EconomicActorId(8031))
+        .expect("producer 8031 seeded from markets.json")
+        .max_price = Money(400);
+    runtime.world.insert_resource(CapitaFactor(30));
+    let snapshot = build_economy_snapshot(&runtime.world, &world_id, 0);
+    let p = &snapshot.producers[0];
+    assert_eq!(p.max_bid, 400);
+    // wc_target = max_price · (batches_target·in_qty·factor) / ECONOMY_SCALE
+    //           = 400 · (2·10·30) / 1000 = 240 (same arithmetic as settlement).
+    assert_eq!(p.wc_target, 240);
+}
+
 /// Verify that `build_economy_snapshot` always populates the `vitals` field.
 ///
 /// The fixture is a fully-seeded `SimulationRuntime::new()` world (abutopia bundle
 /// with 300 agents, capita_baseline=10, so capita_factor=30).  The economy is seeded
 /// by `seed_from_markets_layer`:
-///   - 3 demand actors each receive `opening_cash=1_000_000 × factor=30 = 30_000_000`
-///   - Total seeded money = 3 × 30_000_000 = 90_000_000
+///   - 3 demand actors + producer 8031 each receive
+///     `opening_cash=1_000_000 × factor=30 = 30_000_000`
+///   - Total seeded money = 4 × 30_000_000 = 120_000_000
 ///
 /// At seeding time no ticks have run so no supply/demand actors have traded: the
-/// full 90_000_000 sits in `available` balances.  The route stats are all-zero because
+/// full 120_000_000 sits in `available` balances.  The route stats are all-zero because
 /// the route-assignment system hasn't been invoked, and there are no
 /// CitizenEconomicTargets yet (attribution runs later).
 #[test]
@@ -1198,8 +1251,9 @@ fn economy_snapshot_carries_vitals() {
     let world = runtime.mobility();
 
     // Sanity: the AccountBook exists and has the expected seeded total.
-    // 300 agents / 10 capita_baseline = factor 30.  3 demand specs × 1_000_000 × 30.
-    let expected_total_money: i64 = 3 * 1_000_000 * 30;
+    // 300 agents / 10 capita_baseline = factor 30.
+    // (3 demand specs + producer 8031) × 1_000_000 × 30.
+    let expected_total_money: i64 = 4 * 1_000_000 * 30;
     let actual_total = world
         .resource::<AccountBook>()
         .total_money()
@@ -1207,7 +1261,7 @@ fn economy_snapshot_carries_vitals() {
         .0;
     assert_eq!(
         actual_total, expected_total_money,
-        "seeded total_money must equal 3 × opening_cash × capita_factor"
+        "seeded total_money must equal (3 demand + 1 producer) × opening_cash × capita_factor"
     );
 
     let world_id = abutown_protocol::WorldId("abutopia".to_string());

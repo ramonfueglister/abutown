@@ -192,6 +192,12 @@ pub struct MarketLayer {
     pub supply: Vec<SupplySpec>,
     pub demand: Vec<DemandSpec>,
     pub extractors: Vec<ExtractorSpec>,
+    /// Buying firms (multi-stage production chains). `serde(default)` follows the
+    /// `capita_baseline` world-layer precedent: this is AUTHORED world data, not a
+    /// persisted snapshot, so older worlds that omit the section keep their exact
+    /// pre-chain behavior (no producers, no input pools, #75 dividend semantics).
+    #[serde(default)]
+    pub producers: Vec<ProducerSpec>,
     pub household: HouseholdSpec,
     pub opening_prices: Vec<OpeningPriceSpec>,
 }
@@ -239,6 +245,26 @@ pub struct ExtractorSpec {
     pub out_good: u16,
     pub qty: i64,
     pub min_price: i64,
+}
+
+/// A buying firm: converts `in_qty` of `in_good` (bought on its home `market` via a
+/// Leontief `InputPool`) into `out_qty` of `out_good`, sold through a normal
+/// `SupplyPool` (`qty`/`min_price` are the sell side, exactly like `ExtractorSpec`).
+/// `theta_bps`/`batches_target` author the NON-persisted `ProducerPolicy`
+/// (re-applied from this layer every boot); `opening_cash` is the one-time seed mint.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProducerSpec {
+    pub actor: u64,
+    pub market: u32,
+    pub in_good: u16,
+    pub in_qty: i64,
+    pub out_good: u16,
+    pub out_qty: i64,
+    pub qty: i64,       // sell-side offered_qty_per_tick (same as ExtractorSpec)
+    pub min_price: i64, // sell-side reservation price
+    pub theta_bps: u16,
+    pub batches_target: u32,
+    pub opening_cash: i64,
 }
 
 fn default_capita_baseline() -> i64 {
@@ -635,15 +661,16 @@ mod tests {
         // Four authored markets, ids 9001..9004, ascending.
         let ids: Vec<u32> = bundle.markets.markets.iter().map(|m| m.id).collect();
         assert_eq!(ids, vec![9001, 9002, 9003, 9004]);
-        // Cross-market distances: ONLY the two intended pairs (each one entry; the
-        // factory mirrors both directions at seed time).
+        // Cross-market distances: ONLY the three intended pairs (each one entry; the
+        // factory mirrors both directions at seed time). 9001↔9003 is the WOOD route
+        // of the production chain.
         let pairs: Vec<(u32, u32)> = bundle
             .markets
             .distances
             .iter()
             .map(|d| (d.from, d.to))
             .collect();
-        assert_eq!(pairs, vec![(9001, 9002), (9003, 9004)]);
+        assert_eq!(pairs, vec![(9001, 9002), (9003, 9004), (9001, 9003)]);
     }
 
     #[test]
@@ -842,6 +869,7 @@ mod tests {
                 supply: Vec::new(),
                 demand: Vec::new(),
                 extractors: Vec::new(),
+                producers: Vec::new(),
                 household: HouseholdSpec {
                     population: 1000,
                     capita_baseline: default_capita_baseline(),

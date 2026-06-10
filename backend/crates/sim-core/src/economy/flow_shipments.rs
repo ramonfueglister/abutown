@@ -4,7 +4,6 @@
 //! persisted (ephemeral, regenerated from the resumed flow on restart).
 
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemParam;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::{EconomyConfig, GoodId, MarketId, Money, Quantity};
@@ -77,15 +76,6 @@ pub struct RealizedFlow {
 /// MacroFlow run; NOT persisted (transient signal for the flow-margin price nudge).
 #[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
 pub struct RealizedFlows(pub Vec<RealizedFlow>);
-
-/// Bundled system params for the three flow-shipment resources, keeping
-/// `run_macro_flow_system` within Bevy's 16-param limit.
-#[derive(SystemParam)]
-pub struct FlowShipmentParams<'w> {
-    pub shipments: ResMut<'w, FlowShipments>,
-    pub next_id: ResMut<'w, NextShipmentId>,
-    pub realized: ResMut<'w, RealizedFlows>,
-}
 
 /// Drop arrived shipments that no longer have a live render-agent.
 ///

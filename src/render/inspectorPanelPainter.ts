@@ -1,6 +1,6 @@
 import type { EntityInspector } from './entityInspector';
 import { roundedRectPath } from './canvasPrimitives';
-import type { MarketLocationDto, MarketGoodDto } from '../backend/mobilityProtocol';
+import type { MarketLocationDto, MarketGoodDto, EconomyProducerDto } from '../backend/mobilityProtocol';
 
 export type InspectorPanelTheme = {
   x: number;
@@ -105,6 +105,7 @@ export function drawInspectorPanel(
 /** Maps well-known economy good IDs to human-readable labels. */
 const GOOD_LABELS: Readonly<Record<number, string>> = {
   1: 'FOOD',
+  2: 'WOOD',
   4: 'TOOLS',
   5: 'RAW',
 };
@@ -119,17 +120,30 @@ function formatMoney(raw: number): string {
 
 /**
  * Pure formatter: returns the market panel title as the first element, then one
- * row string per good, then a wages line.
+ * row string per good, then three rows per producer hosted at the market, then
+ * a wages line.
  *
  * Row format: "<GOOD>  p=<settlement/MONEY_DISPLAY_SCALE>  short=<unmet>  glut=<unsold>"
+ * Producer rows: "recipe: <inQty> <IN_GOOD> → <outQty> <OUT_GOOD>",
+ *   "cash/target=<retained>/<wcTarget>" and "max bid=<maxBid>" (money fields
+ *   divided by MONEY_DISPLAY_SCALE like the price lines).
  * Wages line: "wages=<wagePaidLastTick/MONEY_DISPLAY_SCALE>"
  */
-export function marketInspectorRows(market: MarketLocationDto, goods: MarketGoodDto[]): string[] {
+export function marketInspectorRows(
+  market: MarketLocationDto,
+  goods: MarketGoodDto[],
+  producers: EconomyProducerDto[],
+): string[] {
   const rows: string[] = [market.name];
   for (const g of goods) {
     rows.push(
       `${goodLabel(g.goodId)}  p=${formatMoney(g.lastSettlementPrice)}  short=${g.unmetDemandLastTick}  glut=${g.unsoldSupplyLastTick}`,
     );
+  }
+  for (const p of producers) {
+    rows.push(`recipe: ${p.inQty} ${goodLabel(p.inGood)} → ${p.outQty} ${goodLabel(p.outGood)}`);
+    rows.push(`cash/target=${formatMoney(p.retainedEarnings)}/${formatMoney(p.wcTarget)}`);
+    rows.push(`max bid=${formatMoney(p.maxBid)}`);
   }
   rows.push(`wages=${formatMoney(market.wagePaidLastTick)}`);
   return rows;
@@ -143,10 +157,11 @@ export function drawMarketInspectorPanel(
   ctx: CanvasRenderingContext2D,
   market: MarketLocationDto,
   goods: MarketGoodDto[],
+  producers: EconomyProducerDto[],
   theme: InspectorPanelTheme,
   pixelRatio: number,
 ): void {
-  const rows = marketInspectorRows(market, goods);
+  const rows = marketInspectorRows(market, goods, producers);
   // rows[0] is the title; rows[1..] are content rows (no label/value split — single string per row).
   const [title, ...contentRows] = rows;
   const inspector: NonNullable<EntityInspector> = {

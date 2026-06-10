@@ -690,6 +690,17 @@ mod proto_roundtrip_tests {
                     good_id: 1,
                     rate: 250,
                 }],
+                producers: vec![EconomyProducer {
+                    actor_id: 8031,
+                    market_id: 9001,
+                    in_good: 2,
+                    out_good: 4,
+                    retained_earnings: 30_000_000,
+                    wc_target: 24_000,
+                    max_bid: 400,
+                    in_qty: 10,
+                    out_qty: 10,
+                }],
             })),
         };
         assert_roundtrip(&msg);

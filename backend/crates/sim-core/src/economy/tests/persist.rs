@@ -383,11 +383,11 @@ fn ledger_tail_is_capped_and_round_trips() {
 #[test]
 fn raw_deposits_round_trip() {
     use crate::economy::GOOD_RAW;
-    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits};
+    use crate::economy::production::{PRODUCER_TOOLS, RawDeposit, RawDeposits};
 
     let mut world = install_economy();
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -400,7 +400,7 @@ fn raw_deposits_round_trip() {
     assert_eq!(
         snap.raw_deposits,
         vec![(
-            EXTRACTOR_TOOLS,
+            PRODUCER_TOOLS,
             RawDeposit {
                 good: GOOD_RAW,
                 qty_per_interval: Quantity(10),
@@ -416,7 +416,7 @@ fn raw_deposits_round_trip() {
     let mut fresh = install_economy();
     apply_into_world(&mut fresh, &decoded);
 
-    let restored = fresh.resource::<RawDeposits>().0[&EXTRACTOR_TOOLS];
+    let restored = fresh.resource::<RawDeposits>().0[&PRODUCER_TOOLS];
     assert_eq!(restored.last_regen_tick, Some(42));
     assert_eq!(restored.qty_per_interval, Quantity(10));
     assert_eq!(
@@ -426,16 +426,66 @@ fn raw_deposits_round_trip() {
     );
 }
 
+/// Mirrors `raw_deposits_round_trip` for the new non-default `input_pools` field:
+/// the `last_generated_tick` cursor and the discovered `max_price` survive the
+/// extract → JSON → apply round trip byte-stably.
+#[test]
+fn input_pools_round_trip() {
+    use crate::economy::GOOD_WOOD;
+    use crate::economy::producers::{InputPool, InputPools};
+    use crate::economy::production::PRODUCER_TOOLS;
+
+    let mut world = install_economy();
+    world.resource_mut::<InputPools>().0.insert(
+        PRODUCER_TOOLS,
+        InputPool {
+            actor: PRODUCER_TOOLS,
+            market: MarketId(9001),
+            good: GOOD_WOOD,
+            in_qty: Quantity(10),
+            out_qty: Quantity(10),
+            out_good: GOOD_TOOLS,
+            interval_ticks: 1,
+            last_generated_tick: Some(42),
+            max_price: Money(400),
+        },
+    );
+
+    let snap = extract_from_world(&world);
+    assert_eq!(
+        snap.input_pools.len(),
+        1,
+        "input_pools extracted (sorted order)"
+    );
+    assert_eq!(snap.input_pools[0].0, PRODUCER_TOOLS);
+
+    let bytes = serde_json::to_vec(&snap).unwrap();
+    let decoded: EconomyPersistSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let mut fresh = install_economy();
+    apply_into_world(&mut fresh, &decoded);
+
+    let restored = fresh.resource::<InputPools>().0[&PRODUCER_TOOLS];
+    assert_eq!(restored.last_generated_tick, Some(42), "cursor survives");
+    assert_eq!(restored.max_price, Money(400), "discovered bound survives");
+    assert_eq!(restored.good, GOOD_WOOD);
+    assert_eq!(restored.out_good, GOOD_TOOLS);
+    assert_eq!(
+        snap,
+        extract_from_world(&fresh),
+        "full snapshot identity with input_pools"
+    );
+}
+
 #[test]
 fn three_extractor_raw_deposits_round_trip() {
     use crate::economy::GOOD_RAW;
     use crate::economy::production::{
-        EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS, RawDeposit, RawDeposits,
+        EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, PRODUCER_TOOLS, RawDeposit, RawDeposits,
     };
 
     let mut world = install_economy();
     for (actor, cursor) in [
-        (EXTRACTOR_TOOLS, Some(7u64)),
+        (PRODUCER_TOOLS, Some(7u64)),
         (EXTRACTOR_FOOD_A, Some(11)),
         (EXTRACTOR_FOOD_FA, None),
     ] {
@@ -457,7 +507,7 @@ fn three_extractor_raw_deposits_round_trip() {
         "all three extractor deposits persist"
     );
     // Sorted by EconomicActorId (8_031, 8_032, 8_033).
-    assert_eq!(snap.raw_deposits[0].0, EXTRACTOR_TOOLS);
+    assert_eq!(snap.raw_deposits[0].0, PRODUCER_TOOLS);
     assert_eq!(snap.raw_deposits[1].0, EXTRACTOR_FOOD_A);
     assert_eq!(snap.raw_deposits[2].0, EXTRACTOR_FOOD_FA);
 

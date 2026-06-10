@@ -84,15 +84,28 @@ pub fn run_production_at_tick(
     Ok(())
 }
 
-/// The single named primary-resource extractor. ONE faucet (not N scattered ones),
-/// adjacent to the other seeded actor ids (8_001..8_022) but well clear of them.
-pub const EXTRACTOR_TOOLS: EconomicActorId = EconomicActorId(8_031);
+/// 8_031 — the TOOLS firm. Historically `EXTRACTOR_TOOLS` (a RAW→TOOLS faucet);
+/// since the production-chain slice it is the BUYING TOOLS PRODUCER: it purchases
+/// WOOD on its home market via a Leontief `InputPool` (seeded from `ProducerSpec`
+/// in markets.json) and converts it WOOD→TOOLS — no RAW faucet anymore. Renamed
+/// from `EXTRACTOR_TOOLS` (grep-verified: all uses were sim-core docs/tests; tests
+/// that exercise generic faucet machinery keep using this id as an arbitrary actor).
+/// Adjacent to the other seeded actor ids (8_001..8_022) but well clear of them.
+pub const PRODUCER_TOOLS: EconomicActorId = EconomicActorId(8_031);
 
 /// FOOD self-sufficiency: one continuous RAW->FOOD extractor co-located at each FOOD
 /// supply market. `_A` sits at m_a (backs finite supplier 8_011), `_FA` at m_fa (backs
-/// finite flow supplier 8_021). Adjacent to EXTRACTOR_TOOLS (8_031), clear of 8_001..8_022.
+/// finite flow supplier 8_021). Adjacent to PRODUCER_TOOLS (8_031), clear of 8_001..8_022.
 pub const EXTRACTOR_FOOD_A: EconomicActorId = EconomicActorId(8_032);
 pub const EXTRACTOR_FOOD_FA: EconomicActorId = EconomicActorId(8_033);
+
+/// 8_041 — the RAW→WOOD extractor backing the production chain: identical faucet
+/// machinery to 8_032/8_033 (`RawDeposit` + RAW→WOOD `ProductionPool` + `SupplyPool`),
+/// only `out_good = GOOD_WOOD`. Sells at m_fa (9003); the WOOD travels 9003→9001 via
+/// the unchanged macro_flow, where `PRODUCER_TOOLS` (8_031) buys it. The id
+/// deliberately skips from the 8_031..8_033 block to the next decade (8_041),
+/// leaving headroom for more producers/extractors; clear of 8_001..8_022.
+pub const EXTRACTOR_WOOD: EconomicActorId = EconomicActorId(8_041);
 
 /// A standing raw-goods faucet for one actor. PERSISTED (mirrors `ProductionPool`).
 /// `last_regen_tick` is the interval cursor (gates deposits, persists for free since

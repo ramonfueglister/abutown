@@ -92,7 +92,7 @@ pub enum EconomyEvent {
         market: MarketId,
         amount: Money,
     },
-    /// The `EXTRACTOR_TOOLS` faucet deposited `qty` of a raw good this interval (goods-only,
+    /// An extractor faucet (`RawDeposits`) deposited `qty` of a raw good this interval (goods-only,
     /// no money). The sole source of new `GOOD_RAW`; pairs with the recipe `Consumed`
     /// events in the per-good conservation balance.
     Regenerated {

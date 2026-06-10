@@ -5,6 +5,7 @@ import {
   type MarketLocationDto,
   type MarketGoodDto,
   type EconomyFlowDto,
+  type EconomyProducerDto,
 } from './mobilityProtocol';
 
 export type EconomyOverlayState = {
@@ -13,10 +14,11 @@ export type EconomyOverlayState = {
   goods: Map<string, MarketGoodDto>; // key `${marketId}:${goodId}`
   vitals?: EconomyVitalsDto;
   flows: EconomyFlowDto[];
+  producers: EconomyProducerDto[];
 };
 
 export function createEconomyOverlayState(): EconomyOverlayState {
-  return { tick: 0, markets: new Map(), goods: new Map(), flows: [] };
+  return { tick: 0, markets: new Map(), goods: new Map(), flows: [], producers: [] };
 }
 
 export function applyEconomyServerMessage(
@@ -27,5 +29,5 @@ export function applyEconomyServerMessage(
   const dto = economySnapshotFromProto(message.body.value);
   const markets = new Map(dto.markets.map((m) => [m.marketId, m]));
   const goods = new Map(dto.goods.map((g) => [`${g.marketId}:${g.goodId}`, g]));
-  return { tick: dto.tick, markets, goods, vitals: dto.vitals, flows: dto.flows };
+  return { tick: dto.tick, markets, goods, vitals: dto.vitals, flows: dto.flows, producers: dto.producers };
 }

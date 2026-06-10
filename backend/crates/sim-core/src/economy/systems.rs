@@ -2,17 +2,19 @@ use std::collections::BTreeSet;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::Or;
+use bevy_ecs::system::SystemParam;
 
+use crate::economy::producers::run_generate_input_orders_at_tick;
 use crate::economy::production::RawDeposits;
 use crate::economy::{
-    AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    FlowRateEwma, FlowShipmentParams, GoodId, HouseholdSector, InventoryBook, MarketChunks,
-    MarketDistances, MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProductionPools,
-    SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
-    clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
-    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick,
-    run_distribute_profit_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
-    run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
+    AccountBook, BuyerOutlays, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError,
+    EconomyEvent, FlowRateEwma, FlowShipments, GoodId, HouseholdSector, InputPools, InventoryBook,
+    MarketChunks, MarketDistances, MarketGoods, MarketId, Money, NextOrderId, NextShipmentId,
+    OrderBook, ProducerPolicies, ProductionPools, RealizedFlows, SellerReceipts, SettlementPolicy,
+    SupplyPools, TradeLedger, WageTelemetry, clear_market_good_with_receipts,
+    expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
+    run_consumption_update_at_tick, run_distribute_profit_at_tick, run_macro_flow_at_tick,
+    run_pay_wages_at_tick, run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -271,10 +273,15 @@ pub fn install_systems(schedule: &mut bevy_ecs::schedule::Schedule) {
     );
 }
 
-/// Tick-start: clear `SellerReceipts` so the settle points accumulate exactly one
-/// tick of revenue (mirrors `run_consumption_at_tick`'s reset-all-then-accumulate).
-pub fn reset_seller_receipts_system(mut receipts: ResMut<SellerReceipts>) {
+/// Tick-start: clear `SellerReceipts` and `BuyerOutlays` so the settle points accumulate
+/// exactly one tick of revenue/charges (mirrors `run_consumption_at_tick`'s
+/// reset-all-then-accumulate).
+pub fn reset_seller_receipts_system(
+    mut receipts: ResMut<SellerReceipts>,
+    mut outlays: ResMut<BuyerOutlays>,
+) {
     receipts.0.clear();
+    outlays.0.clear();
 }
 
 /// Bridge: derive `DormantMarkets` from chunk LOD. A market anchored (in
@@ -314,6 +321,15 @@ pub fn expire_orders_system(
     );
 }
 
+/// Generate both consumer/supplier pool orders AND Leontief input orders in a single
+/// system, sharing the same dormant-market set and TTL. The two passes are independent
+/// because demand-pool actors and producer (input-pool) actors are disjoint — the
+/// seed-enforced invariant (see the "Role disjointness" assert in markets_layer.rs).
+/// Note producers DO appear on the sell side too (8031 holds a SupplyPool for TOOLS
+/// while its InputPool buys WOOD); only the demand/input actor sets are disjoint.
+/// Both passes use the same fail-fast
+/// `.expect` convention: an `Err` here is a bug (overflow, zero price, or mismatch)
+/// that must surface loudly rather than silently drop orders.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_pool_orders_system(
     tick: Res<Tick>,
@@ -328,6 +344,9 @@ pub fn generate_pool_orders_system(
     mut next: ResMut<NextOrderId>,
     mut demand: ResMut<DemandPools>,
     mut supply: ResMut<SupplyPools>,
+    mut input_pools: ResMut<InputPools>,
+    policies: Res<ProducerPolicies>,
+    market_goods: Res<MarketGoods>,
 ) {
     generate_pool_orders_at_tick(
         &mut accounts,
@@ -346,6 +365,25 @@ pub fn generate_pool_orders_system(
     .expect(
         "generate_pool_orders_at_tick: an Err (Overflow from a too-large capita_factor, or ZeroPrice) is a bug/mis-scale — fail loud rather than silently drop orders (OrderRejected for insufficient funds/goods is a ledger event, not an Err)",
     );
+    run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        tick.0,
+        config.default_order_ttl_ticks,
+        &dormant.0,
+        capita.0,
+    )
+    .expect(
+        "run_generate_input_orders_at_tick: an Err (ZeroPrice, Overflow, or InputPool/ProducerPolicy mismatch) is a bug — fail loud rather than silently drop input orders",
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -359,6 +397,7 @@ pub fn clear_dirty_markets_system(
     mut goods: ResMut<MarketGoods>,
     mut dirty: ResMut<DirtyMarketGoods>,
     mut receipts: ResMut<SellerReceipts>,
+    mut outlays: ResMut<BuyerOutlays>,
 ) {
     let keys: Vec<_> = dirty.0.iter().copied().collect();
     dirty.0.clear();
@@ -373,6 +412,7 @@ pub fn clear_dirty_markets_system(
             tick.0,
             config.settlement_policy,
             &mut receipts.0,
+            &mut outlays.0,
         ) {
             ledger.0.push(EconomyEvent::MarketClearFailed {
                 market: key.market,
@@ -437,12 +477,15 @@ pub fn run_consumption_system(
     );
 }
 
-/// The SFC wage step: firms pay a labor share of this tick's revenue into the
-/// household sector, apportioned to consumer pools (income). Runs after BOTH settle
-/// paths (ClearMarkets, MacroFlow) so all receipts are booked, before Consume.
+/// The SFC wage step: firms pay a labor share of this tick's VALUE ADDED (revenue minus
+/// buyer outlays for the same (firm, market), floored at zero) into the household sector,
+/// apportioned to consumer pools (income). Runs after BOTH settle paths (ClearMarkets,
+/// MacroFlow) so all receipts AND outlays are fully booked, before Consume.
+#[allow(clippy::too_many_arguments)]
 pub fn run_pay_wages_system(
     config: Res<EconomyConfig>,
     receipts: Res<SellerReceipts>,
+    outlays: Res<BuyerOutlays>,
     household: Res<HouseholdSector>,
     mut accounts: ResMut<AccountBook>,
     mut demand: ResMut<DemandPools>,
@@ -457,20 +500,28 @@ pub fn run_pay_wages_system(
         &mut wage_telemetry,
         &mut ledger,
         &config,
+        &outlays,
     )
-    .expect("run_pay_wages_at_tick is infallible by construction (wage <= just-credited revenue, Σweights guards); an Err is a bug");
+    .expect("run_pay_wages_at_tick is infallible by construction (wage <= just-credited value-added, Σweights guards); an Err is a bug");
 }
 
 /// Profit distribution: runs in the PayWages set with an explicit `.after(run_pay_wages_system)`
 /// edge so the wage net-zero assert fires first and income accumulates wage→profit in a
 /// deterministic order. Fallible/audited at the per-firm level inside the core; the wrapper
-/// surfaces a whole-call Err (only a config-validation failure can produce one) as an audited
-/// MarketClearFailed event — never `let _` (which would swallow a config bug), never `.expect`
-/// (the call is genuinely fallible).
+/// surfaces a whole-call Err (a config-validation failure, a `wc_target` computation fault, or
+/// an `InvalidOrder` mismatch-fail-fast when `ProducerPolicies` and `InputPools` are populated
+/// asymmetrically — signalling a seed/re-apply inconsistency that would otherwise produce silent
+/// wrong behaviour) as an audited MarketClearFailed event — never `let _` (which would swallow a
+/// config bug), never `.expect` (the call is genuinely fallible).
+#[allow(clippy::too_many_arguments)]
 pub fn run_distribute_profit_system(
     config: Res<EconomyConfig>,
     receipts: Res<SellerReceipts>,
     household: Res<HouseholdSector>,
+    outlays: Res<BuyerOutlays>,
+    policies: Res<ProducerPolicies>,
+    input_pools: Res<InputPools>,
+    capita: Res<crate::economy::capita::CapitaFactor>,
     mut accounts: ResMut<AccountBook>,
     mut demand: ResMut<DemandPools>,
     mut ledger: ResMut<TradeLedger>,
@@ -482,6 +533,10 @@ pub fn run_distribute_profit_system(
         &household,
         &mut ledger,
         &config,
+        &outlays,
+        &policies,
+        &input_pools,
+        capita.0,
     ) {
         assert_ne!(
             reason,
@@ -538,6 +593,23 @@ pub fn update_market_telemetry_system(config: Res<EconomyConfig>, mut goods: Res
     let _ = update_market_telemetry(&mut goods, *config);
 }
 
+/// Bundled system params for `run_macro_flow_system`, keeping it within Bevy's
+/// 16-param limit: the flow-shipment/telemetry resources plus the producer
+/// input-demand resources the macro flow sources dormant firm demand from
+/// (`build_macro_buckets`' InputPools loop — `input_pools` is `ResMut` because
+/// the flow writes the discovered participation bound back to `pool.max_price`
+/// and stamps the generation cursor).
+#[derive(SystemParam)]
+pub struct MacroFlowParams<'w> {
+    pub shipments: ResMut<'w, FlowShipments>,
+    pub next_id: ResMut<'w, NextShipmentId>,
+    pub realized: ResMut<'w, RealizedFlows>,
+    pub ewma: ResMut<'w, FlowRateEwma>,
+    pub input_pools: ResMut<'w, InputPools>,
+    pub policies: Res<'w, ProducerPolicies>,
+    pub capita: Res<'w, crate::economy::capita::CapitaFactor>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn run_macro_flow_system(
     tick: Res<Tick>,
@@ -551,11 +623,11 @@ pub fn run_macro_flow_system(
     demand: Res<DemandPools>,
     supply: Res<SupplyPools>,
     mut market_goods: ResMut<MarketGoods>,
-    mut flow: FlowShipmentParams,
+    mut flow: MacroFlowParams,
     mut orders: ResMut<OrderBook>,
     mut next_order_id: ResMut<NextOrderId>,
     mut receipts: ResMut<SellerReceipts>,
-    mut flow_ewma: ResMut<FlowRateEwma>,
+    mut outlays: ResMut<BuyerOutlays>,
 ) {
     match run_macro_flow_at_tick(
         &mut accounts,
@@ -563,6 +635,9 @@ pub fn run_macro_flow_system(
         &mut ledger,
         &demand,
         &supply,
+        &mut flow.input_pools,
+        &flow.policies,
+        flow.capita.0,
         &mut market_goods,
         &dirty,
         &dormant.0,
@@ -575,6 +650,7 @@ pub fn run_macro_flow_system(
         &mut orders,
         &mut next_order_id,
         &mut receipts.0,
+        &mut outlays.0,
     ) {
         Ok(()) => {
             // Fold this interval's realized flows into the on-wire EWMA. Gated on
@@ -583,7 +659,7 @@ pub fn run_macro_flow_system(
             if config.macro_flow_interval_ticks != 0
                 && tick.0.is_multiple_of(config.macro_flow_interval_ticks)
             {
-                crate::economy::update_flow_rate_ewma(&mut flow_ewma, &flow.realized);
+                crate::economy::update_flow_rate_ewma(&mut flow.ewma, &flow.realized);
             }
         }
         Err(reason) => {

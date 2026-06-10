@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::economy::{
     AccountBook, Ask, Bid, DemandPool, DemandPools, EconomicActorId, EconomyEvent, GoodId,
-    HouseholdSector, InventoryBalance, InventoryBook, MarketChunks, MarketDistances, MarketGoodKey,
-    MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, MoneyAccount, NextOrderId,
-    OrderBook, OrderId, ProductionPool, ProductionPools, RawDeposit, RawDeposits, SupplyPool,
-    SupplyPools, TradeLedger,
+    HouseholdSector, InputPool, InputPools, InventoryBalance, InventoryBook, MarketChunks,
+    MarketDistances, MarketGoodKey, MarketGoodState, MarketGoods, MarketId, MarketSite, Markets,
+    MoneyAccount, NextOrderId, OrderBook, OrderId, ProductionPool, ProductionPools, RawDeposit,
+    RawDeposits, SupplyPool, SupplyPools, TradeLedger,
 };
 use crate::ids::ChunkCoord;
 use crate::world::persistence::{MigrationError, SnapshotItem, SnapshotKey, SnapshotProvider};
@@ -44,7 +44,13 @@ pub struct EconomyPersistSnapshot {
     pub demand_pools: Vec<(EconomicActorId, DemandPool)>,
     pub supply_pools: Vec<(EconomicActorId, SupplyPool)>,
     pub production_pools: Vec<(EconomicActorId, ProductionPool)>,
-    /// The raw-goods faucets (EXTRACTOR_TOOLS + future extractors). Mirrors `production_pools`;
+    /// Leontief input pools of the buying producers (8_031 …). Persisted for the
+    /// `last_generated_tick` cursor (frozen-time model); `ProducerPolicies` is NOT
+    /// here — it is authored config, re-applied from markets.json every boot.
+    /// ⚠️ New non-default snapshot field; old rows fail to deserialize (one-time
+    /// `DELETE FROM economy_snapshots` before deploy). NO serde-default.
+    pub input_pools: Vec<(EconomicActorId, InputPool)>,
+    /// The raw-goods faucets (the extractor actors, e.g. EXTRACTOR_WOOD). Mirrors `production_pools`;
     /// persisted so the `last_regen_tick` cursor survives restart (frozen-time model). New
     /// non-default snapshot field; old rows fail to deserialize (one-time
     /// `DELETE FROM economy_snapshots` before deploy). NO serde-default.
@@ -73,6 +79,7 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
     let demand = world.resource::<DemandPools>();
     let supply = world.resource::<SupplyPools>();
     let production = world.resource::<ProductionPools>();
+    let input_pools = world.resource::<InputPools>();
     let raw_deposits = world.resource::<RawDeposits>();
     let market_chunks = world.resource::<MarketChunks>();
     let ledger = world.resource::<TradeLedger>();
@@ -100,6 +107,7 @@ pub fn extract_from_world(world: &World) -> EconomyPersistSnapshot {
         demand_pools: demand.0.iter().map(|(k, v)| (*k, *v)).collect(),
         supply_pools: supply.0.iter().map(|(k, v)| (*k, *v)).collect(),
         production_pools: production.0.iter().map(|(k, v)| (*k, v.clone())).collect(),
+        input_pools: input_pools.0.iter().map(|(k, v)| (*k, *v)).collect(),
         raw_deposits: raw_deposits.0.iter().map(|(k, v)| (*k, *v)).collect(),
         market_chunks: market_chunks.0.iter().map(|(k, v)| (*k, *v)).collect(),
         ledger_tail,
@@ -137,6 +145,7 @@ pub fn apply_into_world(world: &mut World, snap: &EconomyPersistSnapshot) {
     world.insert_resource(ProductionPools(
         snap.production_pools.iter().cloned().collect(),
     ));
+    world.insert_resource(InputPools(snap.input_pools.iter().cloned().collect()));
     world.insert_resource(RawDeposits(snap.raw_deposits.iter().cloned().collect()));
     world.insert_resource(MarketChunks(snap.market_chunks.iter().cloned().collect()));
     world.insert_resource(TradeLedger(snap.ledger_tail.clone()));

@@ -22,15 +22,19 @@ use std::collections::BTreeSet;
 
 use crate::economy::capita::capita_factor;
 use crate::economy::pools::target_spend;
+use crate::economy::producers::{
+    InputPool, InputPools, ProducerPolicies, ProducerPolicy, participation_bound,
+    run_generate_input_orders_at_tick, wc_target,
+};
 use crate::economy::production::{
-    EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
+    EXTRACTOR_FOOD_A, PRODUCER_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
     Recipe, run_production_at_tick, run_regen_at_tick,
 };
 use crate::economy::{
     AccountBook, DemandPool, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyError,
-    EconomyEvent, GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, HouseholdSector, InventoryBook, MarketGoodKey,
-    MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, Money, NextOrderId, OrderBook,
-    Quantity, SupplyPool, SupplyPools, TradeLedger, generate_pool_orders_at_tick,
+    EconomyEvent, GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, GOOD_WOOD, HouseholdSector, InventoryBook,
+    MarketGoodKey, MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, Money, NextOrderId,
+    OrderBook, Quantity, SupplyPool, SupplyPools, TradeLedger, generate_pool_orders_at_tick,
 };
 
 // ── 1. capita_factor saturation ──────────────────────────────────────────────
@@ -208,7 +212,7 @@ fn regen_at_tick_overflow_returns_err() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(i64::MAX),
@@ -233,7 +237,7 @@ fn regen_at_tick_realistic_factor_30_is_ok() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -247,11 +251,11 @@ fn regen_at_tick_realistic_factor_30_is_ok() {
 
     // 10 × 30 = 300 RAW deposited.
     assert_eq!(
-        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
+        inv.balance(PRODUCER_TOOLS, GOOD_RAW).available,
         Quantity(300)
     );
     assert!(ledger.0.contains(&EconomyEvent::Regenerated {
-        actor: EXTRACTOR_TOOLS,
+        actor: PRODUCER_TOOLS,
         good: GOOD_RAW,
         qty: Quantity(300),
     }));
@@ -393,7 +397,7 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
     let market = MarketId(1);
 
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -402,9 +406,9 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(10))],
                 outputs: vec![(GOOD_TOOLS, Quantity(10))],
@@ -414,9 +418,9 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             market,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),
@@ -571,5 +575,133 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
         "CONSERVATION VERIFIED: factor=30, 50 ticks, total_money byte-invariant throughout. \
          Max scaled qty ≈ 10 × 30 = 300 ≪ i64::MAX ≈ 9.2×10^18. \
          Safety margin: ~3×10^16×."
+    );
+}
+
+// ── 7. Producer-chain ceilings: wc_target, input-order target, participation bound ──
+
+/// Shared producer fixture for the ceiling tests below.
+fn overflow_input_pool(actor: EconomicActorId, market: MarketId, in_qty: i64) -> InputPool {
+    InputPool {
+        actor,
+        market,
+        good: GOOD_WOOD,
+        in_qty: Quantity(in_qty),
+        out_qty: Quantity(10),
+        out_good: GOOD_TOOLS,
+        interval_ticks: 1,
+        last_generated_tick: None,
+        max_price: Money(1_000),
+    }
+}
+
+/// `wc_target` at the ceiling: `batches_target(2) · in_qty(i64::MAX) · factor(2)`
+/// overflows the i64 batch quantity → `Err(Overflow)`, never a wrap/panic. The
+/// dividend path would surface this through its `?` as an audited event.
+#[test]
+fn wc_target_overflow_returns_err() {
+    let policy = ProducerPolicy {
+        theta_bps: 8_000,
+        batches_target: 2,
+    };
+    let pool = overflow_input_pool(EconomicActorId(9_010), MarketId(1), i64::MAX);
+    assert_eq!(
+        wc_target(policy, &pool, 2),
+        Err(EconomyError::Overflow),
+        "batches(2) · in_qty(i64::MAX) · factor(2) must return Err(Overflow), not wrap"
+    );
+}
+
+/// Below the ceiling: the REAL abutopia producer shape (batches 2, in_qty 10,
+/// bound 400) at the live factor 30 → wc_target = floor(400 · 600 / SCALE 1_000)
+/// = 240 — the working-capital target at the seed-time bound 400 (the live
+/// bound converges lower).
+#[test]
+fn wc_target_realistic_factor_30_is_ok() {
+    let policy = ProducerPolicy {
+        theta_bps: 8_000,
+        batches_target: 2,
+    };
+    let mut pool = overflow_input_pool(EconomicActorId(9_010), MarketId(1), 10);
+    pool.max_price = Money(400);
+    assert_eq!(
+        wc_target(policy, &pool, 30),
+        Ok(Money(240)),
+        "abutopia shape at factor 30: floor(400 · (2·10·30) / 1_000) = 240"
+    );
+}
+
+/// The Leontief order target at an EXTREME capita factor: `batches(2) · in_qty(10) ·
+/// factor(i64::MAX)` overflows → the whole generation pass returns `Err(Overflow)`
+/// (the system wrapper fails loud rather than silently dropping input orders).
+#[test]
+fn input_order_target_overflow_at_extreme_factor_returns_err() {
+    let actor = EconomicActorId(9_011);
+    let market = MarketId(2);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(actor, Money(1_000_000)).unwrap();
+    let inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut input_pools = InputPools::default();
+    let mut policies = ProducerPolicies::default();
+    let mut market_goods = MarketGoods::default();
+    let config = crate::economy::EconomyConfig::default();
+
+    let out_key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    let mut state = MarketGoodState::new(out_key);
+    state.ewma_reference_price = Money(1_000);
+    state.last_settlement_price = Money(1_000);
+    market_goods.0.insert(out_key, state);
+
+    policies.0.insert(
+        actor,
+        ProducerPolicy {
+            theta_bps: 8_000,
+            batches_target: 2,
+        },
+    );
+    input_pools
+        .0
+        .insert(actor, overflow_input_pool(actor, market, 10));
+
+    let result = run_generate_input_orders_at_tick(
+        &mut accounts,
+        &mut orders,
+        &inventory,
+        &mut ledger,
+        &mut dirty,
+        &mut next,
+        &mut input_pools,
+        &policies,
+        &market_goods,
+        &config,
+        1,
+        10,
+        &BTreeSet::new(),
+        i64::MAX, // extreme capita factor: 2 · 10 · i64::MAX overflows i64
+    );
+    assert_eq!(
+        result,
+        Err(EconomyError::Overflow),
+        "Leontief target qty at factor i64::MAX must return Err(Overflow), not wrap"
+    );
+    assert!(orders.bids.is_empty(), "no bid placed on the overflow path");
+}
+
+/// `participation_bound` at the ceiling: `p_out_ref(i64::MAX) · out_qty(i64::MAX)`
+/// produces an i128 intermediate whose i64 narrowing fails → `Err(Overflow)`,
+/// never a wrap (labor share 0 keeps the labor term from masking the multiply).
+#[test]
+fn participation_bound_overflow_returns_err() {
+    assert_eq!(
+        participation_bound(Money(i64::MAX), 0, Quantity(i64::MAX), Quantity(1)),
+        Err(EconomyError::Overflow),
+        "p_out_ref(i64::MAX) · out_qty(i64::MAX) must return Err(Overflow), not wrap"
     );
 }

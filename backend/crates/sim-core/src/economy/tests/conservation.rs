@@ -298,8 +298,8 @@ fn partial_fill_conserves_money_and_goods() {
 #[test]
 fn conservation_full_plugin_multi_tick() {
     use crate::economy::production::{
-        EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit,
-        RawDeposits, Recipe,
+        EXTRACTOR_FOOD_A, PRODUCER_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
+        Recipe,
     };
     use crate::economy::{
         AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyEvent, EconomyPlugin,
@@ -323,7 +323,7 @@ fn conservation_full_plugin_multi_tick() {
     let market = MarketId(1);
 
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -332,9 +332,9 @@ fn conservation_full_plugin_multi_tick() {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(10))],
                 outputs: vec![(GOOD_TOOLS, Quantity(10))],
@@ -344,9 +344,9 @@ fn conservation_full_plugin_multi_tick() {
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             market,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),
@@ -528,7 +528,7 @@ fn conservation_full_plugin_multi_tick() {
 
     // Per-actor RAW balance: with two extractors sharing GOOD_RAW, each must have regenerated
     // exactly as much RAW as it consumed (no shared-RAW double-spend / cross-actor leak).
-    for actor in [EXTRACTOR_TOOLS, EXTRACTOR_FOOD_A] {
+    for actor in [PRODUCER_TOOLS, EXTRACTOR_FOOD_A] {
         let regen: i64 = world
             .resource::<TradeLedger>()
             .0
@@ -584,7 +584,7 @@ fn conservation_full_plugin_multi_tick() {
             .0
             .iter()
             .any(|e| matches!(e, EconomyEvent::Regenerated { .. })),
-        "EXTRACTOR_TOOLS regenerated RAW"
+        "PRODUCER_TOOLS regenerated RAW"
     );
     assert!(
         world
@@ -599,8 +599,8 @@ fn conservation_full_plugin_multi_tick() {
 #[test]
 fn steady_state_multi_tick() {
     use crate::economy::production::{
-        EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit,
-        RawDeposits, Recipe,
+        EXTRACTOR_FOOD_A, PRODUCER_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
+        Recipe,
     };
     use crate::economy::{
         AccountBook, DemandPool, DemandPools, EconomicActorId, EconomyEvent, EconomyPlugin,
@@ -631,9 +631,9 @@ fn steady_state_multi_tick() {
     let consumer = EconomicActorId(8_002);
     let market = MarketId(1);
 
-    // EXTRACTOR_TOOLS is the ONLY supplier (no finite 1M endowment to mask steady state).
+    // PRODUCER_TOOLS is the ONLY supplier (no finite 1M endowment to mask steady state).
     world.resource_mut::<RawDeposits>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(10),
@@ -642,9 +642,9 @@ fn steady_state_multi_tick() {
         },
     );
     world.resource_mut::<ProductionPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         ProductionPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             recipe: Recipe {
                 inputs: vec![(GOOD_RAW, Quantity(10))],
                 outputs: vec![(GOOD_TOOLS, Quantity(10))],
@@ -654,9 +654,9 @@ fn steady_state_multi_tick() {
         },
     );
     world.resource_mut::<SupplyPools>().0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         SupplyPool {
-            actor: EXTRACTOR_TOOLS,
+            actor: PRODUCER_TOOLS,
             market,
             good: GOOD_TOOLS,
             offered_qty_per_tick: Quantity(10),
@@ -806,9 +806,9 @@ fn steady_state_multi_tick() {
         if i >= n - k {
             let accounts = world.resource::<AccountBook>();
             consumer_bal_tail.push(accounts.account(consumer).available.0);
-            // EXTRACTOR_TOOLS is the sole firm seller. With full distribution it nets ~0 each tick;
+            // PRODUCER_TOOLS is the sole firm seller. With full distribution it nets ~0 each tick;
             // the tail spread bounds "no unbounded retained earnings".
-            ext_bal_tail.push(accounts.account(EXTRACTOR_TOOLS).available.0);
+            ext_bal_tail.push(accounts.account(PRODUCER_TOOLS).available.0);
 
             let key = MarketGoodKey {
                 market,
@@ -848,13 +848,13 @@ fn steady_state_multi_tick() {
     let min = |v: &[i64]| *v.iter().min().unwrap();
     let max = |v: &[i64]| *v.iter().max().unwrap();
 
-    // (b) EXTRACTOR_TOOLS balance bounded over the tail (no unbounded retained earnings).
+    // (b) PRODUCER_TOOLS balance bounded over the tail (no unbounded retained earnings).
     // Full distribution ⇒ the firm nets to ~zero each tick; allow a small epsilon for
     // intra-tick rounding remainders left by floor wage/dividend (never minted).
     let seller_eps: i64 = 1_000;
     assert!(
         max(&ext_bal_tail) - min(&ext_bal_tail) < seller_eps,
-        "EXTRACTOR_TOOLS balance bounded over tail (max-min={} < {seller_eps}); tail={:?}",
+        "PRODUCER_TOOLS balance bounded over tail (max-min={} < {seller_eps}); tail={:?}",
         max(&ext_bal_tail) - min(&ext_bal_tail),
         ext_bal_tail
     );

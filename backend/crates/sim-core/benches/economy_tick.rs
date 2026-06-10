@@ -110,13 +110,19 @@ fn build_fixture(m: u32, g: u16) -> FlowFixture {
 }
 
 fn run_once(f: &mut FlowFixture) {
-    use sim_core::economy::{FlowShipments, NextOrderId, NextShipmentId, OrderBook, RealizedFlows};
+    use sim_core::economy::{
+        FlowShipments, InputPools, NextOrderId, NextShipmentId, OrderBook, ProducerPolicies,
+        RealizedFlows,
+    };
     run_macro_flow_at_tick(
         &mut f.accounts,
         &mut f.inventory,
         &mut f.ledger,
         &f.demand,
         &f.supply,
+        &mut InputPools::default(),
+        &ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut f.market_goods,
         &f.dirty,
         &f.dormant,
@@ -128,6 +134,7 @@ fn run_once(f: &mut FlowFixture) {
         &mut RealizedFlows::default(),
         &mut OrderBook::default(),
         &mut NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();

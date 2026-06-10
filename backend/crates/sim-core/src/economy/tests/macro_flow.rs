@@ -148,6 +148,10 @@ fn build_macro_buckets_caps_effective_demand_and_supply() {
         &inventory,
         &demand,
         &supply,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
+        /*current_tick=*/ 0,
         &mg,
         &dormant,
         &cfg,
@@ -193,6 +197,10 @@ fn build_macro_buckets_skips_zero_price_band() {
         &inventory,
         &DemandPools::default(),
         &supply,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
+        /*current_tick=*/ 0,
         &MarketGoods::default(),
         &dormant,
         &EconomyConfig::default(),
@@ -1143,6 +1151,9 @@ fn macro_flow_only_fires_on_interval() {
         &mut led,
         &dem,
         &sup,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut mg,
         &dirty,
         &dormant,
@@ -1155,6 +1166,7 @@ fn macro_flow_only_fires_on_interval() {
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
         &mut std::collections::BTreeMap::new(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
     assert!(led.0.is_empty(), "no flow off-interval");
@@ -1165,6 +1177,9 @@ fn macro_flow_only_fires_on_interval() {
         &mut led,
         &dem,
         &sup,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut mg,
         &dirty,
         &dormant,
@@ -1176,6 +1191,7 @@ fn macro_flow_only_fires_on_interval() {
         &mut crate::economy::RealizedFlows::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -1204,6 +1220,9 @@ fn macro_flow_idle_interval_is_a_noop() {
         &mut led,
         &DemandPools::default(),
         &SupplyPools::default(),
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut mg,
         &DirtyMarketGoods::default(),
         &dormant,
@@ -1215,6 +1234,7 @@ fn macro_flow_idle_interval_is_a_noop() {
         &mut crate::economy::RealizedFlows::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -1359,6 +1379,9 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
         &mut ledger,
         &demand,
         &supply,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut market_goods,
         &DirtyMarketGoods::default(),
         &dormant,
@@ -1370,6 +1393,7 @@ fn macro_flow_settle_fault_isolates_and_conserves() {
         &mut crate::economy::RealizedFlows::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -1535,6 +1559,9 @@ fn run_flow(s: &mut DormantScenario, tick: u64) -> Result<(), EconomyError> {
         &mut s.ledger,
         &s.demand,
         &s.supply,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut s.market_goods,
         &s.dirty,
         &s.dormant,
@@ -1546,6 +1573,7 @@ fn run_flow(s: &mut DormantScenario, tick: u64) -> Result<(), EconomyError> {
         &mut crate::economy::RealizedFlows::default(),
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
 }
@@ -2632,6 +2660,9 @@ fn macro_flow_threads_orderbook_and_counter_unchanged() {
         &mut s.ledger,
         &s.demand,
         &s.supply,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut s.market_goods,
         &s.dirty,
         &s.dormant,
@@ -2643,6 +2674,7 @@ fn macro_flow_threads_orderbook_and_counter_unchanged() {
         &mut crate::economy::RealizedFlows::default(),
         &mut orders,
         &mut next_oid,
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -2924,6 +2956,10 @@ fn build_macro_buckets_active_sources_all_residual_orders() {
         &InventoryBook::default(),
         &DemandPools::default(),
         &SupplyPools::default(),
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
+        /*current_tick=*/ 0,
         &mg,
         &BTreeSet::new(),
         &EconomyConfig::default(),
@@ -2981,6 +3017,10 @@ fn build_macro_buckets_flag_false_ignores_orders() {
         &InventoryBook::default(),
         &DemandPools::default(),
         &SupplyPools::default(),
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
+        /*current_tick=*/ 0,
         &MarketGoods::default(),
         &BTreeSet::new(),
         &EconomyConfig::default(),
@@ -3112,6 +3152,9 @@ fn active_flow_conserves_and_drains_residual_orders() {
         &mut crate::economy::TradeLedger::default(),
         &DemandPools::default(),
         &SupplyPools::default(),
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut mg,
         &crate::economy::DirtyMarketGoods::default(),
         &BTreeSet::new(),
@@ -3123,6 +3166,7 @@ fn active_flow_conserves_and_drains_residual_orders() {
         &mut crate::economy::RealizedFlows::default(),
         &mut orders,
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -3200,6 +3244,9 @@ fn active_residual_with_no_cross_edge_is_not_drained() {
         &mut crate::economy::TradeLedger::default(),
         &DemandPools::default(),
         &SupplyPools::default(),
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut mg,
         &crate::economy::DirtyMarketGoods::default(),
         &BTreeSet::new(),
@@ -3211,6 +3258,7 @@ fn active_residual_with_no_cross_edge_is_not_drained() {
         &mut crate::economy::RealizedFlows::default(),
         &mut orders,
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -3267,6 +3315,10 @@ fn build_macro_buckets_active_one_entry_per_order_not_per_owner() {
         &InventoryBook::default(),
         &DemandPools::default(),
         &SupplyPools::default(),
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
+        /*current_tick=*/ 0,
         &MarketGoods::default(),
         &BTreeSet::new(),
         &EconomyConfig::default(),
@@ -3385,6 +3437,9 @@ fn active_multi_ask_partial_export_settles_not_faults() {
         &mut ledger,
         &DemandPools::default(),
         &SupplyPools::default(),
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut mg,
         &crate::economy::DirtyMarketGoods::default(),
         &BTreeSet::new(),
@@ -3396,6 +3451,7 @@ fn active_multi_ask_partial_export_settles_not_faults() {
         &mut crate::economy::RealizedFlows::default(),
         &mut orders,
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -3456,6 +3512,9 @@ fn realized_flows_carry_shipped_quantity() {
         &mut s.ledger,
         &s.demand,
         &s.supply,
+        &mut crate::economy::InputPools::default(),
+        &crate::economy::ProducerPolicies::default(),
+        /*capita_factor=*/ 1,
         &mut s.market_goods,
         &s.dirty,
         &s.dormant,
@@ -3467,6 +3526,7 @@ fn realized_flows_carry_shipped_quantity() {
         &mut realized,
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
         &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
@@ -3481,4 +3541,389 @@ fn realized_flows_carry_shipped_quantity() {
             flow.qty
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dormant-market PRODUCER input demand (firms-as-buyers via the macro flow).
+// The order path skips dormant markets, so `build_macro_buckets` must source
+// `InputPools` demand itself — qty from `scaled_batch_qty − held`, ceiling from
+// the participation bound — and write the discovered bound back to the pool
+// (the θ-dividend retention keys off `pool.max_price`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::economy::producers::{InputPool, InputPools, ProducerPolicies, ProducerPolicy};
+use crate::economy::{GOOD_TOOLS, GOOD_WOOD, HOUSEHOLD_SECTOR};
+
+/// Producer 77's pool: 10 WOOD in → 5 TOOLS out per batch, 2 batches targeted.
+/// With `labor_share_bps = 6_000` (default) and `ewma(TOOLS) = 10_000`, the
+/// participation bound is `10_000 · 4_000/10_000 · 5/10 = 2_000`.
+fn chain_input_pool(actor: EconomicActorId, market: MarketId) -> InputPool {
+    InputPool {
+        actor,
+        market,
+        good: GOOD_WOOD,
+        in_qty: Quantity(10),
+        out_qty: Quantity(5),
+        out_good: GOOD_TOOLS,
+        interval_ticks: 1,
+        last_generated_tick: None,
+        max_price: Money(0),
+    }
+}
+
+fn chain_policy() -> ProducerPolicy {
+    ProducerPolicy {
+        theta_bps: 8_000,
+        batches_target: 2,
+    }
+}
+
+/// Market goods with a seeded TOOLS reference price at `market`.
+fn tools_priced_goods(market: MarketId, ewma: i64) -> MarketGoods {
+    let key = MarketGoodKey {
+        market,
+        good: GOOD_TOOLS,
+    };
+    let mut state = MarketGoodState::new(key);
+    state.ewma_reference_price = Money(ewma);
+    let mut mg = MarketGoods::default();
+    mg.0.insert(key, state);
+    mg
+}
+
+/// (a) A dormant input pool expresses CAPITA-SCALED Leontief demand in the
+/// buckets, priced at the participation bound, and the bound + cursor are
+/// written back. A fully-stocked pool expresses nothing but is STILL re-priced
+/// and re-stamped (mirrors the active path's stocked-skip).
+#[test]
+fn build_macro_buckets_sources_dormant_input_pool_demand() {
+    let market = MarketId(9);
+    let firm = EconomicActorId(77);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(firm, Money(1_000_000)).unwrap();
+    let mut inventory = InventoryBook::default();
+    inventory.deposit(firm, GOOD_WOOD, Quantity(5)).unwrap();
+    let mut input_pools = InputPools::default();
+    input_pools.0.insert(firm, chain_input_pool(firm, market));
+    let mut policies = ProducerPolicies::default();
+    policies.0.insert(firm, chain_policy());
+    let mg = tools_priced_goods(market, 10_000);
+    let dormant: BTreeSet<MarketId> = [market].into_iter().collect();
+
+    let buckets = build_macro_buckets(
+        &accounts,
+        &inventory,
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut input_pools,
+        &policies,
+        /*capita_factor=*/ 3,
+        /*current_tick=*/ 7,
+        &mg,
+        &dormant,
+        &EconomyConfig::default(),
+        &OrderBook::default(),
+        false,
+    )
+    .unwrap();
+
+    let key = MarketGoodKey {
+        market,
+        good: GOOD_WOOD,
+    };
+    let b = buckets.get(&key).expect("input-pool demand forms a bucket");
+    assert_eq!(
+        b.buyers,
+        vec![(firm, 55)],
+        "Leontief demand is capita-scaled: 2 batches · 10 in_qty · factor 3 − 5 held = 55"
+    );
+    assert_eq!(
+        b.price,
+        Money(2_000),
+        "demand-only bucket pins to the participation bound (10_000 · 0.4 · 5/10)"
+    );
+    assert!(!b.intra_cleared, "dormant pool-sourced bucket");
+    let pool = input_pools.0[&firm];
+    assert_eq!(
+        pool.max_price,
+        Money(2_000),
+        "the discovered bound is written back (θ-dividend retention keys off it)"
+    );
+    assert_eq!(
+        pool.last_generated_tick,
+        Some(7),
+        "the macro pass IS a demand-generation pass: cursor stamped"
+    );
+
+    // Fully stocked: no bucket, but the bound/cursor write-back still happens.
+    inventory.deposit(firm, GOOD_WOOD, Quantity(100)).unwrap();
+    input_pools.0.get_mut(&firm).unwrap().max_price = Money(0);
+    input_pools.0.get_mut(&firm).unwrap().last_generated_tick = None;
+    let buckets = build_macro_buckets(
+        &accounts,
+        &inventory,
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut input_pools,
+        &policies,
+        3,
+        8,
+        &mg,
+        &dormant,
+        &EconomyConfig::default(),
+        &OrderBook::default(),
+        false,
+    )
+    .unwrap();
+    assert!(buckets.is_empty(), "stocked pool expresses no demand");
+    let pool = input_pools.0[&firm];
+    assert_eq!(pool.max_price, Money(2_000), "bound still discovered");
+    assert_eq!(pool.last_generated_tick, Some(8), "cursor still stamped");
+}
+
+/// Dormant chain scenario for (b)/(c): WOOD surplus at A, producer input demand
+/// at B, dist 4, default config (macro interval 10 → tick 0 fires).
+fn dormant_chain_scenario() -> (
+    AccountBook,
+    InventoryBook,
+    InputPools,
+    ProducerPolicies,
+    SupplyPools,
+    MarketGoods,
+    BTreeSet<MarketId>,
+    MarketDistances,
+    EconomyConfig,
+) {
+    let a = MarketId(1); // supplier market
+    let b = MarketId(2); // producer market
+    let seller = EconomicActorId(1);
+    let firm = EconomicActorId(77);
+    let mut accounts = AccountBook::default();
+    accounts.deposit(firm, Money(1_000_000)).unwrap();
+    let mut inventory = InventoryBook::default();
+    inventory.deposit(seller, GOOD_WOOD, Quantity(200)).unwrap();
+    let mut supply = SupplyPools::default();
+    supply.0.insert(
+        seller,
+        SupplyPool {
+            actor: seller,
+            market: a,
+            good: GOOD_WOOD,
+            offered_qty_per_tick: Quantity(200),
+            min_price: Money(500),
+            interval_ticks: 1,
+            last_generated_tick: None,
+        },
+    );
+    let mut input_pools = InputPools::default();
+    input_pools.0.insert(firm, chain_input_pool(firm, b));
+    let mut policies = ProducerPolicies::default();
+    policies.0.insert(firm, chain_policy());
+    let mg = tools_priced_goods(b, 10_000);
+    let dormant: BTreeSet<MarketId> = [a, b].into_iter().collect();
+    let mut distances = MarketDistances::default();
+    distances.0.insert((a, b), 4);
+    distances.0.insert((b, a), 4);
+    let config = EconomyConfig {
+        transport_cost_per_tile_unit: Money(50),
+        ..Default::default()
+    };
+    (
+        accounts,
+        inventory,
+        input_pools,
+        policies,
+        supply,
+        mg,
+        dormant,
+        distances,
+        config,
+    )
+}
+
+/// (b) After a macro run on the dormant chain, the participation bound is
+/// written back to `pool.max_price` and the cursor is stamped — WITHOUT the
+/// order path ever running. This is the write-back that keeps the θ-dividend
+/// retention (wages.rs keys off `pool.max_price`) from retaining everything
+/// forever while the firm buys via the macro path.
+#[test]
+fn macro_run_writes_participation_bound_back_to_dormant_pool() {
+    let (
+        mut accounts,
+        mut inventory,
+        mut input_pools,
+        policies,
+        supply,
+        mut mg,
+        dormant,
+        distances,
+        config,
+    ) = dormant_chain_scenario();
+    let firm = EconomicActorId(77);
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut crate::economy::TradeLedger::default(),
+        &DemandPools::default(),
+        &supply,
+        &mut input_pools,
+        &policies,
+        /*capita_factor=*/ 1,
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &dormant,
+        &distances,
+        &config,
+        /*tick=*/ 0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::RealizedFlows::default(),
+        &mut OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
+        &mut std::collections::BTreeMap::new(),
+    )
+    .unwrap();
+
+    let pool = input_pools.0[&firm];
+    assert_eq!(
+        pool.max_price,
+        Money(2_000),
+        "macro path discovers and writes back the participation bound"
+    );
+    assert_eq!(
+        pool.last_generated_tick,
+        Some(0),
+        "cursor stamped at the macro tick"
+    );
+    assert_eq!(
+        inventory.balance(firm, GOOD_WOOD).available,
+        Quantity(20),
+        "the firm imported its full Leontief gap (2 batches · 10 in_qty, held 0)"
+    );
+}
+
+/// (c) The producer's macro purchase conserves money, debits the PRODUCER's own
+/// account (never a sector sentinel), and captures the charge in BuyerOutlays —
+/// so the value-added wage base (receipts − outlays) sees the input cost.
+#[test]
+fn producer_macro_purchase_conserves_and_captures_outlays() {
+    let (
+        mut accounts,
+        mut inventory,
+        mut input_pools,
+        policies,
+        supply,
+        mut mg,
+        dormant,
+        distances,
+        config,
+    ) = dormant_chain_scenario();
+    let a = MarketId(1);
+    let b = MarketId(2);
+    let seller = EconomicActorId(1);
+    let firm = EconomicActorId(77);
+
+    let money_before = accounts.total_money().unwrap();
+    let firm_before = accounts.account(firm).available;
+    let mut receipts = std::collections::BTreeMap::new();
+    let mut outlays = std::collections::BTreeMap::new();
+
+    crate::economy::macro_flow::run_macro_flow_at_tick(
+        &mut accounts,
+        &mut inventory,
+        &mut crate::economy::TradeLedger::default(),
+        &DemandPools::default(),
+        &supply,
+        &mut input_pools,
+        &policies,
+        1,
+        &mut mg,
+        &crate::economy::DirtyMarketGoods::default(),
+        &dormant,
+        &distances,
+        &config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut crate::economy::RealizedFlows::default(),
+        &mut OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
+        &mut receipts,
+        &mut outlays,
+    )
+    .unwrap();
+
+    // q = 20; src_revenue = 500·20/1000 = 10; transport = (50·20/1000)·4 = 4;
+    // dst_payment = 14 — all charged to the FIRM's account.
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        money_before,
+        "money conserved across the producer's macro purchase"
+    );
+    assert_eq!(
+        accounts.account(firm).available,
+        Money(firm_before.0 - 14),
+        "the PRODUCER's account pays src_revenue + transport (10 + 4)"
+    );
+    assert_eq!(
+        accounts.account(seller).available,
+        Money(10),
+        "the seller is credited the full src_revenue"
+    );
+    assert_eq!(
+        accounts.account(TRANSPORT_OPERATOR).available,
+        Money(4),
+        "transport premium goes to the operator (never destroyed)"
+    );
+    let sector = accounts.account(HOUSEHOLD_SECTOR);
+    assert_eq!(
+        (sector.available, sector.locked),
+        (Money::ZERO, Money::ZERO),
+        "no sector sentinel is touched by the purchase"
+    );
+    assert_eq!(
+        outlays.get(&(firm, b)).copied(),
+        Some(Money(14)),
+        "the buyer charge is captured in outlays keyed (firm, dst) — the wage \
+         value-added base must see the input cost"
+    );
+    assert_eq!(
+        receipts.get(&(seller, a)).copied(),
+        Some(Money(10)),
+        "the seller revenue is captured in receipts"
+    );
+}
+
+/// (d) A dormant input pool whose OUTPUT good has no market-good entry is an
+/// honest fail-loud `ZeroPrice` (same doctrine as the active order path) —
+/// never a silent skip that would leave the chain quietly inert.
+#[test]
+fn dormant_input_pool_without_output_reference_is_zero_price() {
+    let market = MarketId(9);
+    let firm = EconomicActorId(77);
+    let mut input_pools = InputPools::default();
+    input_pools.0.insert(firm, chain_input_pool(firm, market));
+    let mut policies = ProducerPolicies::default();
+    policies.0.insert(firm, chain_policy());
+    let dormant: BTreeSet<MarketId> = [market].into_iter().collect();
+
+    let err = build_macro_buckets(
+        &AccountBook::default(),
+        &InventoryBook::default(),
+        &DemandPools::default(),
+        &SupplyPools::default(),
+        &mut input_pools,
+        &policies,
+        1,
+        0,
+        &MarketGoods::default(), // no (market, TOOLS) entry
+        &dormant,
+        &EconomyConfig::default(),
+        &OrderBook::default(),
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(err, EconomyError::ZeroPrice);
 }

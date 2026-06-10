@@ -72,6 +72,7 @@ message EconomySnapshot {
   repeated EconomyMarketGood goods = 5;
   EconomyVitals vitals = 6;
   repeated EconomyFlow flows = 7;
+  repeated EconomyProducer producers = 8;
 }
 
 message EconomyVitals {
@@ -106,6 +107,21 @@ message EconomyFlow {
   uint32 good_id = 3;
   // EWMA of shipped quantity per macro-flow interval (raw good units, NOT money).
   int64 rate = 4;
+}
+
+// One entry per producing firm (InputPools keyset). Money fields are raw i64;
+// client divides by ECONOMY_SCALE (1000) for display.
+message EconomyProducer {
+  reserved 100 to max;
+  uint64 actor_id = 1;
+  uint32 market_id = 2;
+  uint32 in_good = 3;
+  uint32 out_good = 4;
+  int64 retained_earnings = 5; // firm cash (available balance)
+  int64 wc_target = 6;         // working-capital target; 0 while the bound is undiscovered
+  int64 max_bid = 7;           // current participation bound (telemetry)
+  int64 in_qty = 8;            // recipe input units per batch
+  int64 out_qty = 9;           // recipe output units per batch
 }
 
 message ServerError {

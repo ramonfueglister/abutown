@@ -301,7 +301,8 @@ function render(): void {
       const goods = [...economyState.goods.entries()]
         .filter(([k]) => k.startsWith(`${market.marketId}:`))
         .map(([, v]) => v);
-      drawMarketInspectorPanel(ctx, market, goods, MARKET_INSPECTOR_PANEL, window.devicePixelRatio || 1);
+      const producers = economyState.producers.filter((p) => p.marketId === market.marketId);
+      drawMarketInspectorPanel(ctx, market, goods, producers, MARKET_INSPECTOR_PANEL, window.devicePixelRatio || 1);
     }
   }
 }

@@ -150,7 +150,7 @@ fn regenerated_event_type_tag_is_stable() {
 
 #[test]
 fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
-    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::production::{PRODUCER_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
     use crate::economy::{EconomyEvent, GOOD_RAW, InventoryBook, Quantity, TradeLedger};
     use std::collections::BTreeMap;
 
@@ -158,7 +158,7 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(100),
@@ -170,12 +170,12 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
     run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 5, 1).unwrap();
 
     assert_eq!(
-        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
+        inv.balance(PRODUCER_TOOLS, GOOD_RAW).available,
         Quantity(100)
     );
-    assert_eq!(deposits.0[&EXTRACTOR_TOOLS].last_regen_tick, Some(5));
+    assert_eq!(deposits.0[&PRODUCER_TOOLS].last_regen_tick, Some(5));
     assert!(ledger.0.contains(&EconomyEvent::Regenerated {
-        actor: EXTRACTOR_TOOLS,
+        actor: PRODUCER_TOOLS,
         good: GOOD_RAW,
         qty: Quantity(100),
     }));
@@ -183,7 +183,7 @@ fn regen_deposits_faucet_on_interval_and_stamps_cursor() {
 
 #[test]
 fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
-    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::production::{PRODUCER_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
     use crate::economy::{GOOD_RAW, InventoryBook, Quantity, TradeLedger};
     use std::collections::BTreeMap;
 
@@ -191,7 +191,7 @@ fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(100),
@@ -202,17 +202,17 @@ fn regen_skips_within_interval_but_does_not_advance_cursor_on_skip() {
     run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 0, 1).unwrap(); // fires (last=None)
     run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, 3, 1).unwrap(); // interval not elapsed
     assert_eq!(
-        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
+        inv.balance(PRODUCER_TOOLS, GOOD_RAW).available,
         Quantity(100),
         "only one deposit within the interval"
     );
     // On a skip the gate returns BEFORE stamping, so the cursor stays at the firing tick.
-    assert_eq!(deposits.0[&EXTRACTOR_TOOLS].last_regen_tick, Some(0));
+    assert_eq!(deposits.0[&PRODUCER_TOOLS].last_regen_tick, Some(0));
 }
 
 #[test]
 fn regen_is_flow_capped_not_capacity_capped() {
-    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
+    use crate::economy::production::{PRODUCER_TOOLS, RawDeposit, RawDeposits, run_regen_at_tick};
     use crate::economy::{GOOD_RAW, InventoryBook, Quantity, TradeLedger};
     use std::collections::BTreeMap;
 
@@ -222,7 +222,7 @@ fn regen_is_flow_capped_not_capacity_capped() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     deposits.0.insert(
-        EXTRACTOR_TOOLS,
+        PRODUCER_TOOLS,
         RawDeposit {
             good: GOOD_RAW,
             qty_per_interval: Quantity(100),
@@ -234,7 +234,7 @@ fn regen_is_flow_capped_not_capacity_capped() {
         run_regen_at_tick(&mut inv, &mut ledger, &mut deposits, t, 1).unwrap();
     }
     assert_eq!(
-        inv.balance(EXTRACTOR_TOOLS, GOOD_RAW).available,
+        inv.balance(PRODUCER_TOOLS, GOOD_RAW).available,
         Quantity(300)
     );
 }
@@ -269,11 +269,11 @@ fn regen_is_deterministic_keys_first() {
 
 #[test]
 fn regen_rate_covers_aggregate_tools_demand_at_seed() {
-    // §15.2 Sizing-Sim: the EXTRACTOR_TOOLS's faucet (and its same-rate recipe + SupplyPool)
-    // MUST cover aggregate per-tick TOOLS demand at seed prices, else static prices leave
-    // chronic TOOLS scarcity (§8). Build the live demo world, measure aggregate TOOLS
-    // demand, and assert the seeded faucet rate >= that demand.
-    use crate::economy::production::{EXTRACTOR_TOOLS, RawDeposits};
+    // §15.2 Sizing-Sim, chain edition: TOOLS continuity is now backed by the WOOD
+    // faucet (EXTRACTOR_WOOD) feeding PRODUCER_TOOLS's WOOD→TOOLS recipe. The
+    // faucet rate, converted through the recipe (out_qty/in_qty), MUST cover
+    // aggregate per-tick TOOLS demand at seed, else chronic TOOLS scarcity (§8).
+    use crate::economy::production::{EXTRACTOR_WOOD, PRODUCER_TOOLS, RawDeposits};
     use crate::economy::{DemandPools, GOOD_TOOLS};
 
     // Build the world inline with the same minimal spatial scaffold the seeder needs,
@@ -307,6 +307,8 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
         world.insert_resource(crate::economy::production::RawDeposits::default());
         // EconomyConfig is required by seed_from_markets_layer (capita_baseline lookup).
         world.insert_resource(crate::economy::EconomyConfig::default());
+        world.insert_resource(crate::economy::producers::InputPools::default());
+        world.insert_resource(crate::economy::producers::ProducerPolicies::default());
     }
     let bundle = crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
         .expect("abutopia bundle loads");
@@ -324,13 +326,31 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
         "seed has exactly one TOOLS consumer @ 10/tick (sizing baseline)"
     );
 
-    let faucet = world.resource::<RawDeposits>().0[&EXTRACTOR_TOOLS];
+    // The producer itself has NO faucet (it buys WOOD)…
     assert!(
-        faucet.qty_per_interval.0 >= aggregate_tools_demand && faucet.interval_ticks == 1,
-        "EXTRACTOR_TOOLS faucet rate ({} per {} tick(s)) must cover aggregate TOOLS demand ({}/tick) \
-         at seed prices, else chronic scarcity (§8/§15.2)",
+        !world
+            .resource::<RawDeposits>()
+            .0
+            .contains_key(&PRODUCER_TOOLS),
+        "PRODUCER_TOOLS buys its input — no RAW faucet"
+    );
+    // …so the binding rate is the WOOD faucet through the WOOD→TOOLS recipe.
+    let faucet = world.resource::<RawDeposits>().0[&EXTRACTOR_WOOD];
+    let recipe = world
+        .resource::<crate::economy::production::ProductionPools>()
+        .0[&PRODUCER_TOOLS]
+        .recipe
+        .clone();
+    let (in_qty, out_qty) = (recipe.inputs[0].1.0, recipe.outputs[0].1.0);
+    let tools_rate = faucet.qty_per_interval.0 * out_qty / in_qty;
+    assert!(
+        tools_rate >= aggregate_tools_demand && faucet.interval_ticks == 1,
+        "WOOD faucet through the recipe ({} per {} tick(s) × {}/{}) must cover aggregate \
+         TOOLS demand ({}/tick) at seed, else chronic scarcity (§8/§15.2)",
         faucet.qty_per_interval.0,
         faucet.interval_ticks,
+        out_qty,
+        in_qty,
         aggregate_tools_demand
     );
 }
@@ -338,10 +358,11 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
 #[test]
 fn food_extractor_ids_are_free_and_distinct() {
     use crate::economy::EconomicActorId;
-    use crate::economy::production::{EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS};
-    // Distinct from the TOOLS extractor and from each other.
-    assert_ne!(EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS);
-    assert_ne!(EXTRACTOR_FOOD_FA, EXTRACTOR_TOOLS);
+    use crate::economy::production::{EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, PRODUCER_TOOLS};
+    // Distinct from the TOOLS producer (8_031, a buying firm since the
+    // production chain — no longer an extractor) and from each other.
+    assert_ne!(EXTRACTOR_FOOD_A, PRODUCER_TOOLS);
+    assert_ne!(EXTRACTOR_FOOD_FA, PRODUCER_TOOLS);
     assert_ne!(EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA);
     // Distinct from every seeded actor id (8_001..8_022, 8_031).
     for seeded in [8_001u64, 8_002, 8_011, 8_012, 8_021, 8_022, 8_031] {
@@ -353,8 +374,8 @@ fn food_extractor_ids_are_free_and_distinct() {
 #[test]
 fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
     use crate::economy::production::{
-        EXTRACTOR_FOOD_A, EXTRACTOR_TOOLS, ProductionPool, ProductionPools, RawDeposit,
-        RawDeposits, Recipe, run_production_at_tick, run_regen_at_tick,
+        EXTRACTOR_FOOD_A, PRODUCER_TOOLS, ProductionPool, ProductionPools, RawDeposit, RawDeposits,
+        Recipe, run_production_at_tick, run_regen_at_tick,
     };
     use crate::economy::{
         EconomyEvent, GOOD_FOOD, GOOD_RAW, GOOD_TOOLS, InventoryBook, Quantity, TradeLedger,
@@ -365,7 +386,7 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
     let mut ledger = TradeLedger::default();
     let mut deposits = RawDeposits(BTreeMap::new());
     let mut prod = ProductionPools::default();
-    for (actor, out) in [(EXTRACTOR_TOOLS, GOOD_TOOLS), (EXTRACTOR_FOOD_A, GOOD_FOOD)] {
+    for (actor, out) in [(PRODUCER_TOOLS, GOOD_TOOLS), (EXTRACTOR_FOOD_A, GOOD_FOOD)] {
         deposits.0.insert(
             actor,
             RawDeposit {
@@ -395,7 +416,7 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
 
     // Each extractor produced its OWN good...
     assert_eq!(
-        inv.balance(EXTRACTOR_TOOLS, GOOD_TOOLS).available,
+        inv.balance(PRODUCER_TOOLS, GOOD_TOOLS).available,
         Quantity(10)
     );
     assert_eq!(
@@ -408,12 +429,12 @@ fn two_extractors_make_distinct_goods_and_each_balances_its_own_raw() {
         Quantity(0)
     );
     assert_eq!(
-        inv.balance(EXTRACTOR_TOOLS, GOOD_FOOD).available,
+        inv.balance(PRODUCER_TOOLS, GOOD_FOOD).available,
         Quantity(0)
     );
 
     // Per-actor RAW balance: each regenerated 10 and consumed 10 -> net 0 on hand.
-    for actor in [EXTRACTOR_TOOLS, EXTRACTOR_FOOD_A] {
+    for actor in [PRODUCER_TOOLS, EXTRACTOR_FOOD_A] {
         let regen: i64 = ledger
             .0
             .iter()
@@ -485,11 +506,14 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
                 if sp.good != g {
                     continue;
                 }
-                // Only count CONTINUOUS supply (an extractor faucet), not finite endowment.
-                let Some(dep) = deposits.0.get(&s_actor) else {
+                let s_market = sp.market;
+                let reaches =
+                    s_market == d_market || distances.0.contains_key(&(s_market, d_market));
+                if !reaches {
                     continue;
-                };
-                // The faucet feeds a recipe whose output is this good at this supply pool.
+                }
+                // Only count CONTINUOUS supply, not finite endowment: the seller must
+                // have a recipe producing g…
                 let produces_g = production
                     .0
                     .get(&s_actor)
@@ -498,11 +522,44 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
                 if !produces_g {
                     continue;
                 }
-                let s_market = sp.market;
-                let reaches =
-                    s_market == d_market || distances.0.contains_key(&(s_market, d_market));
-                if reaches {
+                if let Some(dep) = deposits.0.get(&s_actor) {
+                    // …backed directly by an extractor faucet, or…
                     reachable_faucet += dep.qty_per_interval.0 / dep.interval_ticks.max(1) as i64;
+                } else {
+                    // …a BUYING producer (the chain): one hop upstream, its continuous
+                    // rate is the extractor faucet of its recipe input reachable at ITS
+                    // market, converted through the recipe (out_qty/in_qty).
+                    let recipe = &production.0[&s_actor].recipe;
+                    let (in_good, in_qty) = recipe.inputs[0];
+                    let out_qty = recipe
+                        .outputs
+                        .iter()
+                        .find(|(og, _)| *og == g)
+                        .expect("produces_g checked above")
+                        .1;
+                    let mut upstream: i64 = 0;
+                    for (&u_actor, up) in supply.0.iter() {
+                        if up.good != in_good {
+                            continue;
+                        }
+                        let Some(udep) = deposits.0.get(&u_actor) else {
+                            continue;
+                        };
+                        let u_produces = production
+                            .0
+                            .get(&u_actor)
+                            .map(|p| p.recipe.outputs.iter().any(|(og, _)| *og == in_good))
+                            .unwrap_or(false);
+                        if !u_produces {
+                            continue;
+                        }
+                        let u_reaches = up.market == s_market
+                            || distances.0.contains_key(&(up.market, s_market));
+                        if u_reaches {
+                            upstream += udep.qty_per_interval.0 / udep.interval_ticks.max(1) as i64;
+                        }
+                    }
+                    reachable_faucet += upstream * out_qty.0 / in_qty.0;
                 }
             }
             let _ = actor;
@@ -541,6 +598,8 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
         world.insert_resource(RawDeposits::default());
         // EconomyConfig is required by seed_from_markets_layer (capita_baseline lookup).
         world.insert_resource(crate::economy::EconomyConfig::default());
+        world.insert_resource(crate::economy::producers::InputPools::default());
+        world.insert_resource(crate::economy::producers::ProducerPolicies::default());
     }
     let bundle = crate::base_world::BaseWorldBundle::load_from_dir("../../../data/worlds/abutopia")
         .expect("abutopia bundle loads");
