@@ -475,9 +475,11 @@ pub fn run_pay_wages_system(
 /// Profit distribution: runs in the PayWages set with an explicit `.after(run_pay_wages_system)`
 /// edge so the wage net-zero assert fires first and income accumulates wage→profit in a
 /// deterministic order. Fallible/audited at the per-firm level inside the core; the wrapper
-/// surfaces a whole-call Err (a config-validation failure or a `wc_target` computation fault)
-/// as an audited MarketClearFailed event — never `let _` (which would swallow a config bug),
-/// never `.expect` (the call is genuinely fallible).
+/// surfaces a whole-call Err (a config-validation failure, a `wc_target` computation fault, or
+/// an `InvalidOrder` mismatch-fail-fast when `ProducerPolicies` and `InputPools` are populated
+/// asymmetrically — signalling a seed/re-apply inconsistency that would otherwise produce silent
+/// wrong behaviour) as an audited MarketClearFailed event — never `let _` (which would swallow a
+/// config bug), never `.expect` (the call is genuinely fallible).
 #[allow(clippy::too_many_arguments)]
 pub fn run_distribute_profit_system(
     config: Res<EconomyConfig>,

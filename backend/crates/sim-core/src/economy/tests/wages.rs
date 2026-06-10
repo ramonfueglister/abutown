@@ -1803,8 +1803,8 @@ fn mismatched_policy_pool_state_errors_loudly() {
     // state is a silent config-revert (#83 class) that would otherwise drain working
     // capital silently. Both mismatch arms must return Err(InvalidOrder).
     use crate::economy::EconomyConfig;
-    use crate::economy::wages::run_distribute_profit_at_tick;
     use crate::economy::producers::{InputPool, InputPools, ProducerPolicies, ProducerPolicy};
+    use crate::economy::wages::run_distribute_profit_at_tick;
     let f1 = EconomicActorId(8_001);
     let c1 = EconomicActorId(8_002);
     let market = MarketId(9_001);
@@ -1827,17 +1827,31 @@ fn mismatched_policy_pool_state_errors_loudly() {
     {
         let (mut accounts, receipts, mut demand, household, config) = base_setup();
         let mut policies = ProducerPolicies::default();
-        policies.0.insert(f1, ProducerPolicy { theta_bps: 8_000, batches_target: 2 });
+        policies.0.insert(
+            f1,
+            ProducerPolicy {
+                theta_bps: 8_000,
+                batches_target: 2,
+            },
+        );
         let input_pools = InputPools::default(); // no entry for f1
         let mut ledger = TradeLedger::default();
         let result = run_distribute_profit_at_tick(
-            &mut accounts, &receipts, &mut demand, &household, &mut ledger,
-            &config, &BuyerOutlays::default(), &policies, &input_pools,
+            &mut accounts,
+            &receipts,
+            &mut demand,
+            &household,
+            &mut ledger,
+            &config,
+            &BuyerOutlays::default(),
+            &policies,
+            &input_pools,
         );
         assert_eq!(
             result,
             Err(crate::economy::EconomyError::InvalidOrder),
-            "policy present but no InputPool → must fail fast (got {:?})", result
+            "policy present but no InputPool → must fail fast (got {:?})",
+            result
         );
     }
 
@@ -1862,13 +1876,21 @@ fn mismatched_policy_pool_state_errors_loudly() {
         );
         let mut ledger = TradeLedger::default();
         let result = run_distribute_profit_at_tick(
-            &mut accounts, &receipts, &mut demand, &household, &mut ledger,
-            &config, &BuyerOutlays::default(), &policies, &input_pools,
+            &mut accounts,
+            &receipts,
+            &mut demand,
+            &household,
+            &mut ledger,
+            &config,
+            &BuyerOutlays::default(),
+            &policies,
+            &input_pools,
         );
         assert_eq!(
             result,
             Err(crate::economy::EconomyError::InvalidOrder),
-            "InputPool present but no policy → must fail fast (got {:?})", result
+            "InputPool present but no policy → must fail fast (got {:?})",
+            result
         );
     }
 }
