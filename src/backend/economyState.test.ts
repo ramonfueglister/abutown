@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { create } from '@bufbuild/protobuf';
 import {
   ChunkCoordSchema,
+  EconomyFlowSchema,
   EconomyMarketGoodSchema,
   EconomyMarketSchema,
   EconomySnapshotSchema,
@@ -67,5 +68,25 @@ describe('economyState reducer', () => {
     const next = applyEconomyServerMessage(initial, msg);
 
     expect(next).toBe(initial); // same reference — no allocation
+  });
+
+  it('starts with no flows', () => {
+    expect(createEconomyOverlayState().flows).toEqual([]);
+  });
+
+  it('stores flows from the snapshot', () => {
+    const snapshot = create(EconomySnapshotSchema, {
+      tick: 1234n,
+      markets: [],
+      goods: [],
+      flows: [
+        create(EconomyFlowSchema, { srcMarketId: 9003, dstMarketId: 9004, goodId: 1, rate: 250n }),
+      ],
+    });
+    const message = create(ServerMessageSchema, {
+      body: { case: 'economySnapshot', value: snapshot },
+    });
+    const state = applyEconomyServerMessage(createEconomyOverlayState(), message);
+    expect(state.flows).toEqual([{ srcMarketId: 9003, dstMarketId: 9004, goodId: 1, rate: 250 }]);
   });
 });
