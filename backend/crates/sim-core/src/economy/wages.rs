@@ -207,6 +207,12 @@ pub fn run_pay_wages_at_tick(
 /// θ = config `dividend_share_bps` (default 10_000 → dividend == profit, the firm
 /// drains to zero) and `wc_target = 0`.
 ///
+/// **Mismatch invariant (fail-fast):** `ProducerPolicies` and `InputPools` are ONLY ever
+/// seeded and re-applied together. A one-sided state — `(Some, None)` or `(None, Some)` —
+/// is a silent config-revert (#83 class) that would otherwise silently drain the firm's
+/// working capital. This function returns `EconomyError::InvalidOrder` for any such
+/// mismatch instead of falling back to #75 defaults.
+///
 /// SHORTFALL SEMANTICS (no-fallback discipline): withholding cash up to `wc_target` is
 /// the WANTED liquidity buffer, not an anomaly — a policy firm's shortfall is by
 /// construction always explained by it (when capped it retains exactly `wc_target`;
@@ -251,8 +257,15 @@ pub fn run_distribute_profit_at_tick(
                     wc_target(*policy, pool)?,
                     true,
                 ),
-                // No policy: config-θ (default 10_000) and no buffer — the #75 path.
-                _ => (dividend_share, Money::ZERO, false),
+                // No policy AND no input-pool: config-θ (default 10_000) and no buffer —
+                // the #75 path for non-producer actors.
+                (None, None) => (dividend_share, Money::ZERO, false),
+                // One-sided mismatch: ProducerPolicies and InputPools are ONLY seeded/
+                // re-applied together. A partial state is a silent config-revert (#83
+                // class) — fail fast instead of draining working capital silently.
+                (Some(_), None) | (None, Some(_)) => {
+                    return Err(EconomyError::InvalidOrder);
+                }
             };
         let intended = Money(
             i64::try_from((profit.0 as i128) * theta_bps / 10_000)

@@ -1798,6 +1798,82 @@ fn actors_without_policy_distribute_like_before() {
 }
 
 #[test]
+fn mismatched_policy_pool_state_errors_loudly() {
+    // ProducerPolicies and InputPools are only seeded/re-applied together. A one-sided
+    // state is a silent config-revert (#83 class) that would otherwise drain working
+    // capital silently. Both mismatch arms must return Err(InvalidOrder).
+    use crate::economy::EconomyConfig;
+    use crate::economy::wages::run_distribute_profit_at_tick;
+    use crate::economy::producers::{InputPool, InputPools, ProducerPolicies, ProducerPolicy};
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+
+    let base_setup = || -> (AccountBook, SellerReceipts, DemandPools, HouseholdSector, EconomyConfig) {
+        let mut accounts = AccountBook::default();
+        accounts.deposit(f1, Money(400)).unwrap();
+        let mut receipts = SellerReceipts::default();
+        receipts.0.insert((f1, market), Money(1_000));
+        let mut demand = DemandPools::default();
+        demand.0.insert(c1, consumer_pool(c1, MarketId(9_002)));
+        let household = HouseholdSector {
+            population: 1_000_000,
+            pool_weights: BTreeMap::from([(c1, 1)]),
+        };
+        (accounts, receipts, demand, household, EconomyConfig::default())
+    };
+
+    // Case 1: policy present, input-pool absent → Err(InvalidOrder)
+    {
+        let (mut accounts, receipts, mut demand, household, config) = base_setup();
+        let mut policies = ProducerPolicies::default();
+        policies.0.insert(f1, ProducerPolicy { theta_bps: 8_000, batches_target: 2 });
+        let input_pools = InputPools::default(); // no entry for f1
+        let mut ledger = TradeLedger::default();
+        let result = run_distribute_profit_at_tick(
+            &mut accounts, &receipts, &mut demand, &household, &mut ledger,
+            &config, &BuyerOutlays::default(), &policies, &input_pools,
+        );
+        assert_eq!(
+            result,
+            Err(crate::economy::EconomyError::InvalidOrder),
+            "policy present but no InputPool → must fail fast (got {:?})", result
+        );
+    }
+
+    // Case 2: input-pool present, policy absent → Err(InvalidOrder)
+    {
+        let (mut accounts, receipts, mut demand, household, config) = base_setup();
+        let policies = ProducerPolicies::default(); // no entry for f1
+        let mut input_pools = InputPools::default();
+        input_pools.0.insert(
+            f1,
+            InputPool {
+                actor: f1,
+                market,
+                good: GOOD_FOOD,
+                in_qty: Quantity(1_000),
+                out_qty: Quantity(500),
+                out_good: GOOD_TOOLS,
+                interval_ticks: 1,
+                last_generated_tick: None,
+                max_price: Money(300),
+            },
+        );
+        let mut ledger = TradeLedger::default();
+        let result = run_distribute_profit_at_tick(
+            &mut accounts, &receipts, &mut demand, &household, &mut ledger,
+            &config, &BuyerOutlays::default(), &policies, &input_pools,
+        );
+        assert_eq!(
+            result,
+            Err(crate::economy::EconomyError::InvalidOrder),
+            "InputPool present but no policy → must fail fast (got {:?})", result
+        );
+    }
+}
+
+#[test]
 fn full_tick_wage_profit_rebate_all_net_household_sector_to_zero() {
     // One world where a firm sells (auction path → revenue → wage + profit) AND transport
     // accrues (a dormant macro-flow pair → operator fee). Run past a macro-flow interval so
