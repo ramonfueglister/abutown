@@ -1085,3 +1085,97 @@ mod cors_tests {
         assert!(res.headers().get("access-control-allow-origin").is_none());
     }
 }
+
+mod tick_pacing_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// Regression test for the 2026-06-09 production outage: once per-tick
+    /// work exceeds SIMULATION_TICK_INTERVAL the interval is permanently
+    /// overdue, so `Interval::tick()` resolves immediately on every call and
+    /// the tick loop never returns Pending. On a 1-vCPU machine (Fly
+    /// shared-cpu-1x → `#[tokio::main]` = multi_thread with ONE worker) that
+    /// starved the HTTP accept loop indefinitely: the kernel kept completing
+    /// TCP handshakes into the listen backlog while no handler ever answered,
+    /// so Fly's /health check timed out ("awaiting headers") for 10+ hours
+    /// while the sim kept ticking and logging. pace_tick must force a
+    /// scheduler pass per iteration so concurrent tasks (the accept loop)
+    /// always make progress.
+    ///
+    /// The runtime flavor matters: on `current_thread` (the tokio::test
+    /// default) the starvation does NOT reproduce, so this test builds the
+    /// production configuration explicitly.
+    ///
+    /// Measured against the unfixed pacing on multi_thread(1): an overdue
+    /// `Interval::tick()` still yields *sporadically* (timer-wheel artifacts,
+    /// ~4 yields per 100 iterations, irregular). At production tick cost
+    /// (~250 ms) that is one scheduler pass every 6–15 s, while a request
+    /// needs several polls and Fly's check times out at 5 s — hence zero
+    /// healthy checks for 10+ hours. The assertion therefore demands a yield
+    /// per iteration (observer advancing in lockstep), not mere nonzero
+    /// progress, which sporadic yields would satisfy.
+    #[test]
+    fn saturated_tick_loop_still_schedules_other_tasks() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("build single-worker runtime");
+
+        let progress = Arc::new(AtomicU32::new(0));
+        let observed = Arc::clone(&progress);
+        rt.spawn(async move {
+            loop {
+                observed.fetch_add(1, Ordering::SeqCst);
+                tokio::task::yield_now().await;
+            }
+        });
+
+        // Mirror tick_loop's pacing with per-tick work that always overruns
+        // the interval (the production failure mode). The saturated loop runs
+        // a bounded number of iterations and reports the observer's progress
+        // over exactly that window, so a broken pacing fails fast instead of
+        // hanging the test binary.
+        const ITERATIONS: u32 = 100;
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let watched = Arc::clone(&progress);
+        rt.spawn(async move {
+            let mut ticker = simulation_ticker(Duration::from_millis(1));
+            ticker.tick().await;
+            std::thread::sleep(Duration::from_millis(5)); // enter permanent overrun
+            watched.store(0, Ordering::SeqCst);
+            for _ in 0..ITERATIONS {
+                pace_tick(&mut ticker).await;
+                std::thread::sleep(Duration::from_millis(2)); // tick work > interval
+            }
+            let _ = done_tx.send(watched.load(Ordering::SeqCst));
+        });
+
+        let observed_progress = done_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("saturated loop must finish its bounded iterations");
+        rt.shutdown_background();
+
+        assert!(
+            observed_progress >= ITERATIONS / 2,
+            "tick pacing starved concurrent tasks: a saturated tick loop must yield to the \
+             scheduler every iteration, but the observer advanced only {observed_progress} times \
+             across {ITERATIONS} iterations"
+        );
+    }
+
+    /// Under sustained overload missed ticks must not accrue catch-up debt:
+    /// Burst (the tokio default) replays every missed tick back-to-back once
+    /// load drops, sprinting sim-time at max CPU until the backlog drains.
+    /// Delay reschedules from the present, so sim-time degrades gracefully.
+    #[tokio::test]
+    async fn simulation_ticker_does_not_accrue_catchup_debt() {
+        let ticker = simulation_ticker(Duration::from_millis(100));
+        assert_eq!(
+            ticker.missed_tick_behavior(),
+            tokio::time::MissedTickBehavior::Delay,
+            "simulation ticker must use Delay so overload slows sim-time instead of queueing a burst backlog"
+        );
+    }
+}
