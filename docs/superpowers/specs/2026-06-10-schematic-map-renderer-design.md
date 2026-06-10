@@ -80,7 +80,7 @@ message EconomyFlow {
   uint32 src_market_id = 1;
   uint32 dst_market_id = 2;
   uint32 good_id = 3;
-  int64 rate = 4; // ECONOMY_SCALE-scaled, EWMA-smoothed
+  int64 rate = 4; // EWMA-smoothed shipped quantity (raw good units, NOT money/ECONOMY_SCALE)
 }
 ```
 
