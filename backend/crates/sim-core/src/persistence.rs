@@ -328,6 +328,16 @@ pub trait EconomyEventStore: std::fmt::Debug + Send + Sync {
         tick: u64,
         events: &[EconomyEvent],
     ) -> Result<(), EconomyEventStoreError>;
+
+    /// Rolling retention: delete everything but the most recent `keep_last`
+    /// events for a world. Returns the number of deleted rows. Best-effort like
+    /// `append` — the retention loop logs failures and retries next cycle
+    /// (2026-06-10 tick-cost-and-event-retention design).
+    async fn prune(
+        &mut self,
+        world_id: &str,
+        keep_last: u64,
+    ) -> Result<u64, EconomyEventStoreError>;
 }
 
 #[derive(Debug, Default)]
@@ -358,6 +368,20 @@ impl EconomyEventStore for InMemoryEconomyEventStore {
         let entry = self.events.entry(world_id.to_string()).or_default();
         entry.extend(events.iter().map(|e| (tick, e.clone())));
         Ok(())
+    }
+
+    async fn prune(
+        &mut self,
+        world_id: &str,
+        keep_last: u64,
+    ) -> Result<u64, EconomyEventStoreError> {
+        let Some(entry) = self.events.get_mut(world_id) else {
+            return Ok(0);
+        };
+        let keep = usize::try_from(keep_last).unwrap_or(usize::MAX);
+        let excess = entry.len().saturating_sub(keep);
+        entry.drain(0..excess);
+        Ok(excess as u64)
     }
 }
 

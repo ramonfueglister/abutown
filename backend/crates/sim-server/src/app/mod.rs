@@ -58,6 +58,18 @@ use crate::db::connect_shared_pool;
 const DELTA_BROADCAST_CAPACITY: usize = 64;
 const SIMULATION_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
+const ECONOMY_EVENTS_PRUNE_INTERVAL: Duration = Duration::from_secs(300);
+/// Rolling row cap for the durable economy audit log (per world). With the
+/// durable-event filter (~33 k rows/day live) this retains roughly a week of
+/// financial history. Env-tunable like `ABUTOWN_BASE_WORLD_PATH`.
+const ECONOMY_EVENTS_RETENTION_CAP_DEFAULT: u64 = 200_000;
+
+fn economy_events_retention_cap() -> u64 {
+    std::env::var("ABUTOWN_ECONOMY_EVENTS_RETENTION_CAP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(ECONOMY_EVENTS_RETENTION_CAP_DEFAULT)
+}
 const MOBILITY_PERSISTENCE_FRESHNESS_WINDOW: Duration = Duration::from_secs(15);
 const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/abutopia";
 
@@ -141,7 +153,7 @@ impl AppState {
     ) -> Self {
         let (deltas, _) = broadcast::channel(DELTA_BROADCAST_CAPACITY);
         let initial_view =
-            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0);
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None);
         let (mutation_tx, mutation_rx) = tokio::sync::mpsc::unbounded_channel();
         let view = Arc::new(arc_swap::ArcSwap::from_pointee(initial_view));
         let chunk_channels: Arc<DashMap<_, _>> = Arc::new(DashMap::new());
@@ -270,6 +282,33 @@ impl AppState {
             }
         });
     }
+
+    /// Low-frequency rolling retention for the economy audit log: keep the most
+    /// recent `keep_last` rows per world (2026-06-10 retention design — the
+    /// table grew unbounded to 1.9 M rows / 449 MB in two days live). Best-effort
+    /// like the audit append itself.
+    fn spawn_economy_events_retention_loop(&self, prune_interval: Duration, keep_last: u64) {
+        let state = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(prune_interval);
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let world_id = state.view().load().world_id.clone();
+                let store = state.economy_event_store();
+                let mut store = store.lock().await;
+                match store.prune(&world_id.0, keep_last).await {
+                    Ok(0) => {}
+                    Ok(deleted) => {
+                        tracing::info!(deleted, keep_last, "pruned economy audit events")
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "failed to prune economy audit events")
+                    }
+                }
+            }
+        });
+    }
 }
 
 fn build_economy_snapshot(
@@ -331,6 +370,7 @@ fn build_read_view_from_runtime(
         sim_core::mobility::MobilityChunkDelta,
     >,
     pulse_sequence: u64,
+    prev: Option<&crate::runtime_view::RuntimeReadView>,
 ) -> crate::runtime_view::RuntimeReadView {
     let world_id = runtime.world_id_for_persist().clone();
     let mobility_tick = runtime.mobility_tick();
@@ -344,34 +384,56 @@ fn build_read_view_from_runtime(
 
     // Pre-materialize per-chunk tile + mobility snapshots for every loaded
     // chunk so HTTP /chunks/{x}/{y} and WS lagged-recovery can read without
-    // a lock. Single pass over loaded_chunks builds both maps.
+    // a lock.
     //
-    // NOTE: this rebuilds snapshots for every loaded chunk every tick, even
-    // for chunks that didn't change. Bench stayed within the 5% tolerance
-    // (see plan §Task 4 step 5 — the optimization to only rebuild changed
-    // chunks is a documented escape hatch if bench regresses).
+    // Tile snapshots are version-gated against the previous view: a chunk
+    // whose `ChunkVersion` is unchanged reuses the cached `Arc` instead of
+    // re-reading ~1024 tiles + re-encoding a proto. Tiles change only on
+    // `SetTileKind` commands or chunk (un)load, so on a quiet tick this loop
+    // does no tile work at all (2026-06-10 tick-cost design — the full
+    // per-tick rebuild dominated the saturated tick loop behind the
+    // 2026-06-09 outage).
     let world_summary_legacy = runtime.world_summary();
     let world_summary = world_summary_dto_to_proto(&world_summary_legacy);
+    let loaded_coords: Vec<sim_core::ids::ChunkCoord> = world_summary_legacy
+        .loaded_chunks
+        .iter()
+        .map(|c| sim_core::ids::ChunkCoord { x: c.x, y: c.y })
+        .collect();
     let mut chunk_snapshots: std::collections::HashMap<
         sim_core::ids::ChunkCoord,
-        w::ChunkSnapshot,
+        Arc<w::ChunkSnapshot>,
     > = std::collections::HashMap::new();
-    let mut mobility_chunk_snapshots: std::collections::HashMap<
+    for &coord in &loaded_coords {
+        let cached = prev
+            .and_then(|p| p.chunk_snapshots.get(&coord))
+            .filter(|cached| runtime.chunk_version(coord) == Some(cached.chunk_version));
+        let snap = match cached {
+            Some(arc) => Some(Arc::clone(arc)),
+            None => runtime
+                .chunk_snapshot(coord)
+                .map(|snap| Arc::new(chunk_snapshot_dto_to_proto(&snap))),
+        };
+        if let Some(snap) = snap {
+            chunk_snapshots.insert(coord, snap);
+        }
+    }
+
+    // Mobility snapshots change every tick (agents move), so they are always
+    // rebuilt — but in ONE O(agents) bucketing pass over all loaded chunks,
+    // not a full agent scan per chunk (was O(chunks × agents)).
+    let mobility_chunk_snapshots: std::collections::HashMap<
         sim_core::ids::ChunkCoord,
         w::MobilityChunkSnapshot,
-    > = std::collections::HashMap::new();
-    for coord_dto in world_summary_legacy.loaded_chunks.iter() {
-        let coord = sim_core::ids::ChunkCoord {
-            x: coord_dto.x,
-            y: coord_dto.y,
-        };
-        if let Some(snap) = runtime.chunk_snapshot(coord) {
-            chunk_snapshots.insert(coord, chunk_snapshot_dto_to_proto(&snap));
-        }
-        let mob_snapshot = sim_core::mobility::api::build_mobility_chunk_snapshot(mobility, coord);
-        let mob_dto = chunk_snapshot_to_dto(&mob_snapshot, mobility, &world_id, mobility_tick);
-        mobility_chunk_snapshots.insert(coord, mob_dto);
-    }
+    > = sim_core::mobility::api::build_mobility_chunk_snapshots(mobility, &loaded_coords)
+        .into_iter()
+        .map(|(coord, snap)| {
+            (
+                coord,
+                chunk_snapshot_to_dto(&snap, mobility, &world_id, mobility_tick),
+            )
+        })
+        .collect();
 
     let chunk_subscriber_counts =
         sim_core::mobility::api::chunk_subscriber_counts_snapshot(mobility);
@@ -505,6 +567,10 @@ fn build_router_from_state(state: AppState, cors: CorsLayer) -> Router {
     // periodic persist loop needs to be spawned here, since it depends on the
     // AppState clone (view + mutations).
     state.spawn_snapshot_loop(SNAPSHOT_INTERVAL);
+    state.spawn_economy_events_retention_loop(
+        ECONOMY_EVENTS_PRUNE_INTERVAL,
+        economy_events_retention_cap(),
+    );
 
     Router::new()
         .route("/health", get(health))
@@ -695,7 +761,7 @@ fn card_hand_error(error: CardHandError) -> Response {
 async fn chunk(State(state): State<AppState>, Path((x, y)): Path<(i32, i32)>) -> Response {
     let coord = sim_core::ids::ChunkCoord { x, y };
     match state.view().load().chunk_snapshots.get(&coord).cloned() {
-        Some(snap) => proto_response(snap),
+        Some(snap) => proto_response(w::ChunkSnapshot::clone(&snap)),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -1121,8 +1187,14 @@ async fn tick_once(
     }
 
     // Phase 3: publish the new RuntimeReadView for lock-free HTTP/WS readers.
-    let prev_pulse = view.load().pulse_sequence;
-    let new_view = build_read_view_from_runtime(runtime, &per_chunk, prev_pulse + 1);
+    // The previous view feeds the version-gated tile-snapshot cache.
+    let prev_view = view.load_full();
+    let new_view = build_read_view_from_runtime(
+        runtime,
+        &per_chunk,
+        prev_view.pulse_sequence + 1,
+        Some(&prev_view),
+    );
     view.store(Arc::new(new_view));
 
     // Phase 4: legacy global tile pulse via the broadcast channel.
@@ -1404,22 +1476,29 @@ async fn persist_snapshots_once(
         }
     }
 
-    // Phase 2d: economy audit-log append — best-effort, store-mutex only. On a
-    // successful append, send a fire-and-forget `CommitLedgerAudit` so the tick
-    // task advances the audit cursor and bounds the live ledger. A failed append
+    // Phase 2d: economy audit-log append — best-effort, store-mutex only. Only
+    // the DURABLE subset is written (transient high-frequency mechanics stay
+    // in-memory/snapshot-tail only — 2026-06-10 retention design), but the
+    // commit advances the cursor past the FULL pending batch so transient
+    // events are consumed and the live ledger still trims. A failed append
     // leaves the cursor untouched, so the same events retry next cycle.
     if !economy_audit_pending.is_empty() {
-        let appended = economy_audit_pending.len();
-        let event_store = state.economy_event_store();
-        let mut event_store = event_store.lock().await;
-        match event_store
-            .append(&world_id.0, economy_audit_tick, &economy_audit_pending)
-            .await
-        {
+        let consumed = economy_audit_pending.len();
+        let durable = sim_core::economy::durable_audit_subset(&economy_audit_pending);
+        let append_result = if durable.is_empty() {
+            Ok(())
+        } else {
+            let event_store = state.economy_event_store();
+            let mut event_store = event_store.lock().await;
+            event_store
+                .append(&world_id.0, economy_audit_tick, &durable)
+                .await
+        };
+        match append_result {
             Ok(()) => {
                 let _ = state
                     .mutations
-                    .send(crate::runtime_view::Mutation::CommitLedgerAudit { count: appended });
+                    .send(crate::runtime_view::Mutation::CommitLedgerAudit { count: consumed });
             }
             Err(error) => {
                 tracing::warn!(%error, "failed to append economy audit events");

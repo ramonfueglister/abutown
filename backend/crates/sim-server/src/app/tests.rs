@@ -180,15 +180,24 @@ impl sim_core::persistence::EconomyEventStore for RecordingEconomyEventStore {
             .extend(events.iter().map(|e| (tick, e.clone())));
         Ok(())
     }
+
+    async fn prune(
+        &mut self,
+        _world_id: &str,
+        _keep_last: u64,
+    ) -> Result<u64, sim_core::persistence::EconomyEventStoreError> {
+        Ok(0)
+    }
 }
 
 #[tokio::test]
 async fn economy_audit_flush_appends_pending_then_commit_prevents_reappend() {
-    use sim_core::economy::{EconomicActorId, EconomyEvent, Money};
+    use sim_core::economy::{EconomicActorId, EconomyEvent, MarketId, Money};
 
     // Sentinel events with actor ids in a reserved high range the economy systems
     // never generate, so the assertions are robust to any organic ledger activity
-    // from the live tick task running alongside the test.
+    // from the live tick task running alongside the test. WagePaid: an
+    // audit-DURABLE variant, or the flush filter would (correctly) drop it.
     const SENTINEL_BASE: u64 = 900_000;
     fn sentinel_count(recorded: &Arc<std::sync::Mutex<Vec<(u64, EconomyEvent)>>>) -> usize {
         recorded
@@ -196,7 +205,7 @@ async fn economy_audit_flush_appends_pending_then_commit_prevents_reappend() {
             .unwrap()
             .iter()
             .filter(|(_, e)| {
-                matches!(e, EconomyEvent::CashLocked { actor, .. } if actor.0 >= SENTINEL_BASE)
+                matches!(e, EconomyEvent::WagePaid { firm, .. } if firm.0 >= SENTINEL_BASE)
             })
             .count()
     }
@@ -204,8 +213,9 @@ async fn economy_audit_flush_appends_pending_then_commit_prevents_reappend() {
     let mut runtime = SimulationRuntime::new();
     runtime.push_ledger_events_for_test(
         (0..3)
-            .map(|i| EconomyEvent::CashLocked {
-                actor: EconomicActorId(SENTINEL_BASE + i),
+            .map(|i| EconomyEvent::WagePaid {
+                firm: EconomicActorId(SENTINEL_BASE + i),
+                market: MarketId(1),
                 amount: Money(1),
             })
             .collect(),
@@ -274,11 +284,21 @@ impl sim_core::persistence::EconomyEventStore for FailingEconomyEventStore {
             "simulated audit store outage",
         ))
     }
+
+    async fn prune(
+        &mut self,
+        _world_id: &str,
+        _keep_last: u64,
+    ) -> Result<u64, sim_core::persistence::EconomyEventStoreError> {
+        Err(sim_core::persistence::EconomyEventStoreError::unavailable(
+            "simulated audit store outage",
+        ))
+    }
 }
 
 #[tokio::test]
 async fn economy_audit_flush_failure_is_best_effort_and_retries() {
-    use sim_core::economy::{EconomicActorId, EconomyEvent, Money};
+    use sim_core::economy::{EconomicActorId, EconomyEvent, MarketId, Money};
 
     const SENTINEL_BASE: u64 = 910_000;
     fn sentinel_count(attempts: &Arc<std::sync::Mutex<Vec<(u64, EconomyEvent)>>>) -> usize {
@@ -287,7 +307,7 @@ async fn economy_audit_flush_failure_is_best_effort_and_retries() {
             .unwrap()
             .iter()
             .filter(|(_, e)| {
-                matches!(e, EconomyEvent::CashLocked { actor, .. } if actor.0 >= SENTINEL_BASE)
+                matches!(e, EconomyEvent::WagePaid { firm, .. } if firm.0 >= SENTINEL_BASE)
             })
             .count()
     }
@@ -295,8 +315,9 @@ async fn economy_audit_flush_failure_is_best_effort_and_retries() {
     let mut runtime = SimulationRuntime::new();
     runtime.push_ledger_events_for_test(
         (0..2)
-            .map(|i| EconomyEvent::CashLocked {
-                actor: EconomicActorId(SENTINEL_BASE + i),
+            .map(|i| EconomyEvent::WagePaid {
+                firm: EconomicActorId(SENTINEL_BASE + i),
+                market: MarketId(1),
                 amount: Money(1),
             })
             .collect(),
@@ -578,7 +599,7 @@ async fn persist_snapshots_once_rejects_empty_mobility_snapshots() {
         economy_event_store: Arc::new(Mutex::new(Box::new(InMemoryEconomyEventStore::default()))),
         chunk_channels: Arc::new(DashMap::new()),
         view: Arc::new(arc_swap::ArcSwap::from_pointee(
-            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0),
+            build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None),
         )),
         mutations: mutation_tx,
         base_world: Arc::new(BaseWorldResponse::from(&base_world)),
@@ -776,7 +797,8 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
     use sim_core::persistence::InMemoryMobilitySnapshotStore;
 
     let runtime = SimulationRuntime::new();
-    let initial_view = build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0);
+    let initial_view =
+        build_read_view_from_runtime(&runtime, &std::collections::HashMap::new(), 0, None);
     let (deltas, _) = tokio::sync::broadcast::channel(DELTA_BROADCAST_CAPACITY);
     let (mutation_tx, mut mutation_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -826,6 +848,112 @@ fn state_with_delayed_subscription_reply(delay: Duration) -> AppState {
             MOBILITY_PERSISTENCE_FRESHNESS_WINDOW,
         )),
     }
+}
+
+/// Per-tick cost breakdown. Not a real assertion test — an evidence-gathering
+/// harness for the 2026-06-10 "tick is ~250ms" investigation. Run with:
+///   scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml \
+///     -p sim-server profile_tick_phases -- --ignored --nocapture
+#[test]
+#[ignore = "profiling harness; run explicitly with --ignored --nocapture"]
+fn profile_tick_phases() {
+    use std::time::Instant;
+
+    fn median_ms(mut samples: Vec<f64>) -> f64 {
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        samples[samples.len() / 2]
+    }
+    fn time_n<F: FnMut()>(k: usize, mut f: F) -> f64 {
+        let mut s = Vec::with_capacity(k);
+        for _ in 0..k {
+            let t = Instant::now();
+            f();
+            s.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        median_ms(s)
+    }
+
+    let mut runtime = SimulationRuntime::new_from_base_world_dir(resolve_base_world_path())
+        .expect("base world fixture loads");
+
+    // Warm up: get agents mid-route and chunks dirtied like a live world.
+    for _ in 0..100 {
+        let _ = runtime.tick_world_mobility();
+    }
+
+    let world_id = runtime.world_id_for_persist().clone();
+    let loaded = runtime.world_summary().loaded_chunks.len();
+    let agents = runtime.mobility_snapshot().agents.len();
+    const K: usize = 40;
+
+    // --- tick_world_mobility (the actual sim step; mutates) ---
+    let t_tick = time_n(K, || {
+        let _ = runtime.tick_world_mobility();
+    });
+
+    // Freeze on a post-tick state and measure each read sub-phase repeatedly.
+    let per_chunk = runtime.tick_world_mobility();
+    let mobility = runtime.mobility();
+    let mobility_tick = runtime.mobility_tick();
+
+    let t_full = time_n(K, || {
+        let v = build_read_view_from_runtime(&runtime, &per_chunk, 1, None);
+        std::hint::black_box(v);
+    });
+    let prev_view = build_read_view_from_runtime(&runtime, &per_chunk, 1, None);
+    let t_incremental = time_n(K, || {
+        let v = build_read_view_from_runtime(&runtime, &per_chunk, 2, Some(&prev_view));
+        std::hint::black_box(v);
+    });
+    let t_world_summary = time_n(K, || {
+        let s = runtime.world_summary();
+        std::hint::black_box(world_summary_dto_to_proto(&s));
+    });
+    let summary = runtime.world_summary();
+    let t_chunk_loop = time_n(K, || {
+        for coord_dto in summary.loaded_chunks.iter() {
+            let coord = sim_core::ids::ChunkCoord {
+                x: coord_dto.x,
+                y: coord_dto.y,
+            };
+            if let Some(snap) = runtime.chunk_snapshot(coord) {
+                std::hint::black_box(chunk_snapshot_dto_to_proto(&snap));
+            }
+            let mob = sim_core::mobility::api::build_mobility_chunk_snapshot(mobility, coord);
+            std::hint::black_box(chunk_snapshot_to_dto(
+                &mob,
+                mobility,
+                &world_id,
+                mobility_tick,
+            ));
+        }
+    });
+    let t_mobility_full = time_n(K, || {
+        let m = runtime.mobility_snapshot();
+        std::hint::black_box(mobility_snapshot_dto_to_proto(&m));
+    });
+    let t_economy = time_n(K, || {
+        std::hint::black_box(build_economy_snapshot(mobility, &world_id, mobility_tick));
+    });
+    let t_subscriber_counts = time_n(K, || {
+        std::hint::black_box(sim_core::mobility::api::chunk_subscriber_counts_snapshot(
+            mobility,
+        ));
+    });
+
+    eprintln!(
+        "=== tick-phase profile (loaded_chunks={loaded}, agents={agents}, K={K}, median ms) ==="
+    );
+    eprintln!("  tick_world_mobility .......... {t_tick:8.3}");
+    eprintln!("  build_read_view (cold/full) .. {t_full:8.3}");
+    eprintln!("  build_read_view (incremental)  {t_incremental:8.3}");
+    eprintln!("    └ world_summary ............ {t_world_summary:8.3}");
+    eprintln!(
+        "    └ legacy per-chunk loop .... {t_chunk_loop:8.3}  (pre-fix pattern, for comparison)"
+    );
+    eprintln!("    └ mobility_full_dto ........ {t_mobility_full:8.3}");
+    eprintln!("    └ economy_snapshot ......... {t_economy:8.3}");
+    eprintln!("    └ subscriber_counts ........ {t_subscriber_counts:8.3}");
 }
 
 #[tokio::test]
@@ -1178,4 +1306,138 @@ mod tick_pacing_tests {
             "simulation ticker must use Delay so overload slows sim-time instead of queueing a burst backlog"
         );
     }
+}
+
+/// A1 (2026-06-10 tick-cost design): the read view must NOT rebuild tile
+/// snapshots for chunks whose ChunkVersion is unchanged — it reuses the
+/// previous view's Arc. A mutated chunk gets a fresh snapshot; everyone
+/// else stays pointer-identical.
+#[tokio::test]
+async fn read_view_reuses_unchanged_tile_snapshots_and_rebuilds_dirty_ones() {
+    let empty = std::collections::HashMap::new();
+    let mut runtime = SimulationRuntime::new();
+
+    let view1 = build_read_view_from_runtime(&runtime, &empty, 1, None);
+    assert!(
+        !view1.chunk_snapshots.is_empty(),
+        "fixture world must have loaded chunks"
+    );
+
+    // A plain mobility tick does not touch tiles: every tile snapshot must be
+    // reused (pointer-equal), not rebuilt.
+    let _ = runtime.tick_world_mobility();
+    let view2 = build_read_view_from_runtime(&runtime, &empty, 2, Some(&view1));
+    for (coord, snap) in &view1.chunk_snapshots {
+        let snap2 = view2
+            .chunk_snapshots
+            .get(coord)
+            .expect("chunk present in next view");
+        assert!(
+            Arc::ptr_eq(snap, snap2),
+            "unchanged chunk {coord:?} must reuse the cached snapshot Arc"
+        );
+    }
+
+    // Mutating a tile bumps that chunk's version: it must be rebuilt, while
+    // all other chunks keep their cached Arc.
+    let dirty = ChunkCoord { x: 0, y: 0 };
+    mutate_runtime_tile(&mut runtime, "command:view-reuse:1").await;
+    let view3 = build_read_view_from_runtime(&runtime, &empty, 3, Some(&view2));
+    let before = view2.chunk_snapshots.get(&dirty).expect("dirty chunk");
+    let after = view3.chunk_snapshots.get(&dirty).expect("dirty chunk");
+    assert!(
+        !Arc::ptr_eq(before, after),
+        "mutated chunk must get a freshly built snapshot"
+    );
+    assert!(
+        after.chunk_version > before.chunk_version,
+        "rebuilt snapshot must carry the bumped version"
+    );
+    for (coord, snap) in &view2.chunk_snapshots {
+        if *coord == dirty {
+            continue;
+        }
+        assert!(
+            Arc::ptr_eq(snap, view3.chunk_snapshots.get(coord).expect("present")),
+            "non-mutated chunk {coord:?} must still reuse its cached Arc"
+        );
+    }
+}
+
+/// B1 (2026-06-10 design): the audit flush appends only the DURABLE subset of
+/// pending events, yet commits the FULL pending count — transient events are
+/// consumed (never re-pended, ledger still trims) without ever hitting the DB.
+#[tokio::test]
+async fn economy_audit_flush_writes_only_durable_events_but_consumes_all() {
+    use sim_core::economy::{EconomicActorId, EconomyEvent, MarketId, Money};
+
+    const SENTINEL_BASE: u64 = 920_000;
+    fn sentinel_events(recorded: &Arc<std::sync::Mutex<Vec<(u64, EconomyEvent)>>>) -> Vec<String> {
+        recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, e)| match e {
+                EconomyEvent::WagePaid { firm, .. } => firm.0 >= SENTINEL_BASE,
+                EconomyEvent::CashLocked { actor, .. } => actor.0 >= SENTINEL_BASE,
+                _ => false,
+            })
+            .map(|(_, e)| e.event_type().to_string())
+            .collect()
+    }
+
+    let mut runtime = SimulationRuntime::new();
+    runtime.push_ledger_events_for_test(vec![
+        EconomyEvent::CashLocked {
+            actor: EconomicActorId(SENTINEL_BASE),
+            amount: Money(1),
+        },
+        EconomyEvent::WagePaid {
+            firm: EconomicActorId(SENTINEL_BASE + 1),
+            market: MarketId(1),
+            amount: Money(5),
+        },
+        EconomyEvent::CashLocked {
+            actor: EconomicActorId(SENTINEL_BASE + 2),
+            amount: Money(2),
+        },
+    ]);
+
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let state = AppState::new_with_stores(
+        runtime,
+        &base_world,
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(InMemoryMobilitySnapshotStore::default()),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        Box::new(RecordingEconomyEventStore {
+            recorded: Arc::clone(&recorded),
+        }),
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+    );
+
+    let tick0 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick0, TICK_WAIT).await;
+
+    // First flush: only the durable WagePaid sentinel reaches the store.
+    persist_snapshots_once(&state).await.unwrap();
+    assert_eq!(
+        sentinel_events(&recorded),
+        vec!["wage_paid".to_string()],
+        "transient sentinels must be filtered from the durable append"
+    );
+
+    // Let the fire-and-forget CommitLedgerAudit apply, then flush again: the
+    // cursor advanced past the transient sentinels too — nothing re-appends.
+    let tick1 = state.view().load().mobility_tick;
+    wait_for_tick_past(&state, tick1, TICK_WAIT).await;
+    persist_snapshots_once(&state).await.unwrap();
+    assert_eq!(
+        sentinel_events(&recorded),
+        vec!["wage_paid".to_string()],
+        "transient events are consumed, not retried"
+    );
 }

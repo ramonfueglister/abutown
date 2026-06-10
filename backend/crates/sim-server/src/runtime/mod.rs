@@ -557,6 +557,14 @@ impl SimulationRuntime {
         }
     }
 
+    /// Current `ChunkVersion` for a loaded chunk — the cheap dirtiness probe
+    /// the read view uses to decide whether a cached tile snapshot can be
+    /// reused (version unchanged) or must be rebuilt.
+    pub fn chunk_version(&self, coord: ChunkCoord) -> Option<u64> {
+        let entity = *self.world.resource::<ChunksByCoord>().0.get(&coord)?;
+        Some(self.world.get::<ChunkVersion>(entity)?.0)
+    }
+
     pub fn chunk_snapshot(&self, coord: ChunkCoord) -> Option<ChunkSnapshotDto> {
         let (_chunk_size, version, tiles, activity) = chunk_snapshot_data(&self.world, coord)?;
         Some(build_chunk_snapshot_from_parts(

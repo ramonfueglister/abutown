@@ -81,6 +81,41 @@ impl EconomyEventStore for PostgresEconomyEventStore {
 
         Ok(())
     }
+
+    async fn prune(
+        &mut self,
+        world_id: &str,
+        keep_last: u64,
+    ) -> Result<u64, EconomyEventStoreError> {
+        let keep_last = i64::try_from(keep_last)
+            .map_err(|_| EconomyEventStoreError::unavailable("keep_last exceeds i64"))?;
+        // Index-friendly rolling window on the existing (world_id, id) index:
+        // find the id of the (keep_last+1)-th newest row, delete it and older.
+        // Fewer rows than keep_last → subquery yields NULL → COALESCE(-1) →
+        // nothing matches (ids are BIGSERIAL, always positive).
+        let result = sqlx::query(
+            r#"
+            DELETE FROM economy_events
+            WHERE world_id = $1
+              AND id <= COALESCE(
+                (
+                    SELECT id FROM economy_events
+                    WHERE world_id = $1
+                    ORDER BY id DESC
+                    OFFSET $2 LIMIT 1
+                ),
+                -1
+              )
+            "#,
+        )
+        .bind(world_id)
+        .bind(keep_last)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| EconomyEventStoreError::unavailable(error.to_string()))?;
+
+        Ok(result.rows_affected())
+    }
 }
 
 #[cfg(test)]
@@ -139,6 +174,20 @@ mod tests {
                 (7, "transport_paid".to_string())
             ]
         );
+
+        // Rolling retention: keep only the newest row; the older one is deleted.
+        // An under-cap prune afterwards is a no-op.
+        let deleted = store.prune(&world_id, 1).await.unwrap();
+        assert_eq!(deleted, 1, "prune deletes everything past keep_last");
+        let remaining: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT tick, event_type FROM economy_events WHERE world_id = $1 ORDER BY id",
+        )
+        .bind(&world_id)
+        .fetch_all(store.pool_for_test())
+        .await
+        .unwrap();
+        assert_eq!(remaining, vec![(7, "transport_paid".to_string())]);
+        assert_eq!(store.prune(&world_id, 10).await.unwrap(), 0);
 
         // Best-effort cleanup of the test rows.
         let _ = sqlx::query("DELETE FROM economy_events WHERE world_id = $1")

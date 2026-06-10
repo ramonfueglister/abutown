@@ -43,6 +43,28 @@ pub fn run_tick_audit_at_tick(
     Ok(())
 }
 
+/// The durable subset of a flush batch: drops transient events
+/// (`!is_audit_durable`) and collapses the per-tick `TickAudit` heartbeats to
+/// the LAST one of the batch — the durable conservation trace lands on the
+/// flush cadence (~5 s), not the tick cadence, which would otherwise dominate
+/// the table again at full tick speed. Order is preserved. The caller still
+/// commits the FULL batch length so the cursor advances past transient events.
+pub fn durable_audit_subset(batch: &[EconomyEvent]) -> Vec<EconomyEvent> {
+    let last_tick_audit = batch
+        .iter()
+        .rposition(|event| matches!(event, EconomyEvent::TickAudit { .. }));
+    batch
+        .iter()
+        .enumerate()
+        .filter(|(index, event)| {
+            event.is_audit_durable()
+                && (!matches!(event, EconomyEvent::TickAudit { .. })
+                    || Some(*index) == last_tick_audit)
+        })
+        .map(|(_, event)| event.clone())
+        .collect()
+}
+
 /// The un-appended tail of the ledger + the current tick. Non-mutating: only
 /// `commit_ledger_audit` advances the cursor / trims, so a failed append (no
 /// commit) leaves all state unchanged — the events are retried next cycle.
