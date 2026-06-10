@@ -32,31 +32,28 @@ import {
   type TileFillBatch,
   type TileFillStyle,
 } from './minimalMapRenderer';
-
-const MAP_GRASS = '#91c86f';
-const MAP_WATER = '#92d8e9';
-const MAP_RIVERBANK = '#bde8df';
-const MAP_PARK = '#cfe5bf';
-const MAP_PLAZA = '#eadbbd';
-const ROAD_SIDEWALK = '#d8d3c5';
-const ROAD_CURB = '#aaa69c';
-const ROAD_CASING = '#565d61';
-const ROAD_CORE = '#71797d';
-const ROAD_CENTER_LINE = '#f1c93a';
-const RAIL_CASING = 'rgba(122, 131, 135, 0.32)';
-const RAIL_CORE = 'rgba(122, 131, 135, 0.42)';
-const TREE_COLOR = '#84ad78';
-const DETAIL_COLOR = 'rgba(92, 97, 92, 0.34)';
-const BUILDING_RESIDENTIAL = '#c9a16e';
-const BUILDING_RESIDENTIAL_ROOF = '#8b5c3c';
-const BUILDING_COMMERCIAL = '#c9d8dc';
-const BUILDING_CIVIC = '#dccb9a';
-const BUILDING_INDUSTRIAL = '#cabed6';
+import {
+  BUILDING_CIVIC,
+  BUILDING_COMMERCIAL,
+  BUILDING_INDUSTRIAL,
+  BUILDING_RESIDENTIAL,
+  DETAIL,
+  GROUND,
+  PARK,
+  PLAZA,
+  RAIL_CASING,
+  RAIL_CORE,
+  RIVERBANK,
+  ROAD_CENTER_DASH,
+  ROAD_INK,
+  TREE,
+  WATER,
+} from './designTokens';
 
 export function drawGrassBaseLayer(state: MinimalMapRendererState): void {
   const { ctx, tileSize, world } = state;
   ctx.save();
-  ctx.fillStyle = MAP_GRASS;
+  ctx.fillStyle = GROUND;
   ctx.fillRect(
     -TERRAIN_TILE_OVERLAP,
     -TERRAIN_TILE_OVERLAP,
@@ -77,8 +74,8 @@ export function drawTerrainOverlayLayer(state: MinimalMapRendererState, coords: 
 
 export function terrainOverlayStyle(state: MinimalMapRendererState, coord: Coord): TileFillStyle | null {
   const kind = state.terrainKinds.get(key(coord))?.kind;
-  if (kind === 'park' || kind === 'forest' || kind === 'reserve') return { color: MAP_PARK, alpha: 0.82 };
-  if (kind === 'plaza') return { color: MAP_PLAZA, alpha: 0.72 };
+  if (kind === 'park' || kind === 'forest' || kind === 'reserve') return { color: PARK, alpha: 0.82 };
+  if (kind === 'plaza') return { color: PLAZA, alpha: 0.72 };
   return null;
 }
 
@@ -93,27 +90,21 @@ export function drawRiverSurfaceLayer(state: MinimalMapRendererState, coords: re
 
 export function riverSurfaceStyle(state: MinimalMapRendererState, coord: Coord): TileFillStyle | null {
   const terrain = state.terrain.get(key(coord));
-  if (terrain === 'riverbank') return { color: MAP_RIVERBANK, alpha: 0.96 };
-  if (terrain === 'water') return { color: MAP_WATER, alpha: 0.96 };
+  if (terrain === 'riverbank') return { color: RIVERBANK, alpha: 0.96 };
+  if (terrain === 'water') return { color: WATER, alpha: 0.96 };
   return null;
 }
 
 export function drawRoad(state: MinimalMapRendererState, road: RuntimeRoadTile): void {
-  drawRoadBand(state, road.coord, road.mask, ROAD_SIDEWALK, screenStableWorldSize(24, state.camera.scale, { minWorld: 24, maxWorld: 36 }));
-  drawRoadBand(state, road.coord, road.mask, ROAD_CURB, screenStableWorldSize(18, state.camera.scale, { minWorld: 18, maxWorld: 29 }));
-  drawRoadBand(state, road.coord, road.mask, ROAD_CASING, screenStableWorldSize(16, state.camera.scale, { minWorld: 16, maxWorld: 26 }));
-  drawRoadBand(state, road.coord, road.mask, ROAD_CORE, screenStableWorldSize(13, state.camera.scale, { minWorld: 13, maxWorld: 22 }));
-  drawRoadBand(state, road.coord, road.mask, ROAD_CENTER_LINE, screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_INK, screenStableWorldSize(14, state.camera.scale, { minWorld: 14, maxWorld: 24 }));
+  drawRoadBand(state, road.coord, road.mask, ROAD_CENTER_DASH, screenStableWorldSize(2, state.camera.scale, { minWorld: 1.6, maxWorld: 3.4 }));
 }
 
 export function drawRoads(state: MinimalMapRendererState, roads: RuntimeRoadTile[]): void {
   if (roads.length === 0) return;
   const bands = [
-    { color: ROAD_SIDEWALK, width: screenStableWorldSize(24, state.camera.scale, { minWorld: 24, maxWorld: 36 }) },
-    { color: ROAD_CURB, width: screenStableWorldSize(18, state.camera.scale, { minWorld: 18, maxWorld: 29 }) },
-    { color: ROAD_CASING, width: screenStableWorldSize(16, state.camera.scale, { minWorld: 16, maxWorld: 26 }) },
-    { color: ROAD_CORE, width: screenStableWorldSize(13, state.camera.scale, { minWorld: 13, maxWorld: 22 }) },
-    { color: ROAD_CENTER_LINE, width: screenStableWorldSize(2.4, state.camera.scale, { minWorld: 2, maxWorld: 4.2 }) },
+    { color: ROAD_INK, width: screenStableWorldSize(14, state.camera.scale, { minWorld: 14, maxWorld: 24 }) },
+    { color: ROAD_CENTER_DASH, width: screenStableWorldSize(2, state.camera.scale, { minWorld: 1.6, maxWorld: 3.4 }) },
   ];
   for (const band of bands) drawRoadRuns(state, roads, band.color, band.width);
 }
@@ -242,7 +233,7 @@ export function drawDetail(state: MinimalMapRendererState, detail: WorldDetail):
   const { ctx } = state;
   const point = iso(state, detail.coord);
   ctx.save();
-  ctx.fillStyle = DETAIL_COLOR;
+  ctx.fillStyle = DETAIL;
   ctx.fillRect(point.x - 2, point.y - 2, 4, 4);
   ctx.restore();
 }
@@ -257,15 +248,8 @@ export function drawBuilding(state: MinimalMapRendererState, building: RuntimeBu
   const y = point.y - height / 2 + offset.y + jitter.y;
   ctx.save();
   ctx.fillStyle = buildingVectorColor(building);
-  roundedRectPath(ctx, x, y, width, height, 1.4);
+  roundedRectPath(ctx, x, y, width, height, 2.6);
   ctx.fill();
-  if (building.sheet === 'oldhouses' || building.sheet === 'houses') {
-    ctx.fillStyle = BUILDING_RESIDENTIAL_ROOF;
-    roundedRectPath(ctx, x + 1.6, y + 1.5, width - 3.2, height * 0.44, 1.2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255, 246, 214, 0.76)';
-    ctx.fillRect(x + width * 0.68, y + height * 0.62, width * 0.16, height * 0.22);
-  }
   ctx.restore();
 }
 
@@ -283,7 +267,7 @@ export function drawTree(state: MinimalMapRendererState, coord: Coord): void {
   const jitterX = ((hash(`tree-x:${key(coord)}`) % 9) - 4) * 0.38;
   const jitterY = ((hash(`tree-y:${key(coord)}`) % 9) - 4) * 0.38;
   ctx.save();
-  ctx.fillStyle = TREE_COLOR;
+  ctx.fillStyle = TREE;
   ctx.globalAlpha = state.terrainKinds.get(key(coord))?.kind === 'forest' ? 0.72 : 0.54;
   ctx.beginPath();
   ctx.arc(point.x + jitterX, point.y + jitterY, 2.4, 0, Math.PI * 2);

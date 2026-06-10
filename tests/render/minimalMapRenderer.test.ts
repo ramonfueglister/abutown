@@ -6,6 +6,7 @@ import {
   type MinimalMapRendererState,
 } from '../../src/render/minimalMapRenderer';
 import { MINIMAL_MAP_TILE_SIZE } from '../../src/render/minimalMapProjection';
+import { GROUND, PARK, RIVERBANK, WATER } from '../../src/render/designTokens';
 
 type FillRectOperation = {
   type: 'fillRect';
@@ -147,12 +148,12 @@ describe('minimal map renderer', () => {
 
     const grassFills = ctx.operations.filter(
       (operation): operation is FillRectOperation =>
-        operation.type === 'fillRect' && operation.fillStyle === '#91c86f',
+        operation.type === 'fillRect' && operation.fillStyle === GROUND,
     );
     expect(grassFills).toEqual([
       {
         type: 'fillRect',
-        fillStyle: '#91c86f',
+        fillStyle: GROUND,
         globalAlpha: 1,
         x: -0.6,
         y: -0.6,
@@ -173,7 +174,7 @@ describe('minimal map renderer', () => {
       ]),
     }));
 
-    const parkFills = fillOperations(ctx, '#cfe5bf');
+    const parkFills = fillOperations(ctx, PARK);
     expect(parkFills).toHaveLength(1);
     expect(parkFills[0].globalAlpha).toBeCloseTo(0.82);
     expect(rectOperations(ctx)).toEqual([
@@ -199,8 +200,8 @@ describe('minimal map renderer', () => {
       ]),
     }));
 
-    const waterFills = fillOperations(ctx, '#92d8e9');
-    const riverbankFills = fillOperations(ctx, '#bde8df');
+    const waterFills = fillOperations(ctx, WATER);
+    const riverbankFills = fillOperations(ctx, RIVERBANK);
     expect(waterFills).toHaveLength(1);
     expect(waterFills[0].globalAlpha).toBeCloseTo(0.96);
     expect(riverbankFills).toHaveLength(1);
