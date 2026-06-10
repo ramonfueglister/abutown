@@ -548,7 +548,7 @@ export function economySnapshotFromProto(p: EconomySnapshot): EconomySnapshotDto
 // WorldEvent DTO types + proto → DTO converter
 // ---------------------------------------------------------------------------
 
-export type TileKindSetEventDto = { x: number; y: number; kind: string; tick: number };
+export type TileKindSetEventDto = { x: number; y: number; kind: 'grass' | 'water'; tick: number };
 
 /**
  * Map the proto TileKind enum to the lowercase terrain string used by
@@ -563,7 +563,7 @@ export type TileKindSetEventDto = { x: number; y: number; kind: string; tick: nu
  * (protocol/src/lib.rs, sim-server/src/runtime/mod.rs apply_set_tile_kind has
  * no kind restriction). Callers must handle null by skipping the terrain mutation.
  */
-export function tileKindToTerrainString(kind: TileKind): string | null {
+export function tileKindToTerrainString(kind: TileKind): 'grass' | 'water' | null {
   switch (kind) {
     case TileKind.GRASS:
       return 'grass';
@@ -579,12 +579,8 @@ export function tileKindToTerrainString(kind: TileKind): string | null {
 
 /**
  * Convert a `TileKindSetEvent` proto message to an absolute-coordinate DTO,
- * or null if the tile kind cannot be represented in the terrain layer (ROAD,
- * BUILDING_FOOTPRINT, UNSPECIFIED).
- *
- * Roads render from the separate `transport.roads` map; building footprints
- * render from the buildings layer. Events for these kinds must be skipped
- * (with a warning) by the caller — silently painting 'grass' would be wrong.
+ * or null if the tile kind cannot be represented in the terrain layer (see
+ * {@link tileKindToTerrainString} for the ROAD/BUILDING_FOOTPRINT rationale).
  *
  * Local index layout (verified against sim-core/src/base_world.rs:463-464):
  *   for local_y in 0..chunk_size { for local_x in 0..chunk_size { … } }
@@ -595,7 +591,8 @@ export function tileKindToTerrainString(kind: TileKind): string | null {
 export function tileKindSetEventFromProto(event: TileKindSetEvent, chunkSize: number): TileKindSetEventDto | null {
   const terrainKind = tileKindToTerrainString(event.kind);
   if (terrainKind === null) return null;
-  const coord = event.coord ?? { x: 0, y: 0 };
+  if (!event.coord) throw new Error('TileKindSetEvent missing coord');
+  const coord = event.coord;
   const localX = event.localIndex % chunkSize;
   const localY = Math.floor(event.localIndex / chunkSize);
   return {

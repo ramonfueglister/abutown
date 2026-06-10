@@ -223,7 +223,7 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
           const tileEvent = tileKindSetEventFromProto(message.body.value.event.value, chunkSize);
           if (tileEvent === null) {
             // eslint-disable-next-line no-console
-            console.warn('worldEvent: unrenderable tile kind', message.body.value.event.value.kind);
+            console.warn('worldEvent: unrenderable tile kind', message.body.value.event.value.kind, 'coord', message.body.value.event.value.coord, 'localIndex', message.body.value.event.value.localIndex);
           } else {
             options.onTileKindSet(tileEvent);
           }

@@ -43,6 +43,27 @@ describe('tileKindSetEventFromProto', () => {
     expect(dto).toEqual({ x: 0, y: 0, kind: 'grass', tick: 10 });
   });
 
+  it('pins row-major layout with an asymmetric index (localIndex=103, chunkSize=32)', () => {
+    // localIndex=103, chunkSize=32: local_y=3, local_x=7  (103 = 3*32 + 7)
+    // If the decoder were transposed (local_x = floor(103/32)=3, local_y = 103%32=7)
+    // it would produce x=2*32+3=67, y=1*32+7=39 — wrong; correct is x=71, y=35.
+    const event = create(TileKindSetEventSchema, {
+      protocolVersion: 1,
+      eventId: 'e-asym',
+      commandId: 'c-asym',
+      worldId: 'abutopia',
+      tick: 7n,
+      version: 3n,
+      coord: { x: 2, y: 1 },
+      localIndex: 103,
+      kind: TileKind.GRASS,
+    });
+    const dto = tileKindSetEventFromProto(event, 32)!;
+    // absolute x = 2*32 + (103 % 32) = 64 + 7 = 71
+    // absolute y = 1*32 + floor(103 / 32) = 32 + 3 = 35
+    expect(dto).toEqual({ x: 71, y: 35, kind: 'grass', tick: 7 });
+  });
+
   it('handles last tile in chunk (bottom-right)', () => {
     // chunkSize=32, localIndex=32*32-1=1023 → local_y=31, local_x=31
     const event = create(TileKindSetEventSchema, {

@@ -128,8 +128,8 @@ async function startRuntime(): Promise<void> {
     },
     onTileKindSet: (event) => {
       const key = `${event.x}:${event.y}`;
-      terrainKinds.set(key, { kind: event.kind as TerrainKind });
-      terrain.set(key, toRuntimeTerrain(event.kind as BaseWorldTerrainKind));
+      terrainKinds.set(key, { kind: event.kind });
+      terrain.set(key, toRuntimeTerrain(event.kind));
     },
     viewport: {
       // Compose screen → render-world → tile so visibleChunks gets coords
