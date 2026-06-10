@@ -554,13 +554,16 @@ export type TileKindSetEventDto = { x: number; y: number; kind: string; tick: nu
  * Map the proto TileKind enum to the lowercase terrain string used by
  * BaseWorldTerrainKind / TerrainKind in the frontend.
  *
- * ROAD and BUILDING_FOOTPRINT are not terrain-layer kinds — they travel on
- * the transport/building layers. When a SetTileKindCommand resets the
- * underlying terrain below those features, the proto sends GRASS (or WATER),
- * not ROAD/BUILDING_FOOTPRINT. We fall back to 'grass' for completeness so
- * the terrain map never holds a stale or undefined value.
+ * Returns null for kinds that cannot be represented in the terrain layer:
+ * - ROAD: roads render from the separate `transport.roads` map, not the terrain layer.
+ * - BUILDING_FOOTPRINT: building footprints render from the buildings layer.
+ * - UNSPECIFIED: the backend rejects UNSPECIFIED commands, so this should not appear.
+ *
+ * The backend accepts and broadcasts ROAD/BUILDING_FOOTPRINT verbatim
+ * (protocol/src/lib.rs, sim-server/src/runtime/mod.rs apply_set_tile_kind has
+ * no kind restriction). Callers must handle null by skipping the terrain mutation.
  */
-export function tileKindToTerrainString(kind: TileKind): string {
+export function tileKindToTerrainString(kind: TileKind): string | null {
   switch (kind) {
     case TileKind.GRASS:
       return 'grass';
@@ -570,12 +573,18 @@ export function tileKindToTerrainString(kind: TileKind): string {
     case TileKind.BUILDING_FOOTPRINT:
     case TileKind.UNSPECIFIED:
     default:
-      return 'grass';
+      return null;
   }
 }
 
 /**
- * Convert a `TileKindSetEvent` proto message to an absolute-coordinate DTO.
+ * Convert a `TileKindSetEvent` proto message to an absolute-coordinate DTO,
+ * or null if the tile kind cannot be represented in the terrain layer (ROAD,
+ * BUILDING_FOOTPRINT, UNSPECIFIED).
+ *
+ * Roads render from the separate `transport.roads` map; building footprints
+ * render from the buildings layer. Events for these kinds must be skipped
+ * (with a warning) by the caller — silently painting 'grass' would be wrong.
  *
  * Local index layout (verified against sim-core/src/base_world.rs:463-464):
  *   for local_y in 0..chunk_size { for local_x in 0..chunk_size { … } }
@@ -583,14 +592,16 @@ export function tileKindToTerrainString(kind: TileKind): string {
  * → local_x = local_index % chunk_size
  * → local_y = Math.floor(local_index / chunk_size)
  */
-export function tileKindSetEventFromProto(event: TileKindSetEvent, chunkSize: number): TileKindSetEventDto {
+export function tileKindSetEventFromProto(event: TileKindSetEvent, chunkSize: number): TileKindSetEventDto | null {
+  const terrainKind = tileKindToTerrainString(event.kind);
+  if (terrainKind === null) return null;
   const coord = event.coord ?? { x: 0, y: 0 };
   const localX = event.localIndex % chunkSize;
   const localY = Math.floor(event.localIndex / chunkSize);
   return {
     x: coord.x * chunkSize + localX,
     y: coord.y * chunkSize + localY,
-    kind: tileKindToTerrainString(event.kind),
+    kind: terrainKind,
     tick: Number(event.tick),
   };
 }

@@ -220,7 +220,13 @@ export function connectMobilityBackend(options: MobilityBackendBridgeOptions): M
           options.onTileKindSet
         ) {
           const chunkSize = options.viewport.getWorldDims().chunkSize;
-          options.onTileKindSet(tileKindSetEventFromProto(message.body.value.event.value, chunkSize));
+          const tileEvent = tileKindSetEventFromProto(message.body.value.event.value, chunkSize);
+          if (tileEvent === null) {
+            // eslint-disable-next-line no-console
+            console.warn('worldEvent: unrenderable tile kind', message.body.value.event.value.kind);
+          } else {
+            options.onTileKindSet(tileEvent);
+          }
         }
         notify();
       } catch (err) {
