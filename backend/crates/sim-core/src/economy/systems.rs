@@ -7,10 +7,10 @@ use crate::economy::producers::run_generate_input_orders_at_tick;
 use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, BuyerOutlays, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError,
-    EconomyEvent, FlowRateEwma, FlowShipmentParams, GoodId, HouseholdSector, InputPools,
-    InventoryBook, MarketChunks, MarketDistances, MarketGoods, MarketId, Money, NextOrderId,
-    OrderBook, ProducerPolicies, ProductionPools, SellerReceipts, SettlementPolicy, SupplyPools,
-    TradeLedger, WageTelemetry, clear_market_good_with_receipts, expire_orders_at_tick,
+    EconomyEvent, FlowShipmentParams, GoodId, HouseholdSector, InputPools, InventoryBook,
+    MarketChunks, MarketDistances, MarketGoods, MarketId, Money, NextOrderId, OrderBook,
+    ProducerPolicies, ProductionPools, SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger,
+    WageTelemetry, clear_market_good_with_receipts, expire_orders_at_tick,
     generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
     run_consumption_update_at_tick, run_distribute_profit_at_tick, run_macro_flow_at_tick,
     run_pay_wages_at_tick, run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
@@ -602,7 +602,6 @@ pub fn run_macro_flow_system(
     mut orders: ResMut<OrderBook>,
     mut next_order_id: ResMut<NextOrderId>,
     mut receipts: ResMut<SellerReceipts>,
-    mut flow_ewma: ResMut<FlowRateEwma>,
     mut outlays: ResMut<BuyerOutlays>,
 ) {
     match run_macro_flow_at_tick(
@@ -632,7 +631,7 @@ pub fn run_macro_flow_system(
             if config.macro_flow_interval_ticks != 0
                 && tick.0.is_multiple_of(config.macro_flow_interval_ticks)
             {
-                crate::economy::update_flow_rate_ewma(&mut flow_ewma, &flow.realized);
+                crate::economy::update_flow_rate_ewma(&mut flow.ewma, &flow.realized);
             }
         }
         Err(reason) => {

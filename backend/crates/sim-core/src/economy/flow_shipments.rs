@@ -78,13 +78,14 @@ pub struct RealizedFlow {
 #[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
 pub struct RealizedFlows(pub Vec<RealizedFlow>);
 
-/// Bundled system params for the three flow-shipment resources, keeping
+/// Bundled system params for the flow resources, keeping
 /// `run_macro_flow_system` within Bevy's 16-param limit.
 #[derive(SystemParam)]
 pub struct FlowShipmentParams<'w> {
     pub shipments: ResMut<'w, FlowShipments>,
     pub next_id: ResMut<'w, NextShipmentId>,
     pub realized: ResMut<'w, RealizedFlows>,
+    pub ewma: ResMut<'w, crate::economy::flow_telemetry::FlowRateEwma>,
 }
 
 /// Drop arrived shipments that no longer have a live render-agent.

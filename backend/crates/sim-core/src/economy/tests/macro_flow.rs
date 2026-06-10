@@ -3477,6 +3477,7 @@ fn realized_flows_carry_shipped_quantity() {
         &mut crate::economy::OrderBook::default(),
         &mut crate::economy::NextOrderId::default(),
         &mut std::collections::BTreeMap::new(),
+        &mut std::collections::BTreeMap::new(),
     )
     .unwrap();
     assert!(
