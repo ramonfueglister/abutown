@@ -93,6 +93,23 @@ fn base_world_fixture() -> sim_core::base_world::BaseWorldBundle {
     .expect("base world fixture loads")
 }
 
+/// The abutopia fixture rebranded under `world_id`. `hydrate_from_stores`
+/// derives its world id from the bundle (event replay, mobility/economy
+/// snapshot reads, the runtime's own command validation, and the world id
+/// stamped onto collected chunk snapshots all key on it), so rebranding the
+/// bundle is what isolates a postgres test from the live world's rows.
+fn base_world_fixture_with_world_id(world_id: &str) -> sim_core::base_world::BaseWorldBundle {
+    let mut bundle = base_world_fixture();
+    bundle.manifest.world_id = world_id.to_string();
+    bundle.terrain.world_id = world_id.to_string();
+    bundle.transport.world_id = world_id.to_string();
+    bundle.buildings.world_id = world_id.to_string();
+    bundle.decorations.world_id = world_id.to_string();
+    bundle.spawns.world_id = world_id.to_string();
+    bundle.markets.world_id = world_id.to_string();
+    bundle
+}
+
 fn expected_abutopia_proto_chunks() -> Vec<w::ChunkCoord> {
     (0..=3)
         .flat_map(|y| (0..=6).map(move |x| w::ChunkCoord { x, y }))
@@ -535,27 +552,27 @@ async fn postgres_world_state_survives_runtime_restart() {
         return;
     };
 
-    // Use a unique command_id so re-runs don't collide with leftover rows from
-    // earlier test runs (dedup would otherwise short-circuit our mutation).
+    // Isolated world id: events, chunk snapshots, and command dedup are all
+    // keyed on world_id, so a unique id per run keeps the test from reading
+    // or mutating the live world's rows. Rows are deleted again at the end.
+    let world_id = format!("test:recover:{}", uuid::Uuid::now_v7());
     let command_id = format!("command:recover-test:{}", uuid::Uuid::now_v7());
-    // Pick a unique tile index per run so re-runs against the same DB don't
-    // hit `no_state_change` because a previous run already set this tile.
-    // Skip index 0 (seeded as Road in chunk (4,4)) by adding 1 and constraining
-    // to the valid range below the chunk tile count (1024).
-    let local_index: u16 = (((uuid::Uuid::now_v7().as_u128() % 1023) as u16) + 1).min(1023);
+    let local_index: u16 = 11;
+
+    let pool = connect_shared_pool(&database_url)
+        .await
+        .expect("connect shared pool");
 
     // ---- First runtime: hydrate, apply a command, persist snapshot, drop.
+    let target_kind;
     {
-        let base_world = base_world_fixture();
-        let pool = connect_shared_pool(&database_url)
-            .await
-            .expect("connect shared pool");
+        let base_world = base_world_fixture_with_world_id(&world_id);
         let event_store = PostgresWorldEventStore::with_pool(pool.clone())
             .await
             .expect("with_pool postgres event store");
         let snapshot_store = PostgresChunkSnapshotStore::with_pool(
             pool.clone(),
-            SimulationRuntime::default_world_id(),
+            WorldId(world_id.clone()),
             base_world.snapshot_compatibility(),
         )
         .await
@@ -576,22 +593,37 @@ async fn postgres_world_state_survives_runtime_restart() {
         .await
         .expect("hydrate first runtime");
 
+        // Flip the tile to a kind it doesn't currently have so the command can
+        // never be rejected with `no_state_change` (the fresh world id starts
+        // from the base world, never from prior-run pollution). Snapshot tiles
+        // are sparse — an index absent from `tiles` holds the default kind
+        // (Grass), so the post-restart assertion compares via the same lookup.
+        let current_kind = runtime
+            .chunk_snapshot(ChunkCoord { x: 0, y: 0 })
+            .expect("chunk (0,0) loaded from base world")
+            .tiles
+            .iter()
+            .find(|t| t.local_index == local_index)
+            .map(|t| t.kind)
+            .unwrap_or(TileKindDto::Grass);
+        target_kind = if current_kind == TileKindDto::Water {
+            TileKindDto::Grass
+        } else {
+            TileKindDto::Water
+        };
+
         let command = ClientCommandDto::SetTileKind(SetTileKindCommandDto {
             protocol_version: PROTOCOL_VERSION,
-            world_id: WorldId("abutopia".to_string()),
+            world_id: WorldId(world_id.clone()),
             command_id: command_id.clone(),
             coord: ChunkCoordDto { x: 0, y: 0 },
             local_index,
-            kind: TileKindDto::Water,
+            kind: target_kind,
         });
-        match runtime.apply_client_command(command).await {
-            Ok(_) => {}
-            Err(rejection) if rejection.code == "no_state_change" => {
-                // Tile is already in the target state from a prior run; the
-                // restart-recovery assertion below still holds.
-            }
-            Err(other) => panic!("unexpected rejection: {other:?}"),
-        }
+        runtime
+            .apply_client_command(command)
+            .await
+            .expect("command must apply cleanly on a fresh isolated world");
         // Persist using the store directly (stores now live outside the runtime).
         let snapshots = runtime.collect_chunk_snapshots();
         let coords: Vec<sim_core::ids::ChunkCoord> = snapshots
@@ -613,16 +645,13 @@ async fn postgres_world_state_survives_runtime_restart() {
 
     // ---- Second runtime: hydrate fresh from the same database.
     {
-        let base_world = base_world_fixture();
-        let pool = connect_shared_pool(&database_url)
-            .await
-            .expect("connect shared pool (restart)");
+        let base_world = base_world_fixture_with_world_id(&world_id);
         let event_store = PostgresWorldEventStore::with_pool(pool.clone())
             .await
             .expect("with_pool postgres event store (restart)");
         let snapshot_store = PostgresChunkSnapshotStore::with_pool(
             pool.clone(),
-            SimulationRuntime::default_world_id(),
+            WorldId(world_id.clone()),
             base_world.snapshot_compatibility(),
         )
         .await
@@ -646,16 +675,28 @@ async fn postgres_world_state_survives_runtime_restart() {
         let restored = runtime
             .chunk_snapshot(ChunkCoord { x: 0, y: 0 })
             .expect("chunk (0,0) loaded after restart");
-        assert!(
-            restored
-                .tiles
-                .iter()
-                .any(|t| t.local_index == local_index && t.kind == TileKindDto::Water),
-            "post-restart snapshot must contain tile {local_index}=Water set before restart; \
-             got tiles: {:?}",
+        let restored_kind = restored
+            .tiles
+            .iter()
+            .find(|t| t.local_index == local_index)
+            .map(|t| t.kind)
+            .unwrap_or(TileKindDto::Grass);
+        assert_eq!(
+            restored_kind, target_kind,
+            "post-restart snapshot must restore tile {local_index}={target_kind:?} \
+             set before restart; got tiles: {:?}",
             restored.tiles
         );
     }
+
+    let _ = sqlx::query("DELETE FROM world_events WHERE world_id = $1")
+        .bind(&world_id)
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM chunk_snapshots WHERE world_id = $1")
+        .bind(&world_id)
+        .execute(&pool)
+        .await;
 }
 
 #[tokio::test]
