@@ -6,12 +6,13 @@ use bevy_ecs::query::Or;
 use crate::economy::production::RawDeposits;
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, DormantMarkets, EconomyError, EconomyEvent,
-    FlowShipmentParams, GoodId, HouseholdSector, InventoryBook, MarketChunks, MarketDistances,
-    MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProductionPools, SellerReceipts,
-    SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry, clear_market_good_with_receipts,
-    expire_orders_at_tick, generate_pool_orders_at_tick, integer_ewma, run_consumption_at_tick,
-    run_consumption_update_at_tick, run_distribute_profit_at_tick, run_macro_flow_at_tick,
-    run_pay_wages_at_tick, run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
+    FlowRateEwma, FlowShipmentParams, GoodId, HouseholdSector, InventoryBook, MarketChunks,
+    MarketDistances, MarketGoods, MarketId, Money, NextOrderId, OrderBook, ProductionPools,
+    SellerReceipts, SettlementPolicy, SupplyPools, TradeLedger, WageTelemetry,
+    clear_market_good_with_receipts, expire_orders_at_tick, generate_pool_orders_at_tick,
+    integer_ewma, run_consumption_at_tick, run_consumption_update_at_tick,
+    run_distribute_profit_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
+    run_production_at_tick, run_regen_at_tick, run_transport_rebate_at_tick,
 };
 use crate::ids::ChunkCoord;
 use crate::mobility::resources::Tick;
@@ -554,8 +555,9 @@ pub fn run_macro_flow_system(
     mut orders: ResMut<OrderBook>,
     mut next_order_id: ResMut<NextOrderId>,
     mut receipts: ResMut<SellerReceipts>,
+    mut flow_ewma: ResMut<FlowRateEwma>,
 ) {
-    if let Err(reason) = run_macro_flow_at_tick(
+    match run_macro_flow_at_tick(
         &mut accounts,
         &mut inventory,
         &mut ledger,
@@ -574,16 +576,28 @@ pub fn run_macro_flow_system(
         &mut next_order_id,
         &mut receipts.0,
     ) {
-        // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
-        // atomic boundary left the books unchanged. Per-edge settle faults are
-        // already isolated inside run_macro_flow_at_tick (their own
-        // MarketClearFailed events). market/good = the demo sentinel for a
-        // tick-level fault that is not attributable to one (market,good).
-        ledger.0.push(EconomyEvent::MarketClearFailed {
-            market: MarketId(0),
-            good: GoodId(0),
-            reason,
-        });
+        Ok(()) => {
+            // Fold this interval's realized flows into the on-wire EWMA. Gated on
+            // the SAME interval condition the macro flow uses internally, so the
+            // smoothing cadence is one step per macro-flow run — never per tick.
+            if config.macro_flow_interval_ticks != 0
+                && tick.0.is_multiple_of(config.macro_flow_interval_ticks)
+            {
+                crate::economy::update_flow_rate_ewma(&mut flow_ewma, &flow.realized);
+            }
+        }
+        Err(reason) => {
+            // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
+            // atomic boundary left the books unchanged. Per-edge settle faults are
+            // already isolated inside run_macro_flow_at_tick (their own
+            // MarketClearFailed events). market/good = the demo sentinel for a
+            // tick-level fault that is not attributable to one (market,good).
+            ledger.0.push(EconomyEvent::MarketClearFailed {
+                market: MarketId(0),
+                good: GoodId(0),
+                reason,
+            });
+        }
     }
 }
 

@@ -4,6 +4,7 @@ pub mod auction;
 pub mod audit;
 pub mod capita;
 pub mod flow_shipments;
+pub mod flow_telemetry;
 pub mod goods;
 pub mod ids;
 pub mod inventory;
@@ -27,6 +28,7 @@ pub use accounts::*;
 pub use auction::*;
 pub use audit::*;
 pub use flow_shipments::*;
+pub use flow_telemetry::{FlowRateEwma, update_flow_rate_ewma};
 pub use goods::*;
 pub use ids::*;
 pub use inventory::*;
@@ -80,6 +82,7 @@ impl crate::world::schedule::SimPlugin for EconomyPlugin {
         world.insert_resource(crate::economy::flow_shipments::FlowShipments::default());
         world.insert_resource(crate::economy::flow_shipments::NextShipmentId::default());
         world.insert_resource(crate::economy::flow_shipments::RealizedFlows::default());
+        world.insert_resource(crate::economy::flow_telemetry::FlowRateEwma::default());
         world.insert_resource(crate::economy::wages::SellerReceipts::default());
         world.insert_resource(crate::economy::wages::WageTelemetry::default());
         world.insert_resource(crate::economy::wages::HouseholdSector {
