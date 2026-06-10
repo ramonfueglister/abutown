@@ -448,6 +448,68 @@ async fn three_clients_subscribed_to_abutopia_chunk_each_receive_snapshot() {
 }
 
 #[tokio::test]
+async fn websocket_clients_receive_the_same_broadcast_tick() {
+    // Both clients must observe an EconomySnapshot for the same tick with
+    // identical payload — proving that the global per-tick broadcast channel
+    // delivers the same frame to every connected client.
+    let app = build_app_with_runtime(runtime_with_seeded_mobility());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let url = format!("ws://{addr}/ws");
+
+    let (mut client_a, _) = connect_async(&url).await.unwrap();
+    let _ = read_server_message(&mut client_a).await; // drain Hello
+    // Drain the immediate EconomySnapshot sent on connect.
+    let _initial_a = read_economy_snapshot(&mut client_a).await;
+
+    let (mut client_b, _) = connect_async(&url).await.unwrap();
+    let _ = read_server_message(&mut client_b).await; // drain Hello
+    // Drain the immediate EconomySnapshot sent on connect.
+    let _initial_b = read_economy_snapshot(&mut client_b).await;
+
+    // Wait for the first per-tick EconomySnapshot on client A.
+    let snap_a = read_economy_snapshot(&mut client_a).await;
+
+    // Collect EconomySnapshots on client B until we reach or pass snap_a.tick.
+    // The >= approach avoids a flake when the two clients straddle a tick boundary.
+    let mut snaps_b: Vec<w::EconomySnapshot> = Vec::new();
+    loop {
+        let snap = read_economy_snapshot(&mut client_b).await;
+        let tick = snap.tick;
+        snaps_b.push(snap);
+        if tick >= snap_a.tick {
+            break;
+        }
+    }
+
+    // At least one frame on client B must share the exact same tick as snap_a,
+    // and its world_id, markets, and goods must be identical (same broadcast frame).
+    let matching = snaps_b.iter().find(|s| s.tick == snap_a.tick);
+    assert!(
+        matching.is_some(),
+        "client B must receive an EconomySnapshot for tick {} (got ticks: {:?})",
+        snap_a.tick,
+        snaps_b.iter().map(|s| s.tick).collect::<Vec<_>>()
+    );
+    let snap_b = matching.unwrap();
+    assert_eq!(
+        snap_a.world_id, snap_b.world_id,
+        "world_id must match across clients for the same tick"
+    );
+    assert_eq!(
+        snap_a.markets, snap_b.markets,
+        "markets must be identical for the same broadcast tick"
+    );
+    assert_eq!(
+        snap_a.goods, snap_b.goods,
+        "goods must be identical for the same broadcast tick"
+    );
+}
+
+#[tokio::test]
 async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
     // The test asserts that a MobilityChunkDelta arrives, confirming the
     // per-chunk fan-out pipeline is wired.
@@ -494,4 +556,21 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
         delta_seen,
         "per-tick MobilityChunkDelta should arrive within 60 messages"
     );
+}
+
+async fn read_economy_snapshot<S>(stream: &mut S) -> w::EconomySnapshot
+where
+    S: futures_util::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
+{
+    loop {
+        let message = read_server_message(stream).await;
+        if let Some(w::server_message::Body::EconomySnapshot(snap)) = message.body {
+            return snap;
+        }
+    }
 }
