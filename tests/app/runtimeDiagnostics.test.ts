@@ -70,6 +70,8 @@ function baseOptions(): RuntimeDiagnosticsOptions {
       selectedMarketCoord: null,
     }),
     getEconomyMarketCount: () => 0,
+    getEconomyFlowCount: () => 0,
+    getFrameTimeMs: () => 0,
     getEconomyMarkets: () => [],
     projectEntityScreen: (coord) => ({ x: coord.x + 100, y: coord.y + 200 }),
     carVisualWorldPoint: (vehicle) => vehicle.path[0],

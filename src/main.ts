@@ -40,6 +40,7 @@ import {
   EDGE_EXIT_TILES,
   MAP_BACKGROUND,
   OUTSKIRTS_TILES,
+  flowsDrawnLastFrame,
   renderMinimalMap,
 } from './render/minimalMapRenderer';
 import {
@@ -95,6 +96,7 @@ let details: WorldDetail[] = [];
 let vehicleSprites: VehicleSprite[] = [];
 let pedestrianSprites: MinimalPedestrianSprite[] = [];
 let previousTime = performance.now();
+let lastFrameMs = 0;
 let backendStatus: BackendHealthDto | null = null;
 let mobilityState: MobilityOverlayState = createMobilityOverlayState();
 let economyState: EconomyOverlayState = createEconomyOverlayState();
@@ -239,6 +241,7 @@ function attachCamera(): void {
 
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - previousTime) / 1000);
+  lastFrameMs = now - previousTime;
   previousTime = now;
   if (!camera.dragging) constrainCamera(false);
   dampCamera(camera, dt, 18);
@@ -274,6 +277,8 @@ function render(): void {
     selectedAgentId: entitySelection.selectedAgentId(),
     selectedVehicleId: entitySelection.selectedVehicleId(),
     markets: [...economyState.markets.values()],
+    goods: [...economyState.goods.values()],
+    flows: economyState.flows,
     now: Date.now,
     simTime,
   });
@@ -529,6 +534,8 @@ installRuntimeDiagnostics(window, {
   }),
   getEconomyMarketCount: () => economyState.markets.size,
   getEconomyMarkets: () => [...economyState.markets.values()],
+  getEconomyFlowCount: () => flowsDrawnLastFrame(),
+  getFrameTimeMs: () => lastFrameMs,
   getSelected: () => ({
     agentId: entitySelection.selectedAgentId(),
     vehicleId: entitySelection.selectedVehicleId(),
