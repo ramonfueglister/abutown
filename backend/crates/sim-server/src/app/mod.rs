@@ -316,7 +316,10 @@ fn build_economy_snapshot(
     world_id: &abutown_protocol::WorldId,
     tick: u64,
 ) -> w::EconomySnapshot {
-    use sim_core::economy::{AccountBook, FlowRateEwma, MarketGoods, Markets, WageTelemetry};
+    use sim_core::economy::{
+        AccountBook, FlowRateEwma, InputPools, MarketGoods, Markets, ProducerPolicies,
+        WageTelemetry, capita::CapitaFactor, wc_target,
+    };
     use sim_core::mobility::resources::{
         AgentIdIndex, CitizenEconomicTargets, RouteAssignmentStats,
     };
@@ -368,6 +371,46 @@ fn build_economy_snapshot(
             rate: rate.0,
         })
         .collect();
+    let producers = {
+        let pools = world.resource::<InputPools>();
+        let policies = world.resource::<ProducerPolicies>();
+        let accounts = world.resource::<AccountBook>();
+        let capita = world.resource::<CapitaFactor>().0;
+        pools
+            .0
+            .iter()
+            .map(|(&actor, pool)| {
+                // Keyset invariant (seed-asserted by assert_producer_keysets_match):
+                // every InputPool entry has a matching ProducerPolicy.
+                let policy = policies
+                    .0
+                    .get(&actor)
+                    .copied()
+                    .expect("InputPools entry without ProducerPolicy — seed keyset invariant");
+                // wc_target is caller-must-guard max_price > 0; an unpriced pool
+                // (bound not yet discovered) reports target 0, mirroring the
+                // dividend path's conservative retention (wages.rs).
+                let wc = if pool.max_price.0 > 0 {
+                    wc_target(policy, pool, capita)
+                        .expect("wc_target on a priced, seed-validated pool cannot overflow")
+                        .0
+                } else {
+                    0
+                };
+                w::EconomyProducer {
+                    actor_id: actor.0,
+                    market_id: pool.market.0,
+                    in_good: u32::from(pool.good.0),
+                    out_good: u32::from(pool.out_good.0),
+                    retained_earnings: accounts.account(actor).available.0,
+                    wc_target: wc,
+                    max_bid: pool.max_price.0,
+                    in_qty: pool.in_qty.0,
+                    out_qty: pool.out_qty.0,
+                }
+            })
+            .collect()
+    };
     // Every caller's world installs EconomyPlugin + mobility (constructors at
     // runtime/mod.rs:218/368), so absence of any of these resources is a
     // programming error and must panic.
@@ -396,6 +439,7 @@ fn build_economy_snapshot(
         goods,
         vitals,
         flows,
+        producers,
     }
 }
 

@@ -86,8 +86,9 @@ pub(crate) fn scaled_batch_qty(
 /// (`run_distribute_profit_at_tick` in wages.rs) checks `pool.max_price.0 <= 0` and
 /// retains conservatively rather than calling this function, so `wc_target` itself
 /// stays strict: any `max_price <= 0` reaching it is a caller bug, not a recoverable
-/// state.
-pub(crate) fn wc_target(
+/// state. `pub` for the wire-snapshot telemetry (sim-server's economy snapshot
+/// builder), which applies the same guard and reports 0 for unpriced pools.
+pub fn wc_target(
     policy: ProducerPolicy,
     pool: &InputPool,
     capita_factor: i64,

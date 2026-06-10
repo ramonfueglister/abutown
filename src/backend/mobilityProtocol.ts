@@ -536,6 +536,7 @@ export function mobilitySnapshotFromProto(p: MobilitySnapshotProto): MobilitySna
 export type MarketLocationDto = { marketId: number; name: string; tileX: number; tileY: number; wagePaidLastTick: number };
 export type MarketGoodDto = { marketId: number; goodId: number; lastSettlementPrice: number; ewmaReferencePrice: number; tradedQtyLastTick: number; unmetDemandLastTick: number; unsoldSupplyLastTick: number };
 export type EconomyFlowDto = { srcMarketId: number; dstMarketId: number; goodId: number; rate: number };
+export type EconomyProducerDto = { actorId: number; marketId: number; inGood: number; outGood: number; retainedEarnings: number; wcTarget: number; maxBid: number; inQty: number; outQty: number };
 export type EconomyVitalsDto = {
   population: number;
   routedCitizens: number;
@@ -543,7 +544,7 @@ export type EconomyVitalsDto = {
   routesAssigned: number;
   routesFailed: number;
 };
-export type EconomySnapshotDto = { tick: number; markets: MarketLocationDto[]; goods: MarketGoodDto[]; vitals?: EconomyVitalsDto; flows: EconomyFlowDto[] };
+export type EconomySnapshotDto = { tick: number; markets: MarketLocationDto[]; goods: MarketGoodDto[]; vitals?: EconomyVitalsDto; flows: EconomyFlowDto[]; producers: EconomyProducerDto[] };
 
 function economyVitalsFromProto(p: EconomyVitalsProto): EconomyVitalsDto {
   return {
@@ -562,6 +563,7 @@ export function economySnapshotFromProto(p: EconomySnapshot): EconomySnapshotDto
     goods: p.goods.map((g) => ({ marketId: g.marketId, goodId: g.goodId, lastSettlementPrice: Number(g.lastSettlementPrice), ewmaReferencePrice: Number(g.ewmaReferencePrice), tradedQtyLastTick: Number(g.tradedQtyLastTick), unmetDemandLastTick: Number(g.unmetDemandLastTick), unsoldSupplyLastTick: Number(g.unsoldSupplyLastTick) })),
     vitals: p.vitals !== undefined ? economyVitalsFromProto(p.vitals) : undefined,
     flows: p.flows.map((f) => ({ srcMarketId: f.srcMarketId, dstMarketId: f.dstMarketId, goodId: f.goodId, rate: Number(f.rate) })),
+    producers: p.producers.map((pr) => ({ actorId: Number(pr.actorId), marketId: pr.marketId, inGood: pr.inGood, outGood: pr.outGood, retainedEarnings: Number(pr.retainedEarnings), wcTarget: Number(pr.wcTarget), maxBid: Number(pr.maxBid), inQty: Number(pr.inQty), outQty: Number(pr.outQty) })),
   };
 }
 

@@ -4,6 +4,7 @@ import {
   EconomyFlowSchema,
   EconomyMarketGoodSchema,
   EconomyMarketSchema,
+  EconomyProducerSchema,
   EconomySnapshotSchema,
   HelloSchema,
   ServerMessageSchema,
@@ -84,5 +85,47 @@ describe('economyState reducer', () => {
     });
     const state = applyEconomyServerMessage(createEconomyOverlayState(), message);
     expect(state.flows).toEqual([{ srcMarketId: 9003, dstMarketId: 9004, goodId: 1, rate: 250 }]);
+  });
+
+  it('starts with no producers', () => {
+    expect(createEconomyOverlayState().producers).toEqual([]);
+  });
+
+  it('stores producers from the snapshot', () => {
+    const snapshot = create(EconomySnapshotSchema, {
+      tick: 1234n,
+      markets: [],
+      goods: [],
+      producers: [
+        create(EconomyProducerSchema, {
+          actorId: 8031n,
+          marketId: 9001,
+          inGood: 2,
+          outGood: 4,
+          retainedEarnings: 30_000_000n,
+          wcTarget: 240n,
+          maxBid: 400n,
+          inQty: 10n,
+          outQty: 10n,
+        }),
+      ],
+    });
+    const message = create(ServerMessageSchema, {
+      body: { case: 'economySnapshot', value: snapshot },
+    });
+    const state = applyEconomyServerMessage(createEconomyOverlayState(), message);
+    expect(state.producers).toEqual([
+      {
+        actorId: 8031,
+        marketId: 9001,
+        inGood: 2,
+        outGood: 4,
+        retainedEarnings: 30_000_000,
+        wcTarget: 240,
+        maxBid: 400,
+        inQty: 10,
+        outQty: 10,
+      },
+    ]);
   });
 });
