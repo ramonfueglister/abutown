@@ -220,8 +220,11 @@ fn mobility_snapshot_base_world_match_rejects_stale_vehicle() {
     ));
 }
 
+/// An agent walking a DIFFERENT corridor that this base world also has is a
+/// legitimate dynamic state (routing moves agents between corridors) — the
+/// static-era check rejected this and silently reseeded the world.
 #[test]
-fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_link() {
+fn mobility_snapshot_base_world_match_accepts_pedestrian_on_other_existing_corridor() {
     use sim_core::ids::AgentId;
     use sim_core::mobility::{AgentMobilityState, extract_from_world, seed};
 
@@ -229,10 +232,6 @@ fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_link() {
     let (authored, _) =
         seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
     let mut authored_snap = extract_from_world(&authored);
-    assert!(mobility_snapshot_matches_base_world(
-        &authored_snap,
-        &base_world
-    ));
 
     authored_snap
         .agents
@@ -243,7 +242,7 @@ fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_link() {
         progress: 0.0,
     };
 
-    assert!(!mobility_snapshot_matches_base_world(
+    assert!(mobility_snapshot_matches_base_world(
         &authored_snap,
         &base_world
     ));
@@ -1667,5 +1666,153 @@ async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
         snap.markets.len(),
         4,
         "demo markets bootstrapped on empty hydrate (2 original + 2 flow-demo)"
+    );
+}
+
+/// 2026-06-10 silent world-reset fix: a snapshot whose population has DRIFTED
+/// demographically (births = new agent ids, deaths = missing seed ids, agents
+/// wandered off the seed link into activities) is still THIS world and must
+/// resume — identity with the freshly-seeded world is the wrong criterion.
+/// The live server reseeded (tick→0) on every restart because of this.
+#[test]
+fn mobility_snapshot_base_world_match_accepts_demographic_drift() {
+    use sim_core::ids::AgentId;
+    use sim_core::mobility::{AgentMobilityState, extract_from_world, seed};
+
+    let base_world = base_world_fixture();
+    let (authored, _) =
+        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+    let mut snap = extract_from_world(&authored);
+
+    // A death: one seeded agent is gone.
+    snap.agents
+        .remove(&AgentId("agent:walk:0".to_string()))
+        .expect("seeded agent exists");
+    // A birth: a brand-new agent id, parked at an activity.
+    let born_id = AgentId("agent:born:42".to_string());
+    let mut born = sim_core::mobility::AgentRecord::new(
+        born_id.clone(),
+        AgentMobilityState::AtActivity {
+            activity_id: "activity:home".to_string(),
+        },
+        Vec::new(),
+        1.0,
+    );
+    born.birth_tick = 4_000;
+    snap.agents.insert(born_id, born);
+    // A wanderer: a seeded agent left its seed link for an activity.
+    snap.agents
+        .get_mut(&AgentId("agent:walk:1".to_string()))
+        .expect("seeded agent exists")
+        .state = AgentMobilityState::AtActivity {
+        activity_id: "activity:destination".to_string(),
+    };
+
+    assert!(
+        mobility_snapshot_matches_base_world(&snap, &base_world),
+        "a demographically drifted snapshot of THIS world must resume, not reseed"
+    );
+}
+
+/// Walking on a corridor link this base world does not have ⇒ the snapshot
+/// belongs to another world generation ⇒ reseed.
+#[test]
+fn mobility_snapshot_base_world_match_rejects_unknown_corridor_link() {
+    use sim_core::ids::AgentId;
+    use sim_core::mobility::{AgentMobilityState, extract_from_world, seed};
+
+    let base_world = base_world_fixture();
+    let (authored, _) =
+        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+    let mut snap = extract_from_world(&authored);
+
+    snap.agents
+        .get_mut(&AgentId("agent:walk:0".to_string()))
+        .expect("seeded agent exists")
+        .state = AgentMobilityState::Walking {
+        link_id: "link:walk:corridor:99".to_string(),
+        progress: 0.0,
+    };
+
+    assert!(!mobility_snapshot_matches_base_world(&snap, &base_world));
+}
+
+/// An InVehicle agent referencing a vehicle the snapshot does not carry is
+/// internally inconsistent ⇒ reseed.
+#[test]
+fn mobility_snapshot_base_world_match_rejects_dangling_vehicle_ref() {
+    use sim_core::ids::AgentId;
+    use sim_core::mobility::{AgentMobilityState, extract_from_world, seed};
+
+    let base_world = base_world_fixture();
+    let (authored, _) =
+        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+    let mut snap = extract_from_world(&authored);
+
+    snap.agents
+        .get_mut(&AgentId("agent:walk:0".to_string()))
+        .expect("seeded agent exists")
+        .state = AgentMobilityState::InVehicle {
+        vehicle_id: sim_core::ids::VehicleId("vehicle:ghost".to_string()),
+        seat_index: 0,
+    };
+
+    assert!(!mobility_snapshot_matches_base_world(&snap, &base_world));
+}
+
+/// End-to-end guard for the frozen-time model: hydration must RESUME from a
+/// persisted snapshot whose population drifted demographically — sim-time
+/// continues from the saved tick instead of silently reseeding at 0.
+#[tokio::test]
+async fn hydrate_from_stores_resumes_demographically_drifted_snapshot() {
+    use sim_core::ids::AgentId;
+    use sim_core::mobility::{AgentMobilityState, extract_from_world, seed};
+
+    let base_world = base_world_fixture();
+    let (authored, _) =
+        seed::from_base_world_bundle(&base_world).expect("base world mobility seed succeeds");
+    let mut snap = extract_from_world(&authored);
+    snap.tick = 5_000;
+    snap.agents
+        .remove(&AgentId("agent:walk:0".to_string()))
+        .expect("seeded agent exists");
+    let born_id = AgentId("agent:born:7".to_string());
+    snap.agents.insert(
+        born_id.clone(),
+        sim_core::mobility::AgentRecord::new(
+            born_id,
+            AgentMobilityState::AtActivity {
+                activity_id: "activity:home".to_string(),
+            },
+            Vec::new(),
+            1.0,
+        ),
+    );
+
+    let mut mobility_store = InMemoryMobilitySnapshotStore::default();
+    MobilitySnapshotStore::write(
+        &mut mobility_store,
+        "abutopia",
+        5_000,
+        &snap,
+        &base_world.snapshot_compatibility(),
+    )
+    .await
+    .unwrap();
+
+    let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
+        Box::new(InMemoryWorldEventStore::default()),
+        Box::new(InMemoryChunkSnapshotStore::default()),
+        Box::new(mobility_store),
+        Box::new(InMemoryEconomySnapshotStore::default()),
+        &base_world,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        runtime.mobility_tick(),
+        5_000,
+        "frozen-time resume: hydration must continue from the saved tick, not reseed at 0"
     );
 }
