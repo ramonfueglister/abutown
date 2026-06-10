@@ -117,3 +117,15 @@ The mirror of #70's constraint: a shopper is visible only when its market is **o
 3. `config.shoppers_per_unit` + `config.max_shoppers_per_market` defaults (small — a handful of visible shoppers per busy market, not hundreds), added to `EconomyConfig` (ephemeral tuning, not persisted).
 4. Both `shopper:` count-exclusions are required (confirmed): `runtimeDiagnostics.ts:147` (`pedestrians` filter — shoppers are `kind:'pedestrian'`, a NEW exclusion vs #64's `trader:` which is `kind:'trader'`) AND `render-smoke.spec.ts:96` (the `mobilityAgents.agents` `!startsWith('trader:')` filter). Confirm the `shopper:<hash>` key form parses to a valid pedestrian sprite via `spriteIndexFromKey`.
 5. Wire the new `EconomySet::ShopperCapture` **after `MacroFlow`, before `Materialize`** in the `.chain()` (NOT Telemetry — §3); confirm `run_shopper_capture_system` stays borrow-clean alongside `materialize_traders_system`.
+
+## References
+
+Visible shoppers are viewport-bounded projections of the macro demand flow (see
+the macro-demand-flow design's references for the mean-field closure); rendering
+micro-agents as projections of aggregate dynamics follows the
+agent-based-modeling tradition of Epstein & Axtell.
+
+- Epstein, J. M., & Axtell, R. (1996). *Growing artificial societies: Social
+  science from the bottom up*. Brookings Institution Press / MIT Press.
+- Lasry, J.-M., & Lions, P.-L. (2007). Mean field games. *Japanese Journal of
+  Mathematics, 2*(1), 229–260.

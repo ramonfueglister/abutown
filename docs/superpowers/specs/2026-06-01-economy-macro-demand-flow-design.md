@@ -234,3 +234,20 @@ A dedicated **multi-market test world** (a test-only seed building ≥3 markets 
 2. The precise `settlement_price_with_policy` / `Anchored` clamp signature reused for the both-sided band price (auction.rs:43-56).
 3. The minimal live-seed extension shape (a second good with a supplier at one demo market + a consumer at the other) so the demo exhibits a real cross-market gap without enlarging the world.
 4. Confirm `EconomySet` variant + `.chain()` wiring edits compile against the current `systems.rs` set ordering.
+
+## References
+
+The mean-field sector closure (aggregate per-(market, good) flows standing in
+for unmodeled micro-traders) is framing in the mean-field-games tradition, not a
+solved MFG fixpoint; the accounting discipline is stock-flow consistent.
+
+- Godley, W., & Lavoie, M. (2007). *Monetary economics: An integrated approach
+  to credit, money, income, production and wealth*. Palgrave Macmillan.
+- Huang, M., Caines, P. E., & Malhamé, R. P. (2006). Large population stochastic
+  dynamic games: Closed-loop McKean–Vlasov systems and the Nash certainty
+  equivalence principle. *Communications in Information and Systems, 6*(3),
+  221–252.
+- Lasry, J.-M., & Lions, P.-L. (2007). Mean field games. *Japanese Journal of
+  Mathematics, 2*(1), 229–260.
+- Lengnick, M. (2013). Agent-based macroeconomics: A baseline model. *Journal
+  of Economic Behavior & Organization, 86*, 102–120.

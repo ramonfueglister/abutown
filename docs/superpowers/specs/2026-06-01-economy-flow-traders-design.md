@@ -114,3 +114,15 @@ A flow-trader is visible only when (a) both endpoint markets are **dormant** and
 2. The reserved `EconomicActorId` namespace for shipment-traders (a high offset that cannot collide with seeded demo-trader / pool actor ids).
 3. The exact demo seed geometry (market coordinates + the transit chunk) against the real base-world footway graph + the smoke's subscription, so a dormant→dormant flow's route reliably crosses the observed chunk.
 4. Confirm the `materialize_traders_system` signature extension (adding `Res<FlowShipments>`) keeps it a borrow-clean exclusive `fn(&mut World)` (it already reads multiple resources + the graph).
+
+## References
+
+Visible traders are viewport-bounded projections of the macro flow (see the
+macro-demand-flow design's references for the mean-field closure); rendering
+micro-agents as projections of aggregate dynamics follows the
+agent-based-modeling tradition of Epstein & Axtell.
+
+- Epstein, J. M., & Axtell, R. (1996). *Growing artificial societies: Social
+  science from the bottom up*. Brookings Institution Press / MIT Press.
+- Lasry, J.-M., & Lions, P.-L. (2007). Mean field games. *Japanese Journal of
+  Mathematics, 2*(1), 229–260.
