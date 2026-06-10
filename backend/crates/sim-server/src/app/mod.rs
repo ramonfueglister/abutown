@@ -277,10 +277,11 @@ fn build_economy_snapshot(
     world_id: &abutown_protocol::WorldId,
     tick: u64,
 ) -> w::EconomySnapshot {
-    use sim_core::economy::{MarketGoods, Markets, WageTelemetry};
+    use sim_core::economy::{FlowRateEwma, MarketGoods, Markets, WageTelemetry};
     use sim_core::routing::Graph;
     let markets_res = world.resource::<Markets>();
     let goods_res = world.resource::<MarketGoods>();
+    let flows_res = world.resource::<FlowRateEwma>();
     let wages = world.resource::<WageTelemetry>();
     let graph = world.resource::<Graph>();
     let markets = markets_res
@@ -315,13 +316,23 @@ fn build_economy_snapshot(
             unsold_supply_last_tick: st.unsold_supply_last_tick.0,
         })
         .collect();
+    let flows = flows_res
+        .0
+        .iter()
+        .map(|(&(src, dst, good), &rate)| w::EconomyFlow {
+            src_market_id: src.0,
+            dst_market_id: dst.0,
+            good_id: u32::from(good.0),
+            rate: rate.0,
+        })
+        .collect();
     w::EconomySnapshot {
         protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
         world_id: world_id.0.clone(),
         tick,
         markets,
         goods,
-        flows: vec![], // populated in the next slice
+        flows,
     }
 }
 
