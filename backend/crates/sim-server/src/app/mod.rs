@@ -1042,6 +1042,29 @@ async fn apply_mutation_owned(
 /// Sole owner of the SimulationRuntime. Drains pending mutations, ticks the
 /// world, fans out per-chunk deltas, publishes a new RuntimeReadView, and
 /// emits the legacy global tile pulse. All in one task so no lock is needed.
+/// Ticker for the simulation loop. `Delay` (instead of the tokio default
+/// `Burst`) means missed ticks accrue no catch-up debt: under sustained
+/// overload sim-time slows gracefully instead of queueing a backlog that
+/// would later replay at max CPU speed.
+fn simulation_ticker(interval: Duration) -> tokio::time::Interval {
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker
+}
+
+/// Pace one tick-loop iteration. Once per-tick work exceeds the interval the
+/// interval is permanently overdue, so `tick()` resolves inline and yields to
+/// the scheduler only sporadically (measured: every ~25–60 iterations). On a
+/// 1-vCPU machine that starves the HTTP accept loop: requests need several
+/// polls, each gated on one of those rare yields, so /health never answered
+/// within Fly's 5 s check timeout while the sim kept ticking (2026-06-09
+/// production outage). The explicit yield guarantees a scheduler pass per
+/// iteration regardless of load.
+async fn pace_tick(ticker: &mut tokio::time::Interval) {
+    ticker.tick().await;
+    tokio::task::yield_now().await;
+}
+
 async fn tick_loop(
     mut runtime: SimulationRuntime,
     mut mutation_rx: tokio::sync::mpsc::UnboundedReceiver<crate::runtime_view::Mutation>,
@@ -1050,10 +1073,10 @@ async fn tick_loop(
     chunk_channels: Arc<DashMap<ChunkCoord, broadcast::Sender<w::MobilityChunkDelta>>>,
     interval: Duration,
 ) {
-    let mut ticker = tokio::time::interval(interval);
+    let mut ticker = simulation_ticker(interval);
     ticker.tick().await;
     loop {
-        ticker.tick().await;
+        pace_tick(&mut ticker).await;
         tick_once(
             &mut runtime,
             &mut mutation_rx,
