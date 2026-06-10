@@ -79,14 +79,21 @@ pub struct RealizedFlow {
 #[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
 pub struct RealizedFlows(pub Vec<RealizedFlow>);
 
-/// Bundled system params for the flow resources, keeping
-/// `run_macro_flow_system` within Bevy's 16-param limit.
+/// Bundled system params for `run_macro_flow_system`, keeping it within Bevy's
+/// 16-param limit: the flow-shipment/telemetry resources plus the producer
+/// input-demand resources the macro flow sources dormant firm demand from
+/// (`build_macro_buckets`' InputPools loop — `input_pools` is `ResMut` because
+/// the flow writes the discovered participation bound back to `pool.max_price`
+/// and stamps the generation cursor).
 #[derive(SystemParam)]
 pub struct FlowShipmentParams<'w> {
     pub shipments: ResMut<'w, FlowShipments>,
     pub next_id: ResMut<'w, NextShipmentId>,
     pub realized: ResMut<'w, RealizedFlows>,
     pub ewma: ResMut<'w, FlowRateEwma>,
+    pub input_pools: ResMut<'w, crate::economy::producers::InputPools>,
+    pub policies: Res<'w, crate::economy::producers::ProducerPolicies>,
+    pub capita: Res<'w, crate::economy::capita::CapitaFactor>,
 }
 
 /// Drop arrived shipments that no longer have a live render-agent.

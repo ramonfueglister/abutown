@@ -9,6 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::economy::orders::{drain_residual_ask, drain_residual_bid};
 use crate::economy::pools::affordable_qty;
+use crate::economy::producers::{
+    InputPools, ProducerPolicies, participation_bound, scaled_batch_qty,
+};
 use crate::economy::{
     AccountBook, DemandPools, DirtyMarketGoods, EconomicActorId, EconomyConfig, EconomyError,
     EconomyEvent, GoodId, InventoryBook, MarketDistances, MarketGoodKey, MarketGoodState,
@@ -101,7 +104,11 @@ pub fn classify_bucket(total_demand: i64, total_supply: i64) -> (i64, i64, i64) 
 /// pool-sourced (this function's original behavior): group dormant demand/supply by
 /// market-good, derive the synthetic price from the raw band, cap demand by
 /// affordability and supply by on-hand stock; `price <= 0` buckets are dropped;
-/// `intra_cleared = false`. **Active** (non-dormant) markets are residual-ORDER-sourced
+/// `intra_cleared = false`. Dormant demand has TWO pool sources: `DemandPools`
+/// (consumer flow demand) and producer `InputPools` (Leontief stock demand,
+/// firms-as-buyers — see the inline doc on the input-pool loop; this is the path
+/// that keeps a production chain alive while its market never wakes). **Active**
+/// (non-dormant) markets are residual-ORDER-sourced
 /// (S3, gated on `drain_active_residual`): one bucket entry per residual `OrderId`,
 /// weight = `qty_remaining`, price = the auction's `last_settlement_price` (via
 /// `prior_price`), `intra_cleared = true`. ALL residual bids are admitted — affordability
@@ -114,6 +121,10 @@ pub fn build_macro_buckets(
     inventory: &InventoryBook,
     demand: &DemandPools,
     supply: &SupplyPools,
+    input_pools: &mut InputPools,
+    policies: &ProducerPolicies,
+    capita_factor: i64,
+    current_tick: u64,
     market_goods: &MarketGoods,
     dormant: &BTreeSet<MarketId>,
     config: &EconomyConfig,
@@ -134,6 +145,80 @@ pub fn build_macro_buckets(
         };
         let entry = raw_demand.entry(key).or_insert_with(|| (Vec::new(), None));
         entry.0.push((pool.actor, pool.desired_qty_per_tick.0));
+        entry.1 = Some(match entry.1 {
+            Some(c) if c.0 >= pool.max_price.0 => c,
+            _ => pool.max_price,
+        });
+    }
+    // Dormant-market PRODUCER input demand (firms-as-buyers, design spec §4: the
+    // chain's input leg rides "the unchanged macro_flow" with NO viewer). While a
+    // producer's market is dormant the order path
+    // (`run_generate_input_orders_at_tick`) skips its `InputPool` entirely, so the
+    // Leontief derived demand must be expressed HERE or the chain is inert in the
+    // normal headless state (no bid, `max_price` stuck at 0, zero production).
+    //
+    // - qty: the SAME stock-target demand the active order path would express —
+    //   `scaled_batch_qty(policy, pool, capita_factor) − held` floored at 0. The
+    //   target is a STOCK, so expressing it on the (coarser) macro cadence instead
+    //   of the pool's own `interval_ticks` can never over-buy: each pass re-derives
+    //   the gap against current holdings.
+    // - ceiling: the SAME participation bound the order path computes, from the
+    //   CURRENT output reference price; a missing market-good entry is a fail-loud
+    //   `ZeroPrice` exactly like the active path (every output market is seeded
+    //   with a positive opening price).
+    // - write-back: the discovered bound is stored in `pool.max_price` even when no
+    //   demand is expressed (stocked, or the bound floored to 0). The θ-dividend
+    //   retention (wages.rs) keys its working-capital target off `pool.max_price`;
+    //   if the bound stayed 0 while the firm buys via this path, the firm would
+    //   retain its entire profit forever (the e54d2a1 conservative-retention rule)
+    //   and its cash would grow without bound. `last_generated_tick` is stamped
+    //   too: the cursor means "a demand-generation pass ran for this pool at this
+    //   tick" — this IS that pass on the macro cadence (the order path remains the
+    //   stamping authority while the market is active). Both writes happen at
+    //   bucket-build time, before the atomic settle boundary: bound discovery is
+    //   price telemetry, not a money move, and stays valid even when the interval
+    //   settles nothing (or the key is later dirty-filtered).
+    // - mismatch fail-fast: an `InputPool` without a `ProducerPolicy` is a config
+    //   bug (#83 class) — `InvalidOrder`, same doctrine as the order path.
+    //
+    // KNOWN GAP (next slice, accepted here): like the `DemandPools`/`SupplyPools`
+    // loops above, the macro flow's dormant QUANTITIES are capita-blind on the
+    // supply side (`offered_qty_per_tick` unscaled), so the chain's input arrives
+    // at the unscaled per-cadence trickle while a scaled batch needs
+    // `in_qty·capita_factor` — slow-but-alive, not a starvation bug.
+    let labor_share = config.validated_labor_share_bps()?;
+    for pool in input_pools.0.values_mut() {
+        if !dormant.contains(&pool.market) {
+            continue;
+        }
+        let policy = policies
+            .0
+            .get(&pool.actor)
+            .copied()
+            .ok_or(EconomyError::InvalidOrder)?;
+        let p_out_ref = market_goods
+            .0
+            .get(&MarketGoodKey {
+                market: pool.market,
+                good: pool.out_good,
+            })
+            .ok_or(EconomyError::ZeroPrice)?
+            .ewma_reference_price;
+        pool.max_price = participation_bound(p_out_ref, labor_share, pool.out_qty, pool.in_qty)?;
+        pool.last_generated_tick = Some(current_tick);
+
+        let target = scaled_batch_qty(policy, pool, capita_factor)?;
+        let held = inventory.balance(pool.actor, pool.good).available;
+        let desired = (target.0 - held.0).max(0);
+        if desired <= 0 || pool.max_price.0 <= 0 {
+            continue; // stocked, or the bound floored to 0 (recovers when p_out rises)
+        }
+        let key = MarketGoodKey {
+            market: pool.market,
+            good: pool.good,
+        };
+        let entry = raw_demand.entry(key).or_insert_with(|| (Vec::new(), None));
+        entry.0.push((pool.actor, desired));
         entry.1 = Some(match entry.1 {
             Some(c) if c.0 >= pool.max_price.0 => c,
             _ => pool.max_price,
@@ -865,6 +950,9 @@ pub fn run_macro_flow_at_tick(
     ledger: &mut TradeLedger,
     demand: &DemandPools,
     supply: &SupplyPools,
+    input_pools: &mut InputPools,
+    policies: &ProducerPolicies,
+    capita_factor: i64,
     market_goods: &mut MarketGoods,
     dirty: &DirtyMarketGoods,
     dormant: &BTreeSet<MarketId>,
@@ -894,6 +982,10 @@ pub fn run_macro_flow_at_tick(
         inventory,
         demand,
         supply,
+        input_pools,
+        policies,
+        capita_factor,
+        current_tick,
         market_goods,
         dormant,
         config,
