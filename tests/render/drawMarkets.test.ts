@@ -4,6 +4,7 @@ import {
   marketNodeRadius,
   priceTrend,
   satisfiedDemandFraction,
+  trendTriangle,
 } from '../../src/render/drawMarkets';
 import type { MarketGoodDto } from '../../src/backend/mobilityProtocol';
 
@@ -46,5 +47,19 @@ describe('priceTrend', () => {
     expect(priceTrend([good({ lastSettlementPrice: 1005, ewmaReferencePrice: 1000 })])).toBe('flat');
     expect(priceTrend([good({ lastSettlementPrice: 50, ewmaReferencePrice: 0 })])).toBe('flat');
     expect(priceTrend([])).toBe('flat');
+  });
+});
+
+describe('trendTriangle', () => {
+  it('apex is above the base for up, below for down (canvas y grows downward)', () => {
+    const [apexUp, b1Up, b2Up] = trendTriangle({ x: 0, y: 100 }, 10, -1);
+    expect(apexUp.y).toBeLessThan(b1Up.y);
+    expect(apexUp.y).toBeLessThan(b2Up.y);
+    expect(b1Up.y).toBe(b2Up.y);
+    const [apexDown, b1Down] = trendTriangle({ x: 0, y: 100 }, 10, 1);
+    expect(apexDown.y).toBeGreaterThan(b1Down.y);
+    // up-marker sits above the node center, down-marker below
+    expect(apexUp.y).toBeLessThan(100);
+    expect(apexDown.y).toBeGreaterThan(100);
   });
 });

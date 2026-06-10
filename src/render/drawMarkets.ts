@@ -3,6 +3,16 @@ import { GROUND, MARKET_ORANGE } from './designTokens';
 import { screenStableWorldSize } from './minimalGlyphScale';
 
 type Point = { x: number; y: number };
+
+/** Triangle vertices for the price-trend marker. Apex points toward the trend. */
+export function trendTriangle(point: { x: number; y: number }, radius: number, dir: -1 | 1): [Point, Point, Point] {
+  const baseY = point.y + dir * (radius * 0.45);
+  return [
+    { x: point.x, y: baseY + dir * 3 },
+    { x: point.x - 3, y: baseY - dir * 2 },
+    { x: point.x + 3, y: baseY - dir * 2 },
+  ];
+}
 export type PriceTrend = 'up' | 'down' | 'flat';
 
 const TREND_DEADBAND = 0.01; // ±1% of the EWMA reference counts as flat
@@ -103,11 +113,12 @@ export function drawMarketNodes(
     const trend = priceTrend(goods);
     if (trend !== 'flat') {
       const dir = trend === 'up' ? -1 : 1;
+      const [apex, bl, br] = trendTriangle(point, radius, dir);
       ctx.fillStyle = GROUND;
       ctx.beginPath();
-      ctx.moveTo(point.x, point.y + dir * (radius * 0.45) - dir * 2);
-      ctx.lineTo(point.x - 3, point.y + dir * (radius * 0.45) + dir * 3);
-      ctx.lineTo(point.x + 3, point.y + dir * (radius * 0.45) + dir * 3);
+      ctx.moveTo(apex.x, apex.y);
+      ctx.lineTo(bl.x, bl.y);
+      ctx.lineTo(br.x, br.y);
       ctx.closePath();
       ctx.fill();
     }
