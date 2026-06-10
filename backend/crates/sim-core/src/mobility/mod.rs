@@ -64,9 +64,7 @@ pub fn agent_world_coord(
                 *progress,
             ))
         }
-        AgentMobilityState::WaitingAtStop { stop_id }
-        | AgentMobilityState::Boarding { stop_id, .. }
-        | AgentMobilityState::Alighting { stop_id, .. } => {
+        AgentMobilityState::WaitingAtStop { stop_id } => {
             let node_id = graph.node_by_legacy(stop_id)?;
             Some(graph.node(node_id).position)
         }
@@ -571,7 +569,6 @@ mod tests {
     fn sample_world() -> (World, Schedule) {
         let route_id = "route:old-town-loop".to_string();
         let pickup_stop_id = "stop:old-town".to_string();
-        let dropoff_stop_id = "stop:station".to_string();
         let walk_to_pickup = "link:home-to-old-town-stop".to_string();
         let walk_to_activity = "link:station-to-work".to_string();
         let agent_id = AgentId("agent:pedestrian:0".to_string());
@@ -590,10 +587,6 @@ mod tests {
                     PlanStage::WalkToStop {
                         link_id: walk_to_pickup,
                         stop_id: pickup_stop_id,
-                    },
-                    PlanStage::RideToStop {
-                        route_id: route_id.clone(),
-                        stop_id: dropoff_stop_id,
                     },
                     PlanStage::WalkToActivity {
                         link_id: walk_to_activity,
@@ -693,17 +686,14 @@ mod tests {
     fn world_coord_for_agent_waiting_at_stop_uses_stop_coord() {
         let (mut world, _) = empty_world();
         let stop_id = "stop:horizontal:pickup".to_string();
-        let route_id = "route:horizontal".to_string();
         let start = (10.0, 20.0);
         let agent_id = AgentId("agent:waiter".to_string());
         api::spawn_agent_from_record(
             &mut world,
             AgentRecord::new(
                 agent_id.clone(),
-                AgentMobilityState::WaitingAtStop {
-                    stop_id: stop_id.clone(),
-                },
-                vec![PlanStage::RideToStop { route_id, stop_id }],
+                AgentMobilityState::WaitingAtStop { stop_id },
+                Vec::new(),
                 0.5,
             ),
         );

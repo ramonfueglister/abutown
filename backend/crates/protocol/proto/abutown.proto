@@ -42,10 +42,10 @@ enum TileKind {
 }
 
 enum VehicleKind {
-  reserved 100 to max;
+  reserved 2, 100 to max;
+  reserved "VEHICLE_KIND_TRAM";
   VEHICLE_KIND_UNSPECIFIED = 0;
   VEHICLE_KIND_CAR = 1;
-  VEHICLE_KIND_TRAM = 2;
 }
 
 // === Server → Client envelope ===
@@ -289,13 +289,12 @@ message AgentMobility {
 }
 
 message AgentState {
-  reserved 100 to max;
+  reserved 4, 5, 100 to max;
+  reserved "boarding", "alighting";
   oneof state {
     Walking walking = 1;
     WaitingAtStop waiting_at_stop = 2;
     InVehicle in_vehicle = 3;
-    Boarding boarding = 4;
-    Alighting alighting = 5;
     AtActivity at_activity = 6;
   }
 }
@@ -303,8 +302,6 @@ message AgentState {
 message Walking { string link_id = 1; float progress = 2; }
 message WaitingAtStop { string stop_id = 1; }
 message InVehicle { string vehicle_id = 1; uint32 seat_index = 2; }
-message Boarding { string vehicle_id = 1; string stop_id = 2; }
-message Alighting { string vehicle_id = 1; string stop_id = 2; }
 message AtActivity { string activity_id = 1; }
 
 message VehicleMobility {

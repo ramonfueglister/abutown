@@ -85,7 +85,6 @@ const spawns = {
     },
   ],
   car_groups: [],
-  tram_lines: [],
 };
 
 const decorations = { schema_version: schemaVersion, world_id: worldId, trees: [], details: [] };

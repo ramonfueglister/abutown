@@ -301,7 +301,6 @@ mod tests {
             speed_limit: match kind {
                 EdgeKind::Footway => 1.0,
                 EdgeKind::Road => 6.0,
-                EdgeKind::TramTrack => 4.0,
             },
             capacity: 1,
             legacy_id: Some(format!("edge:{id}")),
@@ -480,74 +479,6 @@ mod tests {
                 RoutingProfile::for_key(RoutingProfileKey::Walk),
             ),
             Err(RoutingError::MissingNode(NodeId(99)))
-        );
-    }
-
-    fn walk_transit_graph() -> Graph {
-        Graph::new(
-            vec![
-                node(0, 0.0, 0.0, NodeKind::Intersection),
-                node(1, 10.0, 0.0, NodeKind::TransitStop),
-                node(2, 20.0, 0.0, NodeKind::TransitStop),
-                node(3, 30.0, 0.0, NodeKind::Intersection),
-            ],
-            vec![
-                edge(0, 0, 1, EdgeKind::Footway, 10.0),
-                edge(1, 1, 2, EdgeKind::TramTrack, 10.0),
-                edge(2, 2, 3, EdgeKind::Footway, 10.0),
-            ],
-        )
-    }
-
-    #[test]
-    fn walk_transit_does_not_cross_rail_edges() {
-        let graph = walk_transit_graph();
-        let err = AStarRouter::find_path(
-            &graph,
-            PathRequest {
-                from: NodeId(0),
-                to: NodeId(3),
-                profile: RoutingProfileKey::WalkTransit,
-            },
-            RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
-        )
-        .expect_err("retired transit routing must not use rail edges");
-        assert_eq!(
-            err,
-            RoutingError::NoPath {
-                from: NodeId(0),
-                to: NodeId(3),
-                profile: RoutingProfileKey::WalkTransit,
-            }
-        );
-    }
-
-    #[test]
-    fn walk_transit_cannot_cross_rail_edge_between_stops() {
-        let graph = Graph::new(
-            vec![
-                node(0, 0.0, 0.0, NodeKind::TransitStop),
-                node(1, 10.0, 0.0, NodeKind::TransitStop),
-            ],
-            vec![edge(0, 0, 1, EdgeKind::TramTrack, 10.0)],
-        );
-        let err = AStarRouter::find_path(
-            &graph,
-            PathRequest {
-                from: NodeId(0),
-                to: NodeId(1),
-                profile: RoutingProfileKey::WalkTransit,
-            },
-            RoutingProfile::for_key(RoutingProfileKey::WalkTransit),
-        )
-        .expect_err("retired transit routing must not use rail edges");
-        assert_eq!(
-            err,
-            RoutingError::NoPath {
-                from: NodeId(0),
-                to: NodeId(1),
-                profile: RoutingProfileKey::WalkTransit,
-            }
         );
     }
 

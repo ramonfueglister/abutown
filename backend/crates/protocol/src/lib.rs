@@ -279,17 +279,9 @@ pub enum AgentMobilityStateDto {
     WaitingAtStop {
         stop_id: String,
     },
-    Boarding {
-        vehicle_id: EntityId,
-        stop_id: String,
-    },
     InVehicle {
         vehicle_id: EntityId,
         seat_index: u16,
-    },
-    Alighting {
-        vehicle_id: EntityId,
-        stop_id: String,
     },
 }
 
@@ -333,7 +325,6 @@ pub struct ServerErrorDto {
 // can lift them into their own rejection types without depending on us.
 
 pub type ProtoConversionError = (&'static str, &'static str);
-const LEGACY_TRAM_VEHICLE_KIND: i32 = 2;
 
 impl TryFrom<v1::TileKind> for TileKindDto {
     type Error = ProtoConversionError;
@@ -362,11 +353,6 @@ impl TryFrom<v1::VehicleKind> for VehicleKindDto {
                 "VehicleKind is UNSPECIFIED — sender must use VEHICLE_KIND_CAR",
             )),
             v1::VehicleKind::Car => Ok(VehicleKindDto::Car),
-            unsupported if unsupported as i32 == LEGACY_TRAM_VEHICLE_KIND => Err((
-                "invalid_enum",
-                "VehicleKind TRAM is unsupported by the runtime",
-            )),
-            _ => Err(("invalid_enum", "VehicleKind is unsupported by the runtime")),
         }
     }
 }
@@ -493,7 +479,6 @@ mod tests {
 #[cfg(test)]
 mod proto_roundtrip_tests {
     use super::v1::*;
-    use super::{LEGACY_TRAM_VEHICLE_KIND, VehicleKindDto};
     use prost::Message;
 
     fn sample_chunk() -> ChunkCoord {
@@ -507,23 +492,6 @@ mod proto_roundtrip_tests {
         let bytes = msg.encode_to_vec();
         let back = M::decode(bytes.as_slice()).expect("decode");
         assert_eq!(&back, msg);
-    }
-
-    #[test]
-    fn legacy_tram_wire_vehicle_kind_is_unsupported() {
-        assert_eq!(
-            VehicleKindDto::try_from(VehicleKind::Car),
-            Ok(VehicleKindDto::Car)
-        );
-        let legacy_kind = VehicleKind::try_from(LEGACY_TRAM_VEHICLE_KIND)
-            .expect("legacy wire enum value still exists");
-        assert_eq!(
-            VehicleKindDto::try_from(legacy_kind),
-            Err((
-                "invalid_enum",
-                "VehicleKind TRAM is unsupported by the runtime"
-            ))
-        );
     }
 
     #[test]

@@ -50,9 +50,6 @@ test('renders abutopia with 300 backend-driven pedestrians', async ({ page }) =>
   expect(state.city.reserveTiles).toBe(0);
   expect(state.city.cars).toBe(0);
   expect(state.city.pedestrians).toBe(300);
-  expect(state.city.train).toBeUndefined();
-  expect(state.city.trains).toBeUndefined();
-  expect(state.city[['mobility', 'Trams'].join('')]).toBeUndefined();
   expect(state.city.visualStyle).toEqual({
     id: 'minimal-motorways',
     renderer: 'canvas-vector',

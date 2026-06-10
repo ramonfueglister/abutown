@@ -8,6 +8,5 @@
       "agents_per_corridor": 300
     }
   ],
-  "car_groups": [],
-  "tram_lines": []
+  "car_groups": []
 }

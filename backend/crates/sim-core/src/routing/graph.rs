@@ -19,7 +19,6 @@ pub enum NodeKind {
 pub enum EdgeKind {
     Footway,
     Road,
-    TramTrack,
 }
 
 #[derive(Debug, Clone)]

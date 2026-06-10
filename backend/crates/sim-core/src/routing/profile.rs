@@ -5,15 +5,12 @@ use serde::{Deserialize, Serialize};
 pub enum ModeState {
     Walking,
     Driving,
-    OnTram,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RoutingProfileKey {
     Walk,
     Car,
-    Tram,
-    WalkTransit,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,9 +31,8 @@ impl RoutingProfile {
 
     pub fn initial_mode(self) -> ModeState {
         match self.key {
-            RoutingProfileKey::Walk | RoutingProfileKey::WalkTransit => ModeState::Walking,
+            RoutingProfileKey::Walk => ModeState::Walking,
             RoutingProfileKey::Car => ModeState::Driving,
-            RoutingProfileKey::Tram => ModeState::OnTram,
         }
     }
 
@@ -44,7 +40,6 @@ impl RoutingProfile {
         match self.key {
             RoutingProfileKey::Walk => self.walk_speed,
             RoutingProfileKey::Car => 6.0 * self.car_speed_factor,
-            RoutingProfileKey::Tram | RoutingProfileKey::WalkTransit => self.walk_speed,
         }
         .max(0.001)
     }
@@ -69,14 +64,6 @@ impl RoutingProfile {
                         ModeState::Driving,
                         edge.length / (edge.speed_limit * self.car_speed_factor).max(0.001),
                     ))
-                } else {
-                    None
-                }
-            }
-            RoutingProfileKey::Tram => None,
-            RoutingProfileKey::WalkTransit => {
-                if mode == ModeState::Walking && edge.kind == EdgeKind::Footway {
-                    Some((ModeState::Walking, edge.length / self.walk_speed.max(0.001)))
                 } else {
                     None
                 }
@@ -126,15 +113,6 @@ mod tests {
                 )
                 .is_none()
         );
-        assert!(
-            profile
-                .transition(
-                    ModeState::Walking,
-                    NodeKind::Intersection,
-                    &edge(EdgeKind::TramTrack, 10.0, 4.0),
-                )
-                .is_none()
-        );
     }
 
     #[test]
@@ -158,46 +136,11 @@ mod tests {
                 )
                 .is_none()
         );
-        assert!(
-            profile
-                .transition(
-                    ModeState::Driving,
-                    NodeKind::Intersection,
-                    &edge(EdgeKind::TramTrack, 12.0, 4.0),
-                )
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn retired_transit_profiles_do_not_use_tram_tracks() {
-        let profile = RoutingProfile::for_key(RoutingProfileKey::WalkTransit);
-        let rail = edge(EdgeKind::TramTrack, 20.0, 4.0);
-        assert!(
-            profile
-                .transition(ModeState::Walking, NodeKind::Intersection, &rail)
-                .is_none()
-        );
-        assert!(
-            profile
-                .transition(ModeState::Walking, NodeKind::TransitStop, &rail)
-                .is_none()
-        );
-        assert!(
-            RoutingProfile::for_key(RoutingProfileKey::Tram)
-                .transition(ModeState::OnTram, NodeKind::TransitStop, &rail)
-                .is_none()
-        );
     }
 
     #[test]
     fn fastest_speed_is_positive_for_heuristic() {
-        for key in [
-            RoutingProfileKey::Walk,
-            RoutingProfileKey::Car,
-            RoutingProfileKey::Tram,
-            RoutingProfileKey::WalkTransit,
-        ] {
+        for key in [RoutingProfileKey::Walk, RoutingProfileKey::Car] {
             assert!(RoutingProfile::for_key(key).fastest_speed() > 0.0);
         }
     }

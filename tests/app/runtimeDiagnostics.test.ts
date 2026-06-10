@@ -98,14 +98,9 @@ describe('buildRuntimeDiagnosticsPayload', () => {
     expect(buildRuntimeDiagnosticsPayload(baseOptions()).city.simTime).toBe(4242);
   });
 
-  it('reports car traffic diagnostics without tram runtime diagnostics', () => {
+  it('reports car traffic diagnostics', () => {
     const payload = buildRuntimeDiagnosticsPayload(baseOptions());
-    const city = payload.city as Record<string, unknown>;
-    const retiredTramDiagnostics = ['mobility', 'Trams'].join('');
 
-    expect(city[retiredTramDiagnostics]).toBeUndefined();
-    expect(city.train).toBeUndefined();
-    expect(city.trains).toBeUndefined();
     expect(payload.city.traffic).toEqual({
       routes: 0,
       cars: 0,

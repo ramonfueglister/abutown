@@ -16,7 +16,6 @@ const checks = [
       `CityNetwork::${['empty', 'for', 'world'].join('_')}`,
       `${['tiny', 'world()'].join('_')}`,
       ['legacy', 'seeded'].join('_'),
-      ['trams', 'total'].join('_'),
       'TileKind::BuildingFootprint',
     ],
   },

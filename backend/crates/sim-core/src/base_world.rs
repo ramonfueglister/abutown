@@ -151,7 +151,6 @@ pub struct SpawnLayer {
     pub world_id: String,
     pub pedestrian_groups: Vec<PedestrianSpawnGroup>,
     pub car_groups: Vec<CarSpawnGroup>,
-    pub tram_lines: Vec<TramLineSpawn>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -182,13 +181,6 @@ pub struct CarSpawnGroup {
     pub id: String,
     pub arterial_id: String,
     pub cars_per_arterial: u32,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TramLineSpawn {
-    pub id: String,
-    pub rail_path_ids: Vec<String>,
-    pub trams: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -837,7 +829,6 @@ mod tests {
                 world_id: "test".into(),
                 pedestrian_groups: Vec::new(),
                 car_groups: Vec::new(),
-                tram_lines: Vec::new(),
             },
             markets: MarketLayer {
                 schema_version: 2,

@@ -57,20 +57,6 @@ pub(crate) fn agent_dto_to_proto(dto: abutown_protocol::AgentMobilityDto) -> w::
             vehicle_id: vehicle_id.0,
             seat_index: seat_index as u32,
         }),
-        Legacy::Boarding {
-            vehicle_id,
-            stop_id,
-        } => w::agent_state::State::Boarding(w::Boarding {
-            vehicle_id: vehicle_id.0,
-            stop_id,
-        }),
-        Legacy::Alighting {
-            vehicle_id,
-            stop_id,
-        } => w::agent_state::State::Alighting(w::Alighting {
-            vehicle_id: vehicle_id.0,
-            stop_id,
-        }),
         Legacy::AtActivity { activity_id } => {
             w::agent_state::State::AtActivity(w::AtActivity { activity_id })
         }
