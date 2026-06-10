@@ -32,7 +32,7 @@ export const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c7
 export const MARKET_ORANGE = '#d9783a';
 
 // --- flows (L3) — keyed by backend GoodId (goods.rs: FOOD=1 WOOD=2 IRON=3 TOOLS=4 RAW=5) ---
-export const GOOD_COLORS: Readonly<Record<number, string>> = {
+export const GOOD_COLORS: Readonly<Partial<Record<number, string>>> = {
   1: '#7a9e4f', // FOOD green
   2: '#8c6f4a', // WOOD brown
   3: '#5f7d8c', // IRON slate
