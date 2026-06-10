@@ -178,20 +178,6 @@ pub(crate) fn mobility_snapshot_dto_to_proto(
     }
 }
 
-pub(crate) fn tile_pulse_dto_to_proto(p: &abutown_protocol::TilePulseDeltaDto) -> w::TilePulse {
-    w::TilePulse {
-        protocol_version: u32::from(p.protocol_version),
-        world_id: p.world_id.0.clone(),
-        tick: p.tick,
-        version: p.version,
-        coord: Some(w::ChunkCoord {
-            x: p.coord.x,
-            y: p.coord.y,
-        }),
-        local_index: u32::from(p.local_index),
-    }
-}
-
 pub(crate) fn world_event_dto_to_proto(e: &abutown_protocol::WorldEventDto) -> w::WorldEvent {
     use abutown_protocol::WorldEventDto as L;
     match e {

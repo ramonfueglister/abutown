@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { create } from '@bufbuild/protobuf';
 import {
-  ChunkCoordSchema,
   EconomyFlowSchema,
   EconomyMarketGoodSchema,
   EconomyMarketSchema,
   EconomySnapshotSchema,
+  HelloSchema,
   ServerMessageSchema,
-  TilePulseSchema,
 } from './proto/abutown_pb';
 import {
   applyEconomyServerMessage,
@@ -51,17 +50,14 @@ describe('economyState reducer', () => {
     expect(next.goods.get('7:3')).toMatchObject({ marketId: 7, goodId: 3, lastSettlementPrice: 100, tradedQtyLastTick: 5 });
   });
 
-  it('applying a non-economy message (tilePulse) returns the exact same state reference', () => {
-    const tilePulse = create(TilePulseSchema, {
+  it('applying a non-economy message (hello) returns the exact same state reference', () => {
+    const hello = create(HelloSchema, {
       protocolVersion: 16,
       worldId: 'abutopia',
-      tick: 99n,
-      version: 1n,
-      coord: create(ChunkCoordSchema, { x: 0, y: 0 }),
-      localIndex: 5,
+      chunkSize: 32,
     });
     const msg = create(ServerMessageSchema, {
-      body: { case: 'tilePulse', value: tilePulse },
+      body: { case: 'hello', value: hello },
     });
 
     const initial = createEconomyOverlayState();

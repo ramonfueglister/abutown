@@ -270,6 +270,48 @@ pub fn build_mobility_chunk_snapshot(
     }
 }
 
+/// Bulk variant of `build_mobility_chunk_snapshot`: one O(agents + vehicles)
+/// pass bucketing every entity by its chunk, instead of a full agent scan per
+/// chunk. Returns an entry (possibly empty) for every requested coord —
+/// identical output to N independent per-chunk builds. This is the per-tick
+/// read-view path: the per-chunk scan was O(chunks × agents) and dominated
+/// tick cost (2026-06-10 tick-cost design).
+pub fn build_mobility_chunk_snapshots(
+    world: &World,
+    coords: &[crate::ids::ChunkCoord],
+) -> HashMap<crate::ids::ChunkCoord, crate::mobility::MobilityChunkSnapshot> {
+    let mut out: HashMap<crate::ids::ChunkCoord, crate::mobility::MobilityChunkSnapshot> = coords
+        .iter()
+        .map(|coord| {
+            (
+                *coord,
+                crate::mobility::MobilityChunkSnapshot {
+                    chunk: *coord,
+                    agents: Vec::new(),
+                    vehicles: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    for record in agents(world) {
+        let Some((x, y)) = world_coord_for_agent(world, &record.id) else {
+            continue;
+        };
+        if let Some(snap) = out.get_mut(&crate::mobility::chunk_of(x, y, 32)) {
+            snap.agents.push(record);
+        }
+    }
+    for record in vehicles(world) {
+        let Some((x, y)) = world_coord_for_vehicle(world, &record.id) else {
+            continue;
+        };
+        if let Some(snap) = out.get_mut(&crate::mobility::chunk_of(x, y, 32)) {
+            snap.vehicles.push(record);
+        }
+    }
+    out
+}
+
 /// Ensure a chunk entity exists at `coord`. If `ChunksByCoord` already maps
 /// the coord, return the existing entity. Otherwise spawn an empty-tiles
 /// `Asleep` chunk entity — terrain hydrates later if/when the chunk is
@@ -1313,5 +1355,74 @@ mod market_binding_roundtrip_tests {
             binding2.work_market, 9004,
             "pre-assigned work_market must NOT be recomputed"
         );
+    }
+}
+
+#[cfg(test)]
+mod chunk_snapshot_bucketing_tests {
+    use super::*;
+    use crate::ids::AgentId;
+    use crate::mobility::records::{AgentMobilityState, AgentRecord, PlanStage};
+
+    /// Spawn an agent parked at a fixed world coordinate via an activity
+    /// waypoint (no graph needed — same trick as the market-binding tests).
+    fn spawn_at(world: &mut World, id: &str, pos: (f32, f32)) {
+        let activity_id = format!("activity:{id}");
+        world
+            .resource_mut::<crate::mobility::resources::ActivityWaypoints>()
+            .0
+            .insert(activity_id.clone(), pos);
+        spawn_agent_from_record(
+            world,
+            AgentRecord::new(
+                AgentId(format!("agent:{id}")),
+                AgentMobilityState::AtActivity {
+                    activity_id: activity_id.clone(),
+                },
+                vec![PlanStage::Activity { activity_id }],
+                1.0,
+            ),
+        );
+    }
+
+    /// The single-pass bulk builder must return exactly what N independent
+    /// per-chunk builds return: same agents per chunk, and an entry (possibly
+    /// empty) for every requested chunk.
+    #[test]
+    fn bulk_chunk_snapshots_match_per_chunk_builds() {
+        let (mut world, _schedule) = empty_world_and_schedule();
+
+        // Three chunks at chunk_size 32: (0,0), (1,0), (2,1); plus one
+        // requested chunk with no agents at all.
+        spawn_at(&mut world, "a", (5.0, 5.0)); // chunk (0,0)
+        spawn_at(&mut world, "b", (10.0, 20.0)); // chunk (0,0)
+        spawn_at(&mut world, "c", (40.0, 8.0)); // chunk (1,0)
+        spawn_at(&mut world, "d", (70.0, 40.0)); // chunk (2,1)
+
+        let coords = [
+            crate::ids::ChunkCoord { x: 0, y: 0 },
+            crate::ids::ChunkCoord { x: 1, y: 0 },
+            crate::ids::ChunkCoord { x: 2, y: 1 },
+            crate::ids::ChunkCoord { x: 9, y: 9 }, // empty
+        ];
+
+        let bulk = build_mobility_chunk_snapshots(&world, &coords);
+
+        assert_eq!(bulk.len(), coords.len(), "one entry per requested chunk");
+        for coord in &coords {
+            let per_chunk = build_mobility_chunk_snapshot(&world, *coord);
+            let bulk_snap = bulk
+                .get(coord)
+                .unwrap_or_else(|| panic!("bulk result missing requested chunk {coord:?}"));
+            assert_eq!(
+                bulk_snap, &per_chunk,
+                "bulk snapshot for {coord:?} must equal the per-chunk build"
+            );
+        }
+        // Sanity: the fixture actually distributes agents across chunks.
+        assert_eq!(bulk[&coords[0]].agents.len(), 2);
+        assert_eq!(bulk[&coords[1]].agents.len(), 1);
+        assert_eq!(bulk[&coords[2]].agents.len(), 1);
+        assert_eq!(bulk[&coords[3]].agents.len(), 0);
     }
 }

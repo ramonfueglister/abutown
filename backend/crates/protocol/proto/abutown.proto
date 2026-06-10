@@ -51,10 +51,11 @@ enum VehicleKind {
 // === Server → Client envelope ===
 
 message ServerMessage {
+  reserved 2;
+  reserved "tile_pulse"; // was TilePulse (legacy global pulse, removed 2026-06-10)
   reserved 100 to max;
   oneof body {
     Hello hello = 1;
-    TilePulse tile_pulse = 2;
     MobilityChunkDelta mobility_chunk_delta = 3;
     MobilityChunkSnapshot mobility_chunk_snapshot = 4;
     WorldEvent world_event = 5;
@@ -69,7 +70,16 @@ message EconomySnapshot {
   uint64 tick = 3;
   repeated EconomyMarket markets = 4;
   repeated EconomyMarketGood goods = 5;
-  repeated EconomyFlow flows = 6;
+  EconomyVitals vitals = 6;
+  repeated EconomyFlow flows = 7;
+}
+
+message EconomyVitals {
+  uint64 population = 1;       // live citizen count
+  uint64 routed_citizens = 2;  // CitizenEconomicTargets size (the economy::liveness gauge)
+  int64 total_money = 3;       // audited Σ(available+locked), raw money units (client / 1000 for display)
+  uint64 routes_assigned = 4;  // RouteAssignmentStats
+  uint64 routes_failed = 5;
 }
 
 message EconomyMarket {
@@ -110,15 +120,6 @@ message Hello {
   uint32 protocol_version = 1;
   string world_id = 2;
   uint32 chunk_size = 3;
-}
-
-message TilePulse {
-  uint32 protocol_version = 1;
-  string world_id = 2;
-  uint64 tick = 3;
-  uint64 version = 4;
-  ChunkCoord coord = 5;
-  uint32 local_index = 6;
 }
 
 message MobilityChunkDelta {

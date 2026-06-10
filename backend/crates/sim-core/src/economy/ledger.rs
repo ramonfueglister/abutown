@@ -143,6 +143,38 @@ impl EconomyEvent {
             Self::TickAudit { .. } => "tick_audit",
         }
     }
+
+    /// Whether this event belongs in the DURABLE audit store. The in-memory
+    /// `TradeLedger` and the snapshot `ledger_tail` always carry every event;
+    /// only the durable `economy_events` append is filtered. Durable = the
+    /// financially meaningful outcomes (settlements, wages, profit, rejections,
+    /// the conservation heartbeat). Transient = high-frequency intra-tick
+    /// mechanics whose volume dominated the unbounded table growth — 91 % of
+    /// 1.9 M rows after two days live (2026-06-10 tick-cost-and-event-retention
+    /// design). Exhaustive match: a new variant forces a classification here.
+    pub fn is_audit_durable(&self) -> bool {
+        match self {
+            Self::Trade { .. }
+            | Self::FinalConsumed { .. }
+            | Self::OrderRejected { .. }
+            | Self::MarketClearFailed { .. }
+            | Self::TransportPaid { .. }
+            | Self::MacroFlow { .. }
+            | Self::WagePaid { .. }
+            | Self::ProfitDistributed { .. }
+            | Self::TransportRebate { .. }
+            | Self::TickAudit { .. } => true,
+            Self::OrderCreated { .. }
+            | Self::OrderExpired { .. }
+            | Self::CashLocked { .. }
+            | Self::CashReleased { .. }
+            | Self::GoodsLocked { .. }
+            | Self::GoodsReleased { .. }
+            | Self::Produced { .. }
+            | Self::Consumed { .. }
+            | Self::Regenerated { .. } => false,
+        }
+    }
 }
 
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use abutown_protocol::{
     ChunkCoordDto, ChunkSnapshotDto, ClientCommandDto, CommandAcceptedDto, HealthResponse,
     MobilitySnapshotDto, PROTOCOL_VERSION, ServerHelloDto, ServerMessageDto, SetTileKindCommandDto,
-    TileKindSetEventDto, TilePulseDeltaDto, WorldEventDto, WorldId, WorldSummaryDto,
+    TileKindSetEventDto, WorldEventDto, WorldId, WorldSummaryDto,
 };
 use sim_core::{
     base_world::BaseWorldBundle,
@@ -51,7 +51,6 @@ use crate::commands::{AppliedCommand, CommandRejection};
 
 const WORLD_ID: &str = "abutopia";
 pub const BASE_WORLD_DEFAULT_PATH: &str = "data/worlds/abutopia";
-const PULSE_STRIDE: u64 = 37;
 pub const TICK_PERIOD_MS: u32 = 100;
 
 pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
@@ -86,8 +85,9 @@ pub struct SimulationRuntime {
     pub(crate) schedule: sim_core::bevy_ecs::schedule::Schedule,
     event_store: Box<dyn WorldEventStore + Send + Sync>,
     event_count: usize,
+    /// World-event clock: stamped onto `TileKindSetEvent`s. Hydrated from the
+    /// event store's max tick and advanced once per `tick_world_mobility`.
     tick: u64,
-    version: u64,
 }
 
 fn refresh_flow_field_resources(world: &mut sim_core::bevy_ecs::world::World) {
@@ -149,7 +149,6 @@ impl std::fmt::Debug for SimulationRuntime {
             .field("world_id", &self.world_id)
             .field("chunk_size", &self.chunk_size)
             .field("tick", &self.tick)
-            .field("version", &self.version)
             .finish_non_exhaustive()
     }
 }
@@ -254,7 +253,6 @@ impl SimulationRuntime {
             event_store,
             event_count: 0,
             tick: 0,
-            version: 0,
         })
     }
 
@@ -388,14 +386,26 @@ impl SimulationRuntime {
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, mut snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => {
+            Some((tick, mut snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => {
+                tracing::info!(tick, "resuming mobility from persisted snapshot");
                 normalize_seeded_agent_birth_ticks(&mut snap, base_world);
                 snap
             }
             None => initial_mobility_snapshot_for_base_world(base_world)
                 .map_err(HydrationError::Seed)?,
-            Some((_tick, _snap)) => initial_mobility_snapshot_for_base_world(base_world)
-                .map_err(HydrationError::Seed)?,
+            // Discarding a present-but-mismatched snapshot resets the world to
+            // tick 0 — that must never happen silently (the static-era check
+            // did exactly that on every restart, unnoticed for days).
+            Some((tick, snap)) => {
+                tracing::warn!(
+                    tick,
+                    agents = snap.agents.len(),
+                    vehicles = snap.vehicles.len(),
+                    "persisted mobility snapshot does not match this base-world generation — RESEEDING world at tick 0"
+                );
+                initial_mobility_snapshot_for_base_world(base_world)
+                    .map_err(HydrationError::Seed)?
+            }
         };
 
         apply_into_world(&mut world, mobility_snap);
@@ -517,7 +527,6 @@ impl SimulationRuntime {
             event_store,
             event_count,
             tick: global_tick,
-            version: global_version,
         };
         Ok((
             runtime,
@@ -557,6 +566,14 @@ impl SimulationRuntime {
         }
     }
 
+    /// Current `ChunkVersion` for a loaded chunk — the cheap dirtiness probe
+    /// the read view uses to decide whether a cached tile snapshot can be
+    /// reused (version unchanged) or must be rebuilt.
+    pub fn chunk_version(&self, coord: ChunkCoord) -> Option<u64> {
+        let entity = *self.world.resource::<ChunksByCoord>().0.get(&coord)?;
+        Some(self.world.get::<ChunkVersion>(entity)?.0)
+    }
+
     pub fn chunk_snapshot(&self, coord: ChunkCoord) -> Option<ChunkSnapshotDto> {
         let (_chunk_size, version, tiles, activity) = chunk_snapshot_data(&self.world, coord)?;
         Some(build_chunk_snapshot_from_parts(
@@ -574,7 +591,7 @@ impl SimulationRuntime {
     /// Excludes "stub" chunk entities — empty-tiles entities spawned solely
     /// to track WS subscriptions or LOD activity for chunks that the
     /// persistence layer hasn't loaded yet. Those chunks have no terrain
-    /// payload, so the world-summary + pulse rotation must skip them.
+    /// payload, so the world summary must skip them.
     fn loaded_coords(&self) -> Vec<ChunkCoord> {
         let by_coord = self.world.resource::<ChunksByCoord>();
         let mut coords: Vec<ChunkCoord> = by_coord
@@ -613,6 +630,10 @@ impl SimulationRuntime {
         &mut self,
     ) -> std::collections::HashMap<sim_core::ids::ChunkCoord, sim_core::mobility::MobilityChunkDelta>
     {
+        // Tick counter advanced once per tick (previously lived in the removed
+        // next_pulse); commands drain before the increment, so event
+        // tick-stamps match the old placement byte-for-byte.
+        self.tick += 1;
         mobility_api::tick_mobility(&mut self.world, &mut self.schedule)
     }
 
@@ -932,42 +953,6 @@ impl SimulationRuntime {
             protocol_version: PROTOCOL_VERSION,
             world_id: self.world_id.clone(),
             chunk_size: self.chunk_size,
-        })
-    }
-
-    pub fn next_pulse(&mut self) -> ServerMessageDto {
-        self.tick += 1;
-        self.version += 1;
-        let loaded_coords = self.loaded_coords();
-        assert!(
-            !loaded_coords.is_empty(),
-            "next_pulse called on a runtime with no loaded chunks — \
-             callers must seed or hydrate at least one chunk first",
-        );
-        let coord = loaded_coords[((self.tick - 1) as usize) % loaded_coords.len()];
-        let tile_count = {
-            let world = &self.world;
-            let entity = world
-                .resource::<ChunksByCoord>()
-                .0
-                .get(&coord)
-                .copied()
-                .expect("pulse chunk should be loaded");
-            world
-                .get::<Tiles>(entity)
-                .expect("Tiles on chunk entity")
-                .0
-                .len() as u64
-        };
-        let local_index = ((self.tick * PULSE_STRIDE) % tile_count) as u16;
-
-        ServerMessageDto::TilePulse(TilePulseDeltaDto {
-            protocol_version: PROTOCOL_VERSION,
-            world_id: self.world_id.clone(),
-            tick: self.tick,
-            version: self.version,
-            coord: coord.into(),
-            local_index,
         })
     }
 }

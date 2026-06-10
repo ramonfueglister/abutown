@@ -4,6 +4,7 @@ import {
   EconomyMarketGoodSchema,
   EconomyMarketSchema,
   EconomySnapshotSchema,
+  EconomyVitalsSchema,
 } from './proto/abutown_pb';
 import { economySnapshotFromProto } from './mobilityProtocol';
 
@@ -74,5 +75,24 @@ describe('economySnapshotFromProto', () => {
     expect(dto.tick).toBe(0);
     expect(dto.markets).toEqual([]);
     expect(dto.goods).toEqual([]);
+    expect(dto.vitals).toBeUndefined();
+  });
+
+  it('converts EconomySnapshot vitals (bigint → number)', () => {
+    const vitals = create(EconomyVitalsSchema, {
+      population: 348n,
+      routedCitizens: 13n,
+      totalMoney: 90_000_000n,
+      routesAssigned: 5n,
+      routesFailed: 1n,
+    });
+    const proto = create(EconomySnapshotSchema, { tick: 7n, vitals });
+    const dto = economySnapshotFromProto(proto);
+    expect(dto.vitals).toBeDefined();
+    expect(dto.vitals?.population).toBe(348);
+    expect(dto.vitals?.routedCitizens).toBe(13);
+    expect(dto.vitals?.totalMoney).toBe(90_000_000);
+    expect(dto.vitals?.routesAssigned).toBe(5);
+    expect(dto.vitals?.routesFailed).toBe(1);
   });
 });
