@@ -73,10 +73,34 @@ pub(crate) fn wage_for_revenue(
     ))
 }
 
+/// Value added for one `(firm, market)`: revenue minus this tick's buyer outlays,
+/// floored at zero (a buy-heavy tick pays zero wage, never a negative transfer).
+/// Missing outlay key → `spent = 0` → value_added == revenue (extractor / pure-seller
+/// regression safety). `checked_sub` surfaces a genuine i64 arithmetic overflow (only
+/// possible for extreme edge values, not for normal positive money amounts).
+pub(crate) fn value_added_for(
+    revenue: Money,
+    outlays: &BuyerOutlays,
+    firm: EconomicActorId,
+    market: MarketId,
+) -> Result<Money, EconomyError> {
+    let spent = outlays
+        .0
+        .get(&(firm, market))
+        .copied()
+        .unwrap_or(Money::ZERO);
+    let raw = revenue.checked_sub(spent)?;
+    Ok(Money(raw.0.max(0)))
+}
+
 /// The SFC wage step. Pure over its refs (no `World`). For each `(firm, market)` in
-/// `receipts` (keys-first → ascending), pays `wage = floor(revenue * labor_share / 10_000)`
-/// from the firm into `HOUSEHOLD_SECTOR` via `transfer` (two-leg, conservative); the
-/// wage bill is summed ONLY from transfers that actually succeeded. Then largest-remainder
+/// `receipts` (keys-first → ascending), pays a wage on VALUE ADDED (revenue minus this
+/// tick's buyer outlays for the same `(firm, market)`, floored at zero) rather than on
+/// gross revenue: `wage = floor(value_added * labor_share / 10_000)`. Firms that bought
+/// inputs pay wages only on the margin they created; extractors and pure sellers (no
+/// outlay entry) are unchanged (`value_added == revenue`). The wage is transferred from
+/// the firm into `HOUSEHOLD_SECTOR` via `transfer` (two-leg, conservative); the wage
+/// bill is summed ONLY from transfers that actually succeeded. Then largest-remainder
 /// splits the wage bill across consumer pools (`pool_weights`, ties-by-ascending-index)
 /// and transfers each share `HOUSEHOLD_SECTOR → consumer`, crediting `income_last_tick`
 /// from the COMPLETED `to`-side. Resets `income_last_tick` (keys-first) and `WageTelemetry`
@@ -92,6 +116,7 @@ pub fn run_pay_wages_at_tick(
     wage_telemetry: &mut WageTelemetry,
     ledger: &mut TradeLedger,
     config: &EconomyConfig,
+    outlays: &BuyerOutlays,
 ) -> Result<(), EconomyError> {
     for pool in demand.0.values_mut() {
         pool.income_last_tick = Money::ZERO;
@@ -111,7 +136,8 @@ pub fn run_pay_wages_at_tick(
     let mut wage_bill: i64 = 0;
     if weight_sum > 0 {
         for (&(firm, market), &revenue) in receipts.0.iter() {
-            let wage = wage_for_revenue(revenue, labor_share)?;
+            let value_added = value_added_for(revenue, outlays, firm, market)?;
+            let wage = wage_for_revenue(value_added, labor_share)?;
             if wage.0 <= 0 {
                 continue;
             }

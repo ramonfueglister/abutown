@@ -425,6 +425,7 @@ fn pay_wages_conserves_money_and_nets_sentinel_to_zero() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
 
@@ -473,6 +474,7 @@ fn pay_wages_no_overdraft_and_income_equals_transfers() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
     assert!(accounts.account(f1).available.0 >= 0);
@@ -506,6 +508,7 @@ fn pay_wages_zero_receipts_is_noop() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
     assert_eq!(accounts.total_money().unwrap(), before);
@@ -535,6 +538,7 @@ fn pay_wages_wage_bill_smaller_than_pools_floors_some_to_zero() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
     assert_eq!(accounts.total_money().unwrap(), before);
@@ -570,6 +574,7 @@ fn pay_wages_full_labor_share_pays_all_revenue() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
     assert_eq!(accounts.total_money().unwrap(), before);
@@ -600,6 +605,7 @@ fn pay_wages_all_zero_weights_skips_first_leg() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
     assert_eq!(accounts.total_money().unwrap(), before);
@@ -645,6 +651,7 @@ fn pay_wages_population_million_max_revenue_no_overflow() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
     assert_eq!(
@@ -695,6 +702,7 @@ fn pay_wages_weighted_split_zero_weight_pool_gets_nothing() {
         &mut wage_tel,
         &mut ledger,
         &config,
+        &BuyerOutlays::default(),
     )
     .unwrap();
 
@@ -786,6 +794,7 @@ fn pay_wages_property_conserves_over_random_inputs() {
             &mut wage_tel,
             &mut ledger,
             &config,
+            &BuyerOutlays::default(),
         )
         .unwrap();
         assert_eq!(
@@ -1774,10 +1783,264 @@ fn nonzero_household_sentinel_is_release_grade_err() {
         &mut wt,
         &mut ledger,
         &cfg,
+        &BuyerOutlays::default(),
     );
     assert_eq!(
         r,
         Err(EconomyError::ConservationViolation),
         "non-zero sentinel → release-grade Err, not a debug_assert"
     );
+}
+
+// ── Value-added wages tests ───────────────────────────────────────────────────
+
+/// receipts[(firm, m)] = 1000, outlays[(firm, m)] = 400 → value_added = 600
+/// → wage = floor(0.6 * 600) = 360 (not 600 as revenue-based would give)
+#[test]
+fn wage_basis_is_value_added_when_firm_bought_inputs() {
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    let (mut accounts, receipts, mut demand, household, config) =
+        fixture(&[(f1, market, Money(1_000))], &[c1]);
+    // The firm also spent 400 buying inputs this tick → value_added = 1000 - 400 = 600
+    let mut outlays = BuyerOutlays::default();
+    outlays.0.insert((f1, market), Money(400));
+
+    let before = accounts.total_money().unwrap();
+    let mut wage_tel = WageTelemetry::default();
+    let mut ledger = TradeLedger::default();
+    run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_tel,
+        &mut ledger,
+        &config,
+        &outlays,
+    )
+    .unwrap();
+
+    // wage = floor(600 * 6000 / 10_000) = floor(360) = 360
+    assert_eq!(
+        accounts.total_money().unwrap(),
+        before,
+        "byte-invariant total money"
+    );
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero"
+    );
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(640),
+        "firm keeps revenue - wage = 1000 - 360 = 640"
+    );
+    let inc: i64 = demand.0.values().map(|p| p.income_last_tick.0).sum();
+    assert_eq!(inc, 360, "Σ income == value-added wage bill (360)");
+}
+
+/// receipts[(firm, m)] = 100, outlays[(firm, m)] = 400 → value_added = 0 (floored)
+/// → wage = 0, no transfer at all
+#[test]
+fn negative_value_added_pays_zero_wage() {
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    let (mut accounts, receipts, mut demand, household, config) =
+        fixture(&[(f1, market, Money(100))], &[c1]);
+    let mut outlays = BuyerOutlays::default();
+    outlays.0.insert((f1, market), Money(400));
+
+    let before = accounts.total_money().unwrap();
+    let mut wage_tel = WageTelemetry::default();
+    let mut ledger = TradeLedger::default();
+    run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_tel,
+        &mut ledger,
+        &config,
+        &outlays,
+    )
+    .unwrap();
+
+    // value_added = max(0, 100 - 400) = 0 → wage = 0 → no transfer
+    assert_eq!(accounts.total_money().unwrap(), before, "byte-invariant");
+    assert_eq!(
+        accounts.account(HOUSEHOLD_SECTOR).available,
+        Money::ZERO,
+        "sentinel nets to zero (no strand)"
+    );
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(100),
+        "firm keeps all revenue (no wage paid)"
+    );
+    let inc: i64 = demand.0.values().map(|p| p.income_last_tick.0).sum();
+    assert_eq!(inc, 0, "no income when value_added ≤ 0");
+    // No WagePaid event must be emitted
+    assert!(
+        ledger.0.iter().all(|e| !matches!(e, EconomyEvent::WagePaid { .. })),
+        "no WagePaid event when wage == 0"
+    );
+}
+
+/// Actors without outlays (e.g. pure extractors) must get the same wage as before:
+/// wage = floor(revenue * labor_share). This is a regression guard.
+#[test]
+fn actors_without_outlays_unchanged() {
+    let f1 = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    let (mut accounts, receipts, mut demand, household, config) =
+        fixture(&[(f1, market, Money(1_000))], &[c1]);
+    // No outlays → value_added == revenue → wage identical to old behavior
+    let outlays = BuyerOutlays::default();
+
+    let before = accounts.total_money().unwrap();
+    let mut wage_tel = WageTelemetry::default();
+    let mut ledger = TradeLedger::default();
+    run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_tel,
+        &mut ledger,
+        &config,
+        &outlays,
+    )
+    .unwrap();
+
+    // wage = floor(1000 * 6000 / 10_000) = 600 (unchanged from revenue-based)
+    assert_eq!(accounts.total_money().unwrap(), before, "byte-invariant");
+    assert_eq!(accounts.account(HOUSEHOLD_SECTOR).available, Money::ZERO);
+    assert_eq!(
+        accounts.account(f1).available,
+        Money(400),
+        "firm keeps 1000 - 600 = 400"
+    );
+    let inc: i64 = demand.0.values().map(|p| p.income_last_tick.0).sum();
+    assert_eq!(inc, 600, "Σ income == 600 (identical to old revenue-based)");
+}
+
+/// Two settles that hit the same (buyer, market) key must ACCUMULATE in BuyerOutlays,
+/// not overwrite. This is a regression guard for entry().or_insert + checked_add vs. insert.
+#[test]
+fn outlays_accumulate_across_fills_for_same_buyer_market() {
+    use crate::economy::auction::SettlementPolicy;
+    let buyer = EconomicActorId(1);
+    let seller = EconomicActorId(2);
+    let market = MarketId(1);
+    let key = MarketGoodKey {
+        market,
+        good: GOOD_FOOD,
+    };
+    let mut accounts = AccountBook::default();
+    let mut inventory = InventoryBook::default();
+    let mut orders = OrderBook::default();
+    let mut ledger = TradeLedger::default();
+    let mut dirty = DirtyMarketGoods::default();
+    let mut next = NextOrderId::default();
+    let mut goods = MarketGoods::default();
+    goods.0.insert(key, seeded_state(market));
+    accounts.deposit(buyer, Money(100_000)).unwrap();
+    inventory
+        .deposit(seller, GOOD_FOOD, Quantity(10_000))
+        .unwrap();
+
+    // Create two bid+ask pairs and clear twice, each time hitting (buyer, market).
+    // First pair: qty=1_000, settlement ~1_100
+    create_bid(
+        &mut accounts, &mut orders, &mut ledger, &mut dirty, &mut next,
+        1, buyer, market, GOOD_FOOD, Quantity(1_000), Money(1_500), 10,
+    ).unwrap();
+    create_ask(
+        &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
+        1, seller, market, GOOD_FOOD, Quantity(1_000), Money(1_000), 10,
+    ).unwrap();
+
+    let mut receipts = SellerReceipts::default();
+    let mut outlays = BuyerOutlays::default();
+    clear_market_good_with_receipts(
+        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut goods,
+        key, 2, SettlementPolicy::Anchored, &mut receipts.0, &mut outlays.0,
+    ).unwrap();
+
+    let first_outlay = outlays.0.get(&(buyer, market)).copied().unwrap_or(Money::ZERO);
+
+    // Second pair: qty=2_000
+    create_bid(
+        &mut accounts, &mut orders, &mut ledger, &mut dirty, &mut next,
+        3, buyer, market, GOOD_FOOD, Quantity(2_000), Money(1_500), 10,
+    ).unwrap();
+    create_ask(
+        &mut inventory, &mut orders, &mut ledger, &mut dirty, &mut next,
+        3, seller, market, GOOD_FOOD, Quantity(2_000), Money(1_000), 10,
+    ).unwrap();
+
+    clear_market_good_with_receipts(
+        &mut accounts, &mut inventory, &mut orders, &mut ledger, &mut goods,
+        key, 4, SettlementPolicy::Anchored, &mut receipts.0, &mut outlays.0,
+    ).unwrap();
+
+    let total_outlay = outlays.0.get(&(buyer, market)).copied().unwrap_or(Money::ZERO);
+
+    assert!(
+        first_outlay.0 > 0,
+        "first settle must record a positive outlay"
+    );
+    assert!(
+        total_outlay.0 > first_outlay.0,
+        "second settle must ACCUMULATE onto the existing outlay, not overwrite: \
+         total={} first={}",
+        total_outlay.0,
+        first_outlay.0
+    );
+}
+
+/// When buyer == seller in the same market (self-trade), the value added for that actor
+/// is zero (receipts == outlays), so the wage is zero. Explicit test of the property,
+/// not just inference.
+#[test]
+fn self_trade_nets_value_added_to_zero() {
+    let actor = EconomicActorId(8_001);
+    let c1 = EconomicActorId(8_002);
+    let market = MarketId(9_001);
+    // The actor is both seller (receipt=500) and buyer (outlay=500) in the same market.
+    let (mut accounts, receipts, mut demand, household, config) =
+        fixture(&[(actor, market, Money(500))], &[c1]);
+    let mut outlays = BuyerOutlays::default();
+    outlays.0.insert((actor, market), Money(500));
+
+    let before = accounts.total_money().unwrap();
+    let mut wage_tel = WageTelemetry::default();
+    let mut ledger = TradeLedger::default();
+    run_pay_wages_at_tick(
+        &mut accounts,
+        &receipts,
+        &mut demand,
+        &household,
+        &mut wage_tel,
+        &mut ledger,
+        &config,
+        &outlays,
+    )
+    .unwrap();
+
+    // value_added = 500 - 500 = 0 → wage = 0
+    assert_eq!(accounts.total_money().unwrap(), before, "byte-invariant");
+    assert_eq!(accounts.account(HOUSEHOLD_SECTOR).available, Money::ZERO);
+    assert_eq!(
+        accounts.account(actor).available,
+        Money(500),
+        "self-trade: actor keeps all (no wage)"
+    );
+    let inc: i64 = demand.0.values().map(|p| p.income_last_tick.0).sum();
+    assert_eq!(inc, 0, "self-trade: value_added == 0 → no wage income");
 }

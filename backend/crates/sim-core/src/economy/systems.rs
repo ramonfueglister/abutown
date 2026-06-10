@@ -445,12 +445,14 @@ pub fn run_consumption_system(
     );
 }
 
-/// The SFC wage step: firms pay a labor share of this tick's revenue into the
-/// household sector, apportioned to consumer pools (income). Runs after BOTH settle
-/// paths (ClearMarkets, MacroFlow) so all receipts are booked, before Consume.
+/// The SFC wage step: firms pay a labor share of this tick's VALUE ADDED (revenue minus
+/// buyer outlays for the same (firm, market), floored at zero) into the household sector,
+/// apportioned to consumer pools (income). Runs after BOTH settle paths (ClearMarkets,
+/// MacroFlow) so all receipts AND outlays are fully booked, before Consume.
 pub fn run_pay_wages_system(
     config: Res<EconomyConfig>,
     receipts: Res<SellerReceipts>,
+    outlays: Res<BuyerOutlays>,
     household: Res<HouseholdSector>,
     mut accounts: ResMut<AccountBook>,
     mut demand: ResMut<DemandPools>,
@@ -465,8 +467,9 @@ pub fn run_pay_wages_system(
         &mut wage_telemetry,
         &mut ledger,
         &config,
+        &outlays,
     )
-    .expect("run_pay_wages_at_tick is infallible by construction (wage <= just-credited revenue, Σweights guards); an Err is a bug");
+    .expect("run_pay_wages_at_tick is infallible by construction (wage <= just-credited value-added, Σweights guards); an Err is a bug");
 }
 
 /// Profit distribution: runs in the PayWages set with an explicit `.after(run_pay_wages_system)`
