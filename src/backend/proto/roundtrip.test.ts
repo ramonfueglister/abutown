@@ -7,6 +7,8 @@ import {
   ChunkSubscribeSchema,
   ClientMessageSchema,
   Direction,
+  EconomySnapshotSchema,
+  EconomyVitalsSchema,
   HealthResponseSchema,
   HelloSchema,
   MobilityChunkDeltaSchema,
@@ -172,5 +174,41 @@ describe('proto roundtrip (TS @bufbuild/protobuf v2 API)', () => {
     expect(decoded.persistence?.worldId).toBe('abutopia');
     expect(Number(decoded.persistence?.mobilityTick)).toBe(42);
     expect(decoded.ok).toBe(false);
+  });
+
+  it('round-trips EconomySnapshot with EconomyVitals', () => {
+    const vitals = create(EconomyVitalsSchema, {
+      population: 348n,
+      routedCitizens: 13n,
+      totalMoney: 90_000_000n,
+      routesAssigned: 5n,
+      routesFailed: 1n,
+    });
+    const snapshot = create(EconomySnapshotSchema, {
+      protocolVersion: 1,
+      worldId: 'abutopia',
+      tick: 42n,
+      markets: [],
+      goods: [],
+      vitals,
+    });
+    const msg = create(ServerMessageSchema, {
+      body: { case: 'economySnapshot', value: snapshot },
+    });
+
+    const bytes = toBinary(ServerMessageSchema, msg);
+    const back = fromBinary(ServerMessageSchema, bytes);
+
+    expect(back.body.case).toBe('economySnapshot');
+    if (back.body.case !== 'economySnapshot') throw new Error('unreachable');
+    const s = back.body.value;
+    expect(s.worldId).toBe('abutopia');
+    expect(s.tick).toBe(42n);
+    expect(s.vitals).toBeDefined();
+    expect(s.vitals?.population).toBe(348n);
+    expect(s.vitals?.routedCitizens).toBe(13n);
+    expect(s.vitals?.totalMoney).toBe(90_000_000n);
+    expect(s.vitals?.routesAssigned).toBe(5n);
+    expect(s.vitals?.routesFailed).toBe(1n);
   });
 });

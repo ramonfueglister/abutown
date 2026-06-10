@@ -1144,6 +1144,63 @@ async fn read_view_economy_snapshot_exposes_four_markets_and_known_goods() {
     );
 }
 
+/// Verify that `build_economy_snapshot` always populates the `vitals` field.
+///
+/// The fixture is a fully-seeded `SimulationRuntime::new()` world (abutopia bundle
+/// with 300 agents, capita_baseline=10, so capita_factor=30).  The economy is seeded
+/// by `seed_from_markets_layer`:
+///   - 3 demand actors each receive `opening_cash=1_000_000 × factor=30 = 30_000_000`
+///   - Total seeded money = 3 × 30_000_000 = 90_000_000
+///
+/// At seeding time no ticks have run so no supply/demand actors have traded: the
+/// full 90_000_000 sits in `available` balances.  The route stats are all-zero because
+/// the route-assignment system hasn't been invoked, and there are no
+/// CitizenEconomicTargets yet (attribution runs later).
+#[test]
+fn economy_snapshot_carries_vitals() {
+    use sim_core::economy::AccountBook;
+
+    let runtime = SimulationRuntime::new();
+    let world = runtime.mobility();
+
+    // Sanity: the AccountBook exists and has the expected seeded total.
+    // 300 agents / 10 capita_baseline = factor 30.  3 demand specs × 1_000_000 × 30.
+    let expected_total_money: i64 = 3 * 1_000_000 * 30;
+    let actual_total = world
+        .resource::<AccountBook>()
+        .total_money()
+        .expect("AccountBook summation must not overflow on a freshly seeded world")
+        .0;
+    assert_eq!(
+        actual_total, expected_total_money,
+        "seeded total_money must equal 3 × opening_cash × capita_factor"
+    );
+
+    let world_id = abutown_protocol::WorldId("abutopia".to_string());
+    let snapshot = build_economy_snapshot(world, &world_id, 7);
+
+    let vitals = snapshot
+        .vitals
+        .expect("build_economy_snapshot must always populate vitals");
+    assert_eq!(
+        vitals.total_money, expected_total_money,
+        "vitals.total_money must match the AccountBook sum"
+    );
+    // No CitizenEconomicTargets written yet (attribution runs during ticks).
+    assert_eq!(
+        vitals.routed_citizens, 0,
+        "no routed citizens before first tick"
+    );
+    // 300 agents seeded from the abutopia bundle.
+    assert_eq!(
+        vitals.population, 300,
+        "300 agents seeded from abutopia spawns.json"
+    );
+    // Route-assignment stats are zero before any tick runs.
+    assert_eq!(vitals.routes_assigned, 0);
+    assert_eq!(vitals.routes_failed, 0);
+}
+
 #[cfg(test)]
 mod cors_tests {
     use super::*;

@@ -17,6 +17,7 @@ import type {
 import type { BaseWorldResponse, BaseWorldTerrainKind } from './backend/baseWorldClient';
 import { requireBackend, resolveBackendBaseUrl, type BackendHealthDto } from './backend/backendGate';
 import { setPersistenceBanner } from './app/persistenceBanner';
+import { setVitalsHud } from './app/vitalsHud';
 import { type MobilityBackendBridge } from './backend/mobilityClient';
 import { createMobilityOverlayState, type MobilityOverlayState } from './backend/mobilityState';
 import { createEconomyOverlayState, type EconomyOverlayState } from './backend/economyState';
@@ -125,6 +126,7 @@ async function startRuntime(): Promise<void> {
     },
     onEconomyState: (state) => {
       economyState = state;
+      setVitalsHud(document, state.vitals);
     },
     onTileKindSet: (event) => {
       const key = `${event.x}:${event.y}`;

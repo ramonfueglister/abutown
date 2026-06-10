@@ -316,7 +316,10 @@ fn build_economy_snapshot(
     world_id: &abutown_protocol::WorldId,
     tick: u64,
 ) -> w::EconomySnapshot {
-    use sim_core::economy::{MarketGoods, Markets, WageTelemetry};
+    use sim_core::economy::{AccountBook, MarketGoods, Markets, WageTelemetry};
+    use sim_core::mobility::resources::{
+        AgentIdIndex, CitizenEconomicTargets, RouteAssignmentStats,
+    };
     use sim_core::routing::Graph;
     let markets_res = world.resource::<Markets>();
     let goods_res = world.resource::<MarketGoods>();
@@ -354,12 +357,46 @@ fn build_economy_snapshot(
             unsold_supply_last_tick: st.unsold_supply_last_tick.0,
         })
         .collect();
+    let vitals = {
+        let routed = world
+            .get_resource::<CitizenEconomicTargets>()
+            .map(|t| t.0.len() as u64)
+            .unwrap_or(0);
+        let stats = world
+            .get_resource::<RouteAssignmentStats>()
+            .copied()
+            .unwrap_or_default();
+        // AgentIdIndex is the live agent map: it's always installed by install_mobility
+        // alongside CitizenEconomicTargets — use get_resource so callers that stand up
+        // a bare economy world (no mobility) gracefully produce population=0.
+        let population = world
+            .get_resource::<AgentIdIndex>()
+            .map(|idx| idx.0.len() as u64)
+            .unwrap_or(0);
+        // AccountBook is always present when EconomyPlugin is installed (the production
+        // path that calls this function). If for some reason it is absent, return 0
+        // rather than panicking — the per-tick conservation audit will catch any real
+        // violation independently.
+        let total_money = world
+            .get_resource::<AccountBook>()
+            .and_then(|book| book.total_money().ok())
+            .map(|m| m.0)
+            .unwrap_or(0);
+        Some(w::EconomyVitals {
+            population,
+            routed_citizens: routed,
+            total_money,
+            routes_assigned: stats.assigned,
+            routes_failed: stats.failed,
+        })
+    };
     w::EconomySnapshot {
         protocol_version: u32::from(abutown_protocol::PROTOCOL_VERSION),
         world_id: world_id.0.clone(),
         tick,
         markets,
         goods,
+        vitals,
     }
 }
 

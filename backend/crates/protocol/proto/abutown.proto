@@ -70,6 +70,15 @@ message EconomySnapshot {
   uint64 tick = 3;
   repeated EconomyMarket markets = 4;
   repeated EconomyMarketGood goods = 5;
+  EconomyVitals vitals = 6;
+}
+
+message EconomyVitals {
+  uint64 population = 1;       // live citizen count
+  uint64 routed_citizens = 2;  // CitizenEconomicTargets size (the economy::liveness gauge)
+  int64 total_money = 3;       // audited Σ(available+locked), raw money units (client / 1000 for display)
+  uint64 routes_assigned = 4;  // RouteAssignmentStats
+  uint64 routes_failed = 5;
 }
 
 message EconomyMarket {
