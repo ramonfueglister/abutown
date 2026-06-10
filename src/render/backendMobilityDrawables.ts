@@ -3,7 +3,7 @@ import {
   interpolatedVehicles,
   type MobilityOverlayState,
 } from '../backend/mobilityState';
-import type { DirectionDto } from '../backend/mobilityProtocol';
+import type { AgentMobilityDto, DirectionDto } from '../backend/mobilityProtocol';
 
 export type Coord = { x: number; y: number };
 
@@ -31,6 +31,7 @@ export type BackendPedestrian = {
   direction: DirectionDto;
   ageSeconds: number;
   kind: 'pedestrian' | 'trader';
+  stateType: AgentMobilityDto['state']['type'];
 };
 
 export type BackendCar = {
@@ -95,6 +96,7 @@ export function pedestriansFromMobilityState(
       direction: agent.direction,
       ageSeconds: agent.age_seconds,
       kind: isTraderSpriteKey(agent.sprite_key) ? 'trader' : 'pedestrian',
+      stateType: agent.state.type,
     });
   }
   return out;

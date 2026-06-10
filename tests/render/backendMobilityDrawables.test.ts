@@ -223,6 +223,7 @@ describe('backendMobilityDrawables (interpolated)', () => {
     expect(pedestrians).toHaveLength(1);
     expect(pedestrians[0].path[0]).toEqual({ x: 2, y: 3.51 });
     expect(pedestrians[0].laneOffset).toBe(0);
+    expect(pedestrians[0].stateType).toBe('walking');
   });
 
   it('returns empty arrays when no sprites are available', () => {
