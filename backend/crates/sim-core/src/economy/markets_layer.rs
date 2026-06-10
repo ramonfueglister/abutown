@@ -116,13 +116,32 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
         }
     }
 
+    // ── Per-capita seed scaling (spec 2026-06-06 §2b). Demand will run at
+    // capita_factor× throughput, so the seeded money/goods stock must be
+    // factor× too — money is still minted exactly once, only more of it.
+    // With no live agents (unit tests, economy-only worlds) the factor is 1
+    // and seeding stays byte-identical to the unscaled economy.
+    let seed_factor: i64 = {
+        use crate::mobility::components::AgentMarker;
+        use bevy_ecs::prelude::With;
+        let live: u64 = {
+            let mut q = world.query_filtered::<(), With<AgentMarker>>();
+            q.iter(world).count() as u64
+        };
+        let baseline = world
+            .get_resource::<crate::economy::systems::EconomyConfig>()
+            .map(|c| c.capita_baseline)
+            .unwrap_or(crate::economy::capita::CAPITA_BASELINE_IDENTITY);
+        crate::economy::capita::capita_factor(live, baseline)
+    };
+
     // ── 3) Supply pools: opening inventory + a standing SupplyPool. ──
     for spec in &layer.supply {
         let actor = EconomicActorId(spec.actor);
         let good = GoodId(spec.good);
         world
             .resource_mut::<InventoryBook>()
-            .deposit(actor, good, Quantity(spec.opening_inventory))
+            .deposit(actor, good, Quantity(spec.opening_inventory * seed_factor))
             .expect("seed: supplier goods");
         world.resource_mut::<SupplyPools>().0.insert(
             actor,
@@ -143,7 +162,7 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
         let actor = EconomicActorId(spec.actor);
         world
             .resource_mut::<AccountBook>()
-            .deposit(actor, Money(spec.opening_cash))
+            .deposit(actor, Money(spec.opening_cash * seed_factor))
             .expect("seed: consumer cash");
         world.resource_mut::<DemandPools>().0.insert(
             actor,
