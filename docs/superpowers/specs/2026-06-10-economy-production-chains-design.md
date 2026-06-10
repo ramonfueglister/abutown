@@ -67,11 +67,11 @@ InputPools(BTreeMap<EconomicActorId, InputPool>)  // Resource, persistiert
 
 Alle Bewegungen ausnahmslos `AccountBook::transfer`; #78-Audit unverändert gültig.
 
-### 5.1 `InputOutlays` (Gegenstück zu `SellerReceipts`)
-`InputOutlays(BTreeMap<EconomicActorId, Money>)` — sammelt beim Buyer-Settle (Auktion **und** macro_flow) die Inputausgaben von Akteuren, die in `InputPools` registriert sind (Membership-Check, deterministisch). Reset im selben `ResetReceipts`-Wrapper und mit denselben Intervall-Semantiken wie `SellerReceipts`; persistiert wie diese.
+### 5.1 `BuyerOutlays` (Gegenstück zu `SellerReceipts`)
+`BuyerOutlays(BTreeMap<(EconomicActorId, MarketId), Money>)` — sammelt beim Buyer-Settle (Auktion **und** macro_flow) die Käufer-Belastungen **aller** Käufer unconditional (kein Membership-Coupling im Settle; Konsumenten-Outlays sind eine harmlose, ungenutzte Statistik — nur der Join in PayWages wertet sie aus). Beim macro_flow enthält die Belastung den Transportanteil → Transport steckt damit real in den Inputkosten. Exakt dieselben Semantiken wie `SellerReceipts`: **per-Tick, ephemer, NIE persistiert**, Reset im selben `ResetReceipts`-Wrapper, Capture in der Scratch-Zone der Settle-Funktionen (ein verworfener Settle verwirft auch seine Outlays).
 
 ### 5.2 Value-added-Löhne
-`value_added = SellerReceipts[a] − InputOutlays[a]`; `wage = floor(labor_share_bps · max(0, value_added) / 10_000)`.
+`value_added = SellerReceipts[(a, m)] − BuyerOutlays[(a, m)]` (fehlender Eintrag = 0); `wage = floor(labor_share_bps · max(0, value_added) / 10_000)`.
 Für Extraktoren (Outlays 0) numerisch identisch zu heute — **kein Verhaltensdrift bei Bestandsakteuren**. Negative Wertschöpfung im Intervall (eingekauft, noch nichts verkauft) → Lohn 0, kein negativer Transfer.
 
 ### 5.3 θ-Dividende mit Working-Capital-Kappung (ersetzt 100%-Payout)
@@ -103,10 +103,10 @@ UpdateConsumption    → nur DemandPools (Keynes); InputPools vollständig in Ge
 Produktion läuft vor dem Einkauf desselben Ticks → Ein-Tick-Produktionslag (Bestände aus Vor-Ticks), gewollt und standard.
 
 ### 6.2 Daten & Persistenz
-- **`markets.json`:** neue Sektion `producers` (`actor, market, recipe {in_good, in_qty, out_good, out_qty}, theta_bps, batches_target, opening_cash`). 8031 wandert von `extractors` nach `producers` (opening_cash 1_000_000, konsistent mit Bestandsakteuren); 8041 neu in `extractors` mit `out_good: 2`; `opening_prices` für WOOD an 9003 und 9001. Extraktoren behalten Faucet-Semantik — kein Überladen des Schemas.
+- **`markets.json`:** neue Sektion `producers` (`actor, market, in_good, in_qty, out_good, out_qty, qty, min_price, theta_bps, batches_target, opening_cash` — `qty`/`min_price` sind die Sell-Side wie bei `ExtractorSpec`: der Producer verkauft seinen Output über einen normalen `SupplyPool`). `theta_bps`/`batches_target` leben in einer NICHT persistierten `ProducerPolicies`-Resource (Re-Apply aus dem Layer, §unten); nur `InputPools` (Order-Cursor) wird persistiert. 8031 wandert von `extractors` nach `producers` (opening_cash 1_000_000, konsistent mit Bestandsakteuren); 8041 neu in `extractors` mit `out_good: 2`; `opening_prices` für WOOD an 9003 und 9001. Extraktoren behalten Faucet-Semantik — kein Überladen des Schemas.
 - **Seed-Validierung (fail-fast):** `producer.in_good ≠ GOOD_RAW` (RAW bleibt nicht handelbar), `in_qty/out_qty > 0`, `theta_bps ≤ 10_000`, `batches_target ≥ 1`, Producer-Markt existiert, Input-Gut hat mindestens einen Supply-Markt.
 - **Config-Reapply (Lektion #83):** `theta_bps`/`batches_target` werden beim Start **vor dem Seed-Guard** aus dem authored Layer re-applied, sonst fällt die Ausschüttungsregel bei jedem Restart auf Default zurück.
-- **Snapshot:** `InputPools` + `InputOutlays` persistiert (non-serde-default) → ⚠️ **einmaliges `DELETE FROM economy_snapshots` vor dem Deploy** (wie #69/#73/#74/#75). Kein Legacy-Shim.
+- **Snapshot:** `InputPools` persistiert (non-serde-default) → ⚠️ **einmaliges `DELETE FROM economy_snapshots` vor dem Deploy** (wie #69/#73/#74/#75). `BuyerOutlays` ist per-Tick-ephemer (nie persistiert), `ProducerPolicies` wird re-applied. Kein Legacy-Shim.
 - **Wire (`EconomySnapshot`, additiv):** `retained_earnings`-Gauge + Producer-Rezeptinfo für den Click-Inspector, **frische Tags** (4/5/2 bleiben reserviert, PR #92). `buf breaking` (WIRE_JSON) bleibt grün; Frontend zeigt die Felder im bestehenden Inspector.
 
 ## 7. Fehlerfälle (Konsequenz sichtbar, nichts heilen)
@@ -116,12 +116,12 @@ Produktion läuft vor dem Einkauf desselben Ticks → Ein-Tick-Produktionslag (B
 3. **Kein WOOD-Angebot/unerreichbar:** Orders expiren über `ExpireOrders`, `release_cash` gibt gelocktes Geld frei — Pfad ist #78-auditiert, kein neuer Leak möglich.
 4. **`max_price` unter Marktpreis:** keine Trades → Hungern wie (1). Strukturelle Unrentabilität (`p_src + rate·dist` > Schranke) ist ein Authoring-Problem und bleibt sichtbar.
 5. **Unsinnige Authoring-Werte:** fail-fast beim Seed (§6.2).
-6. **Restart mitten im Intervall:** `InputOutlays`/`InputPools` persistiert → konsistentes Resume.
+6. **Restart:** Frozen-Time-Restarts liegen an Tick-Grenzen; `BuyerOutlays` ist per-Tick (Settle und Lohn im selben Tick) und braucht keine Persistenz; der `InputPools`-Cursor ist persistiert → konsistentes Resume.
 7. **Bug in neuen Transferpfaden:** der per-Tick-#78-Audit (byte-exakte `total_money`-Invarianz) bricht den Tick fail-fast.
 
 ## 8. Tests
 
-- **Unit:** Value-added-Lohn (inkl. Negativ-Fenster → 0); θ-Dividende (Kasse < Target → 0; Teilausschüttung; θ=10_000/wc=0 ≡ #75-Verhalten); Teilnahme-Schranken-Formel; Leontief-Order-Sizing (Soll minus Bestand, Floor 0); `InputOutlays` Reset/Akkumulation/Membership.
+- **Unit:** Value-added-Lohn (inkl. Negativ-Fenster → 0); θ-Dividende (Kasse < Target → 0; Teilausschüttung; θ=10_000/wc=0 ≡ #75-Verhalten); Teilnahme-Schranken-Formel; Leontief-Order-Sizing (Soll minus Bestand, Floor 0); `BuyerOutlays`-Capture an beiden Settle-Punkten (Auktion: actual_cost; macro_flow: Charge inkl. Transport) + Reset.
 - **Konservierung:** N-Tick-Lauf mit voller Kette: `total_money` byte-invariant pro Tick; `HOUSEHOLD_SECTOR == 0` nach Lohn+Dividende+Rebate; Güter-Ledger-Identität WOOD und TOOLS.
 - **Hydrate-Pfad (Lektion #86):** seed → extract → apply auf dem **Produktions**-Restore-Pfad, Resume mitten im Intervall, Kette läuft weiter.
 - **Langlauf-Stationarität (Anti-Blocker-2):** M Ticks: WOOD-Preis am 9001 konvergiert ins Band um `p_src + rate·dist` (#85-Band-Muster); Firmenkasse pendelt ≤ `wc_target + ε` (kein monotoner Drift); TOOLS-Fluss an 9002 stationär > 0.
