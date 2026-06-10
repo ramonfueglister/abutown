@@ -535,6 +535,7 @@ export function mobilitySnapshotFromProto(p: MobilitySnapshotProto): MobilitySna
 
 export type MarketLocationDto = { marketId: number; name: string; tileX: number; tileY: number; wagePaidLastTick: number };
 export type MarketGoodDto = { marketId: number; goodId: number; lastSettlementPrice: number; ewmaReferencePrice: number; tradedQtyLastTick: number; unmetDemandLastTick: number; unsoldSupplyLastTick: number };
+export type EconomyFlowDto = { srcMarketId: number; dstMarketId: number; goodId: number; rate: number };
 export type EconomyVitalsDto = {
   population: number;
   routedCitizens: number;
@@ -542,7 +543,7 @@ export type EconomyVitalsDto = {
   routesAssigned: number;
   routesFailed: number;
 };
-export type EconomySnapshotDto = { tick: number; markets: MarketLocationDto[]; goods: MarketGoodDto[]; vitals?: EconomyVitalsDto };
+export type EconomySnapshotDto = { tick: number; markets: MarketLocationDto[]; goods: MarketGoodDto[]; vitals?: EconomyVitalsDto; flows: EconomyFlowDto[] };
 
 function economyVitalsFromProto(p: EconomyVitalsProto): EconomyVitalsDto {
   return {
@@ -560,6 +561,7 @@ export function economySnapshotFromProto(p: EconomySnapshot): EconomySnapshotDto
     markets: p.markets.map((m) => ({ marketId: m.marketId, name: m.name, tileX: m.tileX, tileY: m.tileY, wagePaidLastTick: Number(m.wagePaidLastTick) })),
     goods: p.goods.map((g) => ({ marketId: g.marketId, goodId: g.goodId, lastSettlementPrice: Number(g.lastSettlementPrice), ewmaReferencePrice: Number(g.ewmaReferencePrice), tradedQtyLastTick: Number(g.tradedQtyLastTick), unmetDemandLastTick: Number(g.unmetDemandLastTick), unsoldSupplyLastTick: Number(g.unsoldSupplyLastTick) })),
     vitals: p.vitals !== undefined ? economyVitalsFromProto(p.vitals) : undefined,
+    flows: p.flows.map((f) => ({ srcMarketId: f.srcMarketId, dstMarketId: f.dstMarketId, goodId: f.goodId, rate: Number(f.rate) })),
   };
 }
 

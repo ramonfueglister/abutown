@@ -1056,6 +1056,7 @@ pub fn run_macro_flow_at_tick(
                         src: eflow.src,
                         dst: eflow.dst,
                         good: eflow.good,
+                        qty: eflow.q,
                         p_src: eflow.p_src,
                         p_dst: eflow.p_dst,
                         dist: eflow.dist,

@@ -77,6 +77,8 @@ export type RuntimeDiagnosticsOptions = {
     selectedMarketCoord: { x: number; y: number } | null;
   };
   getEconomyMarketCount: () => number;
+  getEconomyFlowCount: () => number;
+  getFrameTimeMs: () => number;
   getEconomyMarkets: () => readonly { tileX: number; tileY: number }[];
   projectEntityScreen: (coord: Coord) => Coord;
   carVisualWorldPoint: (vehicle: BackendCar) => Coord;
@@ -193,6 +195,8 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       vehicleInspector: selected.vehicleInspector,
       selectedMarketCoord: selected.selectedMarketCoord,
       economyMarketCount: options.getEconomyMarketCount(),
+      economyFlowCount: options.getEconomyFlowCount(),
+      frameTimeMs: options.getFrameTimeMs(),
       economyMarkets: economyMarketEntries,
       railStations: counts.railStations,
       railYardTracks: counts.railYardTracks,

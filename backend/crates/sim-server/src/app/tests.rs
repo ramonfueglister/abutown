@@ -1144,6 +1144,40 @@ async fn read_view_economy_snapshot_exposes_four_markets_and_known_goods() {
     );
 }
 
+#[test]
+fn economy_snapshot_includes_flow_rates() {
+    // build_economy_snapshot must ship the FlowRateEwma resource as the
+    // snapshot's `flows` field, one entry per (src, dst, good) edge.
+    let mut runtime = SimulationRuntime::new();
+    runtime
+        .world
+        .insert_resource(sim_core::economy::FlowRateEwma(
+            [(
+                (
+                    sim_core::economy::MarketId(9003),
+                    sim_core::economy::MarketId(9004),
+                    sim_core::economy::GOOD_FOOD,
+                ),
+                sim_core::economy::Money(250),
+            )]
+            .into_iter()
+            .collect(),
+        ));
+    let world_id = runtime.world_id_for_persist().clone();
+    let snapshot = build_economy_snapshot(&runtime.world, &world_id, 0);
+    assert_eq!(snapshot.flows.len(), 1);
+    let flow = &snapshot.flows[0];
+    assert_eq!(
+        (
+            flow.src_market_id,
+            flow.dst_market_id,
+            flow.good_id,
+            flow.rate
+        ),
+        (9003, 9004, 1, 250)
+    );
+}
+
 /// Verify that `build_economy_snapshot` always populates the `vitals` field.
 ///
 /// The fixture is a fully-seeded `SimulationRuntime::new()` world (abutopia bundle

@@ -50,4 +50,13 @@ describe('draw order', () => {
       { type: 'building', isoY: 100, x: 0 },
     )).toBeGreaterThan(0);
   });
+
+  it('flows draw above roads but below actors; market nodes draw above everything', () => {
+    const at = (type: Parameters<typeof compareDrawableOrder>[0]['type']) => ({ type, isoY: 10, x: 5 });
+    expect(compareDrawableOrder(at('road'), at('flow'))).toBeLessThan(0);
+    expect(compareDrawableOrder(at('flow'), at('car'))).toBeLessThan(0);
+    expect(compareDrawableOrder(at('flow'), at('pedestrian'))).toBeLessThan(0);
+    expect(compareDrawableOrder(at('pedestrian'), at('marketNode'))).toBeLessThan(0);
+    expect(compareDrawableOrder(at('building'), at('marketNode'))).toBeLessThan(0);
+  });
 });

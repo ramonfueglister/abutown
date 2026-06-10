@@ -684,6 +684,12 @@ mod proto_roundtrip_tests {
                     routes_assigned: 7,
                     routes_failed: 1,
                 }),
+                flows: vec![EconomyFlow {
+                    src_market_id: 9003,
+                    dst_market_id: 9004,
+                    good_id: 1,
+                    rate: 250,
+                }],
             })),
         };
         assert_roundtrip(&msg);

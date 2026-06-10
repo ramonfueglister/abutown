@@ -1,4 +1,6 @@
-export type DrawableType = 'rail' | 'road' | 'railStation' | 'detail' | 'tree' | 'building' | 'car' | 'pedestrian';
+export type DrawableType =
+  | 'rail' | 'road' | 'railStation' | 'flow' | 'detail' | 'tree' | 'building'
+  | 'car' | 'pedestrian' | 'marketNode';
 
 export type DrawableOrderInput = {
   type: DrawableType;
@@ -25,11 +27,12 @@ export function drawPriority(type: DrawableType): number {
   if (type === 'road') return 0;
   if (type === 'rail') return 1;
   if (type === 'railStation') return 2;
-  if (type === 'car') return 3;
-  if (type === 'pedestrian') return 4;
-  if (type === 'detail') return 5;
-  if (type === 'tree') return 7;
-  return 7;
+  if (type === 'flow') return 3;
+  if (type === 'car') return 4;
+  if (type === 'pedestrian') return 5;
+  if (type === 'detail') return 6;
+  if (type === 'marketNode') return 9;
+  return 8; // tree, building
 }
 
 function compareFlatInfrastructureToActor(a: DrawableType, b: DrawableType): number {
@@ -39,9 +42,9 @@ function compareFlatInfrastructureToActor(a: DrawableType, b: DrawableType): num
 }
 
 function isFlatInfrastructure(type: DrawableType): boolean {
-  return type === 'road' || type === 'rail' || type === 'railStation';
+  return type === 'road' || type === 'rail' || type === 'railStation' || type === 'flow';
 }
 
 function isActor(type: DrawableType): boolean {
-  return type === 'car' || type === 'pedestrian';
+  return type === 'car' || type === 'pedestrian' || type === 'marketNode';
 }

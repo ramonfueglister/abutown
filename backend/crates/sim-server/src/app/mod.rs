@@ -316,13 +316,14 @@ fn build_economy_snapshot(
     world_id: &abutown_protocol::WorldId,
     tick: u64,
 ) -> w::EconomySnapshot {
-    use sim_core::economy::{AccountBook, MarketGoods, Markets, WageTelemetry};
+    use sim_core::economy::{AccountBook, FlowRateEwma, MarketGoods, Markets, WageTelemetry};
     use sim_core::mobility::resources::{
         AgentIdIndex, CitizenEconomicTargets, RouteAssignmentStats,
     };
     use sim_core::routing::Graph;
     let markets_res = world.resource::<Markets>();
     let goods_res = world.resource::<MarketGoods>();
+    let flows_res = world.resource::<FlowRateEwma>();
     let wages = world.resource::<WageTelemetry>();
     let graph = world.resource::<Graph>();
     let markets = markets_res
@@ -357,6 +358,16 @@ fn build_economy_snapshot(
             unsold_supply_last_tick: st.unsold_supply_last_tick.0,
         })
         .collect();
+    let flows = flows_res
+        .0
+        .iter()
+        .map(|(&(src, dst, good), &rate)| w::EconomyFlow {
+            src_market_id: src.0,
+            dst_market_id: dst.0,
+            good_id: u32::from(good.0),
+            rate: rate.0,
+        })
+        .collect();
     // Every caller's world installs EconomyPlugin + mobility (constructors at
     // runtime/mod.rs:218/368), so absence of any of these resources is a
     // programming error and must panic.
@@ -384,6 +395,7 @@ fn build_economy_snapshot(
         markets,
         goods,
         vitals,
+        flows,
     }
 }
 

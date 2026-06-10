@@ -531,6 +531,7 @@ fn flow_margin_pulls_sink_down_toward_loop_target() {
         src: m_src,
         dst: m_dst,
         good: g,
+        qty: 1,
         p_src: Money(500),
         p_dst: Money(5_000),
         dist: 10,
