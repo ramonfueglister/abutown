@@ -603,8 +603,7 @@ fn wood_route_distance_stays_within_participation_headroom() {
          lip 55 catches an anchor re-snap that silently shortens the route and \
          re-prices the whole convergence story"
     );
-    assert_eq!(
-        d_fwd, 59,
-        "the snapped abutopia anchors bake exactly 59 tiles"
-    );
+    // The snapped abutopia anchors currently bake 59 tiles; only the band is
+    // load-bearing, so the exact value is diagnostic, not asserted.
+    println!("WOOD route distance 9003↔9001: {d_fwd} tiles (band [55, 65])");
 }

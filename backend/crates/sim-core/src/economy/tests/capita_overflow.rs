@@ -614,7 +614,8 @@ fn wc_target_overflow_returns_err() {
 
 /// Below the ceiling: the REAL abutopia producer shape (batches 2, in_qty 10,
 /// bound 400) at the live factor 30 → wc_target = floor(400 · 600 / SCALE 1_000)
-/// = 240 — the exact working-capital target the live world runs with.
+/// = 240 — the working-capital target at the seed-time bound 400 (the live
+/// bound converges lower).
 #[test]
 fn wc_target_realistic_factor_30_is_ok() {
     let policy = ProducerPolicy {

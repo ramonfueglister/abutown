@@ -170,7 +170,8 @@ pub fn build_macro_buckets(
     //   demand is expressed (stocked, or the bound floored to 0). The θ-dividend
     //   retention (wages.rs) keys its working-capital target off `pool.max_price`;
     //   if the bound stayed 0 while the firm buys via this path, the firm would
-    //   retain its entire profit forever (the e54d2a1 conservative-retention rule)
+    //   retain its entire profit forever (the unpriced-pool conservative-retention
+    //   guard in `run_distribute_profit_at_tick`, wages.rs)
     //   and its cash would grow without bound. `last_generated_tick` is stamped
     //   too: the cursor means "a demand-generation pass ran for this pool at this
     //   tick" — this IS that pass on the macro cadence (the order path remains the
@@ -181,7 +182,7 @@ pub fn build_macro_buckets(
     // - mismatch fail-fast: an `InputPool` without a `ProducerPolicy` is a config
     //   bug (#83 class) — `InvalidOrder`, same doctrine as the order path.
     //
-    // KNOWN GAP (next slice, accepted here): like the `DemandPools`/`SupplyPools`
+    // KNOWN GAP: like the `DemandPools`/`SupplyPools`
     // loops above, the macro flow's dormant QUANTITIES are capita-blind on the
     // supply side (`offered_qty_per_tick` unscaled), so the chain's input arrives
     // at the unscaled per-cadence trickle while a scaled batch needs
