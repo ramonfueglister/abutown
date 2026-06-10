@@ -8,6 +8,24 @@ pub(crate) fn initial_mobility_snapshot_for_base_world(
     Ok(extract_from_world(&seeded_world))
 }
 
+/// Does a persisted snapshot belong to THIS base-world generation?
+///
+/// The population is DEMOGRAPHIC (births mint new agent ids, deaths remove
+/// seeded ones, agents wander off their seed link into activities and
+/// vehicles), so identity with the freshly-seeded world is the wrong
+/// criterion — the static-era version of this check silently reseeded the
+/// live world (tick→0) on every restart, killing frozen-time resume
+/// (2026-06-10). What actually signals "snapshot of another world
+/// generation" is GEOMETRY:
+/// - cars are statically authored (no demographics) — exact match stays;
+/// - every corridor link the snapshot references must exist in this base
+///   world, and its persisted polyline must match the authored corridor
+///   (a regenerated/relocated world ⇒ mismatch ⇒ reseed);
+/// - non-corridor walking links (graph edges, grass lattice) and activity
+///   ids are re-derived from the loaded world at hydrate time, so they
+///   cannot go stale and are not checked here;
+/// - an `InVehicle` reference to a vehicle the snapshot does not carry is
+///   internally inconsistent ⇒ reseed.
 pub(crate) fn mobility_snapshot_matches_base_world(
     snapshot: &MobilityPersistSnapshot,
     base_world: &BaseWorldBundle,
@@ -24,32 +42,48 @@ pub(crate) fn mobility_snapshot_matches_base_world(
         return false;
     }
 
-    let expected_pedestrians = expected_base_world_pedestrian_walks(base_world);
-    let expected_drivers = expected_base_world_driver_vehicles(base_world);
-    if snapshot.agents.len() != expected_pedestrians.len() + expected_drivers.len() {
+    const CORRIDOR_LINK_PREFIX: &str = "link:walk:corridor:";
+    let authored_corridors: std::collections::HashMap<String, Vec<(f32, f32)>> = base_world
+        .transport
+        .pedestrian_corridors
+        .iter()
+        .enumerate()
+        .map(|(index, corridor)| {
+            (
+                format!("{CORRIDOR_LINK_PREFIX}{index}"),
+                corridor
+                    .points
+                    .iter()
+                    .map(|point| (point.x, point.y))
+                    .collect(),
+            )
+        })
+        .collect();
+
+    // Every corridor polyline the snapshot persisted must match the authored
+    // geometry — this catches a regenerated world even for links no agent
+    // currently walks.
+    let corridor_polylines_current = snapshot
+        .link_polylines
+        .iter()
+        .filter(|(link_id, _)| link_id.starts_with(CORRIDOR_LINK_PREFIX))
+        .all(|(link_id, polyline)| {
+            authored_corridors
+                .get(link_id)
+                .is_some_and(|authored| polylines_match(polyline, authored))
+        });
+    if !corridor_polylines_current {
         return false;
     }
 
-    snapshot.agents.values().all(|agent| {
-        if let Some(vehicle_id) = expected_drivers.get(&agent.id.0) {
-            return matches!(
-                &agent.state,
-                sim_core::mobility::AgentMobilityState::InVehicle { vehicle_id: actual, .. }
-                    if actual.0 == *vehicle_id
-            );
+    snapshot.agents.values().all(|agent| match &agent.state {
+        sim_core::mobility::AgentMobilityState::Walking { link_id, .. } => {
+            !link_id.starts_with(CORRIDOR_LINK_PREFIX) || authored_corridors.contains_key(link_id)
         }
-
-        let Some(expected) = expected_pedestrians.get(&agent.id.0) else {
-            return false;
-        };
-        let sim_core::mobility::AgentMobilityState::Walking { link_id, .. } = &agent.state else {
-            return false;
-        };
-        link_id == &expected.link_id
-            && snapshot
-                .link_polylines
-                .get(link_id)
-                .is_none_or(|polyline| polylines_match(polyline, &expected.polyline))
+        sim_core::mobility::AgentMobilityState::InVehicle { vehicle_id, .. } => {
+            snapshot.vehicles.contains_key(vehicle_id)
+        }
+        _ => true,
     })
 }
 
@@ -57,12 +91,7 @@ pub(crate) fn normalize_seeded_agent_birth_ticks(
     snapshot: &mut MobilityPersistSnapshot,
     base_world: &BaseWorldBundle,
 ) {
-    let mut seed_ids = std::collections::HashSet::new();
-    seed_ids.extend(
-        expected_base_world_pedestrian_walks(base_world)
-            .keys()
-            .cloned(),
-    );
+    let mut seed_ids = expected_base_world_pedestrian_walks(base_world);
     seed_ids.extend(
         expected_base_world_driver_vehicles(base_world)
             .keys()
@@ -139,39 +168,26 @@ fn expected_base_world_driver_vehicles(
     expected
 }
 
-struct ExpectedPedestrianWalk {
-    link_id: String,
-    polyline: Vec<(f32, f32)>,
-}
-
+/// Seeded pedestrian agent ids (`agent:walk:N`). Only ids — since the
+/// 2026-06-10 resume fix the base-world match no longer pins seeded agents
+/// to their seed link/polyline (the population is demographic); the ids are
+/// still needed for seed-count capacity and birth-tick normalization.
 fn expected_base_world_pedestrian_walks(
     base_world: &BaseWorldBundle,
-) -> std::collections::HashMap<String, ExpectedPedestrianWalk> {
-    let mut expected = std::collections::HashMap::new();
+) -> std::collections::HashSet<String> {
+    let mut expected = std::collections::HashSet::new();
     let mut agent_index = 0u32;
     for group in &base_world.spawns.pedestrian_groups {
-        let Some(corridor_index) = base_world
+        if !base_world
             .transport
             .pedestrian_corridors
             .iter()
-            .position(|path| path.id == group.corridor_id)
-        else {
+            .any(|path| path.id == group.corridor_id)
+        {
             continue; // unreachable after validate(); skip defensively rather than abort
-        };
-        let corridor = &base_world.transport.pedestrian_corridors[corridor_index];
-        let polyline: Vec<(f32, f32)> = corridor
-            .points
-            .iter()
-            .map(|point| (point.x, point.y))
-            .collect();
+        }
         for _ in 0..group.agents_per_corridor {
-            expected.insert(
-                format!("agent:walk:{agent_index}"),
-                ExpectedPedestrianWalk {
-                    link_id: format!("link:walk:corridor:{corridor_index}"),
-                    polyline: polyline.clone(),
-                },
-            );
+            expected.insert(format!("agent:walk:{agent_index}"));
             agent_index += 1;
         }
     }

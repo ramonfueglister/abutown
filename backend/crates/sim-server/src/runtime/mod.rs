@@ -388,14 +388,26 @@ impl SimulationRuntime {
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, mut snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => {
+            Some((tick, mut snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => {
+                tracing::info!(tick, "resuming mobility from persisted snapshot");
                 normalize_seeded_agent_birth_ticks(&mut snap, base_world);
                 snap
             }
             None => initial_mobility_snapshot_for_base_world(base_world)
                 .map_err(HydrationError::Seed)?,
-            Some((_tick, _snap)) => initial_mobility_snapshot_for_base_world(base_world)
-                .map_err(HydrationError::Seed)?,
+            // Discarding a present-but-mismatched snapshot resets the world to
+            // tick 0 — that must never happen silently (the static-era check
+            // did exactly that on every restart, unnoticed for days).
+            Some((tick, snap)) => {
+                tracing::warn!(
+                    tick,
+                    agents = snap.agents.len(),
+                    vehicles = snap.vehicles.len(),
+                    "persisted mobility snapshot does not match this base-world generation — RESEEDING world at tick 0"
+                );
+                initial_mobility_snapshot_for_base_world(base_world)
+                    .map_err(HydrationError::Seed)?
+            }
         };
 
         apply_into_world(&mut world, mobility_snap);
