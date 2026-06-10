@@ -618,9 +618,9 @@ impl SimulationRuntime {
         &mut self,
     ) -> std::collections::HashMap<sim_core::ids::ChunkCoord, sim_core::mobility::MobilityChunkDelta>
     {
-        // Advance the world-event clock so commands applied this tick are
-        // stamped with a tick that moves forward (previously advanced by the
-        // removed legacy TilePulse emitter).
+        // Tick counter advanced once per tick (previously lived in the removed
+        // next_pulse); commands drain before the increment, so event
+        // tick-stamps match the old placement byte-for-byte.
         self.tick += 1;
         mobility_api::tick_mobility(&mut self.world, &mut self.schedule)
     }

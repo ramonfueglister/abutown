@@ -51,7 +51,8 @@ enum VehicleKind {
 // === Server → Client envelope ===
 
 message ServerMessage {
-  reserved 2; // was TilePulse (legacy global pulse, removed 2026-06-10)
+  reserved 2;
+  reserved "tile_pulse"; // was TilePulse (legacy global pulse, removed 2026-06-10)
   reserved 100 to max;
   oneof body {
     Hello hello = 1;

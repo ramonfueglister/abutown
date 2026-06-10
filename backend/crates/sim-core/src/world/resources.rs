@@ -9,12 +9,6 @@ use crate::ids::ChunkCoord;
 pub struct ChunksByCoord(pub HashMap<ChunkCoord, Entity>);
 
 #[derive(Resource, Default, Debug, Copy, Clone)]
-pub struct TickClock {
-    pub tick: u64,
-    pub version: u64,
-}
-
-#[derive(Resource, Default, Debug, Copy, Clone)]
 pub struct EventCount(pub usize);
 
 #[derive(Resource, Debug, Copy, Clone)]

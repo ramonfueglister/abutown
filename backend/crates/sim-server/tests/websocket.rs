@@ -264,6 +264,23 @@ where
     }
 }
 
+async fn read_economy_snapshot<S>(stream: &mut S) -> w::EconomySnapshot
+where
+    S: futures_util::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
+{
+    loop {
+        let message = read_server_message(stream).await;
+        if let Some(w::server_message::Body::EconomySnapshot(snap)) = message.body {
+            return snap;
+        }
+    }
+}
+
 async fn subscribe_to_seeded_chunks<S>(stream: &mut S)
 where
     S: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
@@ -470,41 +487,44 @@ async fn websocket_clients_receive_the_same_broadcast_tick() {
     // Drain the immediate EconomySnapshot sent on connect.
     let _initial_b = read_economy_snapshot(&mut client_b).await;
 
-    // Wait for the first per-tick EconomySnapshot on client A.
-    let snap_a = read_economy_snapshot(&mut client_a).await;
+    // Client B subscribed later, so anchor on its first per-tick snapshot.
+    // Client A subscribed earlier and is guaranteed to have received every
+    // frame that B received, so scan A until we find the matching tick.
+    let snap_b = read_economy_snapshot(&mut client_b).await;
 
-    // Collect EconomySnapshots on client B until we reach or pass snap_a.tick.
-    // The >= approach avoids a flake when the two clients straddle a tick boundary.
-    let mut snaps_b: Vec<w::EconomySnapshot> = Vec::new();
+    // Collect EconomySnapshots on client A until we reach or pass snap_b.tick.
+    // Because A connected before B, A's stream is a superset of B's stream,
+    // so snap_b.tick must appear in A's frames.
+    let mut snaps_a: Vec<w::EconomySnapshot> = Vec::new();
     loop {
-        let snap = read_economy_snapshot(&mut client_b).await;
+        let snap = read_economy_snapshot(&mut client_a).await;
         let tick = snap.tick;
-        snaps_b.push(snap);
-        if tick >= snap_a.tick {
+        snaps_a.push(snap);
+        if tick >= snap_b.tick {
             break;
         }
     }
 
-    // At least one frame on client B must share the exact same tick as snap_a,
+    // At least one frame on client A must share the exact same tick as snap_b,
     // and its world_id, markets, and goods must be identical (same broadcast frame).
-    let matching = snaps_b.iter().find(|s| s.tick == snap_a.tick);
+    let matching = snaps_a.iter().find(|s| s.tick == snap_b.tick);
     assert!(
         matching.is_some(),
-        "client B must receive an EconomySnapshot for tick {} (got ticks: {:?})",
-        snap_a.tick,
-        snaps_b.iter().map(|s| s.tick).collect::<Vec<_>>()
+        "client A must receive an EconomySnapshot for tick {} (got ticks: {:?})",
+        snap_b.tick,
+        snaps_a.iter().map(|s| s.tick).collect::<Vec<_>>()
     );
-    let snap_b = matching.unwrap();
+    let snap_a = matching.unwrap();
     assert_eq!(
-        snap_a.world_id, snap_b.world_id,
+        snap_b.world_id, snap_a.world_id,
         "world_id must match across clients for the same tick"
     );
     assert_eq!(
-        snap_a.markets, snap_b.markets,
+        snap_b.markets, snap_a.markets,
         "markets must be identical for the same broadcast tick"
     );
     assert_eq!(
-        snap_a.goods, snap_b.goods,
+        snap_b.goods, snap_a.goods,
         "goods must be identical for the same broadcast tick"
     );
 }
@@ -556,21 +576,4 @@ async fn subscribed_chunk_receives_mobility_chunk_delta_each_tick() {
         delta_seen,
         "per-tick MobilityChunkDelta should arrive within 60 messages"
     );
-}
-
-async fn read_economy_snapshot<S>(stream: &mut S) -> w::EconomySnapshot
-where
-    S: futures_util::Stream<
-            Item = Result<
-                tokio_tungstenite::tungstenite::Message,
-                tokio_tungstenite::tungstenite::Error,
-            >,
-        > + Unpin,
-{
-    loop {
-        let message = read_server_message(stream).await;
-        if let Some(w::server_message::Body::EconomySnapshot(snap)) = message.body {
-            return snap;
-        }
-    }
 }
