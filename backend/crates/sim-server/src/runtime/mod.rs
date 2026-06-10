@@ -61,10 +61,8 @@ pub const SEED_DENSITY: sim_core::mobility::seed::SeedDensity =
     };
 
 mod base_world_expectations;
-use base_world_expectations::*;
 pub(crate) use base_world_expectations::{
     expected_base_world_agent_count, initial_mobility_snapshot_for_base_world,
-    normalize_seeded_agent_birth_ticks,
 };
 
 pub fn default_base_world_path() -> std::path::PathBuf {
@@ -381,21 +379,34 @@ impl SimulationRuntime {
         }
         .install(&mut world, &mut schedule);
 
-        // Hydrate mobility state from a current base-world snapshot if present;
-        // otherwise initialize from the canonical base world.
+        // Resume mobility from the persisted snapshot when the store has one;
+        // otherwise seed fresh from the canonical base world. Compatibility is
+        // the store's contract — `read` is keyed by (world_id, schema_version)
+        // — so any returned snapshot IS the live world, however far it has
+        // evolved from the seed (births, deaths, routes). Structural world
+        // edits must bump `schema_version` in the world manifest.
         let mobility_snap = match mobility_snapshot_store
             .read(&world_id.0, &snapshot_compatibility)
             .await
             .map_err(HydrationError::Mobility)?
         {
-            Some((_tick, mut snap)) if mobility_snapshot_matches_base_world(&snap, base_world) => {
-                normalize_seeded_agent_birth_ticks(&mut snap, base_world);
+            Some((tick, snap)) => {
+                tracing::info!(
+                    world_id = %world_id.0,
+                    tick,
+                    agents = snap.agents.len(),
+                    "resuming mobility from persisted snapshot"
+                );
                 snap
             }
-            None => initial_mobility_snapshot_for_base_world(base_world)
-                .map_err(HydrationError::Seed)?,
-            Some((_tick, _snap)) => initial_mobility_snapshot_for_base_world(base_world)
-                .map_err(HydrationError::Seed)?,
+            None => {
+                tracing::warn!(
+                    world_id = %world_id.0,
+                    "no compatible mobility snapshot — seeding fresh from base world"
+                );
+                initial_mobility_snapshot_for_base_world(base_world)
+                    .map_err(HydrationError::Seed)?
+            }
         };
 
         apply_into_world(&mut world, mobility_snap);
