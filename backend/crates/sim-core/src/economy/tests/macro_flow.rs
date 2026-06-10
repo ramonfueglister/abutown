@@ -3442,3 +3442,43 @@ fn active_multi_ask_partial_export_settles_not_faults() {
     );
     assert!(orders.bids.is_empty(), "the bid (qty 5) fully drained");
 }
+
+#[test]
+fn realized_flows_carry_shipped_quantity() {
+    // surplus@A (1 seller, 200 units @ ask 500) → deficit@B (1 buyer, 200 units @ bid 2000),
+    // dist 4, rate 50. Same parameters as macro_flow_conserves_money_and_goods so we know
+    // exactly q=200 ships. We capture `realized` and check qty > 0.
+    let mut s = surplus_deficit_scenario(1, 200, 500, 1, 200, 2000, 4, Money(50));
+    let mut realized = crate::economy::RealizedFlows::default();
+    run_macro_flow_at_tick(
+        &mut s.accounts,
+        &mut s.inventory,
+        &mut s.ledger,
+        &s.demand,
+        &s.supply,
+        &mut s.market_goods,
+        &s.dirty,
+        &s.dormant,
+        &s.distances,
+        &s.config,
+        0,
+        &mut crate::economy::FlowShipments::default(),
+        &mut crate::economy::NextShipmentId::default(),
+        &mut realized,
+        &mut crate::economy::OrderBook::default(),
+        &mut crate::economy::NextOrderId::default(),
+        &mut std::collections::BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(
+        !realized.0.is_empty(),
+        "test harness must realize at least one flow"
+    );
+    for flow in &realized.0 {
+        assert!(
+            flow.qty > 0,
+            "realized flow must carry shipped qty, got {}",
+            flow.qty
+        );
+    }
+}

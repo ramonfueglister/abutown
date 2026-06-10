@@ -67,6 +67,7 @@ pub struct RealizedFlow {
     pub src: MarketId,
     pub dst: MarketId,
     pub good: GoodId,
+    pub qty: i64,
     pub p_src: Money,
     pub p_dst: Money,
     pub dist: i64,
