@@ -102,8 +102,9 @@ pub const EXTRACTOR_FOOD_FA: EconomicActorId = EconomicActorId(8_033);
 /// 8_041 — the RAW→WOOD extractor backing the production chain: identical faucet
 /// machinery to 8_032/8_033 (`RawDeposit` + RAW→WOOD `ProductionPool` + `SupplyPool`),
 /// only `out_good = GOOD_WOOD`. Sells at m_fa (9003); the WOOD travels 9003→9001 via
-/// the unchanged macro_flow, where `PRODUCER_TOOLS` (8_031) buys it. Next free actor
-/// id after the extractor block (8_031..8_033), clear of 8_001..8_022.
+/// the unchanged macro_flow, where `PRODUCER_TOOLS` (8_031) buys it. The id
+/// deliberately skips from the 8_031..8_033 block to the next decade (8_041),
+/// leaving headroom for more producers/extractors; clear of 8_001..8_022.
 pub const EXTRACTOR_WOOD: EconomicActorId = EconomicActorId(8_041);
 
 /// A standing raw-goods faucet for one actor. PERSISTED (mirrors `ProductionPool`).

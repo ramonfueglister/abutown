@@ -7,6 +7,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::economy::flow_telemetry::FlowRateEwma;
 use crate::economy::{EconomyConfig, GoodId, MarketId, Money, Quantity};
 
 /// Reserved actor-id offset for shipment-traders so they never collide with
@@ -85,7 +86,7 @@ pub struct FlowShipmentParams<'w> {
     pub shipments: ResMut<'w, FlowShipments>,
     pub next_id: ResMut<'w, NextShipmentId>,
     pub realized: ResMut<'w, RealizedFlows>,
-    pub ewma: ResMut<'w, crate::economy::flow_telemetry::FlowRateEwma>,
+    pub ewma: ResMut<'w, FlowRateEwma>,
 }
 
 /// Drop arrived shipments that no longer have a live render-agent.

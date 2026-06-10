@@ -260,8 +260,8 @@ pub struct ProducerSpec {
     pub in_qty: i64,
     pub out_good: u16,
     pub out_qty: i64,
-    pub qty: i64,       // sell-side offered_qty_per_tick (wie ExtractorSpec)
-    pub min_price: i64, // sell-side Reservationspreis
+    pub qty: i64,       // sell-side offered_qty_per_tick (same as ExtractorSpec)
+    pub min_price: i64, // sell-side reservation price
     pub theta_bps: u16,
     pub batches_target: u32,
     pub opening_cash: i64,

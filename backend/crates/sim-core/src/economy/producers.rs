@@ -46,6 +46,30 @@ pub struct InputPool {
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct InputPools(pub BTreeMap<EconomicActorId, InputPool>);
 
+/// Capita-scaled batch quantity: `batches_target * in_qty * capita_factor`
+/// (factor floored at 1), the input quantity that `batches_target` scaled
+/// batches consume.
+///
+/// **Coupling constraint:** this is the SINGLE source of the quantity used by
+/// BOTH the working-capital target (`wc_target`) and the Leontief order target
+/// (`run_generate_input_orders_at_tick`). The docs of both lean on the two
+/// staying coupled — "the buffer for n batches equals the settle value of
+/// buying them" only holds while the buffer and the order are sized from the
+/// same arithmetic. Do not fork this computation.
+pub(crate) fn scaled_batch_qty(
+    policy: ProducerPolicy,
+    pool: &InputPool,
+    capita_factor: i64,
+) -> Result<Quantity, EconomyError> {
+    let qty = i64::try_from(
+        i128::from(policy.batches_target)
+            * (pool.in_qty.0 as i128)
+            * (capita_factor.max(1) as i128),
+    )
+    .map_err(|_| EconomyError::Overflow)?;
+    Ok(Quantity(qty))
+}
+
 /// Working-capital target in Money: expected input cost of `batches_target` batches
 /// at the current participation bound. Computed with the SAME scale arithmetic as
 /// order settlement (`checked_order_value`, `price·qty / ECONOMY_SCALE` in i128),
@@ -53,9 +77,10 @@ pub struct InputPools(pub BTreeMap<EconomicActorId, InputPool>);
 /// quantity is capita-scaled (`×capita_factor`, factor 1 byte-identical) because
 /// production consumes `in_qty·capita_factor` per batch (production.rs) — the buffer
 /// must cover the SCALED batches or the dividend drains the firm's input budget.
-/// A non-positive `max_price` surfaces loudly as `NegativeMoney`/`ZeroPrice` (a
-/// seeded pool's participation bound is validated/recomputed > 0 — anything else
-/// is a seed or generation bug).
+/// A non-positive `max_price` surfaces loudly as `NegativeMoney`/`ZeroPrice`.
+/// A seeded pool's bound is normally positive, but the participation bound CAN
+/// legitimately floor to zero (small positive reference price + integer
+/// flooring) — which is exactly why callers must guard, per the next paragraph.
 ///
 /// **Callers must guard `max_price > 0` before invoking.** The dividend path
 /// (`run_distribute_profit_at_tick` in wages.rs) checks `pool.max_price.0 <= 0` and
@@ -67,13 +92,8 @@ pub(crate) fn wc_target(
     pool: &InputPool,
     capita_factor: i64,
 ) -> Result<Money, EconomyError> {
-    let batch_qty = i64::try_from(
-        i128::from(policy.batches_target)
-            * (pool.in_qty.0 as i128)
-            * (capita_factor.max(1) as i128),
-    )
-    .map_err(|_| EconomyError::Overflow)?;
-    checked_order_value(pool.max_price, Quantity(batch_qty))
+    let batch_qty = scaled_batch_qty(policy, pool, capita_factor)?;
+    checked_order_value(pool.max_price, batch_qty)
 }
 
 /// Participation bound (§5.4): never bid more per input unit than the expected
@@ -125,10 +145,11 @@ pub(crate) fn participation_bound(
 /// - `OrderRejected { reason: InsufficientFunds }` when affordable == 0 (cash = 0).
 ///   When `max_price.0 <= 0` after the bound computation the `if desired.0 > 0 &&
 ///   pool.max_price.0 > 0` guard silently skips ordering for this interval; the cursor
-///   IS stamped so the next generation fires on schedule. This is not an error: it means
-///   the output reference price dropped to zero (market structurally unviable), which
-///   will surface downstream as starved production. Price signals can recover next
-///   interval when the output price rises.
+///   IS stamped so the next generation fires on schedule. This is not an error: the
+///   bound floored to zero — the integer flooring in `participation_bound` maps a
+///   positive-but-small output reference price to 0 (a zero reference price itself is
+///   `Err(ZeroPrice)`, propagated above). This surfaces downstream as starved
+///   production; it recovers next interval when the output price rises.
 /// - cursor (`last_generated_tick`) stamped after the bid/rejection/stocked-skip
 ///
 /// **Mismatch invariant (fail-fast):** every `InputPool` entry MUST have a matching
@@ -189,15 +210,9 @@ pub fn run_generate_input_orders_at_tick(
         pool.max_price = participation_bound(p_out_ref, labor_share, pool.out_qty, pool.in_qty)?;
 
         // Leontief desired quantity: batches_target * in_qty * capita_factor − held
-        // (floored at 0). Same i128 scale pattern as pools.rs / production.rs.
-        let target_qty = Quantity(
-            i64::try_from(
-                i128::from(policy.batches_target)
-                    * (pool.in_qty.0 as i128)
-                    * (capita_factor.max(1) as i128),
-            )
-            .map_err(|_| EconomyError::Overflow)?,
-        );
+        // (floored at 0). Shared with wc_target via scaled_batch_qty — see its
+        // coupling-constraint doc.
+        let target_qty = scaled_batch_qty(policy, &pool, capita_factor)?;
         let held = inventory.balance(actor, pool.good).available;
         let desired = Quantity((target_qty.0 - held.0).max(0));
 

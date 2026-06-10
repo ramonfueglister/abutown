@@ -359,7 +359,8 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
 fn food_extractor_ids_are_free_and_distinct() {
     use crate::economy::EconomicActorId;
     use crate::economy::production::{EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA, PRODUCER_TOOLS};
-    // Distinct from the TOOLS extractor and from each other.
+    // Distinct from the TOOLS producer (8_031, a buying firm since the
+    // production chain — no longer an extractor) and from each other.
     assert_ne!(EXTRACTOR_FOOD_A, PRODUCER_TOOLS);
     assert_ne!(EXTRACTOR_FOOD_FA, PRODUCER_TOOLS);
     assert_ne!(EXTRACTOR_FOOD_A, EXTRACTOR_FOOD_FA);

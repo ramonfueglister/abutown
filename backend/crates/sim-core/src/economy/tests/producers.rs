@@ -36,17 +36,10 @@ fn seeded_market_good(market: MarketId) -> MarketGoodState {
         market,
         good: GOOD_TOOLS,
     };
-    MarketGoodState {
-        key,
-        last_settlement_price: Money(1_000),
-        ewma_reference_price: Money(1_000),
-        traded_qty_last_tick: Quantity(0),
-        unmet_demand_last_tick: Quantity(0),
-        unsold_supply_last_tick: Quantity(0),
-        consumed_qty_last_tick: Quantity::ZERO,
-        dirty: false,
-        last_cleared_tick: 0,
-    }
+    let mut state = MarketGoodState::new(key);
+    state.last_settlement_price = Money(1_000);
+    state.ewma_reference_price = Money(1_000);
+    state
 }
 
 // ── participation_bound pure tests ────────────────────────────────────────────

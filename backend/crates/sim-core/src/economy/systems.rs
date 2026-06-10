@@ -322,7 +322,11 @@ pub fn expire_orders_system(
 
 /// Generate both consumer/supplier pool orders AND Leontief input orders in a single
 /// system, sharing the same dormant-market set and TTL. The two passes are independent
-/// (consumer/supply pools do not overlap with input pools) and use the same fail-fast
+/// because demand-pool actors and producer (input-pool) actors are disjoint — the
+/// seed-enforced invariant (see the "Role disjointness" assert in markets_layer.rs).
+/// Note producers DO appear on the sell side too (8031 holds a SupplyPool for TOOLS
+/// while its InputPool buys WOOD); only the demand/input actor sets are disjoint.
+/// Both passes use the same fail-fast
 /// `.expect` convention: an `Err` here is a bug (overflow, zero price, or mismatch)
 /// that must surface loudly rather than silently drop orders.
 #[allow(clippy::too_many_arguments)]
