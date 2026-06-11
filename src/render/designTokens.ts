@@ -30,6 +30,10 @@ export const VEHICLE_COLORS = ['#e85d75', '#3f8fc7', '#49a879', '#e5a944', '#8c7
 
 // --- markets (L1) ---
 export const MARKET_ORANGE = '#d9783a';
+export const STATION_FILL = '#fdfcf5';
+
+// --- flows (L3) ---
+export const FLOW_CASING = '#fdfcf5';
 
 // --- flows (L3) — keyed by backend GoodId (goods.rs: FOOD=1 WOOD=2 IRON=3 TOOLS=4 RAW=5) ---
 export const GOOD_COLORS: Readonly<Partial<Record<number, string>>> = {
@@ -45,4 +49,4 @@ export const GOOD_COLOR_FALLBACK = '#8a8f94';
 export const ZOOM_ECONOMY_MAX = 0.6;
 export const ZOOM_CITY_MIN = 1.0;
 export const FLOW_MIN_OPACITY = 0.15;
-export const AGENT_SHIMMER_OPACITY = 0.35;
+export const AGENT_SHIMMER_OPACITY = 0.55;

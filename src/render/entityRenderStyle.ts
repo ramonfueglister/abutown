@@ -61,7 +61,7 @@ export function pedestrianRenderStyle(
     : screenStableWorldSize(laneOffset, cameraScale, { minWorld: 0, maxWorld: 14 });
   return {
     lane: lanePixels === 0 ? { x: 0, y: 0 } : screenRightLaneOffset(currentPoint, nextPoint, lanePixels),
-    selectedRadius: screenStableWorldSize(4.5, cameraScale, { minWorld: 3.2, maxWorld: 10 }),
-    radius: screenStableWorldSize(1.6, cameraScale, { minWorld: 1.2, maxWorld: 3.2 }),
+    selectedRadius: screenStableWorldSize(5.5, cameraScale, { minWorld: 4, maxWorld: 13 }),
+    radius: screenStableWorldSize(2.6, cameraScale, { minWorld: 2.1, maxWorld: 6 }),
   };
 }

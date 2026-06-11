@@ -166,7 +166,15 @@ function drawScene(state: MinimalMapRendererState): void {
   for (const coord of state.trees) if (isCoordVisible(coord, visibleGrid)) network.drawTree(state, coord);
 
   const marketsById = new Map((state.markets ?? []).map((m) => [m.marketId, m]));
-  lastFlowsDrawn = drawFlows(state.ctx, (c) => iso(state, c), marketsById, state.flows ?? [], flowsBlend);
+  lastFlowsDrawn = drawFlows(
+    state.ctx,
+    (c) => iso(state, c),
+    marketsById,
+    state.flows ?? [],
+    flowsBlend,
+    state.camera.scale,
+    state.now(),
+  );
 
   for (const item of carDrawables) drawCar(state, item.car, item.vehicleId === state.selectedVehicleId);
   for (const item of pedestrianDrawables) drawPedestrian(state, item.pedestrian, item.agentId === state.selectedAgentId, agentsBlend);
@@ -266,9 +274,11 @@ function drawWorldDateLabel(state: MinimalMapRendererState): void {
   const label = formatSimDate(state.simTime);
   ctx.save();
   ctx.setTransform(viewport.devicePixelRatio, 0, 0, viewport.devicePixelRatio, 0, 0);
-  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.font = '600 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.textBaseline = 'bottom';
-  ctx.fillStyle = 'rgba(241, 238, 220, 0.72)';
-  ctx.fillText(label, 12, viewport.height - 8);
+  ctx.textAlign = 'right';
+  // ink on paper — the old light-on-light label was unreadable over GROUND
+  ctx.fillStyle = 'rgba(46, 52, 64, 0.78)';
+  ctx.fillText(label, viewport.width - 12, viewport.height - 10);
   ctx.restore();
 }

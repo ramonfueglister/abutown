@@ -39,16 +39,16 @@ describe('entityRenderStyle', () => {
   it('does not add a default visual lane offset for backend pedestrians', () => {
     expect(pedestrianRenderStyle({ x: 0, y: 0 }, { x: 10, y: 0 }, 0.5, 0)).toEqual({
       lane: { x: 0, y: 0 },
-      selectedRadius: 9,
-      radius: 3.2,
+      selectedRadius: 11,
+      radius: 5.2,
     });
   });
 
   it('can still apply an explicit pedestrian lane offset', () => {
     expect(pedestrianRenderStyle({ x: 0, y: 0 }, { x: 10, y: 0 }, 0.5, 2)).toEqual({
       lane: { x: 0, y: 4 },
-      selectedRadius: 9,
-      radius: 3.2,
+      selectedRadius: 11,
+      radius: 5.2,
     });
   });
 
