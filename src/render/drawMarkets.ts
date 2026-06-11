@@ -1,16 +1,16 @@
 import type { MarketGoodDto, MarketLocationDto } from '../backend/mobilityProtocol';
-import { GROUND, MARKET_ORANGE } from './designTokens';
+import { AGENT_INK, MARKET_ORANGE, STATION_FILL, TRADER_RED } from './designTokens';
 import { screenStableWorldSize } from './minimalGlyphScale';
 
 type Point = { x: number; y: number };
 
 /** Triangle vertices for the price-trend marker. Apex points toward the trend. */
 export function trendTriangle(point: { x: number; y: number }, radius: number, dir: -1 | 1): [Point, Point, Point] {
-  const baseY = point.y + dir * (radius * 0.45);
+  const baseY = point.y + dir * (radius + 5);
   return [
-    { x: point.x, y: baseY + dir * 3 },
-    { x: point.x - 3, y: baseY - dir * 2 },
-    { x: point.x + 3, y: baseY - dir * 2 },
+    { x: point.x, y: baseY + dir * 4 },
+    { x: point.x - 3.4, y: baseY - dir * 2 },
+    { x: point.x + 3.4, y: baseY - dir * 2 },
   ];
 }
 export type PriceTrend = 'up' | 'down' | 'flat';
@@ -72,8 +72,9 @@ export function drawMarketNodes(
     const radius = screenStableWorldSize(
       marketNodeRadius(marketActivity(goods)),
       cameraScale,
-      { minWorld: 5, maxWorld: 16 },
+      { minWorld: 6, maxWorld: 30 },
     );
+    const ringWidth = Math.max(2.4, radius * 0.3);
 
     const traded = marketActivity(goods);
     const tracked = pulseState.get(market.marketId);
@@ -89,32 +90,38 @@ export function drawMarketNodes(
     if (pulse > 0) {
       ctx.globalAlpha = pulse;
       ctx.strokeStyle = MARKET_ORANGE;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = ringWidth;
       ctx.beginPath();
-      ctx.arc(point.x, point.y, radius * 1.6, 0, Math.PI * 2);
+      ctx.arc(point.x, point.y, radius * 1.7, 0, Math.PI * 2);
       ctx.stroke();
     }
+
+    // Mini-Metro station: paper-white interchange disc with a heavy ink ring.
     ctx.globalAlpha = 1;
-    ctx.fillStyle = MARKET_ORANGE;
-    ctx.strokeStyle = GROUND;
-    ctx.lineWidth = 2;
+    ctx.fillStyle = STATION_FILL;
+    ctx.strokeStyle = AGENT_INK;
+    ctx.lineWidth = ringWidth;
     ctx.beginPath();
     ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+
+    // Unmet demand: the ink ring stays open — an orange (or red when starved)
+    // arc closes around the node proportional to satisfied demand.
     const fraction = satisfiedDemandFraction(goods);
     if (fraction < 1) {
-      ctx.strokeStyle = MARKET_ORANGE;
-      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = fraction < 0.5 ? TRADER_RED : MARKET_ORANGE;
+      ctx.lineWidth = ringWidth;
       ctx.beginPath();
-      ctx.arc(point.x, point.y, radius + 3, -Math.PI / 2, -Math.PI / 2 + fraction * Math.PI * 2);
+      ctx.arc(point.x, point.y, radius + ringWidth * 1.4, -Math.PI / 2, -Math.PI / 2 + fraction * Math.PI * 2);
       ctx.stroke();
     }
+
     const trend = priceTrend(goods);
     if (trend !== 'flat') {
       const dir = trend === 'up' ? -1 : 1;
       const [apex, bl, br] = trendTriangle(point, radius, dir);
-      ctx.fillStyle = GROUND;
+      ctx.fillStyle = trend === 'up' ? TRADER_RED : AGENT_INK;
       ctx.beginPath();
       ctx.moveTo(apex.x, apex.y);
       ctx.lineTo(bl.x, bl.y);
@@ -122,6 +129,31 @@ export function drawMarketNodes(
       ctx.closePath();
       ctx.fill();
     }
+
+    drawMarketLabel(ctx, market.name, point, radius, cameraScale);
     ctx.restore();
   }
+}
+
+/** Station name in screen-stable small caps under the node, with a paper halo. */
+function drawMarketLabel(
+  ctx: CanvasRenderingContext2D,
+  name: string,
+  point: Point,
+  radius: number,
+  cameraScale: number,
+): void {
+  if (!name) return;
+  const fontSize = screenStableWorldSize(11, cameraScale, { minWorld: 7, maxWorld: 36 });
+  ctx.font = `600 ${fontSize.toFixed(1)}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const y = point.y + radius * 1.6 + fontSize * 0.55;
+  ctx.lineWidth = fontSize * 0.28;
+  ctx.strokeStyle = STATION_FILL;
+  ctx.globalAlpha = 0.85;
+  ctx.strokeText(name, point.x, y);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = AGENT_INK;
+  ctx.fillText(name, point.x, y);
 }

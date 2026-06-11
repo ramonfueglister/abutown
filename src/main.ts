@@ -128,7 +128,7 @@ async function startRuntime(): Promise<void> {
     },
     onEconomyState: (state) => {
       economyState = state;
-      setVitalsHud(document, state.vitals);
+      setVitalsHud(document, state.vitals, [...state.goods.values()]);
     },
     onTileKindSet: (event) => {
       const key = `${event.x}:${event.y}`;

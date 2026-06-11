@@ -7,6 +7,7 @@ import {
   AGENT_INK,
   SELECTION_HALO_AGENT,
   SELECTION_HALO_VEHICLE,
+  STATION_FILL,
   TRADER_RED,
   VEHICLE_COLORS,
 } from './designTokens';
@@ -57,7 +58,15 @@ export function drawPedestrian(
   }
   const resolved = agentGlyph(pedestrian.stateType, pedestrian.kind);
   const glyph = blend.detail === 'aggregate' ? { ...resolved, shape: 'dot' as const } : resolved;
-  ctx.globalAlpha *= blend.opacity;
+  // Traders are the economy's couriers — keep them readable at every zoom.
+  ctx.globalAlpha *= pedestrian.kind === 'trader' ? Math.max(0.95, blend.opacity) : blend.opacity;
+  if (pedestrian.kind === 'trader') {
+    ctx.strokeStyle = STATION_FILL;
+    ctx.lineWidth = Math.max(1, style.radius * 0.5);
+    ctx.beginPath();
+    ctx.arc(0, 0, style.radius * glyph.radiusScale, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   if (glyph.shape === 'ring') {
     ctx.strokeStyle = glyph.color;
     ctx.lineWidth = Math.max(1.2, style.radius * 0.45);
