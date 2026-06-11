@@ -13,7 +13,7 @@ use crate::economy::{
 use crate::ids::AgentId;
 use crate::mobility::MarketBinding;
 use crate::mobility::components::{AgentMarker, StableAgentId};
-use crate::mobility::resources::{CitizenEconomicTargets, Tick};
+use crate::mobility::resources::CitizenEconomicTargets;
 use crate::routing::{Graph, Node, NodeId, NodeKind};
 use crate::world::components::{ActiveChunk, ChunkCoordComp};
 use crate::world::plugin::CorePlugin;
@@ -205,8 +205,10 @@ fn run_conservation_with_factor(factor: i64, n: u64) {
     let money_before = world.resource::<AccountBook>().total_money().unwrap();
 
     for i in 0..n {
+        // MobilityPlugin's tick_increment_system advances Tick inside the schedule;
+        // a manual increment here would double the stride and halve every
+        // interval-gated cadence (see tests/economy_production_chain.rs run_tick).
         schedule.run(&mut world);
-        world.resource_mut::<Tick>().0 += 1;
         assert_eq!(
             world.resource::<AccountBook>().total_money().unwrap(),
             money_before,
@@ -270,8 +272,10 @@ fn run_solvency_scenario(factor: i64, n: u64) -> (i64, usize) {
     let money_before = world.resource::<AccountBook>().total_money().unwrap();
 
     for i in 0..n {
+        // tick_increment_system advances Tick inside the schedule — no manual
+        // increment (it would double the stride; see run_tick in
+        // tests/economy_production_chain.rs).
         schedule.run(&mut world);
-        world.resource_mut::<Tick>().0 += 1;
         assert_eq!(
             world.resource::<AccountBook>().total_money().unwrap(),
             money_before,
@@ -437,8 +441,10 @@ fn run_density_scenario(capita_baseline: i64, n_citizens: u64, n_ticks: u64) -> 
     let mut mid_consumed: i64 = 0;
 
     for i in 0..n_ticks {
+        // tick_increment_system advances Tick inside the schedule — no manual
+        // increment (it would double the stride; see run_tick in
+        // tests/economy_production_chain.rs).
         schedule.run(&mut world);
-        world.resource_mut::<Tick>().0 += 1;
 
         // (a) Money-conservation: byte-invariant every tick.
         assert_eq!(

@@ -307,7 +307,6 @@ fn conservation_full_plugin_multi_tick() {
         MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
         SupplyPools, TradeLedger,
     };
-    use crate::mobility::resources::Tick;
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     use bevy_ecs::prelude::*;
@@ -488,8 +487,10 @@ fn conservation_full_plugin_multi_tick() {
     let mut last_seen = 0usize;
     let n = 60u64;
     for _ in 0..n {
+        // MobilityPlugin's tick_increment_system advances Tick inside the schedule;
+        // a manual increment here would double the stride and halve every
+        // interval-gated cadence (see tests/economy_production_chain.rs run_tick).
         schedule.run(&mut world);
-        world.resource_mut::<Tick>().0 += 1;
         assert_eq!(
             world.resource::<AccountBook>().total_money().unwrap(),
             money_before,
@@ -608,7 +609,6 @@ fn steady_state_multi_tick() {
         MarketGoodState, MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool,
         SupplyPools, TradeLedger,
     };
-    use crate::mobility::resources::Tick;
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     use bevy_ecs::prelude::*;
@@ -795,8 +795,10 @@ fn steady_state_multi_tick() {
     let mut max_price_tail: Vec<i64> = Vec::new();
 
     for i in 0..n {
+        // tick_increment_system advances Tick inside the schedule — no manual
+        // increment (it would double the stride and halve the tâtonnement cadence;
+        // see run_tick in tests/economy_production_chain.rs).
         schedule.run(&mut world);
-        world.resource_mut::<Tick>().0 += 1;
         // (a) money constant EVERY tick.
         assert_eq!(
             world.resource::<AccountBook>().total_money().unwrap(),

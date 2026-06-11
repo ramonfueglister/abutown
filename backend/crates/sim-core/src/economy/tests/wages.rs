@@ -832,10 +832,12 @@ fn full_economy_world() -> (World, bevy_ecs::schedule::Schedule) {
     (world, schedule)
 }
 
-/// Run the schedule once and advance the tick counter (mirrors all wired tests).
+/// Run the schedule once. MobilityPlugin's tick_increment_system advances Tick
+/// inside the schedule; a manual increment here would double the stride and
+/// halve every interval-gated cadence relative to schedule runs
+/// (see tests/economy_production_chain.rs run_tick).
 fn tick_world(world: &mut World, schedule: &mut bevy_ecs::schedule::Schedule) {
     schedule.run(world);
-    world.resource_mut::<Tick>().0 += 1;
 }
 
 /// Auction path: a supplier sells TOOLS via SupplyPool (active market → auction
@@ -2088,11 +2090,11 @@ fn full_tick_wage_profit_rebate_all_net_household_sector_to_zero() {
     let before = world.resource::<AccountBook>().total_money().unwrap();
     let interval = world.resource::<EconomyConfig>().macro_flow_interval_ticks;
 
-    // Run enough loop iterations that at least one rebate-boundary tick is reached. Because
-    // tick_world DOUBLE-increments Tick (schedule's own tick_increment + the helper's +=1),
-    // Tick.0 advances by 2 per iteration, so the loop counter is NOT Tick.0. We therefore
-    // pin every boundary assertion against the REAL Tick.0 read inside the loop, never the
-    // loop index. Run generously past one interval.
+    // Run enough loop iterations that at least one rebate-boundary tick is reached.
+    // tick_world advances Tick by exactly 1 per run (inside the schedule, AFTER the
+    // economy systems), so the tick the economy gated on during a run is the
+    // post-run Tick.0 − 1. Pin every boundary assertion against that in-run tick,
+    // never the loop index. Run generously past one interval.
     let mut saw_operator_drained_on_boundary = false;
     for _ in 0..(interval as usize + 4) {
         tick_world(&mut world, &mut schedule);
@@ -2109,17 +2111,20 @@ fn full_tick_wage_profit_rebate_all_net_household_sector_to_zero() {
             Money::ZERO,
             "HOUSEHOLD_SECTOR nets to zero after the full tick (all three legs)"
         );
-        // The rebate system gates on Tick.0 % interval == 0 (phase-locked to the operator
-        // credit). On any such boundary tick the operator must read zero AFTER the tick.
-        let now = world.resource::<crate::mobility::resources::Tick>().0;
-        if interval != 0 && now % interval == 0 {
+        // The rebate system gates on the in-run Tick.0 % interval == 0 (phase-locked
+        // to the operator credit). tick_increment_system has already bumped Tick by
+        // the time we read it, so the tick the rebate gated on is `now - 1`. On any
+        // such boundary tick the operator must read zero AFTER the tick.
+        let now = world.resource::<Tick>().0;
+        let ran_tick = now - 1;
+        if interval != 0 && ran_tick % interval == 0 {
             assert_eq!(
                 world
                     .resource::<AccountBook>()
                     .account(crate::economy::TRANSPORT_OPERATOR)
                     .available,
                 Money::ZERO,
-                "operator drained at the interval boundary Tick.0={now}"
+                "operator drained at the interval boundary Tick.0={ran_tick}"
             );
             saw_operator_drained_on_boundary = true;
         }
