@@ -238,8 +238,8 @@ pub fn route_assignment_system(
         // Deterministic one-tick lag: EconomySet::Attribution and MobilitySet::Advance
         // have no explicit ordering edge in the schedule (both only constrain themselves
         // before tick_increment_system / MobilitySet::Bookkeeping), so this may read the
-        // prior tick's CitizenEconomicTargets. CitizenEconomicTargets is written exactly
-        // once per tick by EconomySet::Attribution and read once here, so the lag is
+        // prior tick's CitizenEconomicTargets. Only EconomySet::Attribution writes it
+        // (a zero-order hold refreshed on macro-flow delivery ticks), so the lag is
         // deterministic and bounded to one tick — acceptable for Slice 1.
         let destination =
             economic_destination(&stage, &stable.0, geometric_destination, targets.as_deref());
