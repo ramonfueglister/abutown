@@ -258,8 +258,10 @@ fn tick_audit_fires_every_tick_under_full_plugin() {
     world.insert_resource(Tick(0));
 
     for _ in 0..3 {
+        // MobilityPlugin's tick_increment_system advances Tick inside the schedule;
+        // a manual increment here would double the stride per schedule run
+        // (see tests/economy_production_chain.rs run_tick).
         schedule.run(&mut world);
-        world.resource_mut::<Tick>().0 += 1;
     }
     let n_audit = world
         .resource::<TradeLedger>()
@@ -287,8 +289,9 @@ fn injected_money_drift_panics_the_audit() {
     EconomyPlugin.install(&mut world, &mut schedule);
     world.insert_resource(Tick(0));
 
-    schedule.run(&mut world); // tick 0: audit sets the baseline
-    world.resource_mut::<Tick>().0 += 1;
+    // tick 0: audit sets the baseline. tick_increment_system (installed by
+    // MobilityPlugin) advances Tick inside the schedule — no manual increment.
+    schedule.run(&mut world);
     // MINT money (a conservation violation) between ticks.
     world
         .resource_mut::<AccountBook>()

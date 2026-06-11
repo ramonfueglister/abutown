@@ -372,7 +372,6 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
     use crate::economy::systems::EconomyConfig;
     use crate::economy::{AccountBook, EconomyPlugin, TradeLedger};
     use crate::mobility::components::AgentMarker;
-    use crate::mobility::resources::Tick;
     use crate::world::plugin::CorePlugin;
     use crate::world::schedule::SimPlugin;
     use std::collections::BTreeMap;
@@ -551,8 +550,10 @@ fn conservation_holds_at_factor_30_for_50_ticks() {
     // 50 ticks — byte-invariant money assertion mirrors the #78 tick audit.
     // If any conservation violation occurs the audit system panics (fail-fast).
     for i in 0..50_u64 {
+        // MobilityPlugin's tick_increment_system advances Tick inside the schedule;
+        // a manual increment here would double the stride
+        // (see tests/economy_production_chain.rs run_tick).
         schedule.run(&mut world);
-        world.resource_mut::<Tick>().0 += 1;
         assert_eq!(
             world.resource::<AccountBook>().total_money().unwrap(),
             money_before,
