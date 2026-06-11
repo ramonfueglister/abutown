@@ -105,8 +105,10 @@ fn abutopia_prices_stay_in_band_and_9002_consumes_over_long_run() {
     let mut peak_price_9002 = 0i64;
 
     for i in 0..N {
+        // MobilityPlugin's tick_increment_system advances Tick inside the schedule;
+        // a manual increment here would double the stride and halve every
+        // interval-gated cadence (see tests/economy_production_chain.rs run_tick).
         schedule.run(&mut world);
-        world.resource_mut::<crate::mobility::resources::Tick>().0 += 1;
 
         assert_eq!(
             world.resource::<AccountBook>().total_money().unwrap(),
