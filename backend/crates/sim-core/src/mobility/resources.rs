@@ -98,10 +98,11 @@ pub struct AgentIdIndex(pub HashMap<AgentId, Entity>);
 #[derive(Resource, Debug, Default, Clone)]
 pub struct VehicleIdIndex(pub HashMap<VehicleId, Entity>);
 
-/// Per-tick economic destination override for citizens, written by the economy
+/// Economic destination override for citizens, written by the economy
 /// attribution system and read by `route_assignment_system`. Maps a citizen's
-/// stable `AgentId` to the routing node it should walk its economic leg toward
-/// this tick. Ephemeral: cleared and repopulated every tick; never persisted.
+/// stable `AgentId` to the routing node it should walk its economic leg toward.
+/// Sample-and-hold: refreshed on macro-flow delivery ticks and held across the
+/// interval (see `economy::attribution::AttributionHold`); never persisted.
 #[derive(bevy_ecs::prelude::Resource, Debug, Default, Clone)]
 pub struct CitizenEconomicTargets(
     pub std::collections::BTreeMap<crate::ids::AgentId, crate::routing::NodeId>,

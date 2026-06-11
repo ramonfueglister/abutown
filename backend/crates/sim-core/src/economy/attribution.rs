@@ -1,8 +1,21 @@
 //! Conservation-exact attribution of the macro's realized consumption/wages onto
 //! observed, market-bound citizens. READ-ONLY over economy quantities: it mints
 //! and moves NO money, so the `#78` tick audit is unaffected. It only SELECTS
-//! which citizens are economically targeted this tick and proves the partition
-//! identity `attributed + unobserved == realized`.
+//! which citizens are economically targeted and proves the partition identity
+//! `attributed + unobserved == realized` per delivery tick. The selection is a
+//! zero-order hold over the macro-flow cadence: targets persist across the
+//! non-delivery phases of `macro_flow_interval_ticks` (spec:
+//! `2026-06-11-attribution-target-hold-design.md`).
+
+/// Ephemeral sample-and-hold state for the attribution zero-order hold (see
+/// `docs/superpowers/specs/2026-06-11-attribution-target-hold-design.md`).
+/// Never persisted: after a restart the hold re-arms within one delivery
+/// interval. Initialized on demand inside the exclusive system.
+#[derive(bevy_ecs::prelude::Resource, Debug, Default, Clone, Copy)]
+pub struct AttributionHold {
+    /// Tick of the last overwrite of `CitizenEconomicTargets`.
+    pub last_refresh_tick: u64,
+}
 
 /// One market's attribution outcome for a single channel (shopping OR wages).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,8 +66,11 @@ use bevy_ecs::world::World;
 /// (`WageTelemetry`, valid after PayWages); restricts to observed markets (those
 /// whose market node is in an Active/Hot chunk — identical test to the former
 /// capture systems); selects the attributed cohort from observed, bound citizens;
-/// and writes their economic target node into `CitizenEconomicTargets`. READ-ONLY
-/// over economy state — mints and moves NO money (the `#78` audit is unaffected).
+/// and writes their economic target node into `CitizenEconomicTargets` as a
+/// zero-order hold over the macro-flow cadence: a fresh (non-empty) cohort
+/// overwrites, an empty one is held for up to `macro_flow_interval_ticks`, then
+/// expires. READ-ONLY over economy state — mints and moves NO money (the `#78`
+/// audit is unaffected).
 pub fn run_citizen_attribution_system(world: &mut World) {
     use crate::economy::{EconomyConfig, MarketGoods, Markets, WageTelemetry};
     use crate::ids::ChunkCoord;
@@ -131,8 +147,18 @@ pub fn run_citizen_attribution_system(world: &mut World) {
     let shopper_cap = config.max_shoppers_per_market.saturating_mul(capita);
     let commuter_cap = config.max_commuters_per_market.saturating_mul(capita);
 
+    let tick = world
+        .get_resource::<crate::mobility::resources::Tick>()
+        .map(|t| t.0)
+        .unwrap_or(0);
+
     if observed_markets.is_empty() {
+        // Occlusion clears immediately — citizens must not keep walking to
+        // unobserved markets, so the hold does not outlive observation.
         world.resource_mut::<CitizenEconomicTargets>().0.clear();
+        world
+            .get_resource_or_insert_with(AttributionHold::default)
+            .last_refresh_tick = tick;
         return;
     }
 
@@ -199,8 +225,27 @@ pub fn run_citizen_attribution_system(world: &mut World) {
         }
     }
 
-    // (5) Write.
-    world.resource_mut::<CitizenEconomicTargets>().0 = targets;
+    // (5) Write — zero-order hold across the macro-flow interval (spec:
+    // 2026-06-11-attribution-target-hold-design.md). Realized telemetry is
+    // nonzero only on delivery ticks (one phase out of macro_flow_interval_ticks),
+    // so a per-tick overwrite would strobe the targets — and the routed_citizens
+    // gauge — at a 1/N duty cycle. Instead: a fresh (non-empty) cohort overwrites
+    // and stamps the hold; an empty cohort is held until a full interval passes
+    // with no fresh activity, then expires to empty (a dead economy must read
+    // routed=0, not hold stale targets forever). interval==0 ⇒ macro flow
+    // disabled ⇒ hold disabled (per-tick overwrite).
+    let interval = config.macro_flow_interval_ticks;
+    let fresh = !targets.is_empty();
+    let expired = {
+        let hold = world.get_resource_or_insert_with(AttributionHold::default);
+        interval == 0 || tick.saturating_sub(hold.last_refresh_tick) >= interval
+    };
+    if fresh || expired {
+        world
+            .get_resource_or_insert_with(AttributionHold::default)
+            .last_refresh_tick = tick;
+        world.resource_mut::<CitizenEconomicTargets>().0 = targets;
+    }
 
     // Liveness heartbeat: how many citizens are economically routed this tick. Logged
     // every 60 ticks (not per-tick) so it's a gauge, not spam. Read-only, and a pure
@@ -714,6 +759,116 @@ mod tests {
             targets.len(),
             50,
             "CapitaFactor(30): scaled cap 120, cohort tracks candidates (50), not clamped at 4"
+        );
+    }
+
+    // ── sample-and-hold tests (2026-06-11 attribution-target-hold spec) ──────
+    //
+    // Macro flow delivers every `macro_flow_interval_ticks` (default 10), so
+    // realized telemetry is nonzero on one tick phase out of N. The system is a
+    // zero-order hold over that slow signal: a fresh (non-empty) cohort
+    // overwrites and stamps the hold; an empty cohort is held until a full
+    // interval elapses with no fresh activity, then expires to empty.
+
+    /// Helper: zero the test market's realized consumption (simulates the
+    /// per-tick reset in `pools.rs` on a non-delivery tick).
+    fn zero_consumption(world: &mut World) {
+        for st in world.resource_mut::<MarketGoods>().0.values_mut() {
+            st.consumed_qty_last_tick = Quantity(0);
+        }
+    }
+
+    fn set_tick(world: &mut World, t: u64) {
+        world.insert_resource(crate::mobility::resources::Tick(t));
+    }
+
+    /// Hold: a cohort attributed on a delivery tick persists unchanged through
+    /// the following non-delivery ticks (telemetry zeroed), instead of strobing
+    /// to empty.
+    #[test]
+    fn system_holds_targets_across_non_delivery_ticks() {
+        let mut world = build_attribution_world(9, 5, crate::economy::capita::CapitaFactor(1));
+        set_tick(&mut world, 10);
+        run_citizen_attribution_system(&mut world);
+        let held = world.resource::<CitizenEconomicTargets>().0.clone();
+        assert_eq!(held.len(), 3, "delivery tick attributes min(3, 4, 5) = 3");
+
+        zero_consumption(&mut world);
+        for t in 11..20 {
+            set_tick(&mut world, t);
+            run_citizen_attribution_system(&mut world);
+            assert_eq!(
+                world.resource::<CitizenEconomicTargets>().0,
+                held,
+                "tick {t}: held cohort must persist unchanged across the interval"
+            );
+        }
+    }
+
+    /// Expire: a full `macro_flow_interval_ticks` with no fresh activity clears
+    /// the held cohort — a dead economy must read routed=0, not hold forever.
+    #[test]
+    fn system_expires_held_targets_after_one_interval_without_fresh_activity() {
+        let mut world = build_attribution_world(9, 5, crate::economy::capita::CapitaFactor(1));
+        let interval = EconomyConfig::default().macro_flow_interval_ticks;
+        set_tick(&mut world, 10);
+        run_citizen_attribution_system(&mut world);
+        assert_eq!(world.resource::<CitizenEconomicTargets>().0.len(), 3);
+
+        zero_consumption(&mut world);
+        set_tick(&mut world, 10 + interval);
+        run_citizen_attribution_system(&mut world);
+        assert!(
+            world.resource::<CitizenEconomicTargets>().0.is_empty(),
+            "after a full interval with zero realized activity the hold expires"
+        );
+    }
+
+    /// Fresh overwrite: a later delivery replaces (not merges) the held cohort.
+    #[test]
+    fn system_fresh_delivery_replaces_held_targets() {
+        let mut world = build_attribution_world(9, 5, crate::economy::capita::CapitaFactor(1));
+        set_tick(&mut world, 10);
+        run_citizen_attribution_system(&mut world);
+        assert_eq!(world.resource::<CitizenEconomicTargets>().0.len(), 3);
+
+        // Next delivery realizes 12 units → magnitude 4 → cohort 4 (cap 4, 5 cands).
+        for st in world.resource_mut::<MarketGoods>().0.values_mut() {
+            st.consumed_qty_last_tick = Quantity(12);
+        }
+        set_tick(&mut world, 20);
+        run_citizen_attribution_system(&mut world);
+        assert_eq!(
+            world.resource::<CitizenEconomicTargets>().0.len(),
+            4,
+            "fresh cohort replaces the held one"
+        );
+    }
+
+    /// Off-screen clear wins over hold: when no market is observed, targets
+    /// clear immediately — citizens must not keep walking to unobserved markets.
+    #[test]
+    fn system_off_screen_clears_immediately_even_mid_hold() {
+        let mut world = build_attribution_world(9, 5, crate::economy::capita::CapitaFactor(1));
+        set_tick(&mut world, 10);
+        run_citizen_attribution_system(&mut world);
+        assert_eq!(world.resource::<CitizenEconomicTargets>().0.len(), 3);
+
+        // Despawn the Active chunk → market becomes unobserved.
+        let chunk_entities: Vec<bevy_ecs::entity::Entity> = {
+            let mut q = world
+                .query_filtered::<bevy_ecs::entity::Entity, bevy_ecs::prelude::With<ActiveChunk>>();
+            q.iter(&world).collect()
+        };
+        for e in chunk_entities {
+            world.despawn(e);
+        }
+        zero_consumption(&mut world);
+        set_tick(&mut world, 11);
+        run_citizen_attribution_system(&mut world);
+        assert!(
+            world.resource::<CitizenEconomicTargets>().0.is_empty(),
+            "occlusion clears immediately; the hold does not outlive observation"
         );
     }
 
