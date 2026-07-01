@@ -2,13 +2,15 @@
 // Everything procedural, all values from designTokens.
 
 import * as THREE from 'three/webgpu';
-import { Fn, dot, float, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Fn, dot, float, int, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { godrays } from 'three/addons/tsl/display/GodraysNode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
+import { sss } from 'three/addons/tsl/display/SSSNode.js';
+import { boxBlur } from 'three/addons/tsl/display/boxBlur.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudCfg } from './designTokens';
@@ -276,7 +278,8 @@ async function boot(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const rawPreset = params.get('preset');
   const presetName = rawPreset === 'night' || rawPreset === 'dusk' ? rawPreset : 'morning';
-  const camMode = params.get('cam') === 'far' ? 'far' : 'default';
+  const camModeRaw = params.get('cam');
+  const camMode = camModeRaw === 'far' || camModeRaw === 'sky' ? camModeRaw : 'default';
   const cycleMode = params.get('cycle') === '1';
   const preset = lightPresets[presetName];
 
@@ -339,9 +342,9 @@ async function boot(): Promise<void> {
     const p = vec3(dir.x.mul(float(cloudCfg.scale)).add(driftU), dir.y.mul(float(cloudCfg.scale * 1.6)), dir.z.mul(float(cloudCfg.scale)));
     const n = mx_fractal_noise_float(p, 4, 2.0, 0.55, 1.0);
     const coverage = float(cloudCfg.coverage[presetName]);
-    const dens = smoothstep(float(0.1), float(0.42), n.add(coverage.sub(0.5)));
+    const dens = smoothstep(float(0.06), float(0.34), n.add(coverage.sub(0.5)));
     const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
-    cloudMatDome.opacityNode = dens.mul(horizonFade).mul(float(0.95));
+    cloudMatDome.opacityNode = dens.mul(horizonFade);
     const facing = dot(dir, sunDirUniform).mul(0.5).add(0.5);
     type Vec3Node = ReturnType<typeof vec3>;
     const shadowN = cloudShadow as unknown as Vec3Node;
@@ -350,6 +353,19 @@ async function boot(): Promise<void> {
   }
   const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(46, 32, 24), cloudMatDome);
   scene.add(cloudDome);
+
+  const sunDisc = new THREE.Mesh(
+    new THREE.SphereGeometry(1.5, 20, 20),
+    new THREE.MeshBasicMaterial({ color: 0xfff0d5, fog: false }),
+  );
+  scene.add(sunDisc);
+  const moonDisc = new THREE.Mesh(
+    new THREE.SphereGeometry(1.0, 20, 20),
+    new THREE.MeshBasicMaterial({ color: palette.star, fog: false }),
+  );
+  moonDisc.position.set(-14, 21, 26).normalize().multiplyScalar(38);
+  moonDisc.visible = presetName === 'night';
+  scene.add(moonDisc);
 
   const applySunState = (t: number): void => {
     const dir = sunDirFor(t);
@@ -366,6 +382,9 @@ async function boot(): Promise<void> {
       (cloudLit.value as THREE.Color).set(0x9fb2cc);
       (cloudShadow.value as THREE.Color).set(0x39485c);
     }
+    sunDisc.position.copy(dir.clone().multiplyScalar(38));
+    sunDisc.visible = presetName !== 'night' && dir.y > 0.015;
+    moonDisc.visible = presetName === 'night' || dir.y <= 0.015;
   };
 
   if (preset.showStars) {
@@ -398,6 +417,12 @@ async function boot(): Promise<void> {
     cameraContract.position[2] * camScale,
   );
   camera.lookAt(...cameraContract.target);
+  if (camMode === 'sky') {
+    camera.position.set(-6, 2.5, 9);
+    camera.lookAt(14, 9, -10);
+    camera.fov = 55;
+    camera.updateProjectionMatrix();
+  }
 
   const sun = new THREE.DirectionalLight(preset.sunColor, preset.sunIntensity);
   sun.position.set(...preset.sunPosition);
@@ -659,7 +684,12 @@ async function boot(): Promise<void> {
   const velocityTex = scenePass.getTextureNode('velocity');
   const beautyAA = chain(traa(scenePassColor, scenePassDepth, velocityTex, camera));
   const aoPass = ao(scenePassDepth, scenePassNormal, camera);
-  const withAo = beautyAA.mul(aoPass.getTextureNode().x);
+  const contactRaw = sss(scenePassDepth, camera, sun);
+  const contactBlur = chain(boxBlur((contactRaw as unknown as { r: unknown }).r as never, { size: int(2) as never, separation: int(1) as never }));
+  // Screen-space contact shadows: integrated but disabled for the clay style
+  // (adds speckle on smooth blob geometry; meant for high-detail meshes).
+  const contact = mix(float(1), contactBlur.x, float(0.0));
+  const withAo = beautyAA.mul(aoPass.getTextureNode().x).mul(contact);
   const viewZ = scenePass.getViewZNode();
   // Runtime lifts display nodes into chainable shader-node objects via
   // nodeObject; @types/three r185 doesn't model that lift yet — one
@@ -694,10 +724,10 @@ async function boot(): Promise<void> {
     patient.scale.y = 1 + Math.sin(t * 2.2 + 1.4) * 0.012;
     child.scale.y = 0.68 * (1 + Math.sin(t * 2.6 + 0.7) * 0.015);
     driftU.value = t * cloudCfg.drift;
-    if (cycleMode) {
-      applySunState((t / sunArcCfg.cycleSeconds) % 1);
-      frameCount++;
-      if (frameCount % 90 === 0) cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
+    frameCount++;
+    if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
+    if (frameCount % (cycleMode ? 90 : 240) === 0) {
+      cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
     }
     postProcessing.render();
     if (!window.__LOOK_READY) window.__LOOK_READY = true;

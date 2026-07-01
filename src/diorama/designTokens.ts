@@ -81,7 +81,7 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     fogColor: 0xeee2cf,
     fogNear: 20,
     fogFar: 48,
-    exposure: 1.14,
+    exposure: 1.18,
     skyBelow: 0xc9d8d2,
     skyHorizon: 0xffd9a3,
     skyMid: 0xcfe3df,
@@ -90,8 +90,8 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     mistOpacity: 0.16,
     cloudTint: 0xfdf6ea,
     sunDiscColor: 0xffe3b0,
-    giScale: 1.0,
-    saturation: 1.05,
+    giScale: 0.7,
+    saturation: 1.1,
     contrast: 1.0,
     lampBoost: 1.0,
     showStars: false,
@@ -154,7 +154,7 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
 
 // Physical sky (SkyMesh Rayleigh/Mie) per preset + the sun's day arc.
 export const skyPhys = {
-  morning: { turbidity: 3, rayleigh: 1.3, mieCoefficient: 0.006, mieG: 0.8, timeOfDay: 0.12, sunBoost: 1.15 },
+  morning: { turbidity: 3, rayleigh: 1.3, mieCoefficient: 0.006, mieG: 0.8, timeOfDay: 0.12, sunBoost: 1.3 },
   dusk: { turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9, timeOfDay: 0.96, sunBoost: 2.3 },
   night: { turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8, timeOfDay: 1.08, sunBoost: 0 },
 } as const;
