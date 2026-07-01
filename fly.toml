@@ -1,5 +1,5 @@
-# Single-instance, stateful sim-server. The in-memory world is the SOLE writer —
-# NEVER scale count > 1 (a second machine would double-write the same world_id).
+# Stateless card-hand API (auth + card draws) backed by Supabase Postgres —
+# all durable state lives in the database, not this process.
 app = "abutown-abutopia"
 primary_region = "lhr"  # EU, near Supabase eu-west-1 (cuts persist write latency)
 
