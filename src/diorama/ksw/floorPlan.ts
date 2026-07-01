@@ -355,7 +355,11 @@ export const kswPlan: FloorPlan = {
         { kind: 'ivStand', x: -26.6, z: 10.6 },
         { kind: 'vitalsMonitor', x: -28.8, z: 10.9, rotY: 1.2 },
         { kind: 'wheelchair', x: -21.6, z: 15.2, rotY: -0.8 },
-        { kind: 'handSanitizer', x: -17.6, z: 8.0 },
+        { kind: 'handSanitizer', x: -17.9, z: 8.2 },
+        { kind: 'privacyScreen', x: -26.5, z: 11.0, rotY: Math.PI / 2 },
+        { kind: 'careCart', x: -23.2, z: 11.6, rotY: -0.7 },
+        { kind: 'infoBoard', x: -20.3, z: 8.1, rotY: 2.6 },
+        { kind: 'linenCart', x: -24.8, z: 15.6, rotY: 0.3 },
       ],
       people: [
         { role: 'nurse', x: -20.6, z: 10.6, yaw: 0.4 },

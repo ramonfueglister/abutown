@@ -769,6 +769,18 @@ function espressoMachine(): THREE.Group {
   return g;
 }
 
+function privacyScreen(): THREE.Group {
+  const g = new THREE.Group();
+  for (const [i, yawSeg] of [-1, 0, 1].entries()) {
+    const panel = box(0.7, 1.5, 0.06, palette.mint, radii.s);
+    panel.rotation.y = yawSeg * 0.5;
+    panel.position.set((i - 1) * 0.64, 0.85, Math.abs(i - 1) * -0.14);
+    g.add(panel);
+    g.add(at(cylinder(0.035, 0.035, 0.1, palette.metalMatt, 8), (i - 1) * 0.64, 0.05, Math.abs(i - 1) * -0.14));
+  }
+  return g;
+}
+
 // ── outdoor ─────────────────────────────────────────────────────────────
 
 function tree(): THREE.Group {
@@ -939,6 +951,7 @@ export const propBuilders: Record<string, () => THREE.Group> = {
   espressoMachine,
   tree,
   helipad,
+  privacyScreen,
 };
 
 export function buildProp(p: PropPlacement): THREE.Group {
