@@ -11,7 +11,7 @@ const skipPublicCopy = process.env.VITE_SKIP_PUBLIC_COPY === '1';
 export default defineConfig({
   publicDir: skipPublicCopy ? false : 'public',
   optimizeDeps: {
-    entries: ['index.html'],
+    entries: ['index.html', 'look.html', 'ksw.html'],
   },
   server: {
     host: '127.0.0.1',

@@ -330,19 +330,26 @@ function opTable(): THREE.Group {
 
 function opLightDouble(): THREE.Group {
   const g = new THREE.Group();
-  g.add(at(cylinder(0.09, 0.12, 2.6, palette.white, 14), 1.55, 1.3, 0.9));
+  const poleX = 1.35;
+  const poleZ = 1.0;
+  g.add(at(cylinder(0.09, 0.12, 2.55, palette.white, 14), poleX, 1.28, poleZ));
   for (const [ax, az, dy] of [
-    [-0.5, -0.5, 2.45],
-    [0.5, -1.15, 2.25],
+    [-0.35, 0.15, 2.5],
+    [0.3, -0.75, 2.3],
   ] as const) {
-    const arm = cylinder(0.055, 0.055, 1.6, palette.white, 10);
+    // straight arm from the pole top to the lamp head, aimed and sized exactly
+    const from = new THREE.Vector3(poleX, dy + 0.06, poleZ);
+    const to = new THREE.Vector3(ax, dy + 0.06, az);
+    const len = from.distanceTo(to);
+    const arm = cylinder(0.055, 0.055, len, palette.white, 10);
+    arm.position.copy(from.clone().add(to).multiplyScalar(0.5));
     arm.rotation.z = Math.PI / 2;
-    arm.rotation.y = Math.atan2(0.9 + az, 1.55 - (1.55 + ax));
-    g.add(at(arm, (1.55 + ax) / 2 + ax / 2 + 0.5, dy, (0.9 + az) / 2 + az / 2 + 0.2));
+    arm.rotation.y = -Math.atan2(to.z - from.z, to.x - from.x);
+    g.add(arm);
     const disc = cylinder(0.42, 0.46, 0.12, palette.white, 24);
-    g.add(at(disc, ax, dy - 0.15, az));
+    g.add(at(disc, ax, dy - 0.05, az));
     const face = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.02, 24), glowMat(kswPalette.opLight));
-    g.add(at(face, ax, dy - 0.22, az));
+    g.add(at(face, ax, dy - 0.13, az));
   }
   return g;
 }

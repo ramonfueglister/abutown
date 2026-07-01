@@ -188,10 +188,10 @@ export const kswPalette = {
 // zoom radius so zooming in reveals the interiors.
 export const kswCamera = {
   fov: 24,
-  overviewPosition: [-40, 32, 46] as [number, number, number],
+  overviewPosition: [-68, 42, 78] as [number, number, number],
   target: [0, 0.6, 0] as [number, number, number],
   radiusMin: 7,
-  radiusMax: 95,
+  radiusMax: 150,
   zoomSpeed: 0.0012,
   dragSpeed: 0.005,
   pitchMin: 0.18,
@@ -202,9 +202,9 @@ export const kswCamera = {
 
 // Scene scale-up relative to the one-room prototype.
 export const kswScene = {
-  fogScale: 3.2,
+  fogScale: 7,
   domeRadius: 170,
-  skyScale: 1400,
+  skyScale: 360,
   sunDistance: 70,
   shadowExtent: 46,
   shadowMapSize: 4096,
@@ -217,6 +217,11 @@ export const kswScene = {
   plateThickness: 0.5,
   openingSill: 0.95, // window sill height
   openingHead: 2.35, // shared head height for doors and windows
+} as const;
+
+// KSW post overrides (the prototype `post` tokens belong to look.ts).
+export const kswPost = {
+  dof: { focalLength: 1.4, bokehScale: 1.6 },
 } as const;
 
 // Camera contract — the diorama has ONE gaze, like a built miniature.

@@ -201,7 +201,7 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
     const floor = box(room.rect.w, FLOOR_H, room.rect.d, palette.floorWarm, radii.s);
     floor.position.set(room.rect.x, FLOOR_H / 2, room.rect.z);
     group.add(floor);
-    const inlay = box(room.rect.w * 0.45, 0.03, room.rect.d * 0.35, room.accent, radii.s);
+    const inlay = box(room.rect.w * 0.3, 0.03, room.rect.d * 0.22, room.accent, radii.s);
     inlay.castShadow = false;
     inlay.position.set(room.rect.x, FLOOR_H + 0.015, room.rect.z);
     group.add(inlay);
@@ -245,23 +245,30 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
   const roofMeshes: THREE.Mesh[] = [];
   const roofGroup = new THREE.Group();
   const baseY = FLOOR_H + kswScene.wallHeight;
-  const addRoof = (x: number, z: number, w: number, d: number, step: number, trim: boolean): void => {
+  const EPS = 1e-6;
+  const b = plan.building;
+  // Overhang only where the rect meets the building perimeter; interior
+  // edges stay flush so neighbouring lids read as distinct stepped tiers.
+  const addRoof = (rect: { x: number; z: number; w: number; d: number }, step: number, mat: THREE.MeshPhysicalMaterial, attika: boolean): void => {
     const over = kswScene.roofOverhang;
-    const lid = new THREE.Mesh(
-      new RoundedBoxGeometry(w + 2 * over, kswScene.roofThickness, d + 2 * over, 4, radii.m),
-      roofMat,
-    );
-    lid.position.set(x, baseY + step + kswScene.roofThickness / 2, z);
+    const eW = Math.abs(rect.x - rect.w / 2 - (b.x - b.w / 2)) < EPS ? over : 0;
+    const eE = Math.abs(rect.x + rect.w / 2 - (b.x + b.w / 2)) < EPS ? over : 0;
+    const eN = Math.abs(rect.z - rect.d / 2 - (b.z - b.d / 2)) < EPS ? over : 0;
+    const eS = Math.abs(rect.z + rect.d / 2 - (b.z + b.d / 2)) < EPS ? over : 0;
+    const w = rect.w + eW + eE;
+    const d = rect.d + eN + eS;
+    const lid = new THREE.Mesh(new RoundedBoxGeometry(w, kswScene.roofThickness, d, 4, radii.s), mat);
+    lid.position.set(rect.x + (eE - eW) / 2, baseY + step + kswScene.roofThickness / 2, rect.z + (eS - eN) / 2);
     lid.castShadow = true;
     lid.receiveShadow = true;
     roofMeshes.push(lid);
     roofGroup.add(lid);
-    if (trim) {
+    if (attika && rect.w > 2.2 && rect.d > 2.2) {
       const cap = new THREE.Mesh(
-        new RoundedBoxGeometry(w * 0.6, 0.16, d * 0.6, 4, radii.m),
+        new RoundedBoxGeometry(rect.w - 1.0, 0.12, rect.d - 1.0, 4, radii.s),
         trimMat,
       );
-      cap.position.set(x, baseY + step + kswScene.roofThickness + 0.08, z);
+      cap.position.set(rect.x, baseY + step + kswScene.roofThickness + 0.06, rect.z);
       cap.castShadow = true;
       cap.receiveShadow = true;
       roofMeshes.push(cap);
@@ -269,9 +276,9 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
     }
   };
   plan.rooms.forEach((room, i) => {
-    addRoof(room.rect.x, room.rect.z, room.rect.w, room.rect.d, 0.1 + (i % 3) * 0.07, true);
+    addRoof(room.rect, 0.12 + (i % 3) * 0.09, roofMat, true);
   });
-  for (const c of plan.corridors) addRoof(c.x, c.z, c.w, c.d, 0, false);
+  for (const c of plan.corridors) addRoof(c, 0, trimMat, false);
   group.add(roofGroup);
 
   let currentFade = 1;
