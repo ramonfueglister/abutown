@@ -6,13 +6,8 @@ version = 4
 name = "abutown-protocol"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "prost",
  "prost-build",
- "serde",
- "serde_json",
- "time",
- "uuid",
 ]
 
 [[package]]
@@ -793,7 +788,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "powerfmt",
- "serde_core",
 ]
 
 [[package]]

@@ -9,7 +9,7 @@ import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const outDir = resolve(root, 'src/backend/proto');
+const outDir = resolve(root, 'src/proto');
 mkdirSync(outDir, { recursive: true });
 
 const result = spawnSync('npx', ['buf', 'generate'], {

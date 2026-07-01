@@ -3,7 +3,7 @@ plugins:
   # Local plugin to avoid network dependency on every codegen run — CI
   # determinism, offline-dev friendly. @bufbuild/protoc-gen-es is a devDep.
   - local: ./node_modules/.bin/protoc-gen-es
-    out: src/backend/proto
+    out: src/proto
     opt:
       - target=ts
       - import_extension=js
