@@ -769,6 +769,33 @@ function espressoMachine(): THREE.Group {
   return g;
 }
 
+// ── outdoor ─────────────────────────────────────────────────────────────
+
+function tree(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(at(cylinder(0.14, 0.2, 1.1, palette.woodSoft, 10), 0, 0.55, 0));
+  const puffs: Array<[number, number, number, number]> = [
+    [0, 1.6, 0, 0.75],
+    [0.45, 1.25, 0.2, 0.48],
+    [-0.4, 1.35, -0.18, 0.52],
+    [0.1, 1.2, -0.42, 0.42],
+  ];
+  for (const [x, y, z, r] of puffs) g.add(at(sphere(r, palette.plantGreen, 16), x, y, z));
+  return g;
+}
+
+function helipad(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(at(cylinder(3.0, 3.1, 0.12, kswPalette.plazaPath, 36), 0, 0.06, 0));
+  const rim = torus(2.7, 0.09, palette.coral);
+  rim.rotation.x = Math.PI / 2;
+  g.add(at(rim, 0, 0.13, 0));
+  g.add(at(box(0.4, 0.05, 2.0, palette.white, radii.xs), -0.7, 0.15, 0));
+  g.add(at(box(0.4, 0.05, 2.0, palette.white, radii.xs), 0.7, 0.15, 0));
+  g.add(at(box(1.0, 0.05, 0.4, palette.white, radii.xs), 0, 0.15, 0));
+  return g;
+}
+
 function plantSmall(scale: number): THREE.Group {
   const g = plant();
   g.scale.setScalar(scale);
@@ -910,6 +937,8 @@ export const propBuilders: Record<string, () => THREE.Group> = {
   cafeChair,
   counterBar,
   espressoMachine,
+  tree,
+  helipad,
 };
 
 export function buildProp(p: PropPlacement): THREE.Group {

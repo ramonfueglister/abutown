@@ -80,6 +80,7 @@ function wallGroup(length: number, thickness: number, color: number, openings: W
       g.add(mullion);
       const pane = new THREE.Mesh(new THREE.BoxGeometry(o.width - 0.04, fh - 0.06, 0.03), glassMat());
       pane.position.set(o.center, y0 + fh / 2, 0);
+      pane.userData.windowPane = true;
       g.add(pane);
     }
   }

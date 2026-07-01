@@ -22,6 +22,7 @@ import {
   kswScene,
   lightPresets,
   moonLight,
+  nightGlow,
   palette,
   post,
   skyPhys,
@@ -350,6 +351,24 @@ async function boot(): Promise<void> {
     }
   }
 
+  // Night life: a warm share of the windows glows from inside
+  if (preset.lampOn) {
+    const glow = new THREE.MeshBasicMaterial({
+      color: nightGlow.bulb,
+      transparent: true,
+      opacity: 0.9,
+    });
+    hospital.traverse((o) => {
+      if (!o.userData.windowPane) return;
+      const m = o as THREE.Mesh;
+      // deterministic per-window choice, no RNG: hash the world position
+      const wp = new THREE.Vector3();
+      m.getWorldPosition(wp);
+      const h = Math.abs(Math.sin(wp.x * 12.9898 + wp.z * 78.233) * 43758.5453) % 1;
+      if (h < 0.55) m.material = glow;
+    });
+  }
+
   // Warm interior points at night: entrance + emergency glow
   if (preset.lampOn) {
     for (const [lx, lz] of [
@@ -357,7 +376,7 @@ async function boot(): Promise<void> {
       [-23.5, 12],
       [4, -2],
     ] as const) {
-      const lamp = new THREE.PointLight(0xffc98a, 20 * preset.lampBoost, 16, 2);
+      const lamp = new THREE.PointLight(nightGlow.bulb, 20 * preset.lampBoost, 16, 2);
       lamp.position.set(lx, 2.2, lz);
       scene.add(lamp);
     }
