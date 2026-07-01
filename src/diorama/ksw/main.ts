@@ -48,9 +48,9 @@ const camPresets: Record<CamPresetName, { target: [number, number, number]; radi
     return { target: kswCamera.target, radius: s.radius, yaw: s.yaw, pitch: s.pitch };
   })(),
   // zoomed into the emergency ward: radius below roofFadeNear, roofs gone
-  er: { target: [-22.5, 0.6, 12], radius: 14, yaw: -0.5, pitch: 0.6 },
+  er: { target: [-22.5, 0.4, 12], radius: 14, yaw: -0.5, pitch: 0.72 },
   // surgery block from above the open roof, south-east
-  ops: { target: [-23, 0.4, -16], radius: 12, yaw: 0.5, pitch: 0.9 },
+  ops: { target: [-24, 0.2, -16], radius: 13, yaw: 0.45, pitch: 1.05 },
 };
 
 async function boot(): Promise<void> {
