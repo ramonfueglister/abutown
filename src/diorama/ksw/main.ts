@@ -102,6 +102,10 @@ async function boot(): Promise<void> {
   skyMesh.mieCoefficient.value = phys.mieCoefficient;
   skyMesh.mieDirectionalG.value = phys.mieG;
   skyMesh.sunPosition.value.copy(initialSunDir);
+  // the sky sphere sits beyond fogFar and would be tinted flat by the fog;
+  // per-preset choice — the morning sky is so bright that the fog tint is
+  // actually the better look there
+  (skyMesh.material as THREE.Material & { fog: boolean }).fog = !kswPost.skyUnfogged[presetName];
   scene.add(skyMesh);
 
   // Procedural cloud dome (fbm, sun-lit silver lining)
@@ -419,7 +423,7 @@ async function boot(): Promise<void> {
   scene.add(cubeCam);
   cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
   scene.environment = cubeRT.texture;
-  scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale;
+  scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale[presetName];
 
   // ── post stack: TRAA -> GTAO -> godrays -> zoom-coupled DOF -> bloom ──
   const postProcessing = new THREE.PostProcessing(renderer);
@@ -439,12 +443,12 @@ async function boot(): Promise<void> {
     const raysNode = godrays(scenePassDepth, camera, sun);
     raysNode.density.value = post.godraysDensity;
     raysNode.maxDensity.value = post.godraysMaxDensity;
-    lit = withAo.add(chain(raysNode).mul(presetName === 'dusk' ? post.godraysMixDusk : post.godraysMix));
+    lit = withAo.add(chain(raysNode).mul(kswPost.godraysMix[presetName]));
   }
   // Tilt-shift focus follows the dolly: focus distance = orbit radius.
   const focusU = uniform(rig.radius);
   const withDof = chain(dof(lit, viewZ, focusU, kswPost.dof.focalLength, kswPost.dof.bokehScale));
-  const bloomPass = chain(bloom(withDof, post.bloom.strength, post.bloom.radius, post.bloom.threshold));
+  const bloomPass = chain(bloom(withDof, post.bloom.strength, post.bloom.radius, kswPost.bloomThreshold));
   const composed = withDof.add(bloomPass);
   const lum = dot(composed.rgb, vec3(0.299, 0.587, 0.114));
   const tone = smoothstep(float(grade.low), float(grade.high), lum);

@@ -223,8 +223,15 @@ export const kswScene = {
 export const kswPost = {
   dof: { focalLength: 1.4, bokehScale: 1.6 },
   // the big plate sees mostly open sky in the GI probe — damp the white
-  // wash so the sun stays the protagonist
-  envScale: 0.6,
+  // wash per preset so the sun stays the protagonist (the unfogged morning
+  // sky is by far the brightest)
+  envScale: { morning: 0.32, dusk: 0.6, night: 0.8 },
+  // the unfogged bright sky feeds screen-space godrays/bloom — keep the veil off
+  godraysMix: { morning: 0.12, dusk: 0.5 },
+  bloomThreshold: 1.05,
+  // unfogged sky only where it reads better: the low morning sun renders a
+  // near-white sky that washes the whole frame, so morning keeps the fog tint
+  skyUnfogged: { morning: false, dusk: true, night: true },
 } as const;
 
 // Camera contract — the diorama has ONE gaze, like a built miniature.
