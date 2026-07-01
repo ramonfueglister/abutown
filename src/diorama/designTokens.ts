@@ -25,7 +25,6 @@ export const palette = {
   metalDark: 0x7d8891,
   glass: 0xcfe4ec,
   sunShaft: 0xffdca8,
-  cloud: 0xfdf6ea,
   star: 0xdfe8f2,
 } as const;
 
@@ -42,9 +41,6 @@ export const clay = {
 } as const;
 
 export type LightPreset = {
-  sunColor: number;
-  sunIntensity: number;
-  sunPosition: [number, number, number];
   hemiSky: number;
   hemiGround: number;
   hemiIntensity: number;
@@ -52,16 +48,8 @@ export type LightPreset = {
   fogNear: number;
   fogFar: number;
   exposure: number;
-  // Painted sky gradient (DREDGE-style banding), bottom to top
-  skyBelow: number;
-  skyHorizon: number;
-  skyMid: number;
-  skyZenith: number;
-  // Atmosphere dressing
   mistColor: number;
   mistOpacity: number;
-  cloudTint: number;
-  sunDiscColor: number;
   giScale: number;
   saturation: number;
   contrast: number;
@@ -72,9 +60,6 @@ export type LightPreset = {
 
 export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
   morning: {
-    sunColor: 0xffc27e,
-    sunIntensity: 7.2,
-    sunPosition: [8, 4.5, 1.2],
     hemiSky: 0xc4dcda,
     hemiGround: 0xe4d3ba,
     hemiIntensity: 0.6,
@@ -82,14 +67,8 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     fogNear: 20,
     fogFar: 48,
     exposure: 1.18,
-    skyBelow: 0xc9d8d2,
-    skyHorizon: 0xffd9a3,
-    skyMid: 0xcfe3df,
-    skyZenith: 0x9dc2cc,
     mistColor: 0xf6e9d2,
     mistOpacity: 0.16,
-    cloudTint: 0xfdf6ea,
-    sunDiscColor: 0xffe3b0,
     giScale: 0.7,
     saturation: 1.1,
     contrast: 1.0,
@@ -99,9 +78,6 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
   },
   // The DREDGE moment: amber horizon burning under a deep teal sky.
   dusk: {
-    sunColor: 0xff7d33,
-    sunIntensity: 5.2,
-    sunPosition: [8.5, 2.0, -4],
     hemiSky: 0x4f7d84,
     hemiGround: 0x5c5348,
     hemiIntensity: 0.42,
@@ -109,14 +85,8 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     fogNear: 18,
     fogFar: 46,
     exposure: 0.96,
-    skyBelow: 0x22434c,
-    skyHorizon: 0xff8a3d,
-    skyMid: 0x5d8d8c,
-    skyZenith: 0x143540,
     mistColor: 0x6f949a,
     mistOpacity: 0.22,
-    cloudTint: 0xf2c9a0,
-    sunDiscColor: 0xffb877,
     giScale: 0.55,
     saturation: 1.12,
     contrast: 1.06,
@@ -125,9 +95,6 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     lampOn: true,
   },
   night: {
-    sunColor: 0xa8c4e8,
-    sunIntensity: 1.0,
-    sunPosition: [-6, 7, 6],
     hemiSky: 0x4a5f7d,
     hemiGround: 0x3d4652,
     hemiIntensity: 0.4,
@@ -135,14 +102,8 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     fogNear: 18,
     fogFar: 46,
     exposure: 0.95,
-    skyBelow: 0x0a121e,
-    skyHorizon: 0x3d5670,
-    skyMid: 0x243a54,
-    skyZenith: 0x121f33,
     mistColor: 0x46586e,
     mistOpacity: 0.18,
-    cloudTint: 0x8fa3bd,
-    sunDiscColor: 0xdfe8f2,
     giScale: 0.9,
     saturation: 1.08,
     contrast: 1.05,
@@ -181,8 +142,10 @@ export const cloudCfg = {
 export const nightGlow = {
   bulb: 0xffc98a,
   lampIntensity: 26,
-  bedsideIntensity: 5,
 } as const;
+
+// Moonlight (the night preset's key light — the sun arc is parked below horizon).
+export const moonLight = { color: 0xa8c4e8, intensity: 1.0, position: [-6, 7, 6] as [number, number, number] } as const;
 
 // Post-processing recipe — the miniature magic. All post values live here.
 export const post = {

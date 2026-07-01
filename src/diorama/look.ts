@@ -13,7 +13,7 @@ import { sss } from 'three/addons/tsl/display/SSSNode.js';
 import { boxBlur } from 'three/addons/tsl/display/boxBlur.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudCfg } from './designTokens';
+import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudCfg, moonLight } from './designTokens';
 
 declare global {
   interface Window {
@@ -283,12 +283,12 @@ async function boot(): Promise<void> {
   const cycleMode = params.get('cycle') === '1';
   const preset = lightPresets[presetName];
 
+  // No MSAA: TRAA is the anti-aliasing (multisampled depth also breaks TRAA history).
   const renderer = new THREE.WebGPURenderer({ antialias: false });
   await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.AgXToneMapping;
   renderer.toneMappingExposure = preset.exposure;
   document.body.appendChild(renderer.domElement);
@@ -297,7 +297,6 @@ async function boot(): Promise<void> {
     : 'webgl2';
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(preset.skyMid);
   scene.fog = new THREE.Fog(preset.fogColor, preset.fogNear, preset.fogFar);
 
   // Sun day-arc: t in [0..1] rise->set; night preset parks the sun below horizon
@@ -424,9 +423,9 @@ async function boot(): Promise<void> {
     camera.updateProjectionMatrix();
   }
 
-  const sun = new THREE.DirectionalLight(preset.sunColor, preset.sunIntensity);
-  sun.position.set(...preset.sunPosition);
-  if (presetName !== 'night') applySunState(phys.timeOfDay);
+  const sun = new THREE.DirectionalLight(moonLight.color, moonLight.intensity);
+  sun.position.set(...moonLight.position);
+  applySunState(phys.timeOfDay);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -12;
@@ -437,7 +436,6 @@ async function boot(): Promise<void> {
   sun.shadow.camera.far = 45;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
-  sun.shadow.radius = 6;
   // PCSS: blocker search -> penumbra-sized PCF (contact-hardening soft shadows)
   {
     const texel = 1 / 2048;
@@ -472,8 +470,7 @@ async function boot(): Promise<void> {
       for (const off of taps) lit = fnode(lit.add(cmp(off, filterR, fnode(z))));
       return select(occSum.lessThan(0.02), float(1), lit.mul(1 / 16));
     });
-    const PCSS_ON = true;
-    if (PCSS_ON) (sun.shadow as unknown as { filterNode?: unknown }).filterNode = pcss;
+    (sun.shadow as unknown as { filterNode?: unknown }).filterNode = pcss;
   }
   scene.add(sun);
 
@@ -590,7 +587,7 @@ async function boot(): Promise<void> {
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const sunDir = new THREE.Vector3(...preset.sunPosition).normalize().negate();
+  const sunDir = initialSunDir.clone().negate();
   for (const zc of presetName === 'morning' ? [-1.1, 1.2] : []) {
     const windowCenter = new THREE.Vector3(3.08, 1.65, zc);
     const t = (windowCenter.y - 0.16) / -sunDir.y;
