@@ -63,6 +63,10 @@ async function main() {
       VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_dummy',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    // Own process group so cleanup can kill the whole tree (npm → vite → esbuild).
+    // A plain SIGTERM to `npm` leaves the `vite` grandchild alive, whose open
+    // pipes keep this script's event loop from ever exiting (CI hangs forever).
+    detached: true,
   });
 
   let devServerOutput = '';
@@ -73,8 +77,24 @@ async function main() {
     devServerOutput += d.toString();
   });
 
+  let cleanedUp = false;
   const cleanup = () => {
-    if (!devServer.killed) devServer.kill('SIGTERM');
+    if (cleanedUp) return;
+    cleanedUp = true;
+    // SIGKILL the whole process group (negative pid) so the detached
+    // npm → vite → esbuild tree dies, not just the npm wrapper.
+    if (devServer.pid) {
+      try {
+        process.kill(-devServer.pid, 'SIGKILL');
+      } catch {
+        /* group already gone */
+      }
+    }
+    try {
+      devServer.kill('SIGKILL');
+    } catch {
+      /* already dead */
+    }
   };
   process.on('exit', cleanup);
 
@@ -225,3 +245,6 @@ async function main() {
 }
 
 await main();
+// Force-exit: even after the process group is killed in cleanup(), a lingering
+// handle could keep node alive. Exit explicitly so CI never hangs.
+process.exit(process.exitCode ?? 0);
