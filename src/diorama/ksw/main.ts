@@ -419,7 +419,7 @@ async function boot(): Promise<void> {
   scene.add(cubeCam);
   cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
   scene.environment = cubeRT.texture;
-  scene.environmentIntensity = gi.environmentIntensity * preset.giScale;
+  scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale;
 
   // ── post stack: TRAA -> GTAO -> godrays -> zoom-coupled DOF -> bloom ──
   const postProcessing = new THREE.PostProcessing(renderer);

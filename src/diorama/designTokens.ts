@@ -222,6 +222,9 @@ export const kswScene = {
 // KSW post overrides (the prototype `post` tokens belong to look.ts).
 export const kswPost = {
   dof: { focalLength: 1.4, bokehScale: 1.6 },
+  // the big plate sees mostly open sky in the GI probe — damp the white
+  // wash so the sun stays the protagonist
+  envScale: 0.6,
 } as const;
 
 // Camera contract — the diorama has ONE gaze, like a built miniature.
