@@ -2,14 +2,14 @@
 // Everything procedural, all values from designTokens.
 
 import * as THREE from 'three/webgpu';
-import { float, nodeObject, pass, mrt, output, normalView } from 'three/tsl';
+import { color, dot, float, mix, nodeObject, pass, mrt, output, normalView, positionWorld, smoothstep, vec3, vec4 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { godrays } from 'three/addons/tsl/display/GodraysNode.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi } from './designTokens';
+import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade } from './designTokens';
 
 declare global {
   interface Window {
@@ -272,7 +272,8 @@ function sideTable(): THREE.Group {
 
 async function boot(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
-  const presetName = params.get('preset') === 'night' ? 'night' : 'morning';
+  const rawPreset = params.get('preset');
+  const presetName = rawPreset === 'night' || rawPreset === 'dusk' ? rawPreset : 'morning';
   const camMode = params.get('cam') === 'far' ? 'far' : 'default';
   const preset = lightPresets[presetName];
 
@@ -290,8 +291,53 @@ async function boot(): Promise<void> {
     : 'webgl2';
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(preset.background);
+  scene.background = new THREE.Color(preset.skyMid);
   scene.fog = new THREE.Fog(preset.fogColor, preset.fogNear, preset.fogFar);
+
+  // Painted sky dome (DREDGE-style vertical gradient banding)
+  const skyMat = new THREE.MeshBasicNodeMaterial();
+  skyMat.side = THREE.BackSide;
+  skyMat.fog = false;
+  const h = positionWorld.y;
+  const belowBand = smoothstep(float(-6), float(0.5), h);
+  const lowBand = smoothstep(float(1.5), float(9), h);
+  const highBand = smoothstep(float(8), float(17), h);
+  const lower = mix(color(preset.skyBelow), color(preset.skyHorizon), belowBand);
+  skyMat.colorNode = mix(mix(lower, color(preset.skyMid), lowBand), color(preset.skyZenith), highBand);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(42, 32, 24), skyMat);
+  scene.add(sky);
+
+  // Sun / moon disc on the dome, caught by bloom
+  const discDir = new THREE.Vector3(...preset.sunPosition).normalize();
+  const disc = new THREE.Mesh(
+    new THREE.SphereGeometry(presetName === 'night' ? 1.1 : 1.7, 20, 20),
+    new THREE.MeshBasicMaterial({ color: preset.sunDiscColor, fog: false }),
+  );
+  disc.position.copy(discDir.multiplyScalar(38));
+  disc.position.y = Math.max(disc.position.y, 2.5);
+  scene.add(disc);
+
+  if (preset.showStars) {
+    const starPositions: number[] = [];
+    let seed = 42;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    for (let i = 0; i < 160; i++) {
+      const az = rand() * Math.PI * 2;
+      const el = 0.15 + rand() * 1.25;
+      const r = 39;
+      starPositions.push(r * Math.cos(el) * Math.cos(az), r * Math.sin(el), r * Math.cos(el) * Math.sin(az));
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+    const stars = new THREE.Points(
+      starGeo,
+      new THREE.PointsMaterial({ color: palette.star, size: 0.22, sizeAttenuation: true, transparent: true, opacity: 0.85, fog: false }),
+    );
+    scene.add(stars);
+  }
 
   const camera = new THREE.PerspectiveCamera(cameraContract.fov, window.innerWidth / window.innerHeight, 0.1, 100);
   const camScale = camMode === 'far' ? 1.45 : 1.0;
@@ -306,12 +352,12 @@ async function boot(): Promise<void> {
   sun.position.set(...preset.sunPosition);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -9;
-  sun.shadow.camera.right = 9;
-  sun.shadow.camera.top = 9;
-  sun.shadow.camera.bottom = -9;
+  sun.shadow.camera.left = -12;
+  sun.shadow.camera.right = 12;
+  sun.shadow.camera.top = 14;
+  sun.shadow.camera.bottom = -12;
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 30;
+  sun.shadow.camera.far = 45;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   sun.shadow.radius = 6;
@@ -453,7 +499,7 @@ async function boot(): Promise<void> {
   lamp.position.set(-3.0, 0.14, -0.9);
   scene.add(lamp);
 
-  if (presetName === 'night') {
+  if (preset.lampOn) {
     const bulb = new THREE.Mesh(
       new THREE.SphereGeometry(0.09, 12, 12),
       new THREE.MeshBasicMaterial({ color: nightGlow.bulb }),
@@ -482,6 +528,56 @@ async function boot(): Promise<void> {
   child.position.set(-0.8, 0.14, 1.35);
   scene.add(child);
 
+  // Clay clouds — flattened puff clusters drifting overhead, casting soft shadows
+  const cloudMat = new THREE.MeshStandardMaterial({ color: preset.cloudTint, roughness: 1, metalness: 0 });
+  const clouds: THREE.Group[] = [];
+  const cloudSpecs: Array<[number, number, number, number]> = [
+    [-6, 8.6, -2.5, 1.4],
+    [3.5, 9.4, 4.5, 1.1],
+    [8, 8.2, -5, 0.9],
+  ];
+  for (const [cx, cy, cz, cs] of cloudSpecs) {
+    const g = new THREE.Group();
+    const puffSpecs: Array<[number, number, number, number]> = [
+      [0, 0, 0, 1.15],
+      [1.15, -0.12, 0.25, 0.8],
+      [-1.05, -0.1, -0.2, 0.75],
+      [0.25, 0.42, -0.35, 0.7],
+    ];
+    for (const [px, py, pz, pr] of puffSpecs) {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(pr, 18, 18), cloudMat);
+      puff.position.set(px, py, pz);
+      puff.castShadow = true;
+      g.add(puff);
+    }
+    g.scale.set(cs, cs * 0.55, cs);
+    g.position.set(cx, cy, cz);
+    scene.add(g);
+    clouds.push(g);
+  }
+
+  // Edge mist: soft flattened puffs hugging the plate rim (the diorama floats in haze)
+  const mistMat = new THREE.MeshBasicMaterial({
+    color: preset.mistColor,
+    transparent: true,
+    opacity: preset.mistOpacity,
+    depthWrite: false,
+  });
+  const mistSpecs: Array<[number, number, number, number]> = [
+    [-2.5, 0.25, -6.4, 2.8],
+    [2.8, 0.3, -6.8, 3.2],
+    [7.6, 0.25, -5.6, 2.6],
+    [9.2, 0.3, -1.5, 3.0],
+    [9.6, 0.25, 3.2, 2.6],
+    [-7.9, 0.25, -5.9, 2.4],
+  ];
+  for (const [mx, my, mz, mr] of mistSpecs) {
+    const mist = new THREE.Mesh(new THREE.SphereGeometry(mr, 16, 16), mistMat);
+    mist.position.set(mx, my, mz);
+    mist.scale.y = 0.22;
+    scene.add(mist);
+  }
+
   // One-bounce GI: capture the scene from its center, feed it back as IBL
   const cubeRT = new THREE.CubeRenderTarget(256);
   const cubeCam = new THREE.CubeCamera(0.1, 60, cubeRT);
@@ -489,7 +585,7 @@ async function boot(): Promise<void> {
   scene.add(cubeCam);
   cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
   scene.environment = cubeRT.texture;
-  scene.environmentIntensity = gi.environmentIntensity;
+  scene.environmentIntensity = gi.environmentIntensity * preset.giScale;
 
   // Post stack: GTAO x color -> tilt-shift DOF -> bloom
   const postProcessing = new THREE.PostProcessing(renderer);
@@ -506,16 +602,21 @@ async function boot(): Promise<void> {
   // localized cast at the post-chain boundary.
   const chain = (n: unknown) => nodeObject(n as never) as unknown as typeof scenePassColor;
   let lit = withAo;
-  if (presetName === 'morning') {
+  if (presetName !== 'night') {
     const raysNode = godrays(scenePassDepth, camera, sun);
     raysNode.density.value = post.godraysDensity;
     raysNode.maxDensity.value = post.godraysMaxDensity;
-    lit = withAo.add(chain(raysNode).mul(post.godraysMix));
+    lit = withAo.add(chain(raysNode).mul(presetName === 'dusk' ? post.godraysMixDusk : post.godraysMix));
   }
   const withDof = chain(dof(lit, viewZ, post.dof.focusDistance * camScale, post.dof.focalLength, post.dof.bokehScale));
   const bloomPass = chain(bloom(withDof, post.bloom.strength, post.bloom.radius, post.bloom.threshold));
   const composed = withDof.add(bloomPass);
-  postProcessing.outputNode = film(composed, float(post.filmGrain));
+  // DREDGE split toning: shadows lean teal, highlights lean amber
+  const lum = dot(composed.rgb, vec3(0.299, 0.587, 0.114));
+  const tone = smoothstep(float(grade.low), float(grade.high), lum);
+  const tint = mix(vec3(...grade.shadowTint), vec3(...grade.highlightTint), tone);
+  const graded = vec4(composed.rgb.mul(tint), composed.a);
+  postProcessing.outputNode = film(graded, float(post.filmGrain));
 
   const clock = new THREE.Clock();
   function animate(): void {
@@ -523,6 +624,10 @@ async function boot(): Promise<void> {
     nurse.scale.y = 1 + Math.sin(t * 2.2) * 0.012;
     patient.scale.y = 1 + Math.sin(t * 2.2 + 1.4) * 0.012;
     child.scale.y = 0.68 * (1 + Math.sin(t * 2.6 + 0.7) * 0.015);
+    for (let i = 0; i < clouds.length; i++) {
+      clouds[i].position.x += 0.0025 * (1 + i * 0.3);
+      if (clouds[i].position.x > 14) clouds[i].position.x = -14;
+    }
     postProcessing.render();
     if (!window.__LOOK_READY) window.__LOOK_READY = true;
   }
