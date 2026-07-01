@@ -63,6 +63,9 @@ export type LightPreset = {
   cloudTint: number;
   sunDiscColor: number;
   giScale: number;
+  saturation: number;
+  contrast: number;
+  lampBoost: number;
   showStars: boolean;
   lampOn: boolean;
 };
@@ -88,30 +91,36 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     cloudTint: 0xfdf6ea,
     sunDiscColor: 0xffe3b0,
     giScale: 1.0,
+    saturation: 1.05,
+    contrast: 1.0,
+    lampBoost: 1.0,
     showStars: false,
     lampOn: false,
   },
   // The DREDGE moment: amber horizon burning under a deep teal sky.
   dusk: {
-    sunColor: 0xff8845,
-    sunIntensity: 4.4,
+    sunColor: 0xff7d33,
+    sunIntensity: 5.2,
     sunPosition: [8.5, 2.0, -4],
-    hemiSky: 0x6d989c,
-    hemiGround: 0x7a6a58,
-    hemiIntensity: 0.5,
-    fogColor: 0x587f84,
+    hemiSky: 0x4f7d84,
+    hemiGround: 0x5c5348,
+    hemiIntensity: 0.42,
+    fogColor: 0x486e74,
     fogNear: 18,
     fogFar: 46,
-    exposure: 1.0,
-    skyBelow: 0x35565c,
-    skyHorizon: 0xffa15e,
-    skyMid: 0x8fb5ac,
-    skyZenith: 0x2e5f6b,
-    mistColor: 0x9db8b2,
-    mistOpacity: 0.14,
+    exposure: 0.96,
+    skyBelow: 0x22434c,
+    skyHorizon: 0xff8a3d,
+    skyMid: 0x5d8d8c,
+    skyZenith: 0x143540,
+    mistColor: 0x6f949a,
+    mistOpacity: 0.22,
     cloudTint: 0xf2c9a0,
     sunDiscColor: 0xffb877,
-    giScale: 0.8,
+    giScale: 0.55,
+    saturation: 1.12,
+    contrast: 1.06,
+    lampBoost: 1.35,
     showStars: false,
     lampOn: true,
   },
@@ -125,8 +134,8 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     fogColor: 0x2c3a50,
     fogNear: 18,
     fogFar: 46,
-    exposure: 1.05,
-    skyBelow: 0x0e1826,
+    exposure: 0.95,
+    skyBelow: 0x0a121e,
     skyHorizon: 0x3d5670,
     skyMid: 0x243a54,
     skyZenith: 0x121f33,
@@ -134,11 +143,22 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
     mistOpacity: 0.18,
     cloudTint: 0x8fa3bd,
     sunDiscColor: 0xdfe8f2,
-    giScale: 1.0,
+    giScale: 0.9,
+    saturation: 1.08,
+    contrast: 1.05,
+    lampBoost: 1.2,
     showStars: true,
     lampOn: true,
   },
 };
+
+// Distant silhouette hills (DREDGE depth layering), tint per preset via mist color mix.
+export const hills = {
+  layers: [
+    { distance: 34, height: 5.5, darken: 0.55 },
+    { distance: 28, height: 3.6, darken: 0.7 },
+  ],
+} as const;
 
 // Warm interior glow for lamp-lit presets.
 export const nightGlow = {

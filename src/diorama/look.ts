@@ -9,7 +9,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { godrays } from 'three/addons/tsl/display/GodraysNode.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade } from './designTokens';
+import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, hills } from './designTokens';
 
 declare global {
   interface Window {
@@ -317,6 +317,28 @@ async function boot(): Promise<void> {
   disc.position.y = Math.max(disc.position.y, 2.5);
   scene.add(disc);
 
+  // Distant silhouette hills — thin low crests hugging the horizon line
+  const HILLS_ON = false;
+  const hillLayers: Array<{ dist: number; lerp: number; azs: number[]; rBase: number }> = HILLS_ON
+    ? [
+        { dist: 37, lerp: 0.55, azs: [0.35, 0.75, 1.15, 1.5], rBase: 3.4 },
+        { dist: 32, lerp: 0.3, azs: [0.55, 1.0, 1.38], rBase: 2.4 },
+      ]
+    : [];
+  for (const layer of hillLayers) {
+    const hillColor = new THREE.Color(preset.skyBelow).lerp(new THREE.Color(preset.skyMid), layer.lerp);
+    const hillMat = new THREE.MeshBasicMaterial({ color: hillColor, fog: false });
+    for (const az of layer.azs) {
+      const r = layer.rBase * (0.85 + ((az * 13) % 1) * 0.3);
+      const hill = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), hillMat);
+      const dir = new THREE.Vector3(Math.cos(az), 0, -Math.sin(az));
+      hill.position.copy(dir.multiplyScalar(layer.dist));
+      hill.position.y = -r * 0.72;
+      hill.scale.y = 0.38;
+      scene.add(hill);
+    }
+  }
+
   if (preset.showStars) {
     const starPositions: number[] = [];
     let seed = 42;
@@ -506,7 +528,7 @@ async function boot(): Promise<void> {
     );
     bulb.position.set(0, 1.45, 0);
     lamp.add(bulb);
-    const lampLight = new THREE.PointLight(nightGlow.bulb, nightGlow.lampIntensity, 12, 2);
+    const lampLight = new THREE.PointLight(nightGlow.bulb, nightGlow.lampIntensity * preset.lampBoost, 12, 2);
     lampLight.position.set(0, 1.5, 0);
     lamp.add(lampLight);
   }
@@ -529,20 +551,21 @@ async function boot(): Promise<void> {
   scene.add(child);
 
   // Clay clouds — flattened puff clusters drifting overhead, casting soft shadows
-  const cloudMat = new THREE.MeshStandardMaterial({ color: preset.cloudTint, roughness: 1, metalness: 0 });
+  const cloudMat = new THREE.MeshBasicMaterial({ color: preset.cloudTint, fog: false });
   const clouds: THREE.Group[] = [];
   const cloudSpecs: Array<[number, number, number, number]> = [
-    [-6, 8.6, -2.5, 1.4],
-    [3.5, 9.4, 4.5, 1.1],
-    [8, 8.2, -5, 0.9],
+    [-4, 8.8, -9, 1.5],
+    [6, 9.6, -7, 1.2],
+    [12, 8.4, 1, 1.0],
   ];
   for (const [cx, cy, cz, cs] of cloudSpecs) {
     const g = new THREE.Group();
     const puffSpecs: Array<[number, number, number, number]> = [
-      [0, 0, 0, 1.15],
-      [1.15, -0.12, 0.25, 0.8],
-      [-1.05, -0.1, -0.2, 0.75],
-      [0.25, 0.42, -0.35, 0.7],
+      [0, 0, 0, 1.3],
+      [0.95, -0.15, 0.2, 0.95],
+      [-0.9, -0.12, -0.15, 0.9],
+      [0.2, 0.35, -0.25, 0.85],
+      [-0.35, -0.28, 0.3, 0.8],
     ];
     for (const [px, py, pz, pr] of puffSpecs) {
       const puff = new THREE.Mesh(new THREE.SphereGeometry(pr, 18, 18), cloudMat);
@@ -615,7 +638,12 @@ async function boot(): Promise<void> {
   const lum = dot(composed.rgb, vec3(0.299, 0.587, 0.114));
   const tone = smoothstep(float(grade.low), float(grade.high), lum);
   const tint = mix(vec3(...grade.shadowTint), vec3(...grade.highlightTint), tone);
-  const graded = vec4(composed.rgb.mul(tint), composed.a);
+  const toned = composed.rgb.mul(tint);
+  // Per-preset drama: saturation boost + contrast curve around mid-gray
+  const satLum = dot(toned, vec3(0.299, 0.587, 0.114));
+  const saturated = mix(vec3(satLum, satLum, satLum), toned, float(preset.saturation));
+  const contrasted = saturated.sub(float(0.5)).mul(float(preset.contrast)).add(float(0.5)).clamp(0, 1);
+  const graded = vec4(contrasted, composed.a);
   postProcessing.outputNode = film(graded, float(post.filmGrain));
 
   const clock = new THREE.Clock();
