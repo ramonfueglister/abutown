@@ -35,13 +35,28 @@ export type Room = {
   people: PersonPlacement[];
 };
 
+// A walker patrols a corridor: back and forth along `axis`, the other
+// coordinate fixed. Pure data — the renderer animates it.
+export type Walker = {
+  role: PersonRole;
+  axis: 'x' | 'z';
+  fixed: number;
+  from: number;
+  to: number;
+  speed: number; // radians/s of the sine patrol
+  phase: number;
+};
+
 export type FloorPlan = {
   plate: { w: number; d: number };
   building: { x: number; z: number; w: number; d: number };
   corridors: Array<{ x: number; z: number; w: number; d: number }>;
   rooms: Room[];
+  corridorProps: PropPlacement[];
+  outdoorSlabs: Array<{ x: number; z: number; w: number; d: number }>;
   outdoorProps: PropPlacement[];
   outdoorPeople: PersonPlacement[];
+  walkers: Walker[];
 };
 
 const win = (wall: WallSide, center: number, width = 1.4) => ({ wall, center, width });
@@ -531,9 +546,49 @@ export const kswPlan: FloorPlan = {
       ],
     },
   ],
+  corridorProps: [
+    // corridor A (north, z -11..-7)
+    { kind: 'waitingBench', x: -12.5, z: -9.9, rotY: 0 },
+    { kind: 'linenCart', x: 3.2, z: -9.8, rotY: 0.2 },
+    { kind: 'plant', x: -20.5, z: -10.1 },
+    { kind: 'plant', x: 12.5, z: -10.1 },
+    { kind: 'handSanitizer', x: 24.5, z: -10.0 },
+    { kind: 'wheelchair', x: 18.5, z: -8.2, rotY: 1.9 },
+    // corridor B (south, z 3..7)
+    { kind: 'waitingBench', x: 8.5, z: 3.9, rotY: Math.PI },
+    { kind: 'waitingBench', x: -15.5, z: 3.9, rotY: Math.PI },
+    { kind: 'plant', x: -25.5, z: 4.0 },
+    { kind: 'plant', x: 21.5, z: 4.0 },
+    { kind: 'linenCart', x: -5.5, z: 5.8, rotY: -0.3 },
+    { kind: 'handSanitizer', x: 14.5, z: 4.0 },
+    // connectors
+    { kind: 'plant', x: -28.6, z: -0.5 },
+    { kind: 'plant', x: 28.6, z: -0.5 },
+  ],
+  outdoorSlabs: [
+    { x: -2.5, z: 21.75, w: 22, d: 9.5 }, // entrance plaza
+    { x: -23.5, z: 21.75, w: 13, d: 9.5 }, // ambulance apron
+    { x: 22.5, z: 22, w: 17, d: 9 }, // visitor parking
+  ],
   outdoorProps: [
     { kind: 'ambulance', x: -24.5, z: 20.5, rotY: 0.15 },
     { kind: 'helipad', x: -32.3, z: 21.5 },
+    { kind: 'helicopter', x: -32.3, z: 21.5, rotY: 2.3, scale: 0.85 },
+    // visitor parking row
+    { kind: 'carSage', x: 16.5, z: 20.4, rotY: Math.PI / 2 },
+    { kind: 'carHoney', x: 19.3, z: 20.4, rotY: Math.PI / 2 },
+    { kind: 'carWhite', x: 22.1, z: 20.4, rotY: Math.PI / 2 + 0.06 },
+    { kind: 'carCoral', x: 27.7, z: 20.4, rotY: Math.PI / 2 },
+    { kind: 'carWhite', x: 19.3, z: 24.6, rotY: -Math.PI / 2 },
+    { kind: 'carSage', x: 24.9, z: 24.6, rotY: -Math.PI / 2 - 0.05 },
+    { kind: 'bikeRack', x: 9.0, z: 19.6, rotY: Math.PI / 2 },
+    // lampposts along plaza + apron + parking
+    { kind: 'lamppost', x: -9.5, z: 18.3 },
+    { kind: 'lamppost', x: 4.5, z: 18.3 },
+    { kind: 'lamppost', x: -17.5, z: 18.3 },
+    { kind: 'lamppost', x: -30.5, z: 17.9 },
+    { kind: 'lamppost', x: 13.8, z: 18.3 },
+    { kind: 'lamppost', x: 30.5, z: 18.1 },
     { kind: 'tree', x: -33.2, z: 8.0, scale: 1.2 },
     { kind: 'tree', x: -33.5, z: -6.0 },
     { kind: 'tree', x: -33.0, z: -17.5, scale: 0.9 },
@@ -562,5 +617,18 @@ export const kswPlan: FloorPlan = {
     { role: 'child', x: -1.2, z: 21.2, yaw: -0.4 },
     { role: 'visitor', x: 5.2, z: 20.2, yaw: 2.2 },
     { role: 'doctor', x: -10.8, z: 19.8, yaw: 1.1 },
+  ],
+  walkers: [
+    { role: 'nurse', axis: 'x', fixed: -9, from: -26, to: 24, speed: 0.11, phase: 0.0 },
+    { role: 'doctor', axis: 'x', fixed: -8.3, from: -20, to: 27, speed: 0.09, phase: 2.1 },
+    { role: 'labtech', axis: 'x', fixed: -9.7, from: -14, to: 26, speed: 0.13, phase: 4.4 },
+    { role: 'nurse', axis: 'x', fixed: 5, from: -27, to: 26, speed: 0.1, phase: 1.2 },
+    { role: 'visitor', axis: 'x', fixed: 5.8, from: -24, to: 20, speed: 0.08, phase: 3.6 },
+    { role: 'patient', axis: 'x', fixed: 4.3, from: -12, to: 24, speed: 0.06, phase: 5.3 },
+    { role: 'nurse', axis: 'z', fixed: -28, from: -9, to: 5, speed: 0.14, phase: 0.7 },
+    { role: 'doctor', axis: 'z', fixed: 28, from: -9, to: 5, speed: 0.12, phase: 2.9 },
+    // plaza strollers
+    { role: 'visitor', axis: 'x', fixed: 20.3, from: -10, to: 6, speed: 0.07, phase: 1.8 },
+    { role: 'paramedic', axis: 'z', fixed: -21.5, from: 18, to: 24.5, speed: 0.12, phase: 0.3 },
   ],
 };

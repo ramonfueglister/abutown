@@ -31,6 +31,7 @@ import {
 import { applyDrag, applyZoom, rigFromLookAt, rigPosition, roofFade, type CameraRigState } from './cameraRig';
 import { buildHospital } from './building';
 import { kswPlan } from './floorPlan';
+import { buildPerson } from './props';
 
 declare global {
   interface Window {
@@ -295,17 +296,32 @@ async function boot(): Promise<void> {
   scene.add(hospital);
   roofs.setFade(roofFade(rig.radius, kswCamera));
 
-  // collect animated bits: bean people breathe, ambulance light pulses
+  // collect animated bits: bean people breathe, ambulance light pulses,
+  // helicopter rotors idle-spin
   const beans: THREE.Group[] = [];
   const blinkers: THREE.Mesh[] = [];
+  const rotors: THREE.Object3D[] = [];
   hospital.traverse((o) => {
     if (o.userData.blink) blinkers.push(o as THREE.Mesh);
+    if (o.userData.rotor) rotors.push(o);
     const g = o as THREE.Group;
     if (g.children?.some((c) => (c as THREE.Mesh).geometry?.type === 'CapsuleGeometry' && c.position.y === 0.62)) {
       beans.push(g);
     }
   });
   const beanBaseScale = beans.map((b) => b.scale.y);
+
+  // corridor walkers: sine patrols from the plan, waddling as they go
+  const inCorridor = (x: number, z: number): boolean =>
+    kswPlan.corridors.some((c) => Math.abs(x - c.x) <= c.w / 2 && Math.abs(z - c.z) <= c.d / 2);
+  const walkers = kswPlan.walkers.map((w) => {
+    const x0 = w.axis === 'x' ? w.from : w.fixed;
+    const z0 = w.axis === 'x' ? w.fixed : w.from;
+    const g = buildPerson({ role: w.role, x: x0, z: z0, yaw: 0 });
+    g.position.y = inCorridor(x0, z0) ? 0.14 : 0; // corridor floor vs plate
+    hospital.add(g);
+    return { w, g };
+  });
 
   // Edge mist ring around the plate rim
   const mistMat = new THREE.MeshBasicMaterial({
@@ -358,15 +374,29 @@ async function boot(): Promise<void> {
       transparent: true,
       opacity: 0.9,
     });
+    hospital.updateMatrixWorld(true);
     hospital.traverse((o) => {
-      if (!o.userData.windowPane) return;
       const m = o as THREE.Mesh;
+      if (o.userData.lampBulb) {
+        m.material = glow;
+        return;
+      }
+      if (!o.userData.windowPane) return;
       // deterministic per-window choice, no RNG: hash the world position
       const wp = new THREE.Vector3();
       m.getWorldPosition(wp);
       const h = Math.abs(Math.sin(wp.x * 12.9898 + wp.z * 78.233) * 43758.5453) % 1;
       if (h < 0.55) m.material = glow;
     });
+    // two plaza lampposts actually cast warm pools
+    for (const [lx, lz] of [
+      [-9.5, 18.3],
+      [4.5, 18.3],
+    ] as const) {
+      const pool = new THREE.PointLight(nightGlow.bulb, 14 * preset.lampBoost, 12, 2);
+      pool.position.set(lx, 3.0, lz);
+      scene.add(pool);
+    }
   }
 
   // Warm interior points at night: entrance + emergency glow
@@ -442,6 +472,21 @@ async function boot(): Promise<void> {
       beans[i].scale.y = beanBaseScale[i] * (1 + Math.sin(t * 2.2 + i * 0.9) * 0.012);
     }
     for (const b of blinkers) b.visible = Math.sin(t * 6) > -0.2;
+    for (const r of rotors) r.rotation.y = t * 1.4;
+    for (const { w, g } of walkers) {
+      const s = 0.5 + 0.5 * Math.sin(w.speed * t + w.phase);
+      const pos = w.from + (w.to - w.from) * s;
+      const dir = Math.sign(Math.cos(w.speed * t + w.phase) * (w.to - w.from)) || 1;
+      if (w.axis === 'x') {
+        g.position.x = pos;
+        g.rotation.y = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+      } else {
+        g.position.z = pos;
+        g.rotation.y = dir > 0 ? 0 : Math.PI;
+      }
+      g.rotation.z = Math.sin(t * 7 + w.phase) * 0.045; // waddle
+      g.scale.y = 1 + Math.abs(Math.sin(t * 7 + w.phase)) * 0.02;
+    }
     driftU.value = t * cloudCfg.drift;
     frameCount++;
     if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);

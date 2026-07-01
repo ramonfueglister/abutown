@@ -44,6 +44,22 @@ export function segmentWall(length: number, height: number, openings: WallOpenin
 
 export type RoofControl = { setFade(fade01: number): void; fade(): number };
 
+// Rooftop dressing (HVAC, vents, solar) fades with the lids, so it needs its
+// own transparent material instances built from the clay recipe.
+function fadingClay(color: number): THREE.MeshPhysicalMaterial {
+  const m = new THREE.MeshPhysicalMaterial({
+    color,
+    roughness: clay.roughness,
+    metalness: clay.metalness,
+    transparent: true,
+    opacity: 1,
+  });
+  m.sheen = clay.sheen;
+  m.sheenRoughness = clay.sheenRoughness;
+  m.sheenColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.5);
+  return m;
+}
+
 const FLOOR_H = 0.14;
 
 function wallGroup(length: number, thickness: number, color: number, openings: WallOpening[]): THREE.Group {
@@ -190,12 +206,11 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
   plate.position.y = -kswScene.plateThickness / 2;
   group.add(plate);
 
-  const plaza = box(22, 0.1, 9.5, kswPalette.plazaPath, radii.m);
-  plaza.position.set(-2.5, 0.05, 21.5);
-  group.add(plaza);
-  const apron = box(13, 0.1, 9.5, kswPalette.plazaPath, radii.m);
-  apron.position.set(-23.5, 0.05, 21.5);
-  group.add(apron);
+  for (const s of plan.outdoorSlabs) {
+    const slab = box(s.w, 0.1, s.d, kswPalette.plazaPath, radii.m);
+    slab.position.set(s.x, 0.05, s.z);
+    group.add(slab);
+  }
 
   // floors
   for (const room of plan.rooms) {
@@ -217,9 +232,31 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
   for (const room of plan.rooms) {
     group.add(buildRoomWalls(plan, room));
     group.add(buildSign(room));
+    // every street-side door gets a canopy on two posts
+    for (const d of room.doors) {
+      if (!isPerimeter(plan, room, d.wall)) continue;
+      const p = doorWorld(room, d.wall, d.center);
+      const alongX = d.wall === 'n' || d.wall === 's';
+      const cw = d.width + 1.6;
+      const cd = 1.7;
+      const slab = box(alongX ? cw : cd, 0.16, alongX ? cd : cw, palette.white, radii.s);
+      slab.position.set(p.x + p.out[0] * (cd / 2 + 0.2), FLOOR_H + kswScene.openingHead + 0.12, p.z + p.out[1] * (cd / 2 + 0.2));
+      group.add(slab);
+      for (const side of [-1, 1]) {
+        const post = box(0.14, kswScene.openingHead, 0.14, palette.white, radii.xs);
+        const offAlong = side * (cw / 2 - 0.2);
+        post.position.set(
+          p.x + p.out[0] * (cd - 0.1) + (alongX ? offAlong : 0),
+          FLOOR_H + kswScene.openingHead / 2,
+          p.z + p.out[1] * (cd - 0.1) + (alongX ? 0 : offAlong),
+        );
+        group.add(post);
+      }
+    }
     for (const p of room.props) group.add(withFloorLift(buildProp(p)));
     for (const p of room.people) group.add(withFloorLift(buildPerson(p)));
   }
+  for (const p of plan.corridorProps) group.add(withFloorLift(buildProp(p)));
   for (const p of plan.outdoorProps) group.add(buildProp(p));
   for (const p of plan.outdoorPeople) group.add(buildPerson(p));
 
@@ -280,14 +317,53 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
     addRoof(room.rect, 0.12 + (i % 3) * 0.09, roofMat, true);
   });
   for (const c of plan.corridors) addRoof(c, 0, trimMat, false);
+
+  // rooftop dressing: HVAC boxes, vents and solar rows — a Swiss flat roof
+  // is never empty. All of it fades with the lids.
+  const fadeMats: THREE.MeshPhysicalMaterial[] = [roofMat, trimMat];
+  const hvacMat = fadingClay(palette.metalMatt);
+  const ventMat = fadingClay(palette.white);
+  const solarMat = fadingClay(palette.eye);
+  const solarFrameMat = fadingClay(palette.metalMatt);
+  fadeMats.push(hvacMat, ventMat, solarMat, solarFrameMat);
+  const addRoofMesh = (geo: THREE.BufferGeometry, mat: THREE.MeshPhysicalMaterial, x: number, y: number, z: number, rotY = 0): void => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.rotation.y = rotY;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    roofMeshes.push(m);
+    roofGroup.add(m);
+  };
+  plan.rooms.forEach((room, i) => {
+    const step = 0.12 + (i % 3) * 0.09;
+    const topY = baseY + step + kswScene.roofThickness + 0.12;
+    const r = room.rect;
+    if (i % 3 === 0) {
+      addRoofMesh(new RoundedBoxGeometry(1.2, 0.7, 0.9, 4, radii.s), hvacMat, r.x - r.w * 0.22, topY + 0.28, r.z - r.d * 0.2, 0.2);
+      addRoofMesh(new THREE.CylinderGeometry(0.16, 0.2, 0.5, 12), ventMat, r.x + r.w * 0.24, topY + 0.2, r.z + r.d * 0.18);
+    } else if (i % 3 === 1) {
+      // south-tilted solar row
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(Math.min(r.w * 0.5, 3.2), 0.06, 1.1), solarMat);
+      panel.position.set(r.x, topY + 0.34, r.z + r.d * 0.16);
+      panel.rotation.x = -0.32;
+      panel.castShadow = true;
+      panel.receiveShadow = true;
+      roofMeshes.push(panel);
+      roofGroup.add(panel);
+      addRoofMesh(new RoundedBoxGeometry(0.5, 0.36, 0.5, 4, radii.xs), solarFrameMat, r.x - r.w * 0.28, topY + 0.14, r.z - r.d * 0.22);
+    } else {
+      addRoofMesh(new THREE.CylinderGeometry(0.2, 0.26, 0.62, 12), ventMat, r.x - r.w * 0.2, topY + 0.26, r.z + r.d * 0.2);
+      addRoofMesh(new RoundedBoxGeometry(0.8, 0.5, 0.7, 4, radii.s), hvacMat, r.x + r.w * 0.22, topY + 0.2, r.z - r.d * 0.16, -0.15);
+    }
+  });
   group.add(roofGroup);
 
   let currentFade = 1;
   const roofs: RoofControl = {
     setFade(fade01: number) {
       currentFade = Math.min(Math.max(fade01, 0), 1);
-      roofMat.opacity = currentFade;
-      trimMat.opacity = currentFade;
+      for (const m of fadeMats) m.opacity = currentFade;
       const cast = currentFade > 0.5;
       const visible = currentFade > 0.02;
       for (const m of roofMeshes) {

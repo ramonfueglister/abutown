@@ -808,6 +808,106 @@ function helipad(): THREE.Group {
   return g;
 }
 
+// Rega-style rescue helicopter parked on the pad. The rotor group carries
+// userData.rotor so the scene can idle-spin it.
+function helicopter(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(at(box(2.3, 1.1, 1.15, palette.coral, radii.l), 0, 1.05, 0));
+  g.add(at(box(0.9, 0.5, 0.7, palette.white, radii.m), -0.2, 1.55, 0));
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), glassMat());
+  nose.scale.set(1.1, 0.85, 0.95);
+  g.add(at(nose, 1.05, 1.15, 0));
+  // tail boom + fin + tail rotor
+  const boom = cylinder(0.11, 0.16, 1.7, palette.coral, 10);
+  boom.rotation.z = Math.PI / 2;
+  g.add(at(boom, -1.95, 1.25, 0));
+  g.add(at(box(0.5, 0.7, 0.1, palette.white, radii.s), -2.75, 1.6, 0));
+  const tailRotor = new THREE.Group();
+  tailRotor.add(at(box(0.06, 0.7, 0.05, palette.eye, radii.xs), 0, 0, 0));
+  tailRotor.add(at(box(0.7, 0.06, 0.05, palette.eye, radii.xs), 0, 0, 0));
+  tailRotor.position.set(-2.75, 1.6, 0.09);
+  g.add(tailRotor);
+  // skids
+  for (const side of [-1, 1]) {
+    const skid = cylinder(0.05, 0.05, 2.2, palette.metalMatt, 8);
+    skid.rotation.z = Math.PI / 2;
+    g.add(at(skid, 0, 0.14, side * 0.62));
+    for (const sx of [-0.6, 0.6]) {
+      g.add(at(cylinder(0.045, 0.045, 0.42, palette.metalMatt, 8), sx, 0.35, side * 0.6));
+    }
+  }
+  // main rotor
+  const rotor = new THREE.Group();
+  rotor.add(at(cylinder(0.09, 0.11, 0.3, palette.metalDark, 10), 0, 0.1, 0));
+  rotor.add(at(box(4.4, 0.05, 0.24, palette.eye, radii.xs), 0, 0.24, 0));
+  rotor.add(at(box(0.24, 0.05, 4.4, palette.eye, radii.xs), 0, 0.24, 0));
+  rotor.position.set(-0.1, 1.62, 0);
+  rotor.userData.rotor = true;
+  g.add(rotor);
+  return g;
+}
+
+// Street lamp; the bulb carries userData.lampBulb so night presets light it.
+function lamppost(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(at(cylinder(0.07, 0.1, 2.9, palette.metalMatt, 10), 0, 1.45, 0));
+  g.add(at(cylinder(0.22, 0.26, 0.1, palette.metalMatt), 0, 0.05, 0));
+  const head = cylinder(0.26, 0.34, 0.22, palette.metalDark, 14);
+  g.add(at(head, 0, 2.98, 0));
+  const bulb = sphere(0.15, palette.white, 12);
+  bulb.userData.lampBulb = true;
+  g.add(at(bulb, 0, 2.86, 0));
+  return g;
+}
+
+function bikeRack(): THREE.Group {
+  const g = new THREE.Group();
+  const rail = cylinder(0.05, 0.05, 2.4, palette.metalMatt, 8);
+  rail.rotation.x = Math.PI / 2;
+  g.add(at(rail, 0, 0.75, 0));
+  for (const zc of [-1.1, 1.1]) g.add(at(cylinder(0.05, 0.06, 0.75, palette.metalMatt, 8), 0, 0.38, zc));
+  // three parked clay bikes
+  for (const [i, zc] of [-0.7, 0.1, 0.9].entries()) {
+    const bike = new THREE.Group();
+    for (const wx of [-0.42, 0.42]) {
+      const wheel = torus(0.26, 0.05, palette.eye);
+      wheel.rotation.y = Math.PI / 2;
+      bike.add(at(wheel, wx, 0.31, 0));
+    }
+    const bar = box(0.8, 0.07, 0.07, i === 1 ? palette.coralSoft : palette.sage, radii.xs);
+    bar.rotation.z = 0.12;
+    bike.add(at(bar, 0, 0.62, 0));
+    bike.add(at(cylinder(0.035, 0.035, 0.35, palette.metalMatt, 8), 0.4, 0.78, 0));
+    bike.add(at(box(0.26, 0.05, 0.08, palette.eye, radii.xs), -0.35, 0.85, 0));
+    bike.rotation.y = Math.PI / 2 + (i - 1) * 0.12;
+    bike.position.set(0, 0, zc);
+    g.add(bike);
+  }
+  return g;
+}
+
+function makeCar(color: number): () => THREE.Group {
+  return () => {
+    const g = new THREE.Group();
+    g.add(at(box(2.1, 0.62, 1.05, color, radii.l), 0, 0.55, 0));
+    g.add(at(box(1.15, 0.5, 0.95, color, radii.l), -0.1, 1.05, 0));
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.8), glassMat());
+    shield.rotation.z = -0.4;
+    g.add(at(shield, 0.5, 1.02, 0));
+    for (const [wx, wz] of [
+      [0.72, 0.56],
+      [0.72, -0.56],
+      [-0.72, 0.56],
+      [-0.72, -0.56],
+    ] as const) {
+      const wheel = torus(0.19, 0.09, palette.eye);
+      wheel.rotation.y = Math.PI / 2;
+      g.add(at(wheel, wx, 0.28, wz));
+    }
+    return g;
+  };
+}
+
 function plantSmall(scale: number): THREE.Group {
   const g = plant();
   g.scale.setScalar(scale);
@@ -952,6 +1052,13 @@ export const propBuilders: Record<string, () => THREE.Group> = {
   tree,
   helipad,
   privacyScreen,
+  helicopter,
+  lamppost,
+  bikeRack,
+  carSage: makeCar(palette.sage),
+  carHoney: makeCar(palette.honey),
+  carWhite: makeCar(palette.white),
+  carCoral: makeCar(palette.coralSoft),
 };
 
 export function buildProp(p: PropPlacement): THREE.Group {

@@ -161,6 +161,37 @@ describe('kswPlan geometry invariants', () => {
     }
   });
 
+  it('corridor props sit inside a corridor', () => {
+    for (const p of kswPlan.corridorProps) {
+      const ok = kswPlan.corridors.some((c) => inside(c, p.x, p.z, 0.45));
+      expect(ok, `corridor prop ${p.kind} at ${p.x},${p.z}`).toBe(true);
+    }
+  });
+
+  it('outdoor slabs stay on the plate and clear of the building', () => {
+    const halfW = kswPlan.plate.w / 2;
+    const halfD = kswPlan.plate.d / 2;
+    for (const s of kswPlan.outdoorSlabs) {
+      expect(Math.abs(s.x) + s.w / 2).toBeLessThanOrEqual(halfW);
+      expect(Math.abs(s.z) + s.d / 2).toBeLessThanOrEqual(halfD);
+      expect(overlapArea(s, kswPlan.building)).toBeLessThan(EPS);
+    }
+  });
+
+  it('walker patrols stay inside the corridors or outside on the plate', () => {
+    for (const w of kswPlan.walkers) {
+      for (let i = 0; i <= 20; i++) {
+        const p = w.from + ((w.to - w.from) * i) / 20;
+        const x = w.axis === 'x' ? p : w.fixed;
+        const z = w.axis === 'x' ? w.fixed : p;
+        // union membership: corridors tile seamlessly, so no inner margin here
+        const inCorr = kswPlan.corridors.some((c) => inside(c, x, z, 0));
+        const outside = !inside(kswPlan.building, x, z, -0.5) && Math.abs(x) < kswPlan.plate.w / 2 - 1 && Math.abs(z) < kswPlan.plate.d / 2 - 1;
+        expect(inCorr || outside, `walker ${w.role} leaves the path at ${x.toFixed(1)},${z.toFixed(1)}`).toBe(true);
+      }
+    }
+  });
+
   it('every room is furnished and staffed (a living hospital, not a shell)', () => {
     for (const room of kswPlan.rooms) {
       expect(room.props.length, room.id).toBeGreaterThanOrEqual(3);

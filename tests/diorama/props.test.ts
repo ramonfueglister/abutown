@@ -19,6 +19,7 @@ describe('prop registry', () => {
     const used = new Set<string>();
     for (const room of kswPlan.rooms) for (const p of room.props) used.add(p.kind);
     for (const p of kswPlan.outdoorProps) used.add(p.kind);
+    for (const p of kswPlan.corridorProps) used.add(p.kind);
     const missing = [...used].filter((k) => !(k in propBuilders));
     expect(missing, `missing builders: ${missing.join(', ')}`).toEqual([]);
   });
