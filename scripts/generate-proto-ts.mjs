@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs `buf generate` to produce TS types from
-// backend/crates/protocol/proto/abutown.proto into src/backend/proto/.
+// backend/crates/protocol/proto/abutown.proto into src/proto/.
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
