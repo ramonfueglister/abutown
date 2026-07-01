@@ -152,12 +152,29 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
   },
 };
 
-// Distant silhouette hills (DREDGE depth layering), tint per preset via mist color mix.
-export const hills = {
-  layers: [
-    { distance: 34, height: 5.5, darken: 0.55 },
-    { distance: 28, height: 3.6, darken: 0.7 },
-  ],
+// Physical sky (SkyMesh Rayleigh/Mie) per preset + the sun's day arc.
+export const skyPhys = {
+  morning: { turbidity: 3, rayleigh: 1.3, mieCoefficient: 0.006, mieG: 0.8, timeOfDay: 0.14, sunBoost: 1.0 },
+  dusk: { turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9, timeOfDay: 0.96, sunBoost: 2.3 },
+  night: { turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8, timeOfDay: 1.08, sunBoost: 0 },
+} as const;
+
+export const sunArcCfg = {
+  azRise: 0.15,
+  azSet: 0.95,
+  elevMax: 1.15,
+  elevBase: -0.04,
+  colorLow: 0xff6f2a,
+  colorHigh: 0xfff1dd,
+  cycleSeconds: 48,
+} as const;
+
+// Procedural cloud dome (fbm noise, sun-lit)
+export const cloudCfg = {
+  scale: 2.1,
+  coverage: { morning: 0.45, dusk: 0.6, night: 0.35 },
+  drift: 0.008,
+  litBoost: 1.6,
 } as const;
 
 // Warm interior glow for lamp-lit presets.

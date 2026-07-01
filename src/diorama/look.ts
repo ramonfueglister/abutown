@@ -2,14 +2,15 @@
 // Everything procedural, all values from designTokens.
 
 import * as THREE from 'three/webgpu';
-import { color, dot, float, mix, nodeObject, pass, mrt, output, normalView, positionWorld, smoothstep, vec3, vec4 } from 'three/tsl';
+import { dot, float, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, smoothstep, uniform, vec3, vec4 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { godrays } from 'three/addons/tsl/display/GodraysNode.js';
+import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, hills } from './designTokens';
+import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudCfg } from './designTokens';
 
 declare global {
   interface Window {
@@ -275,6 +276,7 @@ async function boot(): Promise<void> {
   const rawPreset = params.get('preset');
   const presetName = rawPreset === 'night' || rawPreset === 'dusk' ? rawPreset : 'morning';
   const camMode = params.get('cam') === 'far' ? 'far' : 'default';
+  const cycleMode = params.get('cycle') === '1';
   const preset = lightPresets[presetName];
 
   const renderer = new THREE.WebGPURenderer({ antialias: true });
@@ -294,50 +296,76 @@ async function boot(): Promise<void> {
   scene.background = new THREE.Color(preset.skyMid);
   scene.fog = new THREE.Fog(preset.fogColor, preset.fogNear, preset.fogFar);
 
-  // Painted sky dome (DREDGE-style vertical gradient banding)
-  const skyMat = new THREE.MeshBasicNodeMaterial();
-  skyMat.side = THREE.BackSide;
-  skyMat.fog = false;
-  const h = positionWorld.y;
-  const belowBand = smoothstep(float(-6), float(0.5), h);
-  const lowBand = smoothstep(float(1.5), float(9), h);
-  const highBand = smoothstep(float(8), float(17), h);
-  const lower = mix(color(preset.skyBelow), color(preset.skyHorizon), belowBand);
-  skyMat.colorNode = mix(mix(lower, color(preset.skyMid), lowBand), color(preset.skyZenith), highBand);
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(42, 32, 24), skyMat);
-  scene.add(sky);
+  // Sun day-arc: t in [0..1] rise->set; night preset parks the sun below horizon
+  const sunDirFor = (t: number): THREE.Vector3 => {
+    const elev = sunArcCfg.elevBase + sunArcCfg.elevMax * Math.sin(Math.PI * Math.min(Math.max(t, 0), 1));
+    const az = sunArcCfg.azRise + (sunArcCfg.azSet - sunArcCfg.azRise) * t;
+    return new THREE.Vector3(Math.cos(elev) * Math.cos(az), Math.sin(elev), Math.cos(elev) * Math.sin(az));
+  };
+  const sunLightFor = (dir: THREE.Vector3, boost: number): { color: THREE.Color; intensity: number } => {
+    const elevN = Math.min(Math.max(dir.y / 0.5, 0), 1);
+    const eased = elevN * elevN * (3 - 2 * elevN);
+    return {
+      color: new THREE.Color(sunArcCfg.colorLow).lerp(new THREE.Color(sunArcCfg.colorHigh), eased),
+      intensity: (0.8 + 6.2 * eased) * boost,
+    };
+  };
+  const phys = skyPhys[presetName];
+  const initialSunDir = sunDirFor(phys.timeOfDay);
 
-  // Sun / moon disc on the dome, caught by bloom
-  const discDir = new THREE.Vector3(...preset.sunPosition).normalize();
-  const disc = new THREE.Mesh(
-    new THREE.SphereGeometry(presetName === 'night' ? 1.1 : 1.7, 20, 20),
-    new THREE.MeshBasicMaterial({ color: preset.sunDiscColor, fog: false }),
-  );
-  disc.position.copy(discDir.multiplyScalar(38));
-  disc.position.y = Math.max(disc.position.y, 2.5);
-  scene.add(disc);
+  // Physical sky (Rayleigh/Mie scattering) — real sunrise/sunset colors
+  const skyMesh = new SkyMesh();
+  skyMesh.scale.setScalar(400);
+  skyMesh.turbidity.value = phys.turbidity;
+  skyMesh.rayleigh.value = phys.rayleigh;
+  skyMesh.mieCoefficient.value = phys.mieCoefficient;
+  skyMesh.mieDirectionalG.value = phys.mieG;
+  skyMesh.sunPosition.value.copy(initialSunDir);
+  scene.add(skyMesh);
 
-  // Distant silhouette hills — thin low crests hugging the horizon line
-  const HILLS_ON = false;
-  const hillLayers: Array<{ dist: number; lerp: number; azs: number[]; rBase: number }> = HILLS_ON
-    ? [
-        { dist: 37, lerp: 0.55, azs: [0.35, 0.75, 1.15, 1.5], rBase: 3.4 },
-        { dist: 32, lerp: 0.3, azs: [0.55, 1.0, 1.38], rBase: 2.4 },
-      ]
-    : [];
-  for (const layer of hillLayers) {
-    const hillColor = new THREE.Color(preset.skyBelow).lerp(new THREE.Color(preset.skyMid), layer.lerp);
-    const hillMat = new THREE.MeshBasicMaterial({ color: hillColor, fog: false });
-    for (const az of layer.azs) {
-      const r = layer.rBase * (0.85 + ((az * 13) % 1) * 0.3);
-      const hill = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), hillMat);
-      const dir = new THREE.Vector3(Math.cos(az), 0, -Math.sin(az));
-      hill.position.copy(dir.multiplyScalar(layer.dist));
-      hill.position.y = -r * 0.72;
-      hill.scale.y = 0.38;
-      scene.add(hill);
-    }
+  // Procedural cloud dome: fbm noise, lit toward the sun (silver lining)
+  const sunDirUniform = uniform(initialSunDir.clone());
+  const cloudLit = uniform(new THREE.Color(0xffffff));
+  const cloudShadow = uniform(new THREE.Color(0x9aa8b5));
+  const driftU = uniform(0);
+  const cloudMatDome = new THREE.MeshBasicNodeMaterial();
+  cloudMatDome.transparent = true;
+  cloudMatDome.side = THREE.BackSide;
+  cloudMatDome.depthWrite = false;
+  cloudMatDome.fog = false;
+  {
+    const dir = positionWorld.normalize();
+    const p = vec3(dir.x.mul(float(cloudCfg.scale)).add(driftU), dir.y.mul(float(cloudCfg.scale * 1.6)), dir.z.mul(float(cloudCfg.scale)));
+    const n = mx_fractal_noise_float(p, 4, 2.0, 0.55, 1.0);
+    const coverage = float(cloudCfg.coverage[presetName]);
+    const dens = smoothstep(float(0.1), float(0.42), n.add(coverage.sub(0.5)));
+    const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
+    cloudMatDome.opacityNode = dens.mul(horizonFade).mul(float(0.95));
+    const facing = dot(dir, sunDirUniform).mul(0.5).add(0.5);
+    type Vec3Node = ReturnType<typeof vec3>;
+    const shadowN = cloudShadow as unknown as Vec3Node;
+    const litN = (cloudLit as unknown as Vec3Node).mul(float(cloudCfg.litBoost));
+    cloudMatDome.colorNode = mix(shadowN, litN, facing.pow(2.0));
   }
+  const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(46, 32, 24), cloudMatDome);
+  scene.add(cloudDome);
+
+  const applySunState = (t: number): void => {
+    const dir = sunDirFor(t);
+    skyMesh.sunPosition.value.copy(dir);
+    (sunDirUniform.value as THREE.Vector3).copy(dir);
+    if (presetName !== 'night') {
+      const lightState = sunLightFor(dir, phys.sunBoost);
+      sun.position.copy(dir.clone().multiplyScalar(12));
+      sun.color.copy(lightState.color);
+      sun.intensity = Math.max(lightState.intensity, 0.05);
+      (cloudLit.value as THREE.Color).copy(lightState.color).lerp(new THREE.Color(0xffffff), 0.3);
+      (cloudShadow.value as THREE.Color).copy(new THREE.Color(0x8795a3).lerp(lightState.color, 0.15));
+    } else {
+      (cloudLit.value as THREE.Color).set(0x9fb2cc);
+      (cloudShadow.value as THREE.Color).set(0x39485c);
+    }
+  };
 
   if (preset.showStars) {
     const starPositions: number[] = [];
@@ -372,6 +400,7 @@ async function boot(): Promise<void> {
 
   const sun = new THREE.DirectionalLight(preset.sunColor, preset.sunIntensity);
   sun.position.set(...preset.sunPosition);
+  if (presetName !== 'night') applySunState(phys.timeOfDay);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -12;
@@ -550,35 +579,6 @@ async function boot(): Promise<void> {
   child.position.set(-0.8, 0.14, 1.35);
   scene.add(child);
 
-  // Clay clouds — flattened puff clusters drifting overhead, casting soft shadows
-  const cloudMat = new THREE.MeshBasicMaterial({ color: preset.cloudTint, fog: false });
-  const clouds: THREE.Group[] = [];
-  const cloudSpecs: Array<[number, number, number, number]> = [
-    [-4, 8.8, -9, 1.5],
-    [6, 9.6, -7, 1.2],
-    [12, 8.4, 1, 1.0],
-  ];
-  for (const [cx, cy, cz, cs] of cloudSpecs) {
-    const g = new THREE.Group();
-    const puffSpecs: Array<[number, number, number, number]> = [
-      [0, 0, 0, 1.3],
-      [0.95, -0.15, 0.2, 0.95],
-      [-0.9, -0.12, -0.15, 0.9],
-      [0.2, 0.35, -0.25, 0.85],
-      [-0.35, -0.28, 0.3, 0.8],
-    ];
-    for (const [px, py, pz, pr] of puffSpecs) {
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(pr, 18, 18), cloudMat);
-      puff.position.set(px, py, pz);
-      puff.castShadow = true;
-      g.add(puff);
-    }
-    g.scale.set(cs, cs * 0.55, cs);
-    g.position.set(cx, cy, cz);
-    scene.add(g);
-    clouds.push(g);
-  }
-
   // Edge mist: soft flattened puffs hugging the plate rim (the diorama floats in haze)
   const mistMat = new THREE.MeshBasicMaterial({
     color: preset.mistColor,
@@ -652,10 +652,8 @@ async function boot(): Promise<void> {
     nurse.scale.y = 1 + Math.sin(t * 2.2) * 0.012;
     patient.scale.y = 1 + Math.sin(t * 2.2 + 1.4) * 0.012;
     child.scale.y = 0.68 * (1 + Math.sin(t * 2.6 + 0.7) * 0.015);
-    for (let i = 0; i < clouds.length; i++) {
-      clouds[i].position.x += 0.0025 * (1 + i * 0.3);
-      if (clouds[i].position.x > 14) clouds[i].position.x = -14;
-    }
+    driftU.value = t * cloudCfg.drift;
+    if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
     postProcessing.render();
     if (!window.__LOOK_READY) window.__LOOK_READY = true;
   }
