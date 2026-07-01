@@ -170,6 +170,53 @@ export const grade = {
 // image-based lighting, so walls/lawn tint the shadows.
 export const gi = { environmentIntensity: 0.28, hemiCut: 0.5 } as const;
 
+// ── KSW hospital diorama (ksw.html) ─────────────────────────────────────
+// Additions for the full-hospital scene; the prototype tokens above stay
+// untouched so look.ts keeps rendering identically.
+
+export const kswPalette = {
+  roofClay: 0xd9a184, // terracotta roof lids
+  roofTrim: 0xe8bfa0,
+  corridorFloor: 0xf2ead9,
+  plazaPath: 0xe5d9c0,
+  opLight: 0xfff3d6, // OP lamp discs (unlit mesh color)
+  screenGlow: 0xbfe3d9, // device screens
+  crossRed: 0xd8574a, // Swiss hospital cross signage block
+} as const;
+
+// Dynamic diorama camera: wheel dolly, left-drag orbit. Roofs fade with the
+// zoom radius so zooming in reveals the interiors.
+export const kswCamera = {
+  fov: 24,
+  overviewPosition: [-40, 32, 46] as [number, number, number],
+  target: [0, 0.6, 0] as [number, number, number],
+  radiusMin: 7,
+  radiusMax: 95,
+  zoomSpeed: 0.0012,
+  dragSpeed: 0.005,
+  pitchMin: 0.18,
+  pitchMax: 1.25,
+  roofFadeNear: 16,
+  roofFadeFar: 30,
+} as const;
+
+// Scene scale-up relative to the one-room prototype.
+export const kswScene = {
+  fogScale: 3.2,
+  domeRadius: 170,
+  skyScale: 1400,
+  sunDistance: 70,
+  shadowExtent: 46,
+  shadowMapSize: 4096,
+  giProbeY: 9,
+  wallHeight: 2.9,
+  wallThicknessOuter: 0.42,
+  wallThicknessInner: 0.28,
+  roofThickness: 0.26,
+  roofOverhang: 0.2,
+  plateThickness: 0.5,
+} as const;
+
 // Camera contract — the diorama has ONE gaze, like a built miniature.
 // From the south-west, looking into the corner formed by the north + east walls.
 export const cameraContract = {
