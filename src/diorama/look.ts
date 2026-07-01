@@ -2,12 +2,13 @@
 // Everything procedural, all values from designTokens.
 
 import * as THREE from 'three/webgpu';
-import { dot, float, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, smoothstep, uniform, vec3, vec4 } from 'three/tsl';
+import { Fn, dot, float, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { godrays } from 'three/addons/tsl/display/GodraysNode.js';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudCfg } from './designTokens';
@@ -279,7 +280,7 @@ async function boot(): Promise<void> {
   const cycleMode = params.get('cycle') === '1';
   const preset = lightPresets[presetName];
 
-  const renderer = new THREE.WebGPURenderer({ antialias: true });
+  const renderer = new THREE.WebGPURenderer({ antialias: false });
   await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -303,7 +304,7 @@ async function boot(): Promise<void> {
     return new THREE.Vector3(Math.cos(elev) * Math.cos(az), Math.sin(elev), Math.cos(elev) * Math.sin(az));
   };
   const sunLightFor = (dir: THREE.Vector3, boost: number): { color: THREE.Color; intensity: number } => {
-    const elevN = Math.min(Math.max(dir.y / 0.5, 0), 1);
+    const elevN = Math.min(Math.max(dir.y / 0.8, 0), 1);
     const eased = elevN * elevN * (3 - 2 * elevN);
     return {
       color: new THREE.Color(sunArcCfg.colorLow).lerp(new THREE.Color(sunArcCfg.colorHigh), eased),
@@ -412,6 +413,43 @@ async function boot(): Promise<void> {
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   sun.shadow.radius = 6;
+  // PCSS: blocker search -> penumbra-sized PCF (contact-hardening soft shadows)
+  {
+    const texel = 1 / 2048;
+    const taps: Array<[number, number]> = [];
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2 * 2.4;
+      const r = Math.sqrt((i + 0.5) / 16);
+      taps.push([Math.cos(a) * r, Math.sin(a) * r]);
+    }
+    // TSL var-node reassignment isn't modellable with @types/three r185 — runtime-typed.
+    type FN = any;
+    const fnode = (n: unknown): FN => n as FN;
+    const pcss = Fn(({ depthTexture, shadowCoord }: { depthTexture: THREE.DepthTexture; shadowCoord: ReturnType<typeof vec3> }) => {
+      const z = shadowCoord.z;
+      const cmp = (off: [number, number], r: FN, depth: FN): FN =>
+        fnode(texture(depthTexture, shadowCoord.xy.add(vec2(off[0], off[1]).mul(r))).compare(depth));
+      const searchR = float(7 * texel);
+      const deltas = [0.004, 0.02, 0.06];
+      let occSum: FN = float(0);
+      let distSum: FN = float(0);
+      for (const dz of deltas) {
+        let litK: FN = float(0);
+        for (const off of taps.slice(0, 6)) litK = fnode(litK.add(cmp(off, searchR, fnode(z.sub(dz)))));
+        const occ = float(1).sub(litK.mul(1 / 6));
+        occSum = fnode(occSum.add(occ));
+        distSum = fnode(distSum.add(occ.mul(dz)));
+      }
+      const blockerDist = distSum.div(occSum.max(0.0001));
+      const penumbra = blockerDist.mul(260).clamp(0.6, 11);
+      const filterR = fnode(penumbra.mul(float(texel)));
+      let lit: FN = float(0);
+      for (const off of taps) lit = fnode(lit.add(cmp(off, filterR, fnode(z))));
+      return select(occSum.lessThan(0.02), float(1), lit.mul(1 / 16));
+    });
+    const PCSS_ON = true;
+    if (PCSS_ON) (sun.shadow as unknown as { filterNode?: unknown }).filterNode = pcss;
+  }
   scene.add(sun);
 
   const hemi = new THREE.HemisphereLight(preset.hemiSky, preset.hemiGround, preset.hemiIntensity * gi.hemiCut);
@@ -613,17 +651,19 @@ async function boot(): Promise<void> {
   // Post stack: GTAO x color -> tilt-shift DOF -> bloom
   const postProcessing = new THREE.PostProcessing(renderer);
   const scenePass = pass(scene, camera);
-  scenePass.setMRT(mrt({ output, normal: normalView }));
+  scenePass.setMRT(mrt({ output, normal: normalView, velocity }));
   const scenePassColor = scenePass.getTextureNode('output');
   const scenePassNormal = scenePass.getTextureNode('normal');
   const scenePassDepth = scenePass.getTextureNode('depth');
+  const chain = (n: unknown) => nodeObject(n as never) as unknown as typeof scenePassColor;
+  const velocityTex = scenePass.getTextureNode('velocity');
+  const beautyAA = chain(traa(scenePassColor, scenePassDepth, velocityTex, camera));
   const aoPass = ao(scenePassDepth, scenePassNormal, camera);
-  const withAo = scenePassColor.mul(aoPass.getTextureNode().x);
+  const withAo = beautyAA.mul(aoPass.getTextureNode().x);
   const viewZ = scenePass.getViewZNode();
   // Runtime lifts display nodes into chainable shader-node objects via
   // nodeObject; @types/three r185 doesn't model that lift yet — one
   // localized cast at the post-chain boundary.
-  const chain = (n: unknown) => nodeObject(n as never) as unknown as typeof scenePassColor;
   let lit = withAo;
   if (presetName !== 'night') {
     const raysNode = godrays(scenePassDepth, camera, sun);
@@ -646,6 +686,7 @@ async function boot(): Promise<void> {
   const graded = vec4(contrasted, composed.a);
   postProcessing.outputNode = film(graded, float(post.filmGrain));
 
+  let frameCount = 0;
   const clock = new THREE.Clock();
   function animate(): void {
     const t = clock.getElapsedTime();
@@ -653,7 +694,11 @@ async function boot(): Promise<void> {
     patient.scale.y = 1 + Math.sin(t * 2.2 + 1.4) * 0.012;
     child.scale.y = 0.68 * (1 + Math.sin(t * 2.6 + 0.7) * 0.015);
     driftU.value = t * cloudCfg.drift;
-    if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
+    if (cycleMode) {
+      applySunState((t / sunArcCfg.cycleSeconds) % 1);
+      frameCount++;
+      if (frameCount % 90 === 0) cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
+    }
     postProcessing.render();
     if (!window.__LOOK_READY) window.__LOOK_READY = true;
   }
