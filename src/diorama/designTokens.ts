@@ -115,7 +115,7 @@ export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
 
 // Physical sky (SkyMesh Rayleigh/Mie) per preset + the sun's day arc.
 export const skyPhys = {
-  morning: { turbidity: 3, rayleigh: 1.3, mieCoefficient: 0.006, mieG: 0.8, timeOfDay: 0.12, sunBoost: 1.3 },
+  morning: { turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8, timeOfDay: 0.12, sunBoost: 1.3 },
   dusk: { turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9, timeOfDay: 0.96, sunBoost: 2.3 },
   night: { turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8, timeOfDay: 1.08, sunBoost: 0 },
 } as const;
@@ -130,12 +130,20 @@ export const sunArcCfg = {
   cycleSeconds: 48,
 } as const;
 
-// Procedural cloud dome (fbm noise, sun-lit)
-export const cloudCfg = {
-  scale: 2.1,
-  coverage: { morning: 0.45, dusk: 0.6, night: 0.35 },
-  drift: 0.008,
-  litBoost: 1.6,
+// Volumetric clouds: raymarched height-band slab (Beer-Lambert + powder).
+export const cloudVol = {
+  base: 13, // slab bottom (world y)
+  top: 22, // slab top (world y)
+  steps: 36, // primary march samples
+  lightSteps: 4, // secondary march toward the light
+  lightStep: 1.6, // world units per light-march step
+  scale: 0.05, // world -> noise frequency
+  coverage: { morning: 0.44, dusk: 0.62, night: 0.4 },
+  density: 1.3, // extinction multiplier on the primary march
+  absorption: 1.3, // extinction multiplier on the light march
+  drift: 0.015, // noise-space wind per second
+  litBoost: 1.35,
+  maxDist: 90, // clamp the near-horizon march length
 } as const;
 
 // Warm interior glow for lamp-lit presets.

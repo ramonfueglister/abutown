@@ -2,7 +2,7 @@
 // Everything procedural, all values from designTokens.
 
 import * as THREE from 'three/webgpu';
-import { Fn, dot, float, int, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Break, Fn, If, Loop, cameraPosition, dot, exp, float, int, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -13,7 +13,7 @@ import { sss } from 'three/addons/tsl/display/SSSNode.js';
 import { boxBlur } from 'three/addons/tsl/display/boxBlur.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudCfg, moonLight } from './designTokens';
+import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudVol, moonLight } from './designTokens';
 
 declare global {
   interface Window {
@@ -324,64 +324,120 @@ async function boot(): Promise<void> {
   skyMesh.mieCoefficient.value = phys.mieCoefficient;
   skyMesh.mieDirectionalG.value = phys.mieG;
   skyMesh.sunPosition.value.copy(initialSunDir);
+  // Scene fog (far 46-48) would otherwise flat-tint the whole sky shell (r=400).
+  (skyMesh.material as THREE.Material & { fog: boolean }).fog = false;
   scene.add(skyMesh);
 
-  // Procedural cloud dome: fbm noise, lit toward the sun (silver lining)
-  const sunDirUniform = uniform(initialSunDir.clone());
+  // Volumetric clouds: raymarch a height-band slab (y in [base..top]) from the
+  // camera, front-to-back Beer-Lambert with a short secondary march toward the
+  // light (beer * powder = bright cores, dark sun-facing edges).
+  const cloudLightDir = uniform(initialSunDir.clone());
   const cloudLit = uniform(new THREE.Color(0xffffff));
   const cloudShadow = uniform(new THREE.Color(0x9aa8b5));
   const driftU = uniform(0);
-  const cloudMatDome = new THREE.MeshBasicNodeMaterial();
-  cloudMatDome.transparent = true;
-  cloudMatDome.side = THREE.BackSide;
-  cloudMatDome.depthWrite = false;
-  cloudMatDome.fog = false;
+  const cloudMatVol = new THREE.MeshBasicNodeMaterial();
+  cloudMatVol.transparent = true;
+  cloudMatVol.side = THREE.BackSide;
+  cloudMatVol.depthWrite = false;
+  cloudMatVol.fog = false;
   {
-    const dir = positionWorld.normalize();
-    const p = vec3(dir.x.mul(float(cloudCfg.scale)).add(driftU), dir.y.mul(float(cloudCfg.scale * 1.6)), dir.z.mul(float(cloudCfg.scale)));
-    const n = mx_fractal_noise_float(p, 4, 2.0, 0.55, 1.0);
-    const coverage = float(cloudCfg.coverage[presetName]);
-    const dens = smoothstep(float(0.06), float(0.34), n.add(coverage.sub(0.5)));
-    const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
-    cloudMatDome.opacityNode = dens.mul(horizonFade);
-    const facing = dot(dir, sunDirUniform).mul(0.5).add(0.5);
+    // TSL var/loop nodes aren't modellable with @types/three r185 — runtime-typed.
+    type N = any;
+    const fnode = (n: unknown): N => n as N;
+    const slabH = cloudVol.top - cloudVol.base;
+    const densityAt = (p: N): N => {
+      const q = vec3(
+        p.x.mul(float(cloudVol.scale)).add(driftU),
+        p.y.mul(float(cloudVol.scale * 1.35)),
+        p.z.mul(float(cloudVol.scale)).sub(driftU.mul(0.6)),
+      );
+      const n = fnode(mx_fractal_noise_float(q, 4, 2.0, 0.55, 1.0)).mul(0.5).add(0.5);
+      const hN = p.y.sub(float(cloudVol.base)).mul(1 / slabH).clamp(0, 1);
+      const profile = smoothstep(float(0.0), float(0.16), hN).mul(smoothstep(float(1.0), float(0.5), hN));
+      const coverage = float(cloudVol.coverage[presetName]);
+      return n.mul(profile).sub(float(1).sub(coverage)).max(0).mul(float(cloudVol.density));
+    };
     type Vec3Node = ReturnType<typeof vec3>;
     const shadowN = cloudShadow as unknown as Vec3Node;
-    const litN = (cloudLit as unknown as Vec3Node).mul(float(cloudCfg.litBoost));
-    cloudMatDome.colorNode = mix(shadowN, litN, facing.pow(2.0));
+    const litN = (cloudLit as unknown as Vec3Node).mul(float(cloudVol.litBoost));
+    const vol = fnode(
+      Fn(() => {
+        const resCol = fnode(vec3(0).toVar());
+        const resA = fnode(float(0).toVar());
+        const rd = fnode(positionWorld.sub(cameraPosition).normalize());
+        If(rd.y.greaterThan(0.015), () => {
+          const t0 = fnode(float(cloudVol.base).sub(cameraPosition.y).div(rd.y));
+          const t1 = fnode(float(cloudVol.top).sub(cameraPosition.y).div(rd.y));
+          const dt = t1.min(t0.add(float(cloudVol.maxDist))).sub(t0).mul(1 / cloudVol.steps);
+          const trans = fnode(float(1).toVar());
+          const acc = fnode(vec3(0).toVar());
+          Loop(cloudVol.steps, ({ i }: { i: N }) => {
+            const p = fnode(cameraPosition.add(rd.mul(t0.add(dt.mul(float(i).add(0.5))))));
+            const d = densityAt(p);
+            If(d.greaterThan(0.002), () => {
+              const dl = fnode(float(0).toVar());
+              Loop(cloudVol.lightSteps, ({ i: j }: { i: N }) => {
+                const lp = fnode(p.add(fnode(cloudLightDir).mul(float(j).add(1).mul(float(cloudVol.lightStep)))));
+                dl.addAssign(densityAt(lp));
+              });
+              const depthL = dl.mul(cloudVol.lightStep * cloudVol.absorption);
+              const beer = exp(depthL.negate());
+              const powder = float(1).sub(exp(depthL.mul(-2)));
+              const col = fnode(shadowN).add(fnode(litN).mul(beer.mul(powder).mul(2)));
+              const aStep = float(1).sub(exp(d.mul(dt).negate()));
+              acc.addAssign(col.mul(aStep).mul(trans));
+              trans.mulAssign(float(1).sub(aStep));
+            });
+            If(trans.lessThan(0.02), () => {
+              Break();
+            });
+          });
+          const alpha = float(1).sub(trans);
+          const horizonFade = smoothstep(float(0.015), float(0.12), rd.y);
+          resA.assign(alpha.mul(horizonFade));
+          resCol.assign(acc.div(alpha.max(0.0001)));
+        });
+        return vec4(resCol, resA);
+      })(),
+    );
+    cloudMatVol.colorNode = vol.rgb;
+    cloudMatVol.opacityNode = vol.a;
   }
-  const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(46, 32, 24), cloudMatDome);
+  const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(46, 32, 24), cloudMatVol);
   scene.add(cloudDome);
 
+  // Discs sit beyond the cloud sphere (r=46) so clouds occlude them.
   const sunDisc = new THREE.Mesh(
-    new THREE.SphereGeometry(1.5, 20, 20),
+    new THREE.SphereGeometry(2.4, 20, 20),
     new THREE.MeshBasicMaterial({ color: 0xfff0d5, fog: false }),
   );
   scene.add(sunDisc);
+  const moonDir = new THREE.Vector3(-14, 21, 26).normalize();
   const moonDisc = new THREE.Mesh(
-    new THREE.SphereGeometry(1.0, 20, 20),
+    new THREE.SphereGeometry(1.6, 20, 20),
     new THREE.MeshBasicMaterial({ color: palette.star, fog: false }),
   );
-  moonDisc.position.set(-14, 21, 26).normalize().multiplyScalar(38);
+  moonDisc.position.copy(moonDir).multiplyScalar(60);
   moonDisc.visible = presetName === 'night';
   scene.add(moonDisc);
 
   const applySunState = (t: number): void => {
     const dir = sunDirFor(t);
     skyMesh.sunPosition.value.copy(dir);
-    (sunDirUniform.value as THREE.Vector3).copy(dir);
     if (presetName !== 'night') {
+      (cloudLightDir.value as THREE.Vector3).copy(dir);
       const lightState = sunLightFor(dir, phys.sunBoost);
       sun.position.copy(dir.clone().multiplyScalar(12));
       sun.color.copy(lightState.color);
       sun.intensity = Math.max(lightState.intensity, 0.05);
       (cloudLit.value as THREE.Color).copy(lightState.color).lerp(new THREE.Color(0xffffff), 0.3);
-      (cloudShadow.value as THREE.Color).copy(new THREE.Color(0x8795a3).lerp(lightState.color, 0.15));
+      (cloudShadow.value as THREE.Color).copy(new THREE.Color(0x6e8092).lerp(lightState.color, 0.15));
     } else {
+      (cloudLightDir.value as THREE.Vector3).copy(moonDir);
       (cloudLit.value as THREE.Color).set(0x9fb2cc);
       (cloudShadow.value as THREE.Color).set(0x39485c);
     }
-    sunDisc.position.copy(dir.clone().multiplyScalar(38));
+    sunDisc.position.copy(dir.clone().multiplyScalar(60));
     sunDisc.visible = presetName !== 'night' && dir.y > 0.015;
     moonDisc.visible = presetName === 'night' || dir.y <= 0.015;
   };
@@ -396,14 +452,14 @@ async function boot(): Promise<void> {
     for (let i = 0; i < 160; i++) {
       const az = rand() * Math.PI * 2;
       const el = 0.15 + rand() * 1.25;
-      const r = 39;
+      const r = 60;
       starPositions.push(r * Math.cos(el) * Math.cos(az), r * Math.sin(el), r * Math.cos(el) * Math.sin(az));
     }
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
     const stars = new THREE.Points(
       starGeo,
-      new THREE.PointsMaterial({ color: palette.star, size: 0.22, sizeAttenuation: true, transparent: true, opacity: 0.85, fog: false }),
+      new THREE.PointsMaterial({ color: palette.star, size: 0.34, sizeAttenuation: true, transparent: true, opacity: 0.85, fog: false }),
     );
     scene.add(stars);
   }
@@ -720,7 +776,7 @@ async function boot(): Promise<void> {
     nurse.scale.y = 1 + Math.sin(t * 2.2) * 0.012;
     patient.scale.y = 1 + Math.sin(t * 2.2 + 1.4) * 0.012;
     child.scale.y = 0.68 * (1 + Math.sin(t * 2.6 + 0.7) * 0.015);
-    driftU.value = t * cloudCfg.drift;
+    driftU.value = t * cloudVol.drift;
     frameCount++;
     if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
     if (frameCount % (cycleMode ? 90 : 240) === 0) {
