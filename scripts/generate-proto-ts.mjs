@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs `buf generate` to produce TS types from
-// backend/crates/protocol/proto/abutown.proto into src/backend/proto/.
+// backend/crates/protocol/proto/abutown.proto into src/proto/.
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const outDir = resolve(root, 'src/backend/proto');
+const outDir = resolve(root, 'src/proto');
 mkdirSync(outDir, { recursive: true });
 
 const result = spawnSync('npx', ['buf', 'generate'], {

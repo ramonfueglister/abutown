@@ -9,7 +9,7 @@ import {
   type HandCard,
   type VisibleHandCard,
 } from './cardHandState';
-import { resolveBackendBaseUrl } from '../backend/backendGate';
+import { resolveBackendBaseUrl } from '../backendBaseUrl';
 
 export type CardHandViewOptions = {
   baseUrl?: string;

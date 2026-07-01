@@ -5,20 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "dev:stack": "node scripts/run-dev-stack.mjs dev",
     "preview": "vite preview --host 127.0.0.1",
-    "preview:stack": "node scripts/run-dev-stack.mjs preview",
-    "build": "npm run generate:proto && node scripts/build.mjs",
-    "smoke:mobility-persistence": "tsx scripts/smoke-mobility-persistence.mjs",
-    "smoke:visible-traders": "node scripts/smoke-visible-traders.mjs",
-    "smoke:economy-markets": "node scripts/smoke-economy-markets.mjs",
+    "build": "npm run generate:proto && vite build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.typecheck.json",
-    "test:e2e": "npm run build && playwright test",
-    "generate:abutopia": "node scripts/generate-abutopia-world.mjs",
     "generate:proto": "node scripts/generate-proto-ts.mjs",
-    "lint:proto": "buf lint",
-    "lint:proto-breaking": "buf breaking --against '.git#branch=origin/main,subdir=.'"
+    "lint:proto": "buf lint"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.0",
@@ -29,10 +21,8 @@
   "devDependencies": {
     "@bufbuild/buf": "^1.45.0",
     "@bufbuild/protoc-gen-es": "^2.12.0",
-    "@playwright/test": "^1.60.0",
     "@types/node": "^25.7.0",
-    "@types/pg": "^8.20.0",
-    "pg": "^8.21.0",
+    "playwright": "^1.60.0",
     "tsx": "^4.22.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"

@@ -14,12 +14,8 @@ name = "sim-server"
 path = "src/main.rs"
 
 [dependencies]
-abutown-protocol = { path = "../protocol" }
-sim-core = { path = "../sim-core" }
 anyhow.workspace = true
-prost.workspace = true
 arc-swap = "1"
-async-trait.workspace = true
 axum.workspace = true
 dotenvy.workspace = true
 jsonwebtoken.workspace = true
@@ -33,11 +29,7 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
-dashmap = "6"
-tokio-stream = { version = "0.1", features = ["sync"] }
 
 [dev-dependencies]
-futures-util.workspace = true
 http-body-util.workspace = true
-tokio-tungstenite.workspace = true
 tower.workspace = true
