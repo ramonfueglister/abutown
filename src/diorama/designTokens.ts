@@ -215,6 +215,8 @@ export const kswScene = {
   roofThickness: 0.26,
   roofOverhang: 0.2,
   plateThickness: 0.5,
+  openingSill: 0.95, // window sill height
+  openingHead: 2.35, // shared head height for doors and windows
 } as const;
 
 // Camera contract — the diorama has ONE gaze, like a built miniature.
