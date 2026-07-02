@@ -15,7 +15,8 @@ import net from 'node:net';
 
 const HOST = '127.0.0.1';
 const PORT = 5175;
-const TARGET_URL = `http://${HOST}:${PORT}`;
+// The card hand moved off the root page (now the diorama) to /cards.html.
+const TARGET_URL = `http://${HOST}:${PORT}/cards.html`;
 const PAGE_TIMEOUT_MS = 15000;
 const SERVER_READY_TIMEOUT_MS = 30000;
 
