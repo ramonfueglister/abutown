@@ -19,6 +19,7 @@ import {
   grade,
   kswAgents,
   kswCamera,
+  kswGi,
   kswPost,
   kswScene,
   lightPresets,
@@ -480,7 +481,7 @@ async function boot(): Promise<void> {
   // background cadence (one face per kswGi.staticFaceInterval frames) plus
   // immediate dirty walks when the roof fade crosses the castShadow /
   // visibility thresholds or settles after a fade.
-  const cubeRT = new THREE.CubeRenderTarget(256);
+  const cubeRT = new THREE.CubeRenderTarget(kswGi.probeSize);
   const cubeCam = new THREE.CubeCamera(0.1, 400, cubeRT);
   cubeCam.position.set(0, kswScene.giProbeY, 0);
   scene.add(cubeCam);

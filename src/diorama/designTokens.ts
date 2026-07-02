@@ -293,6 +293,9 @@ export const roofFadePolicy = {
 // dirty triggers still walk 6 consecutive faces at one per frame.
 export const kswGi = {
   staticFaceInterval: 40,
+  // PMREM blurs the environment heavily anyway; 128px keeps the background
+  // face render under the frame budget at 10k agents.
+  probeSize: 128,
 } as const;
 
 // Camera contract — the diorama has ONE gaze, like a built miniature.
