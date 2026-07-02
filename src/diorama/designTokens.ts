@@ -259,6 +259,19 @@ export const kswPost = {
   skyUnfogged: { morning: false, dusk: true, night: true },
 } as const;
 
+// Agent crowds (Slice D of the 10k-perf design). Above crowdThreshold the
+// renderer switches to crowd mode: GPU LOD/frustum classification + blob
+// shadows instead of real shadow casters. At or below it (the authored 72)
+// nothing changes — real PCSS shadows, LOD0 beans only.
+export const kswAgents = {
+  crowdThreshold: 200,
+  lodDistance: 35, // camera distance (m) where the bean swaps to the capsule LOD1
+  cullDistance: 600, // beyond this an instance collapses entirely (scale 0)
+  frustumMargin: 2.5, // meters of slack around the frustum planes (agent extent)
+  planBudget: 64, // max routePath plans per frame; expired dwells retry next frame
+  blob: { radius: 0.55, opacity: 0.25, lift: 0.03 }, // soft ground-disc shadow
+} as const;
+
 // Camera contract — the diorama has ONE gaze, like a built miniature.
 // From the south-west, looking into the corner formed by the north + east walls.
 export const cameraContract = {

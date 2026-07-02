@@ -17,6 +17,7 @@ import {
   cloudCfg,
   gi,
   grade,
+  kswAgents,
   kswCamera,
   kswPost,
   kswScene,
@@ -33,7 +34,8 @@ import { buildHospital } from './building';
 import { kswPlan } from './floorPlan';
 import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
 import { buildNav } from './nav';
-import { createAgent, updateAgent, type Agent, type AgentSpec } from './agents';
+import { buildSpawnSpecs } from './agentSpawn';
+import { createAgent, updateAgent, type Agent } from './agents';
 import type { PersonRole } from './floorPlan';
 
 declare global {
@@ -48,7 +50,13 @@ declare global {
       target: [number, number, number];
       agents: { total: number; walking: number; samples: Array<[number, number]> };
     };
-    __KSW_INFO?: () => { drawCalls: number; triangles: number };
+    __KSW_INFO?: () => {
+      drawCalls: number;
+      triangles: number;
+      // main-thread cost per frame (EMA, ms): whole animate body, the agent
+      // behavior+buffer-write loop, and the render call (command encoding)
+      cpu: { frame: number; agents: number; render: number };
+    };
   }
 }
 
@@ -71,6 +79,9 @@ async function boot(): Promise<void> {
   const camRaw = params.get('cam');
   const camPreset: CamPresetName = camRaw === 'er' || camRaw === 'ops' ? camRaw : 'overview';
   const cycleMode = params.get('cycle') === '1';
+  // ?agents=N scales the crowd (clamped; default = the authored plan people)
+  const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
+  const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), 20000);
   const preset = lightPresets[presetName];
 
   const renderer = new THREE.WebGPURenderer({ antialias: false });
@@ -342,29 +353,19 @@ async function boot(): Promise<void> {
   const inBuilding = (x: number, z: number): boolean =>
     Math.abs(x - kswPlan.building.x) < kswPlan.building.w / 2 &&
     Math.abs(z - kswPlan.building.z) < kswPlan.building.d / 2;
-  const spawnSpecs: Array<{ spec: Omit<AgentSpec, 'seed'>; yaw: number }> = [];
-  for (const room of kswPlan.rooms) {
-    for (const p of room.people) {
-      spawnSpecs.push({ spec: { role: p.role, home: [p.x, p.z], homeRoomId: room.id, kind: 'resident', stationary: p.stationary }, yaw: p.yaw });
-    }
-  }
-  for (const p of kswPlan.outdoorPeople) {
-    spawnSpecs.push({ spec: { role: p.role, home: [p.x, p.z], homeRoomId: null, kind: 'outdoor' }, yaw: p.yaw });
-  }
-  for (const w of kswPlan.walkers) {
-    const home: [number, number] = w.axis === 'x' ? [w.from, w.fixed] : [w.fixed, w.from];
-    const kind = inBuilding(home[0], home[1]) ? 'rounds' : 'outdoor';
-    spawnSpecs.push({ spec: { role: w.role, home, homeRoomId: null, kind }, yaw: 0 });
-  }
+  // The authored plan people first, then seeded extras up to ?agents=N.
+  const spawnSpecs = buildSpawnSpecs(kswPlan, nav, agentTarget);
+  // Crowd mode (Slice D): GPU LOD/cull classification + blob shadows instead
+  // of real casters. At or below the threshold the authored look is untouched.
+  const crowd = spawnSpecs.length > kswAgents.crowdThreshold;
   const roleCounts: Partial<Record<PersonRole, number>> = {};
   for (const s of spawnSpecs) roleCounts[s.spec.role] = (roleCounts[s.spec.role] ?? 0) + 1;
-  const agentInstances = createAgentInstances(roleCounts);
+  const agentInstances = createAgentInstances(roleCounts, { crowd });
   for (const m of agentInstances.meshes) hospital.add(m);
   type LiveAgent = { agent: Agent; slot: AgentSlot; idx: number; y: number; yaw: number; roll: number };
   const liveAgents: LiveAgent[] = [];
-  let seedCounter = 1;
   for (const [idx, s] of spawnSpecs.entries()) {
-    const agent = createAgent({ ...s.spec, seed: seedCounter++ });
+    const agent = createAgent(s.spec);
     agent.yaw = s.yaw;
     const y = inBuilding(s.spec.home[0], s.spec.home[1]) ? 0.14 : 0;
     const slot = agentInstances.add(s.spec.role, idx);
@@ -488,13 +489,40 @@ async function boot(): Promise<void> {
   const graded = vec4(contrasted, composed.a);
   postProcessing.outputNode = film(graded, float(post.filmGrain));
 
-  // Perf probe: draw calls / triangles of the last rendered frame.
-  window.__KSW_INFO = () => ({ drawCalls: renderer.info.render.drawCalls, triangles: renderer.info.render.triangles });
+  // Perf probe: draw calls / triangles of the last rendered frame + EMA of
+  // the main-thread frame cost (whole animate body / agent loop / render).
+  const cpu = { frame: 0, agents: 0, render: 0 };
+  const ema = (prev: number, sample: number): number => prev + (sample - prev) * 0.05;
+  window.__KSW_INFO = () => ({
+    drawCalls: renderer.info.render.drawCalls,
+    triangles: renderer.info.render.triangles,
+    cpu: { frame: cpu.frame, agents: cpu.agents, render: cpu.render },
+  });
+
+  // __KSW debug snapshot: camera scalars update every frame (the smoke keys
+  // off them), but the agents block — sample copies over all agents — is
+  // rebuilt in place only every 15 frames, with reused arrays (at 10k a
+  // per-frame rebuild with fresh allocations shows up in the profile).
+  const kswSnapshot: NonNullable<Window['__KSW']> = {
+    radius: rig.radius,
+    yaw: rig.yaw,
+    pitch: rig.pitch,
+    roofFade: roofFade(rig.radius, kswCamera),
+    target: [rig.target[0], rig.target[1], rig.target[2]],
+    agents: {
+      total: liveAgents.length,
+      walking: 0,
+      samples: liveAgents.slice(0, 12).map((la) => [la.agent.pos[0], la.agent.pos[1]]),
+    },
+  };
+  window.__KSW = kswSnapshot;
+  const planBudget = { remaining: 0 };
 
   let frameCount = 0;
   let prevT = 0;
   const clock = new THREE.Clock();
   function animate(): void {
+    const cpu0 = performance.now();
     const t = clock.getElapsedTime();
     const dt = Math.min(Math.max(t - prevT, 0), 0.1);
     prevT = t;
@@ -520,41 +548,57 @@ async function boot(): Promise<void> {
     // edge mist is a close-up treatment; from the overview it would read as
     // separate discs, so it thins out as the camera pulls back
     mistMat.opacity = preset.mistOpacity * (1 - fade * 0.75);
-    window.__KSW = {
-      radius: rig.radius,
-      yaw: rig.yaw,
-      pitch: rig.pitch,
-      roofFade: fade,
-      target: [rig.target[0], rig.target[1], rig.target[2]],
-      agents: {
-        total: liveAgents.length,
-        walking: liveAgents.filter((la) => la.agent.phase === 'walk').length,
-        samples: liveAgents.slice(0, 12).map((la) => [la.agent.pos[0], la.agent.pos[1]]),
-      },
-    };
+    kswSnapshot.radius = rig.radius;
+    kswSnapshot.yaw = rig.yaw;
+    kswSnapshot.pitch = rig.pitch;
+    kswSnapshot.roofFade = fade;
+    kswSnapshot.target[0] = rig.target[0];
+    kswSnapshot.target[1] = rig.target[1];
+    kswSnapshot.target[2] = rig.target[2];
     for (const b of blinkers) b.visible = Math.sin(t * 6) > -0.2;
     for (const r of rotors) r.rotation.y = t * 1.4;
+    planBudget.remaining = kswAgents.planBudget;
+    const cpuAgents0 = performance.now();
+    let walking = 0;
     for (const la of liveAgents) {
-      updateAgent(la.agent, dt, nav);
+      updateAgent(la.agent, dt, nav, planBudget);
       const targetY = inBuilding(la.agent.pos[0], la.agent.pos[1]) ? 0.14 : 0;
       la.y = approach(la.y, targetY, dt, 10);
-      const walking = la.agent.phase === 'walk';
-      if (walking) {
+      const isWalking = la.agent.phase === 'walk';
+      if (isWalking) {
+        walking += 1;
         la.yaw = lerpAngle(la.yaw, la.agent.yaw, Math.min(1, dt * 9));
         la.roll = Math.sin(t * 9 + la.idx) * 0.05;
       } else {
         la.roll *= Math.max(0, 1 - dt * 6);
       }
-      la.slot.set(la.agent.pos[0], la.agent.pos[1], la.y, la.yaw, walking, la.roll);
+      la.slot.set(la.agent.pos[0], la.agent.pos[1], la.y, la.yaw, isWalking, la.roll);
+    }
+    cpu.agents = ema(cpu.agents, performance.now() - cpuAgents0);
+    if (frameCount % 15 === 0) {
+      kswSnapshot.agents.walking = walking;
+      const samples = kswSnapshot.agents.samples;
+      for (let i = 0; i < samples.length; i++) {
+        samples[i][0] = liveAgents[i].agent.pos[0];
+        samples[i][1] = liveAgents[i].agent.pos[1];
+      }
     }
     agentInstances.update(t);
+    if (agentInstances.lod) {
+      agentInstances.lod.frame(camera);
+      renderer.compute(agentInstances.lod.node);
+    }
     driftU.value = t * cloudCfg.drift;
     frameCount++;
     if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
     if (frameCount % (cycleMode ? 90 : 240) === 0) {
       cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
     }
+    const cpuRender0 = performance.now();
     postProcessing.render();
+    const cpuEnd = performance.now();
+    cpu.render = ema(cpu.render, cpuEnd - cpuRender0);
+    cpu.frame = ema(cpu.frame, cpuEnd - cpu0);
     if (!window.__LOOK_READY) window.__LOOK_READY = true;
   }
   renderer.setAnimationLoop(animate);

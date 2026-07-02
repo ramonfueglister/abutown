@@ -1,11 +1,29 @@
-// Instanced bean people for the KSW diorama (Slice C of the 10k-perf design).
-// One merged, vertex-colored geometry + one InstancedMesh per role replaces
-// the per-agent THREE.Group from props.buildPerson. Per-agent state lives in
-// storage buffers (TSL instancedArray, CPU-written for now — Slice D writes
-// them from compute) and the vertex stage applies everything main.ts used to
-// do on Object3Ds: walk/breathing squash, waddle roll, yaw and the
-// (posX, yLift, posZ) translation. The smoothing state (eased y-lift,
-// lerped yaw, decaying roll) stays CPU-side in flat per-agent slots.
+// Instanced bean people for the KSW diorama (Slices C+D of the 10k-perf
+// design). One merged, vertex-colored geometry + InstancedMeshes per role
+// replace the per-agent THREE.Group from props.buildPerson. Per-agent state
+// lives in GLOBAL storage buffers (TSL instancedArray, CPU-written) shared by
+// every mesh via element(instanceIndex + roleOffset); the vertex stage applies
+// everything main.ts used to do on Object3Ds: walk/breathing squash, waddle
+// roll, yaw and the (posX, yLift, posZ) translation. The smoothing state
+// (eased y-lift, lerped yaw, decaying roll) stays CPU-side in flat slots.
+//
+// Crowd mode (agent count > kswAgents.crowdThreshold, Slice D):
+// - two meshes per role (LOD0 bean / LOD1 capsule+head) share the buffers;
+// - a TSL compute pass classifies every agent per frame into a flag buffer:
+//   0 = LOD0, 1 = LOD1, 2 = culled (outside frustum+margin or too far);
+// - the vertex stage collapses instances whose flag doesn't match the mesh's
+//   LOD to scale 0 (zero-area triangles) — draw count stays 2 per role;
+// - scale-0 still pays vertex shading, and the LOD0 bean is ~15x the LOD1
+//   vertex count — at 10k that alone is >20M submitted triangles. So LOD0
+//   meshes draw through a per-role slot map: the CPU (which owns the agent
+//   positions anyway) collects the slots inside lodDistance+frustum with a
+//   2 m slack margin, writes them into a uint slot-map buffer and bounds
+//   mesh.count. The GPU flag stays authoritative per instance (the CPU list
+//   is a strict superset), the LOD1/blob meshes still draw all instances;
+// - agents stop casting real shadows; a single InstancedMesh of soft dark
+//   ground discs (blob shadows) driven by the same buffers stands in.
+// At or below the threshold nothing of this exists: one shadow-casting LOD0
+// mesh per role, exactly the pre-crowd look.
 //
 // Look contract: identical bean proportions, part colors, role accessories
 // and animation amplitudes/frequencies as the deleted buildPerson +
@@ -14,20 +32,25 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
+  Fn,
   abs,
   attribute,
   cos,
   float,
+  instanceIndex,
   instancedArray,
   mix,
   normalLocal,
   positionLocal,
+  select,
   sin,
+  smoothstep,
   transformNormalToView,
+  uint,
   uniform,
   vec3,
 } from 'three/tsl';
-import { clay, palette, radii } from '../designTokens';
+import { clay, kswAgents, palette, radii } from '../designTokens';
 import type { PersonRole } from './floorPlan';
 import { cyl, roundedBox, sph, tor } from './geometryCache';
 
@@ -113,14 +136,14 @@ function personParts(role: PersonRole): PartSpec[] {
   }
 }
 
-// Merge one role's parts into a single indexed BufferGeometry with a
-// per-vertex color attribute baking the part colors (working-color-space,
-// exactly what the per-part clayMat colors resolved to). RoundedBox parts
-// are non-indexed; give them a trivial sequential index (same trick as
+// Merge parts into a single indexed BufferGeometry with a per-vertex color
+// attribute baking the part colors (working-color-space, exactly what the
+// per-part clayMat colors resolved to). RoundedBox parts are non-indexed;
+// give them a trivial sequential index (same trick as
 // staticBatch.ensureIndexed) so the merge stays indexed and small.
-export function mergedPersonGeometry(role: PersonRole): THREE.BufferGeometry {
+function mergeParts(parts: PartSpec[], label: string): THREE.BufferGeometry {
   const color = new THREE.Color();
-  const parts = personParts(role).map((part) => {
+  const prepared = parts.map((part) => {
     // cached geometries are shared — never mutate them in place
     const g = part.geo.clone();
     if (g.index === null) {
@@ -146,10 +169,49 @@ export function mergedPersonGeometry(role: PersonRole): THREE.BufferGeometry {
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     return g;
   });
-  const merged = mergeGeometries(parts, false);
-  if (!merged) throw new Error(`agentMeshes: failed to merge person geometry for role "${role}"`);
-  if (role === 'child') merged.scale(CHILD_SCALE, CHILD_SCALE, CHILD_SCALE);
+  const merged = mergeGeometries(prepared, false);
+  if (!merged) throw new Error(`agentMeshes: failed to merge person geometry for "${label}"`);
   merged.computeBoundingSphere();
+  return merged;
+}
+
+export function mergedPersonGeometry(role: PersonRole): THREE.BufferGeometry {
+  const merged = mergeParts(personParts(role), role);
+  if (role === 'child') {
+    merged.scale(CHILD_SCALE, CHILD_SCALE, CHILD_SCALE);
+    merged.computeBoundingSphere();
+  }
+  return merged;
+}
+
+// The bean's body color per role — same values beanParts() bakes for LOD0.
+const roleBodyColor: Record<PersonRole, number> = {
+  nurse: palette.mint,
+  doctor: palette.white,
+  surgeon: palette.sage,
+  patient: palette.coral,
+  child: palette.honey,
+  visitor: palette.skin,
+  labtech: palette.white,
+  paramedic: palette.coralSoft,
+};
+
+// LOD1 (Slice D): low-poly capsule body + head sphere in the role's body
+// color. Same overall height as the LOD0 bean (top ≈ 1.235 m before child
+// scaling) so distant silhouettes match; a tiny fraction of the vertices.
+export function lodPersonGeometry(role: PersonRole): THREE.BufferGeometry {
+  const body = roleBodyColor[role];
+  const merged = mergeParts(
+    [
+      { geo: new THREE.CapsuleGeometry(0.3, 0.42, 1, 6), color: body, position: [0, 0.5, 0] },
+      { geo: new THREE.SphereGeometry(0.235, 6, 4), color: body, position: [0, 1.0, 0] },
+    ],
+    `${role}-lod1`,
+  );
+  if (role === 'child') {
+    merged.scale(CHILD_SCALE, CHILD_SCALE, CHILD_SCALE);
+    merged.computeBoundingSphere();
+  }
   return merged;
 }
 
@@ -161,36 +223,60 @@ export type AgentSlot = {
   set(x: number, z: number, yLift: number, yaw: number, walking: boolean, roll: number): void;
 };
 
+// The per-frame LOD work (crowd mode only): frame(camera) refreshes the
+// classification uniforms + compacts the LOD0 slot maps, then `node` runs
+// via renderer.compute() before rendering.
+export type AgentLodPass = {
+  node: Parameters<THREE.WebGPURenderer['compute']>[0];
+  frame(camera: THREE.PerspectiveCamera): void;
+};
+
 export type AgentInstances = {
   meshes: THREE.InstancedMesh[];
   // phase is the global agent index (the old la.idx driving sin(t*9+idx)).
   add(role: PersonRole, phase: number): AgentSlot;
   // Per-frame after all slot writes: advance the time uniform + upload buffers.
   update(t: number): void;
+  lod: AgentLodPass | null; // null below the crowd threshold
 };
 
-type RoleBucket = {
-  mesh: THREE.InstancedMesh;
-  a: Float32Array; // vec4 per agent: posX, posZ, yLift, yawSmooth
-  b: Float32Array; // vec4 per agent: walkFlag, phaseSeed, roll, unused
-  attrA: THREE.BufferAttribute;
-  attrB: THREE.BufferAttribute;
-  used: number;
-  capacity: number;
-};
+type RoleBucket = { offset: number; used: number; capacity: number };
 
-export function createAgentInstances(counts: Partial<Record<PersonRole, number>>): AgentInstances {
+export function createAgentInstances(
+  counts: Partial<Record<PersonRole, number>>,
+  opts: { crowd?: boolean } = {},
+): AgentInstances {
+  const crowd = opts.crowd === true;
+  const entries = (Object.entries(counts) as Array<[PersonRole, number]>).filter(([, c]) => c > 0);
+  const total = entries.reduce((sum, [, c]) => sum + c, 0);
+
+  // Global buffers shared by every mesh (LOD0, LOD1, blobs):
+  //   A: posX, posZ, yLift, yawSmooth   B: walkFlag, phaseSeed, roll, blobScale
+  const a = new Float32Array(total * 4);
+  const b = new Float32Array(total * 4);
+  const bufA = instancedArray(a, 'vec4');
+  const bufB = instancedArray(b, 'vec4');
+  // 0 = LOD0, 1 = LOD1, 2 = culled — written by the compute pass each frame.
+  const bufFlag = crowd ? instancedArray(new Uint32Array(total), 'uint') : null;
   const timeU = uniform(0);
+  const identity = new THREE.Matrix4();
+
   const buckets = new Map<PersonRole, RoleBucket>();
   const meshes: THREE.InstancedMesh[] = [];
 
-  for (const [role, capacity] of Object.entries(counts) as Array<[PersonRole, number]>) {
-    if (!capacity) continue;
-    const a = new Float32Array(capacity * 4);
-    const b = new Float32Array(capacity * 4);
-    const bufA = instancedArray(a, 'vec4');
-    const bufB = instancedArray(b, 'vec4');
+  // `slot` is a uint node resolving to the global agent index — either
+  // instanceIndex+roleOffset or a slot-map read for compacted LOD0. The two
+  // aren't modellable under one @types/three r185 node type (same situation
+  // as the PCSS block in main.ts) — runtime-typed.
+  type TSLSlot = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+  const makeRoleMesh = (
+    role: PersonRole,
+    geometry: THREE.BufferGeometry,
+    capacity: number,
+    slot: TSLSlot,
+    lodIndex: 0 | 1,
+  ): THREE.InstancedMesh => {
     // Clay recipe from designTokens; diffuse from the baked vertex colors,
     // sheenColor = color lerped 50% to white — mirrors staticBatch.ts.
     const material = new THREE.MeshPhysicalNodeMaterial({
@@ -205,8 +291,8 @@ export function createAgentInstances(counts: Partial<Record<PersonRole, number>>
     // Vertex animation — exact port of the old per-Object3D animate loop.
     // Object3D composed local = T * R(yaw) * R(roll) * S(squash), so:
     // squash Y, roll around Z, yaw around Y, translate to (posX, yLift, posZ).
-    const A = bufA.toAttribute();
-    const B = bufB.toAttribute();
+    const A = bufA.element(slot);
+    const B = bufB.element(slot);
     const walkSquash = abs(sin(timeU.mul(9.0).add(B.y))).mul(0.025).add(1.0);
     const dwellSquash = sin(timeU.mul(2.2).add(B.y.mul(0.9))).mul(0.012).add(1.0);
     const squash = mix(dwellSquash, walkSquash, B.x);
@@ -214,7 +300,10 @@ export function createAgentInstances(counts: Partial<Record<PersonRole, number>>
     const sr = sin(B.z);
     const cy = cos(A.w);
     const sy = sin(A.w);
-    const p = positionLocal;
+    // Crowd mode: an instance whose flag doesn't match this mesh's LOD
+    // collapses to scale 0 — zero-area triangles, nothing rasterizes.
+    const vis = bufFlag ? select(bufFlag.element(slot).equal(uint(lodIndex)), float(1), float(0)) : float(1);
+    const p = vec3(positionLocal).mul(vis);
     const y1 = p.y.mul(squash);
     const x2 = p.x.mul(cr).sub(y1.mul(sr));
     const y2 = p.x.mul(sr).add(y1.mul(cr));
@@ -229,37 +318,146 @@ export function createAgentInstances(counts: Partial<Record<PersonRole, number>>
     const nz3 = n.z.mul(cy).sub(nx2.mul(sy));
     material.normalNode = transformNormalToView(vec3(nx3, ny2, nz3));
 
-    const mesh = new THREE.InstancedMesh(mergedPersonGeometry(role), material, capacity);
-    mesh.name = `ksw-agents-${role}`;
-    mesh.castShadow = true;
+    const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    mesh.name = lodIndex === 0 ? `ksw-agents-${role}` : `ksw-agents-${role}-lod1`;
+    // crowds are too many real casters for the PCSS cascade — blob shadows take over
+    mesh.castShadow = !crowd;
     mesh.receiveShadow = true;
-    // instances move every frame; per-instance culling comes in Slice D
+    // instances move every frame; visibility is per-instance in the shader
     mesh.frustumCulled = false;
     // the buffers carry the full transform — instanceMatrix stays identity
-    const identity = new THREE.Matrix4();
     for (let i = 0; i < capacity; i++) mesh.setMatrixAt(i, identity);
+    return mesh;
+  };
 
-    buckets.set(role, {
-      mesh,
-      a,
-      b,
-      attrA: bufA.value as THREE.BufferAttribute,
-      attrB: bufB.value as THREE.BufferAttribute,
-      used: 0,
-      capacity,
-    });
-    meshes.push(mesh);
+  // Per-role LOD0 compaction pools (crowd mode) — filled every frame by
+  // AgentLodPass.frame() from the CPU-side positions in `a`.
+  type Lod0Pool = { mesh: THREE.InstancedMesh; map: Uint32Array; attr: THREE.BufferAttribute; offset: number; capacity: number };
+  const lod0Pools: Lod0Pool[] = [];
+
+  let offset = 0;
+  for (const [role, capacity] of entries) {
+    buckets.set(role, { offset, used: 0, capacity });
+    const directSlot = instanceIndex.add(uint(offset));
+    if (!crowd) {
+      meshes.push(makeRoleMesh(role, mergedPersonGeometry(role), capacity, directSlot, 0));
+    } else {
+      const map = new Uint32Array(capacity);
+      const mapBuf = instancedArray(map, 'uint');
+      const mesh0 = makeRoleMesh(role, mergedPersonGeometry(role), capacity, mapBuf.element(instanceIndex), 0);
+      mesh0.count = 0;
+      lod0Pools.push({ mesh: mesh0, map, attr: mapBuf.value as THREE.BufferAttribute, offset, capacity });
+      meshes.push(mesh0);
+      meshes.push(makeRoleMesh(role, lodPersonGeometry(role), capacity, directSlot, 1));
+    }
+    offset += capacity;
   }
 
+  // Blob shadows (crowd mode): one InstancedMesh of soft dark ground discs
+  // under all agents, driven by the same buffers. Slightly y-lifted above the
+  // floor/slab tops (no z-fight), soft radial falloff, culled with flag 2.
+  if (bufFlag) {
+    const blobGeo = new THREE.CircleGeometry(kswAgents.blob.radius, 20);
+    blobGeo.rotateX(-Math.PI / 2);
+    const material = new THREE.MeshBasicNodeMaterial({ color: 0x000000, transparent: true, depthWrite: false });
+    const A = bufA.element(instanceIndex);
+    const B = bufB.element(instanceIndex);
+    const s = select(bufFlag.element(instanceIndex).equal(uint(2)), float(0), B.w);
+    material.positionNode = vec3(
+      positionLocal.x.mul(s).add(A.x),
+      positionLocal.y.add(A.z).add(float(kswAgents.blob.lift)),
+      positionLocal.z.mul(s).add(A.y),
+    );
+    const edge = positionLocal.xz.length().div(float(kswAgents.blob.radius));
+    material.opacityNode = float(kswAgents.blob.opacity).mul(float(1).sub(smoothstep(float(0.45), float(1), edge)));
+    const blobs = new THREE.InstancedMesh(blobGeo, material, total);
+    blobs.name = 'ksw-agents-blobs';
+    blobs.castShadow = false;
+    blobs.receiveShadow = false;
+    blobs.frustumCulled = false;
+    for (let i = 0; i < total; i++) blobs.setMatrixAt(i, identity);
+    meshes.push(blobs);
+  }
+
+  // Per-instance LOD + frustum classification (crowd mode): one dispatch over
+  // all agents per frame. Frustum planes come from the camera on the CPU;
+  // an instance is culled when its center (mid-body) is more than
+  // frustumMargin outside any plane or beyond cullDistance.
+  let lod: AgentLodPass | null = null;
+  if (bufFlag) {
+    const camPosU = uniform(new THREE.Vector3());
+    const planesU = Array.from({ length: 6 }, () => uniform(new THREE.Vector4()));
+    const classify = Fn(() => {
+      const d = bufA.element(instanceIndex);
+      const pos = vec3(d.x, d.z.add(0.65), d.y);
+      const distCam = pos.sub(camPosU).length();
+      let visible = distCam.lessThan(float(kswAgents.cullDistance));
+      for (const plane of planesU) {
+        visible = visible.and(plane.xyz.dot(pos).add(plane.w).greaterThan(float(-kswAgents.frustumMargin)));
+      }
+      const flag = select(visible, select(distCam.greaterThan(float(kswAgents.lodDistance)), uint(1), uint(0)), uint(2));
+      bufFlag.element(instanceIndex).assign(flag);
+    });
+    const projView = new THREE.Matrix4();
+    const frustum = new THREE.Frustum();
+    // CPU compaction slack: strictly looser than the GPU thresholds, so the
+    // slot maps are always a superset of what the GPU classifies as LOD0.
+    const maxLod0Dist = kswAgents.lodDistance + 2;
+    const planeSlack = -(kswAgents.frustumMargin + 2);
+    lod = {
+      node: classify().compute(total),
+      frame(camera) {
+        camera.updateMatrixWorld();
+        camera.getWorldPosition(camPosU.value as THREE.Vector3);
+        projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(projView);
+        for (let i = 0; i < 6; i++) {
+          const pl = frustum.planes[i];
+          (planesU[i].value as THREE.Vector4).set(pl.normal.x, pl.normal.y, pl.normal.z, pl.constant);
+        }
+        // LOD0 slot maps: collect the near, in-frustum agents per role.
+        const cam = camPosU.value as THREE.Vector3;
+        const planes = frustum.planes;
+        for (const pool of lod0Pools) {
+          let n = 0;
+          const end = pool.offset + pool.capacity;
+          for (let i = pool.offset; i < end; i++) {
+            const px = a[i * 4];
+            const py = a[i * 4 + 2] + 0.65; // same mid-body point as the GPU pass
+            const pz = a[i * 4 + 1];
+            const dx = px - cam.x;
+            const dy = py - cam.y;
+            const dz = pz - cam.z;
+            if (dx * dx + dy * dy + dz * dz > maxLod0Dist * maxLod0Dist) continue;
+            let inside = true;
+            for (let k = 0; k < 6; k++) {
+              const pl = planes[k];
+              if (pl.normal.x * px + pl.normal.y * py + pl.normal.z * pz + pl.constant < planeSlack) {
+                inside = false;
+                break;
+              }
+            }
+            if (inside) pool.map[n++] = i;
+          }
+          pool.mesh.count = n;
+          pool.attr.needsUpdate = true;
+        }
+      },
+    };
+  }
+
+  const attrA = bufA.value as THREE.BufferAttribute;
+  const attrB = bufB.value as THREE.BufferAttribute;
   return {
     meshes,
+    lod,
     add(role, phase) {
       const bucket = buckets.get(role);
       if (!bucket) throw new Error(`agentMeshes: no instance bucket for role "${role}"`);
       if (bucket.used >= bucket.capacity) throw new Error(`agentMeshes: bucket "${role}" over capacity (${bucket.capacity})`);
-      const i = bucket.used++;
-      const { a, b } = bucket;
+      const i = bucket.offset + bucket.used++;
       b[i * 4 + 1] = phase;
+      b[i * 4 + 3] = role === 'child' ? CHILD_SCALE : 1; // blob disc scale
       return {
         set(x, z, yLift, yaw, walking, roll) {
           a[i * 4] = x;
@@ -273,10 +471,8 @@ export function createAgentInstances(counts: Partial<Record<PersonRole, number>>
     },
     update(t) {
       timeU.value = t;
-      for (const bucket of buckets.values()) {
-        bucket.attrA.needsUpdate = true;
-        bucket.attrB.needsUpdate = true;
-      }
+      attrA.needsUpdate = true;
+      attrB.needsUpdate = true;
     },
   };
 }

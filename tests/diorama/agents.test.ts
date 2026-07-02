@@ -91,4 +91,50 @@ describe('agents', () => {
       }
     }
   });
+
+  describe('plan budget', () => {
+    // an agent counts as planned once its dwell timer was re-armed (dwellLeft
+    // reset > 0) or it started walking; expired = still waiting for budget
+    const expired = (a: Agent): boolean => a.phase === 'dwell' && a.dwellLeft <= 0;
+
+    it('with budget 2 and 5 expired agents exactly 2 plan per tick, all 5 within 3 ticks', () => {
+      const agents = [1, 2, 3, 4, 5].map((seed) =>
+        createAgent({ role: 'nurse', home: [-4, -16], homeRoomId: 'ips', kind: 'resident', seed }),
+      );
+      for (const a of agents) a.dwellLeft = 0;
+      const tick = (): void => {
+        const budget = { remaining: 2 };
+        for (const a of agents) updateAgent(a, 0.001, nav, budget);
+      };
+      tick();
+      expect(agents.filter((a) => !expired(a)).length).toBe(2);
+      tick();
+      expect(agents.filter((a) => !expired(a)).length).toBe(4);
+      tick();
+      expect(agents.every((a) => !expired(a))).toBe(true);
+    });
+
+    it('a budget-delayed agent behaves identically to an undelayed one afterwards', () => {
+      const mk = () => createAgent({ role: 'doctor', home: [4, -2], homeRoomId: 'wardMedizin', kind: 'rounds', seed: 21 });
+      const free = mk();
+      const starved = mk();
+      free.dwellLeft = 0;
+      starved.dwellLeft = 0;
+      updateAgent(free, 0.001, nav);
+      for (let i = 0; i < 10; i++) updateAgent(starved, 0.001, nav, { remaining: 0 }); // starved
+      updateAgent(starved, 0.001, nav, { remaining: 64 });
+      expect(starved.path).toEqual(free.path);
+      expect(starved.rngState).toBe(free.rngState);
+    });
+
+    it('walking agents never consume budget', () => {
+      const a = createAgent({ role: 'nurse', home: [-4, -16], homeRoomId: 'ips', kind: 'rounds', seed: 3 });
+      // walk it out of dwell first
+      for (let t = 0; t < 30 && a.phase !== 'walk'; t += 0.1) updateAgent(a, 0.1, nav);
+      expect(a.phase).toBe('walk');
+      const budget = { remaining: 5 };
+      updateAgent(a, 0.05, nav, budget);
+      expect(budget.remaining).toBe(5);
+    });
+  });
 });

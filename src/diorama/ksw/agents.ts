@@ -117,13 +117,24 @@ function pickTarget(agent: Agent, rnd: () => number, nav: NavGraph): { point: Pt
   return door ? { point: door.inside, roomId: other.id } : { point: spec.home, roomId: spec.homeRoomId };
 }
 
-export function updateAgent(agent: Agent, dt: number, nav: NavGraph): void {
+// Per-frame route-planning budget (Slice D): routePath is the only expensive
+// step in updateAgent, so a frame may only run so many of them. An agent whose
+// dwell expired while the budget is spent simply stays in dwell (dwellLeft
+// keeps ticking below zero) and retries on a later frame — deterministic,
+// since the agent's own rng sequence is untouched by the delay.
+export type PlanBudget = { remaining: number };
+
+export function updateAgent(agent: Agent, dt: number, nav: NavGraph, budget?: PlanBudget): void {
   if (agent.spec.stationary) return;
 
   if (agent.phase === 'dwell') {
     agent.dwellLeft -= dt;
     agent.heading = null;
     if (agent.dwellLeft > 0) return;
+    if (budget) {
+      if (budget.remaining <= 0) return;
+      budget.remaining -= 1;
+    }
     const rng = mulberry32(agent.rngState);
     const target = pickTarget(agent, rng.next, nav);
     agent.speed = 1.0 + rng.next() * 0.5;
