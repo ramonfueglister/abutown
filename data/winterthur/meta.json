@@ -31,11 +31,11 @@
  },
  "counts": {
   "buildings": 846,
-  "kswBuildings": 24,
-  "named": 73,
+  "kswBuildings": 26,
+  "named": 72,
   "roads": 2057,
   "rails": 239,
-  "triangles": 68633
+  "triangles": 88625
  },
  "attribution": [
   "Gebäude: © swisstopo (swissBUILDINGS3D 3.0)",

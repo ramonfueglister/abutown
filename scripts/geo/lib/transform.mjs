@@ -16,6 +16,85 @@ export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anch
  *   footprint: number[][], height: number, wall: BakedMesh, roof: BakedMesh }} BakedBuilding
  */
 
+// Trace the real footprint from the wall surfaces: every wall facet has a
+// bottom edge sitting at ground level; collected and chained end-to-end they
+// form the building outline. This is the honest footprint — flattening the 3D
+// solid instead just overlays all faces and yields a single stray facet.
+// Returns the largest closed ring as [[x,z],…] in local meters, or null.
+function footprintFromWalls(wallRings, groundY) {
+  const EPS = 0.6; // m above the base still counts as a ground vertex
+  const key = (x, z) => `${Math.round(x * 100)},${Math.round(z * 100)}`;
+  const pts = new Map(); // key → [x, z]
+  const adj = new Map(); // key → Set(neighbour keys)
+  const link = (ka, kb) => {
+    if (ka === kb) return;
+    (adj.get(ka) ?? adj.set(ka, new Set()).get(ka)).add(kb);
+    (adj.get(kb) ?? adj.set(kb, new Set()).get(kb)).add(ka);
+  };
+  for (const ring of wallRings) {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      if (a[1] > groundY + EPS || b[1] > groundY + EPS) continue;
+      const ka = key(a[0], a[2]);
+      const kb = key(b[0], b[2]);
+      pts.set(ka, [a[0], a[2]]);
+      pts.set(kb, [b[0], b[2]]);
+      link(ka, kb);
+    }
+  }
+  if (adj.size < 3) return null;
+  // walk loops greedily, always leaving by an unused edge
+  const used = new Set();
+  const edgeId = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  let best = null;
+  let bestArea = 0;
+  for (const startKey of adj.keys()) {
+    for (const first of adj.get(startKey)) {
+      if (used.has(edgeId(startKey, first))) continue;
+      const ring = [pts.get(startKey)];
+      let prev = startKey;
+      let cur = first;
+      used.add(edgeId(startKey, first));
+      let ok = false;
+      for (let guard = 0; guard < 10000; guard++) {
+        ring.push(pts.get(cur));
+        if (cur === startKey) {
+          ok = true;
+          break;
+        }
+        let next = null;
+        for (const n of adj.get(cur)) {
+          if (n !== prev && !used.has(edgeId(cur, n))) {
+            next = n;
+            break;
+          }
+        }
+        if (next === null) break; // dead end
+        used.add(edgeId(cur, next));
+        prev = cur;
+        cur = next;
+      }
+      if (ok && ring.length >= 4) {
+        const a = Math.abs(polyArea(ring));
+        if (a > bestArea) {
+          bestArea = a;
+          best = ring;
+        }
+      }
+    }
+  }
+  return bestArea > 1 ? best : null;
+}
+
+function polyArea(ring) {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return a / 2;
+}
+
 function* ringsOf(geometry) {
   // MultiPolygon: [poly][ring][pt]; we take every outer ring (holes are
   // rare in LoD2 surfaces and negligible at clay scale)
@@ -112,12 +191,15 @@ export function transformBuildings({ floors, walls, roofs, osmBuildings, project
       }
     if (!b.roofs.length) eaveY = topY; // no roof: wall goes straight to the top
 
-    // footprint: the baked Building_solid 2D ring if provided, else the
-    // largest floor/wall ring
+    // footprint, best source first: an explicitly supplied ring, then the
+    // real outline traced from the wall bases, then the largest floor/wall ring
     let footprint;
     const fpLocal = footprints?.get(uuid);
+    const traced = fpLocal ? null : footprintFromWalls(b.walls, groundY);
     if (fpLocal) {
       footprint = fpLocal.map(([x, z]) => [Math.round(x * 100) / 100, Math.round(z * 100) / 100]);
+    } else if (traced) {
+      footprint = traced.map(([x, z]) => [Math.round(x * 100) / 100, Math.round(z * 100) / 100]);
     } else {
       const candidateRings = b.floors.length ? b.floors : b.walls.length ? b.walls : b.roofs;
       if (candidateRings.length === 0) continue; // no footprint source at all

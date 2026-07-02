@@ -39,24 +39,11 @@ const projector = makeProjector(ANCHOR);
 // `-explodecollections -dim XYZ` reliably yields every facet as a 3D Polygon
 // (a bare -nlt MULTIPOLYGON leaves ~20% flattened to 2D → bogus zero heights).
 // Exploded facets keep their parent UUID, so the transform still groups them
-// per building. Building_solid flattened to 2D gives the clean footprint.
+// per building. The footprint is traced from the wall bases (Building_solid
+// flattened to 2D would just overlay all faces into a single stray facet).
 const surf = ['-nlt', 'MULTIPOLYGON', '-explodecollections', '-dim', 'XYZ'];
 const walls = extractLayer('Wall', surf);
 const roofs = extractLayer('Roof', surf);
-const solids2d = extractLayer('Building_solid', ['-nlt', 'MULTIPOLYGON', '-dim', '2']);
-
-// footprints: Map<uuid, ring[[x,z]]> in local meters (largest ring per uuid)
-const footprints = new Map();
-for (const f of solids2d.features) {
-  const uuid = f.properties?.UUID;
-  if (!uuid || !f.geometry) continue;
-  const rings = [];
-  if (f.geometry.type === 'MultiPolygon') for (const poly of f.geometry.coordinates) rings.push(poly[0]);
-  else if (f.geometry.type === 'Polygon') rings.push(f.geometry.coordinates[0]);
-  const largest = rings.reduce((best, r) => (!best || r.length > best.length ? r : best), null);
-  if (largest) footprints.set(uuid, largest.map(([lon, lat]) => projector.toLocal(lon, lat)));
-}
-console.log(`footprints: ${footprints.size}`);
 
 // OSM building polygons → local rings for the name join
 const osmRaw = JSON.parse(readFileSync(`${SCRATCH}/osm-buildings.json`, 'utf8'));
@@ -68,7 +55,7 @@ for (const el of osmRaw.elements ?? []) {
 }
 console.log(`OSM building polygons: ${osmBuildings.length}`);
 
-const buildings = transformBuildings({ walls, roofs, osmBuildings, projector, footprints });
+const buildings = transformBuildings({ walls, roofs, osmBuildings, projector });
 const { roads, rails } = transformRoads({
   osmRoads: JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8')),
   projector,
