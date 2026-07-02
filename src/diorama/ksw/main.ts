@@ -46,6 +46,7 @@ import { clayMat } from './props';
 import { buildCityMassing } from './geo/cityMassing';
 import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads } from './geo/geoData';
+import { buildWindows } from './geo/windows';
 import { buildNature } from './geo/nature';
 import type { PersonRole } from './floorPlan';
 
@@ -386,6 +387,7 @@ async function boot(): Promise<void> {
   // trees don't need to punch holes in the sun's shadow map; the LOD ring
   // (Task 10) re-enables it for the near ring around the camera.
   cityRoot.add(buildNature(cityNature, { excludeRect: { x: 0, z: 0, w: kswPlan.plate.w, d: kswPlan.plate.d } }));
+  cityRoot.add(buildWindows(cityBuildings, { lampGlow: preset.lampOn }));
   scene.add(cityRoot);
 
   // collect animated bits: ambulance light pulses, helicopter rotor idles.
