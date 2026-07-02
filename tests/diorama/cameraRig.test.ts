@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { kswCamera } from '../../src/diorama/designTokens';
 import {
   applyDrag,
   applyPan,
@@ -94,6 +95,21 @@ describe('applyDrag', () => {
     const p = rigPosition(s);
     expect(p.every((v) => Number.isFinite(v))).toBe(true);
     expect(Math.hypot(p[0] - s.target[0], p[1] - s.target[1], p[2] - s.target[2])).toBeCloseTo(s.radius, 5);
+  });
+});
+
+describe('kswCamera contract (navigierbarer Zoom)', () => {
+  it('roofs are gone well before close-up: fade completes at radius >= 30', () => {
+    expect(kswCamera.roofFadeNear).toBeGreaterThanOrEqual(30);
+  });
+  it('roofs are fully on at the overview framing (radius ~111)', () => {
+    expect(roofFade(111, kswCamera)).toBe(1);
+  });
+  it('interior presets stay roofless', () => {
+    expect(roofFade(14, kswCamera)).toBe(0);
+  });
+  it('allows zooming far out', () => {
+    expect(kswCamera.radiusMax).toBeGreaterThanOrEqual(300);
   });
 });
 

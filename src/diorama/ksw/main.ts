@@ -85,7 +85,11 @@ async function boot(): Promise<void> {
     : 'webgl2';
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(preset.fogColor, preset.fogNear * kswScene.fogScale, preset.fogFar * kswScene.fogScale);
+  // fog scales with the zoom radius in animate(): identical look at the
+  // overview framing, no white-out when zooming far out
+  const fogBaseNear = preset.fogNear * kswScene.fogScale;
+  const fogBaseFar = preset.fogFar * kswScene.fogScale;
+  scene.fog = new THREE.Fog(preset.fogColor, fogBaseNear, fogBaseFar);
 
   // Sun day-arc (shared recipe with the prototype)
   const sunDirFor = (t: number): THREE.Vector3 => {
@@ -209,7 +213,7 @@ async function boot(): Promise<void> {
     radius: start.radius,
     target: start.target,
   };
-  const camera = new THREE.PerspectiveCamera(kswCamera.fov, window.innerWidth / window.innerHeight, 0.1, 400);
+  const camera = new THREE.PerspectiveCamera(kswCamera.fov, window.innerWidth / window.innerHeight, 0.1, 1400);
   const applyRig = (): void => {
     camera.position.set(...rigPosition(rig));
     camera.lookAt(...rig.target);
@@ -510,6 +514,9 @@ async function boot(): Promise<void> {
       }
     }
     applyRig();
+    const fogZoom = Math.max(1, rig.radius / 110);
+    (scene.fog as THREE.Fog).near = fogBaseNear * fogZoom;
+    (scene.fog as THREE.Fog).far = fogBaseFar * fogZoom;
     const fade = roofFade(rig.radius, kswCamera);
     roofs.setFade(fade);
     focusU.value = rig.radius;

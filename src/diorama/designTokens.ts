@@ -191,13 +191,14 @@ export const kswCamera = {
   overviewPosition: [-68, 42, 78] as [number, number, number],
   target: [0, 0.6, 0] as [number, number, number],
   radiusMin: 7,
-  radiusMax: 150,
+  radiusMax: 320,
   zoomSpeed: 0.0012,
   dragSpeed: 0.005,
   pitchMin: 0.18,
   pitchMax: 1.25,
-  roofFadeNear: 16,
-  roofFadeFar: 30,
+  // roofs clear early so the interior is navigable long before close-up
+  roofFadeNear: 34,
+  roofFadeFar: 62,
   // AoE2-style edge scrolling: cursor at the viewport edge pans the target
   panMarginPx: 36,
   panSpeed: 30,
@@ -208,8 +209,8 @@ export const kswCamera = {
 // Scene scale-up relative to the one-room prototype.
 export const kswScene = {
   fogScale: 7,
-  domeRadius: 170,
-  skyScale: 360,
+  domeRadius: 400, // clouds/stars stay around the camera even at max zoom-out
+  skyScale: 900, // sky sphere beyond radiusMax, inside camera.far
   sunDistance: 70,
   shadowExtent: 46,
   shadowMapSize: 4096,
