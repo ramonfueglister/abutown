@@ -569,7 +569,7 @@ async function boot(): Promise<void> {
   // (0 below radius 300, up to preset.mistOpacity*0.8 at the city framing).
   const cityMistMat = mistMat.clone();
   cityMistMat.opacity = 0;
-  addMistRing(cityMeta.plate.w / 2 + 2.2, cityMeta.plate.d / 2 + 2.2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat);
+  addMistRing(cityMeta.plate.w / 2, cityMeta.plate.d / 2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat);
 
   // Night life: window glow + lamp bulbs are baked into the glowNight batch
   // at build time (staticBatch.ts); only the actual light pools live here.
@@ -641,7 +641,7 @@ async function boot(): Promise<void> {
     Math.abs(rig.target[0]) <= kswPlan.plate.w / 2 && Math.abs(rig.target[2]) <= kswPlan.plate.d / 2;
   let shadowExtentNow: number = kswScene.shadowExtent;
   let shadowTargetNow = new THREE.Vector3(0, 0, 0);
-  const updateShadowFrustum = (): void => {
+  const updateShadowFrustum = (force = false): void => {
     const hero = onHeroPlate() && rig.radius <= 120;
     const wantExtent = hero
       ? kswScene.shadowExtent
@@ -649,17 +649,26 @@ async function boot(): Promise<void> {
     const wantTarget = hero ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(...rig.target);
     const extentJump = Math.abs(wantExtent - shadowExtentNow) > shadowExtentNow * 0.1;
     const targetJump = wantTarget.distanceTo(shadowTargetNow) > 20;
-    if (!extentJump && !targetJump) return;
+    if (!force && !extentJump && !targetJump) return;
     shadowExtentNow = wantExtent;
     shadowTargetNow = wantTarget;
     sun.shadow.camera.left = -wantExtent;
     sun.shadow.camera.right = wantExtent;
     sun.shadow.camera.top = wantExtent;
     sun.shadow.camera.bottom = -wantExtent;
-    sun.shadow.camera.far = 220 + wantExtent * 2;
-    sun.shadow.camera.updateProjectionMatrix();
     sun.target.position.copy(wantTarget);
-    sun.position.copy(wantTarget).addScaledVector(currentSunDir, kswScene.sunDistance + wantExtent);
+    // Hero restore must be value-identical to boot: exact far=220 and
+    // sun.position = dir*sunDistance (NOT dir*(sunDistance+extent)) — any
+    // drift here means a hero-plate return after visiting the city no
+    // longer matches the pixel-identical boot frame the Hero-Guard promises.
+    if (hero) {
+      sun.shadow.camera.far = 220;
+      sun.position.copy(currentSunDir).multiplyScalar(kswScene.sunDistance);
+    } else {
+      sun.shadow.camera.far = 220 + wantExtent * 2;
+      sun.position.copy(wantTarget).addScaledVector(currentSunDir, kswScene.sunDistance + wantExtent);
+    }
+    sun.shadow.camera.updateProjectionMatrix();
     if (shadowCached) sun.shadow.needsUpdate = true;
   };
 
@@ -863,7 +872,17 @@ async function boot(): Promise<void> {
     }
     driftU.value = t * cloudCfg.drift;
     frameCount++;
-    if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
+    if (cycleMode) {
+      applySunState((t / sunArcCfg.cycleSeconds) % 1);
+      // applySunState unconditionally writes sun.position = dir*sunDistance
+      // (origin-relative), which clobbers the follow-rig position this frame's
+      // earlier updateShadowFrustum() call set — sun.target stays at rig.target
+      // while sun.position snaps back to the origin ray, skewing the shadow
+      // axis. Force a reapply so position/target/far agree again. Cheap: the
+      // extent/target math is trivial and cycle mode already re-renders
+      // shadows every frame (autoUpdate), so this adds no new shadow-map cost.
+      updateShadowFrustum(true);
+    }
     // Amortized GI probe: at most ONE cube face per frame (was: whole scene
     // 6x in one frame every 240 frames). PMREM rebuild once per full cube.
     // Probe faces render without main-camera culling (setProbeMode).
