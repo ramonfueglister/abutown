@@ -323,6 +323,10 @@ export const kswCity = {
   water: 0xa8cfdd, // Eulach + ponds, calm glass blue
   treeGreen: 0x8fbf83, // canopy base; per-instance tint varies around it
   treeTrunk: 0xb08a62,
+  // roads v2: per-class colors + heights (carriage/footway/rail on distinct
+  // levels so junctions never z-fight; footways read thinner+lighter)
+  roadColors: { carriage: 0xcfc4b2, footway: 0xe5dcc8, rail: 0x8d949c, railBed: 0xb9b2a4 },
+  roadYs: { carriage: 0.04, footway: 0.045, railBed: 0.035, rail: 0.05 },
 } as const;
 
 // Diorama-style layer for the geodetic city (style slice). Additive only.

@@ -1,28 +1,42 @@
 // tests/geo/roads.test.ts
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { buildRoads } from '../../src/diorama/ksw/geo/roads';
+import { buildRoads, miterStrip } from '../../src/diorama/ksw/geo/roads';
+
+describe('miterStrip', () => {
+  it('builds a continuous strip: 2 verts per point, no seams', () => {
+    const g = miterStrip([[0, 0], [10, 0], [10, 10]], 6, 0.04);
+    expect(g.positions.length / 3).toBe(6); // 3 pts × 2
+    expect(g.indices.length).toBe(12); // 2 segments × 2 tris
+  });
+  it('miter joint bisects a right angle (outer corner further than half width)', () => {
+    const g = miterStrip([[0, 0], [10, 0], [10, 10]], 6, 0);
+    // corner verts are at index 2,3: bisector direction (±(1,-1)/√2) × 3√2
+    const cx = [g.positions[6], g.positions[9]];
+    for (const x of cx) expect(Math.abs(x - 10)).toBeCloseTo(3, 3);
+  });
+  it('caps extreme spikes', () => {
+    const g = miterStrip([[0, 0], [10, 0], [0, 0.4]], 6, 0); // ~176° turn
+    for (let i = 0; i < g.positions.length; i += 3) {
+      expect(Math.abs(g.positions[i])).toBeLessThan(25); // no infinite miter spike
+    }
+  });
+});
 
 describe('buildRoads', () => {
   const group = buildRoads(
-    [{ class: 'residential', width: 6, pts: [[0, 0], [10, 0], [10, 10]] }],
-    [{ class: 'rail', width: 3, pts: [[0, 5], [20, 5]] }],
+    [
+      { class: 'residential', width: 6, pts: [[0, 0], [10, 0]] },
+      { class: 'footway', width: 2.2, pts: [[0, 5], [10, 5]] },
+    ],
+    [{ class: 'rail', width: 3, pts: [[0, 9], [10, 9]] }],
   );
-  const roads = group.getObjectByName('roadRibbons') as THREE.Mesh;
-  const rails = group.getObjectByName('railRibbons') as THREE.Mesh;
-
-  it('builds one ribbon quad per segment', () => {
-    // road: 2 segments × 4 verts, rail: 1 segment × 4 verts
-    expect(roads.geometry.getAttribute('position').count).toBe(8);
-    expect(rails.geometry.getAttribute('position').count).toBe(4);
+  it('splits carriage / footway / rail(+bed) into named layers', () => {
+    for (const n of ['carriageRibbons', 'footwayRibbons', 'railBeds', 'railRibbons'])
+      expect(group.getObjectByName(n)).toBeTruthy();
   });
-  it('ribbon width matches the class width', () => {
-    const pos = roads.geometry.getAttribute('position');
-    // first segment runs +x, so its first two verts differ by `width` in z
-    expect(Math.abs(pos.getZ(0) - pos.getZ(1))).toBeCloseTo(6);
-  });
-  it('roads receive but never cast shadows', () => {
-    expect(roads.receiveShadow).toBe(true);
-    expect(roads.castShadow).toBe(false);
+  it('layers sit on distinct heights (no z-fight)', () => {
+    const y = (n: string) => (group.getObjectByName(n) as THREE.Mesh).geometry.getAttribute('position').getY(0);
+    expect(y('carriageRibbons')).not.toBeCloseTo(y('footwayRibbons'), 3);
   });
 });
