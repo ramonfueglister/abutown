@@ -53,28 +53,73 @@ function meshFromRings(rings, groundY) {
   return { pos, idx };
 }
 
-export function transformBuildings({ floors, walls, roofs, osmBuildings, projector }) {
+// Walls by extruding the footprint from ground (y=0) to the eave. swisstopo's
+// real wall facets (~40 per building) are invisible at clay scale but ~40×
+// heavier than a prism; extrusion keeps every building solid and the JSON
+// small while the real LoD2 roof still sits on top. cm-integer positions.
+function extrudeWalls(footprint, eaveH) {
+  const pos = [];
+  const idx = [];
+  const top = Math.round(eaveH * 100);
+  for (let i = 0; i < footprint.length; i++) {
+    const [x0, z0] = footprint[i];
+    const [x1, z1] = footprint[(i + 1) % footprint.length];
+    const X0 = Math.round(x0 * 100);
+    const Z0 = Math.round(z0 * 100);
+    const X1 = Math.round(x1 * 100);
+    const Z1 = Math.round(z1 * 100);
+    const base = pos.length / 3;
+    pos.push(X0, 0, Z0, X1, 0, Z1, X1, top, Z1, X0, top, Z0);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  return { pos, idx };
+}
+
+// `footprints` (optional): Map<uuid, ring[[x,z]]> of 2D footprints already in
+// LOCAL meters — used in production, where swisstopo's Floor layer is a
+// GeoJSON-incompatible 3D solid so the footprint comes from Building_solid
+// flattened to 2D instead. When absent (unit tests), the footprint falls back
+// to the largest floor/wall ring. Footprints never feed ground normalization.
+export function transformBuildings({ floors, walls, roofs, osmBuildings, projector, footprints }) {
   const byUuid = new Map();
-  collectByUuid(floors, projector, byUuid, 'floors');
+  collectByUuid(floors ?? { features: [] }, projector, byUuid, 'floors');
   collectByUuid(walls, projector, byUuid, 'walls');
   collectByUuid(roofs, projector, byUuid, 'roofs');
 
   const out = [];
   for (const [uuid, b] of byUuid) {
     if (b.roofs.length === 0 && b.walls.length === 0) continue; // floor-only stub
+    // groundY = building base (walls reach the ground; roofs start at the eave)
     let groundY = Infinity;
     for (const ring of [...b.floors, ...b.walls, ...b.roofs])
       for (const [, y] of ring) groundY = Math.min(groundY, y);
+    // eaveY = where walls meet the roof = the roof's lowest point (fallback:
+    // wall top when a building has no roof surface); topY = ridge.
+    let eaveY = Infinity;
     let topY = -Infinity;
-    for (const ring of b.roofs.length ? b.roofs : b.walls)
-      for (const [, y] of ring) topY = Math.max(topY, y);
+    const capRings = b.roofs.length ? b.roofs : b.walls;
+    for (const ring of capRings)
+      for (const [, y] of ring) {
+        eaveY = Math.min(eaveY, y);
+        topY = Math.max(topY, y);
+      }
+    if (!b.roofs.length) eaveY = topY; // no roof: wall goes straight to the top
 
-    // footprint: largest floor ring (fallback: lowest wall ring projected)
-    const floorRings = b.floors.length ? b.floors : b.walls;
-    const footprint3d = floorRings.reduce((best, r) => (r.length > best.length ? r : best), floorRings[0]);
-    const footprint = footprint3d.map(([x, , z]) => [Math.round(x * 100) / 100, Math.round(z * 100) / 100]);
+    // footprint: the baked Building_solid 2D ring if provided, else the
+    // largest floor/wall ring
+    let footprint;
+    const fpLocal = footprints?.get(uuid);
+    if (fpLocal) {
+      footprint = fpLocal.map(([x, z]) => [Math.round(x * 100) / 100, Math.round(z * 100) / 100]);
+    } else {
+      const candidateRings = b.floors.length ? b.floors : b.walls.length ? b.walls : b.roofs;
+      if (candidateRings.length === 0) continue; // no footprint source at all
+      const footprint3d = candidateRings.reduce((best, r) => (r.length > best.length ? r : best), candidateRings[0]);
+      footprint = footprint3d.map(([x, , z]) => [Math.round(x * 100) / 100, Math.round(z * 100) / 100]);
+    }
 
-    const wall = meshFromRings(b.walls, groundY);
+    const eaveH = Math.max(eaveY - groundY, 0.1); // clamp: never a zero/neg prism
+    const wall = extrudeWalls(footprint, eaveH);
     const roof = meshFromRings(b.roofs, groundY);
     if (wall.idx.length === 0 && roof.idx.length === 0)
       throw new Error(`bake: building ${uuid} has surfaces but none triangulated`);
