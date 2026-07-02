@@ -62,10 +62,10 @@ fn build_unseeded_world() -> (bevy_ecs::world::World, bevy_ecs::schedule::Schedu
     sim_core::economy::EconomyPlugin.install(&mut world, &mut schedule);
 
     let nodes = vec![
-        node(0, 2.0, 3.0),     // market 9001 anchor
-        node(1, 111.5, 64.51), // market 9002 anchor
-        node(2, 16.0, 48.0),   // market 9003 anchor
-        node(3, 208.0, 48.0),  // market 9004 anchor
+        node(0, 8.0, 8.0),   // market 9001 anchor
+        node(1, 72.0, 8.0),  // market 9002 anchor
+        node(2, 8.0, 40.0),  // market 9003 anchor
+        node(3, 72.0, 40.0), // market 9004 anchor
     ];
     world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
     world.insert_resource(Graph::new(nodes, vec![]));
@@ -582,12 +582,10 @@ fn wood_input_leg_prices_at_participation_bound_and_cash_drift_is_bounded() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The participation story has TWO distance ceilings: the bound 400 vs landed
-/// cost 50 + 5·d requires d ≤ 69 for the route to be viable at all, and the
-/// authored tick-1 sink price 380 > 50 + 5·d requires d ≤ 65 for the chain to
-/// trade from the first cadence. The seeded anchors give d = 59. A re-snapped
-/// or re-authored anchor that silently drifts d outside [55, 65] would change
-/// the story (dead chain or no tick-1 trade) without any other test failing —
-/// pin it.
+/// cost 50 + 5·d requires d ≤ 69 for the route to be viable at all. The authored
+/// corner anchors put 9003 directly below 9001, giving d = 32 and landed WOOD
+/// cost 210. A re-snapped or re-authored anchor that silently drifts this route
+/// changes the production-chain story without any other test failing — pin it.
 #[test]
 fn wood_route_distance_stays_within_participation_headroom() {
     let (world, _schedule) = build_chain_economy();
@@ -595,15 +593,9 @@ fn wood_route_distance_stays_within_participation_headroom() {
     let d_fwd = distances.0[&(MarketId(9003), MarketId(9001))];
     let d_rev = distances.0[&(MarketId(9001), MarketId(9003))];
     assert_eq!(d_fwd, d_rev, "baked distances must be symmetric");
-    assert!(
-        (55..=65).contains(&d_fwd),
-        "WOOD route distance 9003↔9001 is {d_fwd}, outside [55, 65]: the chain's \
-         participation headroom needs d ≤ 69 (TOOLS bound 400 ≥ landed 50 + 5·d) and \
-         tick-1 trade needs d ≤ 65 (authored sink price 380 > 50 + 5·d); the lower \
-         lip 55 catches an anchor re-snap that silently shortens the route and \
-         re-prices the whole convergence story"
+    assert_eq!(
+        d_fwd, 32,
+        "WOOD route distance 9003↔9001 must stay on the authored west-edge route"
     );
-    // The snapped abutopia anchors currently bake 59 tiles; only the band is
-    // load-bearing, so the exact value is diagnostic, not asserted.
-    println!("WOOD route distance 9003↔9001: {d_fwd} tiles (band [55, 65])");
+    println!("WOOD route distance 9003↔9001: {d_fwd} tiles");
 }

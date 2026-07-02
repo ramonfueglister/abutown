@@ -80,7 +80,7 @@ mod tests {
         let markets = vec![
             (9001u32, (2.0f32, 3.0f32)),
             (9002u32, (13.0, 3.0)),
-            (9004u32, (208.0, 48.0)),
+            (9004u32, (72.0, 40.0)),
         ];
         let b = assign_binding((3.0, 3.0), &markets).unwrap();
         assert_eq!(b.home_market, 9001);

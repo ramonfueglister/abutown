@@ -15,7 +15,7 @@ describe('economySnapshotFromProto', () => {
       markets: [
         create(EconomyMarketSchema, {
           marketId: 9001,
-          name: 'Demo A',
+          name: 'Central Works',
           tileX: 2,
           tileY: 3,
           wagePaidLastTick: 320n,
@@ -44,7 +44,7 @@ describe('economySnapshotFromProto', () => {
     expect(dto.markets).toHaveLength(1);
     const market = dto.markets[0];
     expect(market.marketId).toBe(9001);
-    expect(market.name).toBe('Demo A');
+    expect(market.name).toBe('Central Works');
     expect(market.tileX).toBe(2);
     expect(market.tileY).toBe(3);
     // wagePaidLastTick: bigint → number

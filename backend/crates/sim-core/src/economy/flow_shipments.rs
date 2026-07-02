@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::economy::{EconomyConfig, GoodId, MarketId, Money, Quantity};
 
 /// Reserved actor-id offset for shipment-traders so they never collide with
-/// seeded economic actors (8001-8012) or the demo trader (8003).
+/// seeded economic actors (8001-8012) or earlier trader actor ids.
 pub const SHIPMENT_ACTOR_OFFSET: u64 = 1 << 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +54,7 @@ impl NextShipmentId {
 }
 
 /// Visible travel time for a shipment over `dist` tiles, at the same tile/tick
-/// speed the demo trader walks (so flow-traders pace identically). >= 1.
+/// configured visible trader speed. >= 1.
 pub fn shipment_travel_ticks(dist: i64, config: &EconomyConfig) -> u64 {
     let speed = config.trader_tiles_per_tick.max(1);
     (dist.max(0) as u64).div_ceil(speed).max(1)

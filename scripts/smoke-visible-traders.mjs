@@ -71,7 +71,7 @@ try {
 
 // Let the WS open + the initial subscribe poll fire.
 await pause(2500);
-// Zoom out so a wide area (including the demo-market chunks near the origin) is
+// Zoom out so a wide area (including the market chunks near the origin) is
 // subscribed regardless of the default camera center.
 await page.mouse.move(512, 384);
 for (let i = 0; i < 6; i += 1) {

@@ -24,10 +24,10 @@ fn seed_world() -> World {
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
     let nodes = vec![
-        node(0, 2.0, 3.0),
-        node(1, 111.5, 64.51),
-        node(2, 16.0, 48.0),
-        node(3, 208.0, 48.0),
+        node(0, 8.0, 8.0),
+        node(1, 72.0, 8.0),
+        node(2, 8.0, 40.0),
+        node(3, 72.0, 40.0),
     ];
     world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
     world.insert_resource(Graph::new(nodes, vec![]));
@@ -41,30 +41,30 @@ fn seed_world() -> World {
 fn factory_seeds_four_markets_and_two_distance_pairs() {
     let world = seed_world();
 
-    assert_eq!(world.resource::<Markets>().0.len(), 4, "four demo markets");
+    assert_eq!(world.resource::<Markets>().0.len(), 4, "four city markets");
     assert_eq!(world.resource::<MarketChunks>().0.len(), 4, "all anchored");
 
-    // The original demo markets still exist.
+    // The primary production/consumption pair still exists.
     let distances = world.resource::<crate::economy::MarketDistances>();
     assert!(
         distances
             .0
             .contains_key(&(MarketId(9_001), MarketId(9_002))),
-        "original demo pair baked"
+        "primary city pair baked"
     );
 
-    // The flow-demo markets have distance entries in both directions.
+    // The cross-town markets have distance entries in both directions.
     assert!(
         distances
             .0
             .contains_key(&(MarketId(9_003), MarketId(9_004))),
-        "flow-demo A->B distance baked"
+        "cross-town A->B distance baked"
     );
     assert!(
         distances
             .0
             .contains_key(&(MarketId(9_004), MarketId(9_003))),
-        "flow-demo B->A distance baked"
+        "cross-town B->A distance baked"
     );
 }
 
@@ -97,23 +97,21 @@ fn seed_adds_second_good_without_new_markets() {
 }
 
 #[test]
-fn seed_adds_flow_demo_markets_for_dormant_cross_flow() {
-    // Task 7: two far-apart dormant markets (F_A @ chunk (0,1), F_B @ chunk
-    // (6,1)) with a standing GOOD_FOOD imbalance → recurring MacroFlow whose
-    // straight-line route at row y≈48 crosses the transit chunk (3,1).
-    // Both market chunks must be ≥2 chunks from the transit chunk in x.
+fn seed_adds_cross_town_markets_for_dormant_cross_flow() {
+    // The bottom-edge markets (F_A @ chunk (0,1), F_B @ chunk (2,1)) keep a
+    // standing GOOD_FOOD imbalance for recurring MacroFlow.
     use crate::economy::GOOD_FOOD;
     let world = seed_world();
 
-    // The two flow-demo markets exist.
+    // The two cross-town markets exist.
     let markets = world.resource::<Markets>();
     assert!(
         markets.0.contains_key(&MarketId(9_003)),
-        "flow-demo market F_A seeded"
+        "cross-town market F_A seeded"
     );
     assert!(
         markets.0.contains_key(&MarketId(9_004)),
-        "flow-demo market F_B seeded"
+        "cross-town market F_B seeded"
     );
 
     // Both have entries in MarketChunks.
@@ -121,23 +119,9 @@ fn seed_adds_flow_demo_markets_for_dormant_cross_flow() {
     let chunk_fa = *chunks.0.get(&MarketId(9_003)).expect("F_A chunk");
     let chunk_fb = *chunks.0.get(&MarketId(9_004)).expect("F_B chunk");
 
-    // Chunks are distinct.
+    assert_eq!(chunk_fa, ChunkCoord { x: 0, y: 1 }, "F_A bottom-left chunk");
+    assert_eq!(chunk_fb, ChunkCoord { x: 2, y: 1 }, "F_B bottom-right chunk");
     assert_ne!(chunk_fa, chunk_fb, "F_A and F_B in different chunks");
-
-    // Both chunks differ from the transit chunk (3,1) by ≥2 in x.
-    let transit = ChunkCoord { x: 3, y: 1 };
-    assert!(
-        (chunk_fa.x - transit.x).unsigned_abs() >= 2,
-        "F_A chunk {:?} must be ≥2 chunks from transit {:?}",
-        chunk_fa,
-        transit
-    );
-    assert!(
-        (chunk_fb.x - transit.x).unsigned_abs() >= 2,
-        "F_B chunk {:?} must be ≥2 chunks from transit {:?}",
-        chunk_fb,
-        transit
-    );
 
     // Supplier pool at F_A and consumer pool at F_B for GOOD_FOOD.
     let supply = world.resource::<SupplyPools>();
@@ -280,10 +264,10 @@ fn authored_capita_baseline_reaches_economy_config() {
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
     let nodes = vec![
-        node(0, 2.0, 3.0),
-        node(1, 111.5, 64.51),
-        node(2, 16.0, 48.0),
-        node(3, 208.0, 48.0),
+        node(0, 8.0, 8.0),
+        node(1, 72.0, 8.0),
+        node(2, 8.0, 40.0),
+        node(3, 72.0, 40.0),
     ];
     world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
     world.insert_resource(Graph::new(nodes, vec![]));
@@ -320,10 +304,10 @@ fn seed_scales_opening_cash_and_inventory_by_capita_factor() {
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
     let nodes = vec![
-        node(0, 2.0, 3.0),
-        node(1, 111.5, 64.51),
-        node(2, 16.0, 48.0),
-        node(3, 208.0, 48.0),
+        node(0, 8.0, 8.0),
+        node(1, 72.0, 8.0),
+        node(2, 8.0, 40.0),
+        node(3, 72.0, 40.0),
     ];
     world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
     world.insert_resource(Graph::new(nodes, vec![]));
@@ -421,10 +405,10 @@ fn capita_baseline_reapplies_on_hydrate_even_when_state_already_seeded() {
     let mut schedule = bevy_ecs::schedule::Schedule::default();
     crate::economy::EconomyPlugin.install(&mut world, &mut schedule);
     let nodes = vec![
-        node(0, 2.0, 3.0),
-        node(1, 111.5, 64.51),
-        node(2, 16.0, 48.0),
-        node(3, 208.0, 48.0),
+        node(0, 8.0, 8.0),
+        node(1, 72.0, 8.0),
+        node(2, 8.0, 40.0),
+        node(3, 72.0, 40.0),
     ];
     world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
     world.insert_resource(Graph::new(nodes, vec![]));

@@ -43,6 +43,7 @@ type RuntimeCounts = {
   railStations: number;
   railYardTracks: number;
   reserveTiles: number;
+  marketGuideEdges: number;
 };
 
 type RuntimeValidationDiagnostics = {
@@ -196,6 +197,7 @@ export function buildRuntimeDiagnosticsPayload(options: RuntimeDiagnosticsOption
       selectedMarketCoord: selected.selectedMarketCoord,
       economyMarketCount: options.getEconomyMarketCount(),
       economyFlowCount: options.getEconomyFlowCount(),
+      marketGuideEdgeCount: counts.marketGuideEdges,
       frameTimeMs: options.getFrameTimeMs(),
       economyMarkets: economyMarketEntries,
       railStations: counts.railStations,

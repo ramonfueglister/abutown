@@ -424,12 +424,12 @@ mod tests {
         let north = graph.edge(
             graph
                 .edge_by_legacy("link:walk:corridor:north")
-                .expect("north sidewalk edge exists"),
+                .expect("north pedestrian edge exists"),
         );
         let south = graph.edge(
             graph
                 .edge_by_legacy("link:walk:corridor:south")
-                .expect("south sidewalk edge exists"),
+                .expect("south pedestrian edge exists"),
         );
 
         assert_eq!(north.polyline, vec![(2.0, 2.49), (13.0, 2.49)]);

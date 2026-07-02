@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 2;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BaseWorldError {
@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn loads_markets_layer_from_abutopia_bundle() {
         let bundle = load_abutopia();
-        assert_eq!(bundle.manifest.schema_version, 2);
+        assert_eq!(bundle.manifest.schema_version, 4);
         // Four authored markets, ids 9001..9004, ascending.
         let ids: Vec<u32> = bundle.markets.markets.iter().map(|m| m.id).collect();
         assert_eq!(ids, vec![9001, 9002, 9003, 9004]);
@@ -709,7 +709,7 @@ mod tests {
         std::fs::write(
             layers_dst.join("markets.json"),
             r#"{
-  "schema_version": 2,
+  "schema_version": 4,
   "world_id": "abutopia",
   "markets": [{"id": "not-a-number", "name": "Bad Market", "anchor": [0.0, 0.0]}],
   "distances": [],
@@ -795,7 +795,7 @@ mod tests {
     fn bundle_with_pedestrian_points(points: Vec<NetworkPoint>) -> BaseWorldBundle {
         BaseWorldBundle {
             manifest: BaseWorldManifest {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "test".into(),
                 display_name: "Test".into(),
                 chunk_size: 32,
@@ -813,12 +813,12 @@ mod tests {
                 },
             },
             terrain: TerrainLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "test".into(),
                 tiles: Vec::new(),
             },
             transport: TransportLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "test".into(),
                 roads: vec![RoadTile {
                     x: 3,
@@ -835,7 +835,7 @@ mod tests {
                 }],
             },
             buildings: BuildingLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "test".into(),
                 footprints: vec![BuildingFootprint {
                     id: "building:test".into(),
@@ -846,24 +846,24 @@ mod tests {
                 }],
             },
             decorations: DecorationLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "test".into(),
                 trees: Vec::new(),
                 details: Vec::new(),
             },
             spawns: SpawnLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "test".into(),
                 pedestrian_groups: Vec::new(),
                 car_groups: Vec::new(),
             },
             markets: MarketLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "test".into(),
                 markets: vec![MarketSpec {
                     id: 1,
                     name: "Test Market".into(),
-                    anchor: [2.0, 3.0],
+                    anchor: [8.0, 8.0],
                 }],
                 distances: Vec::new(),
                 supply: Vec::new(),

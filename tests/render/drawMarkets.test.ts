@@ -4,6 +4,7 @@ import {
   marketNodeRadius,
   priceTrend,
   satisfiedDemandFraction,
+  stationShapeForMarket,
   trendTriangle,
 } from '../../src/render/drawMarkets';
 import type { MarketGoodDto } from '../../src/backend/mobilityProtocol';
@@ -21,10 +22,17 @@ describe('marketActivity', () => {
 });
 
 describe('marketNodeRadius', () => {
-  it('has a floor at 6, grows monotonically, clamps at 14', () => {
-    expect(marketNodeRadius(0)).toBe(6);
+  it('has a floor at 8, grows monotonically, clamps at 17', () => {
+    expect(marketNodeRadius(0)).toBe(8);
     expect(marketNodeRadius(100)).toBeGreaterThan(marketNodeRadius(10));
-    expect(marketNodeRadius(1e12)).toBe(14);
+    expect(marketNodeRadius(1e12)).toBe(17);
+  });
+});
+
+describe('stationShapeForMarket', () => {
+  it('assigns deterministic Mini-Metro station shapes', () => {
+    expect(stationShapeForMarket(9001)).toBe(stationShapeForMarket(9001));
+    expect(new Set([9001, 9002, 9003, 9004].map(stationShapeForMarket)).size).toBeGreaterThan(1);
   });
 });
 

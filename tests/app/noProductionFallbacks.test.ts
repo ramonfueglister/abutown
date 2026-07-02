@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// Each `path` is scanned for forbidden demo/stale-seed patterns in PRODUCTION
+// Each `path` is scanned for forbidden retired/stale-seed patterns in PRODUCTION
 // source only. A path may be a single file or a directory: directories (the
 // sim-server `runtime/` and `app/` module dirs after the god-file split) are
 // scanned recursively across their non-test `.rs` files. `tests.rs` files are
@@ -49,7 +49,7 @@ const checks = [
 ];
 
 describe('production stale-seed removal', () => {
-  it('does not keep demo world recovery paths in production entrypoints', () => {
+  it('does not keep retired world recovery paths in production entrypoints', () => {
     const hits = checks.flatMap(({ path, patterns }) => {
       const source = productionSource(path);
       return patterns

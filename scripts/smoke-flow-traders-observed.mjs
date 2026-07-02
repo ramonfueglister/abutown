@@ -5,9 +5,9 @@
 // destination — not merely transits between two dormant markets (the #70 case,
 // covered by scripts/smoke-flow-traders.mjs).
 //
-// This inverts #70: instead of observing the transit chunk (3,1) to keep the
-// market chunks dormant, we OBSERVE the F_A market chunk (0,1) — making F_A active
-// — while keeping F_B (6,1) outside the view (dormant). The cross-edge F_A→F_B then
+// This inverts #70: instead of observing a transit chunk to keep the market chunks
+// dormant, we OBSERVE the F_A market chunk (0,1) — making F_A active — while keeping
+// F_B (2,1) outside the view (dormant). The cross-edge F_A→F_B then
 // fires every interval (active source residual ask → dormant deficit pool), and the
 // FlowShipment SPAWNS at F_A. We assert a `trader:` agent's FIRST observed sample is
 // in the observed F_A chunk (0,1) — i.e. it appeared AT the market, not mid-route.
@@ -30,11 +30,11 @@ const PAGE_TIMEOUT_MS = 20000;
 
 const CHUNK_SIZE = 32; // tiles per chunk edge
 
-// F_A market @ tile (16,48) → chunk (0,1); F_B market @ tile (208,48) → chunk (6,1).
-const FA_TILE_X = 16;
-const FA_TILE_Y = 48;
+// F_A market @ tile (8,40) → chunk (0,1); F_B market @ tile (72,40) → chunk (2,1).
+const FA_TILE_X = 8;
+const FA_TILE_Y = 40;
 const MARKET_FA_CHUNK = { x: 0, y: 1 };
-const MARKET_FB_CHUNK = { x: 6, y: 1 };
+const MARKET_FB_CHUNK = { x: 2, y: 1 };
 
 async function pause(ms) {
   await new Promise((r) => setTimeout(r, ms));

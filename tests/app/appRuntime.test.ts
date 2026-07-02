@@ -12,38 +12,48 @@ function createBackendStatus() {
 }
 
 function createBaseWorld() {
-  const width = 224;
-  const height = 128;
-  const roadY = 64;
-  const roadX0 = 107;
-  const houseAX = 106;
-  const houseBX = 117;
+  const width = 80;
+  const height = 48;
+  const roadY = 24;
+  const roadX0 = 14;
+  const edgeLeftX = 8;
+  const edgeRightX = 72;
+  const edgeTopY = 8;
+  const edgeBottomY = 40;
   return {
-    schema_version: 1,
+    schema_version: 4,
     world_id: 'abutopia',
     chunk_size: 32,
     world_tiles: { width, height },
     terrain: { tiles: [] },
     transport: {
-      roads: Array.from({ length: 10 }, (_, index) => ({ x: index + roadX0, y: roadY, kind: 'street' as const, mask: index === 0 ? 2 : index === 9 ? 8 : 10 })),
+      roads: Array.from({ length: 52 }, (_, index) => ({ x: index + roadX0, y: roadY, kind: 'street' as const, mask: index === 0 ? 2 : index === 51 ? 8 : 10 })),
       rails: [],
       arterial_paths: [],
       rail_paths: [],
       pedestrian_corridors: [
         {
-          id: 'corridor:sidewalk:north',
-          points: Array.from({ length: 12 }, (_, index) => ({ x: index + houseAX, y: 63.49 })),
+          id: 'corridor:edge:north',
+          points: Array.from({ length: edgeRightX - edgeLeftX + 1 }, (_, index) => ({ x: index + edgeLeftX, y: edgeTopY })),
         },
         {
-          id: 'corridor:sidewalk:south',
-          points: Array.from({ length: 12 }, (_, index) => ({ x: index + houseAX, y: 64.51 })),
+          id: 'corridor:edge:east',
+          points: Array.from({ length: edgeBottomY - edgeTopY + 1 }, (_, index) => ({ x: edgeRightX, y: index + edgeTopY })),
+        },
+        {
+          id: 'corridor:edge:south',
+          points: Array.from({ length: edgeRightX - edgeLeftX + 1 }, (_, index) => ({ x: index + edgeLeftX, y: edgeBottomY })),
+        },
+        {
+          id: 'corridor:edge:west',
+          points: Array.from({ length: edgeBottomY - edgeTopY + 1 }, (_, index) => ({ x: edgeLeftX, y: index + edgeTopY })),
         },
       ],
     },
     buildings: {
       footprints: [
-        { id: 'building:house-a', tiles: [{ x: houseAX, y: roadY }], sheet: 'oldhouses', frame: 0, district: 'test' },
-        { id: 'building:house-b', tiles: [{ x: houseBX, y: roadY }], sheet: 'oldhouses', frame: 1, district: 'test' },
+        { id: 'landmark:works', tiles: [{ x: 31, y: roadY - 2 }], sheet: 'modern', frame: 0, district: 'test' },
+        { id: 'landmark:market', tiles: [{ x: 49, y: roadY - 2 }], sheet: 'shops', frame: 1, district: 'test' },
       ],
     },
     decorations: {

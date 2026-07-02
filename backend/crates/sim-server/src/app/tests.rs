@@ -393,7 +393,7 @@ impl MobilitySnapshotStore for FailingMobilitySnapshotStore {
 }
 
 #[tokio::test]
-async fn failing_mobility_write_marks_health_stale_with_redacted_error() {
+async fn failing_mobility_write_marks_persistence_stale_with_redacted_error() {
     let mut runtime = SimulationRuntime::new();
     mutate_runtime_tile(&mut runtime, "command:app-persist-health-fail:1").await;
     let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
@@ -420,8 +420,8 @@ async fn failing_mobility_write_marks_health_stale_with_redacted_error() {
     let health = health_response_for_state(&state);
     let persistence = health.persistence.expect("persistence health present");
     assert!(
-        !health.ok,
-        "stale persistence (never succeeded) should make /health unhealthy"
+        health.ok,
+        "stale persistence should be reported separately without blocking runtime health"
     );
     assert_eq!(persistence.status, w::PersistenceHealthStatus::Stale as i32);
     assert_eq!(persistence.world_id, "abutopia");
@@ -617,7 +617,10 @@ async fn persist_snapshots_once_rejects_empty_mobility_snapshots() {
     );
     let health = health_response_for_state(&state);
     let persistence = health.persistence.expect("persistence health present");
-    assert!(!health.ok);
+    assert!(
+        health.ok,
+        "invalid persistence snapshots are reported in persistence health without failing runtime health"
+    );
     assert_eq!(persistence.status, w::PersistenceHealthStatus::Stale as i32);
     assert!(persistence.last_error.contains("0 agents"));
 }
@@ -1110,7 +1113,7 @@ async fn economy_endpoint_returns_json_snapshot() {
 #[tokio::test]
 async fn read_view_economy_snapshot_exposes_four_markets_and_known_goods() {
     // After one tick, the published read view must carry a pre-built
-    // EconomySnapshot with the 4 demo markets seeded from the abutopia bundle
+    // EconomySnapshot with the 4 seed markets from the abutopia bundle
     // and at least the three opening-priced goods (market 9002 TOOLS/FOOD,
     // market 9004 FOOD).
     let state = AppState::new(SimulationRuntime::new());
@@ -1121,7 +1124,7 @@ async fn read_view_economy_snapshot_exposes_four_markets_and_known_goods() {
     assert_eq!(
         view.economy.markets.len(),
         4,
-        "economy snapshot must expose exactly 4 demo markets"
+        "economy snapshot must expose exactly 4 seed markets"
     );
     // The three opening-priced goods (market_id, good_id): (9002,4), (9002,1), (9004,1).
     let goods: std::collections::HashSet<(u32, u32)> = view
@@ -1141,6 +1144,37 @@ async fn read_view_economy_snapshot_exposes_four_markets_and_known_goods() {
     assert!(
         goods.contains(&(9004, 1)),
         "view.economy.goods must include (market=9004, good=FOOD=1)"
+    );
+}
+
+#[test]
+fn base_world_response_exposes_authored_market_guides() {
+    let base_world = BaseWorldBundle::load_from_dir(resolve_base_world_path())
+        .expect("base world bundle present for test");
+    let response = BaseWorldResponse::from(&base_world);
+
+    assert_eq!(
+        response
+            .markets
+            .markets
+            .iter()
+            .map(|market| (market.id, market.name.as_str(), market.anchor))
+            .collect::<Vec<_>>(),
+        vec![
+            (9001, "Central Works", [8.0, 8.0]),
+            (9002, "Market Square", [72.0, 8.0]),
+            (9003, "Harbor Depot", [8.0, 40.0]),
+            (9004, "Homes Quarter", [72.0, 40.0]),
+        ]
+    );
+    assert_eq!(
+        response
+            .markets
+            .distances
+            .iter()
+            .map(|distance| (distance.from, distance.to))
+            .collect::<Vec<_>>(),
+        vec![(9001, 9002), (9003, 9004), (9001, 9003)]
     );
 }
 

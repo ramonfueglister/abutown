@@ -11,6 +11,7 @@ pub struct BaseWorldResponse {
     pub transport: BaseWorldTransportResponse,
     pub buildings: BaseWorldBuildingResponse,
     pub decorations: BaseWorldDecorationResponse,
+    pub markets: BaseWorldMarketLayerResponse,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +46,12 @@ pub struct BaseWorldDecorationResponse {
     pub details: Vec<sim_core::base_world::DecorationDetail>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseWorldMarketLayerResponse {
+    pub markets: Vec<sim_core::base_world::MarketSpec>,
+    pub distances: Vec<sim_core::base_world::MarketDistanceSpec>,
+}
+
 impl From<&BaseWorldBundle> for BaseWorldResponse {
     fn from(bundle: &BaseWorldBundle) -> Self {
         Self {
@@ -77,6 +84,10 @@ impl From<&BaseWorldBundle> for BaseWorldResponse {
             decorations: BaseWorldDecorationResponse {
                 trees: bundle.decorations.trees.clone(),
                 details: bundle.decorations.details.clone(),
+            },
+            markets: BaseWorldMarketLayerResponse {
+                markets: bundle.markets.markets.clone(),
+                distances: bundle.markets.distances.clone(),
             },
         }
     }

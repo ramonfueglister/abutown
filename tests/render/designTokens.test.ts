@@ -15,9 +15,8 @@ describe('designTokens', () => {
     expect(tokens.GOOD_COLOR_FALLBACK).toMatch(/^#[0-9a-f]{6}$/);
   });
 
-  it('opacity floors are sane', () => {
-    expect(tokens.FLOW_MIN_OPACITY).toBeGreaterThan(0);
-    expect(tokens.FLOW_MIN_OPACITY).toBeLessThan(1);
+  it('overlay opacity constants are sane', () => {
+    expect(tokens.ECONOMY_OVERLAY_CITY_OPACITY).toBe(0);
     expect(tokens.AGENT_SHIMMER_OPACITY).toBeGreaterThan(0);
     expect(tokens.AGENT_SHIMMER_OPACITY).toBeLessThan(1);
   });

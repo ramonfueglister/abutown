@@ -288,10 +288,10 @@ fn regen_rate_covers_aggregate_tools_demand_at_seed() {
             legacy_id: None,
         };
         let nodes = vec![
-            node(0, 2.0, 3.0),
-            node(1, 111.5, 64.51),
-            node(2, 16.0, 48.0),
-            node(3, 208.0, 48.0),
+            node(0, 8.0, 8.0),
+            node(1, 72.0, 8.0),
+            node(2, 8.0, 40.0),
+            node(3, 72.0, 40.0),
         ];
         world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
         world.insert_resource(Graph::new(nodes, vec![]));
@@ -579,10 +579,10 @@ fn faucet_rate_covers_routed_demand_per_consumer_pool_at_seed() {
             legacy_id: None,
         };
         let nodes = vec![
-            node(0, 2.0, 3.0),
-            node(1, 111.5, 64.51),
-            node(2, 16.0, 48.0),
-            node(3, 208.0, 48.0),
+            node(0, 8.0, 8.0),
+            node(1, 72.0, 8.0),
+            node(2, 8.0, 40.0),
+            node(3, 72.0, 40.0),
         ];
         world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
         world.insert_resource(Graph::new(nodes, vec![]));

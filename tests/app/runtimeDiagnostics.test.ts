@@ -35,6 +35,7 @@ function baseOptions(): RuntimeDiagnosticsOptions {
       railStations: 6,
       railYardTracks: 7,
       reserveTiles: 8,
+      marketGuideEdges: 3,
     }),
     getDiagnostics: () => ({
       roadRailOverlap: 0,
@@ -110,6 +111,12 @@ describe('buildRuntimeDiagnosticsPayload', () => {
       stuckCars: 0,
       invalidRouteCars: 0,
     });
+  });
+
+  it('reports authored market guide edges drawn by the renderer', () => {
+    const payload = buildRuntimeDiagnosticsPayload(baseOptions());
+
+    expect(payload.city.marketGuideEdgeCount).toBe(3);
   });
 });
 

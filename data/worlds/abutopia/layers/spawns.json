@@ -1,11 +1,26 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "world_id": "abutopia",
   "pedestrian_groups": [
     {
-      "id": "spawn:ped:sidewalk-south",
-      "corridor_id": "corridor:sidewalk:south",
-      "agents_per_corridor": 300
+      "id": "spawn:ped:north",
+      "corridor_id": "corridor:edge:north",
+      "agents_per_corridor": 75
+    },
+    {
+      "id": "spawn:ped:east",
+      "corridor_id": "corridor:edge:east",
+      "agents_per_corridor": 75
+    },
+    {
+      "id": "spawn:ped:south",
+      "corridor_id": "corridor:edge:south",
+      "agents_per_corridor": 75
+    },
+    {
+      "id": "spawn:ped:west",
+      "corridor_id": "corridor:edge:west",
+      "agents_per_corridor": 75
     }
   ],
   "car_groups": []

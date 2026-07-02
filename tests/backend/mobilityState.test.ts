@@ -80,7 +80,7 @@ describe('mobility state reducer', () => {
     });
   });
 
-  it('stores snapshot records without projecting demo map markers', () => {
+  it('stores snapshot records without projecting stale map markers', () => {
     const state = applyMobilitySnapshot(createMobilityOverlayState(), snapshot, 100);
     const diagnostics = mobilityDiagnostics(state);
 

@@ -663,7 +663,7 @@ mod proto_roundtrip_tests {
                 tick: 42,
                 markets: vec![EconomyMarket {
                     market_id: 9001,
-                    name: "Demo A".into(),
+                    name: "Central Works".into(),
                     tile_x: 2,
                     tile_y: 3,
                     wage_paid_last_tick: 320,

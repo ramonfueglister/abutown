@@ -1,5 +1,6 @@
 import type { MarketGoodDto, MarketLocationDto } from '../backend/mobilityProtocol';
 import { AGENT_INK, MARKET_ORANGE, STATION_FILL, TRADER_RED } from './designTokens';
+import { roundedRectPath } from './canvasPrimitives';
 import { screenStableWorldSize } from './minimalGlyphScale';
 
 type Point = { x: number; y: number };
@@ -22,10 +23,17 @@ export function marketActivity(goods: readonly MarketGoodDto[]): number {
   return goods.reduce((sum, g) => sum + g.tradedQtyLastTick, 0);
 }
 
-/** Screen-pixel node radius: floor 6, log growth, ceiling 14. */
+/** Screen-pixel node radius: floor 8, log growth, ceiling 17. */
 export function marketNodeRadius(activity: number): number {
-  if (activity <= 0) return 6;
-  return Math.min(14, 6 + 2 * Math.log10(1 + activity));
+  if (activity <= 0) return 8;
+  return Math.min(17, 8 + 2.2 * Math.log10(1 + activity));
+}
+
+export type StationShape = 'circle' | 'square' | 'diamond' | 'triangle';
+
+export function stationShapeForMarket(marketId: number): StationShape {
+  const shapes: readonly StationShape[] = ['circle', 'square', 'diamond', 'triangle'];
+  return shapes[Math.abs(marketId) % shapes.length] ?? 'circle';
 }
 
 export function satisfiedDemandFraction(goods: readonly MarketGoodDto[]): number {
@@ -96,13 +104,12 @@ export function drawMarketNodes(
       ctx.stroke();
     }
 
-    // Mini-Metro station: paper-white interchange disc with a heavy ink ring.
+    // Mini-Metro station: paper-white interchange glyph with a heavy ink ring.
     ctx.globalAlpha = 1;
     ctx.fillStyle = STATION_FILL;
     ctx.strokeStyle = AGENT_INK;
     ctx.lineWidth = ringWidth;
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    stationShapePath(ctx, point, radius, stationShapeForMarket(market.marketId));
     ctx.fill();
     ctx.stroke();
 
@@ -144,16 +151,50 @@ function drawMarketLabel(
   cameraScale: number,
 ): void {
   if (!name) return;
-  const fontSize = screenStableWorldSize(11, cameraScale, { minWorld: 7, maxWorld: 36 });
+  const fontSize = screenStableWorldSize(11, cameraScale, { minWorld: 8, maxWorld: 36 });
+  const padX = screenStableWorldSize(5, cameraScale, { minWorld: 4, maxWorld: 18 });
+  const padY = screenStableWorldSize(2.2, cameraScale, { minWorld: 2, maxWorld: 10 });
   ctx.font = `600 ${fontSize.toFixed(1)}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  const y = point.y + radius * 1.6 + fontSize * 0.55;
-  ctx.lineWidth = fontSize * 0.28;
-  ctx.strokeStyle = STATION_FILL;
-  ctx.globalAlpha = 0.85;
-  ctx.strokeText(name, point.x, y);
+  ctx.textBaseline = 'middle';
+  const y = point.y + radius * 1.85 + fontSize * 0.5;
+  const textWidth = ctx.measureText(name).width;
+  const boxWidth = textWidth + padX * 2;
+  const boxHeight = fontSize + padY * 2;
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = STATION_FILL;
+  roundedRectPath(ctx, point.x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, boxHeight * 0.42);
+  ctx.fill();
+  ctx.globalAlpha = 0.42;
+  ctx.strokeStyle = 'rgba(46, 52, 64, 0.28)';
+  ctx.lineWidth = screenStableWorldSize(0.8, cameraScale, { minWorld: 0.6, maxWorld: 3 });
+  roundedRectPath(ctx, point.x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, boxHeight * 0.42);
+  ctx.stroke();
   ctx.globalAlpha = 1;
   ctx.fillStyle = AGENT_INK;
   ctx.fillText(name, point.x, y);
+}
+
+function stationShapePath(ctx: CanvasRenderingContext2D, point: Point, radius: number, shape: StationShape): void {
+  ctx.beginPath();
+  if (shape === 'circle') {
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    return;
+  }
+  if (shape === 'square') {
+    roundedRectPath(ctx, point.x - radius, point.y - radius, radius * 2, radius * 2, radius * 0.22);
+    return;
+  }
+  if (shape === 'diamond') {
+    ctx.moveTo(point.x, point.y - radius * 1.15);
+    ctx.lineTo(point.x + radius * 1.15, point.y);
+    ctx.lineTo(point.x, point.y + radius * 1.15);
+    ctx.lineTo(point.x - radius * 1.15, point.y);
+    ctx.closePath();
+    return;
+  }
+  ctx.moveTo(point.x, point.y - radius * 1.12);
+  ctx.lineTo(point.x + radius * 1.08, point.y + radius * 0.72);
+  ctx.lineTo(point.x - radius * 1.08, point.y + radius * 0.72);
+  ctx.closePath();
 }

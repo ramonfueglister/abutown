@@ -1,11 +1,7 @@
 import type { CameraState } from '../cameraController';
 import type { TerrainKind, WorldDetail } from '../city/worldTypes';
 import { formatSimDate } from '../backend/simTime';
-import type {
-  EconomyFlowDto,
-  MarketGoodDto,
-  MarketLocationDto,
-} from '../backend/mobilityProtocol';
+import type { EconomyFlowDto, MarketGoodDto, MarketLocationDto } from '../backend/mobilityProtocol';
 import type {
   RuntimeBuilding,
   RuntimeRailStation,
@@ -14,7 +10,6 @@ import type {
   RuntimeTerrain,
 } from './worldRuntimeTypes';
 import type { MobilityOverlayState } from '../backend/mobilityState';
-import { compareDrawableOrder } from './drawOrder';
 import {
   carsFromMobilityState,
   pedestriansFromMobilityState,
@@ -29,18 +24,11 @@ import {
   buildBackendPedestrianInspector,
   type EntityInspector,
 } from './entityInspector';
-import {
-  AGENT_INSPECTOR_PANEL,
-  VEHICLE_INSPECTOR_PANEL,
-  drawInspectorPanel,
-} from './inspectorPanelPainter';
-import { coordKey as key } from './gridMath';
-import * as network from './drawNetwork';
-import { OUT_OF_WORLD } from './designTokens';
+import { AGENT_INSPECTOR_PANEL, VEHICLE_INSPECTOR_PANEL, drawInspectorPanel } from './inspectorPanelPainter';
+import { GROUND } from './designTokens';
 import { layerBlend } from './layerBlend';
-import { drawFlows } from './drawFlows';
 import { drawMarketNodes } from './drawMarkets';
-import { drawCar, drawPedestrian } from './drawAgents';
+import { drawPedestrian } from './drawAgents';
 
 export type Coord = { x: number; y: number };
 
@@ -79,21 +67,10 @@ export type GridRect = {
   maxY: number;
 };
 
-type StaticDrawable =
-  | { type: 'rail'; coord: Coord; rail: RuntimeRailTile }
-  | { type: 'road'; coord: Coord; road: RuntimeRoadTile }
-  | { type: 'railStation'; coord: Coord; station: RuntimeRailStation }
-  | { type: 'detail'; coord: Coord; detail: WorldDetail }
-  | { type: 'tree'; coord: Coord }
-  | { type: 'building'; coord: Coord; building: RuntimeBuilding };
-
-type CarDrawable = { type: 'car'; coord: Coord; car: BackendCar; vehicleId: string };
-type PedestrianDrawable = { type: 'pedestrian'; coord: Coord; pedestrian: BackendPedestrian; agentId: string };
-type Drawable = StaticDrawable | CarDrawable | PedestrianDrawable;
 export type TileFillStyle = { color: string; alpha: number };
 export type TileFillBatch = TileFillStyle & { coords: Coord[] };
 
-export const MAP_BACKGROUND = OUT_OF_WORLD;
+export const MAP_BACKGROUND = GROUND;
 const VIEWPORT_GRID_PADDING = 9;
 export const TERRAIN_TILE_OVERLAP = 0.6;
 export const OUTSKIRTS_TILES = 0;
@@ -102,6 +79,17 @@ export const EDGE_EXIT_TILES = 0;
 let lastFlowsDrawn = 0;
 export function flowsDrawnLastFrame(): number {
   return lastFlowsDrawn;
+}
+
+let lastMarketGuideEdgesDrawn = 0;
+export function marketGuideEdgesDrawnLastFrame(): number {
+  return lastMarketGuideEdgesDrawn;
+}
+
+export function defaultVisiblePedestrians(
+  pedestrians: readonly BackendPedestrian[],
+): BackendPedestrian[] {
+  return pedestrians.filter((pedestrian) => pedestrian.kind !== 'trader');
 }
 
 export function renderMinimalMap(state: MinimalMapRendererState): void {
@@ -121,76 +109,54 @@ export function renderMinimalMap(state: MinimalMapRendererState): void {
 }
 
 function drawScene(state: MinimalMapRendererState): void {
-  const { ctx, world } = state;
+  const { ctx } = state;
   ctx.save();
   const visibleGrid = visibleGridRect(state);
 
-  const visibleTerrainTiles: Coord[] = [];
-  for (let y = Math.max(0, visibleGrid.minY); y <= Math.min(world.height - 1, visibleGrid.maxY); y += 1) {
-    for (let x = Math.max(0, visibleGrid.minX); x <= Math.min(world.width - 1, visibleGrid.maxX); x += 1) visibleTerrainTiles.push({ x, y });
-  }
-  visibleTerrainTiles.sort((a, b) => iso(state, a).y - iso(state, b).y || a.x - b.x);
-  network.drawGrassBaseLayer(state);
-  network.drawTerrainOverlayLayer(state, visibleTerrainTiles);
-  network.drawRiverSurfaceLayer(state, visibleTerrainTiles);
+  drawPaperWorld(state);
 
-  const pedestrians: BackendPedestrian[] = pedestriansFromMobilityState(
+  lastMarketGuideEdgesDrawn = 0;
+  lastFlowsDrawn = 0;
+
+  const pedestrians = pedestriansFromMobilityState(
     state.mobilityState,
     state.pedestrianSprites,
     state.now(),
     state.mobilityTickPeriodMs,
   );
-  const cars: BackendCar[] = carsFromMobilityState(
-    state.mobilityState,
-    state.vehicleSprites,
-    state.now(),
-    state.mobilityTickPeriodMs,
-  );
-  const carDrawables = cars
-    .map((car) => ({ type: 'car' as const, coord: car.path[0], car, vehicleId: car.id }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort((a, b) => compareDrawables(state, a, b));
-  const pedestrianDrawables = pedestrians
-    .map((pedestrian) => ({ type: 'pedestrian' as const, coord: pedestrian.path[0], pedestrian, agentId: pedestrian.id }))
-    .filter((item) => isCoordVisible(item.coord, visibleGrid))
-    .sort((a, b) => compareDrawables(state, a, b));
   const agentsBlend = layerBlend('agents', state.camera.scale);
-  const flowsBlend = layerBlend('flows', state.camera.scale);
+  const visiblePedestrians = defaultVisiblePedestrians(pedestrians)
+    .filter((pedestrian) => isCoordVisible(pedestrian.path[0], visibleGrid))
+    .sort((a, b) => iso(state, a.path[0]).y - iso(state, b.path[0]).y || a.id.localeCompare(b.id));
+  for (const pedestrian of visiblePedestrians) {
+    drawPedestrian(state, pedestrian, pedestrian.id === state.selectedAgentId, agentsBlend);
+  }
 
-  network.drawRoads(state, [...state.roads.values()].filter((road) => isCoordVisible(road.coord, visibleGrid)));
-  for (const path of state.railPaths) network.drawRailPath(state, path);
-  network.drawEdgeConnections(state, visibleGrid);
-  for (const station of state.railStations) if (isCoordVisible(station.coord, visibleGrid)) network.drawRailStation(state, station);
-  for (const detail of state.details) if (isCoordVisible(detail.coord, visibleGrid)) network.drawDetail(state, detail);
-  for (const building of state.buildings) if (isCoordVisible(building.coord, visibleGrid)) network.drawBuilding(state, building);
-  for (const coord of state.trees) if (isCoordVisible(coord, visibleGrid)) network.drawTree(state, coord);
+  const visibleMarkets = visibleMarketGlyphs(state.markets, visibleGrid);
 
-  const marketsById = new Map((state.markets ?? []).map((m) => [m.marketId, m]));
-  lastFlowsDrawn = drawFlows(
-    state.ctx,
-    (c) => iso(state, c),
-    marketsById,
-    state.flows ?? [],
-    flowsBlend,
-    state.camera.scale,
-    state.now(),
-  );
-
-  for (const item of carDrawables) drawCar(state, item.car, item.vehicleId === state.selectedVehicleId);
-  for (const item of pedestrianDrawables) drawPedestrian(state, item.pedestrian, item.agentId === state.selectedAgentId, agentsBlend);
-
-  const visibleMarkets = new Map(
-    visibleMarketGlyphs(state.markets, visibleGrid).map((m) => [m.marketId, m]),
-  );
+  const visibleMarketMap = new Map(visibleMarkets.map((market) => [market.marketId, market]));
   drawMarketNodes(
     state.ctx,
-    (c) => iso(state, c),
+    (coord) => iso(state, coord),
     state.camera.scale,
-    visibleMarkets,
-    (marketId) => (state.goods ?? []).filter((g) => g.marketId === marketId),
-    state.now(),
+    visibleMarketMap,
+    () => [],
+    0,
   );
 
+  ctx.restore();
+}
+
+function drawPaperWorld(state: MinimalMapRendererState): void {
+  const { ctx, tileSize, world } = state;
+  ctx.save();
+  ctx.fillStyle = GROUND;
+  ctx.fillRect(
+    -TERRAIN_TILE_OVERLAP,
+    -TERRAIN_TILE_OVERLAP,
+    world.width * tileSize.width + TERRAIN_TILE_OVERLAP * 2,
+    world.height * tileSize.height + TERRAIN_TILE_OVERLAP * 2,
+  );
   ctx.restore();
 }
 
@@ -207,7 +173,7 @@ export function visibleMarketGlyphs(
   visibleGrid: GridRect,
 ): MarketLocationDto[] {
   if (!markets) return [];
-  return markets.filter((m) => isCoordVisible({ x: m.tileX, y: m.tileY }, visibleGrid));
+  return markets.filter((market) => isCoordVisible({ x: market.tileX, y: market.tileY }, visibleGrid));
 }
 
 function visibleGridRect(state: MinimalMapRendererState): GridRect {
@@ -229,18 +195,6 @@ function visibleGridRect(state: MinimalMapRendererState): GridRect {
 
 export function isCoordVisible(coord: Coord, rect: GridRect): boolean {
   return coord.x >= rect.minX && coord.x <= rect.maxX && coord.y >= rect.minY && coord.y <= rect.maxY;
-}
-
-function isWaterSurface(state: MinimalMapRendererState, coord: Coord): boolean {
-  const kind = state.terrain.get(key(coord));
-  return kind === 'water' || kind === 'riverbank';
-}
-
-function compareDrawables(state: MinimalMapRendererState, a: Drawable, b: Drawable): number {
-  return compareDrawableOrder(
-    { type: a.type, isoY: iso(state, a.coord).y, x: a.coord.x },
-    { type: b.type, isoY: iso(state, b.coord).y, x: b.coord.x },
-  );
 }
 
 function selectedBackendPedestrian(state: MinimalMapRendererState): BackendPedestrian | null {
@@ -277,7 +231,6 @@ function drawWorldDateLabel(state: MinimalMapRendererState): void {
   ctx.font = '600 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.textBaseline = 'bottom';
   ctx.textAlign = 'right';
-  // ink on paper — the old light-on-light label was unreadable over GROUND
   ctx.fillStyle = 'rgba(46, 52, 64, 0.78)';
   ctx.fillText(label, viewport.width - 12, viewport.height - 10);
   ctx.restore();

@@ -510,6 +510,10 @@ pub fn from_base_world_bundle(
     Ok((world, schedule))
 }
 
+fn activity_waypoint_id(group_id: &str, endpoint: &str) -> String {
+    format!("activity:{group_id}:{endpoint}")
+}
+
 pub fn insert_activity_waypoints_from_base_world(
     world: &mut World,
     bundle: &crate::base_world::BaseWorldBundle,
@@ -542,10 +546,11 @@ pub fn insert_activity_waypoints_from_base_world(
         let mut waypoints = world.resource_mut::<crate::mobility::resources::ActivityWaypoints>();
         waypoints
             .0
-            .insert("activity:home".to_string(), (first.x, first.y));
-        waypoints
-            .0
-            .insert("activity:destination".to_string(), (last.x, last.y));
+            .insert(activity_waypoint_id(&group.id, "home"), (first.x, first.y));
+        waypoints.0.insert(
+            activity_waypoint_id(&group.id, "destination"),
+            (last.x, last.y),
+        );
     }
     Ok(())
 }
@@ -575,6 +580,8 @@ fn seed_pedestrians_from_bundle(
             let agent_id = AgentId(format!("agent:walk:{agent_index}"));
             agent_index += 1;
             let link_id = format!("link:walk:corridor:{corridor_index}");
+            let home_activity_id = activity_waypoint_id(&group.id, "home");
+            let destination_activity_id = activity_waypoint_id(&group.id, "destination");
             let progress = if group.agents_per_corridor > 0 {
                 (n as f32) / (group.agents_per_corridor as f32)
             } else {
@@ -589,11 +596,11 @@ fn seed_pedestrians_from_bundle(
                 vec![
                     PlanStage::WalkToActivity {
                         link_id: link_id.clone(),
-                        activity_id: "activity:home".to_string(),
+                        activity_id: home_activity_id.clone(),
                     },
                     PlanStage::WalkToActivity {
                         link_id,
-                        activity_id: "activity:destination".to_string(),
+                        activity_id: destination_activity_id.clone(),
                     },
                 ],
                 0.05,
@@ -772,7 +779,7 @@ mod tests {
     fn walkability_bundle() -> BaseWorldBundle {
         BaseWorldBundle {
             manifest: BaseWorldManifest {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "walkability-test".into(),
                 display_name: "Walkability Test".into(),
                 chunk_size: 32,
@@ -790,7 +797,7 @@ mod tests {
                 },
             },
             terrain: TerrainLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "walkability-test".into(),
                 tiles: vec![TerrainTile {
                     x: 1,
@@ -799,7 +806,7 @@ mod tests {
                 }],
             },
             transport: TransportLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "walkability-test".into(),
                 roads: vec![RoadTile {
                     x: 0,
@@ -819,7 +826,7 @@ mod tests {
                 }],
             },
             buildings: BuildingLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "walkability-test".into(),
                 footprints: vec![BuildingFootprint {
                     id: "building:test".into(),
@@ -830,13 +837,13 @@ mod tests {
                 }],
             },
             decorations: DecorationLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "walkability-test".into(),
                 trees: Vec::new(),
                 details: Vec::new(),
             },
             spawns: SpawnLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "walkability-test".into(),
                 pedestrian_groups: vec![PedestrianSpawnGroup {
                     id: "spawn:test".into(),
@@ -846,7 +853,7 @@ mod tests {
                 car_groups: Vec::<CarSpawnGroup>::new(),
             },
             markets: MarketLayer {
-                schema_version: 2,
+                schema_version: 4,
                 world_id: "walkability-test".into(),
                 markets: vec![MarketSpec {
                     id: 1,
@@ -891,7 +898,81 @@ mod tests {
     }
 
     #[test]
-    fn seeded_walks_from_base_world_adds_grass_footways_and_keeps_sidewalks() {
+    fn base_world_seed_uses_group_specific_activity_waypoints() {
+        let mut bundle = walkability_bundle();
+        bundle
+            .transport
+            .pedestrian_corridors
+            .push(TransportPath {
+                id: "corridor:test-east".into(),
+                points: vec![
+                    NetworkPoint { x: 2.25, y: 2.0 },
+                    NetworkPoint { x: 3.25, y: 2.0 },
+                ],
+            });
+        bundle
+            .spawns
+            .pedestrian_groups
+            .push(PedestrianSpawnGroup {
+                id: "spawn:east".into(),
+                corridor_id: "corridor:test-east".into(),
+                agents_per_corridor: 1,
+            });
+
+        let (world, _schedule) = from_base_world_bundle(&bundle).expect("base world seeds");
+        let waypoints = world.resource::<crate::mobility::resources::ActivityWaypoints>();
+
+        assert_eq!(
+            waypoints.0.get("activity:spawn:test:home").copied(),
+            Some((0.25, 2.0))
+        );
+        assert_eq!(
+            waypoints
+                .0
+                .get("activity:spawn:test:destination")
+                .copied(),
+            Some((1.25, 2.0))
+        );
+        assert_eq!(
+            waypoints.0.get("activity:spawn:east:home").copied(),
+            Some((2.25, 2.0))
+        );
+        assert_eq!(
+            waypoints
+                .0
+                .get("activity:spawn:east:destination")
+                .copied(),
+            Some((3.25, 2.0))
+        );
+
+        let snapshot = crate::mobility::extract_from_world(&world);
+        let first_group_agent = snapshot
+            .agents
+            .get(&AgentId("agent:walk:0".into()))
+            .expect("first group agent seeded");
+        let second_group_agent = snapshot
+            .agents
+            .get(&AgentId("agent:walk:2".into()))
+            .expect("second group agent seeded after first group");
+
+        assert!(matches!(
+            &first_group_agent.plan[..],
+            [
+                PlanStage::WalkToActivity { activity_id, .. },
+                PlanStage::WalkToActivity { .. },
+            ] if activity_id == "activity:spawn:test:home"
+        ));
+        assert!(matches!(
+            &second_group_agent.plan[..],
+            [
+                PlanStage::WalkToActivity { activity_id, .. },
+                PlanStage::WalkToActivity { .. },
+            ] if activity_id == "activity:spawn:east:home"
+        ));
+    }
+
+    #[test]
+    fn seeded_walks_from_base_world_adds_grass_footways_and_keeps_authored_corridors() {
         let bundle = walkability_bundle();
 
         let walks = seeded_walks_from_base_world(&bundle);
@@ -900,7 +981,7 @@ mod tests {
             walks
                 .iter()
                 .any(|walk| walk.legacy_link_id == "link:walk:corridor:0"),
-            "authored sidewalk footway remains present"
+            "authored pedestrian footway remains present"
         );
         assert!(
             walks
@@ -984,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn from_base_world_bundle_seeds_pedestrian_on_sidewalk_corridor() {
+    fn from_base_world_bundle_seeds_pedestrian_on_edge_corridor() {
         use crate::ids::AgentId;
         use crate::mobility::components::Position;
         use crate::mobility::resources::AgentIdIndex;
@@ -1003,7 +1084,7 @@ mod tests {
 
         assert!(matches!(
             &agent.state,
-            AgentMobilityState::Walking { link_id, .. } if link_id == "link:walk:corridor:1"
+            AgentMobilityState::Walking { link_id, .. } if link_id == "link:walk:corridor:0"
         ));
 
         let entity = *world
@@ -1015,7 +1096,7 @@ mod tests {
             .entity(entity)
             .get::<Position>()
             .expect("agent has position");
-        assert!((position.y - 64.51).abs() < 0.001);
+        assert!((position.y - 8.0).abs() < 0.001);
     }
 
     #[test]

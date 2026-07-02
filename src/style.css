@@ -4,13 +4,14 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #050705;
+  background: #e9ede1;
 }
 
 #game {
   display: block;
   width: 100vw;
   height: 100vh;
+  background: #e9ede1;
   cursor: grab;
   image-rendering: pixelated;
 }

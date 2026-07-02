@@ -4,7 +4,10 @@ import {
   startAppRuntime,
   type AppRuntimeInitialState,
 } from './app/appRuntime';
-import { renderBackendRequired as renderBackendRequiredView } from './app/backendRequiredView';
+import {
+  clearBackendRequired,
+  renderBackendRequired as renderBackendRequiredView,
+} from './app/backendRequiredView';
 import { createEntitySelection } from './app/entitySelection';
 import { attachMapInteraction } from './app/interaction';
 import { installRuntimeDiagnostics, type StaticRuntimeDiagnostics } from './app/runtimeDiagnostics';
@@ -37,11 +40,14 @@ import {
   type BackendPedestrian,
 } from './render/backendMobilityDrawables';
 import { MINIMAL_MAP_TILE_SIZE, mapProject, mapUnproject } from './render/minimalMapProjection';
+import { cityCameraFrame, cityStartMinScale } from './render/cityCameraFrame';
 import {
   EDGE_EXIT_TILES,
   MAP_BACKGROUND,
   OUTSKIRTS_TILES,
+  defaultVisiblePedestrians,
   flowsDrawnLastFrame,
+  marketGuideEdgesDrawnLastFrame,
   renderMinimalMap,
 } from './render/minimalMapRenderer';
 import {
@@ -63,11 +69,17 @@ const TILE_H = MINIMAL_MAP_TILE_SIZE.height;
 const tileSize = { width: TILE_W, height: TILE_H };
 const CAMERA_MIN_SCALE = 0.18;
 const CAMERA_MAX_SCALE = 2.8;
+const START_OVERVIEW_PADDING_PX = 72;
+const START_CITY_PADDING_PX = 52;
+const START_CITY_CENTER_Y_RATIO = 0.46;
 
-const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL);
+const backendBaseUrl = resolveBackendBaseUrl(import.meta.env.VITE_ABUTOWN_BACKEND_URL, {
+  devProxyOrigin: import.meta.env.DEV ? window.location.origin : undefined,
+  preferDevProxy: import.meta.env.DEV,
+});
 let worldId = 'abutopia';
-let WIDTH = 224;
-let HEIGHT = 128;
+let WIDTH = 80;
+let HEIGHT = 48;
 let chunkSize = 32;
 
 const canvasElement = document.querySelector<HTMLCanvasElement>('#game');
@@ -104,8 +116,13 @@ let economyState: EconomyOverlayState = createEconomyOverlayState();
 let mobilityTickPeriodMs = 100;
 let simTime = 0;
 let mobilityBackendBridge: MobilityBackendBridge | null = null;
+let runtimeStarted = false;
+let startupRetryTimer: number | null = null;
+let runtimeBooted = false;
 const entitySelection = createEntitySelection<BackendPedestrian, BackendCar>({
-  getPedestrians: () => pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs),
+  getPedestrians: () => defaultVisiblePedestrians(
+    pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs),
+  ),
   getVehicles: () => carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs),
   getMarkets: () => [...economyState.markets.values()].map((m) => ({ x: m.tileX, y: m.tileY })),
   screenToWorld,
@@ -119,7 +136,10 @@ const entitySelection = createEntitySelection<BackendPedestrian, BackendCar>({
 
 void startRuntime();
 
+const STARTUP_RETRY_INTERVAL_MS = 1_500;
+
 async function startRuntime(): Promise<void> {
+  if (runtimeStarted) return;
   const handle = await startAppRuntime({
     backendBaseUrl,
     onInitialState: applyInitialRuntimeState,
@@ -149,13 +169,25 @@ async function startRuntime(): Promise<void> {
     dependencies: defaultAppRuntimeDependencies(boot, renderBackendRequired),
   });
   mobilityBackendBridge = handle.mobilityBackendBridge;
-  // Only start the re-poll if boot succeeded (mobilityBackendBridge non-null = healthy start).
-  if (handle.mobilityBackendBridge !== null) {
-    startHealthRePoll();
+  if (handle.mobilityBackendBridge === null) {
+    scheduleStartupRetry();
+    return;
   }
+
+  runtimeStarted = true;
+  clearBackendRequired(canvas);
+  startHealthRePoll();
 }
 
 const HEALTH_REPOLL_INTERVAL_MS = 5_000;
+
+function scheduleStartupRetry(): void {
+  if (startupRetryTimer !== null) return;
+  startupRetryTimer = window.setTimeout(() => {
+    startupRetryTimer = null;
+    void startRuntime();
+  }, STARTUP_RETRY_INTERVAL_MS);
+}
 
 function startHealthRePoll(): void {
   let repollActive = true;
@@ -171,9 +203,13 @@ function startHealthRePoll(): void {
         setPersistenceBanner(document, persistenceStatus ?? 'healthy');
       }
     } catch (error) {
-      // HTTP error or stale persistence → escalate to full hard gate.
+      // HTTP errors or unhealthy runtime state escalate to the hard gate.
       repollActive = false;
+      runtimeStarted = false;
+      mobilityBackendBridge?.stop();
+      mobilityBackendBridge = null;
       renderBackendRequired(error);
+      scheduleStartupRetry();
       return;
     }
     if (repollActive) {
@@ -193,6 +229,11 @@ function applyInitialRuntimeState(initial: AppRuntimeInitialState): void {
 }
 
 async function boot(): Promise<void> {
+  if (runtimeBooted) {
+    canvas.dataset.ready = 'true';
+    return;
+  }
+  runtimeBooted = true;
   vehicleSprites = candidateVehicleSprites();
   pedestrianSprites = candidateMinimalPedestrianSprites();
   resize();
@@ -221,16 +262,30 @@ function resize(): void {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.imageSmoothingEnabled = true;
   const minScale = minCameraScaleForViewport();
-  camera.targetScale = Math.max(camera.targetScale, minScale);
-  camera.scale = Math.max(camera.scale, minScale);
   if (!cameraInitialized) {
-    const focus = iso(initialCameraFocusCoord());
+    const frame = cityCameraFrame({
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      world: { width: WIDTH, height: HEIGHT },
+      tileSize,
+      markets: [...economyState.markets.values()],
+      buildings,
+      roads,
+      paddingPx: START_CITY_PADDING_PX,
+      minScale: cityStartMinScale(minScale),
+      maxScale: CAMERA_MAX_SCALE,
+    });
+    camera.targetScale = frame.scale;
+    camera.scale = minScale;
+    const focus = frame.center;
     camera.targetX = window.innerWidth / 2 - focus.x * camera.targetScale;
-    camera.targetY = window.innerHeight * 0.52 - focus.y * camera.targetScale;
+    camera.targetY = window.innerHeight * START_CITY_CENTER_Y_RATIO - focus.y * camera.targetScale;
     camera.x = camera.targetX;
     camera.y = camera.targetY;
     camera.scale = camera.targetScale;
     cameraInitialized = true;
+  } else {
+    camera.targetScale = Math.max(camera.targetScale, minScale);
+    camera.scale = Math.max(camera.scale, minScale);
   }
   constrainCamera(false);
 }
@@ -368,7 +423,6 @@ function toRuntimeTerrain(kind: BaseWorldTerrainKind): RuntimeTerrain {
 function isRuntimeBuildingSheet(value: unknown): value is RuntimeBuilding['sheet'] {
   return (
     value === 'houses' ||
-    value === 'oldhouses' ||
     value === 'cottages' ||
     value === 'townhouses' ||
     value === 'shops' ||
@@ -396,35 +450,6 @@ function toDetailCategory(value: string): WorldDetail['category'] {
     return value;
   }
   throw new Error(`Base world detail category is invalid: ${value}`);
-}
-
-function initialCameraFocusCoord(): Coord {
-  const pedestrians = pedestriansFromMobilityState(mobilityState, pedestrianSprites, Date.now(), mobilityTickPeriodMs);
-  const cars = carsFromMobilityState(mobilityState, vehicleSprites, Date.now(), mobilityTickPeriodMs);
-  const vehicleCoords = cars.map((car) => car.path[0]).filter(isInWorld);
-  if (vehicleCoords.length > 0) return representativeCoord(vehicleCoords);
-  const coords = pedestrians.map((agent) => agent.path[0]).filter(isInWorld);
-  if (coords.length === 0) return { x: Math.floor(WIDTH / 2), y: Math.floor(HEIGHT / 2) };
-  return representativeCoord(coords);
-}
-
-function representativeCoord(coords: Coord[]): Coord {
-  const x = coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length;
-  const y = coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length;
-  const centroid = { x, y };
-  return coords.reduce((best, coord) =>
-    squaredDistance(coord, centroid) < squaredDistance(best, centroid) ? coord : best,
-  );
-}
-
-function squaredDistance(a: Coord, b: Coord): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-}
-
-function isInWorld(coord: Coord): boolean {
-  return coord.x >= 0 && coord.y >= 0 && coord.x < WIDTH && coord.y < HEIGHT;
 }
 
 function selectedBackendPedestrian(): BackendPedestrian | null {
@@ -474,10 +499,11 @@ function constrainCamera(allowOverscroll: boolean): void {
 }
 
 function minCameraScaleForViewport(): number {
+  const paddedWidth = Math.max(320, window.innerWidth - START_OVERVIEW_PADDING_PX * 2);
+  const paddedHeight = Math.max(240, window.innerHeight - START_OVERVIEW_PADDING_PX * 2);
   return Math.max(
     CAMERA_MIN_SCALE,
-    window.innerWidth / (WIDTH * TILE_W),
-    window.innerHeight / (HEIGHT * TILE_H),
+    Math.min(paddedWidth / (WIDTH * TILE_W), paddedHeight / (HEIGHT * TILE_H)),
   );
 }
 
@@ -530,6 +556,7 @@ installRuntimeDiagnostics(window, {
     railStations: railStations.length,
     railYardTracks: Math.max(0, railPaths.length - 2),
     reserveTiles: countTerrainKind('reserve'),
+    marketGuideEdges: marketGuideEdgesDrawnLastFrame(),
   }),
   getDiagnostics: () => baseWorldDiagnostics(),
   getDetails: () => detailCountsByCategory(),

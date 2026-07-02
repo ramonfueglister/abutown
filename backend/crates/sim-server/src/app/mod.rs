@@ -674,9 +674,7 @@ fn health_response_for_state(state: &AppState) -> w::HealthResponse {
     let mut health = view.health.clone();
     let persistence = state.mobility_liveness().snapshot();
     let runtime_agents_ok = !view.mobility_full_dto.agents.is_empty();
-    health.ok = health.ok
-        && runtime_agents_ok
-        && persistence.status != MobilityPersistenceHealthStatus::Stale;
+    health.ok = health.ok && runtime_agents_ok;
     health.persistence = Some(persistence_health_to_proto(persistence));
     health
 }

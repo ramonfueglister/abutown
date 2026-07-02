@@ -129,7 +129,7 @@ use crate::world::components::{ActiveChunk, ChunkCoordComp};
 /// resources the materialize system reads) with two markets anchored to two
 /// footway nodes that share chunk (0,0). One straight Footway joins them so a
 /// flow shipment's whole route — and every mid-flight position — lands in the
-/// observed chunk. No demo trader is seeded.
+/// observed chunk. No persistent trader is seeded.
 fn routed_shipment_world(market_a: MarketId, market_b: MarketId) -> World {
     let mut world = World::new();
     let graph = Graph::new(

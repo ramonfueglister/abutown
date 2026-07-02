@@ -666,7 +666,7 @@ pub fn run_macro_flow_system(
             // A whole-interval failure (e.g. a bucket-build overflow) is audited; the
             // atomic boundary left the books unchanged. Per-edge settle faults are
             // already isolated inside run_macro_flow_at_tick (their own
-            // MarketClearFailed events). market/good = the demo sentinel for a
+            // MarketClearFailed events). market/good = the system sentinel for a
             // tick-level fault that is not attributable to one (market,good).
             ledger.0.push(EconomyEvent::MarketClearFailed {
                 market: MarketId(0),

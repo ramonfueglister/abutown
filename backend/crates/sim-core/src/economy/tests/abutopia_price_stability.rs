@@ -24,7 +24,7 @@ fn node(id: u32, x: f32, y: f32) -> Node {
 
 /// Build the real abutopia economy with a RUNNABLE schedule (seed_world recipe + the
 /// capita run pattern: CorePlugin + MobilityPlugin + EconomyPlugin so the schedule
-/// advances and Tick exists). 4-node graph at the market anchors (9002 @ 111.5,64.51).
+/// advances and Tick exists). 4-node graph at the authored corner market anchors.
 fn build_abutopia_economy() -> (World, bevy_ecs::schedule::Schedule) {
     let mut world = World::new();
     let mut schedule = bevy_ecs::schedule::Schedule::default();
@@ -33,10 +33,10 @@ fn build_abutopia_economy() -> (World, bevy_ecs::schedule::Schedule) {
     EconomyPlugin.install(&mut world, &mut schedule);
 
     let nodes = vec![
-        node(0, 2.0, 3.0),
-        node(1, 111.5, 64.51),
-        node(2, 16.0, 48.0),
-        node(3, 208.0, 48.0),
+        node(0, 8.0, 8.0),
+        node(1, 72.0, 8.0),
+        node(2, 8.0, 40.0),
+        node(3, 72.0, 40.0),
     ];
     world.insert_resource(NodeSpatialIndex::from_nodes(&nodes));
     world.insert_resource(Graph::new(nodes, vec![]));
@@ -141,7 +141,7 @@ fn abutopia_prices_stay_in_band_and_9002_consumes_over_long_run() {
     let final_price_9002 = price_9002(&world);
     let p_src = price_9001(&world);
     let rate = config.transport_cost_per_tile_unit.0;
-    let dist = 172i64; // rounded Manhattan of 9001 (2,3) ↔ 9002 (111.5,64.51): |2-112|+|3-65|
+    let dist = 64i64; // Manhattan of 9001 (8,8) ↔ 9002 (72,8)
     let loop_target = p_src + rate * dist;
     println!(
         "ABUTOPIA STABILITY: consumed_first_half={consumed_first_half} \

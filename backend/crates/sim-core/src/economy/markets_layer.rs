@@ -1,8 +1,8 @@
 //! Data-driven economy seeder. Reconstructs the live economy from an authored
 //! `MarketLayer` (`data/worlds/.../layers/markets.json`) instead of the hardcoded
-//! constants from the removed `seed` module. Seeded ONCE on fresh-world creation;
-//! the economy then persists, so a hydrated world finds non-empty `Markets` and
-//! this no-ops.
+//! constants from the removed `seed` module. Stock/account/pool state is seeded
+//! once and then persists; authored geometry/config such as market anchors and
+//! producer policies is re-applied on every boot.
 
 use bevy_ecs::prelude::*;
 
@@ -18,6 +18,8 @@ use crate::economy::{
     MarketGoods, MarketId, MarketSite, Markets, Money, Quantity, SupplyPool, SupplyPools,
 };
 use crate::routing::{Graph, NodeSpatialIndex};
+
+type ResolvedMarketSite = (MarketId, String, crate::routing::NodeId);
 
 /// Reconstruct the economy from an authored market layer. Requires `Graph` +
 /// `NodeSpatialIndex` (snaps each market anchor to the nearest real footway node,
@@ -42,10 +44,16 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
         cfg.capita_baseline = layer.household.capita_baseline;
     }
 
-    // Idempotent STATE bootstrap: seed markets/pools/accounts only when the world has no
-    // economy yet. Once seeded it persists, so subsequent hydrates find markets and skip
-    // (no double-seed guard, no heal-on-restore shim) — state comes from the snapshot.
+    let Some(resolved) = resolve_market_sites(world, layer) else {
+        return;
+    };
+
+    // Idempotent STOCK/POOL bootstrap: seed pools/accounts only when the world has no
+    // economy yet. Market geometry is authored config and is re-applied above the
+    // hydrate branch so persisted simulations follow map authoring changes without
+    // deleting balances.
     if !world.resource::<Markets>().0.is_empty() {
+        apply_market_sites_and_distances(world, layer, &resolved);
         // HYDRATE path: `ProducerPolicies` is authored CONFIG (NOT persisted) — rebuild
         // it from the layer unconditionally, same #83 lesson as `capita_baseline` above:
         // without this, a restart would silently revert every producer to the #75
@@ -56,77 +64,8 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
         return;
     }
 
-    // ── 1) Markets: snap each anchor → nearest footway node; insert MarketSite + MarketChunks. ──
-    // Resolve every node first; if any anchor fails to snap, or two markets snap to the
-    // same node, return early WITHOUT mutating the world (matches the legacy no-op).
-    let mut resolved: Vec<(MarketId, &str, crate::routing::NodeId)> =
-        Vec::with_capacity(layer.markets.len());
-    {
-        let spatial = world.resource::<NodeSpatialIndex>();
-        let mut seen_nodes = std::collections::HashSet::new();
-        for spec in &layer.markets {
-            let node = match spatial.nearest((spec.anchor[0], spec.anchor[1])) {
-                Some(n) if seen_nodes.insert(n) => n,
-                // None → graph too small; duplicate node → two markets collide. Either
-                // way: graph cannot host this layer's distinct markets — no-op.
-                _ => return,
-            };
-            resolved.push((MarketId(spec.id), spec.name.as_str(), node));
-        }
-    }
-    {
-        let mut markets = world.resource_mut::<Markets>();
-        for (id, name, node) in &resolved {
-            markets.0.insert(
-                *id,
-                MarketSite {
-                    id: *id,
-                    node_id: *node,
-                    name: (*name).to_string(),
-                },
-            );
-        }
-    }
-    {
-        let chunks: Vec<(MarketId, crate::ids::ChunkCoord)> = {
-            let graph = world.resource::<Graph>();
-            resolved
-                .iter()
-                .map(|(id, _, node)| {
-                    let pos = graph.node(*node).position;
-                    (*id, crate::mobility::chunk_of(pos.0, pos.1, 32))
-                })
-                .collect()
-        };
-        let mut anchors = world.resource_mut::<MarketChunks>();
-        for (id, chunk) in chunks {
-            anchors.0.insert(id, chunk);
-        }
-    }
-
-    // ── 2) Market distances: bake BOTH directions for each authored pair. ──
-    {
-        let pairs: Vec<((MarketId, MarketId), i64)> = {
-            let graph = world.resource::<Graph>();
-            layer
-                .distances
-                .iter()
-                .map(|d| {
-                    let m_from = MarketId(d.from);
-                    let m_to = MarketId(d.to);
-                    let node_from = market_node(&resolved, m_from);
-                    let node_to = market_node(&resolved, m_to);
-                    let dist = manhattan_tiles(graph, node_from, node_to);
-                    ((m_from, m_to), dist)
-                })
-                .collect()
-        };
-        let mut distances = world.resource_mut::<MarketDistances>();
-        for ((from, to), dist) in pairs {
-            distances.0.insert((from, to), dist);
-            distances.0.insert((to, from), dist);
-        }
-    }
+    // ── 1-2) Markets + distances: authored geometry/config, re-applied on every boot. ──
+    apply_market_sites_and_distances(world, layer, &resolved);
 
     // ── Per-capita seed scaling (spec 2026-06-06 §2b). Demand will run at
     // capita_factor× throughput, so the seeded money/goods stock must be
@@ -360,6 +299,84 @@ pub fn seed_from_markets_layer(world: &mut World, layer: &MarketLayer) {
     }
 }
 
+/// Snap authored market anchors to real graph nodes. Resolve every node first;
+/// if any anchor fails to snap, or two markets snap to the same node, return
+/// `None` without mutating the world (matches the legacy fresh-seed no-op).
+fn resolve_market_sites(world: &World, layer: &MarketLayer) -> Option<Vec<ResolvedMarketSite>> {
+    let spatial = world.resource::<NodeSpatialIndex>();
+    let mut seen_nodes = std::collections::HashSet::new();
+    let mut resolved = Vec::with_capacity(layer.markets.len());
+    for spec in &layer.markets {
+        let node = spatial.nearest((spec.anchor[0], spec.anchor[1]))?;
+        if !seen_nodes.insert(node) {
+            return None;
+        }
+        resolved.push((MarketId(spec.id), spec.name.clone(), node));
+    }
+    Some(resolved)
+}
+
+fn apply_market_sites_and_distances(
+    world: &mut World,
+    layer: &MarketLayer,
+    resolved: &[ResolvedMarketSite],
+) {
+    {
+        let mut markets = world.resource_mut::<Markets>();
+        for (id, name, node) in resolved {
+            markets.0.insert(
+                *id,
+                MarketSite {
+                    id: *id,
+                    node_id: *node,
+                    name: name.clone(),
+                },
+            );
+        }
+    }
+
+    let chunks: Vec<(MarketId, crate::ids::ChunkCoord)> = {
+        let graph = world.resource::<Graph>();
+        resolved
+            .iter()
+            .map(|(id, _, node)| {
+                let pos = graph.node(*node).position;
+                (*id, crate::mobility::chunk_of(pos.0, pos.1, 32))
+            })
+            .collect()
+    };
+    {
+        let mut anchors = world.resource_mut::<MarketChunks>();
+        for (id, chunk) in chunks {
+            anchors.0.insert(id, chunk);
+        }
+    }
+
+    let pairs: Vec<((MarketId, MarketId), i64)> = {
+        let graph = world.resource::<Graph>();
+        layer
+            .distances
+            .iter()
+            .map(|d| {
+                let m_from = MarketId(d.from);
+                let m_to = MarketId(d.to);
+                let node_from = market_node(resolved, m_from);
+                let node_to = market_node(resolved, m_to);
+                let dist = manhattan_tiles(graph, node_from, node_to);
+                ((m_from, m_to), dist)
+            })
+            .collect()
+    };
+    {
+        let mut distances = world.resource_mut::<MarketDistances>();
+        distances.0.clear();
+        for ((from, to), dist) in pairs {
+            distances.0.insert((from, to), dist);
+            distances.0.insert((to, from), dist);
+        }
+    }
+}
+
 /// Validate every authored `ProducerSpec` — fail-loud on authoring errors (the
 /// file's pattern: `assert!`/`panic!`, mirroring the household-sector asserts).
 /// Runs on EVERY boot, before either the fresh-seed or the hydrate path.
@@ -487,7 +504,7 @@ fn assert_producer_keysets_match(world: &World) {
 /// fail loud on the impossible — a distance spec referencing an unknown market
 /// is an authoring error, not a runtime state to silently tolerate.
 fn market_node(
-    resolved: &[(MarketId, &str, crate::routing::NodeId)],
+    resolved: &[ResolvedMarketSite],
     id: MarketId,
 ) -> crate::routing::NodeId {
     resolved
@@ -513,25 +530,31 @@ mod tests {
         let nodes = vec![
             Node {
                 id: NodeId(0),
-                position: (2.0, 3.0),
+                position: (8.0, 8.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
             Node {
                 id: NodeId(1),
-                position: (111.5, 64.51),
+                position: (72.0, 8.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
             Node {
                 id: NodeId(2),
-                position: (16.0, 48.0),
+                position: (8.0, 40.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
             Node {
                 id: NodeId(3),
-                position: (208.0, 48.0),
+                position: (72.0, 40.0),
+                kind: NodeKind::Intersection,
+                legacy_id: None,
+            },
+            Node {
+                id: NodeId(4),
+                position: (40.0, 8.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
@@ -564,10 +587,10 @@ mod tests {
         assert_eq!(
             pairs,
             vec![
-                (9001, "Demo A"),
-                (9002, "Demo B"),
-                (9003, "Flow Demo A"),
-                (9004, "Flow Demo B"),
+                (9001, "Central Works"),
+                (9002, "Market Square"),
+                (9003, "Harbor Depot"),
+                (9004, "Homes Quarter"),
             ],
             "exactly four markets with authored names, ascending ids"
         );
@@ -593,12 +616,12 @@ mod tests {
             ],
             "distances: only the three authored pairs in both directions"
         );
-        // The WOOD route 9003→9001 in rounded Manhattan tiles: |16-2| + |48-3| = 59.
+        // The WOOD route 9003→9001 runs up the west edge: |8-8| + |40-8| = 32.
         // macro_flow prunes cross-edges without a distance entry ("no known route"),
         // so this edge is what makes the input chain physically possible.
         assert_eq!(
             distances.0[&(MarketId(9003), MarketId(9001))],
-            59,
+            32,
             "WOOD route distance baked from the snapped anchors"
         );
     }
@@ -950,6 +973,37 @@ mod tests {
         );
     }
 
+    /// Re-Apply: authored market anchors are geometry/config, not economic stock.
+    /// A hydrated economy must pick up retuned map positions without deleting
+    /// persisted balances, otherwise edited world data leaves the live backend on
+    /// stale market nodes.
+    #[test]
+    fn market_sites_and_distances_reapplied_over_persisted_state() {
+        use crate::economy::persist::{apply_into_world, extract_from_world};
+
+        let mut layer = abutopia_layer();
+        let mut world = unseeded_world();
+        seed_from_markets_layer(&mut world, &layer);
+        let snap = extract_from_world(&world);
+
+        let mut hydrated = unseeded_world();
+        apply_into_world(&mut hydrated, &snap);
+        layer.markets[0].anchor = [40.0, 8.0];
+        seed_from_markets_layer(&mut hydrated, &layer);
+
+        let central = hydrated.resource::<Markets>().0[&MarketId(9001)].clone();
+        assert_eq!(
+            central.node_id,
+            NodeId(4),
+            "hydrated market node must follow the retuned authored anchor"
+        );
+        assert_eq!(
+            hydrated.resource::<MarketDistances>().0[&(MarketId(9001), MarketId(9002))],
+            32,
+            "distances must be recomputed from re-applied market sites"
+        );
+    }
+
     /// REVIEW I1: after seed AND after re-apply, keys(ProducerPolicies) ==
     /// keys(InputPools) — enforced upfront, not lazily in the dividend path. Removing
     /// a producer from the layer over a persisted snapshot is a loud failure.
@@ -1000,17 +1054,17 @@ mod tests {
         let world = seeded_world();
         let goods = world.resource::<MarketGoods>();
         let cases: &[(u32, u16, i64)] = &[
-            (9002, 4, 1000), // Demo B, TOOLS
-            (9002, 1, 1000), // Demo B, FOOD
-            (9004, 1, 1000), // Flow Demo B, FOOD
+            (9002, 4, 1000), // Market Square, TOOLS
+            (9002, 1, 1000), // Market Square, FOOD
+            (9004, 1, 1000), // Homes Quarter, FOOD
             // Producer chain: TOOLS at the producer's home market (the participation
             // bound's reference price — without it the input-order pass is ZeroPrice
             // at tick 1; 1000 equals macro_flow's prior fallback, so it is inert for
             // the pre-chain dynamics). WOOD authored cheap at the source (50) and at
             // the convergence-side sink (380 < bound 400, > 50+295 landed cost).
-            (9001, 4, 1000), // Demo A, TOOLS
-            (9003, 2, 50),   // Flow Demo A, WOOD (source)
-            (9001, 2, 380),  // Demo A, WOOD (sink)
+            (9001, 4, 1000), // Central Works, TOOLS
+            (9003, 2, 50),   // Harbor Depot, WOOD (source)
+            (9001, 2, 380),  // Central Works, WOOD (sink)
         ];
         for &(market, good, price) in cases {
             let key = MarketGoodKey {

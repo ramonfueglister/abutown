@@ -1206,7 +1206,7 @@ mod market_binding_roundtrip_tests {
         world
             .resource_mut::<crate::mobility::resources::ActivityWaypoints>()
             .0
-            .insert("activity:home".to_string(), (10.0, 20.0));
+            .insert("activity:home".to_string(), (10.0, 24.0));
 
         let agent_id = AgentId("agent:binding:test".to_string());
         let mut record = AgentRecord::new(
@@ -1262,25 +1262,25 @@ mod market_binding_roundtrip_tests {
         let nodes = vec![
             Node {
                 id: NodeId(0),
-                position: (2.0, 3.0),
+                position: (8.0, 8.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
             Node {
                 id: NodeId(1),
-                position: (111.5, 64.51),
+                position: (72.0, 8.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
             Node {
                 id: NodeId(2),
-                position: (16.0, 48.0),
+                position: (8.0, 40.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
             Node {
                 id: NodeId(3),
-                position: (208.0, 48.0),
+                position: (72.0, 40.0),
                 kind: NodeKind::Intersection,
                 legacy_id: None,
             },
@@ -1298,7 +1298,7 @@ mod market_binding_roundtrip_tests {
         world
             .resource_mut::<crate::mobility::resources::ActivityWaypoints>()
             .0
-            .insert("activity:home".to_string(), (2.0, 3.0));
+            .insert("activity:home".to_string(), (8.0, 8.0));
 
         // --- Test 1: Assign when unassigned (home_market == 0) ---
         let id1 = AgentId("agent:assign:unassigned".to_string());
@@ -1395,7 +1395,7 @@ mod chunk_snapshot_bucketing_tests {
         // Three chunks at chunk_size 32: (0,0), (1,0), (2,1); plus one
         // requested chunk with no agents at all.
         spawn_at(&mut world, "a", (5.0, 5.0)); // chunk (0,0)
-        spawn_at(&mut world, "b", (10.0, 20.0)); // chunk (0,0)
+        spawn_at(&mut world, "b", (10.0, 24.0)); // chunk (0,0)
         spawn_at(&mut world, "c", (40.0, 8.0)); // chunk (1,0)
         spawn_at(&mut world, "d", (70.0, 40.0)); // chunk (2,1)
 

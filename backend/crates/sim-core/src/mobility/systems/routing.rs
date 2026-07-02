@@ -48,9 +48,14 @@ fn destination_for_stage(
     }
 }
 
-/// Economic destination override: an attributed citizen's `activity:destination`
-/// leg routes to its bound market node (from `CitizenEconomicTargets`) instead of
-/// the geometric corridor endpoint. The `home` leg and unattributed citizens keep
+fn is_economic_destination_activity(activity_id: &str) -> bool {
+    activity_id == "activity:destination"
+        || (activity_id.starts_with("activity:") && activity_id.ends_with(":destination"))
+}
+
+/// Economic destination override: an attributed citizen's destination leg routes
+/// to its bound market node (from `CitizenEconomicTargets`) instead of the
+/// geometric corridor endpoint. The `home` leg and unattributed citizens keep
 /// `geometric`.
 pub(crate) fn economic_destination(
     stage: &PlanStage,
@@ -58,12 +63,10 @@ pub(crate) fn economic_destination(
     geometric: crate::routing::NodeId,
     targets: Option<&crate::mobility::resources::CitizenEconomicTargets>,
 ) -> crate::routing::NodeId {
-    // "activity:destination" is the canonical id for the economic (away-from-home)
-    // leg, authored by `mobility::seed` (and inherited by births). No shared const
-    // exists yet — the seeder builds the id inline across several sites — so this
-    // string match couples the override to that naming by convention (Slice 1 scope).
+    // "activity:*:destination" is the economic away-from-home leg. Older snapshots
+    // may still carry the global "activity:destination" id.
     if let PlanStage::WalkToActivity { activity_id, .. } = stage
-        && activity_id == "activity:destination"
+        && is_economic_destination_activity(activity_id)
         && let Some(t) = targets
         && let Some(node) = t.0.get(agent)
     {
@@ -583,6 +586,24 @@ mod tests {
         assert_eq!(
             result, market_node,
             "destination leg must be overridden to market node"
+        );
+    }
+
+    #[test]
+    fn grouped_destination_leg_with_target_is_overridden() {
+        let agent = crate::ids::AgentId("agent-2".into());
+        let market_node = crate::routing::NodeId(42);
+        let geometric = crate::routing::NodeId(7);
+        let stage = PlanStage::WalkToActivity {
+            link_id: "walk:test".into(),
+            activity_id: "activity:spawn:ped:north:destination".into(),
+        };
+        let mut targets = crate::mobility::resources::CitizenEconomicTargets::default();
+        targets.0.insert(agent.clone(), market_node);
+        let result = economic_destination(&stage, &agent, geometric, Some(&targets));
+        assert_eq!(
+            result, market_node,
+            "grouped destination leg must be overridden to market node"
         );
     }
 

@@ -4,7 +4,6 @@ export type TerrainKind = 'grass' | 'water' | 'riverbank' | 'park' | 'forest' | 
 
 export type BuildingSheet =
   | 'houses'
-  | 'oldhouses'
   | 'cottages'
   | 'townhouses'
   | 'shops'

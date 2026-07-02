@@ -62,6 +62,19 @@ describe('backend startup gate', () => {
     expect(resolveBackendBaseUrl('https://backend.example.test')).toBe('https://backend.example.test');
   });
 
+  it('can use the frontend dev origin for proxied local backend requests', () => {
+    expect(resolveBackendBaseUrl(undefined, { devProxyOrigin: 'http://127.0.0.1:5175' })).toBe(
+      'http://127.0.0.1:5175',
+    );
+  });
+
+  it('can prefer the frontend dev proxy even when an env backend URL exists', () => {
+    expect(resolveBackendBaseUrl('http://127.0.0.1:8080', {
+      devProxyOrigin: 'http://127.0.0.1:5175',
+      preferDevProxy: true,
+    })).toBe('http://127.0.0.1:5175');
+  });
+
   it('accepts a healthy backend response', () => {
     expect(isBackendHealthDto({
       service: 'abutown-sim',
@@ -221,8 +234,8 @@ describe('backend startup gate', () => {
     })).rejects.toThrow('Backend health not OK: persistence stale');
   });
 
-  it('fails closed when ok=true health reports stale persistence', async () => {
-    await expect(requireBackend({
+  it('accepts stale persistence when runtime health is OK', async () => {
+    const status = await requireBackend({
       fetchImpl: async () =>
         healthProtoResponse({
           service: 'abutown-sim',
@@ -231,7 +244,9 @@ describe('backend startup gate', () => {
           protocol_version: 1,
           persistence: { status: PersistenceHealthStatus.STALE },
         }),
-    })).rejects.toThrow('Backend health not OK: persistence stale');
+    });
+
+    expect(status.persistence?.status).toBe('stale');
   });
 
   it('normalizes unknown startup errors', () => {

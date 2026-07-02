@@ -28,7 +28,7 @@ const ws = new WebSocket(URL);
 ws.binaryType = 'arraybuffer';
 
 ws.addEventListener('open', () => {
-  // Cover chunks (0..7)x(0..3): includes 9001(0,0-ish), 9002(3,2), 9003(0,1), 9004(6,1).
+  // Cover chunks (0..7)x(0..3): includes 9001(0,0), 9002(2,0), 9003(0,1), 9004(2,1).
   const coords = [];
   for (let y = 0; y < 3; y += 1) for (let x = 0; x < 8; x += 1) coords.push({ x, y });
   const msg = create(ClientMessageSchema, {

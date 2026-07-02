@@ -1,11 +1,11 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "world_id": "abutopia",
   "display_name": "Abutopia",
   "chunk_size": 32,
   "world_tiles": {
-    "width": 224,
-    "height": 128
+    "width": 80,
+    "height": 48
   },
   "layers": {
     "terrain": "layers/terrain.json",

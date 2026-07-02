@@ -109,7 +109,28 @@ describe('drawFlows', () => {
     expect(drawFlows(fakeCtx(), project, markets, [flow(1, 9004, 50)], { opacity: 1, detail: 'individual' })).toBe(0);
   });
 
-  it('draws nothing at zero layer opacity', () => {
-    expect(drawFlows(fakeCtx(), project, markets, [flow(9003, 9004, 250)], { opacity: 0, detail: 'aggregate' })).toBe(0);
+  it('strokes no curves and draws no cargo at zero layer opacity', () => {
+    const operations: string[] = [];
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_target, prop) => {
+        if (prop === 'canvas') return undefined;
+        if (prop === 'stroke') return () => operations.push('stroke');
+        if (prop === 'fill') return () => operations.push('fill');
+        if (prop === 'beginPath') return () => operations.push('beginPath');
+        return () => undefined;
+      },
+      set: () => true,
+    });
+
+    const drawn = drawFlows(
+      ctx,
+      project,
+      markets,
+      [flow(9003, 9004, 250)],
+      { opacity: 0, detail: 'aggregate' },
+    );
+
+    expect(drawn).toBe(0);
+    expect(operations).toEqual([]);
   });
 });

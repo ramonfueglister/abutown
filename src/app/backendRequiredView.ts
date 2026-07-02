@@ -16,6 +16,11 @@ export type RenderBackendRequiredOptions = {
   logError?: (message: string) => void;
 };
 
+export function clearBackendRequired(canvas: HTMLCanvasElement): void {
+  delete canvas.dataset.backendRequired;
+  removeBackendRequiredPanel();
+}
+
 export function renderBackendRequired(options: RenderBackendRequiredOptions): void {
   const viewport = options.viewport ?? {
     width: window.innerWidth,
@@ -32,18 +37,24 @@ export function renderBackendRequired(options: RenderBackendRequiredOptions): vo
   options.ctx.fillRect(0, 0, viewport.width, viewport.height);
   options.ctx.restore();
 
-  document.querySelector<HTMLElement>('[data-backend-required]')?.remove();
+  removeBackendRequiredPanel();
   const panel = document.createElement('section');
   panel.className = 'backend-required-panel';
   panel.dataset.backendRequired = 'true';
+  panel.dataset.backendRequiredPanel = 'true';
   panel.innerHTML = `
     <h1>Backend required</h1>
-    <p>Start Abutown backend at ${escapeHtml(options.baseUrl)} and reload.</p>
+    <p>Start Abutown backend at ${escapeHtml(options.baseUrl)}. Abutown retries automatically.</p>
     <pre>cargo run --manifest-path backend/Cargo.toml -p sim-server</pre>
     <small>${escapeHtml(message)}</small>
   `;
   document.body.appendChild(panel);
   (options.logError ?? console.error)(`Abutown backend required: ${message}`);
+}
+
+function removeBackendRequiredPanel(): void {
+  document.querySelector<HTMLElement>('[data-backend-required-panel]')?.remove();
+  document.querySelector<HTMLElement>('section[data-backend-required]')?.remove();
 }
 
 export function escapeHtml(value: unknown): string {

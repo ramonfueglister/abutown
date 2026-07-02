@@ -17,10 +17,22 @@ export type BackendGateOptions = {
   fetchImpl?: typeof fetch;
 };
 
+export type BackendBaseUrlOptions = {
+  devProxyOrigin?: string;
+  preferDevProxy?: boolean;
+};
+
 const DEFAULT_BACKEND_BASE_URL = 'http://127.0.0.1:8080';
 
-export function resolveBackendBaseUrl(envUrl?: unknown): string {
-  return typeof envUrl === 'string' && envUrl.length > 0 ? envUrl : DEFAULT_BACKEND_BASE_URL;
+export function resolveBackendBaseUrl(envUrl?: unknown, options: BackendBaseUrlOptions = {}): string {
+  if (options.preferDevProxy && typeof options.devProxyOrigin === 'string' && options.devProxyOrigin.length > 0) {
+    return options.devProxyOrigin;
+  }
+  if (typeof envUrl === 'string' && envUrl.length > 0) return envUrl;
+  if (typeof options.devProxyOrigin === 'string' && options.devProxyOrigin.length > 0) {
+    return options.devProxyOrigin;
+  }
+  return DEFAULT_BACKEND_BASE_URL;
 }
 
 export function isBackendHealthResponseDto(value: unknown): value is BackendHealthResponseDto {
@@ -96,7 +108,13 @@ function formatBackendHealthError(health: BackendHealthResponseDto): string {
 }
 
 function isAcceptableBackendPersistenceHealth(value: BackendPersistenceHealthDto | undefined): boolean {
-  return value === undefined || value.status === 'starting' || value.status === 'healthy' || value.status === 'degraded';
+  return (
+    value === undefined ||
+    value.status === 'starting' ||
+    value.status === 'healthy' ||
+    value.status === 'degraded' ||
+    value.status === 'stale'
+  );
 }
 
 function isBackendPersistenceHealthDto(value: unknown): value is BackendPersistenceHealthDto {

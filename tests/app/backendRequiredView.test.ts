@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { escapeHtml, renderBackendRequired } from '../../src/app/backendRequiredView';
+import { clearBackendRequired, escapeHtml, renderBackendRequired } from '../../src/app/backendRequiredView';
 
 type FakeElement = {
   className: string;
@@ -88,6 +88,7 @@ describe('backendRequiredView', () => {
     expect(panel?.innerHTML).toContain('Backend required');
     expect(panel?.innerHTML).toContain('network &lt;down&gt;');
     expect(panel?.innerHTML).toContain('http://127.0.0.1:8080');
+    expect(panel?.innerHTML).toContain('retries automatically');
     expect(panel?.innerHTML).toContain('cargo run --manifest-path backend/Cargo.toml -p sim-server');
     expect(logError).toHaveBeenCalledWith('Abutown backend required: network <down>');
   });
@@ -131,5 +132,16 @@ describe('backendRequiredView', () => {
     expect(dom.currentPanel()?.innerHTML).toContain(
       'Backend health not OK: persistence degraded: db &lt;down&gt;',
     );
+  });
+
+  it('clears the backend-required overlay after recovery', () => {
+    const dom = installFakeDom(true);
+    const canvas = createCanvas();
+    canvas.dataset.backendRequired = 'true';
+
+    clearBackendRequired(canvas);
+
+    expect(canvas.dataset.backendRequired).toBeUndefined();
+    expect(dom.currentPanel()).toBeNull();
   });
 });

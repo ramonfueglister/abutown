@@ -39,8 +39,8 @@ test('renders abutopia with 300 backend-driven pedestrians', async ({ page }) =>
   );
 
   expect(state.city.worldId).toBe('abutopia');
-  expect(state.city.width).toBe(224);
-  expect(state.city.height).toBe(128);
+  expect(state.city.width).toBe(80);
+  expect(state.city.height).toBe(48);
   expect(state.city.roadTiles).toBe(10);
   expect(state.city.buildings).toBe(2);
   expect(state.city.railTiles).toBe(0);

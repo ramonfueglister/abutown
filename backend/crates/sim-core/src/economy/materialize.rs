@@ -128,15 +128,15 @@ fn leg_polyline(
 }
 
 /// Owned render input gathered inside the routing cache scope: (actor, current-leg
-/// polyline, progress in [0,1], arrived). Demo traders and flow shipments both
-/// produce these; they are mapped to borrowed `RenderActor`s once the routing
-/// borrows are released.
+/// polyline, progress in [0,1], arrived). Render producers map these to borrowed
+/// `RenderActor`s once the routing borrows are released.
 type RenderInput = (EconomicActorId, Vec<(f32, f32)>, f32, bool);
 
 /// A render-actor input to `plan_render_mutations`: an opaque id, the current-leg
 /// route polyline, the progress along it, and whether it has `arrived` (reached
-/// its destination this tick). Demo `Trader`s and flow shipments both produce
-/// these — the lifecycle machine never sees their economic source.
+/// its destination this tick). Flow shipments and any future persistent trader
+/// projections both produce these — the lifecycle machine never sees their
+/// economic source.
 pub(crate) struct RenderActor<'a> {
     pub actor: EconomicActorId,
     pub polyline: &'a [(f32, f32)],
@@ -144,14 +144,13 @@ pub(crate) struct RenderActor<'a> {
     /// True once the source has reached its destination. An arrived actor is
     /// routed through the SAME ghost-free leave->despawn path as an LOD demotion
     /// (dirty-then-despawn) even when its destination sits in an observed chunk,
-    /// so the client never strands a ghost when watching goods arrive. Demo
-    /// traders never set this (they loop), so `false` preserves their behaviour.
+    /// so the client never strands a ghost when watching goods arrive. Looping
+    /// trader projections keep this false.
     pub arrived: bool,
 }
 
 /// Ghost-free Spawn/Update/Despawn lifecycle (the #66 logic), generic over the
-/// source of (actor, polyline, progress). Demo traders and flow shipments both
-/// feed this. No ECS world access — fully unit-testable.
+/// source of (actor, polyline, progress). No ECS world access — fully unit-testable.
 pub(crate) fn plan_render_mutations(
     actors: &[RenderActor<'_>],
     materialized: &MaterializedTraders,

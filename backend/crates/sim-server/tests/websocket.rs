@@ -21,7 +21,7 @@ fn runtime_with_seeded_mobility() -> SimulationRuntime {
 }
 
 fn seeded_mobility_chunk() -> w::ChunkCoord {
-    w::ChunkCoord { x: 3, y: 2 }
+    w::ChunkCoord { x: 0, y: 0 }
 }
 
 #[tokio::test]

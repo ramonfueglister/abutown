@@ -1,28 +1,126 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "world_id": "abutopia",
   "footprints": [
     {
-      "id": "building:house-a",
+      "id": "landmark:central-works-a",
       "tiles": [
         {
-          "x": 106,
-          "y": 64
+          "x": 31,
+          "y": 21
         }
       ],
-      "sheet": "oldhouses",
-      "frame": 0
+      "sheet": "modern",
+      "frame": 0,
+      "district": "Central Works"
     },
     {
-      "id": "building:house-b",
+      "id": "landmark:central-works-b",
       "tiles": [
         {
-          "x": 117,
-          "y": 64
+          "x": 33,
+          "y": 21
         }
       ],
-      "sheet": "oldhouses",
-      "frame": 1
+      "sheet": "office",
+      "frame": 0,
+      "district": "Central Works"
+    },
+    {
+      "id": "landmark:market-arcade-a",
+      "tiles": [
+        {
+          "x": 47,
+          "y": 28
+        }
+      ],
+      "sheet": "shops",
+      "frame": 0,
+      "district": "Market Square"
+    },
+    {
+      "id": "landmark:market-arcade-b",
+      "tiles": [
+        {
+          "x": 49,
+          "y": 28
+        }
+      ],
+      "sheet": "shops",
+      "frame": 1,
+      "district": "Market Square"
+    },
+    {
+      "id": "landmark:harbor-shed-a",
+      "tiles": [
+        {
+          "x": 15,
+          "y": 28
+        }
+      ],
+      "sheet": "modern",
+      "frame": 1,
+      "district": "Harbor Depot"
+    },
+    {
+      "id": "landmark:harbor-shed-b",
+      "tiles": [
+        {
+          "x": 17,
+          "y": 25
+        }
+      ],
+      "sheet": "office",
+      "frame": 1,
+      "district": "Harbor Depot"
+    },
+    {
+      "id": "landmark:homes-a",
+      "tiles": [
+        {
+          "x": 63,
+          "y": 21
+        }
+      ],
+      "sheet": "houses",
+      "frame": 0,
+      "district": "Homes Quarter"
+    },
+    {
+      "id": "landmark:homes-b",
+      "tiles": [
+        {
+          "x": 66,
+          "y": 21
+        }
+      ],
+      "sheet": "cottages",
+      "frame": 0,
+      "district": "Homes Quarter"
+    },
+    {
+      "id": "landmark:depot-yard-a",
+      "tiles": [
+        {
+          "x": 55,
+          "y": 28
+        }
+      ],
+      "sheet": "tower",
+      "frame": 0,
+      "district": "Depot Yard"
+    },
+    {
+      "id": "landmark:depot-yard-b",
+      "tiles": [
+        {
+          "x": 57,
+          "y": 28
+        }
+      ],
+      "sheet": "office",
+      "frame": 2,
+      "district": "Depot Yard"
     }
   ]
 }

@@ -12,8 +12,8 @@
 //    only after some interval ticks, we POLL generously (up to ~90s) re-reading
 //    frames until a flows-bearing frame appears.
 // 2. ECONOMY VIEW (zoomed out): after zooming out into the economy band, the
-//    diagnostics JSON shows `economyFlowCount >= 1` (flow curves drawn last frame,
-//    Task 13 wired this to flowsDrawnLastFrame()) AND `economyMarketCount >= 1`.
+//    diagnostics JSON shows market glyphs render, while economy flow glyphs and
+//    market guide edges stay hidden in the default presentation.
 //    Screenshot saved to smoke-schematic-economy.png.
 // 3. CITY VIEW (zoomed in): after zooming back in into the city band, the rendered
 //    agent population is > 0 (diagnostics `city.mobility.agents`). Screenshot saved
@@ -50,6 +50,13 @@ const REUSE_STACK = process.env.REUSE_STACK === '1';
 const LOCAL_DATABASE_URL =
   process.env.SMOKE_DATABASE_URL ??
   'postgresql://ramonfuglister@127.0.0.1:5432/abutown';
+
+const RETIRED_MARKET_LABELS = [
+  ['De', 'mo A'].join(''),
+  ['De', 'mo B'].join(''),
+  ['Flow ', 'De', 'mo A'].join(''),
+  ['Flow ', 'De', 'mo B'].join(''),
+];
 
 // How long to keep the page open polling for a flows-bearing frame.
 const FLOW_POLL_TIMEOUT_MS = parseInt(process.env.FLOW_POLL_TIMEOUT_MS ?? '90000', 10);
@@ -248,7 +255,7 @@ let textFramesSent = 0;
 const consoleErrors = [];
 
 page.on('websocket', (ws) => {
-  if (!ws.url().includes(`:${BACKEND_PORT}/`)) return; // backend WS only (skip vite HMR)
+  if (!isBackendWireWebSocket(ws.url())) return; // backend WS only (skip vite HMR)
   ws.on('framesent', (ev) => {
     if (typeof ev.payload === 'string') textFramesSent += 1;
   });
@@ -265,6 +272,18 @@ page.on('console', (msg) => {
   if (msg.type() === 'error') consoleErrors.push(msg.text());
 });
 page.on('pageerror', (err) => consoleErrors.push(err.message));
+
+function isBackendWireWebSocket(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.pathname === '/ws' &&
+      (url.port === String(BACKEND_PORT) || url.port === String(FRONTEND_PORT))
+    );
+  } catch {
+    return false;
+  }
+}
 
 try {
   await page.goto(FRONTEND_URL, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS });
@@ -292,10 +311,18 @@ function scanFlows() {
   let economyFrameCount = 0;
   let maxFlows = 0;
   let sampleFlow = null;
+  const marketNames = new Set();
+  const retiredMarketLabelHits = new Set();
   for (const bytes of receivedBinary) {
     const m = decodeServer(bytes);
     if (!m || m.body.case !== 'economySnapshot') continue;
     economyFrameCount += 1;
+    for (const market of m.body.value.markets ?? []) {
+      if (market.name) marketNames.add(market.name);
+      if (RETIRED_MARKET_LABELS.includes(market.name)) {
+        retiredMarketLabelHits.add(market.name);
+      }
+    }
     const flows = m.body.value.flows ?? [];
     if (flows.length > maxFlows) {
       maxFlows = flows.length;
@@ -308,11 +335,17 @@ function scanFlows() {
       };
     }
   }
-  return { economyFrameCount, maxFlows, sampleFlow };
+  return {
+    economyFrameCount,
+    maxFlows,
+    sampleFlow,
+    marketNames: [...marketNames].sort(),
+    retiredMarketLabelHits: [...retiredMarketLabelHits].sort(),
+  };
 }
 
-// --- Zoom OUT into the economy band so flow curves + market glyphs are drawn ---
-// Flow-demo markets 9003 (16,48) and 9004 (208,48) span the map; zooming out
+// --- Zoom OUT into the economy band so market glyphs remain visible ---
+// Cross-town markets 9003 (8,40) and 9004 (72,40) span the bottom edge; zooming out
 // brings both into view and crosses into the semantic-zoom economy band.
 await page.mouse.move(640, 400);
 for (let i = 0; i < 10; i += 1) {
@@ -332,7 +365,7 @@ const elapsedFlowPollMs = Date.now() - pollStart;
 // Let the renderer draw a couple of frames with the flows present, then sample diagnostics.
 await pause(1500);
 
-// --- Assertion 2: economy-band diagnostics (flow curves + markets drawn) ---
+// --- Assertion 2: economy-band diagnostics (market glyphs drawn, flow glyphs hidden) ---
 const economyDiagRaw = await page.evaluate(() => window.render_game_to_text?.() ?? '');
 let economyDiag = null;
 if (economyDiagRaw) {
@@ -344,6 +377,7 @@ if (economyDiagRaw) {
 }
 const economyFlowCount = economyDiag?.city?.economyFlowCount ?? 0;
 const economyMarketCount = economyDiag?.city?.economyMarketCount ?? 0;
+const marketGuideEdgeCount = economyDiag?.city?.marketGuideEdgeCount ?? 0;
 
 await page.screenshot({ path: ECONOMY_SCREENSHOT });
 
@@ -367,6 +401,8 @@ if (cityDiagRaw) {
 // Agent population rendered from the backend mobility stream.
 const cityAgentCount = cityDiag?.city?.mobility?.agents ?? 0;
 const cityPedestrians = cityDiag?.city?.pedestrians ?? 0;
+const cityFlowCount = cityDiag?.city?.economyFlowCount ?? 0;
+const cityMarketGuideEdgeCount = cityDiag?.city?.marketGuideEdgeCount ?? 0;
 
 await page.screenshot({ path: CITY_SCREENSHOT });
 
@@ -378,11 +414,15 @@ flowScan = scanFlows();
 const checks = {
   // Assertion 1: wire delivered at least one flow.
   wire_flows_received: flowScan.maxFlows > 0,
-  // Assertion 2: economy view drew flow curves + market glyphs.
-  economy_flow_count_ge_1: economyFlowCount >= 1,
+  wire_market_labels_retired: flowScan.retiredMarketLabelHits.length === 0,
+  // Assertion 2: economy view keeps aggregate flow glyphs hidden for now.
+  economy_flow_glyphs_hidden: economyFlowCount === 0,
+  economy_market_guides_hidden: marketGuideEdgeCount === 0,
   economy_market_count_ge_1: economyMarketCount >= 1,
   // Assertion 3: city view rendered the agent population.
   city_agents_rendered: cityAgentCount > 0,
+  city_flow_glyphs_hidden: cityFlowCount === 0,
+  city_market_guides_hidden: cityMarketGuideEdgeCount === 0,
   // Sanity checks.
   no_text_frames: textFramesReceived === 0 && textFramesSent === 0,
   no_console_errors: consoleErrors.length === 0,
@@ -397,11 +437,16 @@ const summary = {
   economy_frame_count: flowScan.economyFrameCount,
   max_flows_seen: flowScan.maxFlows,
   sample_flow: flowScan.sampleFlow,
+  market_names_seen: flowScan.marketNames,
+  retired_market_label_hits: flowScan.retiredMarketLabelHits,
   flow_poll_elapsed_ms: elapsedFlowPollMs,
   economy_flow_count_at_economy_zoom: economyFlowCount,
   economy_market_count_at_economy_zoom: economyMarketCount,
+  market_guide_edge_count_at_economy_zoom: marketGuideEdgeCount,
   city_agent_count_at_city_zoom: cityAgentCount,
   city_pedestrians_at_city_zoom: cityPedestrians,
+  city_flow_count_at_city_zoom: cityFlowCount,
+  city_market_guide_edge_count_at_city_zoom: cityMarketGuideEdgeCount,
   economy_screenshot: ECONOMY_SCREENSHOT,
   city_screenshot: CITY_SCREENSHOT,
   checks,

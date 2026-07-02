@@ -16,25 +16,32 @@ fn loads_abutopia_base_world_fixture() {
 
     assert_eq!(bundle.world_id(), "abutopia");
     assert_eq!(bundle.chunk_size(), 32);
-    assert_eq!(bundle.world_tiles().width, 224);
-    assert_eq!(bundle.world_tiles().height, 128);
-    assert_eq!(bundle.transport.roads.len(), 10);
+    assert_eq!(bundle.world_tiles().width, 80);
+    assert_eq!(bundle.world_tiles().height, 48);
+    assert_eq!(bundle.transport.roads.len(), 52);
     assert!(bundle.transport.rails.is_empty());
     assert!(bundle.transport.arterial_paths.is_empty());
     assert!(bundle.transport.rail_paths.is_empty());
-    assert_eq!(bundle.transport.pedestrian_corridors.len(), 2);
-    let sidewalk_ids = bundle
+    assert_eq!(bundle.transport.pedestrian_corridors.len(), 4);
+    let corridor_ids = bundle
         .transport
         .pedestrian_corridors
         .iter()
         .map(|corridor| corridor.id.as_str())
         .collect::<Vec<_>>();
-    assert!(sidewalk_ids.contains(&"corridor:sidewalk:north"));
-    assert!(sidewalk_ids.contains(&"corridor:sidewalk:south"));
-    assert_eq!(bundle.buildings.footprints.len(), 2);
+    assert_eq!(
+        corridor_ids,
+        vec![
+            "corridor:edge:north",
+            "corridor:edge:east",
+            "corridor:edge:south",
+            "corridor:edge:west",
+        ],
+    );
+    assert_eq!(bundle.buildings.footprints.len(), 10);
     assert!(bundle.decorations.trees.is_empty());
     assert!(bundle.decorations.details.is_empty());
-    assert_eq!(bundle.chunk_coords().len(), 28);
+    assert_eq!(bundle.chunk_coords().len(), 6);
 }
 
 #[test]
@@ -48,7 +55,7 @@ fn missing_manifest_fails_closed() {
 #[test]
 fn materializes_chunk_tiles_from_bundle_layers() {
     let bundle = BaseWorldBundle::load_from_dir(fixture_root()).expect("bundle loads");
-    let chunk = bundle.tiles_for_chunk(sim_core::ids::ChunkCoord { x: 3, y: 2 }, 7);
+    let chunk = bundle.tiles_for_chunk(sim_core::ids::ChunkCoord { x: 0, y: 0 }, 7);
 
     assert_eq!(chunk.len(), 32 * 32);
     assert!(chunk.iter().any(|tile| tile.kind == TileKind::Road));

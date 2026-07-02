@@ -16,7 +16,7 @@
 //!
 //! Factor ~30 at ~300 citizens (baseline 10) is far below the i64 ceiling:
 //!   max representable value ≈ 9.2 × 10^18; at factor 30 the largest scaled quantity
-//!   in the demo seed is 10 * 30 = 300, trivially safe.
+//!   in the authored Abutopia seed is 10 * 30 = 300, trivially safe.
 
 use std::collections::BTreeSet;
 
@@ -364,8 +364,8 @@ fn production_at_tick_realistic_factor_30_is_ok() {
 // realistic per-capita scale is comfortably below any overflow ceiling AND
 // conserves money end-to-end.
 //
-// SAFETY MARGIN NOTE: at factor 30 the largest scaled quantity in the demo
-// seed is 10 × 30 = 300 (well within i64's ~9.2×10^18 range). The realistic
+// SAFETY MARGIN NOTE: at factor 30 the largest scaled quantity in the authored
+// Abutopia seed is 10 × 30 = 300 (well within i64's ~9.2×10^18 range). The realistic
 // ceiling is ~9.2×10^18 / 300 ≈ 3×10^16× above any value this fixture can produce.
 #[test]
 fn conservation_holds_at_factor_30_for_50_ticks() {

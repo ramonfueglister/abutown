@@ -82,14 +82,14 @@ export function drawFlows(
     const b = project({ x: dst.tileX, y: dst.tileY });
     const c = flowCurveControlPoint(a, b);
     const width = screenStableWorldSize(screenWidth, cameraScale, {
-      minWorld: screenWidth,
+      minWorld: 1.2,
       maxWorld: screenWidth * 4.5,
     });
 
     // casing first, so crossing lines keep the Mini-Metro paper gap
     ctx.globalAlpha = 0.9 * blend.opacity;
     ctx.strokeStyle = FLOW_CASING;
-    ctx.lineWidth = width + screenStableWorldSize(3, cameraScale, { minWorld: 3, maxWorld: 12 });
+    ctx.lineWidth = width + screenStableWorldSize(3, cameraScale, { minWorld: 1.2, maxWorld: 12 });
     strokeCurve(ctx, a, c, b);
 
     ctx.globalAlpha = 0.92 * blend.opacity;

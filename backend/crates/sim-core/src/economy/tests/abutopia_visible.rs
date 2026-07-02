@@ -1,6 +1,6 @@
-//! Blocker-1: prove the abutopia world data makes residential-corridor pedestrians
-//! bind home_market to a co-located consumption market (9002), so attribution can
-//! route them. These tests load the REAL abutopia bundle.
+//! Prove the compact abutopia world data makes corridor pedestrians bind to
+//! nearby authored city markets, so attribution can route them. These tests load
+//! the REAL abutopia bundle.
 
 use crate::base_world::BaseWorldBundle;
 use crate::economy::{EconomyPlugin, seed_from_markets_layer};
@@ -21,7 +21,7 @@ fn abutopia_world_with_economy() -> bevy_ecs::world::World {
     world
 }
 
-/// Full chain on real data: spawn a citizen at the corridor (binds home=9002 against
+/// Full chain on real data: spawn a citizen at the north-east corner (binds home=9002 against
 /// the live economy), mark 9002's chunk observed, give 9002 realized consumption, run
 /// attribution → the citizen is routed to 9002's node (routed > 0).
 #[test]
@@ -65,7 +65,7 @@ fn corridor_citizen_is_routed_to_9002_when_observed_and_consuming() {
             0.05,
             0,
         );
-        crate::mobility::api::spawn_agent_from_record_at_position(&mut world, rec, (111.5, 64.51));
+        crate::mobility::api::spawn_agent_from_record_at_position(&mut world, rec, (72.0, 8.0));
     }
 
     // Sanity-check: the freshly-spawned citizens must have bound home_market=9002.
@@ -124,10 +124,10 @@ fn corridor_citizen_is_routed_to_9002_when_observed_and_consuming() {
     println!("routed={} all → node {:?}", targets.len(), node_9002);
 }
 
-/// Corridor:sidewalk:south spans tiles x≈106..117 at y=64.51. After re-anchoring 9002
-/// onto the corridor, every pedestrian there must bind home_market = 9002 (nearest).
+/// Edge corridors place the four authored markets in the four map corners.
+/// Pedestrians should bind to the nearest authored corner, not one catch-all market.
 #[test]
-fn corridor_pedestrians_bind_home_market_9002() {
+fn corridor_pedestrians_bind_nearest_compact_city_market() {
     let world = abutopia_world_with_economy();
     let positions = markets_with_positions(&world);
     assert_eq!(
@@ -136,12 +136,17 @@ fn corridor_pedestrians_bind_home_market_9002() {
         "all four abutopia markets snapped to graph nodes"
     );
 
-    for px in [106.0_f32, 111.5, 117.0] {
+    for ((px, py), expected_market) in [
+        ((8.0_f32, 8.0_f32), 9001),
+        ((72.0, 8.0), 9002),
+        ((8.0, 40.0), 9003),
+        ((72.0, 40.0), 9004),
+    ] {
         let binding =
-            assign_binding((px, 64.51), &positions).expect("binding exists with four live markets");
+            assign_binding((px, py), &positions).expect("binding exists with four live markets");
         assert_eq!(
-            binding.home_market, 9002,
-            "pedestrian at ({px}, 64.51) must bind home_market=9002; got {}",
+            binding.home_market, expected_market,
+            "pedestrian at ({px}, {py}) must bind the nearest corner city market; got {}",
             binding.home_market
         );
     }

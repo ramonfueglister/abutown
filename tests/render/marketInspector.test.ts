@@ -5,7 +5,7 @@ import type { MarketLocationDto, MarketGoodDto, EconomyProducerDto } from '../..
 function makeMarket(overrides?: Partial<MarketLocationDto>): MarketLocationDto {
   return {
     marketId: 9001,
-    name: 'Demo A',
+    name: 'Central Works',
     tileX: 2,
     tileY: 3,
     wagePaidLastTick: 3000,
@@ -47,8 +47,8 @@ describe('marketInspectorRows', () => {
   });
 
   it('first element is the market name (title)', () => {
-    const rows = marketInspectorRows(makeMarket({ name: 'Demo A' }), [], []);
-    expect(rows[0]).toBe('Demo A');
+    const rows = marketInspectorRows(makeMarket({ name: 'Central Works' }), [], []);
+    expect(rows[0]).toBe('Central Works');
   });
 
   it('divides settlement price by MONEY_DISPLAY_SCALE: 5000 → "5.00"', () => {

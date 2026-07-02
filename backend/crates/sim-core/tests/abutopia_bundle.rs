@@ -15,13 +15,21 @@ fn loads_abutopia_base_world() {
 
     assert_eq!(bundle.world_id(), "abutopia");
     assert_eq!(bundle.chunk_size(), 32);
-    assert_eq!(bundle.world_tiles().width, 224);
-    assert_eq!(bundle.world_tiles().height, 128);
-    assert_eq!(bundle.transport.roads.len(), 10);
-    assert_eq!(bundle.buildings.footprints.len(), 2);
-    assert_eq!(bundle.transport.pedestrian_corridors.len(), 2);
-    assert_eq!(bundle.spawns.pedestrian_groups.len(), 1);
-    assert_eq!(bundle.spawns.pedestrian_groups[0].agents_per_corridor, 300);
+    assert_eq!(bundle.world_tiles().width, 80);
+    assert_eq!(bundle.world_tiles().height, 48);
+    assert_eq!(bundle.transport.roads.len(), 52);
+    assert_eq!(bundle.buildings.footprints.len(), 10);
+    assert_eq!(bundle.transport.pedestrian_corridors.len(), 4);
+    assert_eq!(bundle.spawns.pedestrian_groups.len(), 4);
+    assert_eq!(
+        bundle
+            .spawns
+            .pedestrian_groups
+            .iter()
+            .map(|group| group.agents_per_corridor)
+            .sum::<u32>(),
+        300
+    );
     assert!(bundle.transport.rails.is_empty());
     assert!(bundle.transport.arterial_paths.is_empty());
     assert!(bundle.spawns.car_groups.is_empty());
@@ -91,45 +99,60 @@ fn abutopia_authors_the_wood_to_tools_production_chain() {
 }
 
 #[test]
-fn abutopia_authors_sidewalk_pedestrian_corridors() {
+fn abutopia_authors_edge_pedestrian_corridors() {
     let bundle = BaseWorldBundle::load_from_dir(abutopia_root()).expect("abutopia bundle loads");
 
-    assert_eq!(bundle.transport.pedestrian_corridors.len(), 2);
-    assert_corridor_points(&bundle, "corridor:sidewalk:north", 63.49);
-    assert_corridor_points(&bundle, "corridor:sidewalk:south", 64.51);
-    assert!(
-        bundle
-            .transport
-            .pedestrian_corridors
-            .iter()
-            .flat_map(|corridor| corridor.points.iter())
-            .all(|point| point.y != 64.0)
-    );
+    assert_eq!(bundle.transport.pedestrian_corridors.len(), 4);
+    assert_horizontal_corridor_points(&bundle, "corridor:edge:north", 8.0, 8..=72);
+    assert_vertical_corridor_points(&bundle, "corridor:edge:east", 72.0, 8..=40);
+    assert_horizontal_corridor_points(&bundle, "corridor:edge:south", 40.0, 8..=72);
+    assert_vertical_corridor_points(&bundle, "corridor:edge:west", 8.0, 8..=40);
 
-    assert_eq!(bundle.spawns.pedestrian_groups.len(), 1);
-    let group = &bundle.spawns.pedestrian_groups[0];
-    assert_eq!(group.id, "spawn:ped:sidewalk-south");
-    assert_eq!(group.corridor_id, "corridor:sidewalk:south");
-    assert_eq!(group.agents_per_corridor, 300);
-
-    assert!(
-        bundle
-            .transport
-            .pedestrian_corridors
-            .iter()
-            .any(|corridor| corridor.id == group.corridor_id)
-    );
+    assert_eq!(bundle.spawns.pedestrian_groups.len(), 4);
+    for group in &bundle.spawns.pedestrian_groups {
+        assert_eq!(group.agents_per_corridor, 75);
+        assert!(
+            bundle
+                .transport
+                .pedestrian_corridors
+                .iter()
+                .any(|corridor| corridor.id == group.corridor_id)
+        );
+    }
 }
 
-fn assert_corridor_points(bundle: &BaseWorldBundle, corridor_id: &str, y: f32) {
+fn assert_horizontal_corridor_points(
+    bundle: &BaseWorldBundle,
+    corridor_id: &str,
+    y: f32,
+    xs: std::ops::RangeInclusive<i32>,
+) {
     let corridor = bundle
         .transport
         .pedestrian_corridors
         .iter()
         .find(|corridor| corridor.id == corridor_id)
         .expect("pedestrian corridor exists");
-    let expected = (106..=117)
+    let expected = xs
         .map(|x| NetworkPoint { x: x as f32, y })
+        .collect::<Vec<_>>();
+    assert_eq!(corridor.points, expected);
+}
+
+fn assert_vertical_corridor_points(
+    bundle: &BaseWorldBundle,
+    corridor_id: &str,
+    x: f32,
+    ys: std::ops::RangeInclusive<i32>,
+) {
+    let corridor = bundle
+        .transport
+        .pedestrian_corridors
+        .iter()
+        .find(|corridor| corridor.id == corridor_id)
+        .expect("pedestrian corridor exists");
+    let expected = ys
+        .map(|y| NetworkPoint { x, y: y as f32 })
         .collect::<Vec<_>>();
     assert_eq!(corridor.points, expected);
 }

@@ -23,16 +23,16 @@ fn agent_entity(world: &bevy_ecs::world::World, id: &str) -> bevy_ecs::entity::E
         .expect("agent:walk:0 seeded")
 }
 
-/// The south-sidewalk corridor's two endpoints, read live from the world data
+/// The north-edge corridor's two endpoints, read live from the world data
 /// so the assertions track the actual abutopia geometry (not hardcoded coords
 /// that silently drift when the world is regenerated).
-fn south_corridor_ends(bundle: &BaseWorldBundle) -> ((f32, f32), (f32, f32)) {
+fn north_corridor_ends(bundle: &BaseWorldBundle) -> ((f32, f32), (f32, f32)) {
     let corridor = bundle
         .transport
         .pedestrian_corridors
         .iter()
-        .find(|c| c.id == "corridor:sidewalk:south")
-        .expect("south sidewalk corridor exists");
+        .find(|c| c.id == "corridor:edge:north")
+        .expect("north edge corridor exists");
     let first = corridor.points.first().expect("corridor has points");
     let last = corridor.points.last().expect("corridor has points");
     ((first.x, first.y), (last.x, last.y))
@@ -53,7 +53,13 @@ fn abutopia_pedestrian_is_seeded_with_cyclic_round_trip_plan() {
             _ => None,
         })
         .collect();
-    assert_eq!(activities, vec!["activity:home", "activity:destination"]);
+    assert_eq!(
+        activities,
+        vec![
+            "activity:spawn:ped:north:home",
+            "activity:spawn:ped:north:destination"
+        ]
+    );
 }
 
 /// Step the abutopia mobility schedule, returning the walker's x each tick.
@@ -115,7 +121,7 @@ fn run_x_trace(ticks: usize) -> Vec<f32> {
 #[test]
 fn abutopia_pedestrian_oscillates_between_corridor_ends() {
     let bundle = BaseWorldBundle::load_from_dir(abutopia_root()).expect("bundle loads");
-    let (home, dest) = south_corridor_ends(&bundle);
+    let (home, dest) = north_corridor_ends(&bundle);
     let (west, east) = (home.0.min(dest.0), home.0.max(dest.0));
 
     let xs = run_x_trace(1400);
@@ -148,11 +154,14 @@ fn seed_populates_activity_waypoints_from_corridor() {
     // from the bundle — NOT hardcoded. Asserting against the bundle's own points
     // means a world regeneration can never silently drift this out of sync.
     let bundle = BaseWorldBundle::load_from_dir(abutopia_root()).expect("bundle loads");
-    let (home, dest) = south_corridor_ends(&bundle);
+    let (home, dest) = north_corridor_ends(&bundle);
     let (world, _s) = seed::from_base_world_bundle(&bundle).expect("seed ok");
     let wp = world.resource::<sim_core::mobility::resources::ActivityWaypoints>();
-    assert_eq!(wp.0.get("activity:home").copied(), Some(home));
-    assert_eq!(wp.0.get("activity:destination").copied(), Some(dest));
+    assert_eq!(wp.0.get("activity:spawn:ped:north:home").copied(), Some(home));
+    assert_eq!(
+        wp.0.get("activity:spawn:ped:north:destination").copied(),
+        Some(dest)
+    );
 }
 
 #[test]
@@ -188,5 +197,11 @@ fn cyclic_round_trip_survives_snapshot_extract_apply() {
             _ => None,
         })
         .collect();
-    assert_eq!(activities, vec!["activity:home", "activity:destination"]);
+    assert_eq!(
+        activities,
+        vec![
+            "activity:spawn:ped:north:home",
+            "activity:spawn:ped:north:destination"
+        ]
+    );
 }

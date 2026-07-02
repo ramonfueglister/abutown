@@ -112,8 +112,8 @@ fn base_world_fixture_with_world_id(world_id: &str) -> sim_core::base_world::Bas
 }
 
 fn expected_abutopia_proto_chunks() -> Vec<w::ChunkCoord> {
-    (0..=3)
-        .flat_map(|y| (0..=6).map(move |x| w::ChunkCoord { x, y }))
+    (0..=1)
+        .flat_map(|y| (0..=2).map(move |x| w::ChunkCoord { x, y }))
         .collect()
 }
 
@@ -296,7 +296,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/chunks/3/2")
+                .uri("/chunks/1/0")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -308,7 +308,7 @@ async fn chunk_snapshot_is_available_for_loaded_chunk() {
     let snap = w::ChunkSnapshot::decode(body.as_ref()).unwrap();
 
     assert_eq!(snap.world_id, "abutopia");
-    assert_eq!(snap.coord, Some(w::ChunkCoord { x: 3, y: 2 }));
+    assert_eq!(snap.coord, Some(w::ChunkCoord { x: 1, y: 0 }));
     assert_eq!(snap.tile_count, 1024);
     assert_eq!(snap.chunk_state, w::ChunkState::Warm as i32);
 

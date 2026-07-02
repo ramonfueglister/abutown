@@ -1,11 +1,11 @@
 import {
   AGENT_SHIMMER_OPACITY,
-  FLOW_MIN_OPACITY,
+  ECONOMY_OVERLAY_CITY_OPACITY,
   ZOOM_CITY_MIN,
   ZOOM_ECONOMY_MAX,
 } from './designTokens';
 
-export type LayerKey = 'network' | 'markets' | 'agents' | 'flows';
+export type LayerKey = 'network' | 'markets' | 'agents' | 'flows' | 'marketGuides' | 'vehicles';
 export type LayerBlend = { opacity: number; detail: 'aggregate' | 'individual' };
 
 /** 0 at/below the economy band, 1 at/above the city band, linear between. */
@@ -27,8 +27,10 @@ export function layerBlend(layer: LayerKey, scale: number): LayerBlend {
         detail: t > 0 ? 'individual' : 'aggregate',
       };
     case 'flows':
+    case 'marketGuides':
+    case 'vehicles':
       return {
-        opacity: t >= 1 ? FLOW_MIN_OPACITY : 1 - (1 - FLOW_MIN_OPACITY) * t,
+        opacity: t >= 1 ? ECONOMY_OVERLAY_CITY_OPACITY : 1 - (1 - ECONOMY_OVERLAY_CITY_OPACITY) * t,
         detail: t < 1 ? 'individual' : 'aggregate',
       };
   }

@@ -32,6 +32,31 @@ export function agentGlyph(
   return { shape: 'dot', color: AGENT_INK, radiusScale: 1 };
 }
 
+export function pedestrianOpacity(kind: BackendPedestrian['kind'], blend: LayerBlend): number {
+  if (kind === 'trader') return Math.max(0.95, blend.opacity);
+  if (blend.detail === 'individual') return Math.min(0.72, blend.opacity);
+  return blend.opacity;
+}
+
+export function pedestrianRadiusScale(kind: BackendPedestrian['kind'], blend: LayerBlend): number {
+  if (kind === 'trader') return 1.35;
+  if (blend.detail === 'individual') return 0.95;
+  return 1;
+}
+
+export function pedestrianFinalRadius(
+  baseRadius: number,
+  glyph: AgentGlyph,
+  kind: BackendPedestrian['kind'],
+  blend: LayerBlend,
+): number {
+  return baseRadius * glyph.radiusScale * pedestrianRadiusScale(kind, blend);
+}
+
+export function traderHaloRadius(finalRadius: number, baseRadius: number): number {
+  return finalRadius + Math.max(1, baseRadius * 0.45);
+}
+
 export function drawPedestrian(
   state: MinimalMapRendererState,
   pedestrian: BackendPedestrian,
@@ -58,37 +83,40 @@ export function drawPedestrian(
   }
   const resolved = agentGlyph(pedestrian.stateType, pedestrian.kind);
   const glyph = blend.detail === 'aggregate' ? { ...resolved, shape: 'dot' as const } : resolved;
-  // Traders are the economy's couriers — keep them readable at every zoom.
-  ctx.globalAlpha *= pedestrian.kind === 'trader' ? Math.max(0.95, blend.opacity) : blend.opacity;
+  const radiusScale = pedestrianRadiusScale(pedestrian.kind, blend);
+  const finalRadius = style.radius * glyph.radiusScale * radiusScale;
+  ctx.globalAlpha *= pedestrianOpacity(pedestrian.kind, blend);
   if (pedestrian.kind === 'trader') {
     ctx.strokeStyle = STATION_FILL;
-    ctx.lineWidth = Math.max(1, style.radius * 0.5);
+    ctx.lineWidth = Math.max(1, style.radius * 0.55);
     ctx.beginPath();
-    ctx.arc(0, 0, style.radius * glyph.radiusScale, 0, Math.PI * 2);
+    ctx.arc(0, 0, traderHaloRadius(finalRadius, style.radius), 0, Math.PI * 2);
     ctx.stroke();
   }
   if (glyph.shape === 'ring') {
     ctx.strokeStyle = glyph.color;
     ctx.lineWidth = Math.max(1.2, style.radius * 0.45);
     ctx.beginPath();
-    ctx.arc(0, 0, style.radius * glyph.radiusScale, 0, Math.PI * 2);
+    ctx.arc(0, 0, finalRadius, 0, Math.PI * 2);
     ctx.stroke();
   } else {
     ctx.fillStyle = glyph.color;
     ctx.beginPath();
-    ctx.arc(0, 0, style.radius * glyph.radiusScale, 0, Math.PI * 2);
+    ctx.arc(0, 0, finalRadius, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
 }
 
-export function drawCar(state: MinimalMapRendererState, car: BackendCar, selected: boolean): void {
+export function drawCar(state: MinimalMapRendererState, car: BackendCar, selected: boolean, blend: LayerBlend): void {
+  if (blend.opacity <= 0) return;
   const { ctx, camera, tileSize } = state;
   const point = carVisualWorldPoint(car, camera.scale, tileSize);
   const currentPoint = iso(state, car.path[0]);
   const nextPoint = iso(state, car.path[1] ?? car.path[0]);
   const style = carRenderStyle(currentPoint, nextPoint, camera.scale);
   ctx.save();
+  ctx.globalAlpha *= blend.opacity;
   ctx.translate(point.x, point.y);
   if (selected) {
     ctx.globalAlpha = 0.94;

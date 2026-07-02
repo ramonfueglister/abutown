@@ -61,8 +61,8 @@ fn populated_flow_field_cache() -> sim_core::routing::FlowFieldCache {
 }
 
 fn expected_abutopia_chunks() -> Vec<ChunkCoordDto> {
-    (0..=3)
-        .flat_map(|y| (0..=6).map(move |x| ChunkCoordDto { x, y }))
+    (0..=1)
+        .flat_map(|y| (0..=2).map(move |x| ChunkCoordDto { x, y }))
         .collect()
 }
 
@@ -86,7 +86,7 @@ fn simulation_runtime_holds_world_directly() {
 }
 
 #[test]
-fn runtime_materializes_base_world_instead_of_demo_chunks() {
+fn runtime_materializes_base_world_chunks() {
     let fixture_root = workspace_root().join("data/worlds/abutopia");
     let runtime = SimulationRuntime::new_from_base_world_dir(&fixture_root)
         .expect("base world fixture must load");
@@ -171,8 +171,8 @@ fn base_world_fixture_with_car_route() -> sim_core::base_world::BaseWorldBundle 
         .push(sim_core::base_world::TransportPath {
             id: "arterial:test".to_string(),
             points: vec![
-                sim_core::city_network::NetworkPoint { x: 106.0, y: 64.0 },
-                sim_core::city_network::NetworkPoint { x: 117.0, y: 64.0 },
+                sim_core::city_network::NetworkPoint { x: 13.0, y: 24.0 },
+                sim_core::city_network::NetworkPoint { x: 66.0, y: 24.0 },
             ],
         });
     base_world
@@ -263,7 +263,7 @@ fn mobility_snapshot_base_world_match_rejects_stale_pedestrian_polyline() {
 
     authored_snap.link_polylines.insert(
         "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
+        vec![(40.0, 24.0), (13.0, 3.0)],
     );
 
     assert!(!mobility_snapshot_matches_base_world(
@@ -376,7 +376,7 @@ fn runtime_installs_hpa_index_for_seeded_graph() {
     let hpa = runtime.world.resource::<sim_core::routing::HpaIndex>();
 
     assert!(hpa.cluster_count() > 0);
-    assert_eq!(hpa.portal_count(), 0);
+    assert!(hpa.portal_count() > 0);
     assert!(hpa.cluster_count() <= graph.node_count());
 }
 
@@ -442,20 +442,20 @@ fn runtime_can_find_seeded_walk_path() {
 }
 
 #[test]
-fn runtime_uses_sidewalk_footway_geometry_from_base_world() {
+fn runtime_uses_edge_footway_geometry_from_base_world() {
     let network = base_world_fixture().to_city_network();
     let runtime = SimulationRuntime::new_from_network(&network);
     let graph = runtime.world.resource::<sim_core::routing::Graph>();
     let edge = graph.edge(
         graph
             .edge_by_legacy("link:walk:corridor:1")
-            .expect("south sidewalk footway exists"),
+            .expect("east edge footway exists"),
     );
 
     assert_eq!(edge.kind, sim_core::routing::EdgeKind::Footway);
-    assert_eq!(edge.polyline.first().copied(), Some((106.0, 64.51)));
-    assert_eq!(edge.polyline.last().copied(), Some((117.0, 64.51)));
-    assert!(edge.polyline.iter().all(|(_, y)| (*y - 64.0).abs() > 0.001));
+    assert_eq!(edge.polyline.first().copied(), Some((72.0, 8.0)));
+    assert_eq!(edge.polyline.last().copied(), Some((72.0, 40.0)));
+    assert!(edge.polyline.iter().all(|(x, _)| (*x - 72.0).abs() < 0.001));
 }
 
 #[test]
@@ -603,10 +603,9 @@ use sim_core::persistence::{
 /// resource and frozen at `home_market = 0` (unbound) — which then persisted and
 /// survived every restart. Economy attribution filters candidates by
 /// `observed_markets.contains(home_market)`, and 0 is never a market id, so the
-/// on-map economy reported `routed = 0` forever even though the corridor
-/// pedestrians stand on market 9002's tile. The fresh `new()` path already
-/// seeded before spawning, which is why this only reproduced live (and why the
-/// economy tests, which spawn fresh citizens after seeding, masked it).
+/// on-map economy reported `routed = 0` forever even though pedestrians were on
+/// authored city corridors. The fresh `new()` path already seeded before
+/// spawning, which is why this only reproduced live.
 #[tokio::test]
 async fn hydrate_binds_seed_pedestrians_to_their_home_market() {
     let base_world = base_world_fixture();
@@ -640,17 +639,12 @@ async fn hydrate_binds_seed_pedestrians_to_their_home_market() {
         home_markets.iter().filter(|&&m| m == 0).count(),
         home_markets.len(),
     );
-    // Every `corridor:sidewalk:south` pedestrian (x 106..=115 at y 64.51) is
-    // nearest to market 9002 ([111.5, 64.51]); 9001/9003/9004 are far away.
+    let mut distinct: Vec<u32> = home_markets.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
     assert!(
-        home_markets.iter().all(|&m| m == 9002),
-        "corridor pedestrians must bind to market 9002; distinct home markets seen: {:?}",
-        {
-            let mut distinct: Vec<u32> = home_markets.clone();
-            distinct.sort_unstable();
-            distinct.dedup();
-            distinct
-        },
+        distinct.contains(&9002) && distinct.len() >= 3,
+        "compact corridor pedestrians must distribute across authored city markets; seen: {distinct:?}",
     );
 }
 
@@ -1275,17 +1269,20 @@ async fn hydrate_restores_activity_waypoints_for_persisted_base_world_mobility()
         .world
         .resource::<sim_core::mobility::resources::ActivityWaypoints>();
     assert_eq!(
-        waypoints.0.get("activity:home").copied(),
-        Some((106.0, 64.51))
+        waypoints.0.get("activity:spawn:ped:north:home").copied(),
+        Some((8.0, 8.0))
     );
     assert_eq!(
-        waypoints.0.get("activity:destination").copied(),
-        Some((117.0, 64.51))
+        waypoints
+            .0
+            .get("activity:spawn:ped:north:destination")
+            .copied(),
+        Some((72.0, 8.0))
     );
 }
 
 #[tokio::test]
-async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_sidewalk_graph() {
+async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_edge_graph() {
     use sim_core::mobility::api::tick_mobility as api_tick;
     use sim_core::mobility::{extract_from_world, seed};
 
@@ -1301,7 +1298,7 @@ async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_sidewalk_graph() {
     );
     authored_snap.link_polylines.insert(
         "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
+        vec![(40.0, 24.0), (13.0, 3.0)],
     );
     assert!(!mobility_snapshot_matches_base_world(
         &authored_snap,
@@ -1331,29 +1328,29 @@ async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_sidewalk_graph() {
 
     assert_eq!(runtime.mobility_tick_for_test(), 0);
     let graph = runtime.world.resource::<sim_core::routing::Graph>();
-    let south_sidewalk = graph.edge(
+    let east_edge = graph.edge(
         graph
             .edge_by_legacy("link:walk:corridor:1")
-            .expect("current south sidewalk footway is reseeded"),
+            .expect("current east edge footway is reseeded"),
     );
     assert_eq!(
-        south_sidewalk.polyline.first().copied(),
-        Some((106.0, 64.51))
+        east_edge.polyline.first().copied(),
+        Some((72.0, 8.0))
     );
     assert_eq!(
-        south_sidewalk.polyline.last().copied(),
-        Some((117.0, 64.51))
+        east_edge.polyline.last().copied(),
+        Some((72.0, 40.0))
     );
     assert!(
-        south_sidewalk
+        east_edge
             .polyline
             .iter()
-            .all(|(_, y)| (*y - 64.51).abs() < 0.001)
+            .all(|(x, _)| (*x - 72.0).abs() < 0.001)
     );
     let restored_snap = extract_from_world(&runtime.world);
     assert_eq!(
         restored_snap.link_polylines.get("link:walk:corridor:1"),
-        Some(&south_sidewalk.polyline)
+        Some(&east_edge.polyline)
     );
 }
 
@@ -1371,7 +1368,7 @@ async fn hydrate_rejects_routing_snapshot_with_demoted_pedestrians_and_reseeds()
         .remove(&AgentId("agent:walk:0".to_string()));
     authored_snap.link_polylines.insert(
         "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
+        vec![(40.0, 24.0), (13.0, 3.0)],
     );
     authored_snap.tick = 17;
     assert!(!mobility_snapshot_matches_base_world(
@@ -1402,29 +1399,29 @@ async fn hydrate_rejects_routing_snapshot_with_demoted_pedestrians_and_reseeds()
 
     assert_eq!(runtime.mobility_tick_for_test(), 0);
     let graph = runtime.world.resource::<sim_core::routing::Graph>();
-    let south_sidewalk = graph.edge(
+    let east_edge = graph.edge(
         graph
             .edge_by_legacy("link:walk:corridor:1")
-            .expect("current south sidewalk footway is reseeded"),
+            .expect("current east edge footway is reseeded"),
     );
     assert_eq!(
-        south_sidewalk.polyline.first().copied(),
-        Some((106.0, 64.51))
+        east_edge.polyline.first().copied(),
+        Some((72.0, 8.0))
     );
     assert_eq!(
-        south_sidewalk.polyline.last().copied(),
-        Some((117.0, 64.51))
+        east_edge.polyline.last().copied(),
+        Some((72.0, 40.0))
     );
     assert!(
-        south_sidewalk
+        east_edge
             .polyline
             .iter()
-            .all(|(_, y)| (*y - 64.51).abs() < 0.001)
+            .all(|(x, _)| (*x - 72.0).abs() < 0.001)
     );
     let restored_snap = extract_from_world(&runtime.world);
     assert_eq!(
         restored_snap.link_polylines.get("link:walk:corridor:1"),
-        Some(&south_sidewalk.polyline)
+        Some(&east_edge.polyline)
     );
 }
 
@@ -1492,7 +1489,7 @@ async fn hydrate_ignores_snapshot_with_stale_pedestrian_polyline_for_abutopia() 
     let mut authored_snap = extract_from_world(&authored);
     authored_snap.link_polylines.insert(
         "link:walk:corridor:1".to_string(),
-        vec![(2.0, 3.0), (13.0, 3.0)],
+        vec![(40.0, 24.0), (13.0, 3.0)],
     );
 
     let mut mobility_store = InMemoryMobilitySnapshotStore::default();
@@ -1524,7 +1521,7 @@ async fn hydrate_ignores_snapshot_with_stale_pedestrian_polyline_for_abutopia() 
         .expect("runtime reseeds the authored pedestrian");
     assert!(matches!(
         agent.state,
-        AgentMobilityState::Walking { ref link_id, .. } if link_id == "link:walk:corridor:1"
+        AgentMobilityState::Walking { ref link_id, .. } if link_id == "link:walk:corridor:0"
     ));
 
     let entity = *runtime
@@ -1538,7 +1535,7 @@ async fn hydrate_ignores_snapshot_with_stale_pedestrian_polyline_for_abutopia() 
         .entity(entity)
         .get::<Position>()
         .expect("reseeded pedestrian has a position");
-    assert!((position.y - 64.51).abs() < 0.001);
+    assert!((position.y - 8.0).abs() < 0.001);
 }
 
 #[test]
@@ -1619,10 +1616,10 @@ fn runtime_sets_population_carrying_capacity_from_base_world_seed_count() {
 }
 
 #[tokio::test]
-async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
+async fn hydrate_with_empty_economy_store_bootstraps_seed_economy() {
     // A world with no persisted economy (brand-new, or created before the economy
-    // existed) gets the demo economy bootstrapped on hydrate — this is what makes
-    // the flow-demo markets visible in the always-hydrated live server.
+    // existed) gets the seed economy bootstrapped on hydrate; those markets must
+    // be visible in the always-hydrated live server.
     let base_world = base_world_fixture();
     let (runtime, _, _, _) = SimulationRuntime::hydrate_from_stores(
         Box::new(InMemoryWorldEventStore::default()),
@@ -1637,7 +1634,7 @@ async fn hydrate_with_empty_economy_store_bootstraps_demo_economy() {
     assert_eq!(
         snap.markets.len(),
         4,
-        "demo markets bootstrapped on empty hydrate (2 original + 2 flow-demo)"
+        "seed markets bootstrapped on empty hydrate"
     );
 }
 
@@ -1665,7 +1662,7 @@ fn mobility_snapshot_base_world_match_accepts_demographic_drift() {
     let mut born = sim_core::mobility::AgentRecord::new(
         born_id.clone(),
         AgentMobilityState::AtActivity {
-            activity_id: "activity:home".to_string(),
+            activity_id: "activity:spawn:ped:north:home".to_string(),
         },
         Vec::new(),
         1.0,
@@ -1677,7 +1674,7 @@ fn mobility_snapshot_base_world_match_accepts_demographic_drift() {
         .get_mut(&AgentId("agent:walk:1".to_string()))
         .expect("seeded agent exists")
         .state = AgentMobilityState::AtActivity {
-        activity_id: "activity:destination".to_string(),
+        activity_id: "activity:spawn:ped:north:destination".to_string(),
     };
 
     assert!(
@@ -1754,7 +1751,7 @@ async fn hydrate_from_stores_resumes_demographically_drifted_snapshot() {
         sim_core::mobility::AgentRecord::new(
             born_id,
             AgentMobilityState::AtActivity {
-                activity_id: "activity:home".to_string(),
+                activity_id: "activity:spawn:ped:north:home".to_string(),
             },
             Vec::new(),
             1.0,

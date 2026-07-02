@@ -11,9 +11,9 @@
 // 3. Render: after zooming out so the near-origin corridor is observed, at
 //    least one `trader:`-prefixed mobility agent materializes, and at least one
 //    of them is the WOOD shipment trader: it first appears near market 9003
-//    [16,48] and walks TOWARD market 9001 [2,3] (distance-to-9001 decreases).
+//    [8,40] and walks TOWARD market 9001 [8,8] (distance-to-9001 decreases).
 // 4. Inspector: clicking market 9001's tile selects it (selectedMarketCoord ==
-//    {2,3}); a screenshot of the inspector panel (with the producer rows
+//    {8,8}); a screenshot of the inspector panel (with the producer rows
 //    `recipe: 10 WOOD → 10 TOOLS`, `cash/target=...`, `max bid=...`) is saved
 //    for eyeballing.
 //
@@ -51,8 +51,8 @@ const SCREENSHOT_PATH = process.env.SCREENSHOT_PATH ?? '/tmp/smoke-production-ch
 // Chain topology under test (data/worlds/abutopia/layers/markets.json).
 const PRODUCER = { actorId: 8031, marketId: 9001, inGood: 2, outGood: 4, inQty: 10, outQty: 10 };
 const WOOD_FLOW = { src: 9003, dst: 9001, goodId: 2 };
-const MARKET_9001 = { x: 2, y: 3 };
-const MARKET_9003 = { x: 16, y: 48 };
+const MARKET_9001 = { x: 8, y: 8 };
+const MARKET_9003 = { x: 8, y: 40 };
 
 const killProcessGroup = process.platform !== 'win32';
 let backendChild = null;
@@ -290,7 +290,7 @@ function drainFrames() {
   }
 }
 
-// A WOOD shipment trader spawns near 9003 [16,48] and walks toward 9001 [2,3]
+// A WOOD shipment trader spawns near 9003 [8,40] and walks toward 9001 [8,8]
 // (distance to 9001 strictly shrinks). The coexisting 9003→9004 FOOD trader also
 // spawns at 9003 but walks AWAY from 9001, and 9001→9002 traders spawn at 9001 —
 // neither satisfies both conditions.
