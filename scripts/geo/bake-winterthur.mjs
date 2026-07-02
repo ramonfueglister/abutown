@@ -55,7 +55,13 @@ for (const el of osmRaw.elements ?? []) {
 }
 console.log(`OSM building polygons: ${osmBuildings.length}`);
 
-const buildings = transformBuildings({ walls, roofs, osmBuildings, projector });
+const footprintStats = { traced: 0, fallback: 0 };
+const buildings = transformBuildings({ walls, roofs, osmBuildings, projector, stats: footprintStats });
+console.log(`footprints: ${footprintStats.traced} traced, ${footprintStats.fallback} fallback`);
+if (footprintStats.fallback / buildings.length > 0.25)
+  throw new Error(
+    `bake: ${footprintStats.fallback}/${buildings.length} buildings needed a footprint fallback — trace is broken`,
+  );
 const { roads, rails } = transformRoads({
   osmRoads: JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8')),
   projector,

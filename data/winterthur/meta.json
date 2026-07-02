@@ -32,10 +32,10 @@
  "counts": {
   "buildings": 846,
   "kswBuildings": 26,
-  "named": 72,
+  "named": 69,
   "roads": 2057,
   "rails": 239,
-  "triangles": 88625,
+  "triangles": 87315,
   "greens": 119,
   "waterAreas": 5,
   "rivers": 5,

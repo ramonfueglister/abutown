@@ -7,6 +7,7 @@
 // triangulatable geometry — a bake must never silently drop shape.
 import { triangulatePlanarPolygon } from './triangulate.mjs';
 import { nameForFootprint, ringCentroid, roadStyle } from './join.mjs';
+import { footprintValid, roofOutlineFootprint } from './style.mjs';
 
 export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anchor
 
@@ -166,7 +167,15 @@ function extrudeWalls(footprint, eaveH) {
 // flattened to 2D instead. When absent (unit tests), the footprint falls back
 // to the largest floor/wall ring. Footprints never feed ground normalization.
 /** @returns {BakedBuilding[]} */
-export function transformBuildings({ floors, walls, roofs, osmBuildings, projector, footprints = null }) {
+export function transformBuildings({
+  floors,
+  walls,
+  roofs,
+  osmBuildings,
+  projector,
+  footprints = null,
+  stats = { traced: 0, fallback: 0 },
+}) {
   const byUuid = new Map();
   collectByUuid(floors ?? { features: [] }, projector, byUuid, 'floors');
   collectByUuid(walls, projector, byUuid, 'walls');
@@ -205,6 +214,18 @@ export function transformBuildings({ floors, walls, roofs, osmBuildings, project
       if (candidateRings.length === 0) continue; // no footprint source at all
       const footprint3d = candidateRings.reduce((best, r) => (r.length > best.length ? r : best), candidateRings[0]);
       footprint = footprint3d.map(([x, , z]) => [Math.round(x * 100) / 100, Math.round(z * 100) / 100]);
+    }
+
+    // harden: a footprint that doesn't carry its roof is worse than the
+    // roof's own projected outline (real swisstopo geometry either way)
+    if (!footprintValid(footprint, b.roofs)) {
+      const hull = roofOutlineFootprint(b.roofs.length ? b.roofs : b.walls);
+      if (hull.length >= 3) {
+        footprint = hull.map(([x, z]) => [Math.round(x * 100) / 100, Math.round(z * 100) / 100]);
+        stats.fallback += 1;
+      }
+    } else {
+      stats.traced += 1;
     }
 
     const eaveH = Math.max(eaveY - groundY, 0.1); // clamp: never a zero/neg prism
