@@ -10,6 +10,12 @@ import { nameForFootprint, ringCentroid, roadStyle } from './join.mjs';
 
 export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anchor
 
+/**
+ * @typedef {{ pos: number[], idx: number[] }} BakedMesh
+ * @typedef {{ id: string, name?: string, usage?: string, zone: 'ksw'|'city',
+ *   footprint: number[][], height: number, wall: BakedMesh, roof: BakedMesh }} BakedBuilding
+ */
+
 function* ringsOf(geometry) {
   // MultiPolygon: [poly][ring][pt]; we take every outer ring (holes are
   // rare in LoD2 surfaces and negligible at clay scale)
@@ -80,7 +86,8 @@ function extrudeWalls(footprint, eaveH) {
 // GeoJSON-incompatible 3D solid so the footprint comes from Building_solid
 // flattened to 2D instead. When absent (unit tests), the footprint falls back
 // to the largest floor/wall ring. Footprints never feed ground normalization.
-export function transformBuildings({ floors, walls, roofs, osmBuildings, projector, footprints }) {
+/** @returns {BakedBuilding[]} */
+export function transformBuildings({ floors, walls, roofs, osmBuildings, projector, footprints = null }) {
   const byUuid = new Map();
   collectByUuid(floors ?? { features: [] }, projector, byUuid, 'floors');
   collectByUuid(walls, projector, byUuid, 'walls');
