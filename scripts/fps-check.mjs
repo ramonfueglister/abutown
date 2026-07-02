@@ -2,9 +2,9 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
-const HOST='127.0.0.1', PORT=5175;
+const HOST='127.0.0.1', PORT=5186;
 const portOpen=(h,p)=>new Promise(r=>{const s=net.createConnection({host:h,port:p},()=>{s.end();r(true)});s.on('error',()=>r(false));s.setTimeout(800,()=>{s.destroy();r(false)})});
-const dev=spawn('npm',['run','dev'],{cwd:new URL('..',import.meta.url).pathname,stdio:'ignore',detached:true});
+const dev=spawn('npm',['run','dev','--','--port','5186','--strictPort'],{cwd:new URL('..',import.meta.url).pathname,stdio:'ignore',detached:true});
 process.on('exit',()=>{try{process.kill(-dev.pid,'SIGKILL')}catch{}});
 const t0=Date.now(); while(Date.now()-t0<30000 && !(await portOpen(HOST,PORT))) await new Promise(r=>setTimeout(r,200));
 const browser=await chromium.launch({headless:true,args:['--enable-unsafe-webgpu','--enable-gpu','--use-angle=metal']});

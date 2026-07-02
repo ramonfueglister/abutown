@@ -8,7 +8,7 @@ import * as THREE from 'three/webgpu';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { clay, kswPalette, kswScene, palette, radii } from '../designTokens';
 import type { FloorPlan, Room, WallSide } from './floorPlan';
-import { box, buildPerson, buildProp, glassMat } from './props';
+import { box, buildProp, glassMat } from './props';
 
 export type WallOpening = { center: number; width: number; kind: 'door' | 'window' };
 
@@ -254,11 +254,10 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
       }
     }
     for (const p of room.props) group.add(withFloorLift(buildProp(p)));
-    for (const p of room.people) group.add(withFloorLift(buildPerson(p)));
   }
   for (const p of plan.corridorProps) group.add(withFloorLift(buildProp(p)));
   for (const p of plan.outdoorProps) group.add(buildProp(p));
-  for (const p of plan.outdoorPeople) group.add(buildPerson(p));
+  // people are NOT built here: main.ts spawns them as wandering agents
 
   // roofs: one shared transparent clay material; slight per-room height
   // steps so overlapping lids never share a plane.

@@ -32,12 +32,20 @@ import { applyDrag, applyZoom, rigFromLookAt, rigPosition, roofFade, type Camera
 import { buildHospital } from './building';
 import { kswPlan } from './floorPlan';
 import { buildPerson } from './props';
+import { buildNav } from './nav';
+import { createAgent, updateAgent, type Agent, type AgentSpec } from './agents';
 
 declare global {
   interface Window {
     __LOOK_READY?: boolean;
     __LOOK_BACKEND?: string;
-    __KSW?: { radius: number; yaw: number; pitch: number; roofFade: number };
+    __KSW?: {
+      radius: number;
+      yaw: number;
+      pitch: number;
+      roofFade: number;
+      agents: { total: number; walking: number; samples: Array<[number, number]> };
+    };
   }
 }
 
@@ -300,32 +308,50 @@ async function boot(): Promise<void> {
   scene.add(hospital);
   roofs.setFade(roofFade(rig.radius, kswCamera));
 
-  // collect animated bits: bean people breathe, ambulance light pulses,
-  // helicopter rotors idle-spin
-  const beans: THREE.Group[] = [];
+  // collect animated bits: ambulance light pulses, helicopter rotor idles
   const blinkers: THREE.Mesh[] = [];
   const rotors: THREE.Object3D[] = [];
   hospital.traverse((o) => {
     if (o.userData.blink) blinkers.push(o as THREE.Mesh);
     if (o.userData.rotor) rotors.push(o);
-    const g = o as THREE.Group;
-    if (g.children?.some((c) => (c as THREE.Mesh).geometry?.type === 'CapsuleGeometry' && c.position.y === 0.62)) {
-      beans.push(g);
-    }
   });
-  const beanBaseScale = beans.map((b) => b.scale.y);
 
-  // corridor walkers: sine patrols from the plan, waddling as they go
-  const inCorridor = (x: number, z: number): boolean =>
-    kswPlan.corridors.some((c) => Math.abs(x - c.x) <= c.w / 2 && Math.abs(z - c.z) <= c.d / 2);
-  const walkers = kswPlan.walkers.map((w) => {
-    const x0 = w.axis === 'x' ? w.from : w.fixed;
-    const z0 = w.axis === 'x' ? w.fixed : w.from;
-    const g = buildPerson({ role: w.role, x: x0, z: z0, yaw: 0 });
-    g.position.y = inCorridor(x0, z0) ? 0.14 : 0; // corridor floor vs plate
+  // ── everyone is an agent: dwell -> pick a destination -> walk the nav
+  // graph (room -> door -> corridor -> target) -> dwell. Deterministic.
+  const nav = buildNav(kswPlan);
+  const inBuilding = (x: number, z: number): boolean =>
+    Math.abs(x - kswPlan.building.x) < kswPlan.building.w / 2 &&
+    Math.abs(z - kswPlan.building.z) < kswPlan.building.d / 2;
+  type LiveAgent = { agent: Agent; g: THREE.Group; baseScaleY: number; idx: number };
+  const liveAgents: LiveAgent[] = [];
+  let seedCounter = 1;
+  const spawn = (spec: Omit<AgentSpec, 'seed'>, yaw: number): void => {
+    const agent = createAgent({ ...spec, seed: seedCounter++ });
+    const g = buildPerson({ role: spec.role, x: spec.home[0], z: spec.home[1], yaw });
+    g.position.y = inBuilding(spec.home[0], spec.home[1]) ? 0.14 : 0;
+    agent.yaw = yaw;
     hospital.add(g);
-    return { w, g };
-  });
+    liveAgents.push({ agent, g, baseScaleY: g.scale.y, idx: liveAgents.length });
+  };
+  for (const room of kswPlan.rooms) {
+    for (const p of room.people) {
+      spawn({ role: p.role, home: [p.x, p.z], homeRoomId: room.id, kind: 'resident', stationary: p.stationary }, p.yaw);
+    }
+  }
+  for (const p of kswPlan.outdoorPeople) {
+    spawn({ role: p.role, home: [p.x, p.z], homeRoomId: null, kind: 'outdoor' }, p.yaw);
+  }
+  for (const w of kswPlan.walkers) {
+    const home: [number, number] = w.axis === 'x' ? [w.from, w.fixed] : [w.fixed, w.from];
+    const kind = inBuilding(home[0], home[1]) ? 'rounds' : 'outdoor';
+    spawn({ role: w.role, home, homeRoomId: null, kind }, 0);
+  }
+  const lerpAngle = (a: number, b: number, t: number): number => {
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+  };
 
   // Edge mist ring around the plate rim
   const mistMat = new THREE.MeshBasicMaterial({
@@ -461,9 +487,12 @@ async function boot(): Promise<void> {
   postProcessing.outputNode = film(graded, float(post.filmGrain));
 
   let frameCount = 0;
+  let prevT = 0;
   const clock = new THREE.Clock();
   function animate(): void {
     const t = clock.getElapsedTime();
+    const dt = Math.min(Math.max(t - prevT, 0), 0.1);
+    prevT = t;
     applyRig();
     const fade = roofFade(rig.radius, kswCamera);
     roofs.setFade(fade);
@@ -471,25 +500,33 @@ async function boot(): Promise<void> {
     // edge mist is a close-up treatment; from the overview it would read as
     // separate discs, so it thins out as the camera pulls back
     mistMat.opacity = preset.mistOpacity * (1 - fade * 0.75);
-    window.__KSW = { radius: rig.radius, yaw: rig.yaw, pitch: rig.pitch, roofFade: fade };
-    for (let i = 0; i < beans.length; i++) {
-      beans[i].scale.y = beanBaseScale[i] * (1 + Math.sin(t * 2.2 + i * 0.9) * 0.012);
-    }
+    window.__KSW = {
+      radius: rig.radius,
+      yaw: rig.yaw,
+      pitch: rig.pitch,
+      roofFade: fade,
+      agents: {
+        total: liveAgents.length,
+        walking: liveAgents.filter((la) => la.agent.phase === 'walk').length,
+        samples: liveAgents.slice(0, 12).map((la) => [la.agent.pos[0], la.agent.pos[1]]),
+      },
+    };
     for (const b of blinkers) b.visible = Math.sin(t * 6) > -0.2;
     for (const r of rotors) r.rotation.y = t * 1.4;
-    for (const { w, g } of walkers) {
-      const s = 0.5 + 0.5 * Math.sin(w.speed * t + w.phase);
-      const pos = w.from + (w.to - w.from) * s;
-      const dir = Math.sign(Math.cos(w.speed * t + w.phase) * (w.to - w.from)) || 1;
-      if (w.axis === 'x') {
-        g.position.x = pos;
-        g.rotation.y = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    for (const la of liveAgents) {
+      updateAgent(la.agent, dt, nav);
+      la.g.position.x = la.agent.pos[0];
+      la.g.position.z = la.agent.pos[1];
+      const targetY = inBuilding(la.agent.pos[0], la.agent.pos[1]) ? 0.14 : 0;
+      la.g.position.y += (targetY - la.g.position.y) * Math.min(1, dt * 10);
+      if (la.agent.phase === 'walk') {
+        la.g.rotation.y = lerpAngle(la.g.rotation.y, la.agent.yaw, Math.min(1, dt * 9));
+        la.g.rotation.z = Math.sin(t * 9 + la.idx) * 0.05;
+        la.g.scale.y = la.baseScaleY * (1 + Math.abs(Math.sin(t * 9 + la.idx)) * 0.025);
       } else {
-        g.position.z = pos;
-        g.rotation.y = dir > 0 ? 0 : Math.PI;
+        la.g.rotation.z *= Math.max(0, 1 - dt * 6);
+        la.g.scale.y = la.baseScaleY * (1 + Math.sin(t * 2.2 + la.idx * 0.9) * 0.012);
       }
-      g.rotation.z = Math.sin(t * 7 + w.phase) * 0.045; // waddle
-      g.scale.y = 1 + Math.abs(Math.sin(t * 7 + w.phase)) * 0.02;
     }
     driftU.value = t * cloudCfg.drift;
     frameCount++;

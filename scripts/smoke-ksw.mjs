@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 
 const HOST = '127.0.0.1';
-const PORT = 5175;
+const PORT = 5186;
 
 function portOpen(host, port) {
   return new Promise((resolve) => {
@@ -35,7 +35,7 @@ async function waitForPort(timeoutMs) {
   return false;
 }
 
-const dev = spawn('npm', ['run', 'dev'], {
+const dev = spawn('npm', ['run', 'dev', '--', '--port', '5186', '--strictPort'], {
   cwd: new URL('..', import.meta.url).pathname,
   env: { ...process.env },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -123,6 +123,15 @@ try {
   await page.waitForTimeout(150);
   const s4 = await state();
   check('hover without button held does not rotate', Math.abs(s4.yaw - s3.yaw) < 1e-6, `${s3.yaw.toFixed(3)} vs ${s4.yaw.toFixed(3)}`);
+
+  // people actually move through the hospital
+  const a0 = s4.agents;
+  check('a full crowd is spawned', a0.total >= 60, `total=${a0.total}`);
+  await page.waitForTimeout(6000);
+  const a1 = (await state()).agents;
+  const moved = a0.samples.filter((p, i) => Math.hypot(p[0] - a1.samples[i][0], p[1] - a1.samples[i][1]) > 0.3).length;
+  check('people walk around (sampled positions change)', moved >= 2, `${moved}/12 samples moved`);
+  check('someone is walking at any given moment', a0.walking + a1.walking > 0, `walking=${a0.walking}->${a1.walking}`);
 
   if (errors.length) {
     console.error('--- page errors ---');

@@ -18,7 +18,8 @@ export type PersonRole =
   | 'labtech'
   | 'paramedic';
 
-export type PersonPlacement = { role: PersonRole; x: number; z: number; yaw: number };
+// stationary: pinned to the spot (operating surgeons, patients in treatment chairs)
+export type PersonPlacement = { role: PersonRole; x: number; z: number; yaw: number; stationary?: boolean };
 
 export type WallSide = 'n' | 's' | 'e' | 'w';
 
@@ -89,8 +90,8 @@ export const kswPlan: FloorPlan = {
         { kind: 'scrubSink', x: -23.3, z: -13.2, rotY: -Math.PI / 2 },
       ],
       people: [
-        { role: 'surgeon', x: -26.9, z: -16.3, yaw: 1.55 },
-        { role: 'surgeon', x: -25.1, z: -16.5, yaw: -1.55 },
+        { role: 'surgeon', x: -26.9, z: -16.3, yaw: 1.55, stationary: true },
+        { role: 'surgeon', x: -25.1, z: -16.5, yaw: -1.55, stationary: true },
         { role: 'nurse', x: -24.6, z: -15.1, yaw: -2.4 },
       ],
     },
@@ -109,7 +110,7 @@ export const kswPlan: FloorPlan = {
         { kind: 'careCart', x: -15.7, z: -14.4, rotY: 0.4 },
       ],
       people: [
-        { role: 'surgeon', x: -18.1, z: -17.6, yaw: 0.0 },
+        { role: 'surgeon', x: -18.1, z: -17.6, yaw: 0.0, stationary: true },
         { role: 'nurse', x: -16.6, z: -16.1, yaw: -1.3 },
       ],
     },
@@ -400,7 +401,7 @@ export const kswPlan: FloorPlan = {
       ],
       people: [
         { role: 'nurse', x: -15.6, z: 13.2, yaw: 1.2 },
-        { role: 'patient', x: -14.3, z: 12.0, yaw: 3.1 },
+        { role: 'patient', x: -14.3, z: 12.0, yaw: 3.1, stationary: true },
       ],
     },
     {
@@ -479,8 +480,8 @@ export const kswPlan: FloorPlan = {
       ],
       people: [
         { role: 'nurse', x: 10.2, z: 10.4, yaw: 2.9 },
-        { role: 'patient', x: 8.8, z: 12.2, yaw: 0.9 },
-        { role: 'patient', x: 12.0, z: 12.2, yaw: -0.6 },
+        { role: 'patient', x: 8.8, z: 12.2, yaw: 0.9, stationary: true },
+        { role: 'patient', x: 12.0, z: 12.2, yaw: -0.6, stationary: true },
       ],
     },
     {
@@ -500,7 +501,7 @@ export const kswPlan: FloorPlan = {
       ],
       people: [
         { role: 'nurse', x: 15.7, z: 10.4, yaw: 3.0 },
-        { role: 'patient', x: 15.9, z: 13.0, yaw: 0.0 },
+        { role: 'patient', x: 15.9, z: 13.0, yaw: 0.0, stationary: true },
       ],
     },
     {
@@ -539,8 +540,8 @@ export const kswPlan: FloorPlan = {
         { kind: 'plant', x: 23.6, z: 15.4 },
       ],
       people: [
-        { role: 'visitor', x: 24.0, z: 12.9, yaw: 1.6 },
-        { role: 'doctor', x: 27.4, z: 13.0, yaw: 1.5 },
+        { role: 'visitor', x: 24.0, z: 12.9, yaw: 1.6, stationary: true },
+        { role: 'doctor', x: 27.4, z: 13.0, yaw: 1.5, stationary: true },
         { role: 'child', x: 25.7, z: 15.3, yaw: 1.6 },
         { role: 'visitor', x: 26.4, z: 10.4, yaw: 3.1 },
       ],

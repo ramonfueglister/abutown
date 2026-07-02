@@ -9,7 +9,7 @@ import net from 'node:net';
 import { mkdirSync } from 'node:fs';
 
 const HOST = '127.0.0.1';
-const PORT = 5175;
+const PORT = 5186;
 const NAME = process.argv[2] ?? 'overview-morning';
 const PRESET = process.argv[3] ?? 'morning';
 const CAM = process.argv[4] ?? 'overview';
@@ -38,7 +38,7 @@ async function waitForPort(timeoutMs) {
   return false;
 }
 
-const dev = spawn('npm', ['run', 'dev'], {
+const dev = spawn('npm', ['run', 'dev', '--', '--port', '5186', '--strictPort'], {
   cwd: new URL('..', import.meta.url).pathname,
   env: { ...process.env },
   stdio: ['ignore', 'pipe', 'pipe'],
