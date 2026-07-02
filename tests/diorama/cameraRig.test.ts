@@ -99,8 +99,11 @@ describe('applyDrag', () => {
 });
 
 describe('kswCamera contract (navigierbarer Zoom)', () => {
-  it('roofs are gone well before close-up: fade completes at radius >= 30', () => {
-    expect(kswCamera.roofFadeNear).toBeGreaterThanOrEqual(30);
+  it('roofs are gone well before close-up: fade completes at radius >= 55', () => {
+    expect(kswCamera.roofFadeNear).toBeGreaterThanOrEqual(55);
+  });
+  it('a screen-filling hospital view (radius 55) is fully roofless, not translucent', () => {
+    expect(roofFade(55, kswCamera)).toBe(0);
   });
   it('roofs are fully on at the overview framing (radius ~111)', () => {
     expect(roofFade(111, kswCamera)).toBe(1);

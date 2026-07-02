@@ -196,9 +196,11 @@ export const kswCamera = {
   dragSpeed: 0.005,
   pitchMin: 0.18,
   pitchMax: 1.25,
-  // roofs clear early so the interior is navigable long before close-up
-  roofFadeNear: 34,
-  roofFadeFar: 62,
+  // roofs are FULLY gone by the time a screen-filling chunk of the hospital
+  // is in view (radius <= 60) — no lingering translucency in the nav range
+  roofFadeNear: 60,
+  roofFadeFar: 95,
+  zoomSmoothing: 10, // 1/s — wheel zoom eases toward its target radius
   // AoE2-style edge scrolling: cursor at the viewport edge pans the target
   panMarginPx: 36,
   panSpeed: 30,

@@ -96,14 +96,14 @@ try {
   // zoom in: wheel with negative deltaY over the canvas
   await page.mouse.move(640, 400);
   for (let i = 0; i < 22; i++) await page.mouse.wheel(0, -400);
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(900); // zoom eases toward its target — let it settle
   const s1 = await state();
   check('wheel up zooms in (radius shrinks)', s1.radius < s0.radius - 5, `${s0.radius.toFixed(1)} -> ${s1.radius.toFixed(1)}`);
   check('zooming in fades the roofs out', s1.roofFade < 0.05, `fade=${s1.roofFade.toFixed(3)}`);
 
   // zoom out again
   for (let i = 0; i < 22; i++) await page.mouse.wheel(0, 400);
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(900);
   const s2 = await state();
   check('wheel down zooms back out', s2.radius > s1.radius + 5, `${s1.radius.toFixed(1)} -> ${s2.radius.toFixed(1)}`);
   check('zooming out brings the roofs back', s2.roofFade > 0.95, `fade=${s2.roofFade.toFixed(3)}`);
@@ -116,7 +116,8 @@ try {
   await page.waitForTimeout(250);
   const s3 = await state();
   check('left-drag rotates the camera (yaw changes)', Math.abs(s3.yaw - s2.yaw) > 0.2, `${s2.yaw.toFixed(2)} -> ${s3.yaw.toFixed(2)}`);
-  check('drag does not change the zoom radius', Math.abs(s3.radius - s2.radius) < 1e-6, `${s2.radius.toFixed(2)} vs ${s3.radius.toFixed(2)}`);
+  // eased zoom may still be settling by a hair — drag itself must not dolly
+  check('drag does not change the zoom radius', Math.abs(s3.radius - s2.radius) < 0.5, `${s2.radius.toFixed(2)} vs ${s3.radius.toFixed(2)}`);
 
   // moving without the button held must not rotate
   await page.mouse.move(400, 300, { steps: 6 });

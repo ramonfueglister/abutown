@@ -363,7 +363,10 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
     setFade(fade01: number) {
       currentFade = Math.min(Math.max(fade01, 0), 1);
       for (const m of fadeMats) m.opacity = currentFade;
-      const cast = currentFade > 0.5;
+      // shadows drop early in the fade (while the lid is still clearly
+      // visible) so the interior lights up smoothly instead of popping
+      // bright at the very end
+      const cast = currentFade > 0.6;
       const visible = currentFade > 0.02;
       for (const m of roofMeshes) {
         m.castShadow = cast;

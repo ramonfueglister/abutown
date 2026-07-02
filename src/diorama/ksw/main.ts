@@ -220,11 +220,14 @@ async function boot(): Promise<void> {
   };
   applyRig();
 
+  // the wheel only moves a target radius; animate() eases the rig toward it,
+  // so both the dolly and the roof fade glide instead of stepping
+  let zoomTarget = rig.radius;
   renderer.domElement.addEventListener(
     'wheel',
     (e: WheelEvent) => {
       e.preventDefault();
-      rig = applyZoom(rig, e.deltaY, kswCamera);
+      zoomTarget = applyZoom({ ...rig, radius: zoomTarget }, e.deltaY, kswCamera).radius;
     },
     { passive: false },
   );
@@ -505,6 +508,10 @@ async function boot(): Promise<void> {
     const t = clock.getElapsedTime();
     const dt = Math.min(Math.max(t - prevT, 0), 0.1);
     prevT = t;
+    if (Math.abs(zoomTarget - rig.radius) > 1e-4) {
+      const k = 1 - Math.exp(-dt * kswCamera.zoomSmoothing);
+      rig = { ...rig, radius: rig.radius + (zoomTarget - rig.radius) * k };
+    }
     if (mouse && !dragging) {
       const [vx, vz] = edgePanVelocity(mouse.x, mouse.y, window.innerWidth, window.innerHeight, rig.yaw, kswCamera);
       if (vx !== 0 || vz !== 0) {
