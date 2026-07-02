@@ -305,3 +305,14 @@ export const cameraContract = {
   position: [-9.2, 6.8, 10.8] as [number, number, number],
   target: [0.4, 0.9, -0.5] as [number, number, number],
 } as const;
+
+// Winterthur city context (geo slices S1/S2). Scale-extension values only —
+// the hero look tokens above are untouched; these govern the big city plate.
+export const kswCity = {
+  radiusMax: 1500, // wheel dolly ceiling to frame the whole Bahnhof↔ZAG span
+  domeRadius: 1800, // clouds/stars dome swallows the city plate
+  skyScale: 4000,
+  cameraFar: 12000,
+  roadY: 0.04, // road ribbons float just above the plate (no z-fight)
+  railY: 0.05,
+} as const;
