@@ -19,6 +19,7 @@ import {
   grade,
   kswAgents,
   kswCamera,
+  kswCity,
   kswGi,
   kswPost,
   kswScene,
@@ -40,6 +41,11 @@ import { buildSpawnSpecs } from './agentSpawn';
 import { ANIMATED_TAGS } from './staticBatch';
 import { advancePlanCursor, createAgent, updateAgent, type Agent } from './agents';
 import { GiProbeScheduler, renderProbeFace } from './giProbe';
+import { boxGeo } from './geometryCache';
+import { clayMat } from './props';
+import { buildCityMassing } from './geo/cityMassing';
+import { buildRoads } from './geo/roads';
+import { cityBuildings, cityMeta, cityRails, cityRoads } from './geo/geoData';
 import type { PersonRole } from './floorPlan';
 
 declare global {
@@ -64,7 +70,7 @@ declare global {
   }
 }
 
-type CamPresetName = 'overview' | 'er' | 'ops';
+type CamPresetName = 'overview' | 'er' | 'ops' | 'bahnhof' | 'zag';
 const camPresets: Record<CamPresetName, { target: [number, number, number]; radius: number; yaw: number; pitch: number }> = {
   overview: (() => {
     const s = rigFromLookAt(kswCamera.overviewPosition, kswCamera.target);
@@ -74,6 +80,10 @@ const camPresets: Record<CamPresetName, { target: [number, number, number]; radi
   er: { target: [-22.5, 0.4, 12], radius: 14, yaw: -0.5, pitch: 0.72 },
   // surgery block from above the open roof, south-east
   ops: { target: [-24, 0.2, -16], radius: 13, yaw: 0.45, pitch: 1.05 },
+  // real city landmarks (local meters from the KSW anchor, see cityMeta):
+  // pulled back and tilted down so the camera sits above the dense district
+  bahnhof: { target: [cityMeta.landmarks.bahnhof[0], 2, cityMeta.landmarks.bahnhof[1]], radius: 280, yaw: -0.6, pitch: 1.02 },
+  zag: { target: [cityMeta.landmarks.zagTurbinenstrasse[0], 2, cityMeta.landmarks.zagTurbinenstrasse[1]], radius: 280, yaw: 0.4, pitch: 1.02 },
 };
 
 async function boot(): Promise<void> {
@@ -81,7 +91,8 @@ async function boot(): Promise<void> {
   const rawPreset = params.get('preset');
   const presetName = rawPreset === 'night' || rawPreset === 'dusk' ? rawPreset : 'morning';
   const camRaw = params.get('cam');
-  const camPreset: CamPresetName = camRaw === 'er' || camRaw === 'ops' ? camRaw : 'overview';
+  const camPreset: CamPresetName =
+    camRaw === 'er' || camRaw === 'ops' || camRaw === 'bahnhof' || camRaw === 'zag' ? camRaw : 'overview';
   const cycleMode = params.get('cycle') === '1';
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
@@ -126,7 +137,9 @@ async function boot(): Promise<void> {
   const initialSunDir = sunDirFor(phys.timeOfDay);
 
   const skyMesh = new SkyMesh();
-  skyMesh.scale.setScalar(kswScene.skyScale);
+  // sky is a directional shader — enlarging the shell only moves it beyond the
+  // city plate (so distant buildings never poke through), the look is unchanged
+  skyMesh.scale.setScalar(kswCity.skyScale);
   skyMesh.turbidity.value = phys.turbidity;
   skyMesh.rayleigh.value = phys.rayleigh;
   skyMesh.mieCoefficient.value = phys.mieCoefficient;
@@ -230,7 +243,10 @@ async function boot(): Promise<void> {
     radius: start.radius,
     target: start.target,
   };
-  const camera = new THREE.PerspectiveCamera(kswCamera.fov, window.innerWidth / window.innerHeight, 0.1, 1400);
+  const camera = new THREE.PerspectiveCamera(kswCamera.fov, window.innerWidth / window.innerHeight, 0.1, kswCity.cameraFar);
+  // zoom config: hero settings, but the dolly may pull back far enough to
+  // frame the whole Bahnhof↔ZAG city (roof-fade still keyed off kswCamera)
+  const zoomCfg = { ...kswCamera, radiusMax: kswCity.radiusMax };
   const applyRig = (): void => {
     camera.position.set(...rigPosition(rig));
     camera.lookAt(...rig.target);
@@ -244,7 +260,7 @@ async function boot(): Promise<void> {
     'wheel',
     (e: WheelEvent) => {
       e.preventDefault();
-      zoomTarget = applyZoom({ ...rig, radius: zoomTarget }, e.deltaY, kswCamera).radius;
+      zoomTarget = applyZoom({ ...rig, radius: zoomTarget }, e.deltaY, zoomCfg).radius;
     },
     { passive: false },
   );
@@ -339,6 +355,20 @@ async function boot(): Promise<void> {
   const { group: hospital, roofs } = buildHospital(kswPlan, { lampGlow: preset.lampOn });
   scene.add(hospital);
   roofs.setFade(roofFade(rig.radius, kswCamera));
+
+  // ── the real Winterthur city around it (swisstopo LoD2 + OSM, clay) ──────
+  // The hero hospital keeps its own authored plate; the city sits on a bigger
+  // slab 2 cm lower so the two never z-fight. Massing + roads render through
+  // the existing clay builders, so the town reads as the same handmade model.
+  const cityPlate = new THREE.Mesh(
+    boxGeo(cityMeta.plate.w, kswScene.plateThickness, cityMeta.plate.d),
+    clayMat(palette.lawn),
+  );
+  cityPlate.position.set(cityMeta.plate.cx, -kswScene.plateThickness / 2 - 0.02, cityMeta.plate.cz);
+  cityPlate.receiveShadow = true;
+  scene.add(cityPlate);
+  scene.add(buildCityMassing(cityBuildings));
+  scene.add(buildRoads(cityRoads, cityRails));
 
   // collect animated bits: ambulance light pulses, helicopter rotor idles.
   // Tag contract shared with staticBatch.isAnimated via ANIMATED_TAGS.
