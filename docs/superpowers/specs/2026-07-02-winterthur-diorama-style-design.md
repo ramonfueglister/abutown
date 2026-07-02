@@ -89,6 +89,22 @@ Fade-Mechanik; Instanz-Culling per Distanz wie die Agent-Pipeline):
 
 Der Fusswege-Cull aus §3 ist damit Teil des LOD-Systems, kein Sonderfall.
 
+### 2d. Bäume v2 (geodätisch strenger + Original-Formsprache)
+
+- **Grösse aus Daten:** wo OSM `height`/`diameter_crown` mappt, gelten die
+  echten Werte; sonst artspezifischer Default via `leaf_type`/`genus`
+  (Laubbaum ≈ 9 m/6 m Krone, Nadelbaum ≈ 14 m/4 m — dokumentierte Defaults,
+  kein Hash mehr). Der Bake schreibt pro Baum `[x, z, h, r, kind]`.
+- **Form wie das Original:** instanzierte Varianten der Hero-Baumgeometrie
+  aus `props.ts` (chunky Clay-Krone), Nadelbäume als Kegel-Variante im selben
+  Vokabular. LOD: nah = volle Form, fern = Lowpoly-Impostor (§2c-Ringe).
+- **Waldfüllung:** die echten Waldpolygone werden mit deterministisch
+  gesampelten Bäumen gefüllt (Poisson-artiges Hash-Gitter, Dichte ~1/60 m²,
+  nur innerhalb des Polygons). Deklarierte flächentreue Darstellung: das
+  Polygon ist das Datum, die Einzelstämme seine Visualisierung — wie in jeder
+  Kartografie. Einzeln gemappte OSM-Bäume behalten Vorrang (kein Doppel im
+  Umkreis 4 m).
+
 ### 3. Strassen v2
 
 - **Miter-Joints:** Polyline-Offsetting mit Gehrung (Kappung bei >60°-Knick) —
@@ -97,6 +113,9 @@ Der Fusswege-Cull aus §3 ist damit Teil des LOD-Systems, kein Sonderfall.
   Asphalt-Beige, Fusswege heller schmaler, Gleise dunkler auf Schotterband) —
   additive `kswCity`-Token. Kreuzungs-Flackern verschwindet durch die
   Y-Staffelung (0.035/0.04/0.045/0.05).
+- **Breite aus Daten:** OSM-`width`- bzw. `lanes`-Tags gewinnen, wo gemappt
+  (`width` direkt; `lanes × 3.2 m` als Näherung); der Klassen-Default aus S1
+  gilt nur als dokumentierter Fallback.
 - Fusswege < 2.5 m Breite gehören zum LOD-Ring „mittel" (§2c) — in der fernen
   Stadtansicht ausgeblendet, damit das Bild ruhig bleibt.
 
