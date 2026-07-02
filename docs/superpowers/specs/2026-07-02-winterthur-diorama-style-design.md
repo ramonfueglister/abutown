@@ -91,10 +91,14 @@ Der Fusswege-Cull aus §3 ist damit Teil des LOD-Systems, kein Sonderfall.
 
 ### 2d. Bäume v2 (geodätisch strenger + Original-Formsprache)
 
-- **Grösse aus Daten:** wo OSM `height`/`diameter_crown` mappt, gelten die
-  echten Werte; sonst artspezifischer Default via `leaf_type`/`genus`
-  (Laubbaum ≈ 9 m/6 m Krone, Nadelbaum ≈ 14 m/4 m — dokumentierte Defaults,
-  kein Hash mehr). Der Bake schreibt pro Baum `[x, z, h, r, kind]`.
+- **Grösse aus Daten, Faktenlage deklariert:** gemessene Tag-Abdeckung im
+  Ausschnitt: `height` 2/4127, `leaf_type` 540/4127 (13%), `genus`/`species`
+  ≈ 0. Priorität: (1) echte `height`/`diameter_crown` wo vorhanden, (2)
+  `leaf_type`-Default (Laubbaum ≈ 9 m Höhe/6 m Krone, Nadelbaum ≈ 14 m/4 m),
+  (3) ohne Tag: Laubbaum-Default (städtischer Regelfall). Auf die Defaults
+  kommt eine **deklarierte** deterministische Varianz von ±15% (reine
+  Darstellung — uniforme Klone wären falscher als die Varianz). Der Bake
+  schreibt pro Baum `[x, z, h, r, kind]`.
 - **Form wie das Original:** instanzierte Varianten der Hero-Baumgeometrie
   aus `props.ts` (chunky Clay-Krone), Nadelbäume als Kegel-Variante im selben
   Vokabular. LOD: nah = volle Form, fern = Lowpoly-Impostor (§2c-Ringe).
