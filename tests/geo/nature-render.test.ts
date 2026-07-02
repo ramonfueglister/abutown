@@ -69,3 +69,39 @@ describe('buildNature — trees v2 (broad/conifer/impostor split)', () => {
     expect(s.x).toBeCloseTo(3 / 0.75, 1); // canopy geo authored at 0.75 puff radius → scale = r/0.75
   });
 });
+
+describe('buildNature — empty tree kind keeps a non-zero instance buffer', () => {
+  // Only broadleaf trees in this bake (e.g. a future re-bake with no conifers
+  // mapped yet). treeConifers must still exist by name (Task 10's LOD does
+  // getObjectByName on all four tree mesh names) but must not allocate a
+  // zero-size WebGPU instance buffer (the windows.ts GPUValidationError class
+  // of bug, Task 6) — here the mesh can't just be skipped like windows.ts
+  // does, since the name contract requires it to be present.
+  const natureNoConifers: CityNature = {
+    greens: [], waterAreas: [], rivers: [],
+    trees: [
+      { x: 10, z: 10, h: 9, r: 3, kind: 'broad' },
+      { x: 20, z: 15, h: 9, r: 2, kind: 'broad' },
+    ],
+  };
+
+  it('treeConifers exists with count 0 but an allocated instance buffer', () => {
+    const g = buildNature(natureNoConifers, {});
+    const broad = g.getObjectByName('treeCanopies') as THREE.InstancedMesh;
+    const conif = g.getObjectByName('treeConifers') as THREE.InstancedMesh;
+    const trunksMesh = g.getObjectByName('treeTrunks') as THREE.InstancedMesh;
+    const imp = g.getObjectByName('treeImpostors') as THREE.InstancedMesh;
+
+    expect(broad).toBeDefined();
+    expect(conif).toBeDefined();
+    expect(trunksMesh).toBeDefined();
+    expect(imp).toBeDefined();
+
+    expect(conif.count).toBe(0);
+    // capacity must stay >= 1 even though drawn count is 0
+    expect(conif.instanceMatrix.count).toBeGreaterThanOrEqual(1);
+    expect(broad.instanceMatrix.count).toBeGreaterThanOrEqual(1);
+    expect(trunksMesh.instanceMatrix.count).toBeGreaterThanOrEqual(1);
+    expect(imp.instanceMatrix.count).toBeGreaterThanOrEqual(1);
+  });
+});

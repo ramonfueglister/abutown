@@ -142,10 +142,22 @@ export function buildNature(nature: CityNature, opts: NatureOptions = {}): THREE
   const coniferGeo = coniferGeometry();
   const impostorGeo = new THREE.IcosahedronGeometry(1, 1);
 
-  const broad = new THREE.InstancedMesh(broadCanopyGeo, clayMat(kswCity.treeGreen).clone(), broadSpots.length);
-  const conifers = new THREE.InstancedMesh(coniferGeo, clayMat(kswCity.woodGreen).clone(), coniferSpots.length);
-  const trunks = new THREE.InstancedMesh(trunkGeo, clayMat(kswCity.treeTrunk), spots.length);
-  const impostors = new THREE.InstancedMesh(impostorGeo, clayMat(kswCity.treeGreen).clone(), spots.length);
+  // Zero-instance InstancedMeshes create zero-size GPU instance buffers, which
+  // WebGPU rejects (GPUValidationError — the bug class already hit and fixed
+  // in windows.ts, Task 6). windows.ts could just skip an empty mesh, but
+  // these four names can't be: Task 10's LOD does getObjectByName on all of
+  // treeCanopies/treeConifers/treeImpostors/treeTrunks regardless of which
+  // kinds a given bake actually contains. So allocate at least 1 instance
+  // (non-zero buffer) and set `.count` to the real number afterward — a mesh
+  // with count 0 draws nothing but still exists and still has a valid buffer.
+  const broad = new THREE.InstancedMesh(broadCanopyGeo, clayMat(kswCity.treeGreen).clone(), Math.max(1, broadSpots.length));
+  const conifers = new THREE.InstancedMesh(coniferGeo, clayMat(kswCity.woodGreen).clone(), Math.max(1, coniferSpots.length));
+  const trunks = new THREE.InstancedMesh(trunkGeo, clayMat(kswCity.treeTrunk), Math.max(1, spots.length));
+  const impostors = new THREE.InstancedMesh(impostorGeo, clayMat(kswCity.treeGreen).clone(), Math.max(1, spots.length));
+  broad.count = broadSpots.length;
+  conifers.count = coniferSpots.length;
+  trunks.count = spots.length;
+  impostors.count = spots.length;
   broad.name = 'treeCanopies';
   conifers.name = 'treeConifers';
   trunks.name = 'treeTrunks';
