@@ -49,6 +49,7 @@ import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads } from './geo
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
 import { buildNature } from './geo/nature';
+import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
 
 declare global {
@@ -392,6 +393,27 @@ async function boot(): Promise<void> {
   cityRoot.add(buildLamps(cityRoads, { lampGlow: preset.lampOn }));
   scene.add(cityRoot);
 
+  // 3-ring semantic LOD (Task 10, spec §2c): detail follows the camera radius.
+  // getObjectByName can legitimately miss (design-legal), so refs are
+  // collected defensively and applyCityLod is null-tolerant.
+  const lodRefs: CityLodRefs = {
+    windows: cityRoot.getObjectByName('cityWindows') ?? null,
+    lamps: cityRoot.getObjectByName('cityLamps') ?? null,
+    footways: cityRoot.getObjectByName('footwayRibbons') ?? null,
+    treesFull: ['treeCanopies', 'treeConifers']
+      .map((n) => cityRoot.getObjectByName(n))
+      .filter((o): o is THREE.Object3D => o !== undefined),
+    treeImpostors: cityRoot.getObjectByName('treeImpostors') ?? null,
+    setTreeShadows: (on: boolean) => {
+      const canopies = cityRoot.getObjectByName('treeCanopies');
+      const conifers = cityRoot.getObjectByName('treeConifers');
+      if (canopies) canopies.castShadow = on;
+      if (conifers) conifers.castShadow = on;
+    },
+  };
+  let cityRing = cityLodState(rig.radius, 'far');
+  applyCityLod(cityRing, lodRefs);
+
   // collect animated bits: ambulance light pulses, helicopter rotor idles.
   // Tag contract shared with staticBatch.isAnimated via ANIMATED_TAGS.
   const animated: Record<(typeof ANIMATED_TAGS)[number], THREE.Object3D[]> = { blink: [], rotor: [] };
@@ -655,6 +677,12 @@ async function boot(): Promise<void> {
       }
     }
     applyRig();
+    const nextRing = cityLodState(rig.radius, cityRing);
+    if (nextRing !== cityRing) {
+      cityRing = nextRing;
+      applyCityLod(cityRing, lodRefs);
+      if (shadowCached) sun.shadow.needsUpdate = true;
+    }
     const fogZoom = Math.max(1, rig.radius / 110);
     (scene.fog as THREE.Fog).near = fogBaseNear * fogZoom;
     (scene.fog as THREE.Fog).far = fogBaseFar * fogZoom;
