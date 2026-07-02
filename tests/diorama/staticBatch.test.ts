@@ -157,6 +157,13 @@ describe('batchHospital', () => {
     expect(mat.color.getHex()).toBe(new THREE.Color(nightGlow.bulb).getHex());
     expect(mat.transparent).toBe(true);
     expect(mat.opacity).toBeCloseTo(0.9);
+    expect(mat.depthWrite).toBe(false); // unsorted transparent batch
+  });
+
+  it('transparent buckets never depth-write (glass, glowNight): unsorted batches must not depth-reject each other', () => {
+    const day = batchHospital(smallScene(), DAY);
+    const glass = day.batches.find((b) => b.name === 'ksw-glass')!;
+    expect((glass.material as THREE.Material).depthWrite).toBe(false);
   });
 
   it('the roofs control drives the roofFade batch exactly like the old per-mesh control', () => {
@@ -168,13 +175,16 @@ describe('batchHospital', () => {
     roofs.setFade(1);
     expect(roofBatch.castShadow).toBe(true);
     expect(roofBatch.visible).toBe(true);
+    expect(mat.depthWrite).toBe(true); // fully opaque roofs must occlude
     roofs.setFade(0.4);
     expect(roofs.fade()).toBeCloseTo(0.4);
     expect(mat.opacity).toBeCloseTo(0.4);
     expect(roofBatch.castShadow).toBe(false);
     expect(roofBatch.visible).toBe(true);
+    expect(mat.depthWrite).toBe(false); // mid-fade: no depth rejection between lids
     roofs.setFade(0.01);
     expect(roofBatch.visible).toBe(false);
+    expect(mat.depthWrite).toBe(false);
     roofs.setFade(7);
     expect(roofs.fade()).toBe(1);
     roofs.setFade(-2);

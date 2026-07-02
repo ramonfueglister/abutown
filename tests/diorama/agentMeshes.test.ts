@@ -139,6 +139,18 @@ describe('createAgentInstances', () => {
     expect(lod0.count).toBe(1);
   });
 
+  it('setProbeMode is callable in both modes (a no-op below the crowd threshold)', () => {
+    // GPU-side effect (LOD1+blobs everywhere, LOD0 hidden) can't run under
+    // vitest; this pins the API contract: never throws, idempotent.
+    const plain = createAgentInstances({ nurse: 1 });
+    plain.setProbeMode(true);
+    plain.setProbeMode(false);
+    const crowd = createAgentInstances({ nurse: 1 }, { crowd: true });
+    crowd.setProbeMode(true);
+    crowd.setProbeMode(true);
+    crowd.setProbeMode(false);
+  });
+
   it('slot writes are accepted and add() enforces capacity and known roles', () => {
     const inst = createAgentInstances({ nurse: 1 });
     const slot = inst.add('nurse', 7);

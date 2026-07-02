@@ -51,8 +51,9 @@ import {
   vec3,
 } from 'three/tsl';
 import { clay, kswAgents, palette, radii } from '../designTokens';
+import { claySheenNode } from './clayNodes';
 import type { PersonRole } from './floorPlan';
-import { cyl, roundedBox, sph, tor } from './geometryCache';
+import { cyl, ensureSequentialIndex, roundedBox, sph, tor } from './geometryCache';
 
 // ── CPU mirror math (pure, unit-tested) ─────────────────────────────────
 
@@ -101,57 +102,67 @@ function beanParts(bodyColor: number): PartSpec[] {
 
 const badgePart = (): PartSpec => ({ geo: boxPart(0.11, 0.14, 0.03, radii.xs), color: palette.white, position: [0.14, 0.72, 0.31] });
 
-// Role accessories, 1:1 from the deleted props.buildPerson switch.
+// The bean's body color per role — single source for the LOD0 bean body
+// (via personParts) and the LOD1 capsule+head.
+const roleBodyColor: Record<PersonRole, number> = {
+  nurse: palette.mint,
+  doctor: palette.white,
+  surgeon: palette.sage,
+  patient: palette.coral,
+  child: palette.honey,
+  visitor: palette.skin,
+  labtech: palette.white,
+  paramedic: palette.coralSoft,
+};
+
+// Role accessories, 1:1 from the deleted props.buildPerson switch. Body
+// color always comes from roleBodyColor.
 function personParts(role: PersonRole): PartSpec[] {
+  const bean = beanParts(roleBodyColor[role]);
   switch (role) {
     case 'nurse':
-      return [...beanParts(palette.mint), badgePart()];
+      return [...bean, badgePart()];
     case 'doctor':
       return [
-        ...beanParts(palette.white),
+        ...bean,
         // stethoscope: half torus flipped over x
         { geo: tor(0.2, 0.028, 12, 32, Math.PI), color: palette.eye, position: [0, 0.86, 0.26], rotation: [Math.PI, 0, 0] },
       ];
     case 'surgeon':
       return [
-        ...beanParts(palette.sage),
+        ...bean,
         { geo: cyl(0.24, 0.28, 0.14, 18), color: palette.mint, position: [0, 1.06, 0] },
         { geo: boxPart(0.26, 0.14, 0.05, radii.xs), color: palette.white, position: [0, 0.8, 0.31] },
       ];
     case 'patient':
-      return beanParts(palette.coral);
+      return bean;
     case 'child':
-      return beanParts(palette.honey); // CHILD_SCALE baked at merge time
+      return bean; // CHILD_SCALE baked at merge time
     case 'visitor':
-      return beanParts(palette.skin);
+      return bean;
     case 'labtech':
       return [
-        ...beanParts(palette.white),
+        ...bean,
         badgePart(),
         { geo: tor(0.07, 0.016, 12, 32, Math.PI * 2), color: palette.eye, position: [-0.105, 0.92, 0.3] },
         { geo: tor(0.07, 0.016, 12, 32, Math.PI * 2), color: palette.eye, position: [0.105, 0.92, 0.3] },
       ];
     case 'paramedic':
-      return [...beanParts(palette.coralSoft), { geo: boxPart(0.4, 0.12, 0.06, radii.xs), color: palette.white, position: [0, 0.66, 0.29] }];
+      return [...bean, { geo: boxPart(0.4, 0.12, 0.06, radii.xs), color: palette.white, position: [0, 0.66, 0.29] }];
   }
 }
 
 // Merge parts into a single indexed BufferGeometry with a per-vertex color
 // attribute baking the part colors (working-color-space, exactly what the
 // per-part clayMat colors resolved to). RoundedBox parts are non-indexed;
-// give them a trivial sequential index (same trick as
-// staticBatch.ensureIndexed) so the merge stays indexed and small.
+// give them a trivial sequential index (geometryCache.ensureSequentialIndex)
+// so the merge stays indexed and small.
 function mergeParts(parts: PartSpec[], label: string): THREE.BufferGeometry {
   const color = new THREE.Color();
   const prepared = parts.map((part) => {
     // cached geometries are shared — never mutate them in place
     const g = part.geo.clone();
-    if (g.index === null) {
-      const n = g.attributes.position.count;
-      const index = new (n > 65535 ? Uint32Array : Uint16Array)(n);
-      for (let i = 0; i < n; i++) index[i] = i;
-      g.setIndex(new THREE.BufferAttribute(index, 1));
-    }
+    ensureSequentialIndex(g);
     const m = new THREE.Matrix4().compose(
       new THREE.Vector3(...part.position),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(...(part.rotation ?? [0, 0, 0]))),
@@ -183,18 +194,6 @@ export function mergedPersonGeometry(role: PersonRole): THREE.BufferGeometry {
   }
   return merged;
 }
-
-// The bean's body color per role — same values beanParts() bakes for LOD0.
-const roleBodyColor: Record<PersonRole, number> = {
-  nurse: palette.mint,
-  doctor: palette.white,
-  surgeon: palette.sage,
-  patient: palette.coral,
-  child: palette.honey,
-  visitor: palette.skin,
-  labtech: palette.white,
-  paramedic: palette.coralSoft,
-};
 
 // LOD1 (Slice D): low-poly capsule body + head sphere in the role's body
 // color. Same overall height as the LOD0 bean (top ≈ 1.235 m before child
@@ -238,6 +237,12 @@ export type AgentInstances = {
   // Per-frame after all slot writes: advance the time uniform + upload buffers.
   update(t: number): void;
   lod: AgentLodPass | null; // null below the crowd threshold
+  // GI-probe rendering (crowd mode): the probe is a low-res 360° env capture
+  // from the scene center — the main camera's LOD/frustum flags are wrong for
+  // it. probeMode=1 shows LOD1 capsules + blob discs for ALL instances and
+  // hides LOD0 entirely (correct and cheap everywhere); probeMode=0 is the
+  // per-frame classified behavior. No-op below the crowd threshold (no flags).
+  setProbeMode(on: boolean): void;
 };
 
 type RoleBucket = { offset: number; used: number; capacity: number };
@@ -259,6 +264,10 @@ export function createAgentInstances(
   // 0 = LOD0, 1 = LOD1, 2 = culled — written by the compute pass each frame.
   const bufFlag = crowd ? instancedArray(new Uint32Array(total), 'uint') : null;
   const timeU = uniform(0);
+  // 1 while rendering GI-probe faces (crowd mode): overrides the main-camera
+  // classification — see AgentInstances.setProbeMode.
+  const probeU = uniform(0, 'uint');
+  const probeOn = probeU.equal(uint(1));
   const identity = new THREE.Matrix4();
 
   const buckets = new Map<PersonRole, RoleBucket>();
@@ -278,19 +287,22 @@ export function createAgentInstances(
     lodIndex: 0 | 1,
   ): THREE.InstancedMesh => {
     // Clay recipe from designTokens; diffuse from the baked vertex colors,
-    // sheenColor = color lerped 50% to white — mirrors staticBatch.ts.
+    // sheen via the shared clayNodes.claySheenNode (same as staticBatch.ts).
     const material = new THREE.MeshPhysicalNodeMaterial({
-      color: 0xffffff,
+      color: palette.trueWhite,
       roughness: clay.roughness,
       metalness: clay.metalness,
       vertexColors: true,
     });
     material.sheenRoughness = clay.sheenRoughness;
-    material.sheenNode = mix(attribute('color', 'vec3'), vec3(1, 1, 1), 0.5).mul(float(clay.sheen));
+    material.sheenNode = claySheenNode(attribute('color', 'vec3'));
 
     // Vertex animation — exact port of the old per-Object3D animate loop.
     // Object3D composed local = T * R(yaw) * R(roll) * S(squash), so:
     // squash Y, roll around Z, yaw around Y, translate to (posX, yLift, posZ).
+    // Normative spec + executable reference: personTransformRef.ts
+    // (personInstanceMatrix) — the TSL below hand-expands that matrix; any
+    // change must be mirrored there (the TSL itself can't run under vitest).
     const A = bufA.element(slot);
     const B = bufB.element(slot);
     const walkSquash = abs(sin(timeU.mul(9.0).add(B.y))).mul(0.025).add(1.0);
@@ -302,7 +314,10 @@ export function createAgentInstances(
     const sy = sin(A.w);
     // Crowd mode: an instance whose flag doesn't match this mesh's LOD
     // collapses to scale 0 — zero-area triangles, nothing rasterizes.
-    const vis = bufFlag ? select(bufFlag.element(slot).equal(uint(lodIndex)), float(1), float(0)) : float(1);
+    // Probe mode overrides the flag: LOD0 hides everything, LOD1 shows
+    // everything (the probe capture must not inherit main-camera culling).
+    const flagVis = bufFlag ? select(bufFlag.element(slot).equal(uint(lodIndex)), float(1), float(0)) : float(1);
+    const vis = bufFlag ? select(probeOn, float(lodIndex), flagVis) : flagVis;
     const p = vec3(positionLocal).mul(vis);
     const y1 = p.y.mul(squash);
     const x2 = p.x.mul(cr).sub(y1.mul(sr));
@@ -359,10 +374,11 @@ export function createAgentInstances(
   if (bufFlag) {
     const blobGeo = new THREE.CircleGeometry(kswAgents.blob.radius, 20);
     blobGeo.rotateX(-Math.PI / 2);
-    const material = new THREE.MeshBasicNodeMaterial({ color: 0x000000, transparent: true, depthWrite: false });
+    const material = new THREE.MeshBasicNodeMaterial({ color: kswAgents.blob.color, transparent: true, depthWrite: false });
     const A = bufA.element(instanceIndex);
     const B = bufB.element(instanceIndex);
-    const s = select(bufFlag.element(instanceIndex).equal(uint(2)), float(0), B.w);
+    // probe mode shows every disc (no main-camera culling in the env capture)
+    const s = select(probeOn, B.w, select(bufFlag.element(instanceIndex).equal(uint(2)), float(0), B.w));
     material.positionNode = vec3(
       positionLocal.x.mul(s).add(A.x),
       positionLocal.y.add(A.z).add(float(kswAgents.blob.lift)),
@@ -473,6 +489,9 @@ export function createAgentInstances(
       timeU.value = t;
       attrA.needsUpdate = true;
       attrB.needsUpdate = true;
+    },
+    setProbeMode(on) {
+      if (bufFlag) probeU.value = on ? 1 : 0; // no flags below the crowd threshold — no-op
     },
   };
 }

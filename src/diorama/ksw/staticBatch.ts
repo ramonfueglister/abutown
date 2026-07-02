@@ -13,8 +13,10 @@
 // mist, sky, discs, stars).
 
 import * as THREE from 'three/webgpu';
-import { float, mix, varyingProperty, vec3 } from 'three/tsl';
-import { clay, nightGlow, palette } from '../designTokens';
+import { varyingProperty } from 'three/tsl';
+import { clay, nightGlow, palette, roofFadePolicy } from '../designTokens';
+import { claySheenNode } from './clayNodes';
+import { ensureSequentialIndex } from './geometryCache';
 import type { RoofControl } from './building';
 
 // three r185 defines `batchColor` (three/src/nodes/accessors/Batch.js) but
@@ -55,13 +57,17 @@ export function classifyMesh(mesh: THREE.Mesh, opts: { lampGlow: boolean }): Buc
   throw new Error(`staticBatch: unclassifiable material "${mat.type}" on mesh "${mesh.name}"`);
 }
 
-// Meshes animated by main.ts keep their own draw call: the ambulance blinker
-// (userData.blink on the mesh) and the heli rotor (userData.rotor on the
-// parent group whose children are plain clay meshes).
+// userData tags marking objects main.ts animates per-frame: the ambulance
+// blinker (userData.blink on the mesh, visibility toggled) and the heli
+// rotor (userData.rotor on the parent group, rotated). Shared with main.ts's
+// collection traverse — one string contract, not two.
+export const ANIMATED_TAGS = ['blink', 'rotor'] as const;
+
+// Meshes animated by main.ts keep their own draw call (see ANIMATED_TAGS).
 function isAnimated(o: THREE.Object3D): boolean {
   let cur: THREE.Object3D | null = o;
   while (cur) {
-    if (cur.userData.blink || cur.userData.rotor) return true;
+    for (const tag of ANIMATED_TAGS) if (cur.userData[tag]) return true;
     cur = cur.parent;
   }
   return false;
@@ -69,17 +75,16 @@ function isAnimated(o: THREE.Object3D): boolean {
 
 // One MeshPhysicalNodeMaterial replaces the per-color clayMat map: diffuse
 // comes from the per-instance batch color, and the clay sheen recipe
-// (sheenColor = color lerped 50% to white, scaled by clay.sheen) moves into
-// TSL so it stays per-instance too.
+// (clayNodes.claySheenNode) moves into TSL so it stays per-instance too.
 function clayBatchMaterial(transparent: boolean): THREE.MeshPhysicalNodeMaterial {
   const m = new THREE.MeshPhysicalNodeMaterial({
-    color: 0xffffff, // multiplied by the per-instance batch color
+    color: palette.trueWhite, // multiplied by the per-instance batch color
     roughness: clay.roughness,
     metalness: clay.metalness,
     transparent,
   });
   m.sheenRoughness = clay.sheenRoughness;
-  m.sheenNode = mix(batchColor.rgb, vec3(1, 1, 1), 0.5).mul(float(clay.sheen));
+  m.sheenNode = claySheenNode(batchColor.rgb);
   return m;
 }
 
@@ -99,12 +104,16 @@ function bucketSpec(name: BucketName): BucketSpec {
       return { material: clayBatchMaterial(false), perInstanceColor: true, castShadow: false, receiveShadow: true };
     case 'glass':
       return {
+        // depthWrite off: the batch draws with sortObjects=false, so
+        // depth-writing transparent instances would depth-reject each other
+        // in insertion order (popping between overlapping panes/domes).
         material: new THREE.MeshStandardMaterial({
           color: palette.glass,
           roughness: 0.4,
           metalness: 0,
           transparent: true,
           opacity: 0.16,
+          depthWrite: false,
         }),
         perInstanceColor: false,
         castShadow: false,
@@ -113,15 +122,16 @@ function bucketSpec(name: BucketName): BucketSpec {
     case 'glow':
       // unlit emissive-ish surfaces: device screens, op-light faces
       return {
-        material: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+        material: new THREE.MeshBasicMaterial({ color: palette.trueWhite }),
         perInstanceColor: true,
         castShadow: false,
         receiveShadow: false,
       };
     case 'glowNight':
-      // warm night glow: lamp bulbs + the hashed share of window panes
+      // warm night glow: lamp bulbs + the hashed share of window panes.
+      // depthWrite off for the same unsorted-transparency reason as glass.
       return {
-        material: new THREE.MeshBasicMaterial({ color: nightGlow.bulb, transparent: true, opacity: 0.9 }),
+        material: new THREE.MeshBasicMaterial({ color: nightGlow.bulb, transparent: true, opacity: 0.9, depthWrite: false }),
         perInstanceColor: false,
         castShadow: false,
         receiveShadow: false,
@@ -159,7 +169,7 @@ export function batchHospital(group: THREE.Group, opts: { lampGlow: boolean }): 
     let vertexCount = 0;
     let indexCount = 0;
     for (const geo of unique) {
-      ensureIndexed(geo);
+      ensureSequentialIndex(geo);
       vertexCount += geo.attributes.position.count;
       indexCount += geo.index!.count;
     }
@@ -212,35 +222,31 @@ export function batchHospital(group: THREE.Group, opts: { lampGlow: boolean }): 
   pruneEmptyGroups(group);
   for (const batch of batches) group.add(batch);
 
-  // Same thresholds as the pre-batching per-mesh RoofControl: shadows drop
-  // early in the fade (while the lid is still clearly visible) so the
+  // Same thresholds as the pre-batching per-mesh RoofControl (shared via
+  // designTokens.roofFadePolicy with main.ts's refresh triggers): shadows
+  // drop early in the fade (while the lid is still clearly visible) so the
   // interior lights up smoothly instead of popping bright at the very end.
   let currentFade = 1;
   const roofs: RoofControl = {
     setFade(fade01: number) {
       currentFade = Math.min(Math.max(fade01, 0), 1);
-      if (roofMaterial) roofMaterial.opacity = currentFade;
+      if (roofMaterial) {
+        roofMaterial.opacity = currentFade;
+        // depthWrite only while fully opaque: settled roofs must occlude
+        // correctly (the lids overlap trim/walls), but during the fade the
+        // batch draws unsorted (sortObjects=false) — depth-writing
+        // half-transparent lids would depth-reject each other in insertion
+        // order and pop. No depth writes while fading = stable blending.
+        roofMaterial.depthWrite = currentFade >= roofFadePolicy.opaque;
+      }
       if (roofBatch) {
-        roofBatch.castShadow = currentFade > 0.6;
-        roofBatch.visible = currentFade > 0.02;
+        roofBatch.castShadow = currentFade > roofFadePolicy.castShadow;
+        roofBatch.visible = currentFade > roofFadePolicy.visible;
       }
     },
     fade: () => currentFade,
   };
   return { batches, roofs };
-}
-
-// BatchedMesh requires every geometry in a batch to consistently have an
-// index. RoundedBoxGeometry is non-indexed while the other cached primitives
-// are indexed; giving it a trivial sequential index renders identically and
-// makes the buckets homogeneous. (Safe on shared cache instances: the index
-// doesn't change what's drawn for remaining individual meshes either.)
-function ensureIndexed(geo: THREE.BufferGeometry): void {
-  if (geo.index !== null) return;
-  const count = geo.attributes.position.count;
-  const index = new (count > 65535 ? Uint32Array : Uint16Array)(count);
-  for (let i = 0; i < count; i++) index[i] = i;
-  geo.setIndex(new THREE.BufferAttribute(index, 1));
 }
 
 // Batching empties most builder Groups (walls, signs, props); drop them so

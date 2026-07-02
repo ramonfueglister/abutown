@@ -14,7 +14,8 @@ export function clayMat(color: number): THREE.MeshPhysicalMaterial {
     m = new THREE.MeshPhysicalMaterial({ color, roughness: clay.roughness, metalness: clay.metalness });
     m.sheen = clay.sheen;
     m.sheenRoughness = clay.sheenRoughness;
-    m.sheenColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.5);
+    // CPU twin of clayNodes.claySheenNode — same tokens, same recipe
+    m.sheenColor = new THREE.Color(color).lerp(new THREE.Color(palette.trueWhite), clay.sheenLerp);
     materialCache.set(color, m);
   }
   return m;

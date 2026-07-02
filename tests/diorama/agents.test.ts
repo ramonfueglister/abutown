@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildNav } from '../../src/diorama/ksw/nav';
-import { createAgent, updateAgent, type Agent } from '../../src/diorama/ksw/agents';
+import { advancePlanCursor, createAgent, updateAgent, type Agent } from '../../src/diorama/ksw/agents';
 import { kswPlan } from '../../src/diorama/ksw/floorPlan';
 
 const nav = buildNav(kswPlan);
@@ -125,6 +125,32 @@ describe('agents', () => {
       updateAgent(starved, 0.001, nav, { remaining: 64 });
       expect(starved.path).toEqual(free.path);
       expect(starved.rngState).toBe(free.rngState);
+    });
+
+    it('rotating the iteration start (advancePlanCursor) plans every agent under sustained oversubscription', () => {
+      // 3 agents that replan permanently (dwell re-forced to 0 every tick)
+      // with budget 1: without rotation agent 0 would win every tick and
+      // agents 1/2 starve; with the cursor each gets a plan within 3 ticks.
+      const agents = [1, 2, 3].map((seed) =>
+        createAgent({ role: 'nurse', home: [-4, -16], homeRoomId: 'ips', kind: 'resident', seed }),
+      );
+      const planned = new Set<number>();
+      let cursor = 0;
+      for (let tick = 0; tick < 3; tick++) {
+        for (const a of agents) {
+          a.phase = 'dwell'; // permanently replanning: forced back to an expired dwell
+          a.dwellLeft = 0;
+        }
+        const budget = { remaining: 1 };
+        for (let k = 0; k < agents.length; k++) {
+          const i = (cursor + k) % agents.length;
+          const before = agents[i].rngState;
+          updateAgent(agents[i], 0.001, nav, budget);
+          if (agents[i].rngState !== before) planned.add(i); // rng advanced = it planned
+        }
+        cursor = advancePlanCursor(cursor, 1, agents.length);
+      }
+      expect([...planned].sort()).toEqual([0, 1, 2]);
     });
 
     it('walking agents never consume budget', () => {

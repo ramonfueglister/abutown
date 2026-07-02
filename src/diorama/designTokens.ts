@@ -26,6 +26,9 @@ export const palette = {
   glass: 0xcfe4ec,
   sunShaft: 0xffdca8,
   star: 0xdfe8f2,
+  // pure white: neutral base for materials whose diffuse comes from
+  // per-instance/vertex colors, and the clay sheen's lerp target
+  trueWhite: 0xffffff,
 } as const;
 
 // Chunky clay form language — radii scale (meters). No sharp edges, no thin sticks.
@@ -38,6 +41,8 @@ export const clay = {
   // SSS approximation: sheen lifts the terminator like light entering clay/wax.
   sheen: 0.55,
   sheenRoughness: 0.75,
+  // sheenColor = diffuse color lerped this far toward palette.trueWhite
+  sheenLerp: 0.5,
 } as const;
 
 export type LightPreset = {
@@ -265,11 +270,29 @@ export const kswPost = {
 // nothing changes — real PCSS shadows, LOD0 beans only.
 export const kswAgents = {
   crowdThreshold: 200,
+  maxAgents: 20000, // ?agents=N clamp ceiling
   lodDistance: 35, // camera distance (m) where the bean swaps to the capsule LOD1
   cullDistance: 600, // beyond this an instance collapses entirely (scale 0)
   frustumMargin: 2.5, // meters of slack around the frustum planes (agent extent)
   planBudget: 64, // max routePath plans per frame; expired dwells retry next frame
-  blob: { radius: 0.55, opacity: 0.25, lift: 0.03 }, // soft ground-disc shadow
+  blob: { radius: 0.55, opacity: 0.25, lift: 0.03, color: 0x000000 }, // soft ground-disc shadow
+} as const;
+
+// Roof-fade policy thresholds, shared by staticBatch.setFade (castShadow /
+// visibility / depthWrite flips) and main.ts (GI + shadow-map refresh
+// triggers, fade-settle detection). Single source — the two sides MUST agree.
+export const roofFadePolicy = {
+  castShadow: 0.6, // fade above this: the roof batch casts shadows
+  visible: 0.02, // fade above this: the roof batch renders at all
+  opaque: 0.999, // fade at/above this counts as fully settled/opaque (depthWrite on)
+} as const;
+
+// GI cube-probe refresh cadence (giProbe.ts). Static presets render one
+// probe face every staticFaceInterval frames in the background (full cube
+// per 6x that — the pre-Slice-E cadence, minus the 6-in-one-frame hitch);
+// dirty triggers still walk 6 consecutive faces at one per frame.
+export const kswGi = {
+  staticFaceInterval: 40,
 } as const;
 
 // Camera contract — the diorama has ONE gaze, like a built miniature.

@@ -43,3 +43,16 @@ export function sph(r: number, seg: number): THREE.SphereGeometry {
 export function tor(r: number, tube: number, radialSeg: number, tubularSeg: number, arc: number): THREE.TorusGeometry {
   return cached('tor', [r, tube, radialSeg, tubularSeg, arc], () => new THREE.TorusGeometry(r, tube, radialSeg, tubularSeg, arc));
 }
+
+// Give a non-indexed geometry a trivial sequential index (Uint32 above the
+// Uint16 range). Renders identically; needed wherever indexed and non-indexed
+// geometries must mix (BatchedMesh buckets, mergeGeometries with indexed
+// parts). RoundedBoxGeometry is the usual non-indexed culprit. Safe on shared
+// cache instances: the index doesn't change what's drawn elsewhere.
+export function ensureSequentialIndex(geo: THREE.BufferGeometry): void {
+  if (geo.index !== null) return;
+  const count = geo.attributes.position.count;
+  const index = new (count > 65535 ? Uint32Array : Uint16Array)(count);
+  for (let i = 0; i < count; i++) index[i] = i;
+  geo.setIndex(new THREE.BufferAttribute(index, 1));
+}

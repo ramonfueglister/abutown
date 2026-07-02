@@ -8,25 +8,12 @@
 
 import type { FloorPlan, PersonRole } from './floorPlan';
 import type { NavGraph, Pt } from './nav';
-import type { AgentSpec } from './agents';
+import { mulberry32, type AgentSpec } from './agents';
 
 export type SpawnSpec = { spec: AgentSpec; yaw: number };
 
 // Fixed stream seed: the same requested count always yields the same crowd.
 const SPAWN_SEED = 0x1d10ca7;
-
-// Same mulberry32 as agents.ts (kept private there — the two streams must
-// not be entangled anyway: this one is consumed once at spawn time).
-function mulberry32(state: number): () => number {
-  let s = state >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 // The authored people: room residents, plaza people, corridor walkers —
 // order and seeds identical to the pre-Slice-D main.ts loop.
@@ -58,7 +45,7 @@ export function buildSpawnSpecs(plan: FloorPlan, nav: NavGraph, count?: number):
   if (n <= base.length) return base.slice(0, n);
 
   const specs = base.slice();
-  const rnd = mulberry32(SPAWN_SEED);
+  const rnd = mulberry32(SPAWN_SEED).next;
   const rooms = plan.rooms;
   const slabs = plan.outdoorSlabs;
   const { a: laneA, b: laneB, xMin, xMax } = nav.lanes;

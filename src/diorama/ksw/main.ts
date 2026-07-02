@@ -26,6 +26,7 @@ import {
   nightGlow,
   palette,
   post,
+  roofFadePolicy,
   skyPhys,
   sunArcCfg,
 } from '../designTokens';
@@ -35,7 +36,8 @@ import { kswPlan } from './floorPlan';
 import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
 import { buildNav } from './nav';
 import { buildSpawnSpecs } from './agentSpawn';
-import { createAgent, updateAgent, type Agent } from './agents';
+import { ANIMATED_TAGS } from './staticBatch';
+import { advancePlanCursor, createAgent, updateAgent, type Agent } from './agents';
 import { GiProbeScheduler, renderProbeFace } from './giProbe';
 import type { PersonRole } from './floorPlan';
 
@@ -82,7 +84,7 @@ async function boot(): Promise<void> {
   const cycleMode = params.get('cycle') === '1';
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
-  const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), 20000);
+  const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
   const preset = lightPresets[presetName];
 
   const renderer = new THREE.WebGPURenderer({ antialias: false });
@@ -337,13 +339,14 @@ async function boot(): Promise<void> {
   scene.add(hospital);
   roofs.setFade(roofFade(rig.radius, kswCamera));
 
-  // collect animated bits: ambulance light pulses, helicopter rotor idles
-  const blinkers: THREE.Mesh[] = [];
-  const rotors: THREE.Object3D[] = [];
+  // collect animated bits: ambulance light pulses, helicopter rotor idles.
+  // Tag contract shared with staticBatch.isAnimated via ANIMATED_TAGS.
+  const animated: Record<(typeof ANIMATED_TAGS)[number], THREE.Object3D[]> = { blink: [], rotor: [] };
   hospital.traverse((o) => {
-    if (o.userData.blink) blinkers.push(o as THREE.Mesh);
-    if (o.userData.rotor) rotors.push(o);
+    for (const tag of ANIMATED_TAGS) if (o.userData[tag]) animated[tag].push(o);
   });
+  const blinkers = animated.blink as THREE.Mesh[];
+  const rotors = animated.rotor;
 
   // ── everyone is an agent: dwell -> pick a destination -> walk the nav
   // graph (room -> door -> corridor -> target) -> dwell. Deterministic.
@@ -374,6 +377,14 @@ async function boot(): Promise<void> {
   if (shadowCached) {
     sun.shadow.autoUpdate = false;
     sun.shadow.needsUpdate = true; // boot: render the map once, then freeze
+    // Still-animated individual meshes (blinker visibility toggles, rotor
+    // rotates every frame) must not cast into the FROZEN map: their boot
+    // pose would burn in as a stale shadow. Blob shadows still ground them.
+    for (const root of [...blinkers, ...rotors]) {
+      root.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) o.castShadow = false;
+      });
+    }
   }
   const roleCounts: Partial<Record<PersonRole, number>> = {};
   for (const s of spawnSpecs) roleCounts[s.spec.role] = (roleCounts[s.spec.role] ?? 0) + 1;
@@ -465,14 +476,30 @@ async function boot(): Promise<void> {
   // One-bounce GI: capture from above the roofs, feed back as IBL. Boot does
   // the full synchronous 6-face warm-up (never a black env map); after that
   // the scheduler amortizes refreshes to at most ONE face per frame (Slice E)
-  // — continuous walking in cycle mode, dirty-triggered walks on the static
-  // presets (roof fade crossing the castShadow / visibility thresholds),
-  // otherwise zero probe renders.
+  // — continuous walking in cycle mode; on the static presets a slow
+  // background cadence (one face per kswGi.staticFaceInterval frames) plus
+  // immediate dirty walks when the roof fade crosses the castShadow /
+  // visibility thresholds or settles after a fade.
   const cubeRT = new THREE.CubeRenderTarget(256);
   const cubeCam = new THREE.CubeCamera(0.1, 400, cubeRT);
   cubeCam.position.set(0, kswScene.giProbeY, 0);
   scene.add(cubeCam);
-  cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
+  // Crowd mode: run one LOD classification BEFORE the warm-up. The flag
+  // buffer boots zero-initialized (= everything LOD0) and the LOD0 pools
+  // boot at count=0, so an unclassified warm-up would capture 10k blob
+  // discs and zero bodies into the env cube.
+  if (agentInstances.lod) {
+    agentInstances.lod.frame(camera);
+    await renderer.computeAsync(agentInstances.lod.node);
+  }
+  // Probe renders never use main-camera culling: LOD1 capsules + blob discs
+  // everywhere, LOD0 hidden (no-op below the crowd threshold).
+  agentInstances.setProbeMode(true);
+  try {
+    cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
+  } finally {
+    agentInstances.setProbeMode(false);
+  }
   const giScheduler = new GiProbeScheduler(cycleMode ? 'cycle' : 'static');
   scene.environment = cubeRT.texture;
   scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale[presetName];
@@ -540,12 +567,19 @@ async function boot(): Promise<void> {
   };
   window.__KSW = kswSnapshot;
   const planBudget = { remaining: 0 };
+  // Plan-budget fairness: rotate the iteration start each frame so the
+  // budget isn't consumed by array position (see agents.advancePlanCursor).
+  let planCursor = 0;
 
-  // Roof-fade threshold tracking (Slice E): crossing the castShadow flip
-  // (0.6) or the visibility flip (0.02) — see staticBatch.setFade — changes
-  // what the GI probe and the shadow pass see; those are the only refresh
-  // triggers on the static presets.
+  // Roof-fade threshold tracking (Slice E, thresholds shared via
+  // designTokens.roofFadePolicy): crossing the castShadow flip or the
+  // visibility flip — see staticBatch.setFade — changes what the GI probe
+  // and the shadow pass see. Additionally the probe refreshes when the fade
+  // SETTLES (returns to fully-off or fully-opaque after having been in
+  // between), so the resting state gets captured promptly — the slow
+  // background cadence alone would leave a mid-fade capture lingering.
   let prevFade = roofFade(rig.radius, kswCamera);
+  let fadeWasMid = prevFade > roofFadePolicy.visible && prevFade < roofFadePolicy.opaque;
 
   let frameCount = 0;
   let prevT = 0;
@@ -573,14 +607,19 @@ async function boot(): Promise<void> {
     (scene.fog as THREE.Fog).far = fogBaseFar * fogZoom;
     const fade = roofFade(rig.radius, kswCamera);
     roofs.setFade(fade);
-    if ((prevFade > 0.6) !== (fade > 0.6)) {
+    const fadeIsMid = fade > roofFadePolicy.visible && fade < roofFadePolicy.opaque;
+    if ((prevFade > roofFadePolicy.castShadow) !== (fade > roofFadePolicy.castShadow)) {
       // roof batch toggled castShadow: refresh GI + (cached) shadow map
       giScheduler.markDirty();
       if (shadowCached) sun.shadow.needsUpdate = true;
-    } else if ((prevFade > 0.02) !== (fade > 0.02)) {
+    } else if ((prevFade > roofFadePolicy.visible) !== (fade > roofFadePolicy.visible)) {
       // roof visibility flipped: the probe sees a different scene
       giScheduler.markDirty();
+    } else if (fadeWasMid && !fadeIsMid) {
+      // fade settled (fully off or fully opaque): capture the resting state
+      giScheduler.markDirty();
     }
+    fadeWasMid = fadeIsMid;
     prevFade = fade;
     focusU.value = rig.radius;
     // edge mist is a close-up treatment; from the overview it would read as
@@ -598,7 +637,10 @@ async function boot(): Promise<void> {
     planBudget.remaining = kswAgents.planBudget;
     const cpuAgents0 = performance.now();
     let walking = 0;
-    for (const la of liveAgents) {
+    // every agent updates every frame — only the order rotates (F7 fairness)
+    const agentCount = liveAgents.length;
+    for (let k = 0; k < agentCount; k++) {
+      const la = liveAgents[(planCursor + k) % agentCount];
       updateAgent(la.agent, dt, nav, planBudget);
       const targetY = inBuilding(la.agent.pos[0], la.agent.pos[1]) ? 0.14 : 0;
       la.y = approach(la.y, targetY, dt, 10);
@@ -612,6 +654,7 @@ async function boot(): Promise<void> {
       }
       la.slot.set(la.agent.pos[0], la.agent.pos[1], la.y, la.yaw, isWalking, la.roll);
     }
+    planCursor = advancePlanCursor(planCursor, kswAgents.planBudget, agentCount);
     cpu.agents = ema(cpu.agents, performance.now() - cpuAgents0);
     if (frameCount % 15 === 0) {
       kswSnapshot.agents.walking = walking;
@@ -631,9 +674,15 @@ async function boot(): Promise<void> {
     if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
     // Amortized GI probe: at most ONE cube face per frame (was: whole scene
     // 6x in one frame every 240 frames). PMREM rebuild once per full cube.
+    // Probe faces render without main-camera culling (setProbeMode).
     const probe = giScheduler.next();
     if (probe) {
-      renderProbeFace(renderer, cubeCam, scene, probe.face);
+      agentInstances.setProbeMode(true);
+      try {
+        renderProbeFace(renderer, cubeCam, scene, probe.face);
+      } finally {
+        agentInstances.setProbeMode(false);
+      }
       if (probe.cubeComplete) cubeRT.texture.needsPMREMUpdate = true;
     }
     const cpuRender0 = performance.now();

@@ -33,7 +33,10 @@ export type Agent = {
   rngState: number;
 };
 
-function mulberry32(state: number): { next: () => number; state: () => number } {
+// Seeded PRNG core shared with agentSpawn.ts (the two streams never
+// entangle: spawn consumes its own fixed-seed stream once at spawn time,
+// each agent carries its own rngState).
+export function mulberry32(state: number): { next: () => number; state: () => number } {
   let s = state >>> 0;
   const next = (): number => {
     s = (s + 0x6d2b79f5) >>> 0;
@@ -123,6 +126,15 @@ function pickTarget(agent: Agent, rnd: () => number, nav: NavGraph): { point: Pt
 // keeps ticking below zero) and retries on a later frame — deterministic,
 // since the agent's own rng sequence is untouched by the delay.
 export type PlanBudget = { remaining: number };
+
+// Plan-budget fairness: the per-frame agent loop rotates its start index by
+// the budget each frame, so under sustained oversubscription (more expired
+// dwells than budget) every agent eventually reaches the front of the line
+// instead of the tail starving behind low array indices. ALL agents still
+// get updateAgent every frame — only the iteration order rotates.
+export function advancePlanCursor(cursor: number, budget: number, count: number): number {
+  return count > 0 ? (cursor + budget) % count : 0;
+}
 
 export function updateAgent(agent: Agent, dt: number, nav: NavGraph, budget?: PlanBudget): void {
   if (agent.spec.stationary) return;
