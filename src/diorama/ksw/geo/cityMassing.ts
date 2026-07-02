@@ -77,6 +77,11 @@ function tintedClay(base: number): THREE.MeshPhysicalMaterial {
   m.vertexColors = true;
   m.color = new THREE.Color(palette.trueWhite);
   m.sheenColor = new THREE.Color(base).lerp(new THREE.Color(palette.trueWhite), clay.sheenLerp);
+  // Baked meshes are vertex-welded for JSON size (scripts/geo/lib/transform.mjs),
+  // which makes computeVertexNormals() smooth-shade across welded seams —
+  // ridges/eaves would lose the crisp clay facets. Flat shading restores
+  // per-face faceted normals at draw time without unwelding the JSON.
+  m.flatShading = true;
   return m;
 }
 

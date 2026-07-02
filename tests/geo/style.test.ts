@@ -47,6 +47,62 @@ describe('roofSkirts', () => {
   });
 });
 
+describe('roofSkirts winding', () => {
+  // gabled roof: two planes meeting at a ridge y=6, eaves at y=4
+  const planes = [
+    [[0, 4, 0], [10, 4, 0], [10, 6, 5], [0, 6, 5]],
+    [[0, 6, 5], [10, 6, 5], [10, 4, 10], [0, 4, 10]],
+  ];
+
+  function centroidXZ(roofRings: number[][][]): [number, number] {
+    let sx = 0, sz = 0, n = 0;
+    for (const ring of roofRings) {
+      for (const [x, , z] of ring) {
+        sx += x; sz += z; n++;
+      }
+    }
+    return [sx / n, sz / n];
+  }
+
+  // Newell's method — robust for the triangle-shaped (one repeated-vertex)
+  // quads roofSkirts emits when the rising edge already touches the eave.
+  function quadNormal(quad: number[][]): [number, number, number] {
+    let nx = 0, ny = 0, nz = 0;
+    for (let i = 0; i < quad.length; i++) {
+      const [x0, y0, z0] = quad[i];
+      const [x1, y1, z1] = quad[(i + 1) % quad.length];
+      nx += (y0 - y1) * (z0 + z1);
+      ny += (z0 - z1) * (x0 + x1);
+      nz += (x0 - x1) * (y0 + y1);
+    }
+    return [nx, ny, nz];
+  }
+
+  function expectOutwardSkirts(skirts: number[][][], roofRings: number[][][]): void {
+    const [cx, cz] = centroidXZ(roofRings);
+    for (const quad of skirts) {
+      const [nx, , nz] = quadNormal(quad);
+      // centroid of the quad's own points as the reference "midpoint"
+      const mx = quad.reduce((s, p) => s + p[0], 0) / quad.length;
+      const mz = quad.reduce((s, p) => s + p[2], 0) / quad.length;
+      const outX = mx - cx, outZ = mz - cz;
+      const dot = nx * outX + nz * outZ;
+      expect(dot).toBeGreaterThan(0);
+    }
+  }
+
+  it('orients skirts outward for the normally-wound fixture', () => {
+    const skirts = roofSkirts(planes, 4);
+    expectOutwardSkirts(skirts, planes);
+  });
+
+  it('orients skirts outward even when every source ring is reversed', () => {
+    const reversed = planes.map((ring) => [...ring].reverse());
+    const skirts = roofSkirts(reversed, 4);
+    expectOutwardSkirts(skirts, reversed);
+  });
+});
+
 describe('roofUnderside', () => {
   it('copies each plane 0.22 lower with flipped winding', () => {
     const planes = [[[0, 5, 0], [4, 5, 0], [4, 5, 4], [0, 5, 4]]];

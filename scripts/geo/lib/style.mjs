@@ -63,10 +63,26 @@ const ekey = (a, b) => {
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
+// Newell's method — robust for the triangle-shaped (one repeated-vertex)
+// quads a skirt collapses to when its rising edge already touches the eave.
+function quadNormalXZ(quad) {
+  let nx = 0, nz = 0;
+  for (let i = 0; i < quad.length; i++) {
+    const [x0, y0, z0] = quad[i];
+    const [x1, y1, z1] = quad[(i + 1) % quad.length];
+    nx += (y0 - y1) * (z0 + z1);
+    nz += (x0 - x1) * (y0 + y1);
+  }
+  return [nx, nz];
+}
+
 // Vertical fill from each rising roof boundary edge down to the eave —
 // closes the open gable triangles left by prism walls. Shared (ridge/valley)
 // edges appear in two planes and are deduped; edges lying at eave level need
-// no skirt.
+// no skirt. The source roof ring's winding is not trusted: each skirt quad's
+// horizontal normal is checked against (edge midpoint − roof centroid) and
+// the ring is reversed if it faces inward, so skirts are always outward-facing
+// regardless of upstream winding.
 export function roofSkirts(roofRings, eaveY) {
   const seen = new Map(); // ekey -> count
   const edges = [];
@@ -79,16 +95,31 @@ export function roofSkirts(roofRings, eaveY) {
       edges.push({ a, b, k });
     }
   }
+
+  let cx = 0, cz = 0, n = 0;
+  for (const ring of roofRings) {
+    for (const [x, , z] of ring) {
+      cx += x; cz += z; n++;
+    }
+  }
+  cx /= n || 1;
+  cz /= n || 1;
+
   const out = [];
   for (const { a, b, k } of edges) {
     if (seen.get(k) > 1) continue; // interior edge (ridge/valley)
     if (a[1] <= eaveY + EDGE_EPS && b[1] <= eaveY + EDGE_EPS) continue; // flat at eave
-    out.push([
+    const quad = [
       [a[0], a[1], a[2]],
       [b[0], b[1], b[2]],
       [b[0], eaveY, b[2]],
       [a[0], eaveY, a[2]],
-    ]);
+    ];
+    const [nx, nz] = quadNormalXZ(quad);
+    const mx = (a[0] + b[0]) / 2, mz = (a[2] + b[2]) / 2;
+    const outX = mx - cx, outZ = mz - cz;
+    if (nx * outX + nz * outZ < 0) quad.reverse();
+    out.push(quad);
   }
   return out;
 }
