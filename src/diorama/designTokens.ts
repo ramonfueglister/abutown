@@ -146,6 +146,15 @@ export const cloudVol = {
   maxDist: 90, // clamp the near-horizon march length
 } as const;
 
+// Legacy fbm cloud dome — still drives the KSW scene's cloud shell
+// (ksw/main.ts); look.ts moved on to the volumetric slab above.
+export const cloudCfg = {
+  scale: 2.1,
+  coverage: { morning: 0.45, dusk: 0.6, night: 0.35 },
+  drift: 0.008,
+  litBoost: 1.6,
+} as const;
+
 // Warm interior glow for lamp-lit presets.
 export const nightGlow = {
   bulb: 0xffc98a,
