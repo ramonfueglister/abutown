@@ -1,0 +1,117 @@
+# Winterthur-Stadt im Diorama-Stil: Fassaden, Dächer, Strassen, Licht, Perf
+
+**Datum:** 2026-07-02 · **Branch:** `geo/winterthur-map` (nach 272d11a, Natur-Layer) · **Folge-Spec zu** `2026-07-02-winterthur-geodata-design.md`
+
+## Ziel
+
+Die geodätische Stadt (S1+S2 + Natur-Layer) sieht nach Rohbau aus; das
+Original-Hero-Diorama ist die Qualitäts-Referenz („SOTA 2026"). Diese Slice
+bringt die Stadt auf denselben Stil- und Licht-Stand — und behebt die vier
+benannten Mängel: Häuser ohne Unterbau, Dächer-Problematik, müllige Strassen,
+Schwebe-Geometrie — plus das Ruckeln (Perf-Regression).
+
+**Harte Regeln (unverändert):**
+- **Geodäsie:** keine Geometrie ohne Datenquelle. Die Stil-Schicht (Sockel,
+  Bänder, Fenster, Trim) ist eine **deterministische Funktion der echten Form**
+  (Footprint, Fassadenlänge, Höhe, Dachfläche). Nichts wird „wild platziert".
+- **Hero pixel-treu:** bestehende `designTokens`-Werte, `look.ts`,
+  `staticBatch.ts` unangetastet; nur additive Token. Jeder Task endet mit
+  einem **Screenshot-Gate** (Hero `overview`/`er` + Stadt `city`/`bahnhof`),
+  bewertet gegen das Original-Diorama.
+
+## Diagnose der Mängel (verifiziert an Live-Screenshots)
+
+| Mangel | Ursache |
+|---|---|
+| Häuser ohne Unterbau | Wand-Extrusion beginnt exakt bei y=0, kein Sockel, keine Basis — Häuser wirken aufgesetzt |
+| Dächer-Problematik | LoD2-Dachflächen sind papierdünne, **einseitige** Planes (von unten/Seite unsichtbar); **Lücke zwischen Wandoberkante (Traufe=min-Dach-Z) und aufsteigendem Dach** (offene Giebel); Schattenseiten kippen grau (Tint-Spreizung ±14% L zu hart, kein Sonnenschatten) |
+| Strassen müllig | Bänder ohne Gehrungs-Joints (Keillücken), überlappende Quads an Kreuzungen auf gleicher Höhe (Flackern), Einheitsfarbe/-höhe für alle Klassen inkl. Fusswege |
+| Schwebende Dinge | Wenn der Wand-Unterkanten-Trace scheitert, fällt der Footprint auf ein einzelnes Facet zurück → Mini-Wandprisma unter grossem echtem Dach = schwebendes Dach |
+| Ruckeln | Perf-Regression seit Stadt+Bäume. Hypothesen (im Plan ZUERST messen, dann fixen): (a) Shadow-Map-/GI-Caching aus #111 wird durch die neuen Objekte pro Frame invalidiert, (b) GI-Probe rendert jetzt die ganze Stadt (88k Tris × 6 Faces × Kadenz), (c) 4127 Baum-Instanzen als PCSS-Caster verteuern die Shadow-Pass |
+
+## Design
+
+### 1. Bake-Härtung: kein Gebäude ohne tragende Hülle (Schwebe-Fix)
+
+- Gate im Bake: `bbox(roof) ⊆ bbox(footprint) + 1.5 m` UND
+  `area(footprint) ≥ 0.5 × area(roof-projektion)`. Wenn verletzt →
+  Footprint-Fallback = **projizierter Umriss der Dachflächen** (konvexe Hülle
+  der Dach-XZ-Punkte — datengetreu: das Dach IST swisstopo-Geometrie).
+- Report: Anzahl Trace-Erfolge / Dach-Fallbacks; 0 Gebäude ohne Hülle.
+
+### 2. Gebäude-Stil (Diorama-Formsprache, alles aus echter Form abgeleitet)
+
+- **Sockel:** Basisband 0.5 m hoch, 0.12 m ausgestellt, entlang des Footprints;
+  Wand beginnt 0.3 m unter Plattenoberkante (nie schwebend). Farbton wie die
+  Original-Basis (helles `white`-Band).
+- **Traufband + Dachtrim:** helles Band (Original `kswPalette.roofTrim`-Familie)
+  entlang der echten Traufkante; Dächer erhalten **Dicke** (0.22 m Extrusion der
+  echten Dachfläche nach unten + Untersichtfläche) → keine Papier-Planes,
+  sichtbare Dachkante wie beim Original (`roofThickness`-Look).
+- **Giebel-Schliessung:** Wandprisma wird pro Fassadensegment bis zur lokalen
+  Dachhöhe hochgezogen (Sampling der Dachfläche über dem Segment) statt global
+  bis zur Traufe — keine offenen Dreiecks-Lücken unterm Dach.
+- **Fenster (Voll-Variante, approved):** pro Fassadensegment Raster aus echter
+  Segmentlänge × echten Stockwerken (`floors = clamp(round(h/3), 1, 24)`);
+  Fensterproportionen/Sill/Head aus `kswScene`-Verhältnissen skaliert.
+  Instanziert: 1× weisse Rahmen, 1× Glas-Panes, Night-Glow-Anteil deterministisch
+  (`nightWindowHash`, `NIGHT_WINDOW_SHARE` — dieselben Funktionen wie das
+  Original). Budget ~60–120k Instanzen, 2–3 Draw-Calls; Distanz-Cull, falls
+  Perf-Gate reisst.
+- **Tint zähmen:** Helligkeits-Spreizung ±14% → ±6%, Hue-Drift halbiert; Ziel:
+  warme Clay-Schatten statt Grau-Kippen.
+
+### 3. Strassen v2
+
+- **Miter-Joints:** Polyline-Offsetting mit Gehrung (Kappung bei >60°-Knick) —
+  keine Keillücken.
+- **Klassen-Hierarchie:** eigene Y-Ebene + Farbe pro Klasse (Fahrbahnen warmes
+  Asphalt-Beige, Fusswege heller schmaler, Gleise dunkler auf Schotterband) —
+  additive `kswCity`-Token. Kreuzungs-Flackern verschwindet durch die
+  Y-Staffelung (0.035/0.04/0.045/0.05).
+- Fusswege < 2.5 m Breite werden ab Kamera-Radius > 600 m ausgeblendet
+  (Instanz-/Mesh-Split), damit die Stadtansicht ruhig bleibt.
+
+### 4. Beleuchtung wie das Original
+
+- **Kamerafolgendes Schatten-Frustum:** für `radius ≤ 120` exakt heutige Werte
+  (Extent 46, Zentrum Origin) — deckt alle Hero-Presets (overview ≈ 111.5, er,
+  ops) → Hero-Look garantiert unverändert. Darüber wächst der Extent linear
+  (`46 + (radius − 120) × 0.9`, gedeckelt auf die halbe Plattendiagonale) und
+  das Zentrum folgt dem Kamera-Target → die Stadt bekommt echte
+  PCSS-Sonnenschatten. Shadow-Map-Refresh-Politik aus #111 respektieren
+  (Refresh bei Radius-/Target-Änderung, nicht pro Frame).
+- **Wolken-Fade:** Wolkendeck-Opazität → 0 zwischen radius 300→600 (der graue
+  Kuppelrand-Schmier verschwindet; Hero-Framing unverändert bewölkt).
+
+### 5. Performance (Ruckel-Fix) — messen, dann fixen
+
+- Task 1 des Plans: Profil via `__KSW_INFO()` (cpu.frame/agents/render,
+  drawCalls, tris) in `overview` und `city`, Vergleich gegen `origin/main`.
+- Erwartete Fixes (nach Messung): Stadt-Meshes aus der GI-Probe-Szene
+  ausschliessen oder Probe-Kadenz für Statik nutzen; Baum-Canopy als
+  Shadow-Caster nur im Nahbereich; Shadow-/GI-Cache-Invalidierung durch die
+  neuen Objekte beheben. **Gate:** cpu.frame im `city`-Blick ≤ 1.5× des
+  Hero-`overview`-Werts von origin/main; keine sichtbaren Ruckler beim Orbit.
+
+### 6. Screenshot-Loop (Arbeitsweise)
+
+Jeder Task endet mit: Captures `overview`, `er`, `city`, `bahnhof` (morning;
+Licht-Tasks zusätzlich dusk/night) → Selbstbewertung gegen das
+Original-Diorama → bei Mangel iterieren, erst dann nächster Task. Hero-Presets
+müssen durchgehend pixel-treu zur `before-*`-Referenz bleiben.
+
+## Testing
+
+- Bake: Gate-Tests für Hüllen-Validierung + Dach-Fallback (Fixture mit
+  kaputtem Trace); Fassaden-Raster-Ableitung (Stockwerke, Fensterzahl aus
+  Segmentlänge) pur + getestet.
+- Runtime: Miter-Join-Geometrie (keine degenerierten Quads, Winkel-Kappung),
+  Fenster-Instanz-Zahlen deterministisch, Sockel-/Trim-Mesh-Zahlen.
+- `smoke-ksw.mjs` grün; `__KSW_INFO`-Budget im Smoke geprüft.
+
+## Nicht in dieser Slice
+
+S3 (echtes KSW-Gebäude + Innenraum), Terrain (swissALTI3D), Bahnhof-Indoor,
+Landmarken-Labels/Attribution (S4), Brücken über das Gleisfeld als eigene
+Ebene (Strassen bleiben flach auf der Platte).
