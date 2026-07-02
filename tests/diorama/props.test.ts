@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { buildPerson, buildProp, propBuilders } from '../../src/diorama/ksw/props';
+import { buildProp, propBuilders } from '../../src/diorama/ksw/props';
 import { kswPlan, type PersonRole } from '../../src/diorama/ksw/floorPlan';
 import { kswPalette, palette } from '../../src/diorama/designTokens';
 
@@ -59,24 +59,15 @@ describe('prop registry', () => {
   });
 });
 
-describe('people', () => {
+describe('people placements', () => {
+  // person rendering is instanced — merged geometry/colors are covered by
+  // tests/diorama/agentMeshes.test.ts
   const roles: PersonRole[] = ['nurse', 'doctor', 'surgeon', 'patient', 'child', 'visitor', 'labtech', 'paramedic'];
-
-  it('every role builds with token colors and faces its yaw', () => {
-    for (const role of roles) {
-      const g = buildPerson({ role, x: 1, z: 2, yaw: 0.7 });
-      expect(meshes(g).length, role).toBeGreaterThan(0);
-      expect(g.rotation.y).toBeCloseTo(0.7);
-      for (const m of meshes(g)) {
-        const hex = (m.material as THREE.MeshStandardMaterial).color.getHex();
-        expect(allTokenColors.has(hex), `${role}: color #${hex.toString(16)}`).toBe(true);
-      }
-    }
-  });
 
   it('every person placed in the plan has a known role', () => {
     const known = new Set(roles);
     for (const room of kswPlan.rooms) for (const p of room.people) expect(known.has(p.role), p.role).toBe(true);
     for (const p of kswPlan.outdoorPeople) expect(known.has(p.role), p.role).toBe(true);
+    for (const w of kswPlan.walkers) expect(known.has(w.role), w.role).toBe(true);
   });
 });

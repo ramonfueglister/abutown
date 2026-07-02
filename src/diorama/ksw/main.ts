@@ -31,9 +31,10 @@ import {
 import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigFromLookAt, rigPosition, roofFade, type CameraRigState } from './cameraRig';
 import { buildHospital } from './building';
 import { kswPlan } from './floorPlan';
-import { buildPerson } from './props';
+import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
 import { buildNav } from './nav';
 import { createAgent, updateAgent, type Agent, type AgentSpec } from './agents';
+import type { PersonRole } from './floorPlan';
 
 declare global {
   interface Window {
@@ -334,40 +335,43 @@ async function boot(): Promise<void> {
 
   // ── everyone is an agent: dwell -> pick a destination -> walk the nav
   // graph (room -> door -> corridor -> target) -> dwell. Deterministic.
+  // Rendering is per-role instanced (agentMeshes.ts): the shader animates
+  // squash/waddle/yaw from storage buffers, the CPU keeps only the agent
+  // state machine plus flat smoothing slots (eased y, lerped yaw, roll).
   const nav = buildNav(kswPlan);
   const inBuilding = (x: number, z: number): boolean =>
     Math.abs(x - kswPlan.building.x) < kswPlan.building.w / 2 &&
     Math.abs(z - kswPlan.building.z) < kswPlan.building.d / 2;
-  type LiveAgent = { agent: Agent; g: THREE.Group; baseScaleY: number; idx: number };
-  const liveAgents: LiveAgent[] = [];
-  let seedCounter = 1;
-  const spawn = (spec: Omit<AgentSpec, 'seed'>, yaw: number): void => {
-    const agent = createAgent({ ...spec, seed: seedCounter++ });
-    const g = buildPerson({ role: spec.role, x: spec.home[0], z: spec.home[1], yaw });
-    g.position.y = inBuilding(spec.home[0], spec.home[1]) ? 0.14 : 0;
-    agent.yaw = yaw;
-    hospital.add(g);
-    liveAgents.push({ agent, g, baseScaleY: g.scale.y, idx: liveAgents.length });
-  };
+  const spawnSpecs: Array<{ spec: Omit<AgentSpec, 'seed'>; yaw: number }> = [];
   for (const room of kswPlan.rooms) {
     for (const p of room.people) {
-      spawn({ role: p.role, home: [p.x, p.z], homeRoomId: room.id, kind: 'resident', stationary: p.stationary }, p.yaw);
+      spawnSpecs.push({ spec: { role: p.role, home: [p.x, p.z], homeRoomId: room.id, kind: 'resident', stationary: p.stationary }, yaw: p.yaw });
     }
   }
   for (const p of kswPlan.outdoorPeople) {
-    spawn({ role: p.role, home: [p.x, p.z], homeRoomId: null, kind: 'outdoor' }, p.yaw);
+    spawnSpecs.push({ spec: { role: p.role, home: [p.x, p.z], homeRoomId: null, kind: 'outdoor' }, yaw: p.yaw });
   }
   for (const w of kswPlan.walkers) {
     const home: [number, number] = w.axis === 'x' ? [w.from, w.fixed] : [w.fixed, w.from];
     const kind = inBuilding(home[0], home[1]) ? 'rounds' : 'outdoor';
-    spawn({ role: w.role, home, homeRoomId: null, kind }, 0);
+    spawnSpecs.push({ spec: { role: w.role, home, homeRoomId: null, kind }, yaw: 0 });
   }
-  const lerpAngle = (a: number, b: number, t: number): number => {
-    let d = (b - a) % (Math.PI * 2);
-    if (d > Math.PI) d -= Math.PI * 2;
-    if (d < -Math.PI) d += Math.PI * 2;
-    return a + d * t;
-  };
+  const roleCounts: Partial<Record<PersonRole, number>> = {};
+  for (const s of spawnSpecs) roleCounts[s.spec.role] = (roleCounts[s.spec.role] ?? 0) + 1;
+  const agentInstances = createAgentInstances(roleCounts);
+  for (const m of agentInstances.meshes) hospital.add(m);
+  type LiveAgent = { agent: Agent; slot: AgentSlot; idx: number; y: number; yaw: number; roll: number };
+  const liveAgents: LiveAgent[] = [];
+  let seedCounter = 1;
+  for (const [idx, s] of spawnSpecs.entries()) {
+    const agent = createAgent({ ...s.spec, seed: seedCounter++ });
+    agent.yaw = s.yaw;
+    const y = inBuilding(s.spec.home[0], s.spec.home[1]) ? 0.14 : 0;
+    const slot = agentInstances.add(s.spec.role, idx);
+    slot.set(agent.pos[0], agent.pos[1], y, s.yaw, false, 0);
+    liveAgents.push({ agent, slot, idx, y, yaw: s.yaw, roll: 0 });
+  }
+  agentInstances.update(0);
 
   // Edge mist ring around the plate rim
   const mistMat = new THREE.MeshBasicMaterial({
@@ -532,19 +536,18 @@ async function boot(): Promise<void> {
     for (const r of rotors) r.rotation.y = t * 1.4;
     for (const la of liveAgents) {
       updateAgent(la.agent, dt, nav);
-      la.g.position.x = la.agent.pos[0];
-      la.g.position.z = la.agent.pos[1];
       const targetY = inBuilding(la.agent.pos[0], la.agent.pos[1]) ? 0.14 : 0;
-      la.g.position.y += (targetY - la.g.position.y) * Math.min(1, dt * 10);
-      if (la.agent.phase === 'walk') {
-        la.g.rotation.y = lerpAngle(la.g.rotation.y, la.agent.yaw, Math.min(1, dt * 9));
-        la.g.rotation.z = Math.sin(t * 9 + la.idx) * 0.05;
-        la.g.scale.y = la.baseScaleY * (1 + Math.abs(Math.sin(t * 9 + la.idx)) * 0.025);
+      la.y = approach(la.y, targetY, dt, 10);
+      const walking = la.agent.phase === 'walk';
+      if (walking) {
+        la.yaw = lerpAngle(la.yaw, la.agent.yaw, Math.min(1, dt * 9));
+        la.roll = Math.sin(t * 9 + la.idx) * 0.05;
       } else {
-        la.g.rotation.z *= Math.max(0, 1 - dt * 6);
-        la.g.scale.y = la.baseScaleY * (1 + Math.sin(t * 2.2 + la.idx * 0.9) * 0.012);
+        la.roll *= Math.max(0, 1 - dt * 6);
       }
+      la.slot.set(la.agent.pos[0], la.agent.pos[1], la.y, la.yaw, walking, la.roll);
     }
+    agentInstances.update(t);
     driftU.value = t * cloudCfg.drift;
     frameCount++;
     if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);

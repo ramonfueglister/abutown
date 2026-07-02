@@ -4,7 +4,7 @@
 
 import * as THREE from 'three/webgpu';
 import { clay, kswPalette, palette, radii } from '../designTokens';
-import type { PersonPlacement, PersonRole, PropPlacement } from './floorPlan';
+import type { PropPlacement } from './floorPlan';
 import { boxGeo, cyl, roundedBox, sph, tor } from './geometryCache';
 
 const materialCache = new Map<number, THREE.MeshPhysicalMaterial>();
@@ -566,7 +566,8 @@ function incubator(): THREE.Group {
   const dome = new THREE.Mesh(new THREE.SphereGeometry(0.34, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2), glassMat());
   dome.scale.set(1.25, 0.85, 0.8);
   g.add(at(dome, 0, 0.98, 0));
-  // tiny sleeping bean baby under the dome (capsule geometry — not cached, see beanPerson)
+  // tiny sleeping bean baby under the dome (CapsuleGeometry is outside the
+  // Slice-A cache's factory set — single call site, left uncached)
   const baby = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.14, 6, 12), clayMat(palette.honey));
   baby.rotation.z = Math.PI / 2;
   baby.castShadow = true;
@@ -918,85 +919,9 @@ function plantSmall(scale: number): THREE.Group {
   return g;
 }
 
-// ── people ──────────────────────────────────────────────────────────────
-
-export function beanPerson(bodyColor: number): THREE.Group {
-  const g = new THREE.Group();
-  // CapsuleGeometry isn't in geometryCache's factory set (Slice A covers
-  // box/cylinder/sphere/torus only) — left uncached here and for the mouth below
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.55, 8, 24), clayMat(bodyColor));
-  body.position.y = 0.62;
-  body.castShadow = true;
-  body.receiveShadow = true;
-  g.add(body);
-  const eyeGeo = sph(0.052, 12);
-  for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(eyeGeo, clayMat(palette.eye));
-    eye.position.set(side * 0.105, 0.92, 0.305);
-    g.add(eye);
-  }
-  const mouth = new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.06, 4, 8), clayMat(palette.eye));
-  mouth.rotation.z = Math.PI / 2;
-  mouth.position.set(0, 0.8, 0.33);
-  g.add(mouth);
-  return g;
-}
-
-function badge(g: THREE.Group): void {
-  g.add(at(box(0.11, 0.14, 0.03, palette.white, radii.xs), 0.14, 0.72, 0.31));
-}
-
-export function buildPerson(p: PersonPlacement): THREE.Group {
-  let g: THREE.Group;
-  switch (p.role) {
-    case 'nurse': {
-      g = beanPerson(palette.mint);
-      badge(g);
-      break;
-    }
-    case 'doctor': {
-      g = beanPerson(palette.white);
-      const scope = torus(0.2, 0.028, palette.eye, Math.PI);
-      scope.rotation.x = Math.PI;
-      g.add(at(scope, 0, 0.86, 0.26));
-      break;
-    }
-    case 'surgeon': {
-      g = beanPerson(palette.sage);
-      g.add(at(cylinder(0.24, 0.28, 0.14, palette.mint, 18), 0, 1.06, 0));
-      g.add(at(box(0.26, 0.14, 0.05, palette.white, radii.xs), 0, 0.8, 0.31));
-      break;
-    }
-    case 'patient':
-      g = beanPerson(palette.coral);
-      break;
-    case 'child': {
-      g = beanPerson(palette.honey);
-      g.scale.setScalar(0.68);
-      break;
-    }
-    case 'visitor':
-      g = beanPerson(palette.skin);
-      break;
-    case 'labtech': {
-      g = beanPerson(palette.white);
-      badge(g);
-      for (const side of [-1, 1]) {
-        const rim = torus(0.07, 0.016, palette.eye);
-        g.add(at(rim, side * 0.105, 0.92, 0.3));
-      }
-      break;
-    }
-    case 'paramedic': {
-      g = beanPerson(palette.coralSoft);
-      g.add(at(box(0.4, 0.12, 0.06, palette.white, radii.xs), 0, 0.66, 0.29));
-      break;
-    }
-  }
-  g.rotation.y = p.yaw;
-  g.position.set(p.x, 0, p.z);
-  return g;
-}
+// People are no longer built here: Slice C replaced the per-agent
+// THREE.Group (beanPerson/buildPerson) with per-role instanced rendering —
+// see agentMeshes.ts for the merged bean geometry and role accessories.
 
 // ── registry ────────────────────────────────────────────────────────────
 
