@@ -1,6 +1,6 @@
 // tests/geo/facade.test.ts
 import { describe, expect, it } from 'vitest';
-import { facadeLayout } from '../../src/diorama/ksw/geo/facade';
+import { facadeLayout, pointInRing } from '../../src/diorama/ksw/geo/facade';
 
 const b = { footprint: [[0, 0], [24, 0], [24, 10], [0, 10]], height: 9.5, door: { x: 12, z: 0, yaw: Math.PI } };
 
@@ -36,6 +36,34 @@ describe('facadeLayout', () => {
       const toCenterZ = cz - w.z;
       const dot = dirX * toCenterX + dirZ * toCenterZ;
       expect(dot).toBeLessThan(0); // outward direction points away from centroid
+    }
+  });
+
+  it('derives outward-pointing yaw on a concave (L-shaped) footprint', () => {
+    // L-shape: reflex vertex at (8,8). The centroid-average test picks the
+    // wrong side for edges adjacent to the notch since the naive vertex
+    // centroid sits outside the polygon's actual mass, and can even be on
+    // the wrong side of a reflex-adjacent edge.
+    const lShaped = {
+      footprint: [
+        [0, 0],
+        [20, 0],
+        [20, 8],
+        [8, 8],
+        [8, 20],
+        [0, 20],
+      ],
+      height: 6,
+    };
+    const outL = facadeLayout(lShaped);
+    expect(outL.windows.length).toBeGreaterThan(0);
+    for (const w of outL.windows) {
+      const outX = w.x + Math.sin(w.yaw) * 0.5;
+      const outZ = w.z + Math.cos(w.yaw) * 0.5;
+      const inX = w.x - Math.sin(w.yaw) * 0.5;
+      const inZ = w.z - Math.cos(w.yaw) * 0.5;
+      expect(pointInRing(outX, outZ, lShaped.footprint)).toBe(false);
+      expect(pointInRing(inX, inZ, lShaped.footprint)).toBe(true);
     }
   });
 });

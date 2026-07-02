@@ -3,30 +3,41 @@
 // floors = height/3 m (documented), columns from real facade length. No RNG.
 //
 // Footprint rings come from the trace/bake step and their winding order is
-// NOT guaranteed (CW vs CCW depending on the source geometry). A yaw formula
-// derived purely from edge direction would be wrong-side on reversed rings,
-// pushing every window instance inside the wall (invisible). Instead we test
-// both normal candidates against the ring centroid and pick whichever points
-// away from it — robust to winding.
+// NOT guaranteed (CW vs CCW depending on the source geometry), and real
+// traced footprints are frequently concave (L/U-shaped). A yaw formula
+// derived from edge direction alone, or from a naive vertex-average
+// centroid side-test, gets the WRONG side on edges adjacent to a reflex
+// vertex — the centroid of a concave ring can sit on the interior side of
+// such an edge, or even outside the polygon entirely. Instead we do an
+// exact point-in-polygon side test: offset the edge midpoint by ±0.5m
+// along each candidate normal and keep whichever offset point is NOT
+// inside the footprint ring. This is correct for any simple polygon,
+// convex or concave.
 import { kswCityStyle } from '../../designTokens';
 
 export type WindowSlot = { x: number; y: number; z: number; yaw: number };
 export type FacadeLayout = { windows: WindowSlot[]; door: WindowSlot | null };
 
-function centroidOf(fp: number[][]): { cx: number; cz: number } {
-  let cx = 0;
-  let cz = 0;
-  for (const [x, z] of fp) {
-    cx += x;
-    cz += z;
+// Standard ray-casting point-in-polygon test. Mirrors scripts/geo/lib/join.mjs'
+// pointInRing (kept duplicated on purpose: that file is a .mjs build script,
+// this is TS source — do NOT import a .mjs into src).
+export function pointInRing(x: number, z: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, zi] = ring[i];
+    const [xj, zj] = ring[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
   }
-  return { cx: cx / fp.length, cz: cz / fp.length };
+  return inside;
 }
 
-// Outward yaw for an edge from (ax,az) to (bx,bz), robust to ring winding:
-// test both normal candidates by offsetting the edge midpoint and keeping
-// the side farther from the footprint centroid.
-function outwardYaw(ax: number, az: number, bx: number, bz: number, cx: number, cz: number): number {
+// Outward yaw for an edge from (ax,az) to (bx,bz), robust to ring winding
+// AND to concave footprints: offset the edge midpoint by ±0.5m along each
+// candidate normal and pick the one whose offset point is outside the
+// footprint ring. If both are inside (sliver) or both outside (degenerate),
+// return null — caller must skip emitting windows for that edge rather than
+// guess.
+function outwardYaw(ax: number, az: number, bx: number, bz: number, ring: number[][]): number | null {
   const ex = bx - ax;
   const ez = bz - az;
   const len = Math.hypot(ex, ez);
@@ -43,9 +54,10 @@ function outwardYaw(ax: number, az: number, bx: number, bz: number, cx: number, 
   const p1z = mz + n1z * 0.5;
   const p2x = mx + n2x * 0.5;
   const p2z = mz + n2z * 0.5;
-  const d1 = Math.hypot(p1x - cx, p1z - cz);
-  const d2 = Math.hypot(p2x - cx, p2z - cz);
-  const [nx, nz] = d1 > d2 ? [n1x, n1z] : [n2x, n2z];
+  const in1 = pointInRing(p1x, p1z, ring);
+  const in2 = pointInRing(p2x, p2z, ring);
+  if (in1 === in2) return null; // sliver or degenerate — never guess
+  const [nx, nz] = in1 ? [n2x, n2z] : [n1x, n1z];
   // yaw such that (sin(yaw), cos(yaw)) == (nx, nz) — matches windows.ts'
   // position offset convention: x + sin(yaw)*out, z + cos(yaw)*out.
   return Math.atan2(nx, nz);
@@ -61,7 +73,6 @@ export function facadeLayout(b: {
   const windows: WindowSlot[] = [];
   let door: WindowSlot | null = null;
   const fp = b.footprint;
-  const { cx, cz } = centroidOf(fp);
   for (let i = 0; i < fp.length; i++) {
     const [ax, az] = fp[i];
     const [bx, bz] = fp[(i + 1) % fp.length];
@@ -72,7 +83,8 @@ export function facadeLayout(b: {
     if (cols < 1) continue;
     const ux = ex / len;
     const uz = ez / len;
-    const yaw = outwardYaw(ax, az, bx, bz, cx, cz);
+    const yaw = outwardYaw(ax, az, bx, bz, fp);
+    if (yaw === null) continue; // sliver/degenerate edge — never guess the side
     const start = (len - (cols - 1) * s.windowSpacing) / 2;
     const isDoorEdge =
       b.door &&
