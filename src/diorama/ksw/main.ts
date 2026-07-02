@@ -36,6 +36,7 @@ import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './age
 import { buildNav } from './nav';
 import { buildSpawnSpecs } from './agentSpawn';
 import { createAgent, updateAgent, type Agent } from './agents';
+import { GiProbeScheduler, renderProbeFace } from './giProbe';
 import type { PersonRole } from './floorPlan';
 
 declare global {
@@ -358,6 +359,22 @@ async function boot(): Promise<void> {
   // Crowd mode (Slice D): GPU LOD/cull classification + blob shadows instead
   // of real casters. At or below the threshold the authored look is untouched.
   const crowd = spawnSpecs.length > kswAgents.crowdThreshold;
+  // Shadow caching (Slice E): in crowd mode every caster is static — agents
+  // use blob shadows (castShadow=false, agentMeshes.ts), and outside cycle
+  // mode the sun stands still — so re-rendering the shadow map every frame
+  // buys nothing (it was ~3.5k of ~3.8k draw calls). The r185 node-based
+  // shadow system (ShadowNode.updateBefore) honors the classic
+  // light.shadow.autoUpdate / needsUpdate flags: autoUpdate=false freezes
+  // the cached depth map, needsUpdate=true re-renders it exactly once.
+  // Refresh trigger: the roof fade crossing the castShadow threshold
+  // (staticBatch toggles roofBatch.castShadow there). At or below the crowd
+  // threshold (real moving agent shadows) and in cycle mode (the sun moves)
+  // the per-frame path stays untouched.
+  const shadowCached = crowd && !cycleMode;
+  if (shadowCached) {
+    sun.shadow.autoUpdate = false;
+    sun.shadow.needsUpdate = true; // boot: render the map once, then freeze
+  }
   const roleCounts: Partial<Record<PersonRole, number>> = {};
   for (const s of spawnSpecs) roleCounts[s.spec.role] = (roleCounts[s.spec.role] ?? 0) + 1;
   const agentInstances = createAgentInstances(roleCounts, { crowd });
@@ -445,12 +462,18 @@ async function boot(): Promise<void> {
     }
   }
 
-  // One-bounce GI: capture from above the roofs, feed back as IBL
+  // One-bounce GI: capture from above the roofs, feed back as IBL. Boot does
+  // the full synchronous 6-face warm-up (never a black env map); after that
+  // the scheduler amortizes refreshes to at most ONE face per frame (Slice E)
+  // — continuous walking in cycle mode, dirty-triggered walks on the static
+  // presets (roof fade crossing the castShadow / visibility thresholds),
+  // otherwise zero probe renders.
   const cubeRT = new THREE.CubeRenderTarget(256);
   const cubeCam = new THREE.CubeCamera(0.1, 400, cubeRT);
   cubeCam.position.set(0, kswScene.giProbeY, 0);
   scene.add(cubeCam);
   cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
+  const giScheduler = new GiProbeScheduler(cycleMode ? 'cycle' : 'static');
   scene.environment = cubeRT.texture;
   scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale[presetName];
 
@@ -518,6 +541,12 @@ async function boot(): Promise<void> {
   window.__KSW = kswSnapshot;
   const planBudget = { remaining: 0 };
 
+  // Roof-fade threshold tracking (Slice E): crossing the castShadow flip
+  // (0.6) or the visibility flip (0.02) — see staticBatch.setFade — changes
+  // what the GI probe and the shadow pass see; those are the only refresh
+  // triggers on the static presets.
+  let prevFade = roofFade(rig.radius, kswCamera);
+
   let frameCount = 0;
   let prevT = 0;
   const clock = new THREE.Clock();
@@ -544,6 +573,15 @@ async function boot(): Promise<void> {
     (scene.fog as THREE.Fog).far = fogBaseFar * fogZoom;
     const fade = roofFade(rig.radius, kswCamera);
     roofs.setFade(fade);
+    if ((prevFade > 0.6) !== (fade > 0.6)) {
+      // roof batch toggled castShadow: refresh GI + (cached) shadow map
+      giScheduler.markDirty();
+      if (shadowCached) sun.shadow.needsUpdate = true;
+    } else if ((prevFade > 0.02) !== (fade > 0.02)) {
+      // roof visibility flipped: the probe sees a different scene
+      giScheduler.markDirty();
+    }
+    prevFade = fade;
     focusU.value = rig.radius;
     // edge mist is a close-up treatment; from the overview it would read as
     // separate discs, so it thins out as the camera pulls back
@@ -591,8 +629,12 @@ async function boot(): Promise<void> {
     driftU.value = t * cloudCfg.drift;
     frameCount++;
     if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
-    if (frameCount % (cycleMode ? 90 : 240) === 0) {
-      cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
+    // Amortized GI probe: at most ONE cube face per frame (was: whole scene
+    // 6x in one frame every 240 frames). PMREM rebuild once per full cube.
+    const probe = giScheduler.next();
+    if (probe) {
+      renderProbeFace(renderer, cubeCam, scene, probe.face);
+      if (probe.cubeComplete) cubeRT.texture.needsPMREMUpdate = true;
     }
     const cpuRender0 = performance.now();
     postProcessing.render();
