@@ -125,12 +125,19 @@ Der Fusswege-Cull aus §3 ist damit Teil des LOD-Systems, kein Sonderfall.
 
 ### 4. Beleuchtung wie das Original
 
-- **Kamerafolgendes Schatten-Frustum:** für `radius ≤ 120` exakt heutige Werte
-  (Extent 46, Zentrum Origin) — deckt alle Hero-Presets (overview ≈ 111.5, er,
-  ops) → Hero-Look garantiert unverändert. Darüber wächst der Extent linear
-  (`46 + (radius − 120) × 0.9`, gedeckelt auf die halbe Plattendiagonale) und
-  das Zentrum folgt dem Kamera-Target → die Stadt bekommt echte
-  PCSS-Sonnenschatten. Shadow-Map-Refresh-Politik aus #111 respektieren
+- **Kamerafolgendes Schatten-Frustum — Hero-Qualität überall:** Zentrum =
+  Kamera-Target, Extent = `max(46, min(46 + (radius − 120) × 0.9, 900))` —
+  der Extent fällt NIE unter die heutigen 46 m, d. h. beim Reinzoomen in
+  irgendeine Gasse gilt exakt die Hero-Texeldichte (46 m / 4096 PCSS).
+  Hero-Guard: liegt das Target auf der Hero-Platte (|x|,|z| innerhalb
+  `kswPlan.plate`) und `radius ≤ 120`, gelten wert-identisch die heutigen
+  Parameter (Extent 46, Zentrum Origin, far 220) → Hero pixel-treu.
+- **Wandernde GI-Probe — keine Abkürzung:** die Stadt bleibt in der
+  Probe-Szene. Der Probe-Anker folgt dem Kamera-Target (gesnappt auf ein
+  30-m-Raster, nur bei `radius ≤ 300`; sonst und auf der Hero-Platte: heutiger
+  Anker `(0, giProbeY, 0)`). Anker-Wechsel = `markDirty()` → 6-Face-Re-Walk
+  mit der bestehenden 1-Face-pro-Frame-Amortisierung. Damit hat JEDER
+  Zoom-Punkt der Stadt dieselbe One-Bounce-GI-Qualität wie das Hero. Shadow-Map-Refresh-Politik aus #111 respektieren
   (Refresh bei Radius-/Target-Änderung, nicht pro Frame).
 - **Zweischichtige Wolken (Original-Stimmung auf jeder Distanz):** die
   Hero-Wolkenkuppel (r=400, Tokens unverändert) faded zwischen radius 300→600
@@ -148,11 +155,13 @@ Der Fusswege-Cull aus §3 ist damit Teil des LOD-Systems, kein Sonderfall.
 
 - Task 1 des Plans: Profil via `__KSW_INFO()` (cpu.frame/agents/render,
   drawCalls, tris) in `overview` und `city`, Vergleich gegen `origin/main`.
-- Erwartete Fixes (nach Messung): Stadt-Meshes aus der GI-Probe-Szene
-  ausschliessen oder Probe-Kadenz für Statik nutzen; Baum-Canopy als
-  Shadow-Caster nur im Nahbereich; Shadow-/GI-Cache-Invalidierung durch die
-  neuen Objekte beheben. **Gate:** cpu.frame im `city`-Blick ≤ 1.5× des
-  Hero-`overview`-Werts von origin/main; keine sichtbaren Ruckler beim Orbit.
+- Erwartete Fixes (nach Messung): Baum-Canopy als Shadow-Caster nur im
+  Nahbereich (LOD); Shadow-Cache-Invalidierung durch die neuen Objekte
+  beheben; Probe-Kadenz messen. **Die Stadt bleibt in der GI-Probe-Szene**
+  (Qualitätsgebot — kein Ausschluss als Perf-Abkürzung); wird die Probe-Last
+  messbar zum Problem, ist die Antwort Kadenz/Auflösung, nicht Weglassen.
+  **Gate:** cpu.frame im `city`-Blick ≤ 1.5× des Hero-`overview`-Werts von
+  origin/main; keine sichtbaren Ruckler beim Orbit.
 
 ### 6. Screenshot-Loop (Arbeitsweise)
 

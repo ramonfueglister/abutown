@@ -74,7 +74,7 @@ process.kill(-dev.pid);
 Run: `node scratch/perf-measure.mjs overview && node scratch/perf-measure.mjs city`
 Notiere cpu.frame/render + drawCalls für beide Cams. Danach dasselbe auf einem Wegwerf-Checkout von `origin/main` (`git worktree add`+`npm ci` NICHT nötig — origin/main hat keine Stadt; die Referenzzahl steht in progress.md/#111: Hero läuft 100–120 fps ⇒ cpu.frame ≲ 8 ms). Regression = city/overview deutlich darüber.
 
-- [ ] **Step 2: Stadt unter `cityRoot` bündeln + aus der GI-Probe ausschliessen**
+- [ ] **Step 2: Stadt unter `cityRoot` bündeln (KEIN GI-Probe-Ausschluss)**
 
 In main.ts die Stadt-Adds ersetzen durch:
 
@@ -88,14 +88,11 @@ In main.ts die Stadt-Adds ersetzen durch:
   scene.add(cityRoot);
 ```
 
-Beim GI-Probe-Face-Render (Suche nach `renderProbeFace` in main.ts) die Stadt ausblenden — die Hero-GI war ohne Stadt getunt, und die Probe rendert sonst 88k+ Stadt-Tris pro Face:
-
-```ts
-      cityRoot.visible = false;
-      renderProbeFace(/* bestehende Argumente unverändert */);
-      cityRoot.visible = true;
-```
-(Exakt an ALLEN `renderProbeFace`-Aufrufstellen inkl. Boot-Warm-up/CubeCamera.update.)
+**Qualitätsgebot (User-Vorgabe): die Stadt bleibt in der GI-Probe-Szene.**
+Kein `visible=false` um `renderProbeFace` — Task 11 macht die Probe wandernd,
+damit jeder Zoom-Punkt Hero-GI-Qualität bekommt. Falls die Messung die Probe
+als Ruckel-Quelle zeigt, ist die zulässige Stellschraube die Kadenz
+(`kswGi.staticFaceInterval`-Konsum), niemals der Stadt-Ausschluss.
 
 - [ ] **Step 3: Baum-Schatten-Politik**
 
@@ -1318,21 +1315,24 @@ und im animate (bei den anderen radius-abhängigen Updates):
 
 **Interfaces:**
 - Consumes: `sun` (DirectionalLight, Setup main.ts ~306-320), `cloudMatDome`/`driftU`/`sunDirUniform`-Rezept (~157-182), Mist-Ring-Block (~442-…), `kswCityStyle.cloudSwap`, `cityMeta.plate`.
-- Verhalten: `radius ≤ 120` → Schattenkamera exakt heutige Werte (Extent 46, far 220, Zentrum Origin), Hero-Wolkenkuppel voll, Stadt-Wolken 0, Stadt-Mist 0 → **pixel-treu**. Darüber: Extent `min(46 + (radius−120)*0.9, 900)`, `sun.target` = rig.target (an scene hängen!), far mitskaliert (`220 + extent*2`), Refresh throttled (nur wenn sich Extent um >10% oder Target um >20 m geändert hat → `sun.shadow.needsUpdate = true` falls shadowCached, sonst automatisch); Hero-Wolken faden 300→600 aus, Stadt-Dome (Radius `kswCity.domeRadius`, gleiches Material-Rezept mit eigenem `driftU`-Anteil und `scale × 3`) faded ein; Stadt-Mist-Ring um `cityMeta.plate` mit eigenem Material, Opazität 0 bei radius<300, `preset.mistOpacity*0.8` ab 600.
+- Verhalten (**Hero-Qualität überall — Spec §4**): Hero-Guard = Target auf der Hero-Platte (`|x| ≤ kswPlan.plate.w/2 && |z| ≤ kswPlan.plate.d/2`) UND `radius ≤ 120` → Schattenkamera exakt heutige Werte (Extent 46, far 220, Zentrum Origin), Probe-Anker Origin, Hero-Wolkenkuppel voll, Stadt-Wolken 0, Stadt-Mist 0 → **pixel-treu**. Sonst: Zentrum = rig.target, Extent `max(46, min(46 + (radius−120)*0.9, 900))` — **nie unter 46** (Reinzoomen in jede Gasse = Hero-Texeldichte), `sun.target` = rig.target (an scene hängen!), far mitskaliert (`220 + extent*2`), Refresh throttled (Extent-Änderung >10% oder Target-Sprung >20 m → `sun.shadow.needsUpdate = true` falls shadowCached, sonst automatisch). **Wandernde GI-Probe:** Anker = Origin im Hero-Guard oder bei `radius > 300`; sonst rig.target auf 30-m-Raster gesnappt, Höhe `kswScene.giProbeY`; Anker-Wechsel → `cubeCam.position` setzen + `giScheduler.markDirty()`. Wolken: Hero-Dome faded 300→600 aus, Stadt-Dome (Radius `kswCity.domeRadius`, gleiches Material-Rezept, `scale × 3`) faded ein; Stadt-Mist-Ring um `cityMeta.plate`, Opazität 0 bei radius<300, `preset.mistOpacity*0.8` ab 600.
 
-- [ ] **Step 1: Schatten-Follow implementieren**
+- [ ] **Step 1: Schatten-Follow + wandernde GI-Probe implementieren**
 
 Nach dem Sun-Setup:
 
 ```ts
   scene.add(sun.target);
+  const onHeroPlate = (): boolean =>
+    Math.abs(rig.target[0]) <= kswPlan.plate.w / 2 && Math.abs(rig.target[2]) <= kswPlan.plate.d / 2;
   let shadowExtentNow = kswScene.shadowExtent;
   let shadowTargetNow = new THREE.Vector3(0, 0, 0);
   const updateShadowFrustum = (): void => {
-    const wantExtent = rig.radius <= 120
+    const hero = onHeroPlate() && rig.radius <= 120;
+    const wantExtent = hero
       ? kswScene.shadowExtent
-      : Math.min(kswScene.shadowExtent + (rig.radius - 120) * 0.9, 900);
-    const wantTarget = rig.radius <= 120 ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(...rig.target);
+      : Math.max(kswScene.shadowExtent, Math.min(kswScene.shadowExtent + (rig.radius - 120) * 0.9, 900));
+    const wantTarget = hero ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(...rig.target);
     const extentJump = Math.abs(wantExtent - shadowExtentNow) > shadowExtentNow * 0.1;
     const targetJump = wantTarget.distanceTo(shadowTargetNow) > 20;
     if (!extentJump && !targetJump) return;
@@ -1350,6 +1350,27 @@ Nach dem Sun-Setup:
   };
 ```
 `currentSunDir`: in `applySunState` die zuletzt gesetzte `dir` in einer Modul-Variablen `currentSunDir` merken (Init: `initialSunDir.clone()`); der bestehende `sun.position.copy(dir…)`-Pfad in `applySunState` bleibt für den Hero-Fall — `updateShadowFrustum()` läuft im animate NACH `applyRig()` und übersteuert nur im Stadt-Fall. City-Meshes: `cityRoot.traverse → castShadow` bleibt wie gebaut (Massing wirft, Fenster/Lampen nicht, Bäume via LOD).
+
+Direkt danach die **wandernde GI-Probe** (cubeCam-Setup existiert um main.ts:487; `giScheduler` existiert):
+
+```ts
+  // Roaming GI probe: same one-bounce machinery, anchor follows the camera
+  // target so any zoomed-in street gets hero-grade env light. Snapped to a
+  // 30 m grid so orbiting doesn't thrash the probe; every anchor move is a
+  // markDirty() → amortized 6-face re-walk (1 face/frame, Slice-E scheduler).
+  let probeAnchor = new THREE.Vector3(0, kswScene.giProbeY, 0);
+  const updateProbeAnchor = (): void => {
+    const roam = !(onHeroPlate() && rig.radius <= 120) && rig.radius <= 300;
+    const want = roam
+      ? new THREE.Vector3(Math.round(rig.target[0] / 30) * 30, kswScene.giProbeY, Math.round(rig.target[2] / 30) * 30)
+      : new THREE.Vector3(0, kswScene.giProbeY, 0);
+    if (want.equals(probeAnchor)) return;
+    probeAnchor = want;
+    cubeCam.position.copy(want);
+    giScheduler.markDirty();
+  };
+```
+Beide (`updateShadowFrustum()`, `updateProbeAnchor()`) im animate nach `applyRig()` aufrufen.
 
 - [ ] **Step 2: 2-Layer-Wolken**
 
