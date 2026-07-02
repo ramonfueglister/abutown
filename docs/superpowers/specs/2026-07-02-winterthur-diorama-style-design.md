@@ -132,8 +132,17 @@ Der Fusswege-Cull aus §3 ist damit Teil des LOD-Systems, kein Sonderfall.
   das Zentrum folgt dem Kamera-Target → die Stadt bekommt echte
   PCSS-Sonnenschatten. Shadow-Map-Refresh-Politik aus #111 respektieren
   (Refresh bei Radius-/Target-Änderung, nicht pro Frame).
-- **Wolken-Fade:** Wolkendeck-Opazität → 0 zwischen radius 300→600 (der graue
-  Kuppelrand-Schmier verschwindet; Hero-Framing unverändert bewölkt).
+- **Zweischichtige Wolken (Original-Stimmung auf jeder Distanz):** die
+  Hero-Wolkenkuppel (r=400, Tokens unverändert) faded zwischen radius 300→600
+  aus; gleichzeitig faded eine **Stadt-Wolkenschicht** ein — gleiches
+  Material-Rezept (cloudCfg-Werte wiederverwendet), Dome mit r=`kswCity.domeRadius`,
+  gröbere Noise-Skalierung (Wolken wirken auf Stadtdistanz gleich gross wie die
+  Hero-Wolken auf Hero-Distanz). Im Hero-Framing exakt heutiges Bild; in der
+  Stadtansicht ziehen Wolken über die ganze Platte. Kein grauer Kuppelrand mehr.
+- **Stadt-Mist-Ring:** derselbe Dunstring-Aufbau wie am Hero-Plattenrand
+  (identisches Rezept aus main.ts) zusätzlich um den Rand der Stadtplatte —
+  das „Modell auf dem Tisch"-Gefühl endet nicht an der Hero-Kante. Der
+  Hero-Ring bleibt unverändert bestehen.
 
 ### 5. Performance (Ruckel-Fix) — messen, dann fixen
 
