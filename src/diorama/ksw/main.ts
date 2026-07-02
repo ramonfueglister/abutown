@@ -28,7 +28,7 @@ import {
   skyPhys,
   sunArcCfg,
 } from '../designTokens';
-import { applyDrag, applyZoom, rigFromLookAt, rigPosition, roofFade, type CameraRigState } from './cameraRig';
+import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigFromLookAt, rigPosition, roofFade, type CameraRigState } from './cameraRig';
 import { buildHospital } from './building';
 import { kswPlan } from './floorPlan';
 import { buildPerson } from './props';
@@ -44,6 +44,7 @@ declare global {
       yaw: number;
       pitch: number;
       roofFade: number;
+      target: [number, number, number];
       agents: { total: number; walking: number; samples: Array<[number, number]> };
     };
   }
@@ -224,14 +225,21 @@ async function boot(): Promise<void> {
     { passive: false },
   );
   let dragging = false;
+  // AoE2 edge scrolling: remember where the cursor is; animate() pans while
+  // it sits inside the edge margin (paused during drag-rotation)
+  let mouse: { x: number; y: number } | null = null;
   renderer.domElement.addEventListener('pointerdown', (e: PointerEvent) => {
     if (e.button !== 0) return;
     dragging = true;
     renderer.domElement.setPointerCapture(e.pointerId);
   });
   renderer.domElement.addEventListener('pointermove', (e: PointerEvent) => {
+    mouse = { x: e.clientX, y: e.clientY };
     if (!dragging) return;
     rig = applyDrag(rig, e.movementX, e.movementY, kswCamera);
+  });
+  renderer.domElement.addEventListener('pointerleave', () => {
+    mouse = null;
   });
   const endDrag = (e: PointerEvent): void => {
     dragging = false;
@@ -493,6 +501,14 @@ async function boot(): Promise<void> {
     const t = clock.getElapsedTime();
     const dt = Math.min(Math.max(t - prevT, 0), 0.1);
     prevT = t;
+    if (mouse && !dragging) {
+      const [vx, vz] = edgePanVelocity(mouse.x, mouse.y, window.innerWidth, window.innerHeight, rig.yaw, kswCamera);
+      if (vx !== 0 || vz !== 0) {
+        // panning feels map-relative: slower when zoomed in close
+        const zoomScale = Math.min(Math.max(rig.radius / 110, 0.15), 1);
+        rig = applyPan(rig, vx * zoomScale, vz * zoomScale, dt, kswCamera);
+      }
+    }
     applyRig();
     const fade = roofFade(rig.radius, kswCamera);
     roofs.setFade(fade);
@@ -505,6 +521,7 @@ async function boot(): Promise<void> {
       yaw: rig.yaw,
       pitch: rig.pitch,
       roofFade: fade,
+      target: [rig.target[0], rig.target[1], rig.target[2]],
       agents: {
         total: liveAgents.length,
         walking: liveAgents.filter((la) => la.agent.phase === 'walk').length,

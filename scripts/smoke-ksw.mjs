@@ -124,6 +124,21 @@ try {
   const s4 = await state();
   check('hover without button held does not rotate', Math.abs(s4.yaw - s3.yaw) < 1e-6, `${s3.yaw.toFixed(3)} vs ${s4.yaw.toFixed(3)}`);
 
+  // AoE2 edge scrolling: cursor parked at the right edge pans the target
+  const before = await state();
+  await page.mouse.move(1278, 400);
+  await page.waitForTimeout(1200);
+  const after = await state();
+  const panned = Math.hypot(after.target[0] - before.target[0], after.target[2] - before.target[2]);
+  check('cursor at screen edge pans the camera (AoE2 style)', panned > 3, `moved ${panned.toFixed(1)} units`);
+  await page.mouse.move(640, 400);
+  await page.waitForTimeout(300);
+  const settled = await state();
+  await page.waitForTimeout(500);
+  const settled2 = await state();
+  const drift = Math.hypot(settled2.target[0] - settled.target[0], settled2.target[2] - settled.target[2]);
+  check('pan stops when the cursor leaves the edge', drift < 0.05, `drift ${drift.toFixed(3)}`);
+
   // people actually move through the hospital
   const a0 = s4.agents;
   check('a full crowd is spawned', a0.total >= 60, `total=${a0.total}`);

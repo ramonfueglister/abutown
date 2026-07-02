@@ -198,6 +198,11 @@ export const kswCamera = {
   pitchMax: 1.25,
   roofFadeNear: 16,
   roofFadeFar: 30,
+  // AoE2-style edge scrolling: cursor at the viewport edge pans the target
+  panMarginPx: 36,
+  panSpeed: 30,
+  panBoundsX: 34,
+  panBoundsZ: 26,
 } as const;
 
 // Scene scale-up relative to the one-room prototype.
