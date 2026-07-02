@@ -70,7 +70,7 @@ declare global {
   }
 }
 
-type CamPresetName = 'overview' | 'er' | 'ops' | 'bahnhof' | 'zag';
+type CamPresetName = 'overview' | 'er' | 'ops' | 'bahnhof' | 'zag' | 'city';
 const camPresets: Record<CamPresetName, { target: [number, number, number]; radius: number; yaw: number; pitch: number }> = {
   overview: (() => {
     const s = rigFromLookAt(kswCamera.overviewPosition, kswCamera.target);
@@ -84,6 +84,8 @@ const camPresets: Record<CamPresetName, { target: [number, number, number]; radi
   // pulled back and tilted down so the camera sits above the dense district
   bahnhof: { target: [cityMeta.landmarks.bahnhof[0], 2, cityMeta.landmarks.bahnhof[1]], radius: 280, yaw: -0.6, pitch: 1.02 },
   zag: { target: [cityMeta.landmarks.zagTurbinenstrasse[0], 2, cityMeta.landmarks.zagTurbinenstrasse[1]], radius: 280, yaw: 0.4, pitch: 1.02 },
+  // establishing shot: the whole KSW↔Bahnhof↔ZAG span from high up
+  city: { target: [cityMeta.landmarks.bahnhof[0] * 0.6, 2, cityMeta.landmarks.bahnhof[1] * 0.6], radius: 820, yaw: -0.5, pitch: 1.12 },
 };
 
 async function boot(): Promise<void> {
@@ -91,8 +93,8 @@ async function boot(): Promise<void> {
   const rawPreset = params.get('preset');
   const presetName = rawPreset === 'night' || rawPreset === 'dusk' ? rawPreset : 'morning';
   const camRaw = params.get('cam');
-  const camPreset: CamPresetName =
-    camRaw === 'er' || camRaw === 'ops' || camRaw === 'bahnhof' || camRaw === 'zag' ? camRaw : 'overview';
+  const cityCams: CamPresetName[] = ['er', 'ops', 'bahnhof', 'zag', 'city'];
+  const camPreset: CamPresetName = cityCams.includes(camRaw as CamPresetName) ? (camRaw as CamPresetName) : 'overview';
   const cycleMode = params.get('cycle') === '1';
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
