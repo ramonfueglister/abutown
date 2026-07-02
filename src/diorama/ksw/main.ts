@@ -20,6 +20,7 @@ import {
   kswAgents,
   kswCamera,
   kswCity,
+  kswCityStyle,
   kswGi,
   kswPost,
   kswScene,
@@ -162,6 +163,11 @@ async function boot(): Promise<void> {
   const cloudLit = uniform(new THREE.Color(0xffffff));
   const cloudShadow = uniform(new THREE.Color(0x9aa8b5));
   const driftU = uniform(0);
+  // Two-layer clouds (spec §4): the hero dome fades out as the camera pulls
+  // back to the city framing and a bigger, coarser city dome fades in. Both
+  // opacities are driven by cloudMix (kswCityStyle.cloudSwap) in animate().
+  const heroCloudOpacity = uniform(1);
+  const cityCloudOpacity = uniform(0);
   const cloudMatDome = new THREE.MeshBasicNodeMaterial();
   cloudMatDome.transparent = true;
   cloudMatDome.side = THREE.BackSide;
@@ -174,7 +180,8 @@ async function boot(): Promise<void> {
     const coverage = float(cloudCfg.coverage[presetName]);
     const dens = smoothstep(float(0.06), float(0.34), n.add(coverage.sub(0.5)));
     const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
-    cloudMatDome.opacityNode = dens.mul(horizonFade);
+    // fold the hero fade into the opacity node before the material compiles
+    cloudMatDome.opacityNode = dens.mul(horizonFade).mul(heroCloudOpacity);
     const facing = dot(dir, sunDirUniform).mul(0.5).add(0.5);
     type Vec3Node = ReturnType<typeof vec3>;
     const shadowN = cloudShadow as unknown as Vec3Node;
@@ -183,6 +190,30 @@ async function boot(): Promise<void> {
   }
   const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(kswScene.domeRadius, 32, 24), cloudMatDome);
   scene.add(cloudDome);
+
+  // city cloud layer: same recipe, big dome, coarser noise (scale × 3) — takes
+  // over as the hero dome fades out on zoom-out (spec: two-layer clouds).
+  const cloudMatCity = new THREE.MeshBasicNodeMaterial();
+  cloudMatCity.transparent = true;
+  cloudMatCity.side = THREE.BackSide;
+  cloudMatCity.depthWrite = false;
+  cloudMatCity.fog = false;
+  {
+    const dir = positionWorld.normalize();
+    const p = vec3(dir.x.mul(float(cloudCfg.scale * 3)).add(driftU), dir.y.mul(float(cloudCfg.scale * 4.8)), dir.z.mul(float(cloudCfg.scale * 3)));
+    const n = mx_fractal_noise_float(p, 4, 2.0, 0.55, 1.0);
+    const coverage = float(cloudCfg.coverage[presetName]);
+    const dens = smoothstep(float(0.06), float(0.34), n.add(coverage.sub(0.5)));
+    const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
+    cloudMatCity.opacityNode = dens.mul(horizonFade).mul(cityCloudOpacity);
+    const facing = dot(dir, sunDirUniform).mul(0.5).add(0.5);
+    type Vec3Node = ReturnType<typeof vec3>;
+    const shadowN = cloudShadow as unknown as Vec3Node;
+    const litN = (cloudLit as unknown as Vec3Node).mul(float(cloudCfg.litBoost));
+    cloudMatCity.colorNode = mix(shadowN, litN, facing.pow(2.0));
+  }
+  const cityCloudDome = new THREE.Mesh(new THREE.SphereGeometry(kswCity.domeRadius, 32, 24), cloudMatCity);
+  scene.add(cityCloudDome);
 
   const discDist = kswScene.domeRadius * 0.82;
   const sunDisc = new THREE.Mesh(
@@ -199,8 +230,13 @@ async function boot(): Promise<void> {
   scene.add(moonDisc);
 
   const sun = new THREE.DirectionalLight(0xffffff, 1);
+  // Latest sun direction — the shadow-follow rig (below) places the sun
+  // relative to the camera target along this vector so the light angle stays
+  // identical to the hero while the frustum walks the city.
+  let currentSunDir = initialSunDir.clone();
   const applySunState = (t: number): void => {
     const dir = sunDirFor(t);
+    currentSunDir = dir.clone();
     skyMesh.sunPosition.value.copy(dir);
     (sunDirUniform.value as THREE.Vector3).copy(dir);
     if (presetName !== 'night') {
@@ -304,6 +340,9 @@ async function boot(): Promise<void> {
     sun.intensity = moonLight.intensity;
     sun.position.set(...moonLight.position).normalize().multiplyScalar(kswScene.sunDistance);
     applySunState(phys.timeOfDay);
+    // night: the shadow caster is the moon — follow along the moon direction,
+    // not the (unused) daytime sun vector applySunState just recorded.
+    currentSunDir = new THREE.Vector3(...moonLight.position).normalize();
   }
   sun.castShadow = true;
   sun.shadow.mapSize.set(kswScene.shadowMapSize, kswScene.shadowMapSize);
@@ -353,6 +392,9 @@ async function boot(): Promise<void> {
     (sun.shadow as unknown as { filterNode?: unknown }).filterNode = pcss;
   }
   scene.add(sun);
+  // the shadow-follow rig (defined after the GI probe below) moves sun.target
+  // off the origin, so the target proxy must live in the scene graph.
+  scene.add(sun.target);
 
   const hemi = new THREE.HemisphereLight(preset.hemiSky, preset.hemiGround, preset.hemiIntensity * gi.hemiCut);
   scene.add(hemi);
@@ -486,12 +528,13 @@ async function boot(): Promise<void> {
   });
   const rimX = kswPlan.plate.w / 2;
   const rimZ = kswPlan.plate.d / 2;
-  // walk the plate's rectangle perimeter (an ellipse would dip onto the lawn
-  // near the corners) and hug it with small flattened puffs
-  {
+  // walk a rectangle perimeter (an ellipse would dip onto the lawn near the
+  // corners) and hug it with small flattened puffs. Parametrized so both the
+  // hero plate and the city plate rim share one recipe (spec §4: city mist).
+  const addMistRing = (halfW: number, halfD: number, cx: number, cz: number, mat: THREE.MeshBasicMaterial): void => {
     const pad = 2.2;
-    const hw = rimX + pad;
-    const hd = rimZ + pad;
+    const hw = halfW + pad;
+    const hd = halfD + pad;
     const per = 4 * (hw + hd);
     const N = 26;
     for (let i = 0; i < N; i++) {
@@ -514,12 +557,19 @@ async function boot(): Promise<void> {
         mx = -hw;
         mz = hd - t;
       }
-      const mist = new THREE.Mesh(new THREE.SphereGeometry(2.4 + (i % 3) * 0.5, 16, 16), mistMat);
-      mist.position.set(mx, 0.25, mz);
+      const mist = new THREE.Mesh(new THREE.SphereGeometry(2.4 + (i % 3) * 0.5, 16, 16), mat);
+      mist.position.set(mx + cx, 0.25, mz + cz);
       mist.scale.y = 0.22;
       scene.add(mist);
     }
-  }
+  };
+  addMistRing(rimX, rimZ, 0, 0, mistMat);
+
+  // city mist rim: same puffs around the city plate, faded in with the clouds
+  // (0 below radius 300, up to preset.mistOpacity*0.8 at the city framing).
+  const cityMistMat = mistMat.clone();
+  cityMistMat.opacity = 0;
+  addMistRing(cityMeta.plate.w / 2 + 2.2, cityMeta.plate.d / 2 + 2.2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat);
 
   // Night life: window glow + lamp bulbs are baked into the glowNight batch
   // at build time (staticBatch.ts); only the actual light pools live here.
@@ -578,6 +628,56 @@ async function boot(): Promise<void> {
   const giScheduler = new GiProbeScheduler(cycleMode ? 'cycle' : 'static');
   scene.environment = cubeRT.texture;
   scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale[presetName];
+
+  // ── camera-following sun shadows (spec §4: hero-grade light everywhere) ──
+  // Hero-Guard: on the hero plate AND zoomed in (radius ≤ 120) the shadow
+  // frustum is byte-for-byte today's values (extent 46, far 220, origin, the
+  // sun.position that applySunState set) — pixel-identical to the hero. Only
+  // when the camera leaves that box does the frustum walk the city: centred on
+  // rig.target, extent grown with radius (never below 46 → any street keeps
+  // hero texel density), far scaled to keep the plate inside, throttled so
+  // orbiting doesn't thrash the (cached) depth map.
+  const onHeroPlate = (): boolean =>
+    Math.abs(rig.target[0]) <= kswPlan.plate.w / 2 && Math.abs(rig.target[2]) <= kswPlan.plate.d / 2;
+  let shadowExtentNow: number = kswScene.shadowExtent;
+  let shadowTargetNow = new THREE.Vector3(0, 0, 0);
+  const updateShadowFrustum = (): void => {
+    const hero = onHeroPlate() && rig.radius <= 120;
+    const wantExtent = hero
+      ? kswScene.shadowExtent
+      : Math.max(kswScene.shadowExtent, Math.min(kswScene.shadowExtent + (rig.radius - 120) * 0.9, 900));
+    const wantTarget = hero ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(...rig.target);
+    const extentJump = Math.abs(wantExtent - shadowExtentNow) > shadowExtentNow * 0.1;
+    const targetJump = wantTarget.distanceTo(shadowTargetNow) > 20;
+    if (!extentJump && !targetJump) return;
+    shadowExtentNow = wantExtent;
+    shadowTargetNow = wantTarget;
+    sun.shadow.camera.left = -wantExtent;
+    sun.shadow.camera.right = wantExtent;
+    sun.shadow.camera.top = wantExtent;
+    sun.shadow.camera.bottom = -wantExtent;
+    sun.shadow.camera.far = 220 + wantExtent * 2;
+    sun.shadow.camera.updateProjectionMatrix();
+    sun.target.position.copy(wantTarget);
+    sun.position.copy(wantTarget).addScaledVector(currentSunDir, kswScene.sunDistance + wantExtent);
+    if (shadowCached) sun.shadow.needsUpdate = true;
+  };
+
+  // Roaming GI probe: same one-bounce machinery, anchor follows the camera
+  // target so any zoomed-in street gets hero-grade env light. Snapped to a
+  // 30 m grid so orbiting doesn't thrash the probe; every anchor move is a
+  // markDirty() → amortized 6-face re-walk (1 face/frame, Slice-E scheduler).
+  let probeAnchor = new THREE.Vector3(0, kswScene.giProbeY, 0);
+  const updateProbeAnchor = (): void => {
+    const roam = !(onHeroPlate() && rig.radius <= 120) && rig.radius <= 300;
+    const want = roam
+      ? new THREE.Vector3(Math.round(rig.target[0] / 30) * 30, kswScene.giProbeY, Math.round(rig.target[2] / 30) * 30)
+      : new THREE.Vector3(0, kswScene.giProbeY, 0);
+    if (want.equals(probeAnchor)) return;
+    probeAnchor = want;
+    cubeCam.position.copy(want);
+    giScheduler.markDirty();
+  };
 
   // ── post stack: TRAA -> GTAO -> godrays -> zoom-coupled DOF -> bloom ──
   const postProcessing = new THREE.PostProcessing(renderer);
@@ -677,6 +777,10 @@ async function boot(): Promise<void> {
       }
     }
     applyRig();
+    // camera-following light: walk the shadow frustum + roaming GI anchor with
+    // the camera target (both are hero-identical no-ops inside the Hero-Guard).
+    updateShadowFrustum();
+    updateProbeAnchor();
     const nextRing = cityLodState(rig.radius, cityRing);
     if (nextRing !== cityRing) {
       cityRing = nextRing;
@@ -706,6 +810,13 @@ async function boot(): Promise<void> {
     // edge mist is a close-up treatment; from the overview it would read as
     // separate discs, so it thins out as the camera pulls back
     mistMat.opacity = preset.mistOpacity * (1 - fade * 0.75);
+    // two-layer clouds + city mist crossfade on the 300→600 zoom-out ramp:
+    // hero dome & hero mist rule up close, the city dome & city rim take over.
+    const swap = kswCityStyle.cloudSwap;
+    const cloudMix = Math.min(1, Math.max(0, (rig.radius - swap.start) / (swap.end - swap.start)));
+    heroCloudOpacity.value = 1 - cloudMix;
+    cityCloudOpacity.value = cloudMix;
+    cityMistMat.opacity = preset.mistOpacity * 0.8 * cloudMix;
     kswSnapshot.radius = rig.radius;
     kswSnapshot.yaw = rig.yaw;
     kswSnapshot.pitch = rig.pitch;
