@@ -3,9 +3,9 @@
 // Builders return ground-anchored groups (y = 0 at the floor).
 
 import * as THREE from 'three/webgpu';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { clay, kswPalette, palette, radii } from '../designTokens';
 import type { PersonPlacement, PersonRole, PropPlacement } from './floorPlan';
+import { boxGeo, cyl, roundedBox, sph, tor } from './geometryCache';
 
 const materialCache = new Map<number, THREE.MeshPhysicalMaterial>();
 export function clayMat(color: number): THREE.MeshPhysicalMaterial {
@@ -46,28 +46,28 @@ function glowMat(color: number): THREE.MeshBasicMaterial {
 
 export function box(w: number, h: number, d: number, color: number, r: number = radii.s): THREE.Mesh {
   const radius = Math.max(0.01, Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3));
-  const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 4, radius), clayMat(color));
+  const mesh = new THREE.Mesh(roundedBox(w, h, d, 4, radius), clayMat(color));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
 }
 
 export function cylinder(rTop: number, rBot: number, h: number, color: number, seg = 20): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, seg), clayMat(color));
+  const mesh = new THREE.Mesh(cyl(rTop, rBot, h, seg), clayMat(color));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
 }
 
 function sphere(r: number, color: number, seg = 14): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, seg, seg), clayMat(color));
+  const mesh = new THREE.Mesh(sph(r, seg), clayMat(color));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
 }
 
 function torus(r: number, tube: number, color: number, arc = Math.PI * 2): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(r, tube, 12, 32, arc), clayMat(color));
+  const mesh = new THREE.Mesh(tor(r, tube, 12, 32, arc), clayMat(color));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
@@ -82,7 +82,7 @@ function at<T extends THREE.Object3D>(obj: T, x: number, y: number, z: number, r
 function screen(w: number, h: number): THREE.Group {
   const g = new THREE.Group();
   g.add(at(box(w, h, 0.07, palette.eye, radii.xs), 0, 0, 0));
-  const face = new THREE.Mesh(new THREE.BoxGeometry(w - 0.06, h - 0.06, 0.02), glowMat(kswPalette.screenGlow));
+  const face = new THREE.Mesh(boxGeo(w - 0.06, h - 0.06, 0.02), glowMat(kswPalette.screenGlow));
   face.position.z = 0.04;
   g.add(face);
   return g;
@@ -275,7 +275,7 @@ function shockroomLight(): THREE.Group {
   g.add(at(arm, 0.4, 2.05, 0));
   const disc = cylinder(0.3, 0.34, 0.1, palette.white, 20);
   g.add(at(disc, -0.1, 2.0, 0));
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.02, 20), glowMat(kswPalette.opLight));
+  const face = new THREE.Mesh(cyl(0.24, 0.24, 0.02, 20), glowMat(kswPalette.opLight));
   g.add(at(face, -0.1, 1.94, 0));
   return g;
 }
@@ -288,11 +288,11 @@ function ambulance(): THREE.Group {
   g.add(at(box(4.1, 0.3, 2.04, palette.coral, radii.s), -0.35, 1.1, 0));
   g.add(at(box(0.02, 0.55, 1.1, kswPalette.crossRed, radii.xs), -2.36, 1.7, 0));
   // windshield + cab side windows
-  const shield = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.6, 1.6), glassMat());
+  const shield = new THREE.Mesh(boxGeo(0.06, 0.6, 1.6), glassMat());
   shield.rotation.z = -0.35;
   g.add(at(shield, 2.62, 1.35, 0));
   for (const side of [-1, 1]) {
-    const win = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.04), glassMat());
+    const win = new THREE.Mesh(boxGeo(0.9, 0.5, 0.04), glassMat());
     win.rotation.y = Math.PI / 2;
     g.add(at(win, 1.95, 1.35, side * 0.96));
   }
@@ -310,7 +310,7 @@ function ambulance(): THREE.Group {
   }
   // roof light bar: the coral cap pulses (userData.blink drives it in main.ts)
   g.add(at(box(0.7, 0.12, 1.2, palette.metalMatt, radii.s), 0.9, 2.36, 0));
-  const blink = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.5), glowMat(palette.coral).clone());
+  const blink = new THREE.Mesh(boxGeo(0.4, 0.12, 0.5), glowMat(palette.coral).clone());
   blink.userData.blink = true;
   g.add(at(blink, 0.9, 2.46, 0));
   return g;
@@ -348,7 +348,7 @@ function opLightDouble(): THREE.Group {
     g.add(arm);
     const disc = cylinder(0.42, 0.46, 0.12, palette.white, 24);
     g.add(at(disc, ax, dy - 0.05, az));
-    const face = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.02, 24), glowMat(kswPalette.opLight));
+    const face = new THREE.Mesh(cyl(0.34, 0.34, 0.02, 24), glowMat(kswPalette.opLight));
     g.add(at(face, ax, dy - 0.13, az));
   }
   return g;
@@ -472,7 +472,7 @@ function leadShieldWindow(): THREE.Group {
   const g = new THREE.Group();
   g.add(at(box(1.6, 0.9, 0.16, palette.creamBase, radii.s), 0, 0.45, 0));
   g.add(at(box(1.5, 0.9, 0.12, palette.white, radii.s), 0, 1.32, 0));
-  const pane = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.7, 0.04), glassMat());
+  const pane = new THREE.Mesh(boxGeo(1.3, 0.7, 0.04), glassMat());
   g.add(at(pane, 0, 1.32, 0));
   return g;
 }
@@ -561,10 +561,12 @@ function incubator(): THREE.Group {
   const g = new THREE.Group();
   g.add(at(box(1.0, 0.85, 0.65, palette.white, radii.m), 0, 0.45, 0));
   g.add(at(box(0.94, 0.1, 0.6, palette.mint, radii.s), 0, 0.93, 0));
+  // half-sphere dome (thetaLength cut) — outside the sph() cache's
+  // full-sphere signature, single call site, not worth extending the cache for
   const dome = new THREE.Mesh(new THREE.SphereGeometry(0.34, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2), glassMat());
   dome.scale.set(1.25, 0.85, 0.8);
   g.add(at(dome, 0, 0.98, 0));
-  // tiny sleeping bean baby under the dome
+  // tiny sleeping bean baby under the dome (capsule geometry — not cached, see beanPerson)
   const baby = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.14, 6, 12), clayMat(palette.honey));
   baby.rotation.z = Math.PI / 2;
   baby.castShadow = true;
@@ -814,6 +816,8 @@ function helicopter(): THREE.Group {
   const g = new THREE.Group();
   g.add(at(box(2.3, 1.1, 1.15, palette.coral, radii.l), 0, 1.05, 0));
   g.add(at(box(0.9, 0.5, 0.7, palette.white, radii.m), -0.2, 1.55, 0));
+  // unequal width/height segments (16/12) — outside sph()'s equal-segment
+  // signature, single call site, not worth extending the cache for
   const nose = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), glassMat());
   nose.scale.set(1.1, 0.85, 0.95);
   g.add(at(nose, 1.05, 1.15, 0));
@@ -891,7 +895,7 @@ function makeCar(color: number): () => THREE.Group {
     const g = new THREE.Group();
     g.add(at(box(2.1, 0.62, 1.05, color, radii.l), 0, 0.55, 0));
     g.add(at(box(1.15, 0.5, 0.95, color, radii.l), -0.1, 1.05, 0));
-    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.8), glassMat());
+    const shield = new THREE.Mesh(boxGeo(0.05, 0.4, 0.8), glassMat());
     shield.rotation.z = -0.4;
     g.add(at(shield, 0.5, 1.02, 0));
     for (const [wx, wz] of [
@@ -918,12 +922,14 @@ function plantSmall(scale: number): THREE.Group {
 
 export function beanPerson(bodyColor: number): THREE.Group {
   const g = new THREE.Group();
+  // CapsuleGeometry isn't in geometryCache's factory set (Slice A covers
+  // box/cylinder/sphere/torus only) — left uncached here and for the mouth below
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.55, 8, 24), clayMat(bodyColor));
   body.position.y = 0.62;
   body.castShadow = true;
   body.receiveShadow = true;
   g.add(body);
-  const eyeGeo = new THREE.SphereGeometry(0.052, 12, 12);
+  const eyeGeo = sph(0.052, 12);
   for (const side of [-1, 1]) {
     const eye = new THREE.Mesh(eyeGeo, clayMat(palette.eye));
     eye.position.set(side * 0.105, 0.92, 0.305);

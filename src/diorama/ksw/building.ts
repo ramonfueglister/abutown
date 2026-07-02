@@ -5,9 +5,9 @@
 // treats the building as a solid volume until you zoom inside.
 
 import * as THREE from 'three/webgpu';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { clay, kswPalette, kswScene, palette, radii } from '../designTokens';
 import type { FloorPlan, Room, WallSide } from './floorPlan';
+import { boxGeo, cyl, roundedBox } from './geometryCache';
 import { box, buildProp, glassMat } from './props';
 
 export type WallOpening = { center: number; width: number; kind: 'door' | 'window' };
@@ -94,7 +94,7 @@ function wallGroup(length: number, thickness: number, color: number, openings: W
       const mullion = box(0.07, fh - 0.1, 0.09, palette.white, radii.xs);
       mullion.position.set(o.center, y0 + fh / 2, 0);
       g.add(mullion);
-      const pane = new THREE.Mesh(new THREE.BoxGeometry(o.width - 0.04, fh - 0.06, 0.03), glassMat());
+      const pane = new THREE.Mesh(boxGeo(o.width - 0.04, fh - 0.06, 0.03), glassMat());
       pane.position.set(o.center, y0 + fh / 2, 0);
       pane.userData.windowPane = true;
       g.add(pane);
@@ -294,17 +294,14 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
     const eS = Math.abs(rect.z + rect.d / 2 - (b.z + b.d / 2)) < EPS ? over : 0;
     const w = rect.w + eW + eE;
     const d = rect.d + eN + eS;
-    const lid = new THREE.Mesh(new RoundedBoxGeometry(w, kswScene.roofThickness, d, 4, radii.s), mat);
+    const lid = new THREE.Mesh(roundedBox(w, kswScene.roofThickness, d, 4, radii.s), mat);
     lid.position.set(rect.x + (eE - eW) / 2, baseY + step + kswScene.roofThickness / 2, rect.z + (eS - eN) / 2);
     lid.castShadow = true;
     lid.receiveShadow = true;
     roofMeshes.push(lid);
     roofGroup.add(lid);
     if (attika && rect.w > 2.2 && rect.d > 2.2) {
-      const cap = new THREE.Mesh(
-        new RoundedBoxGeometry(rect.w - 1.0, 0.12, rect.d - 1.0, 4, radii.s),
-        trimMat,
-      );
+      const cap = new THREE.Mesh(roundedBox(rect.w - 1.0, 0.12, rect.d - 1.0, 4, radii.s), trimMat);
       cap.position.set(rect.x, baseY + step + kswScene.roofThickness + 0.06, rect.z);
       cap.castShadow = true;
       cap.receiveShadow = true;
@@ -339,10 +336,10 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
     const topY = baseY + step + kswScene.roofThickness + 0.12;
     const r = room.rect;
     if (i % 3 === 0) {
-      addRoofMesh(new RoundedBoxGeometry(1.2, 0.7, 0.9, 4, radii.s), hvacMat, r.x - r.w * 0.22, topY + 0.28, r.z - r.d * 0.2, 0.2);
-      addRoofMesh(new THREE.CylinderGeometry(0.16, 0.2, 0.5, 12), ventMat, r.x + r.w * 0.24, topY + 0.2, r.z + r.d * 0.18);
+      addRoofMesh(roundedBox(1.2, 0.7, 0.9, 4, radii.s), hvacMat, r.x - r.w * 0.22, topY + 0.28, r.z - r.d * 0.2, 0.2);
+      addRoofMesh(cyl(0.16, 0.2, 0.5, 12), ventMat, r.x + r.w * 0.24, topY + 0.2, r.z + r.d * 0.18);
     } else if (i % 3 === 1) {
-      // south-tilted solar row
+      // south-tilted solar row — w varies with room size, so this box stays uncached
       const panel = new THREE.Mesh(new THREE.BoxGeometry(Math.min(r.w * 0.5, 3.2), 0.06, 1.1), solarMat);
       panel.position.set(r.x, topY + 0.34, r.z + r.d * 0.16);
       panel.rotation.x = -0.32;
@@ -350,10 +347,10 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
       panel.receiveShadow = true;
       roofMeshes.push(panel);
       roofGroup.add(panel);
-      addRoofMesh(new RoundedBoxGeometry(0.5, 0.36, 0.5, 4, radii.xs), solarFrameMat, r.x - r.w * 0.28, topY + 0.14, r.z - r.d * 0.22);
+      addRoofMesh(roundedBox(0.5, 0.36, 0.5, 4, radii.xs), solarFrameMat, r.x - r.w * 0.28, topY + 0.14, r.z - r.d * 0.22);
     } else {
-      addRoofMesh(new THREE.CylinderGeometry(0.2, 0.26, 0.62, 12), ventMat, r.x - r.w * 0.2, topY + 0.26, r.z + r.d * 0.2);
-      addRoofMesh(new RoundedBoxGeometry(0.8, 0.5, 0.7, 4, radii.s), hvacMat, r.x + r.w * 0.22, topY + 0.2, r.z - r.d * 0.16, -0.15);
+      addRoofMesh(cyl(0.2, 0.26, 0.62, 12), ventMat, r.x - r.w * 0.2, topY + 0.26, r.z + r.d * 0.2);
+      addRoofMesh(roundedBox(0.8, 0.5, 0.7, 4, radii.s), hvacMat, r.x + r.w * 0.22, topY + 0.2, r.z - r.d * 0.16, -0.15);
     }
   });
   group.add(roofGroup);
