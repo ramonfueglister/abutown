@@ -16,8 +16,8 @@ describe('buildCityMassing', () => {
   const walls = group.getObjectByName('cityWalls') as THREE.Mesh;
   const roofs = group.getObjectByName('cityRoofs') as THREE.Mesh;
 
-  it('merges everything into exactly two meshes', () => {
-    expect(group.children.length).toBe(2);
+  it('merges everything into exactly four meshes', () => {
+    expect(group.children.length).toBe(4);
     expect(walls.geometry.getAttribute('position').count).toBe(8); // 2 buildings × 4 verts
     expect(roofs.geometry.index!.count).toBe(12); // 2 buildings × 2 tris
   });
@@ -33,5 +33,16 @@ describe('buildCityMassing', () => {
   it('casts and receives shadows', () => {
     expect(walls.castShadow && walls.receiveShadow).toBe(true);
     expect(roofs.castShadow && roofs.receiveShadow).toBe(true);
+  });
+
+  it('adds plinth and eave band meshes', () => {
+    const g2 = buildCityMassing([cube(0)]);
+    expect(g2.getObjectByName('cityPlinths')).toBeTruthy();
+    expect(g2.getObjectByName('cityEaves')).toBeTruthy();
+    const plinth = g2.getObjectByName('cityPlinths') as THREE.Mesh;
+    const pos = plinth.geometry.getAttribute('position');
+    let minY = Infinity;
+    for (let i = 0; i < pos.count; i++) minY = Math.min(minY, pos.getY(i));
+    expect(minY).toBeLessThan(0); // sinks below the plate — nothing floats
   });
 });

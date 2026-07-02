@@ -324,3 +324,15 @@ export const kswCity = {
   treeGreen: 0x8fbf83, // canopy base; per-instance tint varies around it
   treeTrunk: 0xb08a62,
 } as const;
+
+// Diorama-style layer for the geodetic city (style slice). Additive only.
+export const kswCityStyle = {
+  plinthH: 0.5, plinthOut: 0.12, plinthSink: 0.3, // sockel: height, outset, below-plate sink
+  eaveBandH: 0.18, eaveBandOut: 0.08,
+  tintL: 0.06, tintHue: 0.012, // tamed variation (was ±14% L)
+  windowW: 1.3, windowH: 1.4, windowSpacing: 2.4, storeyH: 3.0, sillFrac: 0.32,
+  doorW: 1.5, doorH: 2.2,
+  lamp: { spacing: { primary: 25, secondary: 28, tertiary: 30, residential: 35, unclassified: 35, living_street: 35, service: 45, pedestrian: 30 } as Record<string, number>, sideOffset: 1.2 },
+  lod: { nearR: 150, midR: 600, hysteresis: 0.1 },
+  cloudSwap: { start: 300, end: 600 },
+} as const;
