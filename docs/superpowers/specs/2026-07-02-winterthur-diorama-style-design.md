@@ -60,6 +60,34 @@ Schwebe-Geometrie — plus das Ruckeln (Perf-Regression).
   Perf-Gate reisst.
 - **Tint zähmen:** Helligkeits-Spreizung ±14% → ±6%, Hue-Drift halbiert; Ziel:
   warme Clay-Schatten statt Grau-Kippen.
+- **Türen/Eingänge:** ein Eingang pro Gebäude auf der strassenzugewandten
+  Fassade (kürzeste Distanz Fassadensegment ↔ echte Strassen-Polyline; wo OSM
+  `entrance`-Nodes existieren, gewinnen die). Tür-Instanz im Original-Stil
+  (Rahmen + dunkleres Blatt), instanziert wie die Fenster.
+
+### 2b. Strassenlaternen + Nacht-Stadt
+
+- Laternen deterministisch entlang echter Strassen-Polylines: Abstand nach
+  Klasse (primary 25 m, residential 35 m, Fusswege keine), Position = echter
+  Polyline-Lauf + halbe Breite Versatz, abwechselnde Seite. Instanziert
+  (Mast + Kopf); nachts warmes Glühen wie die Original-Lampen
+  (`glowNight`-Bucket-Logik), morgens unauffällig.
+- **Nacht-Gate:** `preset=night` wird in jedem Screenshot-Gate mitgeprüft —
+  Stadt liest sich nachts wie das Original: warme Glühfenster
+  (`NIGHT_WINDOW_SHARE`) + Laternenketten entlang der echten Strassenzüge.
+
+### 2c. Semantisches LOD (SOTA-Baustein statt Ad-hoc-Culls)
+
+Drei Ringe um die Kamera (Radius-basiert, Übergang via vorhandener
+Fade-Mechanik; Instanz-Culling per Distanz wie die Agent-Pipeline):
+
+| Ring | sichtbar |
+|---|---|
+| fern (> 600 m) | Massing + Dächer + Trauf-/Sockelband, Fahrbahnen; keine Fenster-/Tür-/Laternen-Instanzen, keine Fusswege |
+| mittel (150–600 m) | + Fensterraster, Dachtrim, Fusswege, Laternenmasten |
+| nah (< 150 m) | + Türen, Laternen-Detail, volle Baum-Schatten |
+
+Der Fusswege-Cull aus §3 ist damit Teil des LOD-Systems, kein Sonderfall.
 
 ### 3. Strassen v2
 
@@ -69,8 +97,8 @@ Schwebe-Geometrie — plus das Ruckeln (Perf-Regression).
   Asphalt-Beige, Fusswege heller schmaler, Gleise dunkler auf Schotterband) —
   additive `kswCity`-Token. Kreuzungs-Flackern verschwindet durch die
   Y-Staffelung (0.035/0.04/0.045/0.05).
-- Fusswege < 2.5 m Breite werden ab Kamera-Radius > 600 m ausgeblendet
-  (Instanz-/Mesh-Split), damit die Stadtansicht ruhig bleibt.
+- Fusswege < 2.5 m Breite gehören zum LOD-Ring „mittel" (§2c) — in der fernen
+  Stadtansicht ausgeblendet, damit das Bild ruhig bleibt.
 
 ### 4. Beleuchtung wie das Original
 
@@ -114,4 +142,6 @@ müssen durchgehend pixel-treu zur `before-*`-Referenz bleiben.
 
 S3 (echtes KSW-Gebäude + Innenraum), Terrain (swissALTI3D), Bahnhof-Indoor,
 Landmarken-Labels/Attribution (S4), Brücken über das Gleisfeld als eigene
-Ebene (Strassen bleiben flach auf der Platte).
+Ebene (Strassen bleiben flach auf der Platte), **Stadt-Fahrzeuge und
+-Fussgänger** (eigene Slice; Aussenweg-Walker KSW↔Bahnhof↔ZAG ist als S4
+vorgemerkt), erfundene Fassaden-Details ohne Datenbasis (Balkone, Erker).
