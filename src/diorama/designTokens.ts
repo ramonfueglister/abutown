@@ -178,6 +178,78 @@ export const grade = {
 // image-based lighting, so walls/lawn tint the shadows.
 export const gi = { environmentIntensity: 0.28, hemiCut: 0.5 } as const;
 
+// ── KSW hospital diorama (ksw.html) ─────────────────────────────────────
+// Additions for the full-hospital scene; the prototype tokens above stay
+// untouched so look.ts keeps rendering identically.
+
+export const kswPalette = {
+  roofClay: 0xd9a184, // terracotta roof lids
+  roofTrim: 0xe8bfa0,
+  corridorFloor: 0xf2ead9,
+  plazaPath: 0xe5d9c0,
+  opLight: 0xfff3d6, // OP lamp discs (unlit mesh color)
+  screenGlow: 0xbfe3d9, // device screens
+  crossRed: 0xd8574a, // Swiss hospital cross signage block
+} as const;
+
+// Dynamic diorama camera: wheel dolly, left-drag orbit. Roofs fade with the
+// zoom radius so zooming in reveals the interiors.
+export const kswCamera = {
+  fov: 24,
+  overviewPosition: [-68, 42, 78] as [number, number, number],
+  target: [0, 0.6, 0] as [number, number, number],
+  radiusMin: 7,
+  radiusMax: 320,
+  zoomSpeed: 0.0012,
+  dragSpeed: 0.005,
+  pitchMin: 0.18,
+  pitchMax: 1.25,
+  // roofs are FULLY gone by the time a screen-filling chunk of the hospital
+  // is in view (radius <= 60) — no lingering translucency in the nav range
+  roofFadeNear: 60,
+  roofFadeFar: 95,
+  zoomSmoothing: 10, // 1/s — wheel zoom eases toward its target radius
+  // AoE2-style edge scrolling: cursor at the viewport edge pans the target
+  panMarginPx: 36,
+  panSpeed: 30,
+  panBoundsX: 34,
+  panBoundsZ: 26,
+} as const;
+
+// Scene scale-up relative to the one-room prototype.
+export const kswScene = {
+  fogScale: 7,
+  domeRadius: 400, // clouds/stars stay around the camera even at max zoom-out
+  skyScale: 900, // sky sphere beyond radiusMax, inside camera.far
+  sunDistance: 70,
+  shadowExtent: 46,
+  shadowMapSize: 4096,
+  giProbeY: 9,
+  wallHeight: 2.9,
+  wallThicknessOuter: 0.42,
+  wallThicknessInner: 0.28,
+  roofThickness: 0.26,
+  roofOverhang: 0.2,
+  plateThickness: 0.5,
+  openingSill: 0.95, // window sill height
+  openingHead: 2.35, // shared head height for doors and windows
+} as const;
+
+// KSW post overrides (the prototype `post` tokens belong to look.ts).
+export const kswPost = {
+  dof: { focalLength: 1.4, bokehScale: 1.6 },
+  // the big plate sees mostly open sky in the GI probe — damp the white
+  // wash per preset so the sun stays the protagonist (the unfogged morning
+  // sky is by far the brightest)
+  envScale: { morning: 0.32, dusk: 0.6, night: 0.8 },
+  // the unfogged bright sky feeds screen-space godrays/bloom — keep the veil off
+  godraysMix: { morning: 0.12, dusk: 0.5 },
+  bloomThreshold: 1.05,
+  // unfogged sky only where it reads better: the low morning sun renders a
+  // near-white sky that washes the whole frame, so morning keeps the fog tint
+  skyUnfogged: { morning: false, dusk: true, night: true },
+} as const;
+
 // Camera contract — the diorama has ONE gaze, like a built miniature.
 // From the south-west, looking into the corner formed by the north + east walls.
 export const cameraContract = {
