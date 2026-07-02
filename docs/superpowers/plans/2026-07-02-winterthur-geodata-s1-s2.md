@@ -4,6 +4,30 @@
 
 **Goal:** Echte Winterthur-Stadt (swisstopo LoD2 + OSM) als Clay-Massing um das bestehende KSW-Diorama, KSW-Anker als Ursprung — Look pixel-treu.
 
+## Execution-Briefing (für eine frische Session, kein Vorkontext nötig)
+
+- **Branch:** `geo/winterthur-map` (Basis `origin/main` @ df8d9d4). Worktree:
+  `.claude/worktrees/kind-elgamal-746d1f`. Nach Unterbrechungen `pwd` prüfen.
+- **Reihenfolge:** Tasks strikt 1→10; jeder Task ist in sich abgeschlossen
+  (Test → rot → Code → grün → Commit). Kein Task braucht Wissen ausserhalb
+  seines eigenen Blocks + „Global Constraints“.
+- **Alle Fakten sind verifiziert** (URLs, Layer-Namen, Attribut-Falle
+  `GESAMTHOEHE` leer, 844 Gebäude in der Bbox, `ogr2ogr` unter
+  `/opt/anaconda3/bin`) — nicht neu recherchieren, nicht anzweifeln; bei
+  echtem Widerspruch (z. B. 404) stoppen und melden statt improvisieren.
+- **Nichts umdesignen.** Wenn ein Test aus dem Plan scheitert, zuerst die
+  eigene Umsetzung gegen den Plan-Code diffen — der Plan-Code ist gegen die
+  echten Daten entworfen.
+- **Look-Regel (hart):** an bestehenden Werten in `designTokens.ts`, an
+  `look.ts`, `staticBatch.ts`, `clayNodes.ts` NICHTS ändern; nur anfügen.
+- **Gates:** `npx vitest run <testfile>` pro Task; am Ende (Task 10)
+  `npx tsc --noEmit && npx vitest run && npm run build`, dann
+  `node scripts/smoke-ksw.mjs` + `node scripts/capture-ksw.mjs`
+  (Browser-Smoke ist Pflicht, CLAUDE.md). Kein cargo involviert.
+- **Vorher-Referenz fürs Look-Gate:** vor Task 10 einmal auf `origin/main`
+  (`git stash` unnötig — eigener Worktree, einfach `git worktree` nicht
+  wechseln, sondern die Captures VOR dem main.ts-Edit ziehen).
+
 **Architecture:** Offline-Bake (`scripts/geo/`) lädt die swisstopo-Kachel + OSM, projiziert auf lokale Meter (Ursprung = KSW 47.5069/8.7285) und schreibt kompakte JSONs nach `data/winterthur/`. Die Runtime (`src/diorama/ksw/geo/`) baut daraus wenige gemergte Meshes (Wände/Dächer/Strassen) mit den **bestehenden** Clay-Materialien. Spec: `docs/superpowers/specs/2026-07-02-winterthur-geodata-design.md`.
 
 **Tech Stack:** Node .mjs-Skripte, `ogr2ogr` (lokal vorhanden, `/opt/anaconda3/bin`), three.js `ShapeUtils` (Triangulation), Vitest, bestehende Diorama-Builder.
