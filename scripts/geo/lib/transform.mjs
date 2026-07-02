@@ -7,7 +7,7 @@
 // triangulatable geometry — a bake must never silently drop shape.
 import { triangulatePlanarPolygon } from './triangulate.mjs';
 import { nameForFootprint, ringCentroid, roadStyle } from './join.mjs';
-import { footprintValid, roofOutlineFootprint } from './style.mjs';
+import { footprintValid, roofOutlineFootprint, roofSkirts, roofUnderside } from './style.mjs';
 
 export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anchor
 
@@ -120,23 +120,56 @@ function collectByUuid(fc, projector, into, key) {
   }
 }
 
+// cm-quantized positions naturally coincide at shared edges (ridge/valley/eave
+// vertices from adjacent facets round to the same integer triplet), so a
+// weld-by-exact-key pass is a pure encoding optimization — it never moves or
+// merges geometry that wasn't already bit-identical, just avoids storing the
+// same vertex once per triangle that touches it. Roof surfaces are real
+// swisstopo LoD2 facets (~60/building) whose skirts (Task 3) roughly triple
+// the unwelded vertex count; welding keeps the bake within the size budget
+// without altering any coordinate.
 function meshFromRings(rings, groundY) {
   const pos = [];
   const idx = [];
+  const weld = new Map(); // "x,y,z" -> vertex index
   for (const ring of rings) {
     const tri = triangulatePlanarPolygon(ring);
     if (!tri) continue; // degenerate sliver surface — fine to skip a face
-    const base = pos.length / 3;
-    for (let i = 0; i < tri.positions.length; i += 3) {
-      pos.push(
-        Math.round(tri.positions[i] * 100),
-        Math.round((tri.positions[i + 1] - groundY) * 100),
-        Math.round(tri.positions[i + 2] * 100),
-      );
+    const localToGlobal = new Array(tri.positions.length / 3);
+    for (let i = 0, v = 0; i < tri.positions.length; i += 3, v++) {
+      const x = Math.round(tri.positions[i] * 100);
+      const y = Math.round((tri.positions[i + 1] - groundY) * 100);
+      const z = Math.round(tri.positions[i + 2] * 100);
+      const key = `${x},${y},${z}`;
+      let idxOf = weld.get(key);
+      if (idxOf === undefined) {
+        idxOf = pos.length / 3;
+        pos.push(x, y, z);
+        weld.set(key, idxOf);
+      }
+      localToGlobal[v] = idxOf;
     }
-    for (const t of tri.indices) idx.push(base + t);
+    for (const t of tri.indices) idx.push(localToGlobal[t]);
   }
   return { pos, idx };
+}
+
+function appendRings(mesh, rings, groundY) {
+  const extra = meshFromRings(rings, groundY);
+  const weld = new Map();
+  for (let i = 0; i < mesh.pos.length; i += 3) weld.set(`${mesh.pos[i]},${mesh.pos[i + 1]},${mesh.pos[i + 2]}`, i / 3);
+  const remap = new Array(extra.pos.length / 3);
+  for (let v = 0, i = 0; i < extra.pos.length; i += 3, v++) {
+    const key = `${extra.pos[i]},${extra.pos[i + 1]},${extra.pos[i + 2]}`;
+    let idxOf = weld.get(key);
+    if (idxOf === undefined) {
+      idxOf = mesh.pos.length / 3;
+      mesh.pos.push(extra.pos[i], extra.pos[i + 1], extra.pos[i + 2]);
+      weld.set(key, idxOf);
+    }
+    remap[v] = idxOf;
+  }
+  for (const t of extra.idx) mesh.idx.push(remap[t]);
 }
 
 // Walls by extruding the footprint from ground (y=0) to the eave. swisstopo's
@@ -229,8 +262,10 @@ export function transformBuildings({
     }
 
     const eaveH = Math.max(eaveY - groundY, 0.1); // clamp: never a zero/neg prism
+    const skirts = roofSkirts(b.roofs, eaveY);
     const wall = extrudeWalls(footprint, eaveH);
-    const roof = meshFromRings(b.roofs, groundY);
+    appendRings(wall, skirts, groundY);
+    const roof = meshFromRings([...b.roofs, ...roofUnderside(b.roofs)], groundY);
     if (wall.idx.length === 0 && roof.idx.length === 0)
       throw new Error(`bake: building ${uuid} has surfaces but none triangulated`);
 
