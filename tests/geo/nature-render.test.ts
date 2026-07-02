@@ -43,3 +43,29 @@ describe('buildNature', () => {
     expect(greens.castShadow).toBe(false);
   });
 });
+
+describe('buildNature — trees v2 (broad/conifer/impostor split)', () => {
+  const nature2: CityNature = {
+    greens: [], waterAreas: [], rivers: [],
+    trees: [
+      { x: 10, z: 10, h: 9, r: 3, kind: 'broad' },
+      { x: 20, z: 15, h: 14, r: 2, kind: 'conifer' },
+    ],
+  };
+
+  it('splits broadleaf/conifer/impostor instances with real sizes', () => {
+    const g = buildNature(nature2, {});
+    const broad = g.getObjectByName('treeCanopies') as THREE.InstancedMesh;
+    const conif = g.getObjectByName('treeConifers') as THREE.InstancedMesh;
+    const imp = g.getObjectByName('treeImpostors') as THREE.InstancedMesh;
+    expect(broad.count).toBe(1);
+    expect(conif.count).toBe(1);
+    expect(imp.count).toBe(2);
+    expect(imp.visible).toBe(false);
+    const m = new THREE.Matrix4();
+    broad.getMatrixAt(0, m);
+    const s = new THREE.Vector3();
+    m.decompose(new THREE.Vector3(), new THREE.Quaternion(), s);
+    expect(s.x).toBeCloseTo(3 / 0.75, 1); // canopy geo authored at 0.75 puff radius → scale = r/0.75
+  });
+});
