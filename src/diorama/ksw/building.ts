@@ -3,12 +3,17 @@
 // slabs, department signage, and per-room roofs that fade with the camera
 // zoom. Roof meshes cast and receive shadows while present, so the sun
 // treats the building as a solid volume until you zoom inside.
+//
+// The builders emit individual Meshes; buildHospital's final step hoists
+// them into a handful of BatchedMesh buckets (see staticBatch.ts), so the
+// returned group renders in a few draw calls.
 
 import * as THREE from 'three/webgpu';
-import { clay, kswPalette, kswScene, palette, radii } from '../designTokens';
+import { kswPalette, kswScene, palette, radii } from '../designTokens';
 import type { FloorPlan, Room, WallSide } from './floorPlan';
 import { boxGeo, cyl, roundedBox } from './geometryCache';
-import { box, buildProp, glassMat } from './props';
+import { box, buildProp, clayMat, glassMat } from './props';
+import { batchHospital } from './staticBatch';
 
 export type WallOpening = { center: number; width: number; kind: 'door' | 'window' };
 
@@ -43,22 +48,6 @@ export function segmentWall(length: number, height: number, openings: WallOpenin
 }
 
 export type RoofControl = { setFade(fade01: number): void; fade(): number };
-
-// Rooftop dressing (HVAC, vents, solar) fades with the lids, so it needs its
-// own transparent material instances built from the clay recipe.
-function fadingClay(color: number): THREE.MeshPhysicalMaterial {
-  const m = new THREE.MeshPhysicalMaterial({
-    color,
-    roughness: clay.roughness,
-    metalness: clay.metalness,
-    transparent: true,
-    opacity: 1,
-  });
-  m.sheen = clay.sheen;
-  m.sheenRoughness = clay.sheenRoughness;
-  m.sheenColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.5);
-  return m;
-}
 
 const FLOOR_H = 0.14;
 
@@ -198,7 +187,7 @@ function buildSign(room: Room): THREE.Group {
   return g;
 }
 
-export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: RoofControl } {
+export function buildHospital(plan: FloorPlan, opts: { lampGlow: boolean }): { group: THREE.Group; roofs: RoofControl } {
   const group = new THREE.Group();
 
   // ground plate (soft lawn) + hard surfaces
@@ -259,34 +248,24 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
   for (const p of plan.outdoorProps) group.add(buildProp(p));
   // people are NOT built here: main.ts spawns them as wandering agents
 
-  // roofs: one shared transparent clay material; slight per-room height
-  // steps so overlapping lids never share a plane.
-  const roofMat = new THREE.MeshPhysicalMaterial({
-    color: kswPalette.roofClay,
-    roughness: clay.roughness,
-    metalness: clay.metalness,
-    transparent: true,
-    opacity: 1,
-  });
-  roofMat.sheen = clay.sheen;
-  roofMat.sheenRoughness = clay.sheenRoughness;
-  roofMat.sheenColor = new THREE.Color(kswPalette.roofClay).lerp(new THREE.Color(0xffffff), 0.5);
-  const trimMat = new THREE.MeshPhysicalMaterial({
-    color: kswPalette.roofTrim,
-    roughness: clay.roughness,
-    metalness: clay.metalness,
-    transparent: true,
-    opacity: 1,
-  });
-
-  const roofMeshes: THREE.Mesh[] = [];
+  // roofs: everything up here is tagged userData.roofFade so the batching
+  // step collects it into the one transparent roofFade bucket whose opacity
+  // the RoofControl drives. Slight per-room height steps so overlapping lids
+  // never share a plane.
   const roofGroup = new THREE.Group();
   const baseY = FLOOR_H + kswScene.wallHeight;
   const EPS = 1e-6;
   const b = plan.building;
   // Overhang only where the rect meets the building perimeter; interior
   // edges stay flush so neighbouring lids read as distinct stepped tiers.
-  const addRoof = (rect: { x: number; z: number; w: number; d: number }, step: number, mat: THREE.MeshPhysicalMaterial, attika: boolean): void => {
+  const tagRoof = (m: THREE.Mesh): THREE.Mesh => {
+    m.userData.roofFade = true;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    roofGroup.add(m);
+    return m;
+  };
+  const addRoof = (rect: { x: number; z: number; w: number; d: number }, step: number, color: number, attika: boolean): void => {
     const over = kswScene.roofOverhang;
     const eW = Math.abs(rect.x - rect.w / 2 - (b.x - b.w / 2)) < EPS ? over : 0;
     const eE = Math.abs(rect.x + rect.w / 2 - (b.x + b.w / 2)) < EPS ? over : 0;
@@ -294,84 +273,46 @@ export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: Roo
     const eS = Math.abs(rect.z + rect.d / 2 - (b.z + b.d / 2)) < EPS ? over : 0;
     const w = rect.w + eW + eE;
     const d = rect.d + eN + eS;
-    const lid = new THREE.Mesh(roundedBox(w, kswScene.roofThickness, d, 4, radii.s), mat);
+    const lid = tagRoof(new THREE.Mesh(roundedBox(w, kswScene.roofThickness, d, 4, radii.s), clayMat(color)));
     lid.position.set(rect.x + (eE - eW) / 2, baseY + step + kswScene.roofThickness / 2, rect.z + (eS - eN) / 2);
-    lid.castShadow = true;
-    lid.receiveShadow = true;
-    roofMeshes.push(lid);
-    roofGroup.add(lid);
     if (attika && rect.w > 2.2 && rect.d > 2.2) {
-      const cap = new THREE.Mesh(roundedBox(rect.w - 1.0, 0.12, rect.d - 1.0, 4, radii.s), trimMat);
+      const cap = tagRoof(new THREE.Mesh(roundedBox(rect.w - 1.0, 0.12, rect.d - 1.0, 4, radii.s), clayMat(kswPalette.roofTrim)));
       cap.position.set(rect.x, baseY + step + kswScene.roofThickness + 0.06, rect.z);
-      cap.castShadow = true;
-      cap.receiveShadow = true;
-      roofMeshes.push(cap);
-      roofGroup.add(cap);
     }
   };
   plan.rooms.forEach((room, i) => {
-    addRoof(room.rect, 0.12 + (i % 3) * 0.09, roofMat, true);
+    addRoof(room.rect, 0.12 + (i % 3) * 0.09, kswPalette.roofClay, true);
   });
-  for (const c of plan.corridors) addRoof(c, 0, trimMat, false);
+  for (const c of plan.corridors) addRoof(c, 0, kswPalette.roofTrim, false);
 
   // rooftop dressing: HVAC boxes, vents and solar rows — a Swiss flat roof
   // is never empty. All of it fades with the lids.
-  const fadeMats: THREE.MeshPhysicalMaterial[] = [roofMat, trimMat];
-  const hvacMat = fadingClay(palette.metalMatt);
-  const ventMat = fadingClay(palette.white);
-  const solarMat = fadingClay(palette.eye);
-  const solarFrameMat = fadingClay(palette.metalMatt);
-  fadeMats.push(hvacMat, ventMat, solarMat, solarFrameMat);
-  const addRoofMesh = (geo: THREE.BufferGeometry, mat: THREE.MeshPhysicalMaterial, x: number, y: number, z: number, rotY = 0): void => {
-    const m = new THREE.Mesh(geo, mat);
+  const addRoofMesh = (geo: THREE.BufferGeometry, color: number, x: number, y: number, z: number, rotY = 0): void => {
+    const m = tagRoof(new THREE.Mesh(geo, clayMat(color)));
     m.position.set(x, y, z);
     m.rotation.y = rotY;
-    m.castShadow = true;
-    m.receiveShadow = true;
-    roofMeshes.push(m);
-    roofGroup.add(m);
   };
   plan.rooms.forEach((room, i) => {
     const step = 0.12 + (i % 3) * 0.09;
     const topY = baseY + step + kswScene.roofThickness + 0.12;
     const r = room.rect;
     if (i % 3 === 0) {
-      addRoofMesh(roundedBox(1.2, 0.7, 0.9, 4, radii.s), hvacMat, r.x - r.w * 0.22, topY + 0.28, r.z - r.d * 0.2, 0.2);
-      addRoofMesh(cyl(0.16, 0.2, 0.5, 12), ventMat, r.x + r.w * 0.24, topY + 0.2, r.z + r.d * 0.18);
+      addRoofMesh(roundedBox(1.2, 0.7, 0.9, 4, radii.s), palette.metalMatt, r.x - r.w * 0.22, topY + 0.28, r.z - r.d * 0.2, 0.2);
+      addRoofMesh(cyl(0.16, 0.2, 0.5, 12), palette.white, r.x + r.w * 0.24, topY + 0.2, r.z + r.d * 0.18);
     } else if (i % 3 === 1) {
       // south-tilted solar row — w varies with room size, so this box stays uncached
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(Math.min(r.w * 0.5, 3.2), 0.06, 1.1), solarMat);
+      const panel = tagRoof(new THREE.Mesh(new THREE.BoxGeometry(Math.min(r.w * 0.5, 3.2), 0.06, 1.1), clayMat(palette.eye)));
       panel.position.set(r.x, topY + 0.34, r.z + r.d * 0.16);
       panel.rotation.x = -0.32;
-      panel.castShadow = true;
-      panel.receiveShadow = true;
-      roofMeshes.push(panel);
-      roofGroup.add(panel);
-      addRoofMesh(roundedBox(0.5, 0.36, 0.5, 4, radii.xs), solarFrameMat, r.x - r.w * 0.28, topY + 0.14, r.z - r.d * 0.22);
+      addRoofMesh(roundedBox(0.5, 0.36, 0.5, 4, radii.xs), palette.metalMatt, r.x - r.w * 0.28, topY + 0.14, r.z - r.d * 0.22);
     } else {
-      addRoofMesh(cyl(0.2, 0.26, 0.62, 12), ventMat, r.x - r.w * 0.2, topY + 0.26, r.z + r.d * 0.2);
-      addRoofMesh(roundedBox(0.8, 0.5, 0.7, 4, radii.s), hvacMat, r.x + r.w * 0.22, topY + 0.2, r.z - r.d * 0.16, -0.15);
+      addRoofMesh(cyl(0.2, 0.26, 0.62, 12), palette.white, r.x - r.w * 0.2, topY + 0.26, r.z + r.d * 0.2);
+      addRoofMesh(roundedBox(0.8, 0.5, 0.7, 4, radii.s), palette.metalMatt, r.x + r.w * 0.22, topY + 0.2, r.z - r.d * 0.16, -0.15);
     }
   });
   group.add(roofGroup);
 
-  let currentFade = 1;
-  const roofs: RoofControl = {
-    setFade(fade01: number) {
-      currentFade = Math.min(Math.max(fade01, 0), 1);
-      for (const m of fadeMats) m.opacity = currentFade;
-      // shadows drop early in the fade (while the lid is still clearly
-      // visible) so the interior lights up smoothly instead of popping
-      // bright at the very end
-      const cast = currentFade > 0.6;
-      const visible = currentFade > 0.02;
-      for (const m of roofMeshes) {
-        m.castShadow = cast;
-        m.visible = visible;
-      }
-    },
-    fade: () => currentFade,
-  };
+  const { roofs } = batchHospital(group, opts);
   return { group, roofs };
 }
 

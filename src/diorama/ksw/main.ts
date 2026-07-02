@@ -47,6 +47,7 @@ declare global {
       target: [number, number, number];
       agents: { total: number; walking: number; samples: Array<[number, number]> };
     };
+    __KSW_INFO?: () => { drawCalls: number; triangles: number };
   }
 }
 
@@ -319,7 +320,7 @@ async function boot(): Promise<void> {
   scene.add(hemi);
 
   // ── the hospital ───────────────────────────────────────────────────────
-  const { group: hospital, roofs } = buildHospital(kswPlan);
+  const { group: hospital, roofs } = buildHospital(kswPlan, { lampGlow: preset.lampOn });
   scene.add(hospital);
   roofs.setFade(roofFade(rig.radius, kswCamera));
 
@@ -412,27 +413,9 @@ async function boot(): Promise<void> {
     }
   }
 
-  // Night life: a warm share of the windows glows from inside
+  // Night life: window glow + lamp bulbs are baked into the glowNight batch
+  // at build time (staticBatch.ts); only the actual light pools live here.
   if (preset.lampOn) {
-    const glow = new THREE.MeshBasicMaterial({
-      color: nightGlow.bulb,
-      transparent: true,
-      opacity: 0.9,
-    });
-    hospital.updateMatrixWorld(true);
-    hospital.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (o.userData.lampBulb) {
-        m.material = glow;
-        return;
-      }
-      if (!o.userData.windowPane) return;
-      // deterministic per-window choice, no RNG: hash the world position
-      const wp = new THREE.Vector3();
-      m.getWorldPosition(wp);
-      const h = Math.abs(Math.sin(wp.x * 12.9898 + wp.z * 78.233) * 43758.5453) % 1;
-      if (h < 0.55) m.material = glow;
-    });
     // two plaza lampposts actually cast warm pools
     for (const [lx, lz] of [
       [-9.5, 18.3],
@@ -500,6 +483,9 @@ async function boot(): Promise<void> {
   const contrasted = saturated.sub(float(0.5)).mul(float(preset.contrast)).add(float(0.5)).clamp(0, 1);
   const graded = vec4(contrasted, composed.a);
   postProcessing.outputNode = film(graded, float(post.filmGrain));
+
+  // Perf probe: draw calls / triangles of the last rendered frame.
+  window.__KSW_INFO = () => ({ drawCalls: renderer.info.render.drawCalls, triangles: renderer.info.render.triangles });
 
   let frameCount = 0;
   let prevT = 0;

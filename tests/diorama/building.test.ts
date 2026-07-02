@@ -55,42 +55,56 @@ describe('segmentWall', () => {
 });
 
 describe('buildHospital', () => {
-  const { group, roofs } = buildHospital(kswPlan);
+  const { group, roofs } = buildHospital(kswPlan, { lampGlow: false });
+  const batches = group.children.filter((o): o is THREE.BatchedMesh => (o as THREE.BatchedMesh).isBatchedMesh);
+  const roofBatch = batches.find((b) => b.name === 'ksw-roofFade');
 
-  function meshes(root: THREE.Object3D): THREE.Mesh[] {
-    const out: THREE.Mesh[] = [];
-    root.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) out.push(o as THREE.Mesh);
+  it('batches the substantial scene (walls, floors, props, roofs) into few buckets', () => {
+    expect(batches.map((b) => b.name).sort()).toEqual(['ksw-clay', 'ksw-clayNoCast', 'ksw-glass', 'ksw-glow', 'ksw-roofFade']);
+    const instances = batches.reduce((n, b) => n + b.instanceCount, 0);
+    expect(instances).toBeGreaterThan(400);
+    // only the animated meshes (ambulance blinker, heli rotor parts) stay individual
+    const loose: THREE.Mesh[] = [];
+    group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && !(m as THREE.BatchedMesh).isBatchedMesh) loose.push(m);
     });
-    return out;
-  }
-
-  it('builds a substantial scene (walls, floors, props, people, roofs)', () => {
-    expect(meshes(group).length).toBeGreaterThan(400);
+    expect(loose.length).toBeLessThan(10);
+    for (const m of loose) {
+      let animated = false;
+      for (let cur: THREE.Object3D | null = m; cur; cur = cur.parent) {
+        if (cur.userData.blink || cur.userData.rotor) animated = true;
+      }
+      expect(animated).toBe(true);
+    }
   });
 
-  it('covers every room and corridor with a shadow-casting roof', () => {
+  it('covers every room and corridor with a shadow-casting roof instance', () => {
     roofs.setFade(1);
-    const roofMeshes = meshes(group).filter((m) => m.castShadow && m.position.y > kswScene.wallHeight);
-    expect(roofMeshes.length).toBeGreaterThanOrEqual(kswPlan.rooms.length + kswPlan.corridors.length);
+    expect(roofBatch).toBeDefined();
+    expect(roofBatch!.castShadow).toBe(true);
+    expect(roofBatch!.instanceCount).toBeGreaterThanOrEqual(kswPlan.rooms.length + kswPlan.corridors.length);
   });
 
   it('setFade drives opacity, shadow casting, and visibility thresholds', () => {
+    const mat = roofBatch!.material as THREE.Material & { opacity: number };
+    expect(mat.transparent).toBe(true);
     roofs.setFade(1);
-    const roofMeshes = meshes(group).filter((m) => m.position.y > kswScene.wallHeight && (m.material as THREE.Material).transparent);
-    expect(roofMeshes.length).toBeGreaterThan(0);
-    expect(roofMeshes.every((m) => m.castShadow && m.visible)).toBe(true);
+    expect(roofBatch!.castShadow).toBe(true);
+    expect(roofBatch!.visible).toBe(true);
 
     roofs.setFade(0.4);
     expect(roofs.fade()).toBeCloseTo(0.4);
-    expect(roofMeshes.every((m) => !m.castShadow && m.visible)).toBe(true);
-    expect((roofMeshes[0].material as THREE.MeshPhysicalMaterial).opacity).toBeCloseTo(0.4);
+    expect(roofBatch!.castShadow).toBe(false);
+    expect(roofBatch!.visible).toBe(true);
+    expect(mat.opacity).toBeCloseTo(0.4);
 
     roofs.setFade(0.01);
-    expect(roofMeshes.every((m) => !m.visible)).toBe(true);
+    expect(roofBatch!.visible).toBe(false);
 
     roofs.setFade(1); // restore
-    expect(roofMeshes.every((m) => m.castShadow && m.visible)).toBe(true);
+    expect(roofBatch!.castShadow).toBe(true);
+    expect(roofBatch!.visible).toBe(true);
   });
 
   it('clamps fade input to [0, 1]', () => {
