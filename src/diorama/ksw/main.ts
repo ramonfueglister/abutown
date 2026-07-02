@@ -45,7 +45,8 @@ import { boxGeo } from './geometryCache';
 import { clayMat } from './props';
 import { buildCityMassing } from './geo/cityMassing';
 import { buildRoads } from './geo/roads';
-import { cityBuildings, cityMeta, cityRails, cityRoads } from './geo/geoData';
+import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads } from './geo/geoData';
+import { buildNature } from './geo/nature';
 import type { PersonRole } from './floorPlan';
 
 declare global {
@@ -371,6 +372,9 @@ async function boot(): Promise<void> {
   scene.add(cityPlate);
   scene.add(buildCityMassing(cityBuildings));
   scene.add(buildRoads(cityRoads, cityRails));
+  // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
+  // The hero plate keeps its authored trees — city trees skip that rect.
+  scene.add(buildNature(cityNature, { excludeRect: { x: 0, z: 0, w: kswPlan.plate.w, d: kswPlan.plate.d } }));
 
   // collect animated bits: ambulance light pulses, helicopter rotor idles.
   // Tag contract shared with staticBatch.isAnimated via ANIMATED_TAGS.

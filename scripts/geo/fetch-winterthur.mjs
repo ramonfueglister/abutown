@@ -72,4 +72,15 @@ await overpass(
   `[out:json][timeout:60];(way["highway"](${BBOX});way["railway"~"^(rail|tram)$"](${BBOX}););out tags geom;`,
   `${OUT}/osm-roads.json`,
 );
+// nature: green areas, woods, water bodies, the Eulach, and individual trees
+await overpass(
+  `[out:json][timeout:90];(
+    way["leisure"~"^(park|garden|pitch|playground)$"](${BBOX});
+    way["landuse"~"^(grass|meadow|forest|cemetery|village_green|recreation_ground|allotments)$"](${BBOX});
+    way["natural"~"^(wood|scrub|grassland|water)$"](${BBOX});
+    way["waterway"~"^(river|stream)$"](${BBOX});
+    node["natural"="tree"](${BBOX});
+  );out tags geom;`,
+  `${OUT}/osm-nature.json`,
+);
 console.log('fetch complete');

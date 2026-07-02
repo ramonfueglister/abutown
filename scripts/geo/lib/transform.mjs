@@ -228,6 +228,49 @@ export function transformBuildings({ floors, walls, roofs, osmBuildings, project
   return out;
 }
 
+// Nature overlay: green areas (parks/woods/grass/…), water bodies, river
+// centerlines and individual tree points — all straight from OSM, projected
+// to local meters. Greens carry their kind so the renderer can shade parks
+// lighter than woods; rivers keep their tagged width (default 5 m).
+const GREEN_KINDS = new Set([
+  'park', 'garden', 'pitch', 'playground', // leisure
+  'grass', 'meadow', 'forest', 'cemetery', 'village_green', 'recreation_ground', 'allotments', // landuse
+  'wood', 'scrub', 'grassland', // natural
+]);
+
+export function transformNature({ osmNature, projector }) {
+  const greens = [];
+  const waterAreas = [];
+  const rivers = [];
+  const trees = [];
+  const toLocal = ({ lon, lat }) => {
+    const [x, z] = projector.toLocal(lon, lat);
+    return [Math.round(x * 100) / 100, Math.round(z * 100) / 100];
+  };
+  for (const el of osmNature.elements ?? []) {
+    const t = el.tags ?? {};
+    if (el.type === 'node') {
+      if (t.natural === 'tree') trees.push(toLocal(el));
+      continue;
+    }
+    if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
+    if (t.waterway === 'river' || t.waterway === 'stream') {
+      const width = Number.parseFloat(t.width ?? '') || (t.waterway === 'river' ? 5 : 2);
+      rivers.push({ width, pts: el.geometry.map(toLocal) });
+      continue;
+    }
+    if (el.geometry.length < 4) continue; // areas need a closed-ish ring
+    const ring = el.geometry.map(toLocal);
+    if (t.natural === 'water') {
+      waterAreas.push({ ring });
+      continue;
+    }
+    const kind = t.leisure || t.landuse || t.natural;
+    if (kind && GREEN_KINDS.has(kind)) greens.push({ kind, ring });
+  }
+  return { greens, waterAreas, rivers, trees };
+}
+
 export function transformRoads({ osmRoads, projector }) {
   const roads = [];
   const rails = [];

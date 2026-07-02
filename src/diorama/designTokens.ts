@@ -315,4 +315,12 @@ export const kswCity = {
   cameraFar: 12000,
   roadY: 0.04, // road ribbons float just above the plate (no z-fight)
   railY: 0.05,
+  // nature layer (real OSM greens/water/trees), below the road ribbons
+  greenY: 0.025,
+  waterY: 0.03,
+  parkGreen: 0xa9cf92, // parks, grass, pitches — a step livelier than the lawn
+  woodGreen: 0x86b478, // forest/wood patches read deeper
+  water: 0xa8cfdd, // Eulach + ponds, calm glass blue
+  treeGreen: 0x8fbf83, // canopy base; per-instance tint varies around it
+  treeTrunk: 0xb08a62,
 } as const;

@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { ANCHOR, BBOX, makeProjector } from './lib/project.mjs';
-import { transformBuildings, transformRoads } from './lib/transform.mjs';
+import { transformBuildings, transformNature, transformRoads } from './lib/transform.mjs';
 
 const SCRATCH = 'scratch/geo';
 const GDB = `${SCRATCH}/swissBUILDINGS3D_3-0_1072-14.gdb`;
@@ -60,6 +60,11 @@ const { roads, rails } = transformRoads({
   osmRoads: JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8')),
   projector,
 });
+const nature = transformNature({
+  osmNature: JSON.parse(readFileSync(`${SCRATCH}/osm-nature.json`, 'utf8')),
+  projector,
+});
+if (nature.trees.length < 500) throw new Error(`bake: only ${nature.trees.length} trees — nature fetch broken?`);
 
 // sanity gates. An absurd height means a broken projection/ground-normalize —
 // hard fail. Sub-2 m "buildings" are canopies, ground slabs and degenerate
@@ -102,7 +107,12 @@ const meta = {
     zagTurbinenstrasse: projector.toLocal(8.7182, 47.4973).map((v) => Math.round(v)),
     zagKonradstrasse: projector.toLocal(8.7219, 47.5022).map((v) => Math.round(v)),
   },
-  counts: { buildings: buildingsOut.length, kswBuildings: ksw.length, named: named.length, roads: roads.length, rails: rails.length, triangles },
+  counts: {
+    buildings: buildingsOut.length, kswBuildings: ksw.length, named: named.length,
+    roads: roads.length, rails: rails.length, triangles,
+    greens: nature.greens.length, waterAreas: nature.waterAreas.length,
+    rivers: nature.rivers.length, trees: nature.trees.length,
+  },
   attribution: ['Gebäude: © swisstopo (swissBUILDINGS3D 3.0)', 'Karte: © OpenStreetMap-Mitwirkende (ODbL)'],
   sourceTile: 'swissbuildings3d_3_0_2019_1072-14',
 };
@@ -111,8 +121,9 @@ mkdirSync(OUT, { recursive: true });
 writeFileSync(`${OUT}/meta.json`, JSON.stringify(meta, null, 1));
 writeFileSync(`${OUT}/buildings.json`, JSON.stringify({ buildings: buildingsOut }));
 writeFileSync(`${OUT}/roads.json`, JSON.stringify({ roads, rails }));
+writeFileSync(`${OUT}/nature.json`, JSON.stringify(nature));
 
-const total = ['meta', 'buildings', 'roads'].reduce((n, f) => n + statSync(`${OUT}/${f}.json`).size, 0);
+const total = ['meta', 'buildings', 'roads', 'nature'].reduce((n, f) => n + statSync(`${OUT}/${f}.json`).size, 0);
 if (total > MAX_TOTAL_BYTES) throw new Error(`bake: output ${(total / 1e6).toFixed(1)} MB > 8 MB budget`);
 console.log(`bake OK: ${buildingsOut.length} buildings (${ksw.length} ksw, ${named.length} named), ` +
   `${roads.length} roads, ${rails.length} rails, ${triangles} tris, ${(total / 1e6).toFixed(1)} MB`);

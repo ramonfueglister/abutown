@@ -35,7 +35,11 @@
   "named": 72,
   "roads": 2057,
   "rails": 239,
-  "triangles": 88625
+  "triangles": 88625,
+  "greens": 119,
+  "waterAreas": 5,
+  "rivers": 5,
+  "trees": 4127
  },
  "attribution": [
   "Gebäude: © swisstopo (swissBUILDINGS3D 3.0)",
