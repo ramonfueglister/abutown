@@ -369,12 +369,24 @@ async function boot(): Promise<void> {
   );
   cityPlate.position.set(cityMeta.plate.cx, -kswScene.plateThickness / 2 - 0.02, cityMeta.plate.cz);
   cityPlate.receiveShadow = true;
-  scene.add(cityPlate);
-  scene.add(buildCityMassing(cityBuildings));
-  scene.add(buildRoads(cityRoads, cityRails));
+  // The whole city lives under one named group — later tasks (LOD rings,
+  // follow-mode shadows, the wandering GI probe) hang their objects here too.
+  // Quality gate: the city STAYS inside the GI probe scene (scene.add(cityRoot)
+  // below, not excluded from renderProbeFace) — every zoom point keeps
+  // hero-grade GI. If the probe cadence turns out to be the frame-time cost,
+  // the only allowed knob is kswGi.staticFaceInterval, never excluding the city.
+  const cityRoot = new THREE.Group();
+  cityRoot.name = 'cityRoot';
+  cityRoot.add(cityPlate);
+  cityRoot.add(buildCityMassing(cityBuildings));
+  cityRoot.add(buildRoads(cityRoads, cityRails));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
-  scene.add(buildNature(cityNature, { excludeRect: { x: 0, z: 0, w: kswPlan.plate.w, d: kswPlan.plate.d } }));
+  // Tree canopies default to no cast-shadow (nature.ts) — cheap far-field
+  // trees don't need to punch holes in the sun's shadow map; the LOD ring
+  // (Task 10) re-enables it for the near ring around the camera.
+  cityRoot.add(buildNature(cityNature, { excludeRect: { x: 0, z: 0, w: kswPlan.plate.w, d: kswPlan.plate.d } }));
+  scene.add(cityRoot);
 
   // collect animated bits: ambulance light pulses, helicopter rotor idles.
   // Tag contract shared with staticBatch.isAnimated via ANIMATED_TAGS.

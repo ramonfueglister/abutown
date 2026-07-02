@@ -75,6 +75,11 @@ export type NatureOptions = {
   // trees inside this rect (center cx/cz, size w/d) are skipped — the hero
   // plate has its own authored trees
   excludeRect?: { x: number; z: number; w: number; d: number };
+  // canopies cast shadows onto the sun's shadow map. Default false — with
+  // ~4k instanced trees this was a major frame-time cost for a barely
+  // visible effect at city scale. The near-camera LOD ring (Task 10) turns
+  // it back on where it actually reads.
+  treeShadows?: boolean;
 };
 
 export function buildNature(nature: CityNature, opts: NatureOptions = {}): THREE.Group {
@@ -132,7 +137,7 @@ export function buildNature(nature: CityNature, opts: NatureOptions = {}): THREE
     m.compose(new THREE.Vector3(x, trunkH / 2, z), q, new THREE.Vector3(1, trunkH, 1));
     trunks.setMatrixAt(i, m);
   }
-  canopy.castShadow = true;
+  canopy.castShadow = opts.treeShadows ?? false;
   canopy.receiveShadow = true;
   trunks.castShadow = false;
   trunks.receiveShadow = true;
