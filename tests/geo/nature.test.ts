@@ -38,8 +38,16 @@ describe('transformNature', () => {
   });
 
   it('projects tree points to local meters', () => {
-    expect(out.trees.length).toBe(1);
-    expect(out.trees[0][0]).toBeCloseTo(25, 0);
-    expect(out.trees[0][1]).toBeCloseTo(20, 0);
+    const mapped = out.trees.filter((t: { x: number }) => t.x < 90); // exclude the wood's forest fill
+    expect(mapped.length).toBe(1);
+    expect(mapped[0].x).toBeCloseTo(25, 0);
+    expect(mapped[0].z).toBeCloseTo(20, 0);
+    expect(mapped[0].kind).toBe('broad');
+  });
+
+  it('fills the wood polygon with declared forest trees', () => {
+    const filled = out.trees.filter((t: { x: number }) => t.x >= 90);
+    expect(filled.length).toBeGreaterThan(20); // 4800 m² @ 1/60 ≈ 80
+    for (const t of filled) expect(t.kind).toBe('broad');
   });
 });

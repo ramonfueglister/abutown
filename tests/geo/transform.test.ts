@@ -56,4 +56,14 @@ describe('transformRoads', () => {
     expect(roads[0].width).toBe(5.5);
     expect(roads[0].pts[1][0]).toBeCloseTo(100, 0);
   });
+
+  it('prefers an explicit width tag over the class fallback', () => {
+    const osmRoads = {
+      elements: [{ type: 'way', tags: { highway: 'residential', width: '7.5' }, geometry: [
+        { lon: lonAt(0), lat: latAt(0) }, { lon: lonAt(100), lat: latAt(0) },
+      ] }],
+    };
+    const { roads } = transformRoads({ osmRoads, projector: makeProjector(ANCHOR) });
+    expect(roads[0].width).toBe(7.5);
+  });
 });

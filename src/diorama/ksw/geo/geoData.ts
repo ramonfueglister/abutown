@@ -9,6 +9,7 @@ import natureJson from '../../../../data/winterthur/nature.json';
 import roadsJson from '../../../../data/winterthur/roads.json';
 
 export type BakedMesh = { pos: number[]; idx: number[] };
+export type BakedDoor = { x: number; z: number; yaw: number };
 export type BakedBuilding = {
   id: string;
   name?: string;
@@ -18,6 +19,7 @@ export type BakedBuilding = {
   height: number;
   wall: BakedMesh;
   roof: BakedMesh;
+  door?: BakedDoor;
 };
 export type RoadPath = { class: string; width: number; pts: number[][] };
 export type CityMeta = {
@@ -30,7 +32,8 @@ export type CityMeta = {
 export type GreenArea = { kind: string; ring: number[][] };
 export type WaterArea = { ring: number[][] };
 export type RiverPath = { width: number; pts: number[][] };
-export type CityNature = { greens: GreenArea[]; waterAreas: WaterArea[]; rivers: RiverPath[]; trees: number[][] };
+export type TreeSpec = { x: number; z: number; h: number; r: number; kind: 'broad' | 'conifer' };
+export type CityNature = { greens: GreenArea[]; waterAreas: WaterArea[]; rivers: RiverPath[]; trees: TreeSpec[] };
 
 const all = (buildingsJson as { buildings: BakedBuilding[] }).buildings;
 

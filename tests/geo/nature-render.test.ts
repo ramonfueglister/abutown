@@ -11,7 +11,11 @@ const nature: CityNature = {
   ],
   waterAreas: [{ ring: [[-50, 0], [-20, 0], [-20, 20], [-50, 20]] }],
   rivers: [{ width: 6, pts: [[200, 0], [260, 0]] }],
-  trees: [[10, 10], [20, 15], [500, 500]],
+  trees: [
+    { x: 10, z: 10, h: 9, r: 3, kind: 'broad' },
+    { x: 20, z: 15, h: 9, r: 3, kind: 'broad' },
+    { x: 500, z: 500, h: 9, r: 3, kind: 'broad' },
+  ],
 };
 
 describe('buildNature', () => {

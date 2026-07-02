@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { ANCHOR, BBOX, makeProjector } from './lib/project.mjs';
 import { transformBuildings, transformNature, transformRoads } from './lib/transform.mjs';
+import { doorForBuilding } from './lib/style.mjs';
 
 const SCRATCH = 'scratch/geo';
 const GDB = `${SCRATCH}/swissBUILDINGS3D_3-0_1072-14.gdb`;
@@ -92,6 +93,39 @@ if (buildingsOut.length < 500) throw new Error(`bake: only ${buildingsOut.length
 const named = buildingsOut.filter((b) => b.name);
 const ksw = buildingsOut.filter((b) => b.zone === 'ksw');
 if (ksw.length === 0) throw new Error('bake: no buildings in the ksw zone');
+
+// doors: bucket every road point into a 50 m grid once, then per building
+// query the 9 neighbor cells for nearby road points — O(n) instead of O(n²).
+const DOOR_CELL = 50;
+const cellKey = (x, z) => `${Math.floor(x / DOOR_CELL)},${Math.floor(z / DOOR_CELL)}`;
+const roadGrid = new Map();
+for (const r of roads) {
+  for (const [x, z] of r.pts) {
+    const k = cellKey(x, z);
+    (roadGrid.get(k) ?? roadGrid.set(k, []).get(k)).push([x, z]);
+  }
+}
+let withDoor = 0;
+for (const b of buildingsOut) {
+  const [cx, cz] = b.footprint.reduce(([sx, sz], [x, z]) => [sx + x, sz + z], [0, 0]).map((s) => s / b.footprint.length);
+  const gx = Math.floor(cx / DOOR_CELL);
+  const gz = Math.floor(cz / DOOR_CELL);
+  const nearby = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const pts = roadGrid.get(`${gx + dx},${gz + dz}`);
+      if (pts) nearby.push(...pts);
+    }
+  }
+  const door = doorForBuilding(b.footprint, nearby);
+  if (door) {
+    b.door = door;
+    withDoor += 1;
+  }
+}
+const doorRate = withDoor / buildingsOut.length;
+console.log(`doors: ${withDoor}/${buildingsOut.length} buildings (${(doorRate * 100).toFixed(1)}%)`);
+if (doorRate < 0.8) throw new Error(`bake: only ${(doorRate * 100).toFixed(1)}% of buildings got a door — door join broken?`);
 
 const triangles = buildingsOut.reduce((n, b) => n + (b.wall.idx.length + b.roof.idx.length) / 3, 0);
 

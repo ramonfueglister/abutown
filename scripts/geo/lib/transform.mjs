@@ -7,7 +7,9 @@
 // triangulatable geometry — a bake must never silently drop shape.
 import { triangulatePlanarPolygon } from './triangulate.mjs';
 import { nameForFootprint, ringCentroid, roadStyle } from './join.mjs';
-import { footprintValid, roofOutlineFootprint, roofSkirts, roofUnderside } from './style.mjs';
+import {
+  footprintValid, forestFill, roadWidthFromTags, roofOutlineFootprint, roofSkirts, roofUnderside, treeSpec,
+} from './style.mjs';
 
 export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anchor
 
@@ -306,7 +308,10 @@ export function transformNature({ osmNature, projector }) {
   for (const el of osmNature.elements ?? []) {
     const t = el.tags ?? {};
     if (el.type === 'node') {
-      if (t.natural === 'tree') trees.push(toLocal(el));
+      if (t.natural === 'tree') {
+        const [x, z] = toLocal(el);
+        trees.push(treeSpec(t, x, z));
+      }
       continue;
     }
     if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
@@ -324,6 +329,11 @@ export function transformNature({ osmNature, projector }) {
     const kind = t.leisure || t.landuse || t.natural;
     if (kind && GREEN_KINDS.has(kind)) greens.push({ kind, ring });
   }
+  // declared forest fill: every wood/forest green gets a hash-gridded scatter
+  // of additional trees, clear of any tree OSM already mapped individually
+  for (const g of greens) {
+    if (g.kind === 'wood' || g.kind === 'forest') trees.push(...forestFill(g.ring, trees));
+  }
   return { greens, waterAreas, rivers, trees };
 }
 
@@ -338,7 +348,8 @@ export function transformRoads({ osmRoads, projector }) {
       const [x, z] = projector.toLocal(lon, lat);
       return [Math.round(x * 100) / 100, Math.round(z * 100) / 100];
     });
-    (style.class === 'rail' ? rails : roads).push({ class: style.class, width: style.width, pts });
+    const width = roadWidthFromTags(el.tags ?? {}, style.width);
+    (style.class === 'rail' ? rails : roads).push({ class: style.class, width, pts });
   }
   return { roads, rails };
 }

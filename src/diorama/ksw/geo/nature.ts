@@ -114,7 +114,9 @@ export function buildNature(nature: CityNature, opts: NatureOptions = {}): THREE
 
   // trees: chunky clay lollipops, instanced. Canopy = icosphere, trunk = cylinder.
   const ex = opts.excludeRect;
-  const spots = nature.trees.filter(([x, z]) => !ex || Math.abs(x - ex.x) > ex.w / 2 || Math.abs(z - ex.z) > ex.d / 2);
+  const spots = nature.trees.filter(
+    ({ x, z }) => !ex || Math.abs(x - ex.x) > ex.w / 2 || Math.abs(z - ex.z) > ex.d / 2,
+  );
   const canopyGeo = new THREE.IcosahedronGeometry(1, 1);
   const trunkGeo = new THREE.CylinderGeometry(0.14, 0.2, 1, 6);
   const canopy = new THREE.InstancedMesh(canopyGeo, clayMat(kswCity.treeGreen).clone(), spots.length);
@@ -126,7 +128,7 @@ export function buildNature(nature: CityNature, opts: NatureOptions = {}): THREE
   const baseGreen = new THREE.Color(kswCity.treeGreen);
   const tint = new THREE.Color();
   for (let i = 0; i < spots.length; i++) {
-    const [x, z] = spots[i];
+    const { x, z } = spots[i];
     const h = hash01(x * 3.1 + z * 7.7);
     const trunkH = 1.0 + h * 0.9;
     const r = 1.1 + h * 1.1; // canopy radius 1.1..2.2 m

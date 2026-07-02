@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { footprintValid, roofOutlineFootprint } from '../../scripts/geo/lib/style.mjs';
 import { roofSkirts, roofUnderside } from '../../scripts/geo/lib/style.mjs';
+import { doorForBuilding, forestFill, roadWidthFromTags, treeSpec } from '../../scripts/geo/lib/style.mjs';
 
 const roof = [
   [[0, 10, 0], [20, 10, 0], [20, 12, 15], [0, 12, 15]], // one 20x15 sloped plane
@@ -110,5 +111,57 @@ describe('roofUnderside', () => {
     expect(under.length).toBe(1);
     expect(under[0][0][1]).toBeCloseTo(4.78, 5);
     expect(under[0][0][0]).toBe(planes[0][planes[0].length - 1][0]); // reversed order
+  });
+});
+
+describe('treeSpec', () => {
+  it('real tags win, untouched by variance', () => {
+    const t = treeSpec({ height: '17', diameter_crown: '8' }, 1, 2);
+    expect(t.h).toBe(17);
+    expect(t.r).toBe(4);
+  });
+  it('leaf_type default with deterministic ±15% variance', () => {
+    const a = treeSpec({ leaf_type: 'needleleaved' }, 5, 5);
+    const b = treeSpec({ leaf_type: 'needleleaved' }, 5, 5);
+    expect(a).toEqual(b);
+    expect(a.kind).toBe('conifer');
+    expect(a.h).toBeGreaterThan(14 * 0.84);
+    expect(a.h).toBeLessThan(14 * 1.16);
+  });
+});
+
+describe('forestFill', () => {
+  const ring = [[0, 0], [120, 0], [120, 60], [0, 60]]; // 7200 m² → ~120 trees
+  it('fills the polygon at ~1/60 m² density, deterministic', () => {
+    const a = forestFill(ring, []);
+    expect(a.length).toBeGreaterThan(70);
+    expect(a.length).toBeLessThan(170);
+    expect(a).toEqual(forestFill(ring, []));
+    for (const t of a) {
+      expect(t.x).toBeGreaterThanOrEqual(0);
+      expect(t.x).toBeLessThanOrEqual(120);
+    }
+  });
+  it('respects mapped trees (4 m clearance)', () => {
+    const a = forestFill(ring, [{ x: 60, z: 30 }]);
+    for (const t of a) expect(Math.hypot(t.x - 60, t.z - 30)).toBeGreaterThan(4);
+  });
+});
+
+describe('roadWidthFromTags', () => {
+  it('width tag > lanes > fallback', () => {
+    expect(roadWidthFromTags({ width: '7.5' }, 5.5)).toBe(7.5);
+    expect(roadWidthFromTags({ lanes: '3' }, 5.5)).toBeCloseTo(9.6);
+    expect(roadWidthFromTags({}, 5.5)).toBe(5.5);
+  });
+});
+
+describe('doorForBuilding', () => {
+  it('places the door on the road-facing facade', () => {
+    const fp = [[0, 0], [10, 0], [10, 10], [0, 10]];
+    const road = [[5, -6], [5, -20]]; // south of the building (−z side)
+    const d = doorForBuilding(fp, road)!;
+    expect(d.z).toBeCloseTo(0); // south edge
+    expect(d.x).toBeCloseTo(5);
   });
 });
