@@ -386,17 +386,9 @@ impl Core {
         // Re-find leader and follower on the target lane from live state.
         let nb = lane_neighbourhood(&self.fleet, &self.index, target, s, v, VehId::MAX);
 
-        // Hard geometric no-overlap: the decider must physically fit. Leader
-        // gap uses the decider length; follower gap uses the follower length.
-        if nb.lead_gap < 0.0 {
-            return false;
-        }
         if let Some(f) = nb.follower {
-            // gap_to_decider is (s - s_follower - len_follower); must be >= 0.
-            if f.gap_to_decider < 0.0 {
-                return false;
-            }
-            // Safety: new follower's IDM accel must stay above -b_safe.
+            // Gaps are zero-clamped by lane_neighbourhood; a would-be overlap yields
+            // gap 0 → IDM projects braking beyond b_safe → rejected by safety check below.
             let a = crate::idm::idm_accel(&self.params, f.v, f.dv_to_decider, f.gap_to_decider);
             if a <= -self.mobil.b_safe {
                 return false;
