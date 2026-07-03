@@ -131,12 +131,12 @@ describe('transformBuildings — multi-part UUID (real LoD2 wall facets)', () =>
 describe('transformBuildings — roof part with NO wall facets at all (Task 12 completion fix)', () => {
   // Real swisstopo gap: some roof PARTS have zero corresponding wall facets in
   // the source (not "far away walls", but genuinely none). The old code left
-  // those roofs floating with nothing under them. The fix: group roof rings
-  // into connected components (rings sharing a vertex), and for any component
-  // whose facet centroids have no nearby rendered wall-base point, build a
-  // ground→eave prism from the convex hull of that component's own vertices —
-  // geodetically honest because it derives strictly from that part's real
-  // roof geometry, not from an unrelated part's footprint.
+  // those roofs floating with nothing under them. The fix: for any facet whose
+  // centroid has no nearby rendered wall-base point, build a ground→eave prism
+  // from that facet's OWN outline — geodetically honest because it derives
+  // strictly from that facet's real roof geometry, not from an unrelated
+  // part's footprint (and, since the floor-plan-lines fix, never from a convex
+  // hull that could cut across a lower neighbouring roof).
   const part2RoofRing = ringLL(100, 108, 100, 108, 405);
   const floors3 = fc(feat('b3', ringLL(0, 10, 0, 10, 400))); // part 1 base only
   const roofs3 = fc(
@@ -155,13 +155,13 @@ describe('transformBuildings — roof part with NO wall facets at all (Task 12 c
 
   const out3 = transformBuildings({ floors: floors3, walls: walls3, roofs: roofs3, osmBuildings: [], projector: makeProjector(ANCHOR) });
 
-  it('closes the wall-less roof part with a per-part hull prism (coverage >= 0.9 on the fixture)', () => {
+  it('closes the wall-less roof part with a per-facet outline prism (coverage >= 0.9 on the fixture)', () => {
     expect(out3.length).toBe(1);
     const b = out3[0];
     const wallBaseXZ = wallBasePointsMeters(b.wall.pos);
 
     // Reuse the same coverage definition as the bake gate: facet centroid has
-    // a wall-base point within 6 m. The hull-prism closure extrudes exactly
+    // a wall-base point within 6 m. The outline-prism closure extrudes exactly
     // the part-2 roof ring's own footprint, so its wall base sits directly
     // under the roof — well within 6 m of the roof ring's own centroid,
     // regardless of the box's corner-to-center diagonal.
@@ -173,6 +173,104 @@ describe('transformBuildings — roof part with NO wall facets at all (Task 12 c
     cx /= n; cz /= n;
     const covered = wallBaseXZ.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
     expect(covered).toBe(true);
+  });
+});
+
+describe('transformBuildings — closure prisms must not poke above lower roofs', () => {
+  // The root cause of the "floor-plan lines above buildings" artifact: closure
+  // prisms were extruded from the CONVEX HULL of a roof component/facet. For a
+  // CONCAVE part (L-shape), the hull edge cuts across the notch — where a
+  // LOWER roof part sits — and the ground→eave prism wall pokes metres above
+  // that lower roof as a free-floating straight line. The closure must follow
+  // the part's actual outline instead.
+  const wallBox = (uuid: string, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number) => {
+    const edge = (ax: number, az: number, bx: number, bz: number) => feat(uuid, [
+      [lonAt(ax), latAt(-az), y0], [lonAt(bx), latAt(-bz), y0],
+      [lonAt(bx), latAt(-bz), y1], [lonAt(ax), latAt(-az), y1], [lonAt(ax), latAt(-az), y0],
+    ]);
+    return [edge(x0, z0, x1, z0), edge(x1, z0, x1, z1), edge(x1, z1, x0, z1), edge(x0, z1, x0, z0)];
+  };
+  // High wall-less component (eave 410 = 10 m): an L — two rectangles sharing
+  // the edge z=10 on x=0..10, so roofComponents unions them into ONE concave
+  // part whose convex hull spans the notch x>10, z>10.
+  const floors4 = fc(feat('b4', ringLL(0, 30, 0, 10, 400)));
+  const roofs4 = fc(
+    feat('b4', ringLL(0, 30, 0, 10, 410)), // L: north strip
+    feat('b4', ringLL(0, 10, 10, 30, 410)), // L: west strip (shares edge)
+    feat('b4', ringLL(12, 28, 12, 28, 403)), // LOW flat roof inside the notch (3 m)
+  );
+  // only the low notch building has real walls; the L component has none →
+  // it gets closure prisms
+  const walls4 = fc(...wallBox('b4', 12, 28, 12, 28, 400, 403));
+  const out4 = transformBuildings({ floors: floors4, walls: walls4, roofs: roofs4, osmBuildings: [], projector: makeProjector(ANCHOR) });
+
+  // highest roof y (m) whose XZ-projected triangle contains the probe point
+  function roofYAt(b: { roof: { pos: number[]; idx: number[] } }, px: number, pz: number): number | null {
+    const { pos, idx } = b.roof;
+    let best: number | null = null;
+    for (let t = 0; t < idx.length; t += 3) {
+      const [a, c, e] = [idx[t] * 3, idx[t + 1] * 3, idx[t + 2] * 3];
+      const [ax, az, bx, bz, cx, cz] = [pos[a] / 100, pos[a + 2] / 100, pos[c] / 100, pos[c + 2] / 100, pos[e] / 100, pos[e + 2] / 100];
+      const d0 = (bz - az) * (px - ax) - (bx - ax) * (pz - az);
+      const d1 = (cz - bz) * (px - bx) - (cx - bx) * (pz - bz);
+      const d2 = (az - cz) * (px - cx) - (ax - cx) * (pz - cz);
+      if (((d0 < 0) || (d1 < 0) || (d2 < 0)) && ((d0 > 0) || (d1 > 0) || (d2 > 0))) continue;
+      const y = Math.max(pos[a + 1], pos[c + 1], pos[e + 1]) / 100;
+      best = best === null ? y : Math.max(best, y);
+    }
+    return best;
+  }
+  // highest wall y (m) among wall triangles passing within `r` m of the probe
+  function wallTopNear(b: { wall: { pos: number[]; idx: number[] } }, px: number, pz: number, r: number): number {
+    const { pos, idx } = b.wall;
+    let top = -Infinity;
+    for (let t = 0; t < idx.length; t += 3) {
+      const v = [idx[t] * 3, idx[t + 1] * 3, idx[t + 2] * 3].map((a) => [pos[a] / 100, pos[a + 1] / 100, pos[a + 2] / 100]);
+      let dmin = Infinity;
+      for (let e = 0; e < 3; e++) {
+        const [x1, , z1] = v[e];
+        const [x2, , z2] = v[(e + 1) % 3];
+        const dx = x2 - x1;
+        const dz = z2 - z1;
+        const L2 = dx * dx + dz * dz || 1e-9;
+        const s = Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / L2));
+        dmin = Math.min(dmin, Math.hypot(px - (x1 + s * dx), pz - (z1 + s * dz)));
+      }
+      if (dmin < r) top = Math.max(top, Math.max(v[0][1], v[1][1], v[2][1]));
+    }
+    return top;
+  }
+
+  it('no closure wall rises above the lower roof inside the concave notch', () => {
+    expect(out4.length).toBe(1);
+    const b = out4[0];
+    // probe = centroid of the low (3 m) roof, derived from the baked mesh so
+    // the fixture's lon/lat→local sign convention cannot skew it
+    let cx = 0, cz = 0, n = 0;
+    for (let i = 0; i < b.roof.pos.length; i += 3) {
+      if (b.roof.pos[i + 1] === 300) { cx += b.roof.pos[i] / 100; cz += b.roof.pos[i + 2] / 100; n += 1; }
+    }
+    expect(n).toBeGreaterThan(0);
+    cx /= n; cz /= n;
+    const roofY = roofYAt(b, cx, cz);
+    expect(roofY).toBeCloseTo(3, 1);
+    // interior probes of the low roof: its own walls sit ≥1.5 m away, so any
+    // wall geometry within 1 m must be a hull edge cutting across the notch
+    for (const [px, pz] of [[cx, cz], [cx + 3, cz - 3], [cx - 3, cz + 3]]) {
+      const top = wallTopNear(b, px, pz, 1);
+      expect(top).toBeLessThanOrEqual((roofY ?? 3) + 0.3);
+    }
+  });
+
+  it('closure walls still stand under the wall-less L component itself', () => {
+    // the fix must not stop closing the L: probe just inside each L rectangle
+    // — a ground→10 m closure wall must pass within 1.5 m of the rim probes
+    const b = out4[0];
+    const proj = makeProjector(ANCHOR);
+    for (const rim of [[15, 0.5], [0.5, 20]] as const) {
+      const [lx, lz] = proj.toLocal(lonAt(rim[0]), latAt(-rim[1]));
+      expect(wallTopNear(b, lx, lz, 1.5)).toBeGreaterThanOrEqual(9.9);
+    }
   });
 });
 

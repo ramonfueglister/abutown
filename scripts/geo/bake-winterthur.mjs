@@ -69,8 +69,8 @@ if (footprintStats.wallFallback > 0)
   console.log(`wall facets: ${footprintStats.wallFallback} buildings had 0 wall facets — fell back to footprint prism`);
 if (footprintStats.partHulls > 0)
   console.log(
-    `per-part hulls: ${footprintStats.partHulls} roof parts had no rendered wall nearby — closed with a ` +
-    `ground→eave hull prism from that part's own roof geometry`,
+    `per-facet closures: ${footprintStats.partHulls} roof facets had no rendered wall nearby — closed with a ` +
+    `ground→eave prism from that facet's own outline`,
   );
 
 // Coverage gate (data proof for the floating-roof root-fix, computed inside
