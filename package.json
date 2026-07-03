@@ -16,6 +16,7 @@
     "@bufbuild/protobuf": "^2.2.0",
     "@supabase/supabase-js": "^2.105.4",
     "@vitejs/plugin-basic-ssl": "^2.1.0",
+    "suncalc": "^2.0.0",
     "three": "^0.185.1",
     "vite": "^8.0.12"
   },
@@ -23,6 +24,7 @@
     "@bufbuild/buf": "^1.45.0",
     "@bufbuild/protoc-gen-es": "^2.12.0",
     "@types/node": "^25.7.0",
+    "@types/suncalc": "^1.9.2",
     "@types/three": "^0.185.0",
     "playwright": "^1.60.0",
     "tsx": "^4.22.0",

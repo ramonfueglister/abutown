@@ -2,7 +2,7 @@
 // Everything procedural, all values from designTokens.
 
 import * as THREE from 'three/webgpu';
-import { Break, Fn, If, Loop, cameraPosition, dot, exp, float, int, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Break, Fn, If, Loop, cameraPosition, dot, exp, float, int, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalLocal, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -13,14 +13,27 @@ import { sss } from 'three/addons/tsl/display/SSSNode.js';
 import { boxBlur } from 'three/addons/tsl/display/boxBlur.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { palette, radii, clay, lightPresets, cameraContract, post, nightGlow, gi, grade, skyPhys, sunArcCfg, cloudVol, moonLight } from './designTokens';
+import { palette, radii, clay, cameraContract, post, nightGlow, gi, grade, cloudVol, moonLight, moonDisc as moonDiscTokens } from './designTokens';
+import { computeEnvironment, type EnvironmentState } from './environment/environment';
+import { applyEnvironment, type EnvironmentTargets } from './environment/applyEnvironment';
+import { createPrecipitation } from './environment/precipitation';
+import { CLEAR_SKY, sampleWeather, startWeatherLoop, type WeatherSeries, type WeatherState } from './environment/weather';
 
 declare global {
   interface Window {
     __LOOK_READY?: boolean;
     __LOOK_BACKEND?: string;
+    __ENV_STATE?: unknown;
   }
 }
+
+const WX_OVERRIDES: Record<string, WeatherState> = {
+  clear: CLEAR_SKY,
+  overcast: { ...CLEAR_SKY, cloudCover: 0.97, windSpeedMs: 3 },
+  rain: { ...CLEAR_SKY, cloudCover: 0.9, precipMmPerH: 4, windSpeedMs: 5, temperatureC: 10 },
+  snow: { ...CLEAR_SKY, cloudCover: 0.9, precipMmPerH: 3, snow: true, temperatureC: -2 },
+  fog: { ...CLEAR_SKY, cloudCover: 0.6, visibilityM: 150, fog: true, windSpeedMs: 0.5 },
+};
 
 const materialCache = new Map<number, THREE.MeshPhysicalMaterial>();
 function clayMat(color: number): THREE.MeshPhysicalMaterial {
@@ -276,12 +289,15 @@ function sideTable(): THREE.Group {
 
 async function boot(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
-  const rawPreset = params.get('preset');
-  const presetName = rawPreset === 'night' || rawPreset === 'dusk' ? rawPreset : 'morning';
+  const atParam = params.get('at');
+  const frozenAt = atParam ? new Date(atParam) : null;
+  if (frozenAt && Number.isNaN(frozenAt.getTime())) throw new Error(`invalid ?at=${atParam}`);
+  const wxParam = params.get('wx'); // 'clear'|'overcast'|'rain'|'snow'|'fog'|null
   const camModeRaw = params.get('cam');
   const camMode = camModeRaw === 'far' || camModeRaw === 'sky' ? camModeRaw : 'default';
-  const cycleMode = params.get('cycle') === '1';
-  const preset = lightPresets[presetName];
+  const now = (): Date => frozenAt ?? new Date();
+  const initialWeather = (): WeatherState => WX_OVERRIDES[wxParam ?? ''] ?? CLEAR_SKY;
+  const initialEnv = computeEnvironment(now(), initialWeather());
 
   // No MSAA: TRAA is the anti-aliasing (multisampled depth also breaks TRAA history).
   const renderer = new THREE.WebGPURenderer({ antialias: false });
@@ -290,39 +306,25 @@ async function boot(): Promise<void> {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.toneMapping = THREE.AgXToneMapping;
-  renderer.toneMappingExposure = preset.exposure;
+  renderer.toneMappingExposure = initialEnv.exposure;
   document.body.appendChild(renderer.domElement);
   window.__LOOK_BACKEND = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
     ? 'webgpu'
     : 'webgl2';
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(preset.fogColor, preset.fogNear, preset.fogFar);
+  const fog = new THREE.Fog(initialEnv.fogColor, initialEnv.fogNear, initialEnv.fogFar);
+  scene.fog = fog;
 
-  // Sun day-arc: t in [0..1] rise->set; night preset parks the sun below horizon
-  const sunDirFor = (t: number): THREE.Vector3 => {
-    const elev = sunArcCfg.elevBase + sunArcCfg.elevMax * Math.sin(Math.PI * Math.min(Math.max(t, 0), 1));
-    const az = sunArcCfg.azRise + (sunArcCfg.azSet - sunArcCfg.azRise) * t;
-    return new THREE.Vector3(Math.cos(elev) * Math.cos(az), Math.sin(elev), Math.cos(elev) * Math.sin(az));
-  };
-  const sunLightFor = (dir: THREE.Vector3, boost: number): { color: THREE.Color; intensity: number } => {
-    const elevN = Math.min(Math.max(dir.y / 0.8, 0), 1);
-    const eased = elevN * elevN * (3 - 2 * elevN);
-    return {
-      color: new THREE.Color(sunArcCfg.colorLow).lerp(new THREE.Color(sunArcCfg.colorHigh), eased),
-      intensity: (0.8 + 6.2 * eased) * boost,
-    };
-  };
-  const phys = skyPhys[presetName];
-  const initialSunDir = sunDirFor(phys.timeOfDay);
+  const initialSunDir = new THREE.Vector3(initialEnv.sunDir[0], initialEnv.sunDir[1], initialEnv.sunDir[2]);
 
   // Physical sky (Rayleigh/Mie scattering) — real sunrise/sunset colors
   const skyMesh = new SkyMesh();
   skyMesh.scale.setScalar(400);
-  skyMesh.turbidity.value = phys.turbidity;
-  skyMesh.rayleigh.value = phys.rayleigh;
-  skyMesh.mieCoefficient.value = phys.mieCoefficient;
-  skyMesh.mieDirectionalG.value = phys.mieG;
+  skyMesh.turbidity.value = initialEnv.turbidity;
+  skyMesh.rayleigh.value = initialEnv.rayleigh;
+  skyMesh.mieCoefficient.value = initialEnv.mieCoefficient;
+  skyMesh.mieDirectionalG.value = initialEnv.mieG;
   skyMesh.sunPosition.value.copy(initialSunDir);
   // Scene fog (far 46-48) would otherwise flat-tint the whole sky shell (r=400).
   (skyMesh.material as THREE.Material & { fog: boolean }).fog = false;
@@ -334,7 +336,8 @@ async function boot(): Promise<void> {
   const cloudLightDir = uniform(initialSunDir.clone());
   const cloudLit = uniform(new THREE.Color(0xffffff));
   const cloudShadow = uniform(new THREE.Color(0x9aa8b5));
-  const driftU = uniform(0);
+  const driftUV = uniform(new THREE.Vector2(0, 0));
+  const coverageU = uniform(0.44);
   const cloudMatVol = new THREE.MeshBasicNodeMaterial();
   cloudMatVol.transparent = true;
   cloudMatVol.side = THREE.BackSide;
@@ -347,15 +350,14 @@ async function boot(): Promise<void> {
     const slabH = cloudVol.top - cloudVol.base;
     const densityAt = (p: N): N => {
       const q = vec3(
-        p.x.mul(float(cloudVol.scale)).add(driftU),
+        p.x.mul(float(cloudVol.scale)).add(driftUV.x),
         p.y.mul(float(cloudVol.scale * 1.35)),
-        p.z.mul(float(cloudVol.scale)).sub(driftU.mul(0.6)),
+        p.z.mul(float(cloudVol.scale)).add(driftUV.y),
       );
       const n = fnode(mx_fractal_noise_float(q, 4, 2.0, 0.55, 1.0)).mul(0.5).add(0.5);
       const hN = p.y.sub(float(cloudVol.base)).mul(1 / slabH).clamp(0, 1);
       const profile = smoothstep(float(0.0), float(0.16), hN).mul(smoothstep(float(1.0), float(0.5), hN));
-      const coverage = float(cloudVol.coverage[presetName]);
-      return n.mul(profile).sub(float(1).sub(coverage)).max(0).mul(float(cloudVol.density));
+      return n.mul(profile).sub(float(1).sub(coverageU)).max(0).mul(float(cloudVol.density));
     };
     type Vec3Node = ReturnType<typeof vec3>;
     const shadowN = cloudShadow as unknown as Vec3Node;
@@ -406,63 +408,83 @@ async function boot(): Promise<void> {
   const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(46, 32, 24), cloudMatVol);
   scene.add(cloudDome);
 
-  // Discs sit beyond the cloud sphere (r=46) so clouds occlude them.
+  // Only the sun disc sits beyond the cloud sphere (r=46) so clouds occlude it
+  // by day. The moon (and stars) sit inside at r=17; their cloud occlusion is
+  // emulated via starVisibility opacity/visibility damping, not geometry.
   const sunDisc = new THREE.Mesh(
     new THREE.SphereGeometry(2.4, 20, 20),
     new THREE.MeshBasicMaterial({ color: 0xfff0d5, fog: false }),
   );
   scene.add(sunDisc);
-  const moonDir = new THREE.Vector3(-14, 21, 26).normalize();
-  const moonDisc = new THREE.Mesh(
-    new THREE.SphereGeometry(1.6, 20, 20),
-    new THREE.MeshBasicMaterial({ color: palette.star, fog: false }),
-  );
-  moonDisc.position.copy(moonDir).multiplyScalar(60);
-  moonDisc.visible = presetName === 'night';
+  const moonPhaseDirU = uniform(new THREE.Vector3(0, 0, -1));
+  const moonMat = new THREE.MeshBasicNodeMaterial({ fog: false });
+  {
+    // TSL uniform nodes expose a runtime `.value`; @types/three r185 doesn't
+    // model that on the node union, so the uniform is cast at this boundary only.
+    // moonPhaseLightDir is documented as DISC-LOCAL (disc faces viewer, -z toward
+    // viewer); the moon disc mesh carries no rotation of its own, so its local
+    // space matches that convention — dot against normalLocal, not normalView.
+    // Light travels along moonPhaseDirU onto the sphere, so the lit hemisphere is
+    // where the outward normal points against that direction, i.e. negate() first.
+    const litSide = dot(normalLocal.negate(), moonPhaseDirU as unknown as ReturnType<typeof vec3>);
+    const lit = smoothstep(float(-0.15), float(0.15), litSide);
+    const moonDarkU = uniform(new THREE.Color(moonDiscTokens.dark));
+    const moonLitU = uniform(new THREE.Color(moonDiscTokens.lit));
+    moonMat.colorNode = mix(moonDarkU as unknown as ReturnType<typeof vec3>, moonLitU as unknown as ReturnType<typeof vec3>, lit);
+  }
+  // radius 0.46 at dome-distance 17 ≈ the old 1.6 at distance 60 (same apparent size)
+  const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(0.46, 20, 20), moonMat);
+  moonDisc.visible = false;
   scene.add(moonDisc);
 
-  const applySunState = (t: number): void => {
-    const dir = sunDirFor(t);
-    skyMesh.sunPosition.value.copy(dir);
-    if (presetName !== 'night') {
-      (cloudLightDir.value as THREE.Vector3).copy(dir);
-      const lightState = sunLightFor(dir, phys.sunBoost);
-      sun.position.copy(dir.clone().multiplyScalar(12));
-      sun.color.copy(lightState.color);
-      sun.intensity = Math.max(lightState.intensity, 0.05);
-      (cloudLit.value as THREE.Color).copy(lightState.color).lerp(new THREE.Color(0xffffff), 0.3);
-      (cloudShadow.value as THREE.Color).copy(new THREE.Color(0x6e8092).lerp(lightState.color, 0.15));
-    } else {
-      (cloudLightDir.value as THREE.Vector3).copy(moonDir);
-      (cloudLit.value as THREE.Color).set(0x9fb2cc);
-      (cloudShadow.value as THREE.Color).set(0x39485c);
-    }
-    sunDisc.position.copy(dir.clone().multiplyScalar(60));
-    sunDisc.visible = presetName !== 'night' && dir.y > 0.015;
-    moonDisc.visible = presetName === 'night' || dir.y <= 0.015;
+  // Stars — always built; visibility/opacity/rotation driven by applyEnvironment.
+  const starPositions: number[] = [];
+  let starSeed = 42;
+  const starRand = () => {
+    starSeed = (starSeed * 1103515245 + 12345) % 2147483648;
+    return starSeed / 2147483648;
   };
-
-  if (preset.showStars) {
-    const starPositions: number[] = [];
-    let seed = 42;
-    const rand = () => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed / 2147483648;
-    };
-    for (let i = 0; i < 160; i++) {
-      const az = rand() * Math.PI * 2;
-      const el = 0.15 + rand() * 1.25;
-      const r = 60;
-      starPositions.push(r * Math.cos(el) * Math.cos(az), r * Math.sin(el), r * Math.cos(el) * Math.sin(az));
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
-    const stars = new THREE.Points(
-      starGeo,
-      new THREE.PointsMaterial({ color: palette.star, size: 0.34, sizeAttenuation: true, transparent: true, opacity: 0.85, fog: false }),
-    );
-    scene.add(stars);
+  // Uniform full-sphere distribution: the field is rotated around the celestial
+  // pole by applyEnvironment (sidereal), so any rotation must keep the visible
+  // cone populated. Sample sin(el) uniformly in [-1,1] for equal-area coverage;
+  // stars below the horizon are simply hidden by the ground plate (honest).
+  // Radius sits ON the DoF focal plane (focusDistance 16.5) so the tilt-shift bokeh
+  // keeps the stars crisp, while still comfortably behind the ~5-unit diorama.
+  const STAR_COUNT = 420;
+  const STAR_R = 17;
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const az = starRand() * Math.PI * 2;
+    const sinEl = starRand() * 2 - 1;
+    const cosEl = Math.sqrt(Math.max(0, 1 - sinEl * sinEl));
+    starPositions.push(STAR_R * cosEl * Math.cos(az), STAR_R * sinEl, STAR_R * cosEl * Math.sin(az));
   }
+  // Stars are tiny billboarded quads via an InstancedMesh — NOT THREE.Points.
+  // A transparent Points cloud never wrote scene depth in the WebGPU MRT pass, so
+  // the tilt-shift DoF read the sky's far depth at every star pixel and smeared
+  // each one across a giant bokeh → the night sky rendered empty regardless of
+  // size/opacity/radius. Real instanced meshes write depth normally, so DoF sees
+  // them at r=17 (≈ focus) and keeps them crisp. sizeAttenuation is emulated: a
+  // fixed world-size quad at fixed dome radius reads as a near-constant screen dot.
+  const starQuadGeo = new THREE.PlaneGeometry(0.05, 0.05);
+  const starsMaterial = new THREE.MeshBasicMaterial({ color: palette.star, transparent: true, opacity: 0, fog: false, side: THREE.DoubleSide, toneMapped: false });
+  const stars = new THREE.InstancedMesh(starQuadGeo, starsMaterial, STAR_COUNT);
+  stars.frustumCulled = false;
+  const starMat4 = new THREE.Matrix4();
+  const starPos = new THREE.Vector3();
+  const starQuat = new THREE.Quaternion();
+  const starScale = new THREE.Vector3(1, 1, 1);
+  const starLookM = new THREE.Matrix4();
+  for (let i = 0; i < STAR_COUNT; i++) {
+    starPos.set(starPositions[i * 3], starPositions[i * 3 + 1], starPositions[i * 3 + 2]);
+    // Face the dome centre (≈ camera): billboard each quad toward the origin.
+    starLookM.lookAt(starPos, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
+    starQuat.setFromRotationMatrix(starLookM);
+    starMat4.compose(starPos, starQuat, starScale);
+    stars.setMatrixAt(i, starMat4);
+  }
+  stars.instanceMatrix.needsUpdate = true;
+  stars.visible = false;
+  scene.add(stars);
 
   const camera = new THREE.PerspectiveCamera(cameraContract.fov, window.innerWidth / window.innerHeight, 0.1, 100);
   const camScale = camMode === 'far' ? 1.45 : 1.0;
@@ -480,8 +502,7 @@ async function boot(): Promise<void> {
   }
 
   const sun = new THREE.DirectionalLight(moonLight.color, moonLight.intensity);
-  sun.position.set(...moonLight.position);
-  applySunState(phys.timeOfDay);
+  sun.position.copy(initialSunDir).multiplyScalar(12);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -12;
@@ -530,7 +551,7 @@ async function boot(): Promise<void> {
   }
   scene.add(sun);
 
-  const hemi = new THREE.HemisphereLight(preset.hemiSky, preset.hemiGround, preset.hemiIntensity * gi.hemiCut);
+  const hemi = new THREE.HemisphereLight(initialEnv.hemiSky, initialEnv.hemiGround, initialEnv.hemiIntensity);
   scene.add(hemi);
 
   // Diorama base: a soft lawn plate
@@ -643,17 +664,16 @@ async function boot(): Promise<void> {
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const sunDir = initialSunDir.clone().negate();
-  for (const zc of presetName === 'morning' ? [-1.1, 1.2] : []) {
-    const windowCenter = new THREE.Vector3(3.08, 1.65, zc);
-    const t = (windowCenter.y - 0.16) / -sunDir.y;
-    const pool = windowCenter.clone().addScaledVector(sunDir, t);
-    const mid = windowCenter.clone().add(pool).multiplyScalar(0.5);
-    const len = windowCenter.distanceTo(pool);
-    const shaft = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.02, len), shaftMat);
-    shaft.position.copy(mid);
-    shaft.lookAt(pool);
+  // Shafts are built with a fixed unit length (SHAFT_BASE_LEN = 3) and scaled
+  // per frame in applyEnvironment; both always exist, faded via shaft opacity.
+  const shaftWindows = [new THREE.Vector3(3.08, 1.65, -1.1), new THREE.Vector3(3.08, 1.65, 1.2)];
+  const shafts: THREE.Mesh[] = [];
+  for (const windowCenter of shaftWindows) {
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.02, 3), shaftMat);
+    shaft.position.copy(windowCenter);
+    shaft.visible = false;
     scene.add(shaft);
+    shafts.push(shaft);
   }
 
   const lamp = new THREE.Group();
@@ -666,17 +686,17 @@ async function boot(): Promise<void> {
   lamp.position.set(-3.0, 0.14, -0.9);
   scene.add(lamp);
 
-  if (preset.lampOn) {
-    const bulb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.09, 12, 12),
-      new THREE.MeshBasicMaterial({ color: nightGlow.bulb }),
-    );
-    bulb.position.set(0, 1.45, 0);
-    lamp.add(bulb);
-    const lampLight = new THREE.PointLight(nightGlow.bulb, nightGlow.lampIntensity * preset.lampBoost, 12, 2);
-    lampLight.position.set(0, 1.5, 0);
-    lamp.add(lampLight);
-  }
+  // Bulb + light always built; intensity/visibility driven by applyEnvironment (lampOn01).
+  const lampBulb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 12, 12),
+    new THREE.MeshBasicMaterial({ color: nightGlow.bulb }),
+  );
+  lampBulb.position.set(0, 1.45, 0);
+  lampBulb.visible = false;
+  lamp.add(lampBulb);
+  const lampLight = new THREE.PointLight(nightGlow.bulb, 0, 12, 2);
+  lampLight.position.set(0, 1.5, 0);
+  lamp.add(lampLight);
 
   // People — eyes toward the camera side
   const nurse = beanPerson(palette.mint, -1.1);
@@ -697,9 +717,9 @@ async function boot(): Promise<void> {
 
   // Edge mist: soft flattened puffs hugging the plate rim (the diorama floats in haze)
   const mistMat = new THREE.MeshBasicMaterial({
-    color: preset.mistColor,
+    color: initialEnv.mistColor,
     transparent: true,
-    opacity: preset.mistOpacity,
+    opacity: initialEnv.mistOpacity,
     depthWrite: false,
   });
   const mistSpecs: Array<[number, number, number, number]> = [
@@ -724,7 +744,7 @@ async function boot(): Promise<void> {
   scene.add(cubeCam);
   cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
   scene.environment = cubeRT.texture;
-  scene.environmentIntensity = gi.environmentIntensity * preset.giScale;
+  scene.environmentIntensity = gi.environmentIntensity * initialEnv.giScale;
 
   // Post stack: GTAO x color -> tilt-shift DOF -> bloom
   const postProcessing = new THREE.PostProcessing(renderer);
@@ -747,13 +767,12 @@ async function boot(): Promise<void> {
   // Runtime lifts display nodes into chainable shader-node objects via
   // nodeObject; @types/three r185 doesn't model that lift yet — one
   // localized cast at the post-chain boundary.
-  let lit = withAo;
-  if (presetName !== 'night') {
-    const raysNode = godrays(scenePassDepth, camera, sun);
-    raysNode.density.value = post.godraysDensity;
-    raysNode.maxDensity.value = post.godraysMaxDensity;
-    lit = withAo.add(chain(raysNode).mul(presetName === 'dusk' ? post.godraysMixDusk : post.godraysMix));
-  }
+  // Godrays always built now; the mix is a live uniform driven by applyEnvironment.
+  const godraysMixU = uniform(0);
+  const raysNode = godrays(scenePassDepth, camera, sun);
+  raysNode.density.value = post.godraysDensity;
+  raysNode.maxDensity.value = post.godraysMaxDensity;
+  const lit = withAo.add(chain(raysNode).mul(godraysMixU));
   const withDof = chain(dof(lit, viewZ, post.dof.focusDistance * camScale, post.dof.focalLength, post.dof.bokehScale));
   const bloomPass = chain(bloom(withDof, post.bloom.strength, post.bloom.radius, post.bloom.threshold));
   const composed = withDof.add(bloomPass);
@@ -762,26 +781,78 @@ async function boot(): Promise<void> {
   const tone = smoothstep(float(grade.low), float(grade.high), lum);
   const tint = mix(vec3(...grade.shadowTint), vec3(...grade.highlightTint), tone);
   const toned = composed.rgb.mul(tint);
-  // Per-preset drama: saturation boost + contrast curve around mid-gray
+  // Saturation + contrast are live uniforms (per-keyframe drama around mid-gray).
+  const saturationU = uniform(1);
+  const contrastU = uniform(1);
   const satLum = dot(toned, vec3(0.299, 0.587, 0.114));
-  const saturated = mix(vec3(satLum, satLum, satLum), toned, float(preset.saturation));
-  const contrasted = saturated.sub(float(0.5)).mul(float(preset.contrast)).add(float(0.5)).clamp(0, 1);
+  const saturated = mix(vec3(satLum, satLum, satLum), toned, saturationU);
+  const contrasted = saturated.sub(float(0.5)).mul(contrastU).add(float(0.5)).clamp(0, 1);
   const graded = vec4(contrasted, composed.a);
   postProcessing.outputNode = film(graded, float(post.filmGrain));
 
+  // Precipitation: GPU instanced rain/snow particles, animated per-frame from
+  // uniforms (see environment/precipitation.ts). Driven by applyEnvironment.
+  const precipitation = createPrecipitation();
+  scene.add(precipitation.object3d);
+
+  // Weather: live loop unless a ?wx override pins a fixed state.
+  let weatherSeries: WeatherSeries | null = null;
+  if (!wxParam) startWeatherLoop((s) => { weatherSeries = s; });
+  const currentWeather = (): WeatherState =>
+    WX_OVERRIDES[wxParam ?? ''] ?? (weatherSeries ? sampleWeather(weatherSeries, now()) : CLEAR_SKY);
+
+  // TSL uniform nodes expose a runtime `.value`; @types/three r185 doesn't model
+  // that on the node union, so the uniform bundle is cast at this boundary only.
+  const targets: EnvironmentTargets = {
+    renderer,
+    fog,
+    sun,
+    hemi,
+    skyMesh: skyMesh as unknown as EnvironmentTargets['skyMesh'],
+    cloudUniforms: {
+      lightDir: cloudLightDir as unknown as EnvironmentTargets['cloudUniforms']['lightDir'],
+      lit: cloudLit as unknown as EnvironmentTargets['cloudUniforms']['lit'],
+      shadow: cloudShadow as unknown as EnvironmentTargets['cloudUniforms']['shadow'],
+      coverage: coverageU as unknown as EnvironmentTargets['cloudUniforms']['coverage'],
+      driftUV: driftUV as unknown as EnvironmentTargets['cloudUniforms']['driftUV'],
+    },
+    postUniforms: {
+      saturation: saturationU as unknown as EnvironmentTargets['postUniforms']['saturation'],
+      contrast: contrastU as unknown as EnvironmentTargets['postUniforms']['contrast'],
+      godraysMix: godraysMixU as unknown as EnvironmentTargets['postUniforms']['godraysMix'],
+    },
+    mistMaterial: mistMat,
+    sunDisc,
+    moonDisc,
+    moonPhaseDir: moonPhaseDirU as unknown as EnvironmentTargets['moonPhaseDir'],
+    lampLight,
+    lampBulb,
+    stars,
+    starsMaterial,
+    shaftMaterial: shaftMat,
+    shafts,
+    shaftWindows,
+    precipitation,
+    scratch: { v3: new THREE.Vector3(), c1: new THREE.Color(), c2: new THREE.Color() },
+  };
+
+  let lastEnv: EnvironmentState = computeEnvironment(now(), currentWeather());
   let frameCount = 0;
+  let lastT = 0;
   const clock = new THREE.Clock();
   function animate(): void {
     const t = clock.getElapsedTime();
+    const dt = Math.min(t - lastT, 0.1);
+    lastT = t;
     nurse.scale.y = 1 + Math.sin(t * 2.2) * 0.012;
     patient.scale.y = 1 + Math.sin(t * 2.2 + 1.4) * 0.012;
     child.scale.y = 0.68 * (1 + Math.sin(t * 2.6 + 0.7) * 0.015);
-    driftU.value = t * cloudVol.drift;
+    lastEnv = computeEnvironment(now(), currentWeather());
+    applyEnvironment(targets, lastEnv, dt);
+    scene.environmentIntensity = gi.environmentIntensity * lastEnv.giScale;
+    window.__ENV_STATE = lastEnv;
     frameCount++;
-    if (cycleMode) applySunState((t / sunArcCfg.cycleSeconds) % 1);
-    if (frameCount % (cycleMode ? 90 : 240) === 0) {
-      cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
-    }
+    if (frameCount % 240 === 0) cubeCam.update(renderer as unknown as Parameters<typeof cubeCam.update>[0], scene);
     postProcessing.render();
     if (!window.__LOOK_READY) window.__LOOK_READY = true;
   }
