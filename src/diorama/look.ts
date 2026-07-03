@@ -777,6 +777,7 @@ async function boot(): Promise<void> {
     mistMaterial: mistMat,
     sunDisc,
     moonDisc,
+    moonDistance: nightSkyLook.room.moonDistance,
     moonPhaseDir: moonPhaseDirU as unknown as EnvironmentTargets['moonPhaseDir'],
     lampLight,
     lampBulb,

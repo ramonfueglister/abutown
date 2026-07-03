@@ -129,18 +129,15 @@ export const weatherLook = {
   rainColor: 0xaebfd4, snowColor: 0xf4f7fb,
 } as const;
 
-// Precipitation particle geometry/alpha (rain streak vs snow flake). Kept next
-// to weatherLook since these are the visual constants for precipitation.ts.
+// Precipitation particle geometry/alpha (rain streak vs snow flake), plus the
+// box/count value sets. `room` = the prototype's former COUNT/BOX constants
+// (unchanged); `city` = curated starting values for the KSW scene (Task 6
+// capture-review tunes further). Kept next to weatherLook since these are the
+// visual constants for precipitation.ts.
 export const precipLook = {
   rainSx: 0.02, rainSy: 0.55, // thin vertical rain streak (scene units)
   snowSx: 0.06, snowSy: 0.06, // small square snow flake
   rainAlpha: 0.4, snowAlpha: 0.85,
-} as const;
-
-// Precipitation box/count value sets. `room` = the prototype's former
-// COUNT/BOX constants (unchanged); `city` = curated starting values for the
-// KSW scene (Task 6 capture-review tunes further).
-export const precipBoxLook = {
   room: { boxX: 24, boxY: 14, boxZ: 20, count: 3000 },
   city: { boxX: 90, boxY: 40, boxZ: 90, count: 4500 },
 } as const;

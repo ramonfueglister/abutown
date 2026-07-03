@@ -29,6 +29,7 @@ export type EnvironmentTargets = {
   mistMaterial: THREE.MeshBasicMaterial;
   sunDisc: THREE.Mesh;
   moonDisc: THREE.Mesh;
+  moonDistance: number;
   moonPhaseDir: { value: THREE.Vector3 };
   lampLight: THREE.PointLight;
   lampBulb: THREE.Mesh;
@@ -101,10 +102,10 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
   // softening the daytime sun into a glow is fine.
   t.sunDisc.position.set(env.sunDir[0], env.sunDir[1], env.sunDir[2]).multiplyScalar(60);
   t.sunDisc.visible = env.sunDir[1] > 0.015;
-  // Moon shares the star-dome radius (17) so it sits on the DoF focal plane and
+  // Moon shares the star-dome radius so it sits on the DoF focal plane and
   // reads as a crisp disc at night instead of being dissolved by tilt-shift bokeh;
   // its cloud fade is handled by opacity/visibility (starVisibility), not geometry.
-  t.moonDisc.position.set(env.moonDir[0], env.moonDir[1], env.moonDir[2]).multiplyScalar(17);
+  t.moonDisc.position.set(env.moonDir[0], env.moonDir[1], env.moonDir[2]).multiplyScalar(t.moonDistance);
   t.moonDisc.visible = env.moonDir[1] > 0.02 && env.starVisibility > 0.02;
   t.moonPhaseDir.value.set(...moonPhaseLightDir(env.moonPhase));
 
