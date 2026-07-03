@@ -29,14 +29,11 @@ import {
   nightGlow,
   palette,
   post,
-  radii,
   roofFadePolicy,
   skyPhys,
   sunArcCfg,
 } from '../designTokens';
 import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigPosition, roofFade, type CameraRigState } from './cameraRig';
-import { buildHospital } from './building';
-import { kswPlan } from './floorPlan';
 import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
 import { buildNav } from './nav';
 import { buildSpawnSpecs } from './agentSpawn';
@@ -44,12 +41,13 @@ import { ANIMATED_TAGS } from './staticBatch';
 import { advancePlanCursor, createAgent, updateAgent, type Agent } from './agents';
 import { GiProbeScheduler, renderProbeFace } from './giProbe';
 import { boxGeo } from './geometryCache';
-import { box, clayMat } from './props';
+import { clayMat } from './props';
 import { buildCityMassing } from './geo/cityMassing';
 import { buildKswCampus } from './geo/kswCampus';
-import { decomposeToZones } from './interior/zones';
+import { decomposeToZones, type Zone } from './interior/zones';
 import { generateInteriorPlan, departmentCenter } from './interior/generatePlan';
 import { buildInterior } from './interior/buildInterior';
+import { buildPlaza, buildHelipad } from './interior/plaza';
 import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
@@ -80,12 +78,6 @@ declare global {
     };
   }
 }
-
-// S3 interim (T15): the stylized hero hospital is replaced by the real KSW
-// campus shell. This flag guards the now-dead hospital-specific rendering
-// (roofs/agents/animated bits) so the code keeps compiling while T16-T19
-// rebuild the interior/agents/plaza on top of the real hull. Remove in T19.
-const S3_INTERIM = true;
 
 type CamPresetName = 'overview' | 'er' | 'ops' | 'bahnhof' | 'zag' | 'city';
 const camPresets: Record<CamPresetName, { target: [number, number, number]; radius: number; yaw: number; pitch: number }> = {
@@ -445,24 +437,10 @@ async function boot(): Promise<void> {
   const hemi = new THREE.HemisphereLight(preset.hemiSky, preset.hemiGround, preset.hemiIntensity * gi.hemiCut);
   scene.add(hemi);
 
-  // ── the hospital (S3 interim, T15): the stylized hero hospital shell is no
-  // longer added to the scene — the real KSW campus (below) replaces it.
-  // buildHospital still runs so kswPlan-derived downstream code (nav, agent
-  // spawn, smoke) keeps compiling until T16-T19 rebuild those on the real
-  // hull; its group/roofs/animated tags are simply never attached or driven.
-  const { group: hospital, roofs } = buildHospital(kswPlan, { lampGlow: preset.lampOn });
-  if (!S3_INTERIM) {
-    scene.add(hospital);
-    roofs.setFade(roofFade(rig.radius, kswCamera));
-  }
-
-  // Hero plate (S3 interim, T15): buildHospital used to also build the plaza
-  // base plate. With the hospital group no longer added, a standalone hero
-  // plate keeps the plaza slab + mist ring working — same 72×56 lawn-box
-  // recipe as building.ts:194 (T19 re-orders the plaza around the real door).
-  const heroPlate = box(kswPlan.plate.w, kswScene.plateThickness, kswPlan.plate.d, palette.lawn, radii.l);
-  heroPlate.position.y = -kswScene.plateThickness / 2;
-  scene.add(heroPlate);
+  // The stylized hero hospital (buildHospital) is gone (T19): the real KSW
+  // campus below is the building, the generated zone-ladder is its interior,
+  // and buildPlaza/buildHelipad furnish the real entrance + roof. The city
+  // plate (below) underlies the whole campus, so no separate hero lawn plate.
 
   // ── the real KSW campus (S3a, T15): reuses the city clay-massing pipeline
   // on the 26 baked zone==='ksw' buildings — walls with the TSL facade
@@ -480,6 +458,25 @@ async function boot(): Promise<void> {
   const interior = buildInterior(interiorPlan);
   interior.visible = false; // closed at boot (overview) — the cutaway shows it
   scene.add(interior);
+
+  // ── the real forecourt + rooftop helipad (T19) ──────────────────────────
+  // Plaza: slab at the real main door, a path to the nearest real road, an
+  // ambulance under a canopy at the emergency (door) zone edge, and 6 props.
+  // The emergency zone is the door zone (Empfang+Notfall lead its ladder).
+  const erZone: Zone =
+    interiorZones.reduce<{ z: Zone; d: number } | null>((best, z) => {
+      const d = Math.hypot(mainDoor.x - z.x, mainDoor.z - z.z);
+      const inside =
+        mainDoor.x >= z.x - z.w / 2 && mainDoor.x <= z.x + z.w / 2 && mainDoor.z >= z.z - z.d / 2 && mainDoor.z <= z.z + z.d / 2;
+      const score = inside ? d - 1e6 : d;
+      return best === null || score < best.d ? { z, d: score } : best;
+    }, null)?.z ?? interiorZones[0];
+  const plaza = buildPlaza(mainDoor, erZone, cityRoads);
+  scene.add(plaza);
+  // Helipad on the main building's largest high flat roof face; fades with the
+  // cutaway upperFade (same as the roof) so it vanishes when the house opens.
+  const { group: helipad, setFade: setHelipadFade } = buildHelipad(mainBuilding);
+  scene.add(helipad);
 
   // Main-building bbox: the cutaway only engages when the camera target sits
   // over the main building (else the state is forced off so distant/other
@@ -531,7 +528,16 @@ async function boot(): Promise<void> {
   // Tree canopies default to no cast-shadow (nature.ts) — cheap far-field
   // trees don't need to punch holes in the sun's shadow map; the LOD ring
   // (Task 10) re-enables it for the near ring around the camera.
-  cityRoot.add(buildNature(cityNature, { excludeRect: { x: 0, z: 0, w: kswPlan.plate.w, d: kswPlan.plate.d } }));
+  cityRoot.add(
+    buildNature(cityNature, {
+      excludeRect: {
+        x: interiorPlan.building.x,
+        z: interiorPlan.building.z,
+        w: interiorPlan.building.w,
+        d: interiorPlan.building.d,
+      },
+    }),
+  );
   cityRoot.add(buildWindows(cityBuildings));
   cityRoot.add(buildLamps(cityRoads, { lampGlow: preset.lampOn }));
   scene.add(cityRoot);
@@ -562,14 +568,12 @@ async function boot(): Promise<void> {
   let cityRing = cityLodState(rig.radius, 'far');
   applyCityLod(cityRing, lodRefs);
 
-  // collect animated bits: ambulance light pulses, helicopter rotor idles.
-  // Tag contract shared with staticBatch.isAnimated via ANIMATED_TAGS.
-  // S3 interim (T15): the hospital group isn't in the scene, so there is
-  // nothing to animate — empty arrays keep animate() type-safe until T19
-  // reintroduces these props on the real campus.
+  // collect animated bits: ambulance light pulses (plaza), helicopter rotor
+  // idles (helipad). Tag contract shared with staticBatch.isAnimated via
+  // ANIMATED_TAGS — now driven off the real plaza + rooftop props (T19).
   const animated: Record<(typeof ANIMATED_TAGS)[number], THREE.Object3D[]> = { blink: [], rotor: [] };
-  if (!S3_INTERIM) {
-    hospital.traverse((o) => {
+  for (const root of [plaza, helipad]) {
+    root.traverse((o) => {
       for (const tag of ANIMATED_TAGS) if (o.userData[tag]) animated[tag].push(o);
     });
   }
@@ -581,18 +585,15 @@ async function boot(): Promise<void> {
   // Rendering is per-role instanced (agentMeshes.ts): the shader animates
   // squash/waddle/yaw from storage buffers, the CPU keeps only the agent
   // state machine plus flat smoothing slots (eased y, lerped yaw, roll).
-  // S3 interim (T15): the crowd lived inside the stylized hospital's rooms;
-  // with that group detached from the scene there is no interior to spawn
-  // into yet (T17 rebuilds it on the real hull, T19 reactivates agents).
-  // `liveAgents` stays empty and `inBuilding` always false so animate() and
-  // kswSnapshot.agents keep their types with zero live crowd.
-  const nav = buildNav(kswPlan);
+  // The crowd lives in the GENERATED zone-ladder interior (T19): nav is built
+  // over the generated plan and spawn specs come from its rooms. `inBuilding`
+  // tests membership in ANY zone rect (the real footprint is decomposed into
+  // several), so agents standing inside get the raised-floor y-offset.
+  const nav = buildNav(interiorPlan);
   const inBuilding = (x: number, z: number): boolean =>
-    !S3_INTERIM &&
-    Math.abs(x - kswPlan.building.x) < kswPlan.building.w / 2 &&
-    Math.abs(z - kswPlan.building.z) < kswPlan.building.d / 2;
-  // The authored plan people first, then seeded extras up to ?agents=N.
-  const spawnSpecs = S3_INTERIM ? [] : buildSpawnSpecs(kswPlan, nav, agentTarget);
+    interiorZones.some((zn) => Math.abs(x - zn.x) < zn.w / 2 && Math.abs(z - zn.z) < zn.d / 2);
+  // The generated plan's room people first, then seeded extras up to ?agents=N.
+  const spawnSpecs = buildSpawnSpecs(interiorPlan, nav, agentTarget);
   // Crowd mode (Slice D): GPU LOD/cull classification + blob shadows instead
   // of real casters. At or below the threshold the authored look is untouched.
   const crowd = spawnSpecs.length > kswAgents.crowdThreshold;
@@ -623,9 +624,11 @@ async function boot(): Promise<void> {
   const roleCounts: Partial<Record<PersonRole, number>> = {};
   for (const s of spawnSpecs) roleCounts[s.spec.role] = (roleCounts[s.spec.role] ?? 0) + 1;
   const agentInstances = createAgentInstances(roleCounts, { crowd });
-  if (!S3_INTERIM) {
-    for (const m of agentInstances.meshes) hospital.add(m);
-  }
+  // Agents live inside the interior group — hidden with it when the house is
+  // closed (overview), revealed through the cutaway when it opens (er/ops). The
+  // __KSW agent snapshot below is CPU-driven, so movement is reported even
+  // while the meshes are hidden.
+  for (const m of agentInstances.meshes) interior.add(m);
   type LiveAgent = { agent: Agent; slot: AgentSlot; idx: number; y: number; yaw: number; roll: number };
   const liveAgents: LiveAgent[] = [];
   for (const [idx, s] of spawnSpecs.entries()) {
@@ -645,8 +648,12 @@ async function boot(): Promise<void> {
     opacity: preset.mistOpacity,
     depthWrite: false,
   });
-  const rimX = kswPlan.plate.w / 2;
-  const rimZ = kswPlan.plate.d / 2;
+  // hug the real campus complex (the generated interior's bounding box) rather
+  // than the old 72×56 hero plate.
+  const rimX = interiorPlan.building.w / 2;
+  const rimZ = interiorPlan.building.d / 2;
+  const rimCx = interiorPlan.building.x;
+  const rimCz = interiorPlan.building.z;
   // walk a rectangle perimeter (an ellipse would dip onto the lawn near the
   // corners) and hug it with small flattened puffs. Parametrized so both the
   // hero plate and the city plate rim share one recipe (spec §4: city mist).
@@ -682,7 +689,7 @@ async function boot(): Promise<void> {
       scene.add(mist);
     }
   };
-  addMistRing(rimX, rimZ, 0, 0, mistMat);
+  addMistRing(rimX, rimZ, rimCx, rimCz, mistMat);
 
   // city mist rim: same puffs around the city plate, faded in with the clouds
   // (0 below radius 300, up to preset.mistOpacity*0.8 at the city framing).
@@ -692,29 +699,23 @@ async function boot(): Promise<void> {
 
   // Night life: window glow + lamp bulbs are baked into the glowNight batch
   // at build time (staticBatch.ts); only the actual light pools live here.
+  // Rebased (T19) onto the real forecourt: two warm pools flank the main door,
+  // one glows over the emergency zone.
   if (preset.lampOn) {
-    // two plaza lampposts actually cast warm pools
-    for (const [lx, lz] of [
-      [-9.5, 18.3],
-      [4.5, 18.3],
-    ] as const) {
+    const [dox, doz] = [Math.sin(mainDoor.yaw), Math.cos(mainDoor.yaw)];
+    const perpX = Math.cos(mainDoor.yaw);
+    const perpZ = -Math.sin(mainDoor.yaw);
+    for (const side of [-1, 1]) {
+      const px = mainDoor.x + dox * 6 + perpX * side * 6;
+      const pz = mainDoor.z + doz * 6 + perpZ * side * 6;
       const pool = new THREE.PointLight(nightGlow.bulb, 14 * preset.lampBoost, 12, 2);
-      pool.position.set(lx, 3.0, lz);
+      pool.position.set(px, 3.0, pz);
       scene.add(pool);
     }
-  }
-
-  // Warm interior points at night: entrance + emergency glow
-  if (preset.lampOn) {
-    for (const [lx, lz] of [
-      [-2.5, 12],
-      [-23.5, 12],
-      [4, -2],
-    ] as const) {
-      const lamp = new THREE.PointLight(nightGlow.bulb, 20 * preset.lampBoost, 16, 2);
-      lamp.position.set(lx, 2.2, lz);
-      scene.add(lamp);
-    }
+    // emergency-zone glow
+    const emLamp = new THREE.PointLight(nightGlow.bulb, 20 * preset.lampBoost, 16, 2);
+    emLamp.position.set(erZone.x + dox * (erZone.d / 2), 2.6, erZone.z + doz * (erZone.d / 2));
+    scene.add(emLamp);
   }
 
   // One-bounce GI: capture from above the roofs, feed back as IBL. Boot does
@@ -749,15 +750,13 @@ async function boot(): Promise<void> {
   scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale[presetName];
 
   // ── camera-following sun shadows (spec §4: hero-grade light everywhere) ──
-  // Hero-Guard: on the hero plate AND zoomed in (radius ≤ 120) the shadow
-  // frustum is byte-for-byte today's values (extent 46, far 220, origin, the
-  // sun.position that applySunState set) — pixel-identical to the hero. Only
-  // when the camera leaves that box does the frustum walk the city: centred on
-  // rig.target, extent grown with radius (never below 46 → any street keeps
-  // hero texel density), far scaled to keep the plate inside, throttled so
-  // orbiting doesn't thrash the (cached) depth map.
-  const onHeroPlate = (): boolean =>
-    Math.abs(rig.target[0]) <= kswPlan.plate.w / 2 && Math.abs(rig.target[2]) <= kswPlan.plate.d / 2;
+  // The shadow frustum walks with the camera target: centred on rig.target,
+  // extent grown with radius (never below 46 → any street keeps hero texel
+  // density), far scaled to keep the plate inside, throttled so orbiting
+  // doesn't thrash the (cached) depth map. The old hero-plate origin-snap is
+  // gone (T19): the real KSW campus spans ~320 m and is not at the origin, so
+  // there is no small fixed plate to pin the frustum to.
+  const onHeroPlate = (): boolean => false;
   let shadowExtentNow: number = kswScene.shadowExtent;
   let shadowTargetNow = new THREE.Vector3(0, 0, 0);
   const updateShadowFrustum = (force = false): void => {
@@ -901,6 +900,7 @@ async function boot(): Promise<void> {
     targetOverMain() ? cutawayState(rig.radius) : closedCut;
   let cut = computeCut();
   setCutaway(cut);
+  setHelipadFade(cut.upperFade); // helipad fades with the roof when the house opens
   interior.visible = cut.upperFade < 0.5;
 
   let frameCount = 0;
@@ -937,8 +937,11 @@ async function boot(): Promise<void> {
     const fogZoom = Math.max(1, rig.radius / 110);
     (scene.fog as THREE.Fog).near = fogBaseNear * fogZoom;
     (scene.fog as THREE.Fog).far = fogBaseFar * fogZoom;
+    // roofFade is now purely a zoom-derived scalar (0 close .. 1 far): it drives
+    // the edge-mist thinning + the __KSW.roofFade smoke signal + GI-refresh
+    // thresholds. The campus roof itself opens via the dollhouse cutaway, not
+    // this fade, so there is no roof batch to drive here anymore (T19).
     const fade = roofFade(rig.radius, kswCamera);
-    roofs.setFade(fade);
     const fadeIsMid = fade > roofFadePolicy.visible && fade < roofFadePolicy.opaque;
     if ((prevFade > roofFadePolicy.castShadow) !== (fade > roofFadePolicy.castShadow)) {
       // roof batch toggled castShadow: refresh GI + (cached) shadow map
@@ -965,6 +968,7 @@ async function boot(): Promise<void> {
     const nowOpen = nextCut.upperFade < 0.5;
     if (nextCut.cutH !== cut.cutH || nextCut.upperFade !== cut.upperFade) {
       setCutaway(nextCut);
+      setHelipadFade(nextCut.upperFade);
     }
     if (nowOpen !== wasOpen) interior.visible = nowOpen;
     if (nowSliced !== wasSliced || nowOpen !== wasOpen) {
