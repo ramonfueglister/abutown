@@ -8,7 +8,7 @@
 import { triangulatePlanarPolygon } from './triangulate.mjs';
 import { nameForFootprint, ringCentroid, roadStyle } from './join.mjs';
 import {
-  convexHull, footprintValid, forestFill, roadWidthFromTags, roofOutlineFootprint, roofSkirts, treeSpec,
+  footprintValid, forestFill, roadWidthFromTags, roofOutlineFootprint, roofSkirts, treeSpec,
 } from './style.mjs';
 
 export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anchor
@@ -339,54 +339,32 @@ export function facetCovered(centroidXZ, wallBaseXZ) {
   return wallBaseXZ.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
 }
 
+// A roof facet's own XZ outline, ready for extrudeWalls: consecutive
+// duplicates (< 5 cm) and the closing point dropped, wound counterclockwise
+// in (x, z) — the same orientation convexHull emits, so the extruded quads
+// keep the outward-facing winding the front-side wall material needs.
+// Returns null for degenerate rings (< 3 distinct points or near-zero area).
+function ringOutlineXZ(ring) {
+  const pts = [];
+  for (const [x, , z] of ring) {
+    const last = pts[pts.length - 1];
+    if (last && Math.hypot(x - last[0], z - last[1]) < 0.05) continue;
+    pts.push([x, z]);
+  }
+  while (pts.length > 1 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 0.05) pts.pop();
+  if (pts.length < 3) return null;
+  let area2 = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) area2 += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  if (Math.abs(area2 / 2) < 0.05) return null;
+  return area2 > 0 ? pts : pts.reverse();
+}
+
 function ringCentroidXZ(ring) {
   let cx = 0, cz = 0, n = 0;
   for (const [x, , z] of ring) {
     cx += x; cz += z; n += 1;
   }
   return [cx / n, cz / n];
-}
-
-// Group a building's roof rings into connected components: rings that share
-// a vertex (within 20 cm in XZ+Y) belong to the same physical roof part.
-// Union-find over ring endpoints keeps this O(n²) per building, which is
-// fine — buildings carry dozens of roof facets, never thousands.
-function roofComponents(roofRings) {
-  const n = roofRings.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (i) => {
-    while (parent[i] !== i) {
-      parent[i] = parent[parent[i]];
-      i = parent[i];
-    }
-    return i;
-  };
-  const union = (a, b) => {
-    const ra = find(a), rb = find(b);
-    if (ra !== rb) parent[ra] = rb;
-  };
-  const closeEnough = (a, b) => Math.abs(a[0] - b[0]) < 0.2 && Math.abs(a[1] - b[1]) < 0.2 && Math.abs(a[2] - b[2]) < 0.2;
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      let linked = false;
-      for (const va of roofRings[i]) {
-        for (const vb of roofRings[j]) {
-          if (closeEnough(va, vb)) {
-            linked = true;
-            break;
-          }
-        }
-        if (linked) break;
-      }
-      if (linked) union(i, j);
-    }
-  }
-  const groups = new Map(); // root -> ring indices
-  for (let i = 0; i < n; i++) {
-    const r = find(i);
-    (groups.get(r) ?? groups.set(r, []).get(r)).push(i);
-  }
-  return [...groups.values()].map((idxs) => idxs.map((i) => roofRings[i]));
 }
 
 // `footprints` (optional): Map<uuid, ring[[x,z]]> of 2D footprints already in
@@ -472,52 +450,30 @@ export function transformBuildings({
     }
     appendWallRings(wall, skirts, groundY);
 
-    // Per-roof-part hull closure (Task 12 completion fix): some swisstopo
-    // roof PARTS genuinely have zero wall facets in the source — not "walls
-    // far away", but none at all. Group this building's roof rings into
-    // connected components (rings sharing a vertex), and for any component
-    // whose facet centroids aren't covered by the wall mesh built so far,
-    // extrude a ground→eave prism from the CONVEX HULL of that component's
-    // own XZ vertices. This is geodetically honest: the hull derives
-    // strictly from that part's real roof geometry, never from an unrelated
-    // part's footprint.
+    // Per-FACET closure (Task 12 completion fix, outline-honest since the
+    // floor-plan-lines fix): some swisstopo roof facets genuinely have zero
+    // wall facets in the source — not "walls far away", but none at all.
+    // Close any facet whose centroid isn't covered by the wall mesh built so
+    // far with a ground→eave prism from that facet's OWN XZ OUTLINE. The
+    // earlier code extruded the CONVEX HULL of whole roof components (and
+    // facets) instead — on a concave part the hull edge cuts across the
+    // notch, where a LOWER roof part sits, and the prism wall poked metres
+    // above it as a free-floating straight line (the "floor-plan lines above
+    // buildings" artifact: 355/846 baked buildings had walls poking >0.5 m
+    // above their roofs). The facet ring itself is the honest closure: the
+    // prism never extends beyond the facet, and its top (the facet's lowest
+    // vertex) never rises above the facet's own surface.
     let partHulls = 0;
-    if (b.roofs.length > 0) {
-      for (const component of roofComponents(b.roofs)) {
-        const wallBaseXZ = wallBasePointsMeters(wall.pos);
-        const centroids = component.map(ringCentroidXZ);
-        const coveredCount = centroids.filter((c) => facetCovered(c, wallBaseXZ)).length;
-        if (coveredCount / centroids.length < 0.5) {
-          const hullXZ = convexHull(component.flatMap((ring) => ring.map(([x, , z]) => [x, z])));
-          if (hullXZ.length >= 3) {
-            let compEave = Infinity;
-            for (const ring of component) for (const [, y] of ring) compEave = Math.min(compEave, y);
-            const compEaveH = Math.max(compEave - groundY, 0.1);
-            appendPrism(wall, extrudeWalls(hullXZ, compEaveH));
-            partHulls += 1;
-          }
-        }
-      }
-    }
-    // Second pass, per FACET: a large complex roof component (real hospital/
-    // school wings, dozens–hundreds of facets) can clear the component-level
-    // 0.5 average above yet still leave individual interior facets — deep
-    // ridges/valleys/dormers — outside 6 m of the component hull's own
-    // perimeter wall, a real geometric ceiling of a single convex-hull prism
-    // over a large footprint. Close any facet still uncovered after the
-    // component pass with the smallest possible honest closure: a prism from
-    // that ONE facet's own XZ vertices — no roof anywhere left without a hull
-    // under it.
     if (b.roofs.length > 0) {
       for (const ring of b.roofs) {
         const wallBaseXZ = wallBasePointsMeters(wall.pos);
         if (facetCovered(ringCentroidXZ(ring), wallBaseXZ)) continue;
-        const hullXZ = convexHull(ring.map(([x, , z]) => [x, z]));
-        if (hullXZ.length < 3) continue;
+        const outlineXZ = ringOutlineXZ(ring);
+        if (!outlineXZ) continue;
         let facetEave = Infinity;
         for (const [, y] of ring) facetEave = Math.min(facetEave, y);
         const facetEaveH = Math.max(facetEave - groundY, 0.1);
-        appendPrism(wall, extrudeWalls(hullXZ, facetEaveH));
+        appendPrism(wall, extrudeWalls(outlineXZ, facetEaveH));
         partHulls += 1;
       }
     }
