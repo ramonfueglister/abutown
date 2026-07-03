@@ -27,7 +27,8 @@ describe('applyCityLod', () => {
       lamps: { visible: true } as CityLodRefs['lamps'],
       footways: { visible: true } as CityLodRefs['footways'],
       treesFull: [{ visible: true } as never, { visible: true } as never],
-      treeImpostors: { visible: false } as CityLodRefs['treeImpostors'],
+      // two impostor meshes since Task 14: broad 4-puff + conifer cone
+      treeImpostors: [{ visible: false } as never, { visible: false } as never],
       setTreeShadows,
     };
   }
@@ -39,7 +40,7 @@ describe('applyCityLod', () => {
     expect(refs.lamps?.visible).toBe(false);
     expect(refs.footways?.visible).toBe(false);
     expect(refs.treesFull.every((t) => t.visible === false)).toBe(true);
-    expect(refs.treeImpostors?.visible).toBe(true);
+    expect(refs.treeImpostors.every((t) => t.visible === true)).toBe(true);
     expect(refs.setTreeShadows).toHaveBeenCalledWith(false);
   });
 
@@ -50,7 +51,7 @@ describe('applyCityLod', () => {
     expect(refs.lamps?.visible).toBe(true);
     expect(refs.footways?.visible).toBe(true);
     expect(refs.treesFull.every((t) => t.visible === true)).toBe(true);
-    expect(refs.treeImpostors?.visible).toBe(false);
+    expect(refs.treeImpostors.every((t) => t.visible === false)).toBe(true);
     expect(refs.setTreeShadows).toHaveBeenCalledWith(false);
   });
 
@@ -61,7 +62,7 @@ describe('applyCityLod', () => {
     expect(refs.lamps?.visible).toBe(true);
     expect(refs.footways?.visible).toBe(true);
     expect(refs.treesFull.every((t) => t.visible === true)).toBe(true);
-    expect(refs.treeImpostors?.visible).toBe(false);
+    expect(refs.treeImpostors.every((t) => t.visible === false)).toBe(true);
     expect(refs.setTreeShadows).toHaveBeenCalledWith(true);
   });
 
@@ -73,7 +74,7 @@ describe('applyCityLod', () => {
       lamps: null,
       footways: { visible: true } as CityLodRefs['footways'],
       treesFull: [],
-      treeImpostors: null,
+      treeImpostors: [],
       setTreeShadows,
     };
     expect(() => applyCityLod('far', refs)).not.toThrow();

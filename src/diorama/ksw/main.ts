@@ -448,7 +448,9 @@ async function boot(): Promise<void> {
     treesFull: ['treeCanopies', 'treeConifers']
       .map((n) => cityRoot.getObjectByName(n))
       .filter((o): o is THREE.Object3D => o !== undefined),
-    treeImpostors: cityRoot.getObjectByName('treeImpostors') ?? null,
+    treeImpostors: ['treeImpostors', 'treeImpostorsConifer']
+      .map((n) => cityRoot.getObjectByName(n))
+      .filter((o): o is THREE.Object3D => o !== undefined),
     setTreeShadows: (on: boolean) => {
       const canopies = cityRoot.getObjectByName('treeCanopies');
       const conifers = cityRoot.getObjectByName('treeConifers');

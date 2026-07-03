@@ -29,7 +29,9 @@ export type CityLodRefs = {
   lamps: THREE.Object3D | null;
   footways: THREE.Object3D | null;
   treesFull: THREE.Object3D[];
-  treeImpostors: THREE.Object3D | null;
+  // two impostor meshes since Task 14 (broad 4-puff + conifer cone) — same
+  // collect-then-filter pattern as treesFull, so a missing mesh is just absent
+  treeImpostors: THREE.Object3D[];
   setTreeShadows: (on: boolean) => void;
 };
 
@@ -39,6 +41,6 @@ export function applyCityLod(ring: CityLodRing, r: CityLodRefs): void {
   if (r.lamps) r.lamps.visible = !far;
   if (r.footways) r.footways.visible = !far;
   for (const t of r.treesFull) if (t) t.visible = !far;
-  if (r.treeImpostors) r.treeImpostors.visible = far;
+  for (const t of r.treeImpostors) if (t) t.visible = far;
   r.setTreeShadows(ring === 'near');
 }
