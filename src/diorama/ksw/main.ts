@@ -710,10 +710,9 @@ async function boot(): Promise<void> {
 
   // One-bounce GI: capture from above the roofs, feed back as IBL. Boot does
   // the full synchronous 6-face warm-up (never a black env map); after that
-  // the scheduler amortizes refreshes to at most ONE face per frame (Slice E)
-  // — continuous walking in cycle mode; on the static presets a slow
-  // background cadence (one face per kswGi.staticFaceInterval frames) plus
-  // immediate dirty walks when the roof fade crosses the castShadow /
+  // the scheduler amortizes refreshes to at most ONE face per frame (Slice E):
+  // a slow background cadence (one face per kswGi.staticFaceInterval frames)
+  // plus immediate dirty walks when the roof fade crosses the castShadow /
   // visibility thresholds or settles after a fade.
   const cubeRT = new THREE.CubeRenderTarget(kswGi.probeSize);
   const cubeCam = new THREE.CubeCamera(0.1, 400, cubeRT);
