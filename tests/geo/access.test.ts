@@ -37,4 +37,30 @@ describe('accessPoints', () => {
     expect(ap.edge).toBe(1); // the drivable edge (index 1), not the closer footway (index 0)
     expect(mixedGraph.edgeClass[ap.edge]).toBeLessThanOrEqual(6);
   });
+
+  it('binds a building near the middle of a long undensified segment (>2 cells from start)', () => {
+    // Single 300 m segment (0,0)->(300,0), class 4 drivable. Building centroid at (200,10):
+    // only 10 m from the segment mid, but 200 m (>2 grid cells of 50 m) from the start point.
+    const longGraph = {
+      edgeA: [0], edgeB: [1], edgeClass: [4],
+      edgePtOffset: [0], edgePtX: [0, 300], edgePtZ: [0, 0], edgePtY: [450, 450],
+    };
+    const building = [[198, 8], [202, 8], [202, 12], [198, 12]];
+    const [ap] = accessPoints({ graph: longGraph, footprints: [building] });
+    expect(ap.edge).toBe(0);
+    expect(ap.offsetM).toBeCloseTo(200, 0);
+  });
+
+  it('binds a building near the second segment of a multi-segment edge (arcTo prior-segment summation)', () => {
+    // 3-point edge (0,0)->(100,0)->(100,100), class 4 drivable. Building near (100,40) on the
+    // second segment. Expected offset = 100 (first segment) + 40 (into second segment) = 140.
+    const arcGraph = {
+      edgeA: [0], edgeB: [2], edgeClass: [4],
+      edgePtOffset: [0], edgePtX: [0, 100, 100], edgePtZ: [0, 0, 100], edgePtY: [450, 450, 450],
+    };
+    const building = [[98, 38], [102, 38], [102, 42], [98, 42]];
+    const [ap] = accessPoints({ graph: arcGraph, footprints: [building] });
+    expect(ap.edge).toBe(0);
+    expect(ap.offsetM).toBeCloseTo(140, 0);
+  });
 });

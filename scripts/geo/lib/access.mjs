@@ -13,8 +13,15 @@ export function accessPoints({ graph, footprints }) {
   for (let e = 0; e < graph.edgeA.length; e++) {
     const { start, end } = segsOf(e);
     for (let i = start; i < end - 1; i++) {
-      const k = `${Math.floor(graph.edgePtX[i] / CELL)},${Math.floor(graph.edgePtZ[i] / CELL)}`;
-      (grid.get(k) ?? grid.set(k, []).get(k)).push({ e, i });
+      const ax = graph.edgePtX[i], az = graph.edgePtZ[i];
+      const bx = graph.edgePtX[i + 1], bz = graph.edgePtZ[i + 1];
+      const gx0 = Math.floor(Math.min(ax, bx) / CELL), gx1 = Math.floor(Math.max(ax, bx) / CELL);
+      const gz0 = Math.floor(Math.min(az, bz) / CELL), gz1 = Math.floor(Math.max(az, bz) / CELL);
+      for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+        const k = `${gx},${gz}`;
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push({ e, i });
+      }
     }
   }
   const project = (px, pz, e, i) => {
@@ -24,7 +31,7 @@ export function accessPoints({ graph, footprints }) {
     const L2 = dx * dx + dz * dz || 1e-9;
     const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / L2));
     const qx = ax + t * dx, qz = az + t * dz;
-    return { d: Math.hypot(px - qx, pz - qz), t, segLen: Math.sqrt(L2) };
+    return { d: Math.hypot(px - qx, pz - qz), t };
   };
   const arcTo = (e, segIdx, t) => {
     const { start } = segsOf(e);
