@@ -227,8 +227,13 @@ if (!existsSync(`${OUT}/gdb-list.json`)) {
   const gdbDirs = [];
   let downloaded = 0;
   for (const u of gdbUrls) {
-    const base = u.split('/').pop().replace(/\.gdb\.zip$/, '');
-    const gdbDir = `${OUT}/${base}.gdb`;
+    const base = u.split('/').pop().replace(/\.gdb\.zip$/, ''); // e.g. swissbuildings3d_3_0_2019_1051-44_2056_5728
+    const tileMatch = /_(\d+-\d+)_\d+_\d+$/.exec(base);
+    if (!tileMatch) throw new Error(`swissBUILDINGS3D: cannot parse tile id from ${base}`);
+    // The zip's internal folder uses swisstopo's display convention, not the
+    // download filename — verified via `unzip -l` on a real tile (2026-07-03):
+    // swissBUILDINGS3D_3-0_<tile>.gdb, matching the pre-existing single-tile pattern.
+    const gdbDir = `${OUT}/swissBUILDINGS3D_3-0_${tileMatch[1]}.gdb`;
     if (!existsSync(gdbDir)) {
       const zipPath = `${OUT}/${base}.gdb.zip`;
       if (!existsSync(zipPath)) {
