@@ -125,15 +125,30 @@ function clearCache(): void {
 
 export function startWeatherLoop(onUpdate: (s: WeatherSeries) => void): void {
   const cached = readCache();
+  let everSucceeded = false;
   if (cached) {
     try {
       onUpdate(parseOpenMeteo(JSON.parse(cached)));
+      everSucceeded = true;
     } catch {
       clearCache();
     }
   }
   let backoffMs = 30_000;
+  // At most one fetch/retry chain is in flight. On failure fetchOnce schedules
+  // its own retry via retryTimer; the interval below must SKIP while a retry is
+  // pending, otherwise each failing 15-min tick would spawn a fresh, self-
+  // perpetuating retry chain and the attempts would multiply without bound.
+  let retryPending = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
   const fetchOnce = async (): Promise<void> => {
+    // Reclaim: whatever triggered this call, the previous retry chain (if any)
+    // is now consumed by this attempt, so cancel any dangling timer first.
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    retryPending = false;
     try {
       const res = await fetch(OPEN_METEO_URL);
       if (!res.ok) throw new Error(`open-meteo http ${res.status}`);
@@ -141,13 +156,24 @@ export function startWeatherLoop(onUpdate: (s: WeatherSeries) => void): void {
       const series = parseOpenMeteo(json);
       writeCache(json);
       backoffMs = 30_000;
+      everSucceeded = true;
       onUpdate(series);
     } catch (err) {
-      console.warn('[environment] weather fetch failed, keeping last state', err);
-      setTimeout(() => void fetchOnce(), backoffMs);
+      if (everSucceeded) {
+        console.warn('[environment] weather fetch failed, keeping last state', err);
+      } else {
+        console.warn('[environment] weather fetch failed, no weather data yet, rendering clear-sky default', err);
+      }
+      retryPending = true;
+      retryTimer = setTimeout(() => void fetchOnce(), backoffMs);
       backoffMs = Math.min(backoffMs * 2, REFRESH_MS);
     }
   };
   void fetchOnce();
-  setInterval(() => void fetchOnce(), REFRESH_MS);
+  setInterval(() => {
+    // Skip the periodic refresh while a retry chain is already in flight, so
+    // the two timers never compound into multiple concurrent chains.
+    if (retryPending) return;
+    void fetchOnce();
+  }, REFRESH_MS);
 }

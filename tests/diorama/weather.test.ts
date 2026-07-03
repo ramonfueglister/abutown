@@ -188,6 +188,34 @@ describe('startWeatherLoop', () => {
     expect(onUpdate).toHaveBeenCalledWith(parseOpenMeteo(fixture));
   });
 
+  it('does not multiply retry chains when failures span interval boundaries', async () => {
+    vi.useFakeTimers();
+    const storage = makeMemoryStorage();
+    vi.stubGlobal('localStorage', storage);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Always fails: the retry chain backs off (30s → 60s → … → capped at
+    // REFRESH_MS) while the 15-min interval keeps ticking. With a single-chain
+    // guard the interval SKIPS while a retry is pending, so attempts follow the
+    // one backoff chain rather than one chain per interval tick.
+    const fetchMock = vi.fn().mockRejectedValue(new Error('always down'));
+    vi.stubGlobal('fetch', fetchMock);
+    const onUpdate = vi.fn();
+
+    startWeatherLoop(onUpdate);
+    // Warn wording when nothing has ever succeeded (no cache, no prior success).
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(warnSpy.mock.calls[0][0]).toContain('rendering clear-sky default');
+
+    // Advance two full refresh intervals of continuous failure.
+    await vi.advanceTimersByTimeAsync(2 * REFRESH_MS);
+
+    // A per-interval-spawned chain would compound: after 2 intervals it would be
+    // dozens of concurrent retries. Single-chain behavior over 30 min of 30s→
+    // capped backoff is bounded well under this.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(12);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it('removes a corrupt cache entry without throwing', () => {
     vi.useFakeTimers();
     const storage = makeMemoryStorage({ [CACHE_KEY]: 'not-json{{{' });

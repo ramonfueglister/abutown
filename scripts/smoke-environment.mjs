@@ -105,13 +105,34 @@ try {
       }
     };
 
-    // 1) Live wiring: no ?wx → the client must fetch open-meteo
-    await probe('at=2026-07-03T11:00:00Z', (env) => {
+    // 1) Live wiring: no ?wx → the client fetches open-meteo AND applies the
+    // parsed series. ?at is before the fixture's time range, so sampleWeather
+    // clamps to states[0] (cloud_cover 20% → 0.2). Per weatherLook:
+    //   cloudCoverage = coverageMin + (coverageMax - coverageMin) * 0.2
+    //                 = 0.15 + 0.70 * 0.2 = 0.29
+    // The fetch is async and applied on a later frame, so wait for the series to
+    // land instead of reading the first frame's CLEAR_SKY default.
+    await probe('at=2026-07-03T11:00:00Z', () => []); // navigate + become ready
+    let appliedCloud = NaN;
+    try {
+      await page.waitForFunction(
+        () => window.__ENV_STATE && Math.abs(window.__ENV_STATE.cloudCoverage - 0.29) < 0.02,
+        { timeout: 15000 },
+      );
+      appliedCloud = (await page.evaluate(() => window.__ENV_STATE)).cloudCoverage;
+    } catch {
+      appliedCloud = (await page.evaluate(() => window.__ENV_STATE?.cloudCoverage)) ?? NaN;
+    }
+    {
       const errs = [];
       if (!meteoRequested) errs.push('open-meteo was never requested');
+      if (!(Math.abs(appliedCloud - 0.29) < 0.02))
+        errs.push(`parsed series not applied: cloudCoverage=${appliedCloud} (expected ~0.29 from states[0] cloud 20%)`);
+      const env = await page.evaluate(() => window.__ENV_STATE);
       if (env.sunElevDeg < 55) errs.push(`noon sun too low: ${env.sunElevDeg}`);
-      return errs;
-    });
+      checks.push({ query: 'at=2026-07-03T11:00:00Z (applied)', errors: errs });
+      for (const e of errs) console.error(`FAIL [applied]: ${e}`);
+    }
     // 2) State matrix (wx overrides, no network dependency)
     await probe('at=2026-07-03T04:00:00Z&wx=clear', (e) =>
       e.sunElevDeg > -8 && e.sunElevDeg < 12 && e.godraysMix >= 0 ? [] : [`dawn state off: elev=${e.sunElevDeg}`]

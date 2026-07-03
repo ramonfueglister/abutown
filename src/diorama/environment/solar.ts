@@ -5,8 +5,9 @@
 //   +x = east, +z = south, +y = up.
 // The room's east wall (x+) is the morning-sun side, matching look.ts.
 //
-// suncalc azimuth is measured from SOUTH, positive westward. We convert to
-// azimuth-from-north (clockwise via east) before mapping into scene space.
+// suncalc 2.0.0 returns positions in DEGREES with azimuth already measured
+// from NORTH, clockwise via east (0=N, 90=E, 180=S, 270=W). We only convert
+// degrees→radians before mapping into scene space.
 
 import * as SunCalc from 'suncalc';
 
@@ -27,14 +28,14 @@ export function sceneDirFromAzEl(azFromNorthRad: number, elevRad: number): Vec3T
   ];
 }
 
-function azFromNorth(suncalcAzimuthDeg: number): number {
-  return suncalcAzimuthDeg * RAD;
+function degToRad(deg: number): number {
+  return deg * RAD;
 }
 
 export function sunState(utc: Date): SunState {
   const pos = SunCalc.getPosition(utc, WINTERTHUR.lat, WINTERTHUR.lon);
   const later = SunCalc.getPosition(new Date(utc.getTime() + 60_000), WINTERTHUR.lat, WINTERTHUR.lon);
-  const azN = azFromNorth(pos.azimuth);
+  const azN = degToRad(pos.azimuth);
   const elevRad = pos.altitude * RAD;
   return {
     dir: sceneDirFromAzEl(azN, elevRad),
@@ -49,7 +50,7 @@ export function moonState(utc: Date): MoonState {
   const illum = SunCalc.getMoonIllumination(utc);
   const elevRad = pos.altitude * RAD;
   return {
-    dir: sceneDirFromAzEl(azFromNorth(pos.azimuth), elevRad),
+    dir: sceneDirFromAzEl(degToRad(pos.azimuth), elevRad),
     elevDeg: pos.altitude,
     phase: illum.phase,
     illumination: illum.fraction,

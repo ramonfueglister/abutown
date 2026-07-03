@@ -118,6 +118,24 @@ export const weatherLook = {
   rainColor: 0xaebfd4, snowColor: 0xf4f7fb,
 } as const;
 
+// Precipitation particle geometry/alpha (rain streak vs snow flake). Kept next
+// to weatherLook since these are the visual constants for precipitation.ts.
+export const precipLook = {
+  rainSx: 0.02, rainSy: 0.55, // thin vertical rain streak (scene units)
+  snowSx: 0.06, snowSy: 0.06, // small square snow flake
+  rainAlpha: 0.4, snowAlpha: 0.85,
+} as const;
+
+// Curated cloud tint colors for applyEnvironment. Day mixes the sun color
+// toward litWhite; night uses fixed lit/shadow tints.
+export const cloudLook = {
+  shadowBase: 0x6e8092,
+  nightLit: 0x9fb2cc,
+  nightShadow: 0x39485c,
+  litWhite: 0xffffff,
+  litWhiteMix: 0.3,
+} as const;
+
 // Sun color easing endpoints (used by environment.ts sunLight).
 export const sunArcCfg = {
   colorLow: 0xff6f2a,
@@ -142,6 +160,7 @@ export const cloudVol = {
 export const nightGlow = {
   bulb: 0xffc98a,
   lampIntensity: 20,
+  boost: 1.2, // applyEnvironment multiplies lampIntensity by this at full lampOn01
 } as const;
 
 // Moonlight (the night preset's key light — the sun arc is parked below horizon).

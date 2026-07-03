@@ -2,7 +2,7 @@
 // no geometry rebuilds, no allocations in the hot path.
 
 import * as THREE from 'three/webgpu';
-import { moonLight, nightGlow } from '../designTokens';
+import { cloudLook, moonLight, nightGlow } from '../designTokens';
 import { moonPhaseLightDir, type EnvironmentState } from './environment';
 import type { PrecipitationSystem } from './precipitation';
 
@@ -41,10 +41,6 @@ export type EnvironmentTargets = {
   scratch: { v3: THREE.Vector3; c1: THREE.Color; c2: THREE.Color };
 };
 
-const CLOUD_SHADOW_BASE = 0x6e8092;
-const CLOUD_NIGHT_LIT = 0x9fb2cc;
-const CLOUD_NIGHT_SHADOW = 0x39485c;
-
 export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, dtSeconds: number): void {
   // scratch.v3 is reused three times below (sunDir → moonDir → per-window shaft
   // "down"). Each consumer copies the value out (uniform .copy / light .position)
@@ -69,16 +65,16 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
     t.sun.color.set(env.sunColor);
     t.sun.intensity = Math.max(env.sunIntensity, 0.05);
     t.cloudUniforms.lightDir.value.copy(sunDir);
-    t.cloudUniforms.lit.value.set(env.sunColor).lerp(t.scratch.c1.set(0xffffff), 0.3);
-    t.cloudUniforms.shadow.value.set(CLOUD_SHADOW_BASE).lerp(t.scratch.c2.set(env.sunColor), 0.15);
+    t.cloudUniforms.lit.value.set(env.sunColor).lerp(t.scratch.c1.set(cloudLook.litWhite), cloudLook.litWhiteMix);
+    t.cloudUniforms.shadow.value.set(cloudLook.shadowBase).lerp(t.scratch.c2.set(env.sunColor), 0.15);
   } else {
     const moonDir = t.scratch.v3.set(env.moonDir[0], Math.max(env.moonDir[1], 0.15), env.moonDir[2]).normalize();
     t.sun.position.copy(moonDir).multiplyScalar(12);
     t.sun.color.set(moonLight.color);
     t.sun.intensity = Math.max(env.moonIntensity, 0.12);
     t.cloudUniforms.lightDir.value.copy(moonDir);
-    t.cloudUniforms.lit.value.set(CLOUD_NIGHT_LIT);
-    t.cloudUniforms.shadow.value.set(CLOUD_NIGHT_SHADOW);
+    t.cloudUniforms.lit.value.set(cloudLook.nightLit);
+    t.cloudUniforms.shadow.value.set(cloudLook.nightShadow);
   }
 
   // Hemisphere + GI scale
@@ -113,7 +109,7 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
   t.moonPhaseDir.value.set(...moonPhaseLightDir(env.moonPhase));
 
   // Lamp (warm windows)
-  t.lampLight.intensity = nightGlow.lampIntensity * 1.2 * env.lampOn01;
+  t.lampLight.intensity = nightGlow.lampIntensity * nightGlow.boost * env.lampOn01;
   t.lampBulb.visible = env.lampOn01 > 0.05;
 
   // Stars: real dome rotation around the celestial pole

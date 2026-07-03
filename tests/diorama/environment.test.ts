@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { envAnchors, envKeyframes, weatherLook } from '../../src/diorama/designTokens';
 import { computeEnvironment, lerpColorHex, moonPhaseLightDir } from '../../src/diorama/environment/environment';
 import { CLEAR_SKY } from '../../src/diorama/environment/weather';
-import { sunState } from '../../src/diorama/environment/solar';
+import { moonState, sunState } from '../../src/diorama/environment/solar';
 
 describe('envKeyframes', () => {
   it('has all four keyframes with lamp on at night, off at day', () => {
@@ -113,11 +113,24 @@ describe('computeEnvironment — weather modulation', () => {
     expect(cloudy.starVisibility).toBeLessThan(clear.starVisibility * 0.4);
   });
   it('full moon night is brighter than new moon night', () => {
-    // moonIntensity scales with illumination — compare two synthetic states via internals:
-    const night = new Date('2026-06-21T23:30:00Z');
-    const e = computeEnvironment(night, CLEAR_SKY);
-    expect(e.moonIntensity).toBeGreaterThanOrEqual(0);
-    expect(e.moonIntensity).toBeLessThanOrEqual(1.6);
+    // moonIntensity scales with illumination. Pick real dates in 2026 by scanning
+    // for a near-full (>0.95) and a near-new (<0.05) moon at 23:00Z, then compare
+    // the actual computed environments — not just a bounds check.
+    const scanNight = (predicate: (illum: number) => boolean): Date => {
+      for (let day = 0; day < 365; day++) {
+        const d = new Date(Date.UTC(2026, 0, 1, 23, 0));
+        d.setUTCDate(d.getUTCDate() + day);
+        if (predicate(moonState(d).illumination)) return d;
+      }
+      throw new Error('no matching moon night found in 2026');
+    };
+    const fullNight = scanNight((f) => f > 0.95);
+    const newNight = scanNight((f) => f < 0.05);
+    const full = computeEnvironment(fullNight, CLEAR_SKY);
+    const dark = computeEnvironment(newNight, CLEAR_SKY);
+    expect(full.moonIntensity).toBeGreaterThan(dark.moonIntensity);
+    expect(full.moonIntensity).toBeLessThanOrEqual(1.6);
+    expect(dark.moonIntensity).toBeGreaterThanOrEqual(0);
   });
 });
 

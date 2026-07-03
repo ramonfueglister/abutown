@@ -5,7 +5,7 @@
 // the diorama via `mod`. CPU cost per frame: 4 uniform writes, no matrix work.
 import * as THREE from 'three/webgpu';
 import { float, hash, instanceIndex, mix, positionLocal, uniform, vec3, vec4 } from 'three/tsl';
-import { weatherLook } from '../designTokens';
+import { precipLook, weatherLook } from '../designTokens';
 import type { PrecipType } from './environment';
 
 export type PrecipitationSystem = {
@@ -55,8 +55,8 @@ export function createPrecipitation(): PrecipitationSystem {
     const z = f(z0.add(f(windU.y).mul(drift)).add(BOX.z / 2).mod(BOX.z).sub(BOX.z / 2));
 
     // rain: thin vertical streak; snow: small square.
-    const sx = mix(float(0.02), float(0.06), snowU);
-    const sy = mix(float(0.55), float(0.06), snowU);
+    const sx = mix(float(precipLook.rainSx), float(precipLook.snowSx), snowU);
+    const sy = mix(float(precipLook.rainSy), float(precipLook.snowSy), snowU);
     const local = f(positionLocal).mul(vec3(sx, sy, float(1)));
     mat.positionNode = f(local).add(vec3(x, y, z));
 
@@ -67,7 +67,7 @@ export function createPrecipitation(): PrecipitationSystem {
       vec3(...hexToRgb01(weatherLook.snowColor)),
       snowU,
     );
-    const alpha = mix(float(0.4), float(0.85), snowU);
+    const alpha = mix(float(precipLook.rainAlpha), float(precipLook.snowAlpha), snowU);
     mat.colorNode = vec4(col, f(alpha).mul(active.select(float(1), float(0))));
   }
 

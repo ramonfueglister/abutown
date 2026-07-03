@@ -408,7 +408,9 @@ async function boot(): Promise<void> {
   const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(46, 32, 24), cloudMatVol);
   scene.add(cloudDome);
 
-  // Discs sit beyond the cloud sphere (r=46) so clouds occlude them.
+  // Only the sun disc sits beyond the cloud sphere (r=46) so clouds occlude it
+  // by day. The moon (and stars) sit inside at r=17; their cloud occlusion is
+  // emulated via starVisibility opacity/visibility damping, not geometry.
   const sunDisc = new THREE.Mesh(
     new THREE.SphereGeometry(2.4, 20, 20),
     new THREE.MeshBasicMaterial({ color: 0xfff0d5, fog: false }),
