@@ -41,7 +41,7 @@ console.log('cam        agents   fps    p50     p95     max     drawCalls  tris'
 for (const agents of [undefined, 10000]) {
   for (const cam of ['overview', 'er']) {
     const q = agents === undefined ? '' : `&agents=${agents}`;
-    await page.goto(`http://${HOST}:${PORT}/ksw.html?preset=morning&cam=${cam}${q}`, { waitUntil: 'load' });
+    await page.goto(`http://${HOST}:${PORT}/ksw.html?at=2026-07-03T09:00:00Z&wx=clear&cam=${cam}${q}`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: 30000 });
     await page.waitForTimeout(3000); // warm-up: shader compiles, TRAA settle
     const r = await page.evaluate(
