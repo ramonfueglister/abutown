@@ -47,9 +47,10 @@ export const clay = {
 
 // ── Realtime environment (klinik/look-prototype) ────────────────────────
 // Art-directed keyframes over real sun elevation + real weather. The
-// prototype's look.ts and environment/* consume these. The KSW city still
-// runs on the preset architecture below (lightPresets/skyPhys) until Task 4
-// rewires it; Task 5 removes the preset tokens.
+// prototype's look.ts and environment/* consume these, and the KSW city
+// (ksw/main.ts) was rewired onto the same realtime environment in Task 4;
+// the old preset architecture (lightPresets/skyPhys/etc.) was deleted in
+// Task 5.
 
 // --- Realtime environment: art-directed keyframes over real sun elevation ---
 // The old presets live on as keyframes: night (<-6°), goldenMorning/-Evening
@@ -152,102 +153,12 @@ export const cloudLook = {
   litWhiteMix: 0.3,
 } as const;
 
-// ── KSW preset architecture (city, pre-environment) ─────────────────────
-// The Winterthur city (ksw/main.ts) still drives its look from these fixed
-// morning/dusk/night presets. Kept until Task 4 rewires the city onto the
-// realtime environment; Task 5 deletes them.
-
-export type LightPreset = {
-  hemiSky: number;
-  hemiGround: number;
-  hemiIntensity: number;
-  fogColor: number;
-  fogNear: number;
-  fogFar: number;
-  exposure: number;
-  mistColor: number;
-  mistOpacity: number;
-  giScale: number;
-  saturation: number;
-  contrast: number;
-  lampBoost: number;
-  showStars: boolean;
-  lampOn: boolean;
-};
-
-export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
-  morning: {
-    hemiSky: 0xc4dcda,
-    hemiGround: 0xe4d3ba,
-    hemiIntensity: 0.6,
-    fogColor: 0xeee2cf,
-    fogNear: 20,
-    fogFar: 48,
-    exposure: 1.18,
-    mistColor: 0xf6e9d2,
-    mistOpacity: 0.16,
-    giScale: 0.7,
-    saturation: 1.1,
-    contrast: 1.0,
-    lampBoost: 1.0,
-    showStars: false,
-    lampOn: false,
-  },
-  // The DREDGE moment: amber horizon burning under a deep teal sky.
-  dusk: {
-    hemiSky: 0x4f7d84,
-    hemiGround: 0x5c5348,
-    hemiIntensity: 0.42,
-    fogColor: 0x486e74,
-    fogNear: 18,
-    fogFar: 46,
-    exposure: 0.96,
-    mistColor: 0x6f949a,
-    mistOpacity: 0.22,
-    giScale: 0.55,
-    saturation: 1.12,
-    contrast: 1.06,
-    lampBoost: 1.35,
-    showStars: false,
-    lampOn: true,
-  },
-  night: {
-    hemiSky: 0x4a5f7d,
-    hemiGround: 0x3d4652,
-    hemiIntensity: 0.4,
-    fogColor: 0x2c3a50,
-    fogNear: 18,
-    fogFar: 46,
-    exposure: 0.95,
-    mistColor: 0x46586e,
-    mistOpacity: 0.18,
-    giScale: 0.9,
-    saturation: 1.08,
-    contrast: 1.05,
-    lampBoost: 1.2,
-    showStars: true,
-    lampOn: true,
-  },
-};
-
-// Physical sky (SkyMesh Rayleigh/Mie) per preset + the sun's day arc.
-export const skyPhys = {
-  morning: { turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8, timeOfDay: 0.12, sunBoost: 1.3 },
-  dusk: { turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9, timeOfDay: 0.96, sunBoost: 2.3 },
-  night: { turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8, timeOfDay: 1.08, sunBoost: 0 },
-} as const;
-
-// Sun day-arc config. The city (ksw/main.ts) reads the full arc geometry
-// (azRise/azSet/elev*/cycleSeconds); environment.ts reads only the color
-// easing endpoints (colorLow/colorHigh). Union of both consumers.
+// Sun color easing endpoints. environment.ts reads these to lerp the sun
+// color over the day; the old day-arc geometry (azRise/azSet/elev*/
+// cycleSeconds) was deleted in Task 5 along with the KSW preset architecture.
 export const sunArcCfg = {
-  azRise: 0.15,
-  azSet: 0.95,
-  elevMax: 1.15,
-  elevBase: -0.04,
   colorLow: 0xff6f2a,
   colorHigh: 0xfff1dd,
-  cycleSeconds: 48,
 } as const;
 
 // Volumetric clouds: raymarched height-band slab (Beer-Lambert + powder).
@@ -267,11 +178,11 @@ export const cloudVol = {
 } as const;
 
 // Legacy fbm cloud dome — still drives the KSW scene's cloud shell
-// (ksw/main.ts); look.ts moved on to the volumetric slab above.
+// (ksw/main.ts); look.ts moved on to the volumetric slab above. The
+// preset-keyed `coverage`/`drift` fields were dead (Task 5) — the realtime
+// environment drives coverage/drift dynamically now (see weatherLook).
 export const cloudCfg = {
   scale: 2.1,
-  coverage: { morning: 0.45, dusk: 0.6, night: 0.35 },
-  drift: 0.008,
   litBoost: 1.6,
 } as const;
 
@@ -285,10 +196,10 @@ export const nightGlow = {
   emergency: 20, // base intensity of the emergency-zone PointLight
 } as const;
 
-// Moonlight (the night preset's key light — the sun arc is parked below
-// horizon). The city (ksw/main.ts) reads `position`; environment.ts reads
-// only color/intensity. Union of both consumers.
-export const moonLight = { color: 0xa8c4e8, intensity: 1.0, position: [-6, 7, 6] as [number, number, number] } as const;
+// Moonlight (the night preset's key light). Only color/intensity are read
+// (look.ts, applyCityEnvironment.ts, applyEnvironment.ts); the old `position`
+// field was dead (Task 5).
+export const moonLight = { color: 0xa8c4e8, intensity: 1.0 } as const;
 
 // Moon disc terminator shading — dark (unlit) and lit hemisphere colors.
 export const moonDisc = { dark: 0x292e3b, lit: 0xdee8f2 } as const;
@@ -311,9 +222,8 @@ export const grade = {
 } as const;
 
 // One-bounce GI: the scene is captured from its own center and fed back as
-// image-based lighting, so walls/lawn tint the shadows. `hemiCut` damps the
-// preset hemisphere intensity for the city (ksw/main.ts).
-export const gi = { environmentIntensity: 0.28, hemiCut: 0.5 } as const;
+// image-based lighting, so walls/lawn tint the shadows.
+export const gi = { environmentIntensity: 0.28 } as const;
 
 // ── KSW hospital diorama (ksw.html) ─────────────────────────────────────
 // Additions for the full-hospital scene; the prototype tokens above stay
@@ -372,28 +282,22 @@ export const kswScene = {
   openingHead: 2.35, // shared head height for doors and windows
 } as const;
 
-// KSW post overrides (the prototype `post` tokens belong to look.ts).
+// KSW post overrides (the prototype `post` tokens belong to look.ts). The
+// preset-keyed `envScale`/`godraysMix` (Record) and `skyUnfogged` fields were
+// dead (Task 5) — superseded by the scalar/derived fields below, which the
+// realtime environment drives per-frame instead.
 export const kswPost = {
   dof: { focalLength: 1.4, bokehScale: 1.6 },
-  // the big plate sees mostly open sky in the GI probe — damp the white
-  // wash per preset so the sun stays the protagonist (the unfogged morning
-  // sky is by far the brightest)
-  envScale: { morning: 0.32, dusk: 0.6, night: 0.8 },
   // Task 4: the realtime environment supplies a per-frame giScale; the city
   // damps the GI-probe white-wash by this fixed scalar on top (= the former
   // envScale.morning, the value the overview framing was tuned at).
   envScaleScalar: 0.32,
-  // the unfogged bright sky feeds screen-space godrays/bloom — keep the veil off
-  godraysMix: { morning: 0.12, dusk: 0.5 },
   // Task 4: env.godraysMix ranges over the keyframe godraysMix (peak 0.35 at
   // golden morning); the city's tuned veil was a fixed 0.12, so scale the live
   // uniform by 0.12/0.35 to land on the same look. = godraysMix.morning /
   // envKeyframes.goldenMorning.godraysMix = 0.12 / 0.35.
   godraysScale: 0.12 / 0.35,
   bloomThreshold: 1.05,
-  // unfogged sky only where it reads better: the low morning sun renders a
-  // near-white sky that washes the whole frame, so morning keeps the fog tint
-  skyUnfogged: { morning: false, dusk: true, night: true },
 } as const;
 
 // Agent crowds (Slice D of the 10k-perf design). Above crowdThreshold the
