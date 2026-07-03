@@ -3,7 +3,7 @@
 // SoA-Spalten: parallele repeated-Felder gleicher Länge, ECS-ready.
 // Vertrag: Kacheln sind statisch; Positionen lokal-Meter um den Anker.
 syntax = "proto3";
-package abutown.world;
+package abutown.v1;
 
 message Projection {
   double anchor_lon = 1;
@@ -58,8 +58,8 @@ message RoadGraph {
 
 enum RoadClass {
   ROAD_CLASS_UNSPECIFIED = 0;
-  MOTORWAY = 1; PRIMARY = 2; SECONDARY = 3; RESIDENTIAL = 4;
-  SERVICE = 5; TRACK = 6; PATH = 7; FOOTWAY = 8; CYCLEWAY = 9; RAIL = 10;
+  ROAD_CLASS_MOTORWAY = 1; ROAD_CLASS_PRIMARY = 2; ROAD_CLASS_SECONDARY = 3; ROAD_CLASS_RESIDENTIAL = 4;
+  ROAD_CLASS_SERVICE = 5; ROAD_CLASS_TRACK = 6; ROAD_CLASS_PATH = 7; ROAD_CLASS_FOOTWAY = 8; ROAD_CLASS_CYCLEWAY = 9; ROAD_CLASS_RAIL = 10;
 }
 
 message TransitLayer {
@@ -108,11 +108,11 @@ message WorldTile {
 }
 
 enum Landcover {
-  LANDCOVER_UNSPECIFIED = 0; MEADOW = 1; FOREST = 2; FARMLAND = 3;
-  RESIDENTIAL_LU = 4; INDUSTRIAL_LU = 5; WATER = 6; ROCK = 7;
+  LANDCOVER_UNSPECIFIED = 0; LANDCOVER_MEADOW = 1; LANDCOVER_FOREST = 2; LANDCOVER_FARMLAND = 3;
+  LANDCOVER_RESIDENTIAL = 4; LANDCOVER_INDUSTRIAL = 5; LANDCOVER_WATER = 6; LANDCOVER_ROCK = 7;
 }
 
 enum Usage {
-  USAGE_UNSPECIFIED = 0; RESIDENTIAL_U = 1; COMMERCIAL = 2;
-  INDUSTRIAL_U = 3; PUBLIC = 4; AGRICULTURE = 5;
+  USAGE_UNSPECIFIED = 0; USAGE_RESIDENTIAL = 1; USAGE_COMMERCIAL = 2;
+  USAGE_INDUSTRIAL = 3; USAGE_PUBLIC = 4; USAGE_AGRICULTURE = 5;
 }
