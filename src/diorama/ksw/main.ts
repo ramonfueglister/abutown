@@ -356,6 +356,14 @@ async function boot(): Promise<void> {
   sun.shadow.normalBias = 0.04;
   sun.shadow.radius = 5;
   // PCSS: blocker search -> penumbra-sized PCF (contact-hardening soft shadows)
+  // penumbraScale corrects for the shadow-camera extent growing with zoom
+  // (updateShadowFrustum, up to 900 m): the penumbra term below is tuned in
+  // TEXELS for the hero extent (46 m), so a bigger extent -> bigger
+  // meters-per-texel -> the same texel penumbra reads as a much larger blur
+  // in world space. Scaling by shadowExtent/wantExtent keeps the blur's
+  // world-space size constant; at the hero extent this is exactly 1.0, so
+  // the hero frame is mathematically unchanged (pixel-treu).
+  const penumbraScale = uniform(1);
   {
     const texel = 1 / kswScene.shadowMapSize;
     const taps: Array<[number, number]> = [];
@@ -383,7 +391,7 @@ async function boot(): Promise<void> {
         distSum = fnode(distSum.add(occ.mul(dz)));
       }
       const blockerDist = distSum.div(occSum.max(0.0001));
-      const penumbra = blockerDist.mul(260).clamp(0.6, 11);
+      const penumbra = blockerDist.mul(260).mul(penumbraScale).clamp(0.6, 11);
       const filterR = fnode(penumbra.mul(float(texel)));
       let lit: FN = float(0);
       for (const off of taps) lit = fnode(lit.add(cmp(off, filterR, fnode(z))));
@@ -662,6 +670,9 @@ async function boot(): Promise<void> {
     sun.shadow.camera.top = wantExtent;
     sun.shadow.camera.bottom = -wantExtent;
     sun.target.position.copy(wantTarget);
+    // keep the PCSS penumbra's world-space size constant as the shadow
+    // camera's meters-per-texel grows with extent; 1.0 at the hero extent.
+    penumbraScale.value = kswScene.shadowExtent / wantExtent;
     // Hero restore must be value-identical to boot: exact far=220 and
     // sun.position = dir*sunDistance (NOT dir*(sunDistance+extent)) — any
     // drift here means a hero-plate return after visiting the city no
