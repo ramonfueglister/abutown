@@ -253,7 +253,7 @@ git commit -m "feat(geo): world.proto — Kachel/Graph/Manifest-Schema + JS-Code
 - Test: `tests/geo/stac.test.ts`
 
 **Interfaces:**
-- Produces: `stacItemUrls({ collection, bbox, pageJsonList }) -> string[]` — pure Funktion über bereits gefetchte STAC-Antwortseiten (Netz bleibt im fetch-Skript); wählt pro Item das passende Asset (DEM: `_2_2056.tif`-Variante = 2-m-Grid; Gebäude: `.gdb.zip`) und bei Jahrgangs-Duplikaten den **neuesten**.
+- Produces: `stacItemUrls({ pageJsonList, assetSuffix }) -> string[]` — pure Funktion über bereits gefetchte STAC-Antwortseiten (Netz bleibt im fetch-Skript; collection/bbox stecken in der Seiten-URL, die Task 3 baut); wählt pro Item das passende Asset (DEM: `_2_2056.tif`-Variante = 2-m-Grid; Gebäude: `.gdb.zip`) und bei Jahrgangs-Duplikaten den **neuesten**.
 
 - [ ] **Step 1: Failing Test**
 
