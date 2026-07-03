@@ -81,7 +81,7 @@ try {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(`console: ${m.text()}`);
   });
-  await page.goto(`http://${HOST}:${PORT}/ksw.html?preset=morning&cam=overview`, {
+  await page.goto(`http://${HOST}:${PORT}/ksw.html?at=2026-07-03T09:00:00Z&wx=clear&cam=overview`, {
     waitUntil: 'load',
     timeout: 20000,
   });

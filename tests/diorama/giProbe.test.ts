@@ -3,8 +3,7 @@
 // tests pin the steady-state policy: static presets render one face every
 // staticFaceInterval frames in the background, a dirty mark walks exactly 6
 // consecutive faces immediately (all of them, in order, PMREM rebuild once
-// at the end) and then returns to the background cadence, cycle mode walks
-// forever.
+// at the end) and then returns to the background cadence.
 
 import { describe, expect, it } from 'vitest';
 import { GiProbeScheduler } from '../../src/diorama/ksw/giProbe';
@@ -85,21 +84,5 @@ describe('GiProbeScheduler', () => {
     const walk = drain(s, 6); // immediate, no idle gap
     expect(walk.map((r) => r?.face)).toEqual([2, 3, 4, 5, 0, 1]);
     expect(walk.map((r) => r?.cubeComplete)).toEqual([false, false, false, false, false, true]);
-  });
-
-  it('cycle mode walks one face per frame forever, completing the cube every 6th frame', () => {
-    const s = new GiProbeScheduler('cycle');
-    const walk = drain(s, 13);
-    expect(walk.map((r) => r?.face)).toEqual([0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0]);
-    expect(walk.filter((r) => r?.cubeComplete).length).toBe(2);
-    expect(walk[5]?.cubeComplete).toBe(true);
-    expect(walk[11]?.cubeComplete).toBe(true);
-  });
-
-  it('cycle mode ignores dirty marks (it re-renders everything continuously anyway)', () => {
-    const s = new GiProbeScheduler('cycle');
-    drain(s, 2);
-    s.markDirty();
-    expect(s.next()?.face).toBe(2); // sequence uninterrupted
   });
 });

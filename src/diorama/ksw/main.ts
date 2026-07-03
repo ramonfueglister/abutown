@@ -24,15 +24,18 @@ import {
   kswGi,
   kswPost,
   kswScene,
-  lightPresets,
-  moonLight,
   nightGlow,
+  nightSkyLook,
   palette,
   post,
+  precipLook,
   roofFadePolicy,
-  skyPhys,
-  sunArcCfg,
 } from '../designTokens';
+import { computeEnvironment, type EnvironmentState } from '../environment/environment';
+import { applyCityEnvironment, type CityEnvironmentTargets } from './applyCityEnvironment';
+import { createPrecipitation } from '../environment/precipitation';
+import { createStarField, createMoonDisc } from '../environment/nightSky';
+import { CLEAR_SKY, sampleWeather, startWeatherLoop, type WeatherSeries, type WeatherState } from '../environment/weather';
 import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigPosition, roofFade, type CameraRigState } from './cameraRig';
 import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
 import { buildNav } from './nav';
@@ -53,6 +56,7 @@ import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
+import { lampGlowU } from './glowUniform';
 import { buildNature } from './geo/nature';
 import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
@@ -61,6 +65,7 @@ declare global {
   interface Window {
     __LOOK_READY?: boolean;
     __LOOK_BACKEND?: string;
+    __ENV_STATE?: unknown;
     __KSW?: {
       radius: number;
       yaw: number;
@@ -98,18 +103,33 @@ const camPresets: Record<CamPresetName, { target: [number, number, number]; radi
   city: { target: [cityMeta.landmarks.bahnhof[0] * 0.6, 2, cityMeta.landmarks.bahnhof[1] * 0.6], radius: 820, yaw: -0.5, pitch: 1.12 },
 };
 
+// ?wx= pins a fixed weather state (else the live Open-Meteo loop drives it).
+// Same table as look.ts (the room prototype) — kept 1:1.
+const WX_OVERRIDES: Record<string, WeatherState> = {
+  clear: CLEAR_SKY,
+  overcast: { ...CLEAR_SKY, cloudCover: 0.97, windSpeedMs: 3 },
+  rain: { ...CLEAR_SKY, cloudCover: 0.9, precipMmPerH: 4, windSpeedMs: 5, temperatureC: 10 },
+  snow: { ...CLEAR_SKY, cloudCover: 0.9, precipMmPerH: 3, snow: true, temperatureC: -2 },
+  fog: { ...CLEAR_SKY, cloudCover: 0.6, visibilityM: 150, fog: true, windSpeedMs: 0.5 },
+};
+
 async function boot(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
-  const rawPreset = params.get('preset');
-  const presetName = rawPreset === 'night' || rawPreset === 'dusk' ? rawPreset : 'morning';
+  // ?at= freezes the clock to a fixed UTC instant (else real now()).
+  const atParam = params.get('at');
+  const frozenAt = atParam ? new Date(atParam) : null;
+  if (frozenAt && Number.isNaN(frozenAt.getTime())) throw new Error(`invalid ?at=${atParam}`);
+  const wxParam = params.get('wx'); // 'clear'|'overcast'|'rain'|'snow'|'fog'|null
+  const now = (): Date => frozenAt ?? new Date();
   const camRaw = params.get('cam');
   const cityCams: CamPresetName[] = ['er', 'ops', 'bahnhof', 'zag', 'city'];
   const camPreset: CamPresetName = cityCams.includes(camRaw as CamPresetName) ? (camRaw as CamPresetName) : 'overview';
-  const cycleMode = params.get('cycle') === '1';
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
-  const preset = lightPresets[presetName];
+  // Realtime environment: physical sun/moon/stars for now() steered by live (or
+  // ?wx-pinned) weather. Re-evaluated every frame; this is the boot seed.
+  let lastEnv: EnvironmentState = computeEnvironment(now(), WX_OVERRIDES[wxParam ?? ''] ?? CLEAR_SKY);
 
   // ── generated interior plan (S3b, T17) computed up front so the T18 cutaway
   // presets (er/ops) can re-aim onto the Notfall / OP zone centers. The plan is
@@ -143,7 +163,7 @@ async function boot(): Promise<void> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.AgXToneMapping;
-  renderer.toneMappingExposure = preset.exposure;
+  renderer.toneMappingExposure = lastEnv.exposure;
   document.body.appendChild(renderer.domElement);
   window.__LOOK_BACKEND = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
     ? 'webgpu'
@@ -151,48 +171,35 @@ async function boot(): Promise<void> {
 
   const scene = new THREE.Scene();
   // fog scales with the zoom radius in animate(): identical look at the
-  // overview framing, no white-out when zooming far out
-  const fogBaseNear = preset.fogNear * kswScene.fogScale;
-  const fogBaseFar = preset.fogFar * kswScene.fogScale;
-  scene.fog = new THREE.Fog(preset.fogColor, fogBaseNear, fogBaseFar);
+  // overview framing, no white-out when zooming far out. applyCityEnvironment
+  // writes the base near/far into fogBase each frame; animate() × zoom.
+  const fogBase = { near: lastEnv.fogNear * kswScene.fogScale, far: lastEnv.fogFar * kswScene.fogScale };
+  scene.fog = new THREE.Fog(lastEnv.fogColor, fogBase.near, fogBase.far);
 
-  // Sun day-arc (shared recipe with the prototype)
-  const sunDirFor = (t: number): THREE.Vector3 => {
-    const elev = sunArcCfg.elevBase + sunArcCfg.elevMax * Math.sin(Math.PI * Math.min(Math.max(t, 0), 1));
-    const az = sunArcCfg.azRise + (sunArcCfg.azSet - sunArcCfg.azRise) * t;
-    return new THREE.Vector3(Math.cos(elev) * Math.cos(az), Math.sin(elev), Math.cos(elev) * Math.sin(az));
-  };
-  const sunLightFor = (dir: THREE.Vector3, boost: number): { color: THREE.Color; intensity: number } => {
-    const elevN = Math.min(Math.max(dir.y / 0.8, 0), 1);
-    const eased = elevN * elevN * (3 - 2 * elevN);
-    return {
-      color: new THREE.Color(sunArcCfg.colorLow).lerp(new THREE.Color(sunArcCfg.colorHigh), eased),
-      intensity: (0.8 + 6.2 * eased) * boost,
-    };
-  };
-  const phys = skyPhys[presetName];
-  const initialSunDir = sunDirFor(phys.timeOfDay);
+  const initialSunDir = new THREE.Vector3(lastEnv.sunDir[0], lastEnv.sunDir[1], lastEnv.sunDir[2]);
 
   const skyMesh = new SkyMesh();
   // sky is a directional shader — enlarging the shell only moves it beyond the
   // city plate (so distant buildings never poke through), the look is unchanged
   skyMesh.scale.setScalar(kswCity.skyScale);
-  skyMesh.turbidity.value = phys.turbidity;
-  skyMesh.rayleigh.value = phys.rayleigh;
-  skyMesh.mieCoefficient.value = phys.mieCoefficient;
-  skyMesh.mieDirectionalG.value = phys.mieG;
+  skyMesh.turbidity.value = lastEnv.turbidity;
+  skyMesh.rayleigh.value = lastEnv.rayleigh;
+  skyMesh.mieCoefficient.value = lastEnv.mieCoefficient;
+  skyMesh.mieDirectionalG.value = lastEnv.mieG;
   skyMesh.sunPosition.value.copy(initialSunDir);
-  // the sky sphere sits beyond fogFar and would be tinted flat by the fog;
-  // per-preset choice — the morning sky is so bright that the fog tint is
-  // actually the better look there
-  (skyMesh.material as THREE.Material & { fog: boolean }).fog = !kswPost.skyUnfogged[presetName];
+  // The sky shell (r=skyScale) sits far beyond fogFar; leaving fog on would
+  // flat-tint the whole sky. Off always (matches the room prototype).
+  (skyMesh.material as THREE.Material & { fog: boolean }).fog = false;
   scene.add(skyMesh);
 
   // Procedural cloud dome (fbm, sun-lit silver lining)
   const sunDirUniform = uniform(initialSunDir.clone());
   const cloudLit = uniform(new THREE.Color(0xffffff));
   const cloudShadow = uniform(new THREE.Color(0x9aa8b5));
-  const driftU = uniform(0);
+  // Wind-driven drift on scene x/z; applyCityEnvironment integrates it (the
+  // noise y-component stays drift-free). Coverage is a shared live uniform.
+  const driftUV = uniform(new THREE.Vector2(0, 0));
+  const coverageU = uniform(0.44);
   // Two-layer clouds (spec §4): the hero dome fades out as the camera pulls
   // back to the city framing and a bigger, coarser city dome fades in. Both
   // opacities are driven by cloudMix (kswCityStyle.cloudSwap) in animate().
@@ -205,10 +212,9 @@ async function boot(): Promise<void> {
   cloudMatDome.fog = false;
   {
     const dir = positionWorld.normalize();
-    const p = vec3(dir.x.mul(float(cloudCfg.scale)).add(driftU), dir.y.mul(float(cloudCfg.scale * 1.6)), dir.z.mul(float(cloudCfg.scale)));
+    const p = vec3(dir.x.mul(float(cloudCfg.scale)).add(driftUV.x), dir.y.mul(float(cloudCfg.scale * 1.6)), dir.z.mul(float(cloudCfg.scale)).add(driftUV.y));
     const n = mx_fractal_noise_float(p, 4, 2.0, 0.55, 1.0);
-    const coverage = float(cloudCfg.coverage[presetName]);
-    const dens = smoothstep(float(0.06), float(0.34), n.add(coverage.sub(0.5)));
+    const dens = smoothstep(float(0.06), float(0.34), n.add(coverageU.sub(0.5)));
     const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
     // fold the hero fade into the opacity node before the material compiles
     cloudMatDome.opacityNode = dens.mul(horizonFade).mul(heroCloudOpacity);
@@ -230,10 +236,9 @@ async function boot(): Promise<void> {
   cloudMatCity.fog = false;
   {
     const dir = positionWorld.normalize();
-    const p = vec3(dir.x.mul(float(cloudCfg.scale * 3)).add(driftU), dir.y.mul(float(cloudCfg.scale * 4.8)), dir.z.mul(float(cloudCfg.scale * 3)));
+    const p = vec3(dir.x.mul(float(cloudCfg.scale * 3)).add(driftUV.x), dir.y.mul(float(cloudCfg.scale * 4.8)), dir.z.mul(float(cloudCfg.scale * 3)).add(driftUV.y));
     const n = mx_fractal_noise_float(p, 4, 2.0, 0.55, 1.0);
-    const coverage = float(cloudCfg.coverage[presetName]);
-    const dens = smoothstep(float(0.06), float(0.34), n.add(coverage.sub(0.5)));
+    const dens = smoothstep(float(0.06), float(0.34), n.add(coverageU.sub(0.5)));
     const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
     cloudMatCity.opacityNode = dens.mul(horizonFade).mul(cityCloudOpacity);
     const facing = dot(dir, sunDirUniform).mul(0.5).add(0.5);
@@ -245,67 +250,43 @@ async function boot(): Promise<void> {
   const cityCloudDome = new THREE.Mesh(new THREE.SphereGeometry(kswCity.domeRadius, 32, 24), cloudMatCity);
   scene.add(cityCloudDome);
 
-  const discDist = kswScene.domeRadius * 0.82;
+  // Sun disc: position + visibility driven per-frame by applyCityEnvironment.
   const sunDisc = new THREE.Mesh(
     new THREE.SphereGeometry(5.2, 20, 20),
     new THREE.MeshBasicMaterial({ color: 0xfff0d5, fog: false }),
   );
   scene.add(sunDisc);
-  const moonDisc = new THREE.Mesh(
-    new THREE.SphereGeometry(3.4, 20, 20),
-    new THREE.MeshBasicMaterial({ color: palette.star, fog: false }),
-  );
-  moonDisc.position.set(-14, 21, 26).normalize().multiplyScalar(discDist);
-  moonDisc.visible = presetName === 'night';
+
+  // Moon disc + star field — extracted to environment/nightSky.ts, built with
+  // the city dome values (nightSkyLook.city). Both always exist now;
+  // visibility/opacity/rotation are driven by applyCityEnvironment.
+  const { mesh: moonDisc, phaseDir: moonPhaseDirU } = createMoonDisc({
+    radius: nightSkyLook.city.moonRadius,
+    distance: nightSkyLook.city.moonDistance,
+  });
   scene.add(moonDisc);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1);
-  // Latest sun direction — the shadow-follow rig (below) places the sun
-  // relative to the camera target along this vector so the light angle stays
-  // identical to the hero while the frustum walks the city.
-  let currentSunDir = initialSunDir.clone();
-  const applySunState = (t: number): void => {
-    const dir = sunDirFor(t);
-    currentSunDir = dir.clone();
-    skyMesh.sunPosition.value.copy(dir);
-    (sunDirUniform.value as THREE.Vector3).copy(dir);
-    if (presetName !== 'night') {
-      const lightState = sunLightFor(dir, phys.sunBoost);
-      sun.position.copy(dir.clone().multiplyScalar(kswScene.sunDistance));
-      sun.color.copy(lightState.color);
-      sun.intensity = Math.max(lightState.intensity, 0.05);
-      (cloudLit.value as THREE.Color).copy(lightState.color).lerp(new THREE.Color(0xffffff), 0.3);
-      (cloudShadow.value as THREE.Color).copy(new THREE.Color(0x8795a3).lerp(lightState.color, 0.15));
-    } else {
-      (cloudLit.value as THREE.Color).set(0x9fb2cc);
-      (cloudShadow.value as THREE.Color).set(0x39485c);
-    }
-    sunDisc.position.copy(dir.clone().multiplyScalar(discDist));
-    sunDisc.visible = presetName !== 'night' && dir.y > 0.015;
-    moonDisc.visible = presetName === 'night' || dir.y <= 0.015;
-  };
+  const { object3d: starsObj, material: starsMat } = createStarField({
+    radius: nightSkyLook.city.starRadius,
+    quadSize: nightSkyLook.city.starQuad,
+    count: nightSkyLook.city.starCount,
+  });
+  scene.add(starsObj);
 
-  if (preset.showStars) {
-    const starPositions: number[] = [];
-    let seed = 42;
-    const rand = () => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed / 2147483648;
-    };
-    for (let i = 0; i < 220; i++) {
-      const az = rand() * Math.PI * 2;
-      const el = 0.15 + rand() * 1.25;
-      const r = kswScene.domeRadius * 0.85;
-      starPositions.push(r * Math.cos(el) * Math.cos(az), r * Math.sin(el), r * Math.cos(el) * Math.sin(az));
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
-    const stars = new THREE.Points(
-      starGeo,
-      new THREE.PointsMaterial({ color: palette.star, size: 0.8, sizeAttenuation: true, transparent: true, opacity: 0.85, fog: false }),
-    );
-    scene.add(stars);
-  }
+  const sun = new THREE.DirectionalLight(0xffffff, 1);
+  // Latest key-light direction — the shadow-follow rig (below) places the sun
+  // relative to the camera target along this vector so the light angle stays
+  // identical to the hero while the frustum walks the city. applyCityEnvironment
+  // writes it IN-PLACE (day: sun dir, night: moon dir).
+  const currentSunDir = initialSunDir.clone();
+  // Shadow-refresh threshold (Slice E + Task 4): the realtime sun creeps
+  // continuously, so re-rendering the cached crowd shadow map on every
+  // direction change would defeat the cache. Track the direction the map was
+  // last rendered at and only refresh once the sun has drifted past this
+  // angle. 0.002 rad =~ one refresh every ~27s of real sun motion
+  // (~0.25deg/min creep) — sub-texel under PCSS, so no visible staleness.
+  const SHADOW_SUN_REFRESH_RAD = 0.002;
+  const lastShadowSunDir = currentSunDir.clone();
 
   // ── dynamic camera: wheel dolly + left-drag orbit ──────────────────────
   const start = camPresets[camPreset];
@@ -363,17 +344,8 @@ async function boot(): Promise<void> {
   renderer.domElement.addEventListener('pointercancel', endDrag);
 
   // ── light rig ──────────────────────────────────────────────────────────
-  if (presetName !== 'night') {
-    applySunState(phys.timeOfDay);
-  } else {
-    sun.color.set(moonLight.color);
-    sun.intensity = moonLight.intensity;
-    sun.position.set(...moonLight.position).normalize().multiplyScalar(kswScene.sunDistance);
-    applySunState(phys.timeOfDay);
-    // night: the shadow caster is the moon — follow along the moon direction,
-    // not the (unused) daytime sun vector applySunState just recorded.
-    currentSunDir = new THREE.Vector3(...moonLight.position).normalize();
-  }
+  // The key light is fully driven by applyCityEnvironment (color/intensity/dir);
+  // boot leaves it neutral. Only the shadow-camera setup below is static.
   sun.castShadow = true;
   sun.shadow.mapSize.set(kswScene.shadowMapSize, kswScene.shadowMapSize);
   sun.shadow.camera.left = -kswScene.shadowExtent;
@@ -434,7 +406,9 @@ async function boot(): Promise<void> {
   // off the origin, so the target proxy must live in the scene graph.
   scene.add(sun.target);
 
-  const hemi = new THREE.HemisphereLight(preset.hemiSky, preset.hemiGround, preset.hemiIntensity * gi.hemiCut);
+  // Neutral at boot; applyCityEnvironment sets color/intensity (hemiCut is
+  // already folded into the keyframe hemiIntensity values).
+  const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
   scene.add(hemi);
 
   // The stylized hero hospital (buildHospital) is gone (T19): the real KSW
@@ -447,7 +421,7 @@ async function boot(): Promise<void> {
   // shader, roofs, plinth/eave trim. Facade detail is always on (hero/near).
   // mainBuilding always comes from the FULL campus so zone decomposition keys
   // off the true largest footprint even when the shell mesh is suppressed.
-  const { group: kswCampus, mainBuilding } = buildKswCampus(kswBuildings, { lampGlow: preset.lampOn });
+  const { group: kswCampus, mainBuilding } = buildKswCampus(kswBuildings);
   scene.add(kswCampus);
   const setCutaway = kswCampus.userData.setCutaway as (u: { cutH: number; upperFade: number }) => void;
 
@@ -521,7 +495,7 @@ async function boot(): Promise<void> {
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
   cityRoot.add(cityPlate);
-  cityRoot.add(buildCityMassing(cityBuildings, { lampGlow: preset.lampOn }));
+  cityRoot.add(buildCityMassing(cityBuildings));
   cityRoot.add(buildRoads(cityRoads, cityRails));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
@@ -539,7 +513,7 @@ async function boot(): Promise<void> {
     }),
   );
   cityRoot.add(buildWindows(cityBuildings));
-  cityRoot.add(buildLamps(cityRoads, { lampGlow: preset.lampOn }));
+  cityRoot.add(buildLamps(cityRoads));
   scene.add(cityRoot);
 
   // 3-ring semantic LOD (Task 10, spec §2c): detail follows the camera radius.
@@ -598,17 +572,16 @@ async function boot(): Promise<void> {
   // of real casters. At or below the threshold the authored look is untouched.
   const crowd = spawnSpecs.length > kswAgents.crowdThreshold;
   // Shadow caching (Slice E): in crowd mode every caster is static — agents
-  // use blob shadows (castShadow=false, agentMeshes.ts), and outside cycle
-  // mode the sun stands still — so re-rendering the shadow map every frame
-  // buys nothing (it was ~3.5k of ~3.8k draw calls). The r185 node-based
-  // shadow system (ShadowNode.updateBefore) honors the classic
-  // light.shadow.autoUpdate / needsUpdate flags: autoUpdate=false freezes
-  // the cached depth map, needsUpdate=true re-renders it exactly once.
-  // Refresh trigger: the roof fade crossing the castShadow threshold
-  // (staticBatch toggles roofBatch.castShadow there). At or below the crowd
-  // threshold (real moving agent shadows) and in cycle mode (the sun moves)
-  // the per-frame path stays untouched.
-  const shadowCached = crowd && !cycleMode;
+  // use blob shadows (castShadow=false, agentMeshes.ts) — so re-rendering the
+  // shadow map every frame buys nothing (it was ~3.5k of ~3.8k draw calls).
+  // Task 4 put the sun on the realtime clock (it creeps ~0.25deg/min), but a
+  // threshold-refresh (SHADOW_SUN_REFRESH_RAD below, in animate()) keeps the
+  // depth map fresh without re-rendering every frame, so the crowd cache is
+  // still worth taking. The r185 node-based shadow system
+  // (ShadowNode.updateBefore) honors the classic light.shadow.autoUpdate /
+  // needsUpdate flags: autoUpdate=false freezes the cached depth map,
+  // needsUpdate=true re-renders it exactly once.
+  const shadowCached = crowd;
   if (shadowCached) {
     sun.shadow.autoUpdate = false;
     sun.shadow.needsUpdate = true; // boot: render the map once, then freeze
@@ -641,11 +614,14 @@ async function boot(): Promise<void> {
   }
   agentInstances.update(0);
 
-  // Edge mist ring around the plate rim
+  // Edge mist ring around the plate rim. Base opacity/color are driven per-frame
+  // by applyCityEnvironment (into mistBaseOpacity); animate() applies the
+  // zoom-fade and city crossfade on top.
+  const mistBaseOpacity = { value: lastEnv.mistOpacity };
   const mistMat = new THREE.MeshBasicMaterial({
-    color: preset.mistColor,
+    color: lastEnv.mistColor,
     transparent: true,
-    opacity: preset.mistOpacity,
+    opacity: lastEnv.mistOpacity,
     depthWrite: false,
   });
   // hug the real campus complex (the generated interior's bounding box) rather
@@ -698,32 +674,45 @@ async function boot(): Promise<void> {
   addMistRing(cityMeta.plate.w / 2, cityMeta.plate.d / 2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat);
 
   // Night life: window glow + lamp bulbs are baked into the glowNight batch
-  // at build time (staticBatch.ts); only the actual light pools live here.
-  // Rebased (T19) onto the real forecourt: two warm pools flank the main door,
-  // one glows over the emergency zone.
-  if (preset.lampOn) {
+  // at build time (staticBatch.ts) and ride the shared lampGlowU uniform; the
+  // actual light pools live here. Rebased (T19) onto the real forecourt: two
+  // warm pools flank the main door, one glows over the emergency zone. The
+  // pools are ALWAYS created now; their intensity scales by glow01 (Task 3:
+  // preset-driven; Task 4: continuous per-frame from lampLights/lampBaseIntensities).
+  const lampLights: THREE.PointLight[] = [];
+  const lampBaseIntensities: number[] = [];
+  const glow01 = lastEnv.lampOn01;
+  {
     const [dox, doz] = [Math.sin(mainDoor.yaw), Math.cos(mainDoor.yaw)];
     const perpX = Math.cos(mainDoor.yaw);
     const perpZ = -Math.sin(mainDoor.yaw);
     for (const side of [-1, 1]) {
       const px = mainDoor.x + dox * 6 + perpX * side * 6;
       const pz = mainDoor.z + doz * 6 + perpZ * side * 6;
-      const pool = new THREE.PointLight(nightGlow.bulb, 14 * preset.lampBoost, 12, 2);
+      const base = nightGlow.cityPool * nightGlow.boost;
+      const pool = new THREE.PointLight(nightGlow.bulb, base * glow01, 12, 2);
       pool.position.set(px, 3.0, pz);
       scene.add(pool);
+      lampLights.push(pool);
+      lampBaseIntensities.push(base);
     }
     // emergency-zone glow
-    const emLamp = new THREE.PointLight(nightGlow.bulb, 20 * preset.lampBoost, 16, 2);
+    const emBase = nightGlow.emergency * nightGlow.boost;
+    const emLamp = new THREE.PointLight(nightGlow.bulb, emBase * glow01, 16, 2);
     emLamp.position.set(erZone.x + dox * (erZone.d / 2), 2.6, erZone.z + doz * (erZone.d / 2));
     scene.add(emLamp);
+    lampLights.push(emLamp);
+    lampBaseIntensities.push(emBase);
   }
+  // Task 3: presets still drive the glow — one shared uniform for the batched
+  // glow geometry (windows + bulbs). Task 4 fades this continuously with sunset.
+  lampGlowU.value = glow01;
 
   // One-bounce GI: capture from above the roofs, feed back as IBL. Boot does
   // the full synchronous 6-face warm-up (never a black env map); after that
-  // the scheduler amortizes refreshes to at most ONE face per frame (Slice E)
-  // — continuous walking in cycle mode; on the static presets a slow
-  // background cadence (one face per kswGi.staticFaceInterval frames) plus
-  // immediate dirty walks when the roof fade crosses the castShadow /
+  // the scheduler amortizes refreshes to at most ONE face per frame (Slice E):
+  // a slow background cadence (one face per kswGi.staticFaceInterval frames)
+  // plus immediate dirty walks when the roof fade crosses the castShadow /
   // visibility thresholds or settles after a fade.
   const cubeRT = new THREE.CubeRenderTarget(kswGi.probeSize);
   const cubeCam = new THREE.CubeCamera(0.1, 400, cubeRT);
@@ -745,9 +734,15 @@ async function boot(): Promise<void> {
   } finally {
     agentInstances.setProbeMode(false);
   }
-  const giScheduler = new GiProbeScheduler(cycleMode ? 'cycle' : 'static');
+  // The scheduler amortizes probe refreshes (≤1 face/frame). computeEnvironment
+  // changes only slowly across a frame, so the static background cadence is
+  // fine — no per-frame full re-walk needed for the realtime sun.
+  const giScheduler = new GiProbeScheduler('static');
   scene.environment = cubeRT.texture;
-  scene.environmentIntensity = gi.environmentIntensity * preset.giScale * kswPost.envScale[presetName];
+  // giScale is written per-frame by applyCityEnvironment into giBase; animate()
+  // computes scene.environmentIntensity = gi.environmentIntensity * giBase * envScaleScalar.
+  const giBase = { value: lastEnv.giScale };
+  scene.environmentIntensity = gi.environmentIntensity * giBase.value * kswPost.envScaleScalar;
 
   // ── camera-following sun shadows (spec §4: hero-grade light everywhere) ──
   // The shadow frustum walks with the camera target: centred on rig.target,
@@ -758,18 +753,22 @@ async function boot(): Promise<void> {
   // there is no small fixed plate to pin the frustum to.
   const onHeroPlate = (): boolean => false;
   let shadowExtentNow: number = kswScene.shadowExtent;
-  let shadowTargetNow = new THREE.Vector3(0, 0, 0);
+  const shadowTargetNow = new THREE.Vector3(0, 0, 0);
+  // Scratch for the per-frame "wanted" target — computed fresh every call but
+  // never retained past this function, so one shared instance is safe (avoids
+  // an allocation per frame; see Task-4 review finding).
+  const wantTargetScratch = new THREE.Vector3(0, 0, 0);
   const updateShadowFrustum = (force = false): void => {
     const hero = onHeroPlate() && rig.radius <= 120;
     const wantExtent = hero
       ? kswScene.shadowExtent
       : Math.max(kswScene.shadowExtent, Math.min(kswScene.shadowExtent + (rig.radius - 120) * 0.9, 900));
-    const wantTarget = hero ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(...rig.target);
+    const wantTarget = hero ? wantTargetScratch.set(0, 0, 0) : wantTargetScratch.set(...rig.target);
     const extentJump = Math.abs(wantExtent - shadowExtentNow) > shadowExtentNow * 0.1;
     const targetJump = wantTarget.distanceTo(shadowTargetNow) > 20;
     if (!force && !extentJump && !targetJump) return;
     shadowExtentNow = wantExtent;
-    shadowTargetNow = wantTarget;
+    shadowTargetNow.copy(wantTarget);
     sun.shadow.camera.left = -wantExtent;
     sun.shadow.camera.right = wantExtent;
     sun.shadow.camera.top = wantExtent;
@@ -822,13 +821,13 @@ async function boot(): Promise<void> {
   const aoPass = ao(scenePassDepth, scenePassNormal, camera);
   const withAo = beautyAA.mul(aoPass.getTextureNode().x);
   const viewZ = scenePass.getViewZNode();
-  let lit = withAo;
-  if (presetName !== 'night') {
-    const raysNode = godrays(scenePassDepth, camera, sun);
-    raysNode.density.value = post.godraysDensity;
-    raysNode.maxDensity.value = post.godraysMaxDensity;
-    lit = withAo.add(chain(raysNode).mul(kswPost.godraysMix[presetName]));
-  }
+  // Godrays always built now; the mix is a live uniform (env.godraysMix, written
+  // by applyCityEnvironment) scaled by the city's tuned veil constant.
+  const godraysMixU = uniform(0);
+  const raysNode = godrays(scenePassDepth, camera, sun);
+  raysNode.density.value = post.godraysDensity;
+  raysNode.maxDensity.value = post.godraysMaxDensity;
+  const lit = withAo.add(chain(raysNode).mul(godraysMixU).mul(float(kswPost.godraysScale)));
   // Tilt-shift focus follows the dolly: focus distance = orbit radius.
   const focusU = uniform(rig.radius);
   const withDof = chain(dof(lit, viewZ, focusU, kswPost.dof.focalLength, kswPost.dof.bokehScale));
@@ -838,11 +837,68 @@ async function boot(): Promise<void> {
   const tone = smoothstep(float(grade.low), float(grade.high), lum);
   const tint = mix(vec3(...grade.shadowTint), vec3(...grade.highlightTint), tone);
   const toned = composed.rgb.mul(tint);
+  // Saturation + contrast are live uniforms (per-keyframe drama around mid-gray).
+  const saturationU = uniform(1);
+  const contrastU = uniform(1);
   const satLum = dot(toned, vec3(0.299, 0.587, 0.114));
-  const saturated = mix(vec3(satLum, satLum, satLum), toned, float(preset.saturation));
-  const contrasted = saturated.sub(float(0.5)).mul(float(preset.contrast)).add(float(0.5)).clamp(0, 1);
+  const saturated = mix(vec3(satLum, satLum, satLum), toned, saturationU);
+  const contrasted = saturated.sub(float(0.5)).mul(contrastU).add(float(0.5)).clamp(0, 1);
   const graded = vec4(contrasted, composed.a);
   postProcessing.outputNode = film(graded, float(post.filmGrain));
+
+  // Precipitation: GPU instanced rain/snow, driven by applyCityEnvironment.
+  const precipitation = createPrecipitation({
+    ...precipLook.city,
+    rainSx: precipLook.rainCitySx,
+    rainSy: precipLook.rainCitySy,
+    snowSx: precipLook.snowCitySx,
+    snowSy: precipLook.snowCitySy,
+    rainAlpha: precipLook.rainCityAlpha,
+  });
+  scene.add(precipitation.object3d);
+
+  // Weather: live Open-Meteo loop unless a ?wx override pins a fixed state.
+  let weatherSeries: WeatherSeries | null = null;
+  if (!wxParam) startWeatherLoop((s) => { weatherSeries = s; });
+  const currentWeather = (): WeatherState =>
+    WX_OVERRIDES[wxParam ?? ''] ?? (weatherSeries ? sampleWeather(weatherSeries, now()) : CLEAR_SKY);
+
+  // The realtime environment target bundle. TSL uniform nodes expose a runtime
+  // `.value` that @types/three r185 doesn't model on the node union, so the
+  // uniform members are cast at this boundary only.
+  type Holder<T> = { value: T };
+  const envTargets: CityEnvironmentTargets = {
+    renderer,
+    fog: scene.fog as THREE.Fog,
+    fogBase,
+    sun,
+    currentSunDir,
+    hemi,
+    skyMesh: skyMesh as unknown as CityEnvironmentTargets['skyMesh'],
+    cloud: {
+      sunDirUniform: sunDirUniform as unknown as Holder<THREE.Vector3>,
+      lit: cloudLit as unknown as Holder<THREE.Color>,
+      shadow: cloudShadow as unknown as Holder<THREE.Color>,
+      coverageU: coverageU as unknown as Holder<number>,
+      driftUV: driftUV as unknown as Holder<THREE.Vector2>,
+    },
+    post: {
+      saturationU: saturationU as unknown as Holder<number>,
+      contrastU: contrastU as unknown as Holder<number>,
+      godraysMixU: godraysMixU as unknown as Holder<number>,
+    },
+    mist: { mat: mistMat, cityMat: cityMistMat, baseOpacity: mistBaseOpacity },
+    sunDisc,
+    moon: { mesh: moonDisc, phaseDir: moonPhaseDirU as unknown as Holder<THREE.Vector3> },
+    stars: { object3d: starsObj, material: starsMat as THREE.MeshBasicMaterial },
+    lampLights,
+    lampBaseIntensities,
+    precipitation,
+    giBase,
+    exposure: (v: number) => { renderer.toneMappingExposure = v; },
+    scratch: { v3: new THREE.Vector3(), c1: new THREE.Color(), c2: new THREE.Color() },
+    lampGlow: lampGlowU as unknown as Holder<number>,
+  };
 
   // Perf probe: draw calls / triangles of the last rendered frame + EMA of
   // the main-thread frame cost (whole animate body / agent loop / render).
@@ -935,8 +991,8 @@ async function boot(): Promise<void> {
       if (shadowCached) sun.shadow.needsUpdate = true;
     }
     const fogZoom = Math.max(1, rig.radius / 110);
-    (scene.fog as THREE.Fog).near = fogBaseNear * fogZoom;
-    (scene.fog as THREE.Fog).far = fogBaseFar * fogZoom;
+    (scene.fog as THREE.Fog).near = fogBase.near * fogZoom;
+    (scene.fog as THREE.Fog).far = fogBase.far * fogZoom;
     // roofFade is now purely a zoom-derived scalar (0 close .. 1 far): it drives
     // the edge-mist thinning + the __KSW.roofFade smoke signal + GI-refresh
     // thresholds. The campus roof itself opens via the dollhouse cutaway, not
@@ -981,15 +1037,16 @@ async function boot(): Promise<void> {
 
     focusU.value = rig.radius;
     // edge mist is a close-up treatment; from the overview it would read as
-    // separate discs, so it thins out as the camera pulls back
-    mistMat.opacity = preset.mistOpacity * (1 - fade * 0.75);
+    // separate discs, so it thins out as the camera pulls back. Base opacity is
+    // the per-frame environment value (mistBaseOpacity), fade/cloudMix on top.
+    mistMat.opacity = mistBaseOpacity.value * (1 - fade * 0.75);
     // two-layer clouds + city mist crossfade on the 300→600 zoom-out ramp:
     // hero dome & hero mist rule up close, the city dome & city rim take over.
     const swap = kswCityStyle.cloudSwap;
     const cloudMix = Math.min(1, Math.max(0, (rig.radius - swap.start) / (swap.end - swap.start)));
     heroCloudOpacity.value = 1 - cloudMix;
     cityCloudOpacity.value = cloudMix;
-    cityMistMat.opacity = preset.mistOpacity * 0.8 * cloudMix;
+    cityMistMat.opacity = mistBaseOpacity.value * 0.8 * cloudMix;
     kswSnapshot.radius = rig.radius;
     kswSnapshot.yaw = rig.yaw;
     kswSnapshot.pitch = rig.pitch;
@@ -1034,19 +1091,37 @@ async function boot(): Promise<void> {
       agentInstances.lod.frame(camera);
       renderer.compute(agentInstances.lod.node);
     }
-    driftU.value = t * cloudCfg.drift;
     frameCount++;
-    if (cycleMode) {
-      applySunState((t / sunArcCfg.cycleSeconds) % 1);
-      // applySunState unconditionally writes sun.position = dir*sunDistance
-      // (origin-relative), which clobbers the follow-rig position this frame's
-      // earlier updateShadowFrustum() call set — sun.target stays at rig.target
-      // while sun.position snaps back to the origin ray, skewing the shadow
-      // axis. Force a reapply so position/target/far agree again. Cheap: the
-      // extent/target math is trivial and cycle mode already re-renders
-      // shadows every frame (autoUpdate), so this adds no new shadow-map cost.
+    // ── realtime environment: physical sun/moon/stars for now(), steered by
+    // live (or ?wx-pinned) weather. applyCityEnvironment writes every look
+    // uniform (incl. cloud drift integration) and the shared currentSunDir.
+    lastEnv = computeEnvironment(now(), currentWeather());
+    applyCityEnvironment(envTargets, lastEnv, dt);
+    // The precipitation field is periodic (positions wrap via mod inside its
+    // box), so re-centring the mesh on box-multiples of the camera target is
+    // seamless — this keeps rain/snow visible at far ?cam targets (e.g.
+    // bahnhof/zag) instead of only ever falling over the world origin.
+    precipitation.object3d.position.set(
+      Math.round(rig.target[0] / precipLook.city.boxX) * precipLook.city.boxX,
+      0,
+      Math.round(rig.target[2] / precipLook.city.boxZ) * precipLook.city.boxZ,
+    );
+    // The follow rig placed sun.position from currentSunDir earlier this frame;
+    // apply just moved currentSunDir, so re-sync position/target/far. Cheap: the
+    // extent/target math is trivial. The sun creeps continuously in realtime, so
+    // re-rendering the (cached, crowd-mode) shadow map on every direction change
+    // would defeat Slice E's cache; only force a refresh once the sun has drifted
+    // past SHADOW_SUN_REFRESH_RAD since the map was last rendered. Camera moves
+    // (extent/target jumps) still refresh via updateShadowFrustum()'s own
+    // early-out path, unaffected by this threshold.
+    if (lastShadowSunDir.angleTo(currentSunDir) > SHADOW_SUN_REFRESH_RAD) {
+      lastShadowSunDir.copy(currentSunDir);
       updateShadowFrustum(true);
+    } else {
+      updateShadowFrustum();
     }
+    scene.environmentIntensity = gi.environmentIntensity * giBase.value * kswPost.envScaleScalar;
+    window.__ENV_STATE = lastEnv;
     // Amortized GI probe: at most ONE cube face per frame (was: whole scene
     // 6x in one frame every 240 frames). PMREM rebuild once per full cube.
     // Probe faces render without main-camera culling (setProbeMode).

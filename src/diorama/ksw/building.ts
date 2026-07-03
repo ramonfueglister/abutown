@@ -189,7 +189,7 @@ export function buildSign(room: Room): THREE.Group {
   return g;
 }
 
-export function buildHospital(plan: FloorPlan, opts: { lampGlow: boolean }): { group: THREE.Group; roofs: RoofControl } {
+export function buildHospital(plan: FloorPlan): { group: THREE.Group; roofs: RoofControl } {
   const group = new THREE.Group();
 
   // ground plate (soft lawn) + hard surfaces
@@ -314,7 +314,7 @@ export function buildHospital(plan: FloorPlan, opts: { lampGlow: boolean }): { g
   });
   group.add(roofGroup);
 
-  const { roofs } = batchHospital(group, opts);
+  const { roofs } = batchHospital(group);
   return { group, roofs };
 }
 

@@ -13,6 +13,7 @@ import {
 import { clay, kswCityStyle, kswPalette, kswS3, palette } from '../../designTokens';
 import { NIGHT_WINDOW_SHARE } from '../staticBatch';
 import { clayMat } from '../props';
+import { lampGlowU } from '../glowUniform';
 import type { BakedBuilding, BakedMesh, BakedWallMesh } from './geoData';
 
 // Baked facade-UV quantization factor: 1 unit = 0.2 m. MUST match
@@ -217,9 +218,10 @@ export function tintedClay(base: number): THREE.MeshPhysicalMaterial {
 // (storeyH, windowSpacing, windowW/H, sillFrac). Inside a window cell the clay
 // mixes toward palette.glass with a white frame border and a slight edge
 // darkening for inset depth. Clamp: no window whose storey TOP would sit above
-// eaveH−0.2, so nothing ever paints above the real eave (root cause B). At
-// night (lampGlow) a deterministic per-cell hash < NIGHT_WINDOW_SHARE lights
-// the glass warm via emissiveNode. `facadeDetail` (0/1 uniform, driven by the
+// eaveH−0.2, so nothing ever paints above the real eave (root cause B). A
+// deterministic per-cell hash < NIGHT_WINDOW_SHARE lights the glass warm via
+// emissiveNode, scaled by the shared lampGlowU uniform (0 by day, 1 at night).
+// `facadeDetail` (0/1 uniform, driven by the
 // LOD ring) fades the whole raster out for the far ring.
 type FacadeMaterial = THREE.MeshPhysicalNodeMaterial & {
   facadeDetail: ReturnType<typeof uniform>;
@@ -234,7 +236,7 @@ export type CutawayFacadeMaterial = FacadeMaterial & {
   upperFade: ReturnType<typeof uniform>;
 };
 
-export function facadeMaterial(base: number, opts: { lampGlow: boolean; cutaway?: boolean }): FacadeMaterial {
+export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): FacadeMaterial {
   const s = kswCityStyle;
   const glass = new THREE.Color(palette.glass);
   const frameCol = new THREE.Color(palette.white);
@@ -329,21 +331,21 @@ export function facadeMaterial(base: number, opts: { lampGlow: boolean; cutaway?
     m.colorNode = facadeColor;
   }
 
-  if (opts.lampGlow) {
-    // deterministic per-cell hash on the facade grid cell (u-cell + storey),
-    // mirroring nightWindowHash's sin-fract formula but on cell indices so the
-    // choice is stable per window. Only the glass area glows.
-    const cellHash = colIdx.mul(float(12.9898)).add(storeyIdx.mul(float(78.233))).sin().mul(float(43758.5453));
-    const hash = cellHash.sub(cellHash.floor()); // 0..1 fract via sin, like nightWindowHash
-    const lit = hash.lessThan(float(NIGHT_WINDOW_SHARE)).select(float(1), float(0));
-    const glow = glassMask.mul(gate).mul(lit);
-    m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(0.9)));
-  }
+  // Night glow is ALWAYS built now; its intensity rides the shared lampGlowU
+  // uniform (0 = day, no glow; 1 = full night). A deterministic per-cell hash
+  // on the facade grid cell (u-cell + storey), mirroring nightWindowHash's
+  // sin-fract formula but on cell indices so the choice is stable per window,
+  // decides which panes glow. Only the glass area glows.
+  const cellHash = colIdx.mul(float(12.9898)).add(storeyIdx.mul(float(78.233))).sin().mul(float(43758.5453));
+  const hash = cellHash.sub(cellHash.floor()); // 0..1 fract via sin, like nightWindowHash
+  const lit = hash.lessThan(float(NIGHT_WINDOW_SHARE)).select(float(1), float(0));
+  const glow = glassMask.mul(gate).mul(lit);
+  m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(0.9)).mul(lampGlowU));
 
   return Object.assign(m, { facadeDetail, cutH, upperFade }) as CutawayFacadeMaterial;
 }
 
-export function buildCityMassing(buildings: BakedBuilding[], opts: { lampGlow: boolean } = { lampGlow: false }): THREE.Group {
+export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityMassing';
 
@@ -357,7 +359,7 @@ export function buildCityMassing(buildings: BakedBuilding[], opts: { lampGlow: b
 
   // Walls: same tinted clay, but a TSL node material that paints the procedural
   // window raster in-shader (Task 13). setFacadeDetail flips the LOD uniform.
-  const wallMat = facadeMaterial(palette.creamBase, opts);
+  const wallMat = facadeMaterial(palette.creamBase);
   const wallMesh = new THREE.Mesh(mergeWalls(buildings, palette.creamBase), wallMat);
   wallMesh.name = 'cityWalls';
   wallMesh.castShadow = true;

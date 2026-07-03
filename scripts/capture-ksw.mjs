@@ -1,7 +1,9 @@
 // KSW capture harness: spawn vite dev, open /ksw.html headless, wait for
 // first rendered frame, screenshot to artifacts/ksw/<name>.png.
-// Usage: node scripts/capture-ksw.mjs [name] [preset] [cam] [extraQuery]
-//   preset: morning | dusk | night     cam: overview | er | ops
+// Usage: node scripts/capture-ksw.mjs [name] [daystate] [cam] [extraQuery]
+//   daystate: morning | dusk | night — mapped to a deterministic ?at=/?wx=
+//             pair (real sun/weather sim, not the old preset system)
+//   cam: overview | er | ops
 //   extraQuery: extra URL params appended verbatim, e.g. "interior=1&shell=0"
 //               (S3-interim, T17 — additive query passthrough for judging)
 
@@ -13,10 +15,26 @@ import { mkdirSync } from 'node:fs';
 const HOST = '127.0.0.1';
 const PORT = 5186;
 const NAME = process.argv[2] ?? 'overview-morning';
-const PRESET = process.argv[3] ?? 'morning';
+const DAYSTATE = process.argv[3] ?? 'morning';
 const CAM = process.argv[4] ?? 'overview';
 const EXTRA = process.argv[5] ?? '';
 const OUT = `artifacts/ksw/${NAME}.png`;
+
+// Deterministic (at, wx) per named day-state — replaces the old ?preset=.
+// These are UTC instants tuned for Winterthur's latitude (47.5°N) against
+// the keyframe anchors used elsewhere (night < -6 deg, golden -6..+4 deg,
+// day > 25 deg elevation). Measured via src/diorama/environment/solar.ts
+// sunState().elevDeg on 2026-07-03:
+//   morning 04:04Z -> elevDeg ~= +3.72 (golden, rising)
+//   dusk    19:03Z -> elevDeg ~= +2.55 (golden, descending; matches the
+//                     env capture matrix's dusk sample)
+//   night   23:00Z -> elevDeg ~= -18.81 (night, unchanged)
+const DAYSTATES = {
+  morning: { at: '2026-07-03T04:04:00Z', wx: 'clear' },
+  dusk: { at: '2026-07-03T19:03:00Z', wx: 'clear' },
+  night: { at: '2026-07-03T23:00:00Z', wx: 'clear' },
+};
+const { at: AT, wx: WX } = DAYSTATES[DAYSTATE] ?? DAYSTATES.morning;
 
 function portOpen(host, port) {
   return new Promise((resolve) => {
@@ -88,7 +106,7 @@ try {
       if (m.type() === 'error') errors.push(`console: ${m.text()}`);
     });
     const extraQuery = EXTRA ? `&${EXTRA}` : '';
-    await page.goto(`http://${HOST}:${PORT}/ksw.html?preset=${PRESET}&cam=${CAM}${extraQuery}`, { waitUntil: 'load', timeout: 20000 });
+    await page.goto(`http://${HOST}:${PORT}/ksw.html?at=${AT}&wx=${WX}&cam=${CAM}${extraQuery}`, { waitUntil: 'load', timeout: 20000 });
     try {
       await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: 30000 });
       await page.waitForTimeout(900);
