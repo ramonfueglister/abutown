@@ -1,7 +1,9 @@
 // KSW capture harness: spawn vite dev, open /ksw.html headless, wait for
 // first rendered frame, screenshot to artifacts/ksw/<name>.png.
-// Usage: node scripts/capture-ksw.mjs [name] [preset] [cam]
+// Usage: node scripts/capture-ksw.mjs [name] [preset] [cam] [extraQuery]
 //   preset: morning | dusk | night     cam: overview | er | ops
+//   extraQuery: extra URL params appended verbatim, e.g. "interior=1&shell=0"
+//               (S3-interim, T17 — additive query passthrough for judging)
 
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -13,6 +15,7 @@ const PORT = 5186;
 const NAME = process.argv[2] ?? 'overview-morning';
 const PRESET = process.argv[3] ?? 'morning';
 const CAM = process.argv[4] ?? 'overview';
+const EXTRA = process.argv[5] ?? '';
 const OUT = `artifacts/ksw/${NAME}.png`;
 
 function portOpen(host, port) {
@@ -84,7 +87,8 @@ try {
     page.on('console', (m) => {
       if (m.type() === 'error') errors.push(`console: ${m.text()}`);
     });
-    await page.goto(`http://${HOST}:${PORT}/ksw.html?preset=${PRESET}&cam=${CAM}`, { waitUntil: 'load', timeout: 20000 });
+    const extraQuery = EXTRA ? `&${EXTRA}` : '';
+    await page.goto(`http://${HOST}:${PORT}/ksw.html?preset=${PRESET}&cam=${CAM}${extraQuery}`, { waitUntil: 'load', timeout: 20000 });
     try {
       await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: 30000 });
       await page.waitForTimeout(900);

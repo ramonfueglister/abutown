@@ -47,6 +47,9 @@ import { boxGeo } from './geometryCache';
 import { box, clayMat } from './props';
 import { buildCityMassing } from './geo/cityMassing';
 import { buildKswCampus } from './geo/kswCampus';
+import { decomposeToZones } from './interior/zones';
+import { generateInteriorPlan } from './interior/generatePlan';
+import { buildInterior } from './interior/buildInterior';
 import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { buildWindows } from './geo/windows';
@@ -109,6 +112,13 @@ async function boot(): Promise<void> {
   const cityCams: CamPresetName[] = ['er', 'ops', 'bahnhof', 'zag', 'city'];
   const camPreset: CamPresetName = cityCams.includes(camRaw as CamPresetName) ? (camRaw as CamPresetName) : 'overview';
   const cycleMode = params.get('cycle') === '1';
+  // S3-interim (T17): ?interior=1 drops the generated zone-ladder interior into
+  // the real shell for judging (no cutaway yet — T18 reveals it). ?shell=0
+  // additionally suppresses the real KSW main-building wall/roof meshes so the
+  // interior is visible from outside; other campus buildings stay. Both flags
+  // are interim and replaced by the T18 dollhouse cutaway.
+  const showInterior = params.get('interior') === '1';
+  const hideShell = params.get('shell') === '0';
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
@@ -437,8 +447,27 @@ async function boot(): Promise<void> {
   // ── the real KSW campus (S3a, T15): reuses the city clay-massing pipeline
   // on the 26 baked zone==='ksw' buildings — walls with the TSL facade
   // shader, roofs, plinth/eave trim. Facade detail is always on (hero/near).
-  const { group: kswCampus } = buildKswCampus(kswBuildings, { lampGlow: preset.lampOn });
+  // mainBuilding always comes from the FULL campus so zone decomposition keys
+  // off the true largest footprint even when the shell mesh is suppressed.
+  const { mainBuilding } = buildKswCampus(kswBuildings, { lampGlow: preset.lampOn });
+  // ?shell=0 (S3-interim, T17): rebuild the campus WITHOUT the main building so
+  // the generated interior is visible from outside for judging. Other campus
+  // buildings stay. Default (shell on) renders the full campus.
+  const campusBuildings = hideShell ? kswBuildings.filter((b) => b.id !== mainBuilding.id) : kswBuildings;
+  const { group: kswCampus } = buildKswCampus(campusBuildings, { lampGlow: preset.lampOn });
   scene.add(kswCampus);
+
+  // ── the generated zone-ladder interior (S3b, T17): decompose the real main
+  // building footprint into zones, generate an authored department FloorPlan
+  // per zone, and drop the built interior at the campus origin (footprints are
+  // already in the local world frame). Interim: only rendered with ?interior=1
+  // (the T18 cutaway will reveal it inside the closed shell).
+  if (showInterior) {
+    const zones = decomposeToZones(mainBuilding.footprint);
+    const door = mainBuilding.door ?? { x: zones[0]?.x ?? 0, z: zones[0]?.z ?? 0, yaw: 0 };
+    const interiorPlan = generateInteriorPlan(zones, door);
+    scene.add(buildInterior(interiorPlan));
+  }
 
   // ── the real Winterthur city around it (swisstopo LoD2 + OSM, clay) ──────
   // The hero hospital keeps its own authored plate; the city sits on a bigger
