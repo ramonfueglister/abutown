@@ -16,7 +16,11 @@ const OUTDIR = 'artifacts/env';
 const MATRIX = [
   ['dawn', 'at=2026-07-03T04:10:00Z&wx=clear'],
   ['noon', 'at=2026-07-03T11:00:00Z&wx=clear'],
-  ['dusk', 'at=2026-07-03T19:35:00Z&wx=clear'],
+  // 19:03Z ≈ 21:03 local: sun at ~+2.6° descending, shortly before sunset
+  // (~19:26Z). This is the real golden-evening moment — the DREDGE
+  // "Amber unter Teal" — whereas the old 19:35Z was already past sunset
+  // (elev −1.6°) and read as near-night black.
+  ['dusk', 'at=2026-07-03T19:03:00Z&wx=clear'],
   ['night', 'at=2026-07-03T23:30:00Z&wx=clear'],
   ['overcast', 'at=2026-07-03T11:00:00Z&wx=overcast'],
   ['rain', 'at=2026-07-03T15:00:00Z&wx=rain'],
