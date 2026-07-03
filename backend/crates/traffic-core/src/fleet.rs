@@ -126,7 +126,6 @@ impl Fleet {
     /// Mark a slot free for reuse. The route span in `route_lanes` is left in
     /// place (not reclaimed) — cheap and keeps handles stable; acceptable
     /// because routes are bounded by `cap`.
-    #[allow(dead_code)]
     pub(crate) fn free(&mut self, id: VehId) {
         let i = id as usize;
         if self.alive[i] {

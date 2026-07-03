@@ -18,6 +18,7 @@
 
 pub mod fleet;
 pub mod idm;
+pub mod junction;
 pub mod mobil;
 pub mod rng;
 pub mod tick;

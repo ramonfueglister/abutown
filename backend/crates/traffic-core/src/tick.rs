@@ -18,6 +18,7 @@
 
 use crate::fleet::{Fleet, LaneIndex, RouteHandle, VehId};
 use crate::idm::{IdmParams, idm_accel};
+use crate::junction::{self, APPROACH_ZONE_M, JunctionModel, MANDATORY_ZONE_M, NodeOccupancy};
 use crate::mobil::{self, Follower, LaneNeighbourhood, MobilParams};
 use rayon::prelude::*;
 use traffic_net::TrafficNet;
@@ -27,6 +28,11 @@ pub const DT: f32 = 0.1;
 
 /// Default vehicle length (m) used for bumper-to-bumper gaps.
 const VEHICLE_LEN: f32 = 4.5;
+
+/// Small setback (m) from a lane end where a held vehicle waits — the "stop
+/// line". Keeps a blocked vehicle strictly short of the boundary so
+/// [`advance_route`] never advances its cursor while it waits.
+const STOP_LINE_EPS: f32 = 0.05;
 
 /// Per-vehicle intent produced by phase 1 and consumed by phase 2.
 ///
@@ -44,7 +50,25 @@ struct Intent {
     /// Optional MOBIL lane change committed by phase 1: `(target_lane,
     /// new_follower_accel)`. The accel is re-validated in phase 2.
     lane_change: Option<LaneChange>,
+    /// If this tick's longitudinal motion would carry the vehicle across a node
+    /// (advancing the route cursor onto the next lane), the turn id it would
+    /// take. Phase 2 arbitrates conflict-point occupancy for these; a vehicle
+    /// that loses is held at the stop line. `u32::MAX` = no crossing this tick.
+    cross_turn: u32,
+    /// The lane the vehicle *starts* the tick on (its current lane), needed by
+    /// phase 2 to hold it in place (revert to the stop line) if it loses the
+    /// conflict-point arbitration.
+    from_lane: u32,
+    /// Arc position clamped to the current lane's stop line, used when a hold
+    /// reverts a would-be crossing.
+    stop_s: f32,
+    /// The route cursor before any crossing, restored on a hold.
+    from_cursor: u32,
 }
+
+/// Sentinel in [`Intent::cross_turn`]: this vehicle is not crossing a node this
+/// tick, so phase 2 skips conflict-point arbitration for it.
+const NO_CROSS: u32 = u32::MAX;
 
 /// A phase-1 MOBIL decision to switch sideways, applied (after re-check) in
 /// phase 2. Only the target lane is carried: phase 2 re-derives the target
@@ -65,6 +89,10 @@ impl Default for Intent {
             lane: 0,
             cursor: 0,
             lane_change: None,
+            cross_turn: NO_CROSS,
+            from_lane: 0,
+            stop_s: 0.0,
+            from_cursor: 0,
         }
     }
 }
@@ -97,6 +125,18 @@ pub struct Core {
     /// Base seed for deterministic per-vehicle noise via [`crate::u01`].
     seed: u64,
 
+    /// The baked network. Cloned once at construction so phase-2 conflict-point
+    /// arbitration can consult `turns_from` / `conflictsWith` without threading
+    /// a borrow through the kernel. Not touched on the parallel hot path except
+    /// through the immutable [`JunctionModel`].
+    net: TrafficNet,
+
+    /// Precomputed per-turn signal windows + gap headways (Task 5).
+    junction: JunctionModel,
+
+    /// Phase-2 conflict-point occupancy scratch, pre-sized in [`Core::new`].
+    occupancy: NodeOccupancy,
+
     /// Reusable phase-1 output buffer, one slot per vehicle slot. Sized to
     /// `cap` at construction; never reallocated in the tick hot path.
     intents: Vec<Intent>,
@@ -104,6 +144,10 @@ pub struct Core {
     /// The lane ids that currently hold at least one vehicle, recomputed each
     /// tick for the parallel partition. Pre-sized to `lane_count`.
     active_lanes: Vec<u32>,
+
+    /// Slots that finished their route this tick, collected in phase-2 and freed
+    /// after the occupancy pass. Pre-sized to `cap`; reused each tick.
+    despawn: Vec<VehId>,
 }
 
 impl Core {
@@ -170,6 +214,29 @@ impl Core {
             }
         }
 
+        // Task 5 indexes `net.lanes` / `net.turns` directly by id in the tick
+        // path (turn lookup, edge-of-lane, conflict lists). Assert id == index
+        // for both so those O(1) accesses are sound — the real bake satisfies
+        // this and a fixture that doesn't is a hard error, not a silent wrong
+        // answer.
+        for (i, l) in net.lanes.iter().enumerate() {
+            assert!(
+                l.id as usize == i,
+                "lane id {} not equal to its index {i}; Core requires id == index",
+                l.id
+            );
+        }
+        for (i, tn) in net.turns.iter().enumerate() {
+            assert!(
+                tn.id as usize == i,
+                "turn id {} not equal to its index {i}; Core requires id == index",
+                tn.id
+            );
+        }
+
+        let junction = JunctionModel::build(net);
+        let occupancy = NodeOccupancy::new(net);
+
         Core {
             lane_len,
             lane_count,
@@ -179,8 +246,12 @@ impl Core {
             mobil: MobilParams::default(),
             lane_adj,
             seed,
+            net: net.clone(),
+            junction,
+            occupancy,
             intents: vec![Intent::default(); cap],
             active_lanes: Vec::with_capacity(lane_count),
+            despawn: Vec::with_capacity(cap),
         }
     }
 
@@ -258,6 +329,8 @@ impl Core {
         let mobil_params = &self.mobil;
         let lane_adj = &self.lane_adj;
         let seed = self.seed;
+        let net = &self.net;
+        let junction = &self.junction;
 
         // Raw pointer into the intent buffer for disjoint parallel writes: each
         // vehicle slot is written by exactly one lane task, so the writes never
@@ -267,6 +340,7 @@ impl Core {
         self.active_lanes.par_iter().for_each(|&lane| {
             let ptr = intents_ptr; // Copy the wrapper into the closure.
             let occ = index.on_lane(lane);
+            let this_lane_len = lane_len[lane as usize];
             // occ[0] is the leader (max s). occ[k] follows occ[k-1].
             for (k, &veh) in occ.iter().enumerate() {
                 let i = veh as usize;
@@ -275,12 +349,64 @@ impl Core {
 
                 // Find the leader's (gap, dv). Prefer the in-lane vehicle ahead
                 // (occ[k-1], higher s). If none, look onto the next route lane.
-                let (gap, dv) = if k > 0 {
+                let (mut gap, mut dv) = if k > 0 {
                     let lead = occ[k - 1] as usize;
                     let raw_gap = fleet.s[lead] - s - fleet.len_m[lead];
                     (raw_gap, v - fleet.v[lead])
                 } else {
                     leader_across_boundary(fleet, index, lane_len, lane, i, s, v)
+                };
+
+                // ---- Junction gate: is the next node crossable this tick? ----
+                // Only the front-most-relevant vehicles near a lane end consult
+                // it; deeper followers are governed by their in-lane leader. A
+                // blocked crossing injects a v=0 phantom at the stop line (lane
+                // end), composed with the leader gap via `min` so a red light
+                // always beats a distant cross-boundary leader (carry-forward b).
+                let dist_to_end = this_lane_len - s;
+                // The vehicle's next boundary crossing (if it has a successor
+                // lane on its route): `Some(turn)` when a turn connects, `None`
+                // when the route ends here (open route → despawn), and a
+                // "blocked" verdict when the pair has no turn (bake defect —
+                // treat the lane end as a hard wall rather than teleport).
+                let boundary = if dist_to_end <= APPROACH_ZONE_M {
+                    route_boundary(fleet, net, i, lane)
+                } else {
+                    Boundary::NotYet
+                };
+
+                let mut blocked = false;
+                let mut route_end = false;
+                let next_turn = match boundary {
+                    Boundary::Turn(turn) => {
+                        if !junction_allows(fleet, index, lane_len, junction, net, turn, t) {
+                            blocked = true;
+                            let stop_gap = dist_to_end;
+                            if stop_gap < gap {
+                                gap = stop_gap;
+                                dv = v;
+                            }
+                        }
+                        turn
+                    }
+                    // Route ends here or the pair is a bake defect: in both cases
+                    // do not cross. A genuine route end (RouteEnd) despawns in
+                    // phase 2; a defect (NoTurn) holds at the wall so a later
+                    // integration never teleports the vehicle.
+                    Boundary::RouteEnd => {
+                        route_end = true;
+                        NO_CROSS
+                    }
+                    Boundary::NoTurn => {
+                        blocked = true;
+                        let stop_gap = dist_to_end;
+                        if stop_gap < gap {
+                            gap = stop_gap;
+                            dv = v;
+                        }
+                        NO_CROSS
+                    }
+                    Boundary::NotYet => NO_CROSS,
                 };
 
                 let acc = idm_accel(params, v, dv, gap);
@@ -289,8 +415,25 @@ impl Core {
                 let mut new_v = (v + acc * DT).max(0.0);
                 let mut new_s = s + new_v * DT;
 
+                // Blocked crossing or route end: clamp just short of the lane
+                // end so `advance_route` keeps the cursor on the current lane
+                // (no cross). Route-end vehicles sit at the stop line until
+                // phase 2 despawns them.
+                if (blocked || route_end) && new_s >= this_lane_len {
+                    new_s = this_lane_len - STOP_LINE_EPS;
+                }
+
                 // Advance across lane boundaries along the route.
                 let (new_lane, new_cursor, wrapped_s) = advance_route(fleet, lane_len, i, new_s);
+
+                // Detect whether this longitudinal step crosses a node (cursor
+                // advanced onto the next route lane). If so, record the turn so
+                // phase 2 can arbitrate conflict-point occupancy sequentially.
+                let cross_turn = if new_lane != lane && !blocked && !route_end {
+                    next_turn
+                } else {
+                    NO_CROSS
+                };
                 new_s = wrapped_s;
 
                 // Deterministic tiny speed noise keeps homogeneous rings from
@@ -304,15 +447,20 @@ impl Core {
                 // neighbourhood (excluding self) and each same-edge adjacent
                 // lane's neighbourhood at this vehicle's `s`. We only WRITE this
                 // vehicle's own intent slot, preserving the disjointness proof.
+                // Turn-awareness (carry-forward a): within the mandatory zone of
+                // a lane end, restrict changes to lanes that still serve the
+                // route (see `evaluate_lane_change`).
                 let lane_change = evaluate_lane_change(
                     fleet,
                     index,
                     mobil_params,
                     params,
                     lane_adj,
+                    net,
                     lane,
                     s,
                     v,
+                    dist_to_end,
                     seed,
                     t,
                     veh,
@@ -326,6 +474,10 @@ impl Core {
                         lane: new_lane,
                         cursor: new_cursor,
                         lane_change,
+                        cross_turn,
+                        from_lane: lane,
+                        stop_s: this_lane_len - STOP_LINE_EPS,
+                        from_cursor: fleet.route[i].cursor,
                     };
                 }
             }
@@ -333,16 +485,82 @@ impl Core {
 
         // ---- Phase 2: sequential, fixed order -> apply + rebuild ------------
         // Pass A: apply the longitudinal intent (speed, arc position, route
-        // progression) for every alive vehicle.
+        // progression) for every alive vehicle. Vehicles that cross a node this
+        // tick must first win the conflict-point arbitration (fixed slot order,
+        // so it is deterministic and thread-independent); a loser is held at the
+        // stop line on its origin lane. This is the ONLY node bookkeeping and it
+        // lives entirely here in the sequential apply.
+        self.occupancy.begin_tick(t);
+        self.despawn.clear();
         for i in 0..self.fleet.slots() {
             if !self.fleet.alive[i] {
                 continue;
             }
             let it = self.intents[i];
+
+            if it.cross_turn != NO_CROSS {
+                // This vehicle would cross a node this tick. Two gates remain:
+                // (1) route completion — an open route with no onward turn ends
+                //     here → despawn; (2) conflict-point occupancy.
+                let turn = it.cross_turn;
+                let node = self.junction.node_of(turn);
+                let conflicts = &self.net.turns[turn as usize].conflicts_with;
+                if self.occupancy.try_claim(&self.net, node, turn, conflicts) {
+                    // Won: commit the crossed state. The turn's `toLane` is the
+                    // lane actually entered (authoritative over the authored
+                    // route lane, which MOBIL may have desynced); rewrite the
+                    // route lane at the new cursor so downstream lookups agree.
+                    let mut to_lane = self.net.turns[turn as usize].to_lane;
+
+                    // Keep-right at the junction (carry-forward a + European
+                    // keep-right): MOBIL is turn-unaware and its free-road return
+                    // incentive can sit exactly at threshold, so a vehicle that
+                    // overtook into a left lane would otherwise never drift back.
+                    // On crossing, re-seat it into the *rightmost* same-edge lane
+                    // that still serves the route and is clear ahead at the entry
+                    // point. It only shifts right (never left), so it never
+                    // abandons an in-progress overtake, and the clear-ahead gate
+                    // stops it cutting back in front of a slower vehicle.
+                    to_lane = self.rightmost_clear_entry(i, to_lane);
+
+                    self.fleet.v[i] = it.v;
+                    self.fleet.s[i] = it.s;
+                    self.fleet.lane[i] = to_lane;
+                    self.fleet.route[i].cursor = it.cursor;
+                    let rh = self.fleet.route[i];
+                    let idx = (rh.start + rh.cursor) as usize;
+                    if idx < rh.end as usize {
+                        self.fleet.route_lanes[idx] = to_lane;
+                    }
+                } else {
+                    // Lost: hold at the stop line on the origin lane.
+                    self.fleet.v[i] = 0.0;
+                    self.fleet.s[i] = it.stop_s;
+                    self.fleet.lane[i] = it.from_lane;
+                    self.fleet.route[i].cursor = it.from_cursor;
+                }
+                continue;
+            }
+
+            // Non-crossing: apply longitudinal intent directly.
             self.fleet.v[i] = it.v;
             self.fleet.s[i] = it.s;
             self.fleet.lane[i] = it.lane;
             self.fleet.route[i].cursor = it.cursor;
+
+            // Route completion for open (non-looping) routes: a vehicle sitting
+            // at the end of its final route lane with no onward turn despawns.
+            // Ring routes always have an onward turn back to route[0], so they
+            // never trip this and keep looping.
+            if route_completed(&self.fleet, &self.net, &self.lane_len, i) {
+                self.despawn.push(i as VehId);
+            }
+        }
+
+        // Free completed routes after the pass so slot reuse can't disturb the
+        // fixed-order apply above.
+        for &id in &self.despawn {
+            self.fleet.free(id);
         }
 
         // Pass B: apply MOBIL lane changes in ascending slot order. Each change
@@ -353,6 +571,16 @@ impl Core {
         // the deterministic conflict resolution the two-phase model requires.
         for i in 0..self.fleet.slots() {
             if !self.fleet.alive[i] {
+                continue;
+            }
+            // Skip MOBIL for a vehicle that crossed a node this tick: its phase-1
+            // sideways decision referenced the *pre-crossing* lane/edge and is
+            // now stale (the target lane belongs to the edge it just left). It
+            // re-evaluates cleanly on its new edge next tick. Without this, a
+            // stale target would move the vehicle onto a lane of the wrong edge,
+            // which — near a node — is exactly where the keep-right return would
+            // otherwise be applied to the wrong lane.
+            if self.intents[i].cross_turn != NO_CROSS {
                 continue;
             }
             let Some(lc) = self.intents[i].lane_change else {
@@ -367,10 +595,104 @@ impl Core {
                 let rh = self.fleet.route[i];
                 let idx = (rh.start + rh.cursor) as usize;
                 self.fleet.route_lanes[idx] = target;
+
+                // Route reconciliation (carry-forward a): MOBIL is turn-unaware,
+                // so after moving sideways the next planned route lane may no
+                // longer be reachable from `target` (its turn departed the old
+                // lane). Re-map the next hop to an equivalent lane on the *same
+                // next edge* that `target` actually has a turn to. If none
+                // exists the mandatory-lane-light gate would have suppressed the
+                // change near the node; far from the node we leave it and the
+                // junction gate will hold the vehicle (surfacing the mismatch)
+                // rather than teleport it.
+                let next_idx = (rh.start + rh.cursor + 1) as usize;
+                if next_idx < rh.end as usize {
+                    let planned_next = self.fleet.route_lanes[next_idx];
+                    let next_edge = self.net.lanes[planned_next as usize].edge;
+                    // Already reachable? Then nothing to do.
+                    if junction::turn_between(&self.net, target, planned_next).is_none() {
+                        // Find a turn from `target` onto the same next edge.
+                        if let Some(remapped) = self
+                            .net
+                            .turns_from(target)
+                            .iter()
+                            .map(|&tid| self.net.turns[tid as usize].to_lane)
+                            .find(|&tl| self.net.lanes[tl as usize].edge == next_edge)
+                        {
+                            self.fleet.route_lanes[next_idx] = remapped;
+                        }
+                    }
+                }
             }
         }
 
         self.index.rebuild(&self.fleet);
+    }
+
+    /// Choose the lane a crossing vehicle should enter: starting from the turn's
+    /// `to_lane`, drift as far *right* (lower index) as possible while the
+    /// candidate still serves the next route edge and its entry region is clear.
+    /// Returns `to_lane` unchanged if no rightward shift is admissible.
+    ///
+    /// `slot`'s intent position (`intents[slot].s`) is the arc length at which
+    /// it enters the new lane; we clear-check each candidate against the live
+    /// occupancy at that `s`. Only rightward shifts are considered, so an
+    /// in-progress overtake (which moved left) is never undone mid-manoeuvre.
+    fn rightmost_clear_entry(&self, slot: usize, to_lane: u32) -> u32 {
+        // Next route edge the entered lane must keep serving (if any).
+        let rh = self.fleet.route[slot];
+        let route = &self.fleet.route_lanes[rh.start as usize..rh.end as usize];
+        let cursor = rh.cursor as usize;
+        let next_edge = route
+            .get(cursor + 1)
+            .map(|&nl| self.net.lanes[nl as usize].edge);
+
+        let entry_s = self.intents[slot].s;
+        let veh_len = self.fleet.len_m[slot];
+
+        let mut chosen = to_lane;
+        // Walk right neighbours; accept the furthest-right admissible one.
+        let mut cand = self.lane_adj[chosen as usize].1; // right of `chosen`
+        while cand != u32::MAX {
+            // Must still serve the route.
+            let serves = match next_edge {
+                Some(e) => turn_onto_edge(&self.net, cand, e).is_some(),
+                None => true,
+            };
+            // Entry region clear: nearest vehicle ahead on `cand` leaves a gap.
+            let clear = self.entry_gap_clear(cand, entry_s, veh_len);
+            if serves && clear {
+                chosen = cand;
+                cand = self.lane_adj[chosen as usize].1;
+            } else {
+                break;
+            }
+        }
+        chosen
+    }
+
+    /// Whether entering `lane` at arc `s` (vehicle length `len`) leaves a safe
+    /// bumper gap to the nearest vehicle ahead on that lane (>= a few car
+    /// lengths). Conservative: a tight lane is left alone so the vehicle stays
+    /// where it crossed.
+    fn entry_gap_clear(&self, lane: u32, s: f32, len: f32) -> bool {
+        const MIN_ENTRY_GAP_M: f32 = 15.0;
+        // Occupancy is leader-first (descending s). Find the nearest vehicle
+        // ahead of `s` and behind it; require both gaps comfortable.
+        let occ = self.index.on_lane(lane);
+        for &veh in occ {
+            let j = veh as usize;
+            let sj = self.fleet.s[j];
+            let gap = if sj >= s {
+                sj - s - len
+            } else {
+                s - sj - self.fleet.len_m[j]
+            };
+            if gap < MIN_ENTRY_GAP_M {
+                return false;
+            }
+        }
+        true
     }
 
     /// Re-validate a phase-1 MOBIL change against the *current* (post-
@@ -440,9 +762,11 @@ fn evaluate_lane_change(
     mobil_params: &MobilParams,
     idm: &IdmParams,
     lane_adj: &[(u32, u32)],
+    net: &TrafficNet,
     lane: u32,
     s: f32,
     v: f32,
+    dist_to_end: f32,
     seed: u64,
     t: u64,
     veh: VehId,
@@ -457,14 +781,35 @@ fn evaluate_lane_change(
         return None;
     }
 
+    // Mandatory-lane-light (carry-forward a): within `MANDATORY_ZONE_M` of the
+    // lane end, MOBIL is turn-unaware and would happily rewrite the route cursor
+    // onto a lane with no turn for the vehicle's next edge — stranding it. So
+    // near the node we only permit changes onto a lane that can still serve the
+    // route: one with a turn whose `toLane` lies on the same edge as the route's
+    // planned next lane. Away from the node (dist_to_end > zone) MOBIL is
+    // unrestricted, as before.
+    let restrict = dist_to_end <= MANDATORY_ZONE_M;
+    let next_edge = if restrict {
+        route_next_edge(fleet, net, veh as usize)
+    } else {
+        None
+    };
+
     // Current-lane neighbourhood, excluding self (self occupies this lane).
     let cur = lane_neighbourhood(fleet, index, lane, s, v, veh);
 
     // Evaluate each candidate; keep the one with the greatest incentive that
     // both passes the criterion. `to_right` earns the keep-right bias.
-    let mut best: Option<(u32, f32, LaneNeighbourhood)> = None;
+    let mut best: Option<(u32, f32)> = None;
     for (target, to_right) in [(right, true), (left, false)] {
         if target == u32::MAX {
+            continue;
+        }
+        // Turn-awareness gate: if restricted and the target lane can't serve the
+        // route's next edge, skip it.
+        if let Some(edge) = next_edge
+            && !lane_serves_edge(net, target, edge)
+        {
             continue;
         }
         // On the target lane the decider is absent, so exclude nothing real;
@@ -473,13 +818,32 @@ fn evaluate_lane_change(
         let d = mobil::evaluate(mobil_params, idm, v, &cur, &tgt, to_right);
         if d.change {
             match best {
-                Some((_, best_inc, _)) if best_inc >= d.incentive => {}
-                _ => best = Some((target, d.incentive, tgt)),
+                Some((_, best_inc)) if best_inc >= d.incentive => {}
+                _ => best = Some((target, d.incentive)),
             }
         }
     }
 
-    best.map(|(target_lane, _, _)| LaneChange { target_lane })
+    best.map(|(target_lane, _)| LaneChange { target_lane })
+}
+
+/// The edge id of the route's *next* lane (the lane after the cursor), or `None`
+/// if the vehicle is on its final route lane. Used by the mandatory-lane gate.
+fn route_next_edge(fleet: &Fleet, net: &TrafficNet, veh: usize) -> Option<u32> {
+    let rh = fleet.route[veh];
+    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
+    let cursor = rh.cursor as usize;
+    let next_lane = *route.get(cursor + 1)?;
+    Some(net.lanes[next_lane as usize].edge)
+}
+
+/// Whether `lane` has any turn leading onto a lane of `edge` — i.e. it can serve
+/// a route whose next hop is on `edge`. Scans the lane's `turns_from` CSR.
+fn lane_serves_edge(net: &TrafficNet, lane: u32, edge: u32) -> bool {
+    net.turns_from(lane).iter().any(|&tid| {
+        let to_lane = net.turns[tid as usize].to_lane;
+        net.lanes[to_lane as usize].edge == edge
+    })
 }
 
 /// Build the MOBIL [`LaneNeighbourhood`] a vehicle at `(s, v)` with length
@@ -646,4 +1010,127 @@ fn advance_route(fleet: &Fleet, lane_len: &[f32], veh: usize, mut new_s: f32) ->
         guard += 1;
     }
     (lane, cursor as u32, new_s)
+}
+
+/// What lies at the end of a vehicle's current route lane.
+enum Boundary {
+    /// Too far from the lane end to matter yet.
+    NotYet,
+    /// The next route lane is reached via this turn id.
+    Turn(u32),
+    /// The route ends on this lane (no successor) — an open route completing.
+    RouteEnd,
+    /// The route has a successor lane but the net has no turn connecting them
+    /// (a bake defect). Treated as an impassable wall.
+    NoTurn,
+}
+
+/// Classify the boundary at the end of vehicle `veh`'s current route lane.
+///
+/// The route is a lane-id sequence, but MOBIL changes which lane the vehicle
+/// actually occupies (rewriting the cursor lane and re-mapping the immediate
+/// next hop). To stay robust to that, the boundary is matched at **edge**
+/// granularity: the transition is carried by any turn from the current `lane`
+/// onto the *same edge* as the route's next planned lane. The turn's real
+/// `toLane` becomes the lane the vehicle enters (see [`advance_route`], which is
+/// kept consistent by rewriting the route lane on crossing). A route with no
+/// successor edge (cursor at the end and no loop turn back to the first edge)
+/// is an *open* route completing.
+fn route_boundary(fleet: &Fleet, net: &TrafficNet, veh: usize, lane: u32) -> Boundary {
+    let rh = fleet.route[veh];
+    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
+    let n = route.len();
+    if n == 0 {
+        return Boundary::RouteEnd;
+    }
+    let cursor = rh.cursor as usize;
+    if cursor + 1 < n {
+        let next_edge = net.lanes[route[cursor + 1] as usize].edge;
+        match turn_onto_edge(net, lane, next_edge) {
+            Some(turn) => Boundary::Turn(turn),
+            None => Boundary::NoTurn,
+        }
+    } else {
+        // Last lane: a loop turn back onto the first route lane's edge continues.
+        let first_edge = net.lanes[route[0] as usize].edge;
+        match turn_onto_edge(net, lane, first_edge) {
+            Some(turn) => Boundary::Turn(turn),
+            None => Boundary::RouteEnd,
+        }
+    }
+}
+
+/// The first turn from `lane` whose `toLane` lies on `edge`, or `None`. Matches
+/// at edge granularity so a MOBIL-shifted vehicle still finds its onward turn.
+fn turn_onto_edge(net: &TrafficNet, lane: u32, edge: u32) -> Option<u32> {
+    net.turns_from(lane)
+        .iter()
+        .copied()
+        .find(|&tid| net.lanes[net.turns[tid as usize].to_lane as usize].edge == edge)
+}
+
+/// Whether a vehicle has completed its (open) route: it sits at the end of its
+/// final route lane and there is no onward turn back to the route start.
+fn route_completed(fleet: &Fleet, net: &TrafficNet, lane_len: &[f32], veh: usize) -> bool {
+    let rh = fleet.route[veh];
+    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
+    let n = route.len();
+    if n == 0 {
+        return true;
+    }
+    let cursor = rh.cursor as usize;
+    if cursor + 1 < n {
+        return false; // still lanes ahead
+    }
+    // Final lane: a loop continues, so it is not "completed".
+    let lane = fleet.lane[veh];
+    if junction::turn_between(net, lane, route[0]).is_some() {
+        return false;
+    }
+    // Open route on its final lane: completed once it reaches the lane end.
+    fleet.s[veh] >= lane_len[lane as usize] - STOP_LINE_EPS - 1e-3
+}
+
+/// Whether the next turn may be crossed this tick: signal green *and* every
+/// conflicting approaching vehicle leaves an acceptable gap.
+///
+/// The gap check scans, for each turn this one yields to, the vehicles on that
+/// turn's `fromLane` (the conflicting approach) and rejects if any is closer
+/// than the critical time-gap distance to the shared node. Read-only over the
+/// phase-1 snapshot; the final crossing authority is phase-2 occupancy.
+fn junction_allows(
+    fleet: &Fleet,
+    index: &LaneIndex,
+    lane_len: &[f32],
+    junction: &JunctionModel,
+    net: &TrafficNet,
+    turn: u32,
+    t: u64,
+) -> bool {
+    // Signal gating first (cheap, stateless).
+    if !junction.signal_green(turn, t, DT) {
+        return false;
+    }
+    // Gap acceptance: only if this turn yields to something.
+    if junction.t_gap(turn) == 0.0 {
+        return true;
+    }
+    let yields_to = &net.turns[turn as usize].yields_to;
+    for &other in yields_to {
+        let from_lane = net.turns[other as usize].from_lane;
+        // The conflicting approach: vehicles on `from_lane`, ranked leader-first
+        // (nearest the node = smallest remaining distance). Check the nearest.
+        let occ = index.on_lane(from_lane);
+        let llen = lane_len[from_lane as usize];
+        // occ[0] is the furthest-along (max s) = nearest the node.
+        if let Some(&lead) = occ.first() {
+            let j = lead as usize;
+            let dist_to_conflict = (llen - fleet.s[j]).max(0.0);
+            let v_conflict = fleet.v[j];
+            if !junction.gap_ok(turn, dist_to_conflict, v_conflict) {
+                return false;
+            }
+        }
+    }
+    true
 }
