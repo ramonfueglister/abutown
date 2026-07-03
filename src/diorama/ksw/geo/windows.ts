@@ -1,12 +1,13 @@
 // src/diorama/ksw/geo/windows.ts
-// Instanced diorama windows/doors for the city: white frames + glass panes
-// slightly proud of the real facades, warm night glow in the original share.
+// Instanced city DOORS only. Windows moved into the wall shader (Task 13,
+// cityMassing.ts facadeMaterial) — the 154k instanced frames/panes/glow are
+// gone. Doors stay instanced: a door is a single box per building, cheap, and
+// its wood tone + placement don't fit a per-facet raster.
 import * as THREE from 'three/webgpu';
 import { kswCityStyle, palette } from '../../designTokens';
-import { NIGHT_WINDOW_SHARE, nightWindowHash } from '../staticBatch';
-import { clayMat, glassMat } from '../props';
+import { clayMat } from '../props';
 import type { BakedBuilding } from './geoData';
-import { facadeLayout, type WindowSlot } from './facade';
+import { facadeDoor, type WindowSlot } from './facade';
 
 function fill(mesh: THREE.InstancedMesh, slots: WindowSlot[], out: number): void {
   const m = new THREE.Matrix4();
@@ -21,42 +22,25 @@ function fill(mesh: THREE.InstancedMesh, slots: WindowSlot[], out: number): void
   mesh.instanceMatrix.needsUpdate = true;
 }
 
-export function buildWindows(buildings: BakedBuilding[], opts: { lampGlow: boolean }): THREE.Group {
+export function buildWindows(buildings: BakedBuilding[]): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityWindows';
   const s = kswCityStyle;
-  const all: WindowSlot[] = [];
   const doors: WindowSlot[] = [];
   for (const b of buildings) {
-    const layout = facadeLayout(b);
-    all.push(...layout.windows);
-    if (layout.door) doors.push(layout.door);
+    const door = facadeDoor(b);
+    if (door) doors.push(door);
   }
-  const glow: WindowSlot[] = [];
-  const plain: WindowSlot[] = [];
-  for (const w of all) (opts.lampGlow && nightWindowHash(w.x, w.z) < NIGHT_WINDOW_SHARE ? glow : plain).push(w);
-
-  const frameGeo = new THREE.BoxGeometry(s.windowW + 0.16, s.windowH + 0.16, 0.1);
-  const paneGeo = new THREE.BoxGeometry(s.windowW, s.windowH, 0.06);
-  const doorGeo = new THREE.BoxGeometry(s.doorW, s.doorH, 0.14);
-
   // Zero-instance InstancedMeshes create zero-size GPU uniform buffers, which
-  // WebGPU rejects (GPUValidationError). Only build/add a mesh when it has
-  // at least one instance — e.g. `glow` is empty whenever lampGlow is off.
-  const specs: Array<{ name: string; geo: THREE.BufferGeometry; mat: THREE.Material; slots: WindowSlot[]; out: number }> = [
-    { name: 'cityWindowFrames', geo: frameGeo, mat: clayMat(palette.white), slots: all, out: 0.07 },
-    { name: 'cityWindowPanes', geo: paneGeo, mat: glassMat().clone(), slots: plain, out: 0.1 },
-    { name: 'cityWindowGlow', geo: paneGeo, mat: new THREE.MeshBasicMaterial({ color: 0xffd9a0 }), slots: glow, out: 0.1 },
-    { name: 'cityDoors', geo: doorGeo, mat: clayMat(palette.woodSoft), slots: doors, out: 0.08 },
-  ];
-  for (const spec of specs) {
-    if (spec.slots.length === 0) continue;
-    const mesh = new THREE.InstancedMesh(spec.geo, spec.mat, spec.slots.length);
-    mesh.name = spec.name;
-    fill(mesh, spec.slots, spec.out);
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    group.add(mesh);
-  }
+  // WebGPU rejects — only build the mesh when there is at least one door.
+  if (doors.length === 0) return group;
+
+  const doorGeo = new THREE.BoxGeometry(s.doorW, s.doorH, 0.14);
+  const mesh = new THREE.InstancedMesh(doorGeo, clayMat(palette.woodSoft), doors.length);
+  mesh.name = 'cityDoors';
+  fill(mesh, doors, 0.08);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  group.add(mesh);
   return group;
 }

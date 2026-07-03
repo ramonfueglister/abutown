@@ -16,10 +16,14 @@ describe('cityLodState', () => {
 });
 
 describe('applyCityLod', () => {
-  function makeRefs(): CityLodRefs & { setTreeShadows: ReturnType<typeof vi.fn> } {
+  function makeRefs(): CityLodRefs & {
+    setTreeShadows: ReturnType<typeof vi.fn>;
+    setFacadeDetail: ReturnType<typeof vi.fn>;
+  } {
     const setTreeShadows = vi.fn();
+    const setFacadeDetail = vi.fn();
     return {
-      windows: { visible: true } as CityLodRefs['windows'],
+      setFacadeDetail,
       lamps: { visible: true } as CityLodRefs['lamps'],
       footways: { visible: true } as CityLodRefs['footways'],
       treesFull: [{ visible: true } as never, { visible: true } as never],
@@ -28,10 +32,10 @@ describe('applyCityLod', () => {
     };
   }
 
-  it('far: hides windows/lamps/footways/full-trees, shows impostors, shadows off', () => {
+  it('far: facade detail off + hides lamps/footways/full-trees, shows impostors, shadows off', () => {
     const refs = makeRefs();
     applyCityLod('far', refs);
-    expect(refs.windows?.visible).toBe(false);
+    expect(refs.setFacadeDetail).toHaveBeenCalledWith(false);
     expect(refs.lamps?.visible).toBe(false);
     expect(refs.footways?.visible).toBe(false);
     expect(refs.treesFull.every((t) => t.visible === false)).toBe(true);
@@ -39,10 +43,10 @@ describe('applyCityLod', () => {
     expect(refs.setTreeShadows).toHaveBeenCalledWith(false);
   });
 
-  it('mid: shows windows/footways/lamps + full trees, impostors off, shadows off', () => {
+  it('mid: facade detail on + shows footways/lamps + full trees, impostors off, shadows off', () => {
     const refs = makeRefs();
     applyCityLod('mid', refs);
-    expect(refs.windows?.visible).toBe(true);
+    expect(refs.setFacadeDetail).toHaveBeenCalledWith(true);
     expect(refs.lamps?.visible).toBe(true);
     expect(refs.footways?.visible).toBe(true);
     expect(refs.treesFull.every((t) => t.visible === true)).toBe(true);
@@ -53,7 +57,7 @@ describe('applyCityLod', () => {
   it('near: everything on, tree shadows on', () => {
     const refs = makeRefs();
     applyCityLod('near', refs);
-    expect(refs.windows?.visible).toBe(true);
+    expect(refs.setFacadeDetail).toHaveBeenCalledWith(true);
     expect(refs.lamps?.visible).toBe(true);
     expect(refs.footways?.visible).toBe(true);
     expect(refs.treesFull.every((t) => t.visible === true)).toBe(true);
@@ -63,8 +67,9 @@ describe('applyCityLod', () => {
 
   it('is null-tolerant: partially-null refs do not throw', () => {
     const setTreeShadows = vi.fn();
+    const setFacadeDetail = vi.fn();
     const refs: CityLodRefs = {
-      windows: null,
+      setFacadeDetail,
       lamps: null,
       footways: { visible: true } as CityLodRefs['footways'],
       treesFull: [],

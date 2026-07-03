@@ -15,9 +15,50 @@ export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anch
 
 /**
  * @typedef {{ pos: number[], idx: number[] }} BakedMesh
+ * @typedef {{ pos: number[], idx: number[], fuv: number[] }} BakedWallMesh
  * @typedef {{ id: string, name?: string, usage?: string, zone: 'ksw'|'city',
- *   footprint: number[][], height: number, wall: BakedMesh, roof: BakedMesh }} BakedBuilding
+ *   footprint: number[][], height: number, eaveH: number, wall: BakedWallMesh, roof: BakedMesh }} BakedBuilding
  */
+
+// Facade UV quantization (Task 13): u/v are stored in 2-decimetre units
+// (round(metres × FUV_PER_M)). 2 dm is well under the 2.4 m window grid, and
+// the coarse step is a deliberate size lever — it both shortens the JSON
+// numbers AND lets more shared corner vertices weld (their quantized u/v
+// coincide), keeping buildings.json inside the 8 MB budget. Runtime divides by
+// the SAME factor (cityMassing.ts FUV_PER_M).
+export const FUV_PER_M = 5; // 1 unit = 0.2 m (2 dm)
+
+// Facade UV for one wall facet (Task 13): u = horizontal distance along the
+// facet's dominant horizontal direction (its XZ extent), v = height above
+// building ground, both in 2-dm units. The origin is the facet's min-XZ corner
+// so u is monotonic along the wall face; `dir` is the facet's own horizontal
+// axis (from its XZ bounding extent). A facet seen perfectly edge-on in XZ (a
+// near-horizontal cap) collapses to a point → dir length ~0, and every vertex
+// maps to u=0 (harmless: such facets carry no window rows).
+function facetFacadeUV(ring, groundY) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const [x, , z] of ring) {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+  }
+  let dx = maxX - minX;
+  let dz = maxZ - minZ;
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-4) { dx = 1; dz = 0; } else { dx /= len; dz /= len; }
+  // u(vertex) = ((x,z) − facet min-corner) · dir, in metres → 2-dm units.
+  // Facet-local origin keeps u small (bounded by the facet width) so the JSON
+  // numbers stay short. The wall mesh welds by POSITION ONLY (see
+  // wallMeshFromRings), so a vertex shared by two perpendicular walls at a
+  // building corner keeps whichever facet wrote it first — a 1-vertex grid
+  // seam on the few triangles spanning that corner. At clay/city scale that is
+  // invisible, and it is the deliberate price of NOT doubling the wall vertex
+  // buffer (position+fuv welding pushed the bake to 12 MB, over the 8 MB
+  // budget). v (height) is a pure function of position.y, so it never conflicts.
+  return (x, y, z) => {
+    const u = (x - minX) * dx + (z - minZ) * dz;
+    return [Math.round(u * FUV_PER_M), Math.round((y - groundY) * FUV_PER_M)];
+  };
+}
 
 // Trace the real footprint from the wall surfaces: every wall facet has a
 // bottom edge sitting at ground level; collected and chained end-to-end they
@@ -156,6 +197,67 @@ function meshFromRings(rings, groundY) {
   return { pos, idx };
 }
 
+// Wall variant of meshFromRings (Task 13): identical position-welded
+// triangulation (weld key is POSITION only — same vertex count as the plain
+// wall mesh, so the bake stays in budget), plus a facade-UV pair (fuv) per
+// vertex, aligned 1:1 with pos. A vertex shared by two facets keeps the fuv of
+// whichever facet was triangulated first (see facetFacadeUV for the corner-seam
+// tradeoff). fuv.length === pos.length/3 * 2 always.
+function wallMeshFromRings(rings, groundY) {
+  const pos = [];
+  const idx = [];
+  const fuv = [];
+  const weld = new Map(); // "x,y,z" -> vertex index
+  for (const ring of rings) {
+    const tri = triangulatePlanarPolygon(ring);
+    if (!tri) continue;
+    const uvOf = facetFacadeUV(ring, groundY);
+    const localToGlobal = new Array(tri.positions.length / 3);
+    for (let i = 0, v = 0; i < tri.positions.length; i += 3, v++) {
+      const px = tri.positions[i];
+      const py = tri.positions[i + 1];
+      const pz = tri.positions[i + 2];
+      const x = Math.round(px * 100);
+      const y = Math.round((py - groundY) * 100);
+      const z = Math.round(pz * 100);
+      const key = `${x},${y},${z}`;
+      let idxOf = weld.get(key);
+      if (idxOf === undefined) {
+        idxOf = pos.length / 3;
+        pos.push(x, y, z);
+        const [u, vv] = uvOf(px, py, pz);
+        fuv.push(u, vv);
+        weld.set(key, idxOf);
+      }
+      localToGlobal[v] = idxOf;
+    }
+    for (const t of tri.indices) idx.push(localToGlobal[t]);
+  }
+  return { pos, idx, fuv };
+}
+
+// Append more facets (skirts, hull fallbacks) to a wall mesh, computing fuv for
+// the emitted rings the same way and re-welding by position so the combined
+// buffer stays vertex-aligned (fuv.length === pos.length/3 * 2).
+function appendWallRings(mesh, rings, groundY) {
+  const extra = wallMeshFromRings(rings, groundY);
+  const weld = new Map();
+  for (let i = 0; i < mesh.pos.length; i += 3) weld.set(`${mesh.pos[i]},${mesh.pos[i + 1]},${mesh.pos[i + 2]}`, i / 3);
+  const remap = new Array(extra.pos.length / 3);
+  for (let v = 0, i = 0; i < extra.pos.length; i += 3, v++) {
+    const key = `${extra.pos[i]},${extra.pos[i + 1]},${extra.pos[i + 2]}`;
+    let idxOf = weld.get(key);
+    if (idxOf === undefined) {
+      idxOf = mesh.pos.length / 3;
+      mesh.pos.push(extra.pos[i], extra.pos[i + 1], extra.pos[i + 2]);
+      mesh.fuv.push(extra.fuv[v * 2], extra.fuv[v * 2 + 1]);
+      weld.set(key, idxOf);
+    }
+    remap[v] = idxOf;
+  }
+  for (const t of extra.idx) mesh.idx.push(remap[t]);
+}
+
 function appendRings(mesh, rings, groundY) {
   const extra = meshFromRings(rings, groundY);
   const weld = new Map();
@@ -181,7 +283,9 @@ function appendRings(mesh, rings, groundY) {
 function extrudeWalls(footprint, eaveH) {
   const pos = [];
   const idx = [];
+  const fuv = []; // 2 per vertex, 2-dm ints — facade UV per extruded quad
   const top = Math.round(eaveH * 100);
+  const topV = Math.round(eaveH * FUV_PER_M); // v in 2-dm units
   for (let i = 0; i < footprint.length; i++) {
     const [x0, z0] = footprint[i];
     const [x1, z1] = footprint[(i + 1) % footprint.length];
@@ -191,9 +295,23 @@ function extrudeWalls(footprint, eaveH) {
     const Z1 = Math.round(z1 * 100);
     const base = pos.length / 3;
     pos.push(X0, 0, Z0, X1, 0, Z1, X1, top, Z1, X0, top, Z0);
+    // u along this edge in dm: 0 at corner 0, edge length at corner 1. v = 0
+    // at the base, eaveH at the top. Ground is y=0 for an extruded prism.
+    const edgeU = Math.round(Math.hypot(x1 - x0, z1 - z0) * FUV_PER_M);
+    fuv.push(0, 0, edgeU, 0, edgeU, topV, 0, topV);
     idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
-  return { pos, idx };
+  return { pos, idx, fuv };
+}
+
+// Append an extruded prism (from extrudeWalls) to a wall mesh, carrying its
+// fuv through so the combined buffer stays vertex-aligned. No welding needed —
+// the prism's positions are new — but fuv MUST grow in lockstep with pos.
+function appendPrism(mesh, prism) {
+  const before = mesh.pos.length / 3;
+  for (let i = 0; i < prism.pos.length; i += 3) mesh.pos.push(prism.pos[i], prism.pos[i + 1], prism.pos[i + 2]);
+  for (let i = 0; i < prism.fuv.length; i++) mesh.fuv.push(prism.fuv[i]);
+  for (const t of prism.idx) mesh.idx.push(before + t);
 }
 
 // Coverage-gate helper (Task 12): pull the wall-BASE points (in meters, XZ)
@@ -347,12 +465,12 @@ export function transformBuildings({
     // zero wall facets (stats.wallFallback counts + the bake logs them).
     let wall;
     if (b.walls.length > 0) {
-      wall = meshFromRings(b.walls, groundY);
+      wall = wallMeshFromRings(b.walls, groundY);
     } else {
       wall = extrudeWalls(footprint, eaveH);
       stats.wallFallback = (stats.wallFallback ?? 0) + 1;
     }
-    appendRings(wall, skirts, groundY);
+    appendWallRings(wall, skirts, groundY);
 
     // Per-roof-part hull closure (Task 12 completion fix): some swisstopo
     // roof PARTS genuinely have zero wall facets in the source — not "walls
@@ -375,10 +493,7 @@ export function transformBuildings({
             let compEave = Infinity;
             for (const ring of component) for (const [, y] of ring) compEave = Math.min(compEave, y);
             const compEaveH = Math.max(compEave - groundY, 0.1);
-            const prism = extrudeWalls(hullXZ, compEaveH);
-            const before = wall.pos.length / 3;
-            for (let i = 0; i < prism.pos.length; i += 3) wall.pos.push(prism.pos[i], prism.pos[i + 1], prism.pos[i + 2]);
-            for (const t of prism.idx) wall.idx.push(before + t);
+            appendPrism(wall, extrudeWalls(hullXZ, compEaveH));
             partHulls += 1;
           }
         }
@@ -402,10 +517,7 @@ export function transformBuildings({
         let facetEave = Infinity;
         for (const [, y] of ring) facetEave = Math.min(facetEave, y);
         const facetEaveH = Math.max(facetEave - groundY, 0.1);
-        const prism = extrudeWalls(hullXZ, facetEaveH);
-        const before = wall.pos.length / 3;
-        for (let i = 0; i < prism.pos.length; i += 3) wall.pos.push(prism.pos[i], prism.pos[i + 1], prism.pos[i + 2]);
-        for (const t of prism.idx) wall.idx.push(before + t);
+        appendPrism(wall, extrudeWalls(hullXZ, facetEaveH));
         partHulls += 1;
       }
     }
@@ -455,6 +567,10 @@ export function transformBuildings({
       zone: Math.hypot(cx, cz) < KSW_ZONE_RADIUS ? 'ksw' : 'city',
       footprint,
       height: Math.round((topY - groundY) * 100) / 100,
+      // Real eave height (m, 1 decimal): the shader clamps the window raster so
+      // no storey top sits above it — walls end at the eave, gable skirts reach
+      // the ridge, so the wall mesh's own max-y would be WRONG here.
+      eaveH: Math.round(eaveH * 10) / 10,
       wall,
       roof,
       ...nameForFootprint(footprint, osmBuildings),

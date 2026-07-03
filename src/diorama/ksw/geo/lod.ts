@@ -23,7 +23,9 @@ export function cityLodState(radius: number, prev: CityLodRing): CityLodRing {
 // assume any of these exist and must never throw on a partially-null refs
 // object (e.g. in tests, or a bake that skips a mesh).
 export type CityLodRefs = {
-  windows: THREE.Object3D | null;
+  // Windows are now a wall-shader raster (Task 13), not a separate object — the
+  // far ring flips a uniform via setFacadeDetail instead of hiding a group.
+  setFacadeDetail: (on: boolean) => void;
   lamps: THREE.Object3D | null;
   footways: THREE.Object3D | null;
   treesFull: THREE.Object3D[];
@@ -33,7 +35,7 @@ export type CityLodRefs = {
 
 export function applyCityLod(ring: CityLodRing, r: CityLodRefs): void {
   const far = ring === 'far';
-  if (r.windows) r.windows.visible = !far;
+  r.setFacadeDetail(!far);
   if (r.lamps) r.lamps.visible = !far;
   if (r.footways) r.footways.visible = !far;
   for (const t of r.treesFull) if (t) t.visible = !far;

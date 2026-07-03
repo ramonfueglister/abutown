@@ -44,6 +44,39 @@ describe('transformBuildings', () => {
   });
 });
 
+describe('transformBuildings — facade UV attribute (Task 13)', () => {
+  // A single south-facing wall facet 10 m wide (x 50→60), 8 m tall, plus its
+  // flat roof at 458 (eave = roof low point = 458, ground = 450 → eaveH 8).
+  const out = transformBuildings({ floors, walls, roofs, osmBuildings, projector: makeProjector(ANCHOR) });
+  const b = out[0];
+
+  it('emits fuv aligned to the wall position buffer (2 ints per vertex)', () => {
+    expect(Array.isArray(b.wall.fuv)).toBe(true);
+    expect(b.wall.fuv.length).toBe((b.wall.pos.length / 3) * 2);
+    for (const v of b.wall.fuv) expect(Number.isInteger(v)).toBe(true); // dm ints
+  });
+
+  it('threads the building eave height (m, 1 decimal)', () => {
+    expect(b.eaveH).toBeCloseTo(8, 1);
+  });
+
+  it('u is monotonic along the facet and v encodes height in dm', () => {
+    // Pair each wall vertex (x-position, u) and (y-height, v). Since the facet
+    // runs along +x, u must increase with local x; v must equal height·10.
+    const verts: { x: number; y: number; u: number; v: number }[] = [];
+    for (let i = 0, k = 0; i < b.wall.pos.length; i += 3, k++) {
+      verts.push({ x: b.wall.pos[i], y: b.wall.pos[i + 1], u: b.wall.fuv[k * 2], v: b.wall.fuv[k * 2 + 1] });
+    }
+    // v (2-dm units) == y (cm) × 5 / 100 = y/20 for every vertex
+    for (const p of verts) expect(p.v).toBe(Math.round(p.y / 20));
+    // u grows with x: sort by x, u must be non-decreasing
+    const byX = [...verts].sort((p, q) => p.x - q.x);
+    for (let i = 1; i < byX.length; i++) expect(byX[i].u).toBeGreaterThanOrEqual(byX[i - 1].u);
+    // the facet spans 10 m → max u ≈ 50 (2-dm units)
+    expect(Math.max(...verts.map((p) => p.u))).toBeGreaterThan(45);
+  });
+});
+
 describe('transformBuildings — multi-part UUID (real LoD2 wall facets)', () => {
   // one swisstopo UUID with TWO disjoint building parts (real-world case:
   // an annex/wing far from the main volume) — the roof for part 2 must sit

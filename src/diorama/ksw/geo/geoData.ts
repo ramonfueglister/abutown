@@ -9,6 +9,9 @@ import natureJson from '../../../../data/winterthur/nature.json';
 import roadsJson from '../../../../data/winterthur/roads.json';
 
 export type BakedMesh = { pos: number[]; idx: number[] };
+// Wall mesh carries a facade-UV attribute (Task 13): fuv = 2 dm-ints per vertex
+// (u = horizontal metres·10 along the facet, v = height·10), aligned to pos.
+export type BakedWallMesh = { pos: number[]; idx: number[]; fuv: number[] };
 export type BakedDoor = { x: number; z: number; yaw: number };
 export type BakedBuilding = {
   id: string;
@@ -17,7 +20,9 @@ export type BakedBuilding = {
   zone: 'ksw' | 'city';
   footprint: number[][];
   height: number;
-  wall: BakedMesh;
+  // Real eave height (m, 1 decimal) — the facade shader clamps windows below it.
+  eaveH: number;
+  wall: BakedWallMesh;
   roof: BakedMesh;
   door?: BakedDoor;
 };

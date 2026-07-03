@@ -423,7 +423,7 @@ async function boot(): Promise<void> {
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
   cityRoot.add(cityPlate);
-  cityRoot.add(buildCityMassing(cityBuildings));
+  cityRoot.add(buildCityMassing(cityBuildings, { lampGlow: preset.lampOn }));
   cityRoot.add(buildRoads(cityRoads, cityRails));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
@@ -431,15 +431,18 @@ async function boot(): Promise<void> {
   // trees don't need to punch holes in the sun's shadow map; the LOD ring
   // (Task 10) re-enables it for the near ring around the camera.
   cityRoot.add(buildNature(cityNature, { excludeRect: { x: 0, z: 0, w: kswPlan.plate.w, d: kswPlan.plate.d } }));
-  cityRoot.add(buildWindows(cityBuildings, { lampGlow: preset.lampOn }));
+  cityRoot.add(buildWindows(cityBuildings));
   cityRoot.add(buildLamps(cityRoads, { lampGlow: preset.lampOn }));
   scene.add(cityRoot);
 
   // 3-ring semantic LOD (Task 10, spec §2c): detail follows the camera radius.
   // getObjectByName can legitimately miss (design-legal), so refs are
   // collected defensively and applyCityLod is null-tolerant.
+  const cityWalls = cityRoot.getObjectByName('cityWalls');
   const lodRefs: CityLodRefs = {
-    windows: cityRoot.getObjectByName('cityWindows') ?? null,
+    setFacadeDetail: (on: boolean): void => {
+      (cityWalls?.userData.setFacadeDetail as ((v: boolean) => void) | undefined)?.(on);
+    },
     lamps: cityRoot.getObjectByName('cityLamps') ?? null,
     footways: cityRoot.getObjectByName('footwayRibbons') ?? null,
     treesFull: ['treeCanopies', 'treeConifers']
