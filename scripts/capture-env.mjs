@@ -1,8 +1,15 @@
-// Environment capture matrix: spawn vite dev, open /look.html headless for each
-// [name, query] pair, wait for __LOOK_READY + 1s settle, screenshot to
-// artifacts/env/<name>.png. Drives the real Winterthur sun/moon + weather via
-// the ?at=/?wx= overrides. Replaces the retired preset-based capture-look.mjs.
-// Usage: node scripts/capture-env.mjs
+// Environment capture matrix: spawn vite dev, open the target page headless for
+// each [name, query] pair, wait for __LOOK_READY + 1s settle, screenshot to
+// <outdir>/<name>.png. Drives the real Winterthur sun/moon + weather via the
+// ?at=/?wx= overrides. Replaces the retired preset-based capture-look.mjs.
+//
+// Usage:
+//   node scripts/capture-env.mjs                     # look.html → artifacts/env
+//   node scripts/capture-env.mjs --page=/ --out=env-city  # city → artifacts/env-city
+//
+// The city matrix reuses the 9 environment states and adds three cam=city
+// establishing shots (dawn/noon/night) so the whole KSW↔Bahnhof↔ZAG span is
+// reviewable at the city framing, not just the overview.
 
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -11,9 +18,19 @@ import { mkdirSync } from 'node:fs';
 
 const HOST = '127.0.0.1';
 const PORT = 5175;
-const OUTDIR = 'artifacts/env';
 
-const MATRIX = [
+const argv = process.argv.slice(2);
+const getArg = (name, fallback) => {
+  const hit = argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : fallback;
+};
+// --page=/ selects the city (index.html); default is the room prototype.
+const rawPage = getArg('page', 'look.html');
+const PAGE = rawPage === '/' ? '' : rawPage.replace(/^\//, '');
+const IS_CITY = PAGE === '';
+const OUTDIR = `artifacts/${getArg('out', 'env')}`;
+
+const BASE_MATRIX = [
   ['dawn', 'at=2026-07-03T04:10:00Z&wx=clear'],
   ['noon', 'at=2026-07-03T11:00:00Z&wx=clear'],
   // 19:03Z ≈ 21:03 local: sun at ~+2.6° descending, shortly before sunset
@@ -28,6 +45,16 @@ const MATRIX = [
   ['hochnebel', 'at=2026-10-20T09:00:00Z&wx=fog'],
   ['winter-night-1730', 'at=2026-01-15T16:35:00Z&wx=clear'],
 ];
+
+// City-only: the same dawn/noon/night states re-shot from the high establishing
+// framing (cam=city). Look.html has no camera presets, so these are city-only.
+const CITY_CAM = [
+  ['city-dawn', 'at=2026-07-03T04:10:00Z&wx=clear&cam=city'],
+  ['city-noon', 'at=2026-07-03T11:00:00Z&wx=clear&cam=city'],
+  ['city-night', 'at=2026-07-03T23:30:00Z&wx=clear&cam=city'],
+];
+
+const MATRIX = IS_CITY ? [...BASE_MATRIX, ...CITY_CAM] : BASE_MATRIX;
 
 function portOpen(host, port) {
   return new Promise((resolve) => {
@@ -101,15 +128,18 @@ try {
         if (m.type() === 'error') errors.push(`console: ${m.text()}`);
       });
       try {
-        await page.goto(`http://${HOST}:${PORT}/look.html?${query}`, { waitUntil: 'load', timeout: 20000 });
+        await page.goto(`http://${HOST}:${PORT}/${PAGE}?${query}`, { waitUntil: 'load', timeout: 20000 });
         await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: 25000 });
         await page.waitForTimeout(1000);
         const backend = await page.evaluate(() => window.__LOOK_BACKEND);
-        await page.screenshot({ path: out });
+        // page.screenshot composites via CDP captureScreenshot — proven on the
+        // live WebGPU canvas here (look.html shipped this way). A hard cap keeps
+        // a stuck compositor from stalling the whole matrix instead of hanging.
+        await page.screenshot({ path: out, timeout: 20000 });
         console.log(`CAPTURE OK -> ${out} (backend: ${backend})`);
       } catch (e) {
         fail(`[${name}] scene never became ready: ${e}`);
-        await page.screenshot({ path: `${OUTDIR}/${name}-broken.png` }).catch(() => {});
+        await page.screenshot({ path: `${OUTDIR}/${name}-broken.png`, timeout: 20000 }).catch(() => {});
       }
       if (errors.length) {
         console.error(`--- page errors [${name}] ---`);

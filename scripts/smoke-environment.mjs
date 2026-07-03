@@ -91,17 +91,21 @@ try {
     });
 
     const checks = [];
-    const probe = async (query, assert) => {
-      await page.goto(`http://${HOST}:${PORT}/look.html?${query}`, { waitUntil: 'load', timeout: 20000 });
+    // page: '' → the city at `/` (index.html), 'look.html' → the room prototype.
+    // Both entries publish the identical __LOOK_READY/__ENV_STATE contract, so
+    // the same probe drives either side; only the path differs.
+    const probe = async (query, assert, page_ = 'look.html') => {
+      const label = `${page_ || '/'}?${query}`;
+      await page.goto(`http://${HOST}:${PORT}/${page_}?${query}`, { waitUntil: 'load', timeout: 20000 });
       try {
         await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: 45000 });
         const env = await page.evaluate(() => window.__ENV_STATE);
         const errors = assert(env);
-        checks.push({ query, errors });
-        for (const e of errors) console.error(`FAIL [${query}]: ${e}`);
+        checks.push({ query: label, errors });
+        for (const e of errors) console.error(`FAIL [${label}]: ${e}`);
       } catch (e) {
-        checks.push({ query, errors: [`scene never became ready: ${e}`] });
-        console.error(`FAIL [${query}]: scene never became ready: ${e}`);
+        checks.push({ query: label, errors: [`scene never became ready: ${e}`] });
+        console.error(`FAIL [${label}]: scene never became ready: ${e}`);
       }
     };
 
@@ -154,6 +158,50 @@ try {
     // 3) Winter check: at 17:30 CET in January it is already night
     await probe('at=2026-01-15T16:30:00Z&wx=clear', (e) =>
       e.sunElevDeg < 0 ? [] : ['winter 17:30 local should be after sunset']
+    );
+
+    // ── CITY (`/`) checks — the same realtime environment pipeline, wired into
+    // the KSW diorama. Proves the city page requests + applies live weather and
+    // that the ?at/?wx matrix lands the same env values on the city side.
+    // (a) Live wiring: no ?wx → the city fetches open-meteo AND applies the
+    //     parsed series. Same fixture + arithmetic as look-probe 1: ?at before
+    //     the fixture range clamps to states[0] (cloud 20%) →
+    //     cloudCoverage = 0.15 + 0.70*0.2 = 0.29.
+    meteoRequested = false;
+    await probe('at=2026-07-03T11:00:00Z', () => [], ''); // navigate + become ready
+    let cityCloud = NaN;
+    try {
+      await page.waitForFunction(
+        () => window.__ENV_STATE && Math.abs(window.__ENV_STATE.cloudCoverage - 0.29) < 0.02,
+        { timeout: 15000 },
+      );
+      cityCloud = (await page.evaluate(() => window.__ENV_STATE)).cloudCoverage;
+    } catch {
+      cityCloud = (await page.evaluate(() => window.__ENV_STATE?.cloudCoverage)) ?? NaN;
+    }
+    {
+      const errs = [];
+      if (!meteoRequested) errs.push('city: open-meteo was never requested');
+      if (!(Math.abs(cityCloud - 0.29) < 0.02))
+        errs.push(`city: parsed series not applied: cloudCoverage=${cityCloud} (expected ~0.29 from states[0] cloud 20%)`);
+      checks.push({ query: '/?at=2026-07-03T11:00:00Z (applied)', errors: errs });
+      for (const e of errs) console.error(`FAIL [city applied]: ${e}`);
+    }
+    // (b) Noon: sun high over the city.
+    await probe('at=2026-07-03T11:00:00Z&wx=clear', (e) =>
+      e.sunElevDeg > 55 ? [] : [`city noon sun too low: ${e.sunElevDeg}`], ''
+    );
+    // (c) Deep night: stars out AND street lamps fully lit — the city lives.
+    await probe('at=2026-07-03T23:30:00Z&wx=clear', (e) =>
+      e.starVisibility > 0.7 && e.lampOn01 === 1 ? [] : [`city night off: stars=${e.starVisibility} lampOn01=${e.lampOn01}`], ''
+    );
+    // (d) Rain override maps through on the city side.
+    await probe('at=2026-07-03T11:00:00Z&wx=rain', (e) =>
+      e.precipType === 'rain' ? [] : [`city rain off: ${e.precipType}`], ''
+    );
+    // (e) Winter 16:30Z (17:30 local) is already after sunset over the city.
+    await probe('at=2026-01-15T16:30:00Z&wx=clear', (e) =>
+      e.sunElevDeg < 0 ? [] : ['city winter 17:30 local should be after sunset'], ''
     );
 
     await browser.close();
