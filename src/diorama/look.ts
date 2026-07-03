@@ -758,7 +758,8 @@ async function boot(): Promise<void> {
   const graded = vec4(contrasted, composed.a);
   postProcessing.outputNode = film(graded, float(post.filmGrain));
 
-  // Precipitation (no-op stub in this task; Task 7 fills it in).
+  // Precipitation: GPU instanced rain/snow particles, animated per-frame from
+  // uniforms (see environment/precipitation.ts). Driven by applyEnvironment.
   const precipitation = createPrecipitation();
   scene.add(precipitation.object3d);
 
