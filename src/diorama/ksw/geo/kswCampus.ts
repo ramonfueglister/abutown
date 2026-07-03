@@ -1,0 +1,136 @@
+// src/diorama/ksw/geo/kswCampus.ts
+// The real KSW campus (26 baked swisstopo buildings, zone==='ksw') rendered
+// through the SAME clay-massing pipeline as the city (Task 15, S3a): walls
+// with the TSL facade shader (fuv attribute, procedural windows), roofs,
+// plinth/eave trim bands. Only the group/mesh names differ (kswCampus*
+// instead of city*) so both can live in the scene side by side without name
+// collisions. mainBuilding = the largest-footprint-area building (the tower
+// + wing complex) — later tasks (zone decomposition, cutaway) key off it.
+//
+// Dollhouse cutaway (Task 18, S3c): the MAIN building's wall+roof are split off
+// from the other 25 into their own meshes so the cutaway uniforms slice ONLY
+// the main building. Its walls get the cutaway facade material (discard above
+// cutH + a bright seam band); its roof + eave band fade out with upperFade
+// BEFORE the hard slice engages. The other 25 campus buildings stay closed —
+// they render through the plain city pipeline exactly as in T15.
+// `group.userData.setCutaway({ cutH, upperFade })` drives it every frame.
+import * as THREE from 'three/webgpu';
+import { kswCityStyle, kswPalette, palette } from '../../designTokens';
+import { clayMat } from '../props';
+import {
+  buildCityMassing,
+  facadeMaterial,
+  mergeTinted,
+  mergeWalls,
+  ringBandParts,
+  type CutawayFacadeMaterial,
+} from './cityMassing';
+import type { BakedBuilding } from './geoData';
+
+// shoelace formula, absolute value — footprint rings are simple polygons in
+// local metres (x, z), winding direction doesn't matter for area comparison.
+function footprintArea(fp: number[][]): number {
+  let area = 0;
+  for (let i = 0; i < fp.length; i++) {
+    const [x1, z1] = fp[i];
+    const [x2, z2] = fp[(i + 1) % fp.length];
+    area += x1 * z2 - x2 * z1;
+  }
+  return Math.abs(area) / 2;
+}
+
+function largestBuilding(buildings: BakedBuilding[]): BakedBuilding {
+  let mainBuilding = buildings[0];
+  let maxArea = -Infinity;
+  for (const b of buildings) {
+    const a = footprintArea(b.footprint);
+    if (a > maxArea) {
+      maxArea = a;
+      mainBuilding = b;
+    }
+  }
+  return mainBuilding;
+}
+
+export type CutawayUniforms = { cutH: number; upperFade: number };
+
+export function buildKswCampus(
+  buildings: BakedBuilding[],
+  opts: { lampGlow: boolean },
+): { group: THREE.Group; mainBuilding: BakedBuilding } {
+  const group = new THREE.Group();
+  group.name = 'kswCampus';
+
+  const mainBuilding = largestBuilding(buildings);
+  const others = buildings.filter((b) => b.id !== mainBuilding.id);
+
+  // ── the 25 secondary buildings: plain city pipeline, always closed ──────
+  const secondary = buildCityMassing(others, opts);
+  const rename: Record<string, string> = {
+    cityWalls: 'kswCampusWalls',
+    cityRoofs: 'kswCampusRoofs',
+    cityPlinths: 'kswCampusPlinths',
+    cityEaves: 'kswCampusEaves',
+  };
+  for (const child of [...secondary.children]) {
+    if (rename[child.name]) child.name = rename[child.name];
+    group.add(child);
+  }
+  const walls = group.getObjectByName('kswCampusWalls');
+  (walls?.userData.setFacadeDetail as ((on: boolean) => void) | undefined)?.(true);
+
+  // ── the main building: split meshes with the cutaway material ────────────
+  // Walls carry the cutaway facade shader (discard above cutH + seam band).
+  const mainWallMat = facadeMaterial(palette.creamBase, { lampGlow: opts.lampGlow, cutaway: true }) as CutawayFacadeMaterial;
+  mainWallMat.facadeDetail.value = 1; // hero/near: full window raster
+  const mainWalls = new THREE.Mesh(mergeWalls([mainBuilding], palette.creamBase), mainWallMat);
+  mainWalls.name = 'kswMainWalls';
+  mainWalls.castShadow = true;
+  mainWalls.receiveShadow = true;
+  group.add(mainWalls);
+
+  // Roof: fades out (opacity = upperFade) BEFORE the slice engages so the top
+  // is gone by the time the wall is cut open.
+  const mainRoofMat = clayMat(kswPalette.roofClay).clone();
+  mainRoofMat.transparent = true;
+  mainRoofMat.depthWrite = true; // opaque at rest; opacity ramps to 0 on open
+  const mainRoof = new THREE.Mesh(mergeTinted([mainBuilding], (b) => b.roof, kswPalette.roofClay), mainRoofMat);
+  mainRoof.name = 'kswMainRoof';
+  mainRoof.castShadow = true;
+  mainRoof.receiveShadow = true;
+  group.add(mainRoof);
+
+  // Plinth stays (ground level, below the cut — always visible).
+  const plinthParts = ringBandParts(mainBuilding.footprint, -kswCityStyle.plinthSink, kswCityStyle.plinthH, kswCityStyle.plinthOut);
+  const mainPlinth = new THREE.Mesh(plinthParts, clayMat(palette.white));
+  mainPlinth.name = 'kswMainPlinth';
+  mainPlinth.castShadow = false;
+  mainPlinth.receiveShadow = true;
+  group.add(mainPlinth);
+
+  // Eave band sits near the top — fade it with the roof so it doesn't poke
+  // through the open cut.
+  const eaveY = Math.max(mainBuilding.height - 2, kswCityStyle.plinthH + 0.5);
+  const eaveParts = ringBandParts(mainBuilding.footprint, eaveY - kswCityStyle.eaveBandH, eaveY, kswCityStyle.eaveBandOut);
+  const mainEaveMat = clayMat(kswPalette.roofTrim).clone();
+  mainEaveMat.transparent = true;
+  mainEaveMat.depthWrite = true;
+  const mainEave = new THREE.Mesh(eaveParts, mainEaveMat);
+  mainEave.name = 'kswMainEave';
+  mainEave.castShadow = false;
+  mainEave.receiveShadow = true;
+  group.add(mainEave);
+
+  // Per-frame cutaway driver (T18). At rest (cutH 1e6, fade 1) every write is
+  // a no-op → the closed campus is pixel-identical to T15.
+  group.userData.setCutaway = (u: CutawayUniforms): void => {
+    mainWallMat.cutH.value = u.cutH;
+    mainWallMat.upperFade.value = u.upperFade;
+    mainRoofMat.opacity = u.upperFade;
+    mainRoof.visible = u.upperFade > 0.001;
+    mainEaveMat.opacity = u.upperFade;
+    mainEave.visible = u.upperFade > 0.001;
+  };
+
+  return { group, mainBuilding };
+}

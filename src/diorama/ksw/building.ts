@@ -49,7 +49,7 @@ export function segmentWall(length: number, height: number, openings: WallOpenin
 
 export type RoofControl = { setFade(fade01: number): void; fade(): number };
 
-const FLOOR_H = 0.14;
+export const FLOOR_H = 0.14;
 
 function wallGroup(length: number, thickness: number, color: number, openings: WallOpening[]): THREE.Group {
   const g = new THREE.Group();
@@ -108,7 +108,9 @@ function isPerimeter(plan: FloorPlan, room: Room, side: WallSide): boolean {
   }
 }
 
-function buildRoomWalls(plan: FloorPlan, room: Room): THREE.Group {
+// Exported for the zone-ladder interior builder (T17, interior/buildInterior.ts)
+// so it reuses the exact banded-wall recipe instead of duplicating it.
+export function buildRoomWalls(plan: FloorPlan, room: Room): THREE.Group {
   const g = new THREE.Group();
   const r = room.rect;
   const EPSI = 0.012; // keep neighbouring rooms' wall faces off the shared plane
@@ -165,7 +167,7 @@ function doorWorld(room: Room, wall: WallSide, center: number): { x: number; z: 
 
 // Department sign over the first door, hung on the outside: accent slab,
 // plus a Swiss-cross block for the emergency ward and the main entrance.
-function buildSign(room: Room): THREE.Group {
+export function buildSign(room: Room): THREE.Group {
   const g = new THREE.Group();
   const d = room.doors[0];
   const p = doorWorld(room, d.wall, d.center);
@@ -317,7 +319,7 @@ export function buildHospital(plan: FloorPlan, opts: { lampGlow: boolean }): { g
 }
 
 // Props/people inside rooms stand on the raised room floor.
-function withFloorLift(g: THREE.Group): THREE.Group {
+export function withFloorLift(g: THREE.Group): THREE.Group {
   g.position.y += FLOOR_H;
   return g;
 }

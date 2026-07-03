@@ -61,8 +61,11 @@ export function buildSpawnSpecs(plan: FloorPlan, nav: NavGraph, count?: number):
       const lane = rnd() < 0.5 ? laneA : laneB;
       const home: Pt = [xMin + rnd() * (xMax - xMin), lane];
       specs.push({ spec: { role, home, homeRoomId: null, kind: 'rounds', seed }, yaw });
-    } else if (kindRoll < 0.7) {
-      // outdoor stroller: somewhere on the forecourt slabs
+    } else if (kindRoll < 0.7 && slabs.length > 0) {
+      // outdoor stroller: somewhere on the forecourt slabs (only when the plan
+      // authors any — the generated zone-ladder plan has none, so this branch
+      // collapses into the resident branch below there instead of indexing an
+      // empty slab array).
       const s = slabs[Math.floor(rnd() * slabs.length) % slabs.length];
       const home: Pt = [s.x + (rnd() - 0.5) * (s.w - 3), s.z + (rnd() - 0.5) * (s.d - 3)];
       specs.push({ spec: { role, home, homeRoomId: null, kind: 'outdoor', seed }, yaw });

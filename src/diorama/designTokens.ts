@@ -329,6 +329,15 @@ export const kswCity = {
   roadYs: { carriage: 0.04, footway: 0.045, railBed: 0.035, rail: 0.05 },
 } as const;
 
+// S3c Dollhouse-Cutaway (T18): additive token block. `cutHeight` = the y (m)
+// the main building is sliced at when the cutaway is fully open (ground floor +
+// seam only); `cutSeam` = the bright trim band thickness just below the cut;
+// `fadeStartR`/`fadeEndR` = the zoom-radius window over which upper storeys fade
+// out (radius ≥ start: closed, radius ≤ end: fully open); `seamColor` = the warm
+// cut-edge tone. Separate from roofFadePolicy — the cutaway drives the MAIN
+// KSW building only, never the city roofs.
+export const kswS3 = { cutHeight: 3.2, cutSeam: 0.25, fadeStartR: 90, fadeEndR: 55, seamColor: 0xf3e2c8 } as const;
+
 // Diorama-style layer for the geodetic city (style slice). Additive only.
 export const kswCityStyle = {
   plinthH: 0.5, plinthOut: 0.12, plinthSink: 0.3, // sockel: height, outset, below-plate sink

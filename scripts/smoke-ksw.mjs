@@ -140,9 +140,13 @@ try {
   const drift = Math.hypot(settled2.target[0] - settled.target[0], settled2.target[2] - settled.target[2]);
   check('pan stops when the cursor leaves the edge', drift < 0.05, `drift ${drift.toFixed(3)}`);
 
-  // people actually move through the hospital
-  const a0 = s4.agents;
-  check('a full crowd is spawned', a0.total >= 60, `total=${a0.total}`);
+  // People actually move through the REAL KSW interior (T19). The crowd total
+  // is the generated plan's people count (dynamic — no authored 72 anymore),
+  // so assert a healthy floor instead of an exact number. Agent state is
+  // CPU-driven: __KSW.agents updates even while the interior meshes are
+  // hidden behind the closed dollhouse at the overview framing.
+  const a0 = (await state()).agents;
+  check('a full crowd is spawned from the generated plan', a0.total >= 60, `total=${a0.total}`);
   await page.waitForTimeout(6000);
   const a1 = (await state()).agents;
   const moved = a0.samples.filter((p, i) => Math.hypot(p[0] - a1.samples[i][0], p[1] - a1.samples[i][1]) > 0.3).length;
