@@ -60,7 +60,7 @@ describe('computeEnvironment — keyframe selection', () => {
     const e = computeEnvironment(new Date('2026-06-21T11:25:00Z'), CLEAR_SKY);
     expect(e.lampOn01).toBe(0);
     expect(e.starVisibility).toBe(0);
-    expect(e.exposure).toBeCloseTo(1.12, 2);
+    expect(e.exposure).toBeCloseTo(0.98, 2);
   });
   it('is continuous across the golden→day boundary (no jumps)', () => {
     let prev = computeEnvironment(utcAtElevation(3, true), CLEAR_SKY);

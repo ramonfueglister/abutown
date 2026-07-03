@@ -57,11 +57,14 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // hemiIntensity values below fold in the old prototype's gi.hemiCut=0.5
   // (deleted from environment.ts) so hemisphere brightness matches the
   // art-directed original instead of coming out 2x too bright.
+  // Recurated: was reading as a warm-lit evening, not night. Dropped exposure
+  // and GI so the room goes dark enough for stars + the moon terminator to
+  // register; cooler mist/hemi keeps the night blue rather than amber.
   night: {
-    hemiSky: 0x4a5f7d, hemiGround: 0x3d4652, hemiIntensity: 0.2,
-    fogColor: 0x2c3a50, fogNear: 18, fogFar: 46,
-    exposure: 0.95, mistColor: 0x46586e, mistOpacity: 0.18,
-    giScale: 0.9, saturation: 1.08, contrast: 1.05,
+    hemiSky: 0x3d5270, hemiGround: 0x323b48, hemiIntensity: 0.16,
+    fogColor: 0x263248, fogNear: 18, fogFar: 46,
+    exposure: 0.78, mistColor: 0x3c4d62, mistOpacity: 0.2,
+    giScale: 0.68, saturation: 1.08, contrast: 1.08,
     godraysMix: 0, lampOn01: 1,
     turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8,
     sunBoost: 0,
@@ -86,14 +89,16 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
     sunBoost: 2.3,
   },
   // NEW curation: bright, neutral midday — flat contrast, no drama, lamp off.
+  // Recurated: exposure/hemi/sunBoost were blowing the scene to near-white;
+  // pulled back so surfaces read their clay tint and keep gentle contrast.
   day: {
-    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.375,
+    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.28,
     fogColor: 0xe8eef2, fogNear: 22, fogFar: 52,
-    exposure: 1.12, mistColor: 0xf2f3ee, mistOpacity: 0.1,
-    giScale: 0.75, saturation: 1.04, contrast: 1.0,
+    exposure: 0.98, mistColor: 0xf2f3ee, mistOpacity: 0.1,
+    giScale: 0.7, saturation: 1.08, contrast: 1.04,
     godraysMix: 0.15, lampOn01: 0,
     turbidity: 3, rayleigh: 2.2, mieCoefficient: 0.005, mieG: 0.8,
-    sunBoost: 1.0,
+    sunBoost: 0.66,
   },
 };
 
@@ -136,7 +141,7 @@ export const cloudVol = {
 // Warm interior glow for lamp-lit presets.
 export const nightGlow = {
   bulb: 0xffc98a,
-  lampIntensity: 26,
+  lampIntensity: 20,
 } as const;
 
 // Moonlight (the night preset's key light — the sun arc is parked below horizon).
