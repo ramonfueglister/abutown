@@ -56,7 +56,9 @@ for (const el of osmRaw.elements ?? []) {
 }
 console.log(`OSM building polygons: ${osmBuildings.length}`);
 
-const footprintStats = { traced: 0, fallback: 0, wallFallback: 0, roofFacetsTotal: 0, roofFacetsCovered: 0, floatingBuildings: 0 };
+const footprintStats = {
+  traced: 0, fallback: 0, wallFallback: 0, roofFacetsTotal: 0, roofFacetsCovered: 0, floatingBuildings: 0, partHulls: 0,
+};
 const buildings = transformBuildings({ walls, roofs, osmBuildings, projector, stats: footprintStats });
 console.log(`footprints: ${footprintStats.traced} traced, ${footprintStats.fallback} fallback`);
 if (footprintStats.fallback / buildings.length > 0.25)
@@ -65,6 +67,11 @@ if (footprintStats.fallback / buildings.length > 0.25)
   );
 if (footprintStats.wallFallback > 0)
   console.log(`wall facets: ${footprintStats.wallFallback} buildings had 0 wall facets — fell back to footprint prism`);
+if (footprintStats.partHulls > 0)
+  console.log(
+    `per-part hulls: ${footprintStats.partHulls} roof parts had no rendered wall nearby — closed with a ` +
+    `ground→eave hull prism from that part's own roof geometry`,
+  );
 
 // Coverage gate (data proof for the floating-roof root-fix, computed inside
 // transformBuildings from the raw per-facet rings — see the comment there):

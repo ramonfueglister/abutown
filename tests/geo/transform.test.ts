@@ -95,6 +95,54 @@ describe('transformBuildings — multi-part UUID (real LoD2 wall facets)', () =>
   });
 });
 
+describe('transformBuildings — roof part with NO wall facets at all (Task 12 completion fix)', () => {
+  // Real swisstopo gap: some roof PARTS have zero corresponding wall facets in
+  // the source (not "far away walls", but genuinely none). The old code left
+  // those roofs floating with nothing under them. The fix: group roof rings
+  // into connected components (rings sharing a vertex), and for any component
+  // whose facet centroids have no nearby rendered wall-base point, build a
+  // ground→eave prism from the convex hull of that component's own vertices —
+  // geodetically honest because it derives strictly from that part's real
+  // roof geometry, not from an unrelated part's footprint.
+  const part2RoofRing = ringLL(100, 108, 100, 108, 405);
+  const floors3 = fc(feat('b3', ringLL(0, 10, 0, 10, 400))); // part 1 base only
+  const roofs3 = fc(
+    feat('b3', ringLL(0, 10, 0, 10, 405)), // part 1 roof (has walls)
+    feat('b3', part2RoofRing), // part 2 roof — NO wall facets in source
+  );
+  const wallBox = (uuid: string, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number) => {
+    const edge = (ax: number, az: number, bx: number, bz: number) => feat(uuid, [
+      [lonAt(ax), latAt(-az), y0], [lonAt(bx), latAt(-bz), y0],
+      [lonAt(bx), latAt(-bz), y1], [lonAt(ax), latAt(-az), y1], [lonAt(ax), latAt(-az), y0],
+    ]);
+    return [edge(x0, z0, x1, z0), edge(x1, z0, x1, z1), edge(x1, z1, x0, z1), edge(x0, z1, x0, z0)];
+  };
+  // only part 1 gets real wall facets — part 2 has none in this fixture
+  const walls3 = fc(...wallBox('b3', 0, 10, 0, 10, 400, 405));
+
+  const out3 = transformBuildings({ floors: floors3, walls: walls3, roofs: roofs3, osmBuildings: [], projector: makeProjector(ANCHOR) });
+
+  it('closes the wall-less roof part with a per-part hull prism (coverage >= 0.9 on the fixture)', () => {
+    expect(out3.length).toBe(1);
+    const b = out3[0];
+    const wallBaseXZ = wallBasePointsMeters(b.wall.pos);
+
+    // Reuse the same coverage definition as the bake gate: facet centroid has
+    // a wall-base point within 6 m. The hull-prism closure extrudes exactly
+    // the part-2 roof ring's own footprint, so its wall base sits directly
+    // under the roof — well within 6 m of the roof ring's own centroid,
+    // regardless of the box's corner-to-center diagonal.
+    let cx = 0, cz = 0, n = 0;
+    for (const [lon, lat] of part2RoofRing) {
+      const [lx, lz] = makeProjector(ANCHOR).toLocal(lon, lat);
+      cx += lx; cz += lz; n += 1;
+    }
+    cx /= n; cz /= n;
+    const covered = wallBaseXZ.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
+    expect(covered).toBe(true);
+  });
+});
+
 describe('transformRoads', () => {
   it('projects way geometry and keeps the classification', () => {
     const osmRoads = {

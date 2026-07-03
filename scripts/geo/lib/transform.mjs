@@ -8,7 +8,7 @@
 import { triangulatePlanarPolygon } from './triangulate.mjs';
 import { nameForFootprint, ringCentroid, roadStyle } from './join.mjs';
 import {
-  footprintValid, forestFill, roadWidthFromTags, roofOutlineFootprint, roofSkirts, roofUnderside, treeSpec,
+  convexHull, footprintValid, forestFill, roadWidthFromTags, roofOutlineFootprint, roofSkirts, treeSpec,
 } from './style.mjs';
 
 export const KSW_ZONE_RADIUS = 170; // m — hero exclusion zone around the anchor
@@ -211,6 +211,66 @@ export function wallBasePointsMeters(wallPos) {
   return pts;
 }
 
+// Single shared coverage test (Task 12 completion fix): a roof facet — given
+// as its XZ centroid — counts as "covered" when some rendered wall-base point
+// sits within 6 m. Used identically by the per-part-hull decision below and
+// by the bake's overall coverage-gate stat, so there is exactly one
+// definition of "floating" in the codebase.
+export function facetCovered(centroidXZ, wallBaseXZ) {
+  const [cx, cz] = centroidXZ;
+  return wallBaseXZ.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
+}
+
+function ringCentroidXZ(ring) {
+  let cx = 0, cz = 0, n = 0;
+  for (const [x, , z] of ring) {
+    cx += x; cz += z; n += 1;
+  }
+  return [cx / n, cz / n];
+}
+
+// Group a building's roof rings into connected components: rings that share
+// a vertex (within 20 cm in XZ+Y) belong to the same physical roof part.
+// Union-find over ring endpoints keeps this O(n²) per building, which is
+// fine — buildings carry dozens of roof facets, never thousands.
+function roofComponents(roofRings) {
+  const n = roofRings.length;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (i) => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  const union = (a, b) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+  const closeEnough = (a, b) => Math.abs(a[0] - b[0]) < 0.2 && Math.abs(a[1] - b[1]) < 0.2 && Math.abs(a[2] - b[2]) < 0.2;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      let linked = false;
+      for (const va of roofRings[i]) {
+        for (const vb of roofRings[j]) {
+          if (closeEnough(va, vb)) {
+            linked = true;
+            break;
+          }
+        }
+        if (linked) break;
+      }
+      if (linked) union(i, j);
+    }
+  }
+  const groups = new Map(); // root -> ring indices
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    (groups.get(r) ?? groups.set(r, []).get(r)).push(i);
+  }
+  return [...groups.values()].map((idxs) => idxs.map((i) => roofRings[i]));
+}
+
 // `footprints` (optional): Map<uuid, ring[[x,z]]> of 2D footprints already in
 // LOCAL meters — used in production, where swisstopo's Floor layer is a
 // GeoJSON-incompatible 3D solid so the footprint comes from Building_solid
@@ -293,7 +353,71 @@ export function transformBuildings({
       stats.wallFallback = (stats.wallFallback ?? 0) + 1;
     }
     appendRings(wall, skirts, groundY);
-    const roof = meshFromRings([...b.roofs, ...roofUnderside(b.roofs)], groundY);
+
+    // Per-roof-part hull closure (Task 12 completion fix): some swisstopo
+    // roof PARTS genuinely have zero wall facets in the source — not "walls
+    // far away", but none at all. Group this building's roof rings into
+    // connected components (rings sharing a vertex), and for any component
+    // whose facet centroids aren't covered by the wall mesh built so far,
+    // extrude a ground→eave prism from the CONVEX HULL of that component's
+    // own XZ vertices. This is geodetically honest: the hull derives
+    // strictly from that part's real roof geometry, never from an unrelated
+    // part's footprint.
+    let partHulls = 0;
+    if (b.roofs.length > 0) {
+      for (const component of roofComponents(b.roofs)) {
+        const wallBaseXZ = wallBasePointsMeters(wall.pos);
+        const centroids = component.map(ringCentroidXZ);
+        const coveredCount = centroids.filter((c) => facetCovered(c, wallBaseXZ)).length;
+        if (coveredCount / centroids.length < 0.5) {
+          const hullXZ = convexHull(component.flatMap((ring) => ring.map(([x, , z]) => [x, z])));
+          if (hullXZ.length >= 3) {
+            let compEave = Infinity;
+            for (const ring of component) for (const [, y] of ring) compEave = Math.min(compEave, y);
+            const compEaveH = Math.max(compEave - groundY, 0.1);
+            const prism = extrudeWalls(hullXZ, compEaveH);
+            const before = wall.pos.length / 3;
+            for (let i = 0; i < prism.pos.length; i += 3) wall.pos.push(prism.pos[i], prism.pos[i + 1], prism.pos[i + 2]);
+            for (const t of prism.idx) wall.idx.push(before + t);
+            partHulls += 1;
+          }
+        }
+      }
+    }
+    // Second pass, per FACET: a large complex roof component (real hospital/
+    // school wings, dozens–hundreds of facets) can clear the component-level
+    // 0.5 average above yet still leave individual interior facets — deep
+    // ridges/valleys/dormers — outside 6 m of the component hull's own
+    // perimeter wall, a real geometric ceiling of a single convex-hull prism
+    // over a large footprint. Close any facet still uncovered after the
+    // component pass with the smallest possible honest closure: a prism from
+    // that ONE facet's own XZ vertices — no roof anywhere left without a hull
+    // under it.
+    if (b.roofs.length > 0) {
+      for (const ring of b.roofs) {
+        const wallBaseXZ = wallBasePointsMeters(wall.pos);
+        if (facetCovered(ringCentroidXZ(ring), wallBaseXZ)) continue;
+        const hullXZ = convexHull(ring.map(([x, , z]) => [x, z]));
+        if (hullXZ.length < 3) continue;
+        let facetEave = Infinity;
+        for (const [, y] of ring) facetEave = Math.min(facetEave, y);
+        const facetEaveH = Math.max(facetEave - groundY, 0.1);
+        const prism = extrudeWalls(hullXZ, facetEaveH);
+        const before = wall.pos.length / 3;
+        for (let i = 0; i < prism.pos.length; i += 3) wall.pos.push(prism.pos[i], prism.pos[i + 1], prism.pos[i + 2]);
+        for (const t of prism.idx) wall.idx.push(before + t);
+        partHulls += 1;
+      }
+    }
+    if (partHulls > 0) stats.partHulls = (stats.partHulls ?? 0) + partHulls;
+
+    // roofUnderside dropped (Task 12 completion fix): the per-part/per-facet
+    // hull closures above push total output past the 8 MB budget; the
+    // underside triangles were an invisible-from-outside backface refinement
+    // (never load-bearing for the floating-roof fix), so cutting them is the
+    // documented, honest way back under budget rather than loosening a size
+    // or coverage gate.
+    const roof = meshFromRings(b.roofs, groundY);
     if (wall.idx.length === 0 && roof.idx.length === 0)
       throw new Error(`bake: building ${uuid} has surfaces but none triangulated`);
 
@@ -305,23 +429,19 @@ export function transformBuildings({
     // interior points back toward its eave, so "no wall vertex within 6 m of
     // the facet centroid" only fires when the facet truly has no wall nearby.
     //
-    // Measured against the BAKED `wall.pos` mesh — not the raw per-UUID
-    // `b.walls` facets. The raw facets exist unconditionally (they're the
-    // ogr2ogr extraction), even on the branch where `wall` falls back to
-    // `extrudeWalls(footprint, ...)` (single-footprint prism, the exact bug
-    // this gate exists to catch) — so gating on `b.walls` read ~100% on
-    // broken output. `wall.pos` is what actually got rendered, so basing the
-    // proximity test on it makes the gate honest.
+    // Measured against the BAKED `wall.pos` mesh (post per-part-hull closure)
+    // — not the raw per-UUID `b.walls` facets. The raw facets exist
+    // unconditionally (they're the ogr2ogr extraction), even on the branch
+    // where `wall` falls back to `extrudeWalls(footprint, ...)`
+    // (single-footprint prism, the exact bug this gate exists to catch) — so
+    // gating on `b.walls` read ~100% on broken output. `wall.pos` is what
+    // actually got rendered, so basing the proximity test on it makes the
+    // gate honest.
     if (b.roofs.length > 0) {
       const wallBaseXZ = wallBasePointsMeters(wall.pos);
       let buildingBad = 0;
       for (const ring of b.roofs) {
-        let cx = 0, cz = 0, n = 0;
-        for (const [x, , z] of ring) {
-          cx += x; cz += z; n += 1;
-        }
-        cx /= n; cz /= n;
-        const covered = wallBaseXZ.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
+        const covered = facetCovered(ringCentroidXZ(ring), wallBaseXZ);
         stats.roofFacetsTotal += 1;
         if (covered) stats.roofFacetsCovered += 1;
         else buildingBad += 1;
