@@ -5,9 +5,6 @@ import { clayMat, glassMat } from '../../src/diorama/ksw/props';
 import { boxGeo, roundedBox } from '../../src/diorama/ksw/geometryCache';
 import { nightGlow, palette, radii } from '../../src/diorama/designTokens';
 
-const DAY = { lampGlow: false };
-const NIGHT = { lampGlow: true };
-
 function clayMesh(color: number, castShadow = true): THREE.Mesh {
   const m = new THREE.Mesh(roundedBox(1, 1, 1, 4, radii.s), clayMat(color));
   m.castShadow = castShadow;
@@ -37,46 +34,41 @@ describe('nightWindowHash', () => {
 
 describe('classifyMesh', () => {
   it('routes clay meshes by shadow flag', () => {
-    expect(classifyMesh(clayMesh(palette.creamBase), DAY)).toBe('clay');
-    expect(classifyMesh(clayMesh(palette.mint, false), DAY)).toBe('clayNoCast');
+    expect(classifyMesh(clayMesh(palette.creamBase))).toBe('clay');
+    expect(classifyMesh(clayMesh(palette.mint, false))).toBe('clayNoCast');
   });
 
   it('routes roof-tagged meshes to roofFade regardless of material', () => {
     const roof = clayMesh(palette.metalMatt);
     roof.userData.roofFade = true;
-    expect(classifyMesh(roof, DAY)).toBe('roofFade');
-    expect(classifyMesh(roof, NIGHT)).toBe('roofFade');
+    expect(classifyMesh(roof)).toBe('roofFade');
   });
 
   it('routes MeshBasicMaterial (screens, op-light faces) to glow', () => {
     const screen = new THREE.Mesh(boxGeo(0.4, 0.3, 0.02), new THREE.MeshBasicMaterial({ color: 0xdff3ef }));
-    expect(classifyMesh(screen, DAY)).toBe('glow');
-    expect(classifyMesh(screen, NIGHT)).toBe('glow');
+    expect(classifyMesh(screen)).toBe('glow');
   });
 
-  it('window panes: glass by day, hash-selected share glows at night', () => {
-    // hash(0, 0) === 0 < NIGHT_WINDOW_SHARE: this pane glows at night
+  it('window panes: hash-selected share always route to glowNight (intensity rides lampGlowU)', () => {
+    // hash(0, 0) === 0 < NIGHT_WINDOW_SHARE: this pane routes into glowNight
     const glowing = paneAt(0, 0);
     expect(nightWindowHash(0, 0)).toBeLessThan(NIGHT_WINDOW_SHARE);
-    expect(classifyMesh(glowing, DAY)).toBe('glass');
-    expect(classifyMesh(glowing, NIGHT)).toBe('glowNight');
+    expect(classifyMesh(glowing)).toBe('glowNight');
 
-    // find a position the hash leaves dark and verify it stays glass
+    // a hash-dark pane stays plain glass
     let dark: [number, number] | null = null;
     for (let i = 1; i < 100 && !dark; i++) {
       if (nightWindowHash(i * 0.37, i * 0.91) >= NIGHT_WINDOW_SHARE) dark = [i * 0.37, i * 0.91];
     }
     expect(dark).not.toBeNull();
     const darkPane = paneAt(dark![0], dark![1]);
-    expect(classifyMesh(darkPane, DAY)).toBe('glass');
-    expect(classifyMesh(darkPane, NIGHT)).toBe('glass');
+    expect(classifyMesh(darkPane)).toBe('glass');
   });
 
-  it('lamp bulbs are clay by day and glow at night', () => {
+  it('lamp bulbs always route to glowNight (intensity rides lampGlowU)', () => {
     const bulb = clayMesh(palette.white);
     bulb.userData.lampBulb = true;
-    expect(classifyMesh(bulb, DAY)).toBe('clay');
-    expect(classifyMesh(bulb, NIGHT)).toBe('glowNight');
+    expect(classifyMesh(bulb)).toBe('glowNight');
   });
 
   it('the world-position hash uses the pane position, not local coords', () => {
@@ -87,7 +79,7 @@ describe('classifyMesh', () => {
     carrier.add(pane);
     carrier.updateMatrixWorld(true);
     const expected = nightWindowHash(5.5, -3.25) < NIGHT_WINDOW_SHARE ? 'glowNight' : 'glass';
-    expect(classifyMesh(pane, NIGHT)).toBe(expected);
+    expect(classifyMesh(pane)).toBe(expected);
   });
 });
 
@@ -115,9 +107,11 @@ describe('batchHospital', () => {
 
   it('hoists meshes into buckets, dedupes geometry, keeps animated meshes', () => {
     const group = smallScene();
-    const { batches } = batchHospital(group, DAY);
+    const { batches } = batchHospital(group);
     const byName = new Map(batches.map((b) => [b.name, b]));
-    expect([...byName.keys()].sort()).toEqual(['ksw-clay', 'ksw-clayNoCast', 'ksw-glass', 'ksw-roofFade']);
+    // the pane at hash(0,0)=0 now always routes to glowNight (its intensity
+    // rides lampGlowU), so the day scene has no plain-glass bucket.
+    expect([...byName.keys()].sort()).toEqual(['ksw-clay', 'ksw-clayNoCast', 'ksw-glowNight', 'ksw-roofFade']);
     expect(byName.get('ksw-clay')!.instanceCount).toBe(3);
     expect(byName.get('ksw-clayNoCast')!.instanceCount).toBe(1);
     // the originals are gone; only the blinker survives as a loose mesh
@@ -134,7 +128,7 @@ describe('batchHospital', () => {
 
   it('bakes world transforms and per-instance colors into the batch', () => {
     const group = smallScene();
-    const { batches } = batchHospital(group, DAY);
+    const { batches } = batchHospital(group);
     const clayBatch = batches.find((b) => b.name === 'ksw-clay')!;
     const m = new THREE.Matrix4();
     clayBatch.getMatrixAt(1, m);
@@ -146,29 +140,25 @@ describe('batchHospital', () => {
     expect(c.getHex()).toBe(new THREE.Color(palette.creamBase).getHex());
   });
 
-  it('night mode moves the hash-selected panes into a glowNight bucket', () => {
+  it('hash-selected panes always route to a glowNight bucket (intensity rides lampGlowU)', () => {
     const group = smallScene(); // its pane sits at hash(0,0)=0 -> glows
-    const { batches } = batchHospital(group, NIGHT);
+    const { batches } = batchHospital(group);
     const names = batches.map((b) => b.name);
     expect(names).toContain('ksw-glowNight');
-    expect(names).not.toContain('ksw-glass');
     const glowNight = batches.find((b) => b.name === 'ksw-glowNight')!;
-    const mat = glowNight.material as THREE.MeshBasicMaterial;
+    // warm night-glow node material: colour still nightGlow.bulb, transparent,
+    // depthWrite off, opacity driven by lampGlowU via opacityNode (not a static
+    // .opacity — so we assert the presence of the node instead of a value).
+    const mat = glowNight.material as THREE.MeshBasicNodeMaterial;
     expect(mat.color.getHex()).toBe(new THREE.Color(nightGlow.bulb).getHex());
     expect(mat.transparent).toBe(true);
-    expect(mat.opacity).toBeCloseTo(0.9);
     expect(mat.depthWrite).toBe(false); // unsorted transparent batch
-  });
-
-  it('transparent buckets never depth-write (glass, glowNight): unsorted batches must not depth-reject each other', () => {
-    const day = batchHospital(smallScene(), DAY);
-    const glass = day.batches.find((b) => b.name === 'ksw-glass')!;
-    expect((glass.material as THREE.Material).depthWrite).toBe(false);
+    expect(mat.opacityNode).toBeTruthy(); // opacity rides the lampGlowU uniform
   });
 
   it('the roofs control drives the roofFade batch exactly like the old per-mesh control', () => {
     const group = smallScene();
-    const { batches, roofs } = batchHospital(group, DAY);
+    const { batches, roofs } = batchHospital(group);
     const roofBatch = batches.find((b) => b.name === 'ksw-roofFade')!;
     const mat = roofBatch.material as THREE.Material & { opacity: number };
     expect(mat.transparent).toBe(true);

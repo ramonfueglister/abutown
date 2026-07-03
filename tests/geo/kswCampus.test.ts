@@ -5,7 +5,7 @@ import { buildKswCampus } from '../../src/diorama/ksw/geo/kswCampus';
 import { kswBuildings } from '../../src/diorama/ksw/geo/geoData';
 
 describe('buildKswCampus', () => {
-  const { group, mainBuilding } = buildKswCampus(kswBuildings, { lampGlow: false });
+  const { group, mainBuilding } = buildKswCampus(kswBuildings);
 
   it('is named kswCampus and reuses the city massing pipeline (walls with fuv facade attribute)', () => {
     expect(group.name).toBe('kswCampus');

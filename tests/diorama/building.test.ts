@@ -55,12 +55,16 @@ describe('segmentWall', () => {
 });
 
 describe('buildHospital', () => {
-  const { group, roofs } = buildHospital(kswPlan, { lampGlow: false });
+  const { group, roofs } = buildHospital(kswPlan);
   const batches = group.children.filter((o): o is THREE.BatchedMesh => (o as THREE.BatchedMesh).isBatchedMesh);
   const roofBatch = batches.find((b) => b.name === 'ksw-roofFade');
 
   it('batches the substantial scene (walls, floors, props, roofs) into few buckets', () => {
-    expect(batches.map((b) => b.name).sort()).toEqual(['ksw-clay', 'ksw-clayNoCast', 'ksw-glass', 'ksw-glow', 'ksw-roofFade']);
+    // glowNight is always present now (window panes + lamp bulbs route into it
+    // unconditionally; their intensity rides the shared lampGlowU uniform).
+    expect(batches.map((b) => b.name).sort()).toEqual([
+      'ksw-clay', 'ksw-clayNoCast', 'ksw-glass', 'ksw-glow', 'ksw-glowNight', 'ksw-roofFade',
+    ]);
     const instances = batches.reduce((n, b) => n + b.instanceCount, 0);
     expect(instances).toBeGreaterThan(400);
     // only the animated meshes (ambulance blinker, heli rotor parts) stay individual

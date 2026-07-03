@@ -13,10 +13,11 @@
 // mist, sky, discs, stars).
 
 import * as THREE from 'three/webgpu';
-import { varyingProperty } from 'three/tsl';
+import { float, varyingProperty } from 'three/tsl';
 import { clay, nightGlow, palette, roofFadePolicy } from '../designTokens';
 import { claySheenNode } from './clayNodes';
 import { ensureSequentialIndex } from './geometryCache';
+import { lampGlowU } from './glowUniform';
 import type { RoofControl } from './building';
 
 // three r185 defines `batchColor` (three/src/nodes/accessors/Batch.js) but
@@ -38,17 +39,20 @@ export const NIGHT_WINDOW_SHARE = 0.55;
 
 // Which bucket a static mesh belongs to. Pure, given the mesh's material
 // class, userData tags, shadow flags and (for night windows) matrixWorld.
-export function classifyMesh(mesh: THREE.Mesh, opts: { lampGlow: boolean }): BucketName {
+// Glow geometry is ALWAYS routed into the glowNight bucket now; its intensity
+// rides the shared lampGlowU uniform (0 at day = invisible), so the bake no
+// longer decides day-vs-night — the runtime uniform does.
+export function classifyMesh(mesh: THREE.Mesh): BucketName {
   const mat = mesh.material as THREE.Material;
   if (mesh.userData.roofFade) return 'roofFade';
   if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) return 'glow';
-  if (opts.lampGlow && mesh.userData.lampBulb) return 'glowNight';
+  if (mesh.userData.lampBulb) return 'glowNight';
   if ((mat as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) {
     return mesh.castShadow ? 'clay' : 'clayNoCast';
   }
   if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
     // the shared glassMat: window panes, vehicle glass, domes
-    if (opts.lampGlow && mesh.userData.windowPane) {
+    if (mesh.userData.windowPane) {
       const wp = new THREE.Vector3().setFromMatrixPosition(mesh.matrixWorld);
       if (nightWindowHash(wp.x, wp.z) < NIGHT_WINDOW_SHARE) return 'glowNight';
     }
@@ -127,15 +131,20 @@ function bucketSpec(name: BucketName): BucketSpec {
         castShadow: false,
         receiveShadow: false,
       };
-    case 'glowNight':
-      // warm night glow: lamp bulbs + the hashed share of window panes.
+    case 'glowNight': {
+      // warm night glow: lamp bulbs + the hashed share of window panes. Opacity
+      // rides the shared lampGlowU uniform (0 = day, fully transparent; 0.9 at
+      // full night), so the geometry is always present but only shows at night.
       // depthWrite off for the same unsorted-transparency reason as glass.
+      const glowMat = new THREE.MeshBasicNodeMaterial({ color: nightGlow.bulb, transparent: true, depthWrite: false });
+      glowMat.opacityNode = float(0.9).mul(lampGlowU);
       return {
-        material: new THREE.MeshBasicMaterial({ color: nightGlow.bulb, transparent: true, opacity: 0.9, depthWrite: false }),
+        material: glowMat,
         perInstanceColor: false,
         castShadow: false,
         receiveShadow: false,
       };
+    }
     case 'roofFade':
       return { material: clayBatchMaterial(true), perInstanceColor: true, castShadow: true, receiveShadow: true };
   }
@@ -144,14 +153,14 @@ function bucketSpec(name: BucketName): BucketSpec {
 // Hoist every batchable Mesh under `group` into per-bucket BatchedMeshes,
 // remove the originals (and the groups left empty), and return the batches
 // plus the RoofControl driving the roofFade bucket.
-export function batchHospital(group: THREE.Group, opts: { lampGlow: boolean }): { batches: THREE.BatchedMesh[]; roofs: RoofControl } {
+export function batchHospital(group: THREE.Group): { batches: THREE.BatchedMesh[]; roofs: RoofControl } {
   group.updateMatrixWorld(true);
 
   const buckets = new Map<BucketName, THREE.Mesh[]>();
   group.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh || isAnimated(mesh)) return;
-    const name = classifyMesh(mesh, opts);
+    const name = classifyMesh(mesh);
     const list = buckets.get(name);
     if (list) list.push(mesh);
     else buckets.set(name, [mesh]);

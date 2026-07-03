@@ -278,8 +278,11 @@ export const cloudCfg = {
 // Warm interior glow for lamp-lit presets.
 export const nightGlow = {
   bulb: 0xffc98a,
+  lampHead: 0xffe3b0, // warm lamp-head tint mixed in as lampGlowU rises to 1
   lampIntensity: 20,
   boost: 1.2, // applyEnvironment multiplies lampIntensity by this at full lampOn01
+  cityPool: 14, // base intensity of the two forecourt PointLight pools
+  emergency: 20, // base intensity of the emergency-zone PointLight
 } as const;
 
 // Moonlight (the night preset's key light — the sun arc is parked below

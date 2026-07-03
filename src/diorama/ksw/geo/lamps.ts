@@ -2,9 +2,17 @@
 // Street lamps along the REAL road polylines: class-based spacing, alternating
 // sides — deterministic, no scattering. Night: warm bulbs like the original.
 import * as THREE from 'three/webgpu';
-import { kswCityStyle, palette } from '../../designTokens';
+import { mix, vec3 } from 'three/tsl';
+import { kswCityStyle, nightGlow, palette } from '../../designTokens';
 import { clayMat } from '../props';
+import { lampGlowU } from '../glowUniform';
 import type { RoadPath } from './geoData';
+
+// rgb01 tuple for a 0xRRGGBB hex — TSL vec3 needs normalized channels.
+function rgb01(hex: number): [number, number, number] {
+  const c = new THREE.Color(hex);
+  return [c.r, c.g, c.b];
+}
 
 export function lampSpots(roads: RoadPath[]): Array<{ x: number; z: number }> {
   const out: Array<{ x: number; z: number }> = [];
@@ -36,7 +44,7 @@ export function lampSpots(roads: RoadPath[]): Array<{ x: number; z: number }> {
   return out;
 }
 
-export function buildLamps(roads: RoadPath[], opts: { lampGlow: boolean }): THREE.Group {
+export function buildLamps(roads: RoadPath[]): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityLamps';
   const spots = lampSpots(roads);
@@ -58,11 +66,11 @@ export function buildLamps(roads: RoadPath[], opts: { lampGlow: boolean }): THRE
   heads.count = spots.length;
   const bulbGeo = new THREE.SphereGeometry(0.15, 8, 6);
   bulbGeo.translate(0, 2.86, 0);
-  const bulbs = new THREE.InstancedMesh(
-    bulbGeo,
-    opts.lampGlow ? new THREE.MeshBasicMaterial({ color: 0xffe3b0 }) : clayMat(palette.white),
-    n,
-  );
+  // The bulb is always built with an unlit node material; its colour mixes from
+  // white (day look) toward the warm nightGlow.lampHead tint as lampGlowU rises.
+  const bulbMat = new THREE.MeshBasicNodeMaterial();
+  bulbMat.colorNode = mix(vec3(...rgb01(palette.white)), vec3(...rgb01(nightGlow.lampHead)), lampGlowU);
+  const bulbs = new THREE.InstancedMesh(bulbGeo, bulbMat, n);
   bulbs.name = 'lampBulbs';
   bulbs.count = spots.length;
   const m = new THREE.Matrix4();

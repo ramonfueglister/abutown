@@ -56,7 +56,6 @@ export type CutawayUniforms = { cutH: number; upperFade: number };
 
 export function buildKswCampus(
   buildings: BakedBuilding[],
-  opts: { lampGlow: boolean },
 ): { group: THREE.Group; mainBuilding: BakedBuilding } {
   const group = new THREE.Group();
   group.name = 'kswCampus';
@@ -65,7 +64,7 @@ export function buildKswCampus(
   const others = buildings.filter((b) => b.id !== mainBuilding.id);
 
   // ── the 25 secondary buildings: plain city pipeline, always closed ──────
-  const secondary = buildCityMassing(others, opts);
+  const secondary = buildCityMassing(others);
   const rename: Record<string, string> = {
     cityWalls: 'kswCampusWalls',
     cityRoofs: 'kswCampusRoofs',
@@ -81,7 +80,7 @@ export function buildKswCampus(
 
   // ── the main building: split meshes with the cutaway material ────────────
   // Walls carry the cutaway facade shader (discard above cutH + seam band).
-  const mainWallMat = facadeMaterial(palette.creamBase, { lampGlow: opts.lampGlow, cutaway: true }) as CutawayFacadeMaterial;
+  const mainWallMat = facadeMaterial(palette.creamBase, { cutaway: true }) as CutawayFacadeMaterial;
   mainWallMat.facadeDetail.value = 1; // hero/near: full window raster
   const mainWalls = new THREE.Mesh(mergeWalls([mainBuilding], palette.creamBase), mainWallMat);
   mainWalls.name = 'kswMainWalls';

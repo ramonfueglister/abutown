@@ -53,6 +53,7 @@ import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
+import { lampGlowU } from './glowUniform';
 import { buildNature } from './geo/nature';
 import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
@@ -447,7 +448,7 @@ async function boot(): Promise<void> {
   // shader, roofs, plinth/eave trim. Facade detail is always on (hero/near).
   // mainBuilding always comes from the FULL campus so zone decomposition keys
   // off the true largest footprint even when the shell mesh is suppressed.
-  const { group: kswCampus, mainBuilding } = buildKswCampus(kswBuildings, { lampGlow: preset.lampOn });
+  const { group: kswCampus, mainBuilding } = buildKswCampus(kswBuildings);
   scene.add(kswCampus);
   const setCutaway = kswCampus.userData.setCutaway as (u: { cutH: number; upperFade: number }) => void;
 
@@ -521,7 +522,7 @@ async function boot(): Promise<void> {
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
   cityRoot.add(cityPlate);
-  cityRoot.add(buildCityMassing(cityBuildings, { lampGlow: preset.lampOn }));
+  cityRoot.add(buildCityMassing(cityBuildings));
   cityRoot.add(buildRoads(cityRoads, cityRails));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
@@ -539,7 +540,7 @@ async function boot(): Promise<void> {
     }),
   );
   cityRoot.add(buildWindows(cityBuildings));
-  cityRoot.add(buildLamps(cityRoads, { lampGlow: preset.lampOn }));
+  cityRoot.add(buildLamps(cityRoads));
   scene.add(cityRoot);
 
   // 3-ring semantic LOD (Task 10, spec §2c): detail follows the camera radius.
@@ -698,25 +699,39 @@ async function boot(): Promise<void> {
   addMistRing(cityMeta.plate.w / 2, cityMeta.plate.d / 2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat);
 
   // Night life: window glow + lamp bulbs are baked into the glowNight batch
-  // at build time (staticBatch.ts); only the actual light pools live here.
-  // Rebased (T19) onto the real forecourt: two warm pools flank the main door,
-  // one glows over the emergency zone.
-  if (preset.lampOn) {
+  // at build time (staticBatch.ts) and ride the shared lampGlowU uniform; the
+  // actual light pools live here. Rebased (T19) onto the real forecourt: two
+  // warm pools flank the main door, one glows over the emergency zone. The
+  // pools are ALWAYS created now; their intensity scales by glow01 (Task 3:
+  // preset-driven; Task 4: continuous per-frame from lampLights/lampBaseIntensities).
+  const lampLights: THREE.PointLight[] = [];
+  const lampBaseIntensities: number[] = [];
+  const glow01 = preset.lampOn ? 1 : 0;
+  {
     const [dox, doz] = [Math.sin(mainDoor.yaw), Math.cos(mainDoor.yaw)];
     const perpX = Math.cos(mainDoor.yaw);
     const perpZ = -Math.sin(mainDoor.yaw);
     for (const side of [-1, 1]) {
       const px = mainDoor.x + dox * 6 + perpX * side * 6;
       const pz = mainDoor.z + doz * 6 + perpZ * side * 6;
-      const pool = new THREE.PointLight(nightGlow.bulb, 14 * preset.lampBoost, 12, 2);
+      const base = nightGlow.cityPool * nightGlow.boost;
+      const pool = new THREE.PointLight(nightGlow.bulb, base * glow01, 12, 2);
       pool.position.set(px, 3.0, pz);
       scene.add(pool);
+      lampLights.push(pool);
+      lampBaseIntensities.push(base);
     }
     // emergency-zone glow
-    const emLamp = new THREE.PointLight(nightGlow.bulb, 20 * preset.lampBoost, 16, 2);
+    const emBase = nightGlow.emergency * nightGlow.boost;
+    const emLamp = new THREE.PointLight(nightGlow.bulb, emBase * glow01, 16, 2);
     emLamp.position.set(erZone.x + dox * (erZone.d / 2), 2.6, erZone.z + doz * (erZone.d / 2));
     scene.add(emLamp);
+    lampLights.push(emLamp);
+    lampBaseIntensities.push(emBase);
   }
+  // Task 3: presets still drive the glow — one shared uniform for the batched
+  // glow geometry (windows + bulbs). Task 4 fades this continuously with sunset.
+  lampGlowU.value = glow01;
 
   // One-bounce GI: capture from above the roofs, feed back as IBL. Boot does
   // the full synchronous 6-face warm-up (never a black env map); after that
