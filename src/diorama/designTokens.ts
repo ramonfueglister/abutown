@@ -120,6 +120,76 @@ export const skyPhys = {
   night: { turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8, timeOfDay: 1.08, sunBoost: 0 },
 } as const;
 
+// --- Realtime environment: art-directed keyframes over real sun elevation ---
+// The old presets live on as keyframes: night (<-6°), goldenMorning/-Evening
+// (anchored at +4°, chosen by whether the sun is rising), day (>25°, NEW).
+export type EnvKeyframe = {
+  hemiSky: number; hemiGround: number; hemiIntensity: number;
+  fogColor: number; fogNear: number; fogFar: number;
+  exposure: number; mistColor: number; mistOpacity: number;
+  giScale: number; saturation: number; contrast: number;
+  godraysMix: number; lampOn01: number;
+  turbidity: number; rayleigh: number; mieCoefficient: number; mieG: number;
+  sunBoost: number; cloudCoverageBase: number;
+};
+
+export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; goldenEvening: EnvKeyframe; day: EnvKeyframe } = {
+  night: {
+    hemiSky: 0x4a5f7d, hemiGround: 0x3d4652, hemiIntensity: 0.4,
+    fogColor: 0x2c3a50, fogNear: 18, fogFar: 46,
+    exposure: 0.95, mistColor: 0x46586e, mistOpacity: 0.18,
+    giScale: 0.9, saturation: 1.08, contrast: 1.05,
+    godraysMix: 0, lampOn01: 1,
+    turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8,
+    sunBoost: 0, cloudCoverageBase: 0.4,
+  },
+  goldenMorning: {
+    hemiSky: 0xc4dcda, hemiGround: 0xe4d3ba, hemiIntensity: 0.6,
+    fogColor: 0xeee2cf, fogNear: 20, fogFar: 48,
+    exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.16,
+    giScale: 0.7, saturation: 1.1, contrast: 1.0,
+    godraysMix: 0.35, lampOn01: 0,
+    turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8,
+    sunBoost: 1.3, cloudCoverageBase: 0.44,
+  },
+  // The DREDGE moment — amber horizon under deep teal — now fires at the REAL dusk.
+  goldenEvening: {
+    hemiSky: 0x4f7d84, hemiGround: 0x5c5348, hemiIntensity: 0.42,
+    fogColor: 0x486e74, fogNear: 18, fogFar: 46,
+    exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.22,
+    giScale: 0.55, saturation: 1.12, contrast: 1.06,
+    godraysMix: 0.6, lampOn01: 1,
+    turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9,
+    sunBoost: 2.3, cloudCoverageBase: 0.62,
+  },
+  // NEW curation: bright, neutral midday — flat contrast, no drama, lamp off.
+  day: {
+    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.75,
+    fogColor: 0xe8eef2, fogNear: 22, fogFar: 52,
+    exposure: 1.12, mistColor: 0xf2f3ee, mistOpacity: 0.1,
+    giScale: 0.75, saturation: 1.04, contrast: 1.0,
+    godraysMix: 0.15, lampOn01: 0,
+    turbidity: 3, rayleigh: 2.2, mieCoefficient: 0.005, mieG: 0.8,
+    sunBoost: 1.0, cloudCoverageBase: 0.44,
+  },
+};
+
+// Sun-elevation anchors (degrees) for keyframe interpolation.
+export const envAnchors = { nightBelowDeg: -6, goldenPeakDeg: 4, dayAboveDeg: 25 } as const;
+
+// How real weather modulates the look. All weather→look constants live here.
+export const weatherLook = {
+  coverageMin: 0.15, coverageMax: 0.85, // cloud_cover 0..1 → raymarcher coverage window
+  sunDampMax: 0.75, // full overcast removes 75% of direct sun
+  hemiBoostMax: 0.35, // ...and adds up to 35% diffuse hemi
+  fogVisFullM: 200, fogVisClearM: 4000, // visibility → fog factor ramp
+  fogNearMin: 4, fogFarMin: 22, // fully fogged near/far
+  precipFullMmPerH: 5, // 5 mm/h = full-intensity particles
+  snowTempC: 1, // precip at or below this temperature falls as snow
+  driftBase: 0.006, driftPerMs: 0.0011, // cloud drift = base + speed(m/s) * perMs
+  rainColor: 0xaebfd4, snowColor: 0xf4f7fb,
+} as const;
+
 export const sunArcCfg = {
   azRise: 0.15,
   azSet: 0.95,
