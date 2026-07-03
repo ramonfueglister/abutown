@@ -854,6 +854,7 @@ async function boot(): Promise<void> {
     rainSy: precipLook.rainCitySy,
     snowSx: precipLook.snowCitySx,
     snowSy: precipLook.snowCitySy,
+    rainAlpha: precipLook.rainCityAlpha,
   });
   scene.add(precipitation.object3d);
 

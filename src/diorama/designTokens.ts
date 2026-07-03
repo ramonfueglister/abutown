@@ -144,8 +144,12 @@ export const precipLook = {
   // rain streak and 0.06 snow flake all but vanished over the 90-unit box. Give
   // the city its own slightly heavier streak/flake + higher count so rain fäden
   // and snow flocken actually register at the pulled-back city framing.
-  rainCitySx: 0.05, rainCitySy: 0.9, snowCitySx: 0.14, snowCitySy: 0.14,
-  city: { boxX: 90, boxY: 40, boxZ: 90, count: 7000 },
+  // Task 6 look-review round 1: rain still barely read at the pulled-back city
+  // framing — streaks were too thin/short/sparse to register as fäden. Curated
+  // heavier: thicker+longer streak, higher alpha, denser count.
+  rainCitySx: 0.11, rainCitySy: 1.8, snowCitySx: 0.14, snowCitySy: 0.14,
+  rainCityAlpha: 0.6,
+  city: { boxX: 90, boxY: 40, boxZ: 90, count: 13000 },
 } as const;
 
 // Curated cloud tint colors for applyEnvironment. Day mixes the sun color
@@ -392,7 +396,12 @@ export const nightSkyLook = {
   // cloud layer already swaps onto the 1800 dome; the sky must too. Quad/moon
   // sizes scale up proportionally (~×4.5) to keep the same apparent size, and
   // the star count is raised so the far-larger sphere doesn't read sparse.
-  city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 2.7, starCount: 900, moonRadius: 15, moonDistance: kswCity.domeRadius * 0.82 },
+  // Task 6 look-review round 1: at 1080p the ×4.5-scaled 2.7 quad still read as
+  // ~4.5px specks — the night sky looked starless. Curated up (quad ×2, count
+  // ~×1.8) until a real starfield reads at the city framing, and the moon disc
+  // enlarged so it's an unmistakable disc, not a dot. Apparent-size honesty
+  // holds — the moon still sits at its true elevation for the capture time.
+  city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 5.5, starCount: 2200, moonRadius: 26, moonDistance: kswCity.domeRadius * 0.82 },
 } as const;
 
 // Diorama-style layer for the geodetic city (style slice). Additive only.

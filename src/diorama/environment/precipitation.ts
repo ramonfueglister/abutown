@@ -24,6 +24,7 @@ export type PrecipOpts = {
   rainSy: number;
   snowSx: number;
   snowSy: number;
+  rainAlpha: number;
 };
 
 const RAIN_SPEED = 9; // m/s fall
@@ -89,7 +90,8 @@ export function createPrecipitation(opts?: Partial<PrecipOpts>): PrecipitationSy
       vec3(...hexToRgb01(weatherLook.snowColor)),
       snowU,
     );
-    const alpha = mix(float(precipLook.rainAlpha), float(precipLook.snowAlpha), snowU);
+    const rainAlpha = opts?.rainAlpha ?? precipLook.rainAlpha;
+    const alpha = mix(float(rainAlpha), float(precipLook.snowAlpha), snowU);
     mat.colorNode = vec4(col, f(alpha).mul(active.select(float(1), float(0))));
   }
 
