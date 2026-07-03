@@ -264,6 +264,15 @@ impl NodeOccupancy {
     pub fn try_claim(&mut self, net: &TrafficNet, node: u32, turn: u32, conflicts: &[u32]) -> bool {
         let n = node as usize;
         let now = self.now;
+        // The lane this turn merges onto: two distinct turns that feed the SAME
+        // `toLane` share a physical merge point, so only one may cross per
+        // clearance window regardless of whether the bake marked them
+        // `conflictsWith` (real bakes frequently omit merge conflicts). Treating
+        // a shared `toLane` as an implicit conflict closes that gap — two
+        // vehicles can no longer land on top of each other at s≈0 on the merged
+        // lane. Grounded in the same conflict-point principle the explicit list
+        // encodes; purely additive (never *removes* a conflict).
+        let turn_to_lane = net.turns[turn as usize].to_lane;
         // Reject if any live claim conflicts.
         for &(other, expiry) in &self.claims[n] {
             if now >= expiry || other == turn {
@@ -271,7 +280,8 @@ impl NodeOccupancy {
             }
             let a_conflicts_b = conflicts.contains(&other);
             let b_conflicts_a = net.turns[other as usize].conflicts_with.contains(&turn);
-            if a_conflicts_b || b_conflicts_a {
+            let shared_merge = net.turns[other as usize].to_lane == turn_to_lane;
+            if a_conflicts_b || b_conflicts_a || shared_merge {
                 return false;
             }
         }

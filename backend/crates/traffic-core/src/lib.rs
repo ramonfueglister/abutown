@@ -27,4 +27,4 @@ pub use fleet::{Fleet, LaneIndex, RouteHandle, VehId};
 pub use idm::{IdmParams, idm_accel};
 pub use mobil::{Follower, LaneNeighbourhood, MobilDecision, MobilParams};
 pub use rng::u01;
-pub use tick::{Core, DT};
+pub use tick::{Core, DT, VehicleView};

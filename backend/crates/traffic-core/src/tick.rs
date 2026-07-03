@@ -26,6 +26,20 @@ use traffic_net::TrafficNet;
 /// Simulation timestep (s). Fixed; the integrator is ballistic-safe at this dt.
 pub const DT: f32 = 0.1;
 
+/// A read-only snapshot of one alive vehicle, for consumers outside the kernel
+/// (the server's re-routing decision and per-tick publish seam).
+#[derive(Debug, Clone, Copy)]
+pub struct VehicleView {
+    /// Lane id the vehicle currently occupies.
+    pub lane: u32,
+    /// Edge id of that lane.
+    pub edge: u32,
+    /// Arc position along the lane (m).
+    pub s: f32,
+    /// Speed (m/s).
+    pub v: f32,
+}
+
 /// Default vehicle length (m) used for bumper-to-bumper gaps.
 const VEHICLE_LEN: f32 = 4.5;
 
@@ -299,6 +313,58 @@ impl Core {
     /// before the first tick). Cheap; the tick already does this in phase 2.
     pub fn reindex(&mut self) {
         self.index.rebuild(&self.fleet);
+    }
+
+    /// Re-route an alive vehicle onto `new_route` in place, keeping its current
+    /// lane and arc position. `new_route[0]` **must** equal the vehicle's
+    /// current lane so the swap is a continuation, not a teleport; the cursor
+    /// resets to 0 (the head of the new route). Returns `false` — leaving the
+    /// old route untouched — if the vehicle is not alive, the route is empty,
+    /// or its head is not the current lane. Used by the server's periodic
+    /// congestion re-routing (Task 7); the kernel itself never re-routes.
+    ///
+    /// Like [`spawn`](Self::spawn), the new route is appended to `route_lanes`
+    /// (the old span is left in place); route storage is bounded by the churn
+    /// of a run, matching the existing spawn allocation model.
+    pub fn reroute(&mut self, veh: VehId, new_route: &[u32]) -> bool {
+        let i = veh as usize;
+        if i >= self.fleet.slots() || !self.fleet.alive[i] {
+            return false;
+        }
+        if new_route.is_empty() || new_route[0] != self.fleet.lane[i] {
+            return false;
+        }
+        let start = self.fleet.route_lanes.len() as u32;
+        self.fleet.route_lanes.extend_from_slice(new_route);
+        let end = self.fleet.route_lanes.len() as u32;
+        self.fleet.route[i] = RouteHandle {
+            start,
+            end,
+            cursor: 0,
+        };
+        true
+    }
+
+    /// The edge id a lane belongs to, for route bookkeeping outside the kernel.
+    pub fn edge_of_lane(&self, lane: u32) -> u32 {
+        self.net.lanes[lane as usize].edge
+    }
+
+    /// Read-only view of an alive vehicle's `(lane, edge)` and remaining route
+    /// as edge ids, for the server's re-routing / snapshot seam. Returns `None`
+    /// for a free slot.
+    pub fn vehicle_view(&self, veh: VehId) -> Option<VehicleView> {
+        let i = veh as usize;
+        if i >= self.fleet.slots() || !self.fleet.alive[i] {
+            return None;
+        }
+        let lane = self.fleet.lane[i];
+        Some(VehicleView {
+            lane,
+            edge: self.net.lanes[lane as usize].edge,
+            s: self.fleet.s[i],
+            v: self.fleet.v[i],
+        })
     }
 
     /// Advance the simulation one timestep. `t` is the tick number, folded into
