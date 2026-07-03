@@ -32,8 +32,8 @@ export type EnvironmentTargets = {
   moonPhaseDir: { value: THREE.Vector3 };
   lampLight: THREE.PointLight;
   lampBulb: THREE.Mesh;
-  stars: THREE.Points;
-  starsMaterial: THREE.PointsMaterial;
+  stars: THREE.InstancedMesh;
+  starsMaterial: THREE.MeshBasicMaterial;
   shaftMaterial: THREE.MeshBasicMaterial;
   shafts: THREE.Mesh[];
   shaftWindows: THREE.Vector3[];
@@ -101,9 +101,14 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
   t.mistMaterial.opacity = env.mistOpacity;
 
   // Discs (read env.* directly, so the scratch reuse above doesn't affect them)
+  // Sun disc stays beyond the cloud dome (r=46) so clouds occlude it by day; DoF
+  // softening the daytime sun into a glow is fine.
   t.sunDisc.position.set(env.sunDir[0], env.sunDir[1], env.sunDir[2]).multiplyScalar(60);
   t.sunDisc.visible = env.sunDir[1] > 0.015;
-  t.moonDisc.position.set(env.moonDir[0], env.moonDir[1], env.moonDir[2]).multiplyScalar(60);
+  // Moon shares the star-dome radius (17) so it sits on the DoF focal plane and
+  // reads as a crisp disc at night instead of being dissolved by tilt-shift bokeh;
+  // its cloud fade is handled by opacity/visibility (starVisibility), not geometry.
+  t.moonDisc.position.set(env.moonDir[0], env.moonDir[1], env.moonDir[2]).multiplyScalar(17);
   t.moonDisc.visible = env.moonDir[1] > 0.02 && env.starVisibility > 0.02;
   t.moonPhaseDir.value.set(...moonPhaseLightDir(env.moonPhase));
 
@@ -112,7 +117,7 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
   t.lampBulb.visible = env.lampOn01 > 0.05;
 
   // Stars: real dome rotation around the celestial pole
-  t.starsMaterial.opacity = 0.85 * env.starVisibility;
+  t.starsMaterial.opacity = env.starVisibility;
   t.stars.visible = env.starVisibility > 0.01;
   t.stars.rotation.set(0, 0, 0);
   t.stars.rotateOnWorldAxis(POLE_AXIS, env.siderealAngleRad);

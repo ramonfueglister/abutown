@@ -430,7 +430,8 @@ async function boot(): Promise<void> {
     const moonLitU = uniform(new THREE.Color(moonDiscTokens.lit));
     moonMat.colorNode = mix(moonDarkU as unknown as ReturnType<typeof vec3>, moonLitU as unknown as ReturnType<typeof vec3>, lit);
   }
-  const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 20), moonMat);
+  // radius 0.46 at dome-distance 17 ≈ the old 1.6 at distance 60 (same apparent size)
+  const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(0.46, 20, 20), moonMat);
   moonDisc.visible = false;
   scene.add(moonDisc);
 
@@ -441,16 +442,45 @@ async function boot(): Promise<void> {
     starSeed = (starSeed * 1103515245 + 12345) % 2147483648;
     return starSeed / 2147483648;
   };
-  for (let i = 0; i < 160; i++) {
+  // Uniform full-sphere distribution: the field is rotated around the celestial
+  // pole by applyEnvironment (sidereal), so any rotation must keep the visible
+  // cone populated. Sample sin(el) uniformly in [-1,1] for equal-area coverage;
+  // stars below the horizon are simply hidden by the ground plate (honest).
+  // Radius sits ON the DoF focal plane (focusDistance 16.5) so the tilt-shift bokeh
+  // keeps the stars crisp, while still comfortably behind the ~5-unit diorama.
+  const STAR_COUNT = 420;
+  const STAR_R = 17;
+  for (let i = 0; i < STAR_COUNT; i++) {
     const az = starRand() * Math.PI * 2;
-    const el = 0.15 + starRand() * 1.25;
-    const r = 60;
-    starPositions.push(r * Math.cos(el) * Math.cos(az), r * Math.sin(el), r * Math.cos(el) * Math.sin(az));
+    const sinEl = starRand() * 2 - 1;
+    const cosEl = Math.sqrt(Math.max(0, 1 - sinEl * sinEl));
+    starPositions.push(STAR_R * cosEl * Math.cos(az), STAR_R * sinEl, STAR_R * cosEl * Math.sin(az));
   }
-  const starGeo = new THREE.BufferGeometry();
-  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
-  const starsMaterial = new THREE.PointsMaterial({ color: palette.star, size: 0.34, sizeAttenuation: true, transparent: true, opacity: 0, fog: false });
-  const stars = new THREE.Points(starGeo, starsMaterial);
+  // Stars are tiny billboarded quads via an InstancedMesh — NOT THREE.Points.
+  // A transparent Points cloud never wrote scene depth in the WebGPU MRT pass, so
+  // the tilt-shift DoF read the sky's far depth at every star pixel and smeared
+  // each one across a giant bokeh → the night sky rendered empty regardless of
+  // size/opacity/radius. Real instanced meshes write depth normally, so DoF sees
+  // them at r=17 (≈ focus) and keeps them crisp. sizeAttenuation is emulated: a
+  // fixed world-size quad at fixed dome radius reads as a near-constant screen dot.
+  const starQuadGeo = new THREE.PlaneGeometry(0.05, 0.05);
+  const starsMaterial = new THREE.MeshBasicMaterial({ color: palette.star, transparent: true, opacity: 0, fog: false, side: THREE.DoubleSide, toneMapped: false });
+  const stars = new THREE.InstancedMesh(starQuadGeo, starsMaterial, STAR_COUNT);
+  stars.frustumCulled = false;
+  const starMat4 = new THREE.Matrix4();
+  const starPos = new THREE.Vector3();
+  const starQuat = new THREE.Quaternion();
+  const starScale = new THREE.Vector3(1, 1, 1);
+  const starLookM = new THREE.Matrix4();
+  for (let i = 0; i < STAR_COUNT; i++) {
+    starPos.set(starPositions[i * 3], starPositions[i * 3 + 1], starPositions[i * 3 + 2]);
+    // Face the dome centre (≈ camera): billboard each quad toward the origin.
+    starLookM.lookAt(starPos, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
+    starQuat.setFromRotationMatrix(starLookM);
+    starMat4.compose(starPos, starQuat, starScale);
+    stars.setMatrixAt(i, starMat4);
+  }
+  stars.instanceMatrix.needsUpdate = true;
   stars.visible = false;
   scene.add(stars);
 
