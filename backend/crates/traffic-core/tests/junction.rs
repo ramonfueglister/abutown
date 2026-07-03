@@ -61,11 +61,15 @@ fn signal_corridor(feeder_len: f32, green_s: f32, cycle_s: f32) -> TrafficNet {
 /// in phase 0. That satisfies coverage.
 #[test]
 fn red_light_queues_and_green_discharges() {
-    // Long green so the whole queue clears; measure throughput during it.
+    // green_share = 0.5: Webster saturation flow target = 1800 * 0.5 * 1 lane
+    // = 900 vph. Assert within +/-20% (720..=1080), computed from the fixture's
+    // own greenS/cycleS so the band stays honest if the fixture changes.
     let green_s = 30.0;
     let cycle_s = 60.0;
+    let lanes = 1.0;
+    let green_share = green_s / cycle_s;
     let net = signal_corridor(200.0, green_s, cycle_s);
-    let mut core = Core::new(&net, 40, 0xA11CE);
+    let mut core = Core::new(&net, 512, 0xA11CE);
     core.set_params(IdmParams {
         v0: 13.9,
         t_headway: 1.2,
@@ -74,48 +78,78 @@ fn red_light_queues_and_green_discharges() {
         s0: 2.0,
     });
 
-    // Spawn a dense platoon on the feeder, all heading 0 -> 1. Place it well
-    // back from the stop line (200 m feeder) and packed tight so the queue
-    // cannot fully clear during a single 30 s green — guaranteeing that some
-    // vehicles are still waiting when the light turns red.
+    // Seed an initial platoon on the feeder so a queue exists immediately.
     let route = [0u32, 1u32];
-    let n = 14;
-    for k in 0..n {
-        let s = 5.0 + k as f32 * 7.0; // 7 m spacing, tail at ~96 m
-        core.spawn(0, s, &route).expect("spawn feeder");
+    for k in 0..8u32 {
+        let s = 5.0 + k as f32 * 7.0;
+        core.spawn(0, s, &route).expect("spawn feeder seed");
     }
     core.reindex();
 
     let dt = 0.1f32;
     let jm = JunctionModel::build(&net);
 
-    // Drive two full cycles. Track, per tick, whether the signal is red and
-    // whether any vehicle crossed the stop line (appeared on lane 1) that tick.
-    // Invariant: no vehicle ever *first appears* on lane 1 while the light is
-    // red. Also record discharge during a steady green window.
+    // Keep the approach CONTINUOUSLY saturated: every tick, if the queued
+    // count on the feeder lane is below a target depth and there's a safe gap
+    // at s=0, spawn another vehicle on the same route. Deterministic (no
+    // randomness) — always tries the same target depth.
+    const TARGET_QUEUE_DEPTH: usize = 20;
+    const MIN_SPAWN_GAP_M: f32 = 8.0;
+
     let mut prev_on_exit: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut saw_queue_on_red = false;
-    // Steady-state green discharge measured over the SECOND green window.
-    let mut green_window_idx = 0u32;
-    let mut crossed_this_green: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut measured_green_ticks = 0u32;
-    let mut throughput_vph = 0.0f32;
-    let mut was_green = jm.signal_green(0, 0, dt);
 
-    for t in 0..(2 * (cycle_s / dt) as u64) {
+    // Measure crossings over cycles 1..=5 (skip cycle 0 as warm-up so the
+    // window reflects steady-state saturated discharge, not startup transients
+    // from the initial seed platoon).
+    const MEASURE_FROM_CYCLE: u32 = 1;
+    const MEASURE_CYCLES: u32 = 5;
+    let mut green_window_idx: i64 = -1;
+    let mut was_green = jm.signal_green(0, 0, dt);
+    let mut crossed_in_window = 0u64;
+    let mut measure_start_t: Option<u64> = None;
+    let mut measure_end_t: Option<u64> = None;
+
+    let total_cycles = (MEASURE_FROM_CYCLE + MEASURE_CYCLES + 1) as u64;
+    let total_ticks = (total_cycles as f32 * cycle_s / dt) as u64;
+
+    for t in 0..total_ticks {
+        // Top up the standing queue before ticking, so the approach never
+        // starves: keep spawning at s=0 while there's room and depth is low.
+        loop {
+            let queued = (0..core.fleet.slots())
+                .filter(|&i| core.fleet.alive[i] && core.fleet.lane[i] == 0)
+                .count();
+            if queued >= TARGET_QUEUE_DEPTH {
+                break;
+            }
+            // Safe gap at s=0: no alive vehicle on lane 0 within MIN_SPAWN_GAP_M
+            // of the origin.
+            let blocked = (0..core.fleet.slots()).any(|i| {
+                core.fleet.alive[i] && core.fleet.lane[i] == 0 && core.fleet.s[i] < MIN_SPAWN_GAP_M
+            });
+            if blocked {
+                break;
+            }
+            if core.spawn(0, 0.0, &route).is_none() {
+                break; // fleet full
+            }
+        }
+        core.reindex();
+
         core.tick(t);
         let green = jm.signal_green(0, t, dt);
 
-        // Detect fresh crossings this tick.
+        // Detect fresh crossings this tick (first appearance on lane 1).
         let mut on_exit_now: std::collections::HashSet<u32> = std::collections::HashSet::new();
         for i in 0..core.fleet.slots() {
             if core.fleet.alive[i] && core.fleet.lane[i] == 1 {
                 on_exit_now.insert(i as u32);
             }
         }
+        let fresh_count = on_exit_now.difference(&prev_on_exit).count() as u64;
         for &id in &on_exit_now {
-            let fresh = !prev_on_exit.contains(&id);
-            if fresh {
+            if !prev_on_exit.contains(&id) {
                 assert!(
                     green,
                     "vehicle {id} crossed the stop line on RED at tick {t}"
@@ -123,7 +157,6 @@ fn red_light_queues_and_green_discharges() {
             }
         }
 
-        // Queue check while red: vehicles waiting on the feeder.
         if !green {
             let queued = (0..core.fleet.slots())
                 .filter(|&i| core.fleet.alive[i] && core.fleet.lane[i] == 0)
@@ -133,20 +166,18 @@ fn red_light_queues_and_green_discharges() {
             }
         }
 
-        // Measure discharge over the FIRST green window (index 0), which is the
-        // one that clears the initial queue. `t == 0` starts green.
         if green && !was_green {
             green_window_idx += 1;
         }
-        if green && green_window_idx == 0 {
-            crossed_this_green.extend(on_exit_now.difference(&prev_on_exit).copied());
-            measured_green_ticks += 1;
-        }
-        if !green && was_green && green_window_idx == 0 && throughput_vph == 0.0 {
-            let dur = measured_green_ticks as f32 * dt;
-            if dur > 0.0 {
-                throughput_vph = crossed_this_green.len() as f32 / dur * 3600.0;
+
+        let in_measure_window = green_window_idx >= MEASURE_FROM_CYCLE as i64
+            && green_window_idx < (MEASURE_FROM_CYCLE + MEASURE_CYCLES) as i64;
+        if green && in_measure_window {
+            if measure_start_t.is_none() {
+                measure_start_t = Some(t);
             }
+            crossed_in_window += fresh_count;
+            measure_end_t = Some(t);
         }
 
         prev_on_exit = on_exit_now;
@@ -158,25 +189,27 @@ fn red_light_queues_and_green_discharges() {
         "no queue ever formed while the light was red"
     );
 
-    // Webster-consistent saturation flow ~1800 veh/h/lane during green. With a
-    // finite queue we can't exceed it; assert we're within a broad band that
-    // still proves real discharge (not zero, not absurd). The platoon is
-    // queue-limited over one 30 s green, so assert several crossed and the
-    // instantaneous discharge rate is physically plausible.
-    assert!(
-        crossed_this_green.len() >= 5,
-        "expected the queue to discharge on green, only {} crossed",
-        crossed_this_green.len()
+    let (start_t, end_t) = (
+        measure_start_t.expect("measurement window never opened"),
+        measure_end_t.expect("measurement window never closed"),
     );
-    // Upper sanity bound: a single lane cannot discharge faster than ~2200 vph.
-    // `throughput_vph == 0` means the window didn't close inside the run; the
-    // count assertion above already proves discharge, so only bound it if set.
-    if throughput_vph > 0.0 {
-        assert!(
-            throughput_vph <= 2200.0,
-            "discharge {throughput_vph} vph exceeds physical saturation flow"
-        );
-    }
+    // Webster capacity (`sat_flow * green_share`) is an hourly-average rate over
+    // the FULL cycle (red included), not a green-only rate — the green_share
+    // factor already discounts for red time. So the denominator here is the
+    // full wall-clock span of the measured cycles, not just their green slices.
+    let measured_wall_duration = MEASURE_CYCLES as f32 * cycle_s;
+    let vph = crossed_in_window as f32 / measured_wall_duration * 3600.0;
+
+    let target = 1800.0 * green_share * lanes;
+    let band_lo = 0.8 * target;
+    let band_hi = 1.2 * target;
+    assert!(
+        vph >= band_lo && vph <= band_hi,
+        "saturated signal discharge {vph:.1} vph (crossed {crossed_in_window} over \
+         {measured_wall_duration:.1}s wall time [{start_t}..={end_t}]) outside the \
+         Webster +/-20% band [{band_lo:.1}, {band_hi:.1}] around target {target:.1} \
+         (1800 * green_share {green_share:.3} * {lanes} lane)"
+    );
 }
 
 // ---------------------------------------------------------------------------

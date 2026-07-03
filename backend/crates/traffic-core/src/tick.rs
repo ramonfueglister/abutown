@@ -354,7 +354,7 @@ impl Core {
                     let raw_gap = fleet.s[lead] - s - fleet.len_m[lead];
                     (raw_gap, v - fleet.v[lead])
                 } else {
-                    leader_across_boundary(fleet, index, lane_len, lane, i, s, v)
+                    leader_across_boundary(fleet, index, net, lane_len, lane, i, s, v)
                 };
 
                 // ---- Junction gate: is the next node crossable this tick? ----
@@ -941,9 +941,11 @@ unsafe impl Sync for IntentPtr {}
 /// looking onto subsequent lanes of its route. Returns an effectively infinite
 /// gap (free road) if no vehicle is found within the lookahead, or a standing
 /// obstacle at the lane end if the route terminates without a successor.
+#[allow(clippy::too_many_arguments)]
 fn leader_across_boundary(
     fleet: &Fleet,
     index: &LaneIndex,
+    net: &TrafficNet,
     lane_len: &[f32],
     lane: u32,
     follower: usize,
@@ -962,12 +964,30 @@ fn leader_across_boundary(
     if n == 0 {
         return (f32::INFINITY, 0.0);
     }
-    // Scan up to `n` successor lanes along the (wrapping) route. Each empty
-    // lane contributes its full length to the running gap; the first lane with
-    // an occupant yields the leader (its rear-most vehicle, smallest `s`). After
-    // `n` steps we have traversed every lane of the route (a full loop on the
-    // ring) without finding anyone -> free road. This bounds the walk and so is
-    // safe even on a degenerate single-vehicle ring.
+    // Scan up to `n` successor lanes along the route. Each empty lane
+    // contributes its full length to the running gap; the first lane with an
+    // occupant yields the leader (its rear-most vehicle, smallest `s`). After
+    // `n` steps every lane of the route has been traversed (a full loop, for a
+    // *closed* ring route) without finding anyone -> free road.
+    //
+    // Wrapping past the route's last lane is only valid when the route
+    // genuinely loops (a turn connects the final lane back onto the first
+    // route lane's edge) — this is what makes ring fixtures work. For an open
+    // route (e.g. a dead end with no such turn) there is nothing beyond the
+    // final lane: treat it as free road rather than wrapping the cursor back
+    // to index 0, which would otherwise phantom-leader this vehicle off an
+    // unrelated queue sitting on the route's FIRST lane (e.g. traffic queued
+    // behind a signal far behind this vehicle, on a completely different part
+    // of the network). See `route_completed`, which makes the same
+    // loop-vs-open distinction for despawn.
+    let last_lane = route[n - 1];
+    let is_loop = junction::turn_between(net, last_lane, route[0]).is_some();
+    if !is_loop && (rh.cursor as usize) + 1 >= n {
+        // Already on (or beyond) the final lane of an open route: nothing
+        // ahead but free road until the route completes.
+        return (f32::INFINITY, 0.0);
+    }
+
     let mut cur = rh.cursor as usize;
     for _ in 0..n {
         cur = (cur + 1) % n;

@@ -229,13 +229,23 @@ pub struct NodeOccupancy {
 }
 
 impl NodeOccupancy {
-    /// Sized for the net's node id space. Pre-reserves a small per-node buffer
-    /// so typical crossings never reallocate on the hot path.
+    /// Sized for the net's node id space. Pre-reserves each node's claim buffer
+    /// at that node's actual turn count (the real Winterthur network peaks at
+    /// ~18 turns on its busiest node), so a fully-loaded node never reallocates
+    /// on the hot path. Nodes with no turns still get a capacity-1 buffer (the
+    /// `Vec` itself is cheap; this only avoids a first-claim realloc).
     pub fn new(net: &TrafficNet) -> NodeOccupancy {
         let max_node = net.nodes.iter().map(|n| n.id).max().unwrap_or(0) as usize;
         let n = max_node + 1;
+        let mut turns_per_node = vec![0usize; n];
+        for t in &net.turns {
+            turns_per_node[t.node as usize] += 1;
+        }
         NodeOccupancy {
-            claims: (0..n).map(|_| Vec::with_capacity(4)).collect(),
+            claims: turns_per_node
+                .into_iter()
+                .map(|count| Vec::with_capacity(count.max(1)))
+                .collect(),
             now: 0,
         }
     }
