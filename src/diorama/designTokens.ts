@@ -379,8 +379,17 @@ export const kswPost = {
   // wash per preset so the sun stays the protagonist (the unfogged morning
   // sky is by far the brightest)
   envScale: { morning: 0.32, dusk: 0.6, night: 0.8 },
+  // Task 4: the realtime environment supplies a per-frame giScale; the city
+  // damps the GI-probe white-wash by this fixed scalar on top (= the former
+  // envScale.morning, the value the overview framing was tuned at).
+  envScaleScalar: 0.32,
   // the unfogged bright sky feeds screen-space godrays/bloom — keep the veil off
   godraysMix: { morning: 0.12, dusk: 0.5 },
+  // Task 4: env.godraysMix ranges over the keyframe godraysMix (peak 0.35 at
+  // golden morning); the city's tuned veil was a fixed 0.12, so scale the live
+  // uniform by 0.12/0.35 to land on the same look. = godraysMix.morning /
+  // envKeyframes.goldenMorning.godraysMix = 0.12 / 0.35.
+  godraysScale: 0.12 / 0.35,
   bloomThreshold: 1.05,
   // unfogged sky only where it reads better: the low morning sun renders a
   // near-white sky that washes the whole frame, so morning keeps the fog tint

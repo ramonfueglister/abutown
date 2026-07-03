@@ -143,6 +143,6 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
 // Celestial pole for latitude 47.5°: in scene coords the pole sits toward
 // north (-z) at elevation = latitude.
 const LAT_RAD = (47.499 * Math.PI) / 180;
-const POLE_AXIS = new THREE.Vector3(0, Math.sin(LAT_RAD), -Math.cos(LAT_RAD)).normalize();
+export const POLE_AXIS = new THREE.Vector3(0, Math.sin(LAT_RAD), -Math.cos(LAT_RAD)).normalize();
 const SHAFT_BASE_LEN = 3; // shafts are built with unit length 3, scaled per frame
 const scratchPool = new THREE.Vector3();
