@@ -5,14 +5,13 @@
 //   - boot: main.ts still runs a full synchronous 6-face warm-up
 //     (CubeCamera.update) before the first presented frame, so the
 //     environment map is never black.
-//   - 'cycle' (sun moves continuously): walk one face per frame, forever.
-//   - 'static' presets: a slow background cadence — one face every
-//     kswGi.staticFaceInterval frames (full cube per 6x that, the
-//     pre-Slice-E refresh rate without the 6-in-one-frame hitch) — so
-//     anything the dirty triggers miss (moving agents, blinkers) still
-//     converges. markDirty() (the roof fade crossing the castShadow or the
-//     visibility threshold, or settling after a fade) additionally schedules
-//     an immediate full walk: 6 consecutive faces, one per frame.
+//   - a slow background cadence — one face every kswGi.staticFaceInterval
+//     frames (full cube per 6x that, the pre-Slice-E refresh rate without
+//     the 6-in-one-frame hitch) — so anything the dirty triggers miss
+//     (moving agents, blinkers) still converges. markDirty() (the roof fade
+//     crossing the castShadow or the visibility threshold, or settling
+//     after a fade) additionally schedules an immediate full walk: 6
+//     consecutive faces, one per frame.
 // A walk always covers 6 consecutive faces mod 6, i.e. all of them, so the
 // PMREM rebuild (scene.environment ingest) fires once per completed walk —
 // `cubeComplete` on the last face — and, on the background cadence, once
@@ -22,7 +21,7 @@
 import * as THREE from 'three/webgpu';
 import { kswGi } from '../designTokens';
 
-export type GiProbeMode = 'cycle' | 'static';
+export type GiProbeMode = 'static';
 
 export class GiProbeScheduler {
   private face = 0;
@@ -35,22 +34,16 @@ export class GiProbeScheduler {
     private readonly staticFaceInterval: number = kswGi.staticFaceInterval,
   ) {}
 
-  // Schedule a full 6-face re-walk (static mode; a no-op in cycle mode,
-  // which re-renders every face continuously anyway). Re-marking mid-walk
-  // restarts the countdown so the trigger state is always fully captured.
+  // Schedule a full 6-face re-walk. Re-marking mid-walk restarts the
+  // countdown so the trigger state is always fully captured.
   markDirty(): void {
-    if (this.mode === 'static') this.pending = 6;
+    this.pending = 6;
   }
 
   // The face to render this frame, or null (idle). `cubeComplete` is true
   // when this face finishes a full cube — the caller triggers the PMREM
   // rebuild then.
   next(): { face: number; cubeComplete: boolean } | null {
-    if (this.mode === 'cycle') {
-      const face = this.face;
-      this.face = (face + 1) % 6;
-      return { face, cubeComplete: face === 5 };
-    }
     if (this.pending > 0) {
       // dirty walk: 6 consecutive faces, one per frame, PMREM on the last
       const face = this.face;
