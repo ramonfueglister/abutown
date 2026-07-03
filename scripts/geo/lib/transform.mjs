@@ -209,7 +209,7 @@ export function transformBuildings({
   osmBuildings,
   projector,
   footprints = null,
-  stats = { traced: 0, fallback: 0 },
+  stats = { traced: 0, fallback: 0, wallFallback: 0, roofFacetsTotal: 0, roofFacetsCovered: 0, floatingBuildings: 0 },
 }) {
   const byUuid = new Map();
   collectByUuid(floors ?? { features: [] }, projector, byUuid, 'floors');
@@ -265,11 +265,46 @@ export function transformBuildings({
 
     const eaveH = Math.max(eaveY - groundY, 0.1); // clamp: never a zero/neg prism
     const skirts = roofSkirts(b.roofs, eaveY);
-    const wall = extrudeWalls(footprint, eaveH);
+    // Real wall facets carry every disjoint building part under its own
+    // roof by construction (they come from the same per-UUID collection as
+    // the roofs) — a single-footprint prism only covers the largest part.
+    // extrudeWalls is kept ONLY as a fallback for the rare building with
+    // zero wall facets (stats.wallFallback counts + the bake logs them).
+    let wall;
+    if (b.walls.length > 0) {
+      wall = meshFromRings(b.walls, groundY);
+    } else {
+      wall = extrudeWalls(footprint, eaveH);
+      stats.wallFallback = (stats.wallFallback ?? 0) + 1;
+    }
     appendRings(wall, skirts, groundY);
     const roof = meshFromRings([...b.roofs, ...roofUnderside(b.roofs)], groundY);
     if (wall.idx.length === 0 && roof.idx.length === 0)
       throw new Error(`bake: building ${uuid} has surfaces but none triangulated`);
+
+    // Coverage gate data (Task 12): does every roof FACET sit on a real wall,
+    // or is it a disjoint part with none (the floating-roof bug)? Per-facet
+    // (not per-vertex) because a hip/gable roof's interior ridge vertices sit
+    // naturally many meters from any wall CORNER — a strict vertex↔vertex
+    // check false-flags healthy geometry. A facet's own centroid pulls those
+    // interior points back toward its eave, so "no wall vertex within 6 m of
+    // the facet centroid" only fires when the facet truly has no wall nearby.
+    if (b.roofs.length > 0) {
+      const wallVerts = b.walls.flatMap((ring) => ring.map(([x, , z]) => [x, z]));
+      let buildingBad = 0;
+      for (const ring of b.roofs) {
+        let cx = 0, cz = 0, n = 0;
+        for (const [x, , z] of ring) {
+          cx += x; cz += z; n += 1;
+        }
+        cx /= n; cz /= n;
+        const covered = wallVerts.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
+        stats.roofFacetsTotal += 1;
+        if (covered) stats.roofFacetsCovered += 1;
+        else buildingBad += 1;
+      }
+      if (buildingBad / b.roofs.length > 0.3) stats.floatingBuildings += 1;
+    }
 
     const [cx, cz] = ringCentroid(footprint);
     const building = {

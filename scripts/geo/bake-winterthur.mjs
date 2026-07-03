@@ -56,13 +56,29 @@ for (const el of osmRaw.elements ?? []) {
 }
 console.log(`OSM building polygons: ${osmBuildings.length}`);
 
-const footprintStats = { traced: 0, fallback: 0 };
+const footprintStats = { traced: 0, fallback: 0, wallFallback: 0, roofFacetsTotal: 0, roofFacetsCovered: 0, floatingBuildings: 0 };
 const buildings = transformBuildings({ walls, roofs, osmBuildings, projector, stats: footprintStats });
 console.log(`footprints: ${footprintStats.traced} traced, ${footprintStats.fallback} fallback`);
 if (footprintStats.fallback / buildings.length > 0.25)
   throw new Error(
     `bake: ${footprintStats.fallback}/${buildings.length} buildings needed a footprint fallback — trace is broken`,
   );
+if (footprintStats.wallFallback > 0)
+  console.log(`wall facets: ${footprintStats.wallFallback} buildings had 0 wall facets — fell back to footprint prism`);
+
+// Coverage gate (data proof for the floating-roof root-fix, computed inside
+// transformBuildings from the raw per-facet rings — see the comment there):
+// wall/roof coverage must clear 90% (target > 95%, vs. the proven-broken
+// 659/846 footprint-containment metric this replaces).
+const wallRoofQuote = footprintStats.roofFacetsTotal > 0
+  ? footprintStats.roofFacetsCovered / footprintStats.roofFacetsTotal
+  : 1;
+console.log(
+  `wall/roof coverage: ${(wallRoofQuote * 100).toFixed(1)}% of roof facets have a wall within 6 m ` +
+  `(${footprintStats.floatingBuildings}/${buildings.length} buildings floating)`,
+);
+if (wallRoofQuote < 0.9)
+  throw new Error(`bake: wall/roof coverage only ${(wallRoofQuote * 100).toFixed(1)}% — floating-roof regression`);
 const { roads, rails } = transformRoads({
   osmRoads: JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8')),
   projector,
