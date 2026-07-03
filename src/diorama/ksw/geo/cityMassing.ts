@@ -373,7 +373,10 @@ export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {
 
   const plinths = buildings.map((b) => ringBand(b.footprint, -kswCityStyle.plinthSink, kswCityStyle.plinthH, kswCityStyle.plinthOut));
   const eaves = buildings.map((b) => {
-    const eave = Math.max(b.height - 2, kswCityStyle.plinthH + 0.5); // eave≈wall top; height is ridge — band sits just below
+    // Band top = the baked eave (where walls meet the roof). b.height is the
+    // RIDGE — a height-derived guess floats the band mid-air on steep roofs
+    // and multi-part swisstopo UUIDs (worst case ~93 m above the real eave).
+    const eave = Math.max(b.eaveH, kswCityStyle.plinthH + 0.5);
     return ringBand(b.footprint, eave - kswCityStyle.eaveBandH, eave, kswCityStyle.eaveBandOut);
   });
 

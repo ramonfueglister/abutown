@@ -71,4 +71,17 @@ describe('buildCityMassing', () => {
     for (let i = 0; i < pos.count; i++) minY = Math.min(minY, pos.getY(i));
     expect(minY).toBeLessThan(0); // sinks below the plate — nothing floats
   });
+
+  it('places the eave band at the baked eave height, never above it', () => {
+    // steep roof: ridge (height) 20 m, real eave 12 m — the old height−2
+    // heuristic put the band at 18 m, floating around the roof
+    const steep = { ...cube(0), height: 20, eaveH: 12 };
+    const g = buildCityMassing([steep]);
+    const eaves = g.getObjectByName('cityEaves') as THREE.Mesh;
+    const pos = eaves.geometry.getAttribute('position');
+    let maxY = -Infinity;
+    for (let i = 0; i < pos.count; i++) maxY = Math.max(maxY, pos.getY(i));
+    expect(maxY).toBeLessThanOrEqual(12); // never above the real eave
+    expect(maxY).toBeGreaterThan(11); // and at the eave, not sunk to the floor
+  });
 });
