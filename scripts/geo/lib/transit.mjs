@@ -2,7 +2,7 @@
 // tags.name), Modus aus tags.route, Platform-/Stop-Nodes werden aufs nächste
 // befahrbare/schienengebundene Kantensegment (Klasse ≤6) projiziert — teilt
 // sich die Grid+Projektions-Primitive mit access.mjs (nearestEdgePoint).
-import { nearestEdgePoint } from './access.mjs';
+import { nearestEdgePoint, buildSegmentGrid } from './access.mjs';
 
 const MODE_MAP = { bus: 0, tram: 1, train: 2, light_rail: 2, subway: 2 };
 const STOP_ROLES = new Set(['platform', 'stop', 'platform_entry_only', 'platform_exit_only']);
@@ -15,6 +15,10 @@ export function transformTransit({ osmTransit, graph, projector }) {
   const stopEdge = [];
   const stopOffsetM = [];
   const stopName = [];
+
+  // Built once and reused for every stop projection — see the comment on
+  // nearestEdgePoint's `grid` param for why this matters at city scale.
+  const grid = buildSegmentGrid(graph);
 
   for (const el of osmTransit.elements ?? []) {
     if (el.type !== 'relation') continue;
@@ -32,7 +36,7 @@ export function transformTransit({ osmTransit, graph, projector }) {
       if (m.type !== 'node' || !STOP_ROLES.has(m.role)) continue;
       if (typeof m.lon !== 'number' || typeof m.lat !== 'number') continue;
       const [x, z] = projector.toLocal(m.lon, m.lat);
-      const hit = nearestEdgePoint(graph, x, z, MAX_STOP_DIST, (cls) => cls <= 6);
+      const hit = nearestEdgePoint(graph, x, z, MAX_STOP_DIST, (cls) => cls <= 6, grid);
       stopEdge.push(hit ? hit.edge : 0xffffffff);
       stopOffsetM.push(hit ? hit.offsetM : 0);
       stopName.push(m.tags?.name ?? '');

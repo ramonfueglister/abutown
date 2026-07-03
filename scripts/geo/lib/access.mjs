@@ -11,7 +11,7 @@ const CELL = 50;
 // segments whose midpoint can sit many cells from their start point.
 // `accessPoints` and `transit.mjs`'s `nearestEdgePoint` both build on this,
 // so the bucketing behavior lives in exactly one place.
-function buildSegmentGrid(graph) {
+export function buildSegmentGrid(graph) {
   const grid = new Map(); // "gx,gz" -> [{e, i}]
   const segsOf = (e) => {
     const start = graph.edgePtOffset[e];
@@ -62,8 +62,15 @@ function buildSegmentGrid(graph) {
 // any edge) within maxDist. Returns { edge, offsetM } or null. Used directly
 // by transit.mjs (class ≤6 filter) and internally by accessPoints, which
 // keeps its own two-tier drivable-beats-footway ranking on top.
-export function nearestEdgePoint(graph, x, z, maxDist, classOk = () => true) {
-  const { candidatesAt, project, arcTo } = buildSegmentGrid(graph);
+//
+// `grid` (optional): a pre-built buildSegmentGrid(graph) result, so a caller
+// projecting many points onto the same graph (e.g. transit.mjs projecting
+// thousands of stops) builds the segment grid ONCE instead of once per call.
+// Rebuilding it per call is O(edges) each time — over a city-scale graph
+// (tens of thousands of edges) times thousands of transit stops, that
+// quadratic cost was observed to dominate bake-world's wall clock.
+export function nearestEdgePoint(graph, x, z, maxDist, classOk = () => true, grid = null) {
+  const { candidatesAt, project, arcTo } = grid ?? buildSegmentGrid(graph);
   let best = null;
   for (const { e, i } of candidatesAt(x, z)) {
     if (!classOk(graph.edgeClass[e])) continue;

@@ -8,7 +8,7 @@ export function parseAAIGrid(text) {
   let i = 0;
   for (; i < lines.length; i++) {
     const m = /^(\w+)\s+(-?[\d.]+)/.exec(lines[i]);
-    if (!m || !/^(ncols|nrows|xllcorner|yllcorner|cellsize|NODATA_value)$/i.test(m[1])) break;
+    if (!m || !/^(ncols|nrows|xllcorner|yllcorner|cellsize|dx|dy|NODATA_value)$/i.test(m[1])) break;
     head[m[1].toLowerCase()] = Number(m[2]);
   }
   const ncols = head.ncols, nrows = head.nrows;
@@ -19,7 +19,17 @@ export function parseAAIGrid(text) {
     for (const v of lines[i].trim().split(/\s+/)) data[k++] = Number(v);
   }
   if (k !== ncols * nrows) throw new Error(`AAIGrid: ${k} values, expected ${ncols * nrows}`);
-  return { ncols, nrows, xll: head.xllcorner, yll: head.yllcorner, cell: head.cellsize, nodata: head.nodata_value ?? -9999, data };
+  // Some AAIGrid exports (this bake's dem.asc, gdal_translate over a
+  // geographic-degree source) use `dx`/`dy` instead of a single `cellsize`,
+  // and dx != dy here (6e-5 vs 4e-5 deg — the source raster isn't square in
+  // lon/lat degree-space). Support both: cellsize when present/isotropic,
+  // otherwise separate celldx/celldy.
+  const celldx = head.cellsize ?? head.dx;
+  const celldy = head.cellsize ?? head.dy;
+  return {
+    ncols, nrows, xll: head.xllcorner, yll: head.yllcorner,
+    celldx, celldy, nodata: head.nodata_value ?? -9999, data,
+  };
 }
 
 export function makeDemSampler(grid, projector) {
@@ -32,9 +42,11 @@ export function makeDemSampler(grid, projector) {
       const lat = projector.anchorLat - z / (R * rad);
       const lon = projector.anchorLon + x / (R * rad * Math.cos(projector.anchorLat * rad));
       // grid.xll/yll are corner coords of the outer edge of the corner cell;
-      // cell centers are offset by +0.5 cell from the corner.
-      const col = (lon - grid.xll) / grid.cell - 0.5;
-      const rowFromS = (lat - grid.yll) / grid.cell - 0.5; // row index counted from south (row 0 = south edge)
+      // cell centers are offset by +0.5 cell from the corner. Columns step by
+      // celldx (lon), rows step by celldy (lat) — independent when the grid
+      // is non-square in degree-space.
+      const col = (lon - grid.xll) / grid.celldx - 0.5;
+      const rowFromS = (lat - grid.yll) / grid.celldy - 0.5; // row index counted from south (row 0 = south edge)
       const row = grid.nrows - 1 - rowFromS; // flip: row 0 = north (data layout)
       const c0 = Math.max(0, Math.min(grid.ncols - 2, Math.floor(col)));
       const r0 = Math.max(0, Math.min(grid.nrows - 2, Math.floor(row)));
