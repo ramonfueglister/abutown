@@ -40,86 +40,6 @@ export const clay = {
   sheenRoughness: 0.75,
 } as const;
 
-export type LightPreset = {
-  hemiSky: number;
-  hemiGround: number;
-  hemiIntensity: number;
-  fogColor: number;
-  fogNear: number;
-  fogFar: number;
-  exposure: number;
-  mistColor: number;
-  mistOpacity: number;
-  giScale: number;
-  saturation: number;
-  contrast: number;
-  lampBoost: number;
-  showStars: boolean;
-  lampOn: boolean;
-};
-
-export const lightPresets: Record<'morning' | 'dusk' | 'night', LightPreset> = {
-  morning: {
-    hemiSky: 0xc4dcda,
-    hemiGround: 0xe4d3ba,
-    hemiIntensity: 0.6,
-    fogColor: 0xeee2cf,
-    fogNear: 20,
-    fogFar: 48,
-    exposure: 1.18,
-    mistColor: 0xf6e9d2,
-    mistOpacity: 0.16,
-    giScale: 0.7,
-    saturation: 1.1,
-    contrast: 1.0,
-    lampBoost: 1.0,
-    showStars: false,
-    lampOn: false,
-  },
-  // The DREDGE moment: amber horizon burning under a deep teal sky.
-  dusk: {
-    hemiSky: 0x4f7d84,
-    hemiGround: 0x5c5348,
-    hemiIntensity: 0.42,
-    fogColor: 0x486e74,
-    fogNear: 18,
-    fogFar: 46,
-    exposure: 0.96,
-    mistColor: 0x6f949a,
-    mistOpacity: 0.22,
-    giScale: 0.55,
-    saturation: 1.12,
-    contrast: 1.06,
-    lampBoost: 1.35,
-    showStars: false,
-    lampOn: true,
-  },
-  night: {
-    hemiSky: 0x4a5f7d,
-    hemiGround: 0x3d4652,
-    hemiIntensity: 0.4,
-    fogColor: 0x2c3a50,
-    fogNear: 18,
-    fogFar: 46,
-    exposure: 0.95,
-    mistColor: 0x46586e,
-    mistOpacity: 0.18,
-    giScale: 0.9,
-    saturation: 1.08,
-    contrast: 1.05,
-    lampBoost: 1.2,
-    showStars: true,
-    lampOn: true,
-  },
-};
-
-// Physical sky (SkyMesh Rayleigh/Mie) per preset + the sun's day arc.
-export const skyPhys = {
-  morning: { turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8, timeOfDay: 0.12, sunBoost: 1.3 },
-  dusk: { turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9, timeOfDay: 0.96, sunBoost: 2.3 },
-  night: { turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8, timeOfDay: 1.08, sunBoost: 0 },
-} as const;
-
 // --- Realtime environment: art-directed keyframes over real sun elevation ---
 // The old presets live on as keyframes: night (<-6°), goldenMorning/-Evening
 // (anchored at +4°, chosen by whether the sun is rising), day (>25°, NEW).
@@ -190,14 +110,10 @@ export const weatherLook = {
   rainColor: 0xaebfd4, snowColor: 0xf4f7fb,
 } as const;
 
+// Sun color easing endpoints (used by environment.ts sunLight).
 export const sunArcCfg = {
-  azRise: 0.15,
-  azSet: 0.95,
-  elevMax: 1.15,
-  elevBase: -0.04,
   colorLow: 0xff6f2a,
   colorHigh: 0xfff1dd,
-  cycleSeconds: 48,
 } as const;
 
 // Volumetric clouds: raymarched height-band slab (Beer-Lambert + powder).
@@ -208,10 +124,8 @@ export const cloudVol = {
   lightSteps: 4, // secondary march toward the light
   lightStep: 1.6, // world units per light-march step
   scale: 0.05, // world -> noise frequency
-  coverage: { morning: 0.44, dusk: 0.62, night: 0.4 },
   density: 1.3, // extinction multiplier on the primary march
   absorption: 1.3, // extinction multiplier on the light march
-  drift: 0.015, // noise-space wind per second
   litBoost: 1.35,
   maxDist: 90, // clamp the near-horizon march length
 } as const;
@@ -246,7 +160,7 @@ export const grade = {
 
 // One-bounce GI: the scene is captured from its own center and fed back as
 // image-based lighting, so walls/lawn tint the shadows.
-export const gi = { environmentIntensity: 0.28, hemiCut: 0.5 } as const;
+export const gi = { environmentIntensity: 0.28 } as const;
 
 // Camera contract — the diorama has ONE gaze, like a built miniature.
 // From the south-west, looking into the corner formed by the north + east walls.
