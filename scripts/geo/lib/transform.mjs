@@ -196,6 +196,21 @@ function extrudeWalls(footprint, eaveH) {
   return { pos, idx };
 }
 
+// Coverage-gate helper (Task 12): pull the wall-BASE points (in meters, XZ)
+// out of a baked `wall.pos` mesh — the cm-integer, ground-normalized vertex
+// buffer that actually got triangulated and rendered (real facets welded via
+// meshFromRings, OR the extrudeWalls prism fallback). y ≤ 60 cm keeps only
+// the ground ring, not eave/ridge vertices that happen to sit above a wall.
+// Exported so the coverage math is testable against a fixture wall mesh
+// directly, independent of the full transformBuildings pipeline.
+export function wallBasePointsMeters(wallPos) {
+  const pts = [];
+  for (let i = 0; i < wallPos.length; i += 3) {
+    if (wallPos[i + 1] <= 60) pts.push([wallPos[i] / 100, wallPos[i + 2] / 100]);
+  }
+  return pts;
+}
+
 // `footprints` (optional): Map<uuid, ring[[x,z]]> of 2D footprints already in
 // LOCAL meters — used in production, where swisstopo's Floor layer is a
 // GeoJSON-incompatible 3D solid so the footprint comes from Building_solid
@@ -289,8 +304,16 @@ export function transformBuildings({
     // check false-flags healthy geometry. A facet's own centroid pulls those
     // interior points back toward its eave, so "no wall vertex within 6 m of
     // the facet centroid" only fires when the facet truly has no wall nearby.
+    //
+    // Measured against the BAKED `wall.pos` mesh — not the raw per-UUID
+    // `b.walls` facets. The raw facets exist unconditionally (they're the
+    // ogr2ogr extraction), even on the branch where `wall` falls back to
+    // `extrudeWalls(footprint, ...)` (single-footprint prism, the exact bug
+    // this gate exists to catch) — so gating on `b.walls` read ~100% on
+    // broken output. `wall.pos` is what actually got rendered, so basing the
+    // proximity test on it makes the gate honest.
     if (b.roofs.length > 0) {
-      const wallVerts = b.walls.flatMap((ring) => ring.map(([x, , z]) => [x, z]));
+      const wallBaseXZ = wallBasePointsMeters(wall.pos);
       let buildingBad = 0;
       for (const ring of b.roofs) {
         let cx = 0, cz = 0, n = 0;
@@ -298,7 +321,7 @@ export function transformBuildings({
           cx += x; cz += z; n += 1;
         }
         cx /= n; cz /= n;
-        const covered = wallVerts.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
+        const covered = wallBaseXZ.some(([wx, wz]) => Math.hypot(wx - cx, wz - cz) < 6);
         stats.roofFacetsTotal += 1;
         if (covered) stats.roofFacetsCovered += 1;
         else buildingBad += 1;

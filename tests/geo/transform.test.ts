@@ -1,7 +1,7 @@
 // tests/geo/transform.test.ts
 import { describe, expect, it } from 'vitest';
 import { makeProjector, ANCHOR } from '../../scripts/geo/lib/project.mjs';
-import { transformBuildings, transformRoads } from '../../scripts/geo/lib/transform.mjs';
+import { transformBuildings, transformRoads, wallBasePointsMeters } from '../../scripts/geo/lib/transform.mjs';
 
 // one synthetic flat-roof building ~50 m east of the anchor, ground at 450 m
 const lonAt = (m: number) => ANCHOR.lon + m / (111320 * Math.cos((ANCHOR.lat * Math.PI) / 180));
@@ -116,5 +116,52 @@ describe('transformRoads', () => {
     };
     const { roads } = transformRoads({ osmRoads, projector: makeProjector(ANCHOR) });
     expect(roads[0].width).toBe(7.5);
+  });
+});
+
+describe('wallBasePointsMeters — coverage gate must read the BAKED wall mesh (Task 12)', () => {
+  // Task 12 finding: the coverage gate used to derive its wall point set from
+  // the raw per-UUID `b.walls` facets, which exist even under the original
+  // prism bug (extrudeWalls collapses every disjoint part onto ONE
+  // footprint) — so it read ~100% on geometry that was actually broken. The
+  // gate must instead measure the mesh that was really triangulated/rendered
+  // (`wall.pos`), which for a single-footprint prism only has base points
+  // under part 1.
+
+  // A two-part building: part 1 at x=0..10,z=0..10; part 2 far away at
+  // x=100..110,z=100..110. Real per-facet wall geometry covers BOTH parts.
+  const realWallPos = [
+    // part 1 base ring (y=0)
+    0, 0, 0, 1000, 0, 0, 1000, 0, 1000, 0, 0, 1000,
+    // part 2 base ring (y=0), far away
+    10000, 0, 10000, 10800, 0, 10000, 10800, 0, 10800, 10000, 0, 10800,
+  ];
+  // A single-footprint PRISM (the pre-fix bug shape): extrudeWalls only ever
+  // extrudes ONE traced footprint ring, so its base only covers part 1 —
+  // part 2's roof floats with nothing nearby.
+  const prismWallPos = [0, 0, 0, 1000, 0, 0, 1000, 0, 1000, 0, 0, 1000];
+  const part2RoofCentroid = [104, 104]; // meters — centroid of the part-2 base square
+
+  function coverageFor(wallPos: number[]) {
+    const wallBaseXZ = wallBasePointsMeters(wallPos);
+    return wallBaseXZ.some(([wx, wz]) => Math.hypot(wx - part2RoofCentroid[0], wz - part2RoofCentroid[1]) < 6);
+  }
+
+  it('reads LOW coverage for part 2 against a single-footprint prism mesh (the old bug shape)', () => {
+    expect(coverageFor(prismWallPos)).toBe(false);
+  });
+
+  it('reads HIGH coverage for part 2 against the real multi-part wall mesh', () => {
+    expect(coverageFor(realWallPos)).toBe(true);
+  });
+
+  it('extracts only ground-level (y ≤ 60 cm) points, in meters, dropping eave/ridge vertices', () => {
+    const wallPos = [
+      0, 0, 0, // base
+      500, 55, 0, // still base (skirt tolerance)
+      1000, 400, 0, // eave/top — must be excluded
+    ];
+    const pts = wallBasePointsMeters(wallPos);
+    expect(pts).toEqual([[0, 0], [5, 0]]);
   });
 });
