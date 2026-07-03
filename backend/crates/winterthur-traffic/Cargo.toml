@@ -11,7 +11,16 @@ path = "src/main.rs"
 
 [dependencies]
 traffic-net = { path = "../traffic-net" }
+traffic-core = { path = "../traffic-core" }
+anyhow.workspace = true
 fast_paths.workspace = true
+bevy_ecs.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
-traffic-core = { path = "../traffic-core" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+reqwest.workspace = true

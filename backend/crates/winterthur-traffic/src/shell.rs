@@ -1,0 +1,414 @@
+//! The headless `bevy_ecs` orchestration shell.
+//!
+//! A single [`World`] holds the traffic net, sim kernel, CH router, spawner,
+//! edge-measurement accumulator and the sim clock as resources. One chained
+//! [`Schedule`] runs the systems in a **fixed, deterministic order** every
+//! tick:
+//!
+//! ```text
+//! drain_commands → spawn_trips → core_tick → measure_edges → publish_snapshot
+//! ```
+//!
+//! Signals advance *inside* `core_tick` (the kernel gates turns on its own
+//! signal windows), so there is no separate signals system. Congestion
+//! re-routing is folded into `core_tick`'s system on a 30-sim-second cadence
+//! (see [`REROUTE_INTERVAL_TICKS`]).
+//!
+//! [`build_sim`] constructs the `(World, Schedule)` pair with no timing or I/O,
+//! so tests drive `schedule.run(&mut world)` as fast as the CPU allows. The
+//! binary ([`crate::main`]) wraps this with the tokio 10 Hz interval and the
+//! `/healthz` endpoint.
+//!
+//! # Publish seam (Task 8)
+//!
+//! `publish_snapshot` calls the [`SnapshotHook`] resource's closure once per
+//! tick with a [`Snapshot`] borrow. The default hook is a no-op; the WS gateway
+//! (Task 8) installs a real one via [`World::insert_resource`] before the loop
+//! starts. No WS code lives here — only the seam.
+
+use crate::Router;
+use crate::measure::EdgeMeasure;
+use crate::spawner::{MAX_CONCURRENT, SpawnConfig, Spawner};
+use bevy_ecs::prelude::*;
+use traffic_core::{Core, u01};
+use traffic_net::TrafficNet;
+
+/// Re-routing cadence: every 30 sim-seconds = 300 ticks at dt=0.1.
+pub const REROUTE_INTERVAL_TICKS: u64 = (30.0 / traffic_core::DT) as u64;
+
+/// A vehicle is a re-route candidate when the congestion factor on its current
+/// edge (measured / free-flow travel time) exceeds this ratio.
+pub const DELAY_RATIO_THRESHOLD: f32 = 1.5;
+
+/// Probability a *candidate* vehicle actually re-routes on a given re-route
+/// tick (keeps the swap sparse + avoids herd re-routing).
+pub const REROUTE_PROBABILITY: f32 = 0.1;
+
+// ---------------------------------------------------------------------------
+// Resources
+// ---------------------------------------------------------------------------
+
+/// The baked traffic network (immutable during a run).
+#[derive(Resource)]
+pub struct TrafficNetRes(pub TrafficNet);
+
+/// The microscopic simulation kernel.
+#[derive(Resource)]
+pub struct CoreRes(pub Core);
+
+/// The CH router (weights updated on the measurement cadence).
+#[derive(Resource)]
+pub struct RouterRes(pub Router);
+
+/// The trip spawner.
+#[derive(Resource)]
+pub struct SpawnerRes(pub Spawner);
+
+/// The per-edge harmonic-mean-speed measurement accumulator.
+#[derive(Resource)]
+pub struct MeasureRes(pub EdgeMeasure);
+
+/// Monotonic sim clock (tick count). One tick = `traffic_core::DT` seconds.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct SimClock {
+    pub tick: u64,
+}
+
+/// Per-vehicle destination edge, indexed by `VehId` (slot). Grown as slots are
+/// allocated; a stale entry for a since-despawned slot is harmless because the
+/// re-route pass only reads entries for currently-alive vehicles.
+#[derive(Resource, Default)]
+pub struct TripRegistry {
+    pub dest_edge: Vec<u32>,
+}
+
+impl TripRegistry {
+    fn record(&mut self, veh: u32, dest_edge: u32) {
+        let i = veh as usize;
+        if i >= self.dest_edge.len() {
+            self.dest_edge.resize(i + 1, u32::MAX);
+        }
+        self.dest_edge[i] = dest_edge;
+    }
+}
+
+/// Base seed for all deterministic draws (spawner + re-route sampling).
+#[derive(Resource, Clone, Copy)]
+pub struct SimSeed(pub u64);
+
+/// A stub inbound-command queue (player influence lands in a later task). The
+/// `drain_commands` system empties it each tick; today it is always empty.
+#[derive(Resource, Default)]
+pub struct CommandQueue {
+    pub pending: Vec<SimCommand>,
+}
+
+/// Placeholder command variant so the queue type is non-trivial and the drain
+/// system has something concrete to consume once commands exist.
+#[derive(Debug, Clone)]
+pub enum SimCommand {}
+
+/// Scratch buffer reused by `spawn_trips` for the `(veh, dest_edge)` records a
+/// tick produces, so the hot path allocates nothing steady-state.
+#[derive(Resource, Default)]
+struct SpawnScratch(Vec<(u32, u32)>);
+
+// ---------------------------------------------------------------------------
+// Publish seam (Task 8)
+// ---------------------------------------------------------------------------
+
+/// Read-only per-tick view handed to the publish hook. Deliberately minimal —
+/// Task 8 decides the wire format; this just exposes what a publisher needs
+/// without borrowing the whole `World`.
+pub struct Snapshot<'a> {
+    pub tick: u64,
+    pub core: &'a Core,
+    pub net: &'a TrafficNet,
+}
+
+/// Type of the publish callback: invoked once per tick after the kernel step.
+type HookFn = Box<dyn Fn(&Snapshot<'_>) + Send + Sync>;
+
+/// The publish seam. Default is a no-op; Task 8 replaces the closure.
+#[derive(Resource)]
+pub struct SnapshotHook(pub HookFn);
+
+impl Default for SnapshotHook {
+    fn default() -> Self {
+        SnapshotHook(Box::new(|_snap| {}))
+    }
+}
+
+impl SnapshotHook {
+    /// Install a real publisher (Task 8).
+    pub fn new(f: impl Fn(&Snapshot<'_>) + Send + Sync + 'static) -> Self {
+        SnapshotHook(Box::new(f))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Construction
+// ---------------------------------------------------------------------------
+
+/// Build the `(World, Schedule)` for a headless run over `net`, seeded with
+/// `seed`. Loads the sibling `buildings.json` for the spawner's clusters from
+/// the same directory as the net; falls back to gateway-only attractors if the
+/// buildings file is absent. No timing / I/O — callers drive `schedule.run`.
+pub fn build_sim(net: TrafficNet, seed: u64) -> (World, Schedule) {
+    let buildings_json = load_sibling_buildings();
+    build_sim_with_buildings(net, seed, &buildings_json)
+}
+
+/// Like [`build_sim`] but with the buildings JSON supplied explicitly (tests /
+/// deployments that bake the data path differently).
+pub fn build_sim_with_buildings(
+    net: TrafficNet,
+    seed: u64,
+    buildings_json: &str,
+) -> (World, Schedule) {
+    let router = Router::new(&net);
+    let core = Core::new(&net, MAX_CONCURRENT + 64, seed);
+    let spawner = Spawner::new(&net, buildings_json, SpawnConfig::default(), seed);
+    let measure = EdgeMeasure::new(&net);
+
+    let mut world = World::new();
+    world.insert_resource(TrafficNetRes(net));
+    world.insert_resource(CoreRes(core));
+    world.insert_resource(RouterRes(router));
+    world.insert_resource(SpawnerRes(spawner));
+    world.insert_resource(MeasureRes(measure));
+    world.insert_resource(SimClock::default());
+    world.insert_resource(TripRegistry::default());
+    world.insert_resource(SimSeed(seed));
+    world.insert_resource(CommandQueue::default());
+    world.insert_resource(SpawnScratch::default());
+    world.insert_resource(SnapshotHook::default());
+
+    let mut schedule = Schedule::default();
+    schedule.add_systems(
+        (
+            drain_commands,
+            spawn_trips,
+            core_tick,
+            measure_edges,
+            publish_snapshot,
+        )
+            .chain(),
+    );
+
+    (world, schedule)
+}
+
+/// Locate `buildings.json` next to the net path via the `TRAFFICNET_JSON` env
+/// override or the default `data/winterthur/` path, returning `""` if unread.
+fn load_sibling_buildings() -> String {
+    let net_path = std::env::var("TRAFFICNET_JSON")
+        .unwrap_or_else(|_| "data/winterthur/trafficnet.json".to_string());
+    let buildings = std::path::Path::new(&net_path)
+        .parent()
+        .map(|d| d.join("buildings.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from("data/winterthur/buildings.json"));
+    std::fs::read_to_string(&buildings).unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// Server loop (tokio timing + healthz) — shared by the binary and tests
+// ---------------------------------------------------------------------------
+
+/// Run the 10 Hz tick loop with a responsive `/healthz` endpoint on `port`.
+///
+/// Timing follows the #91 outage lesson: `interval(100 ms)` with
+/// [`tokio::time::MissedTickBehavior::Delay`] (a slow tick never triggers a
+/// burst of catch-up ticks) and `yield_now().await` after each tick so the HTTP
+/// accept loop keeps making progress on a single vCPU. The health server runs
+/// on its own task, so a busy tick can never block it.
+///
+/// Loops forever (until the process exits); the health task is spawned and left
+/// running. Returns only on a bind error.
+pub async fn run_loop(mut world: World, mut schedule: Schedule, port: u16) -> std::io::Result<()> {
+    use axum::{Router as AxumRouter, routing::get};
+    use tokio::time::{Duration, MissedTickBehavior, interval};
+
+    let health = AxumRouter::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/", get(|| async { "winterthur-traffic" }));
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, health).await;
+    });
+
+    let mut ticker = interval(Duration::from_millis(100));
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        schedule.run(&mut world);
+        tokio::task::yield_now().await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Systems (run in the chained order declared in build_sim)
+// ---------------------------------------------------------------------------
+
+/// Drain the inbound command queue. Stub for now: the queue is always empty, so
+/// this is a no-op placeholder that reserves the first slot in the fixed order.
+fn drain_commands(mut queue: ResMut<CommandQueue>) {
+    queue.pending.clear();
+}
+
+/// Sample + spawn this tick's trips and record their destinations.
+fn spawn_trips(
+    mut core: ResMut<CoreRes>,
+    net: Res<TrafficNetRes>,
+    router: Res<RouterRes>,
+    mut spawner: ResMut<SpawnerRes>,
+    clock: Res<SimClock>,
+    mut registry: ResMut<TripRegistry>,
+    mut scratch: ResMut<SpawnScratch>,
+) {
+    scratch.0.clear();
+    spawner
+        .0
+        .step(&mut core.0, &net.0, &router.0, clock.tick, &mut scratch.0);
+    for &(veh, dest) in &scratch.0 {
+        registry.record(veh, dest);
+    }
+}
+
+/// Advance the kernel one tick (signals gate internally), then run the periodic
+/// congestion re-route, then bump the clock.
+fn core_tick(
+    mut core: ResMut<CoreRes>,
+    net: Res<TrafficNetRes>,
+    router: Res<RouterRes>,
+    registry: Res<TripRegistry>,
+    seed: Res<SimSeed>,
+    mut clock: ResMut<SimClock>,
+    measure: Res<MeasureRes>,
+) {
+    let t = clock.tick;
+    core.0.tick(t);
+
+    if t > 0 && t.is_multiple_of(REROUTE_INTERVAL_TICKS) {
+        reroute_congested(
+            &mut core.0,
+            &net.0,
+            &router.0,
+            &measure.0,
+            &registry,
+            seed.0,
+            t,
+        );
+    }
+
+    clock.tick = t + 1;
+}
+
+/// Accumulate per-edge speed samples every tick; on a window boundary flush to
+/// the router (update weights + rebuild CH).
+fn measure_edges(
+    core: Res<CoreRes>,
+    net: Res<TrafficNetRes>,
+    mut measure: ResMut<MeasureRes>,
+    mut router: ResMut<RouterRes>,
+    clock: Res<SimClock>,
+) {
+    measure.0.sample(&core.0, &net.0);
+    // `clock.tick` was already advanced in `core_tick`, so the window closes on
+    // the tick *after* the WINDOW_TICKS-th sim step — one flush per 5 sim-min.
+    if EdgeMeasure::window_closes(clock.tick) {
+        measure.0.flush(&mut router.0);
+    }
+}
+
+/// Invoke the publish seam with a read-only snapshot. No-op by default.
+fn publish_snapshot(
+    hook: Res<SnapshotHook>,
+    core: Res<CoreRes>,
+    net: Res<TrafficNetRes>,
+    clock: Res<SimClock>,
+) {
+    let snap = Snapshot {
+        tick: clock.tick,
+        core: &core.0,
+        net: &net.0,
+    };
+    (hook.0)(&snap);
+}
+
+// ---------------------------------------------------------------------------
+// Congestion re-routing
+// ---------------------------------------------------------------------------
+
+/// Sample alive vehicles on congested edges and, with [`REROUTE_PROBABILITY`],
+/// re-query the router from the vehicle's current edge to its destination and
+/// swap its route (keeping the current lane). Deterministic: candidacy and the
+/// probability draw are pure functions of `u01(seed, t, veh)`.
+///
+/// # Limitations (documented per the plan)
+///  * The delay proxy is the congestion factor of the vehicle's **current
+///    edge** (measured / free-flow travel time), not a full remaining-route
+///    expected-vs-free-flow ratio — the kernel does not track per-vehicle
+///    expected time, and this is the cheapest deterministic proxy that reacts
+///    to real congestion. A vehicle stuck behind a jam it has not yet reached
+///    is not re-routed until it enters the congested edge.
+///  * The swap only takes effect when the router returns a route whose head is
+///    the vehicle's current lane's edge and whose first lane is the current
+///    lane (via `Core::reroute`'s guard); otherwise the vehicle keeps its old
+///    route. No mid-lane teleporting is possible.
+fn reroute_congested(
+    core: &mut Core,
+    net: &TrafficNet,
+    router: &Router,
+    measure: &EdgeMeasure,
+    registry: &TripRegistry,
+    seed: u64,
+    t: u64,
+) {
+    let slots = core.fleet.slots();
+    for veh in 0..slots as u32 {
+        let Some(view) = core.vehicle_view(veh) else {
+            continue;
+        };
+        // Destination known?
+        let Some(&dest_edge) = registry.dest_edge.get(veh as usize) else {
+            continue;
+        };
+        if dest_edge == u32::MAX || dest_edge == view.edge {
+            continue;
+        }
+
+        // Congestion factor on the current edge.
+        let free = measure.free_flow_s(view.edge);
+        // Effective travel time now = free-flow scaled by how slow the vehicle
+        // is going vs the edge free speed (a per-vehicle congestion proxy).
+        let edge_speed = net.edges[view.edge as usize].speed_ms.max(0.1);
+        let ratio = if view.v <= 0.05 {
+            f32::INFINITY
+        } else {
+            edge_speed / view.v
+        };
+        let _ = free; // reserved for a future remaining-route proxy
+        if ratio <= DELAY_RATIO_THRESHOLD {
+            continue;
+        }
+
+        // Probability gate (deterministic).
+        if u01(seed, t, veh as u64) >= REROUTE_PROBABILITY {
+            continue;
+        }
+
+        // Re-query from the current edge; the new route must start at the
+        // current lane so the swap is a continuation.
+        let Some(new_route) = router.route(net, view.edge, dest_edge) else {
+            continue;
+        };
+        if new_route.first() != Some(&view.lane) {
+            // Router picked a different lane on the current edge as the head;
+            // Core::reroute would reject it. Skip — keep the old route.
+            continue;
+        }
+        core.reroute(veh, &new_route);
+    }
+}
