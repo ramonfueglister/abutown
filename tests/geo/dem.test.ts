@@ -29,4 +29,15 @@ describe('dem', () => {
     expect(p.length).toBe(4);
     expect(p[0]).toBeGreaterThan(99);
   });
+  it('distinguishes north/south samples asymmetrically', () => {
+    const g = parseAAIGrid(asc);
+    const s = makeDemSampler(g, makeProjector(ANCHOR));
+    // z=-10: ~10 m NORTH of anchor → samples north row (values ~100-102)
+    // z=+10: ~10 m SOUTH of anchor → samples south row (values ~106-108)
+    const northSample = s.heightAt(0, -10);
+    const southSample = s.heightAt(0, +10);
+    expect(northSample).toBeLessThan(southSample);
+    expect(northSample).toBeCloseTo(101, 0); // north row center ≈ 101
+    expect(southSample).toBeCloseTo(107, 0); // south row center ≈ 107
+  });
 });
