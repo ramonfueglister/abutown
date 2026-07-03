@@ -92,8 +92,13 @@ async function overpassSplit(queryFor, bbox, outfile, depth = 0) {
   return merged;
 }
 
-async function overpass(queryFor, bbox, outfile) {
+async function overpass(queryFor, bbox, outfile, minElements) {
   const elements = await overpassSplit(queryFor, bbox, outfile);
+  if (elements.length < minElements) {
+    throw new Error(
+      `${outfile}: only ${elements.length} elements, expected at least ${minElements} — query or bbox regression?`,
+    );
+  }
   const payload = JSON.stringify({ elements });
   writeFileSync(outfile, payload);
   console.log(`wrote ${outfile} (${(payload.length / 1024).toFixed(0)} KB, ${elements.length} elements)`);
@@ -142,6 +147,8 @@ if (!existsSync(`${OUT}/boundary-winterthur.geojson`)) {
 }
 const boundary = JSON.parse(readFileSync(`${OUT}/boundary-winterthur.geojson`, 'utf8'));
 if (!boundary.features?.length) throw new Error('boundaries: Winterthur polygon missing');
+if (boundary.features.length !== 1)
+  throw new Error(`boundaries: expected exactly 1 Winterthur feature, got ${boundary.features.length}`);
 console.log(`boundary: ${boundary.features.length} feature(s)`);
 
 // ---------------------------------------------------------------------------
@@ -222,7 +229,8 @@ if (!existsSync(`${OUT}/gdb-list.json`)) {
     pageJsonList: await stacPages('ch.swisstopo.swissbuildings3d_3_0'),
     assetSuffix: '.gdb.zip',
   });
-  if (gdbUrls.length === 0) throw new Error('swissBUILDINGS3D: no tiles found — bbox wrong?');
+  if (gdbUrls.length < 20)
+    throw new Error(`swissBUILDINGS3D: only ${gdbUrls.length} tiles found (expected ~30) — bbox wrong?`);
   console.log(`swissBUILDINGS3D: ${gdbUrls.length} tiles to fetch`);
   const gdbDirs = [];
   let downloaded = 0;
@@ -267,23 +275,27 @@ await overpass(
     `[out:json][timeout:180];(way["highway"](${bbox});way["railway"~"^(rail|tram)$"](${bbox});rel["type"="restriction"](${bbox});node["highway"="traffic_signals"](${bbox}););out body geom;`,
   OSM_BBOX,
   `${OUT}/osm-roads.json`,
+  10000, // observed ~35,584
 );
 await overpass(
   (bbox) =>
     `[out:json][timeout:180];(rel["type"="route"]["route"~"^(bus|tram|train)$"](${bbox});node["public_transport"="platform"](${bbox});node["highway"="bus_stop"](${bbox}););out body geom;`,
   OSM_BBOX,
   `${OUT}/osm-transit.json`,
+  100, // observed ~676
 );
 await overpass(
   (bbox) => `[out:json][timeout:180];(way["landuse"](${bbox});rel["landuse"](${bbox}););out body geom;`,
   OSM_BBOX,
   `${OUT}/osm-landuse.json`,
+  500, // observed ~4,483
 );
 // out geom: full geometry for the polygon join (names sit on building areas)
 await overpass(
   (bbox) => `[out:json][timeout:180];(way["building"](${bbox});relation["building"](${bbox}););out body geom;`,
   OSM_BBOX,
   `${OUT}/osm-buildings.json`,
+  10000, // observed ~46,111
 );
 // nature: green areas, woods, water bodies, the Eulach, and individual trees
 await overpass(
@@ -296,6 +308,7 @@ await overpass(
   );out body geom;`,
   OSM_BBOX,
   `${OUT}/osm-nature.json`,
+  5000, // observed ~134,994
 );
 
 console.log('fetch complete');
