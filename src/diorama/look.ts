@@ -2,7 +2,7 @@
 // Everything procedural, all values from designTokens.
 
 import * as THREE from 'three/webgpu';
-import { Break, Fn, If, Loop, cameraPosition, dot, exp, float, int, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Break, Fn, If, Loop, cameraPosition, dot, exp, float, int, mix, mx_fractal_noise_float, nodeObject, pass, mrt, output, normalLocal, normalView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -13,7 +13,7 @@ import { sss } from 'three/addons/tsl/display/SSSNode.js';
 import { boxBlur } from 'three/addons/tsl/display/boxBlur.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { palette, radii, clay, cameraContract, post, nightGlow, gi, grade, cloudVol, moonLight } from './designTokens';
+import { palette, radii, clay, cameraContract, post, nightGlow, gi, grade, cloudVol, moonLight, moonDisc as moonDiscTokens } from './designTokens';
 import { computeEnvironment, type EnvironmentState } from './environment/environment';
 import { applyEnvironment, type EnvironmentTargets } from './environment/applyEnvironment';
 import { createPrecipitation } from './environment/precipitation';
@@ -419,9 +419,16 @@ async function boot(): Promise<void> {
   {
     // TSL uniform nodes expose a runtime `.value`; @types/three r185 doesn't
     // model that on the node union, so the uniform is cast at this boundary only.
-    const litSide = dot(normalView.negate(), moonPhaseDirU as unknown as ReturnType<typeof vec3>);
+    // moonPhaseLightDir is documented as DISC-LOCAL (disc faces viewer, -z toward
+    // viewer); the moon disc mesh carries no rotation of its own, so its local
+    // space matches that convention — dot against normalLocal, not normalView.
+    // Light travels along moonPhaseDirU onto the sphere, so the lit hemisphere is
+    // where the outward normal points against that direction, i.e. negate() first.
+    const litSide = dot(normalLocal.negate(), moonPhaseDirU as unknown as ReturnType<typeof vec3>);
     const lit = smoothstep(float(-0.15), float(0.15), litSide);
-    moonMat.colorNode = mix(vec3(0.16, 0.18, 0.23), vec3(0.87, 0.91, 0.95), lit);
+    const moonDarkU = uniform(new THREE.Color(moonDiscTokens.dark));
+    const moonLitU = uniform(new THREE.Color(moonDiscTokens.lit));
+    moonMat.colorNode = mix(moonDarkU as unknown as ReturnType<typeof vec3>, moonLitU as unknown as ReturnType<typeof vec3>, lit);
   }
   const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 20), moonMat);
   moonDisc.visible = false;

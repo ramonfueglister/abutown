@@ -142,6 +142,9 @@ export const nightGlow = {
 // Moonlight (the night preset's key light — the sun arc is parked below horizon).
 export const moonLight = { color: 0xa8c4e8, intensity: 1.0 } as const;
 
+// Moon disc terminator shading — dark (unlit) and lit hemisphere colors.
+export const moonDisc = { dark: 0x292e3b, lit: 0xdee8f2 } as const;
+
 // Post-processing recipe — the miniature magic. All post values live here.
 export const post = {
   dof: { focusDistance: 16.5, focalLength: 1.4, bokehScale: 2.2 },
