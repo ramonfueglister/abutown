@@ -21,9 +21,17 @@ const EXTRA = process.argv[5] ?? '';
 const OUT = `artifacts/ksw/${NAME}.png`;
 
 // Deterministic (at, wx) per named day-state — replaces the old ?preset=.
+// These are UTC instants tuned for Winterthur's latitude (47.5°N) against
+// the keyframe anchors used elsewhere (night < -6 deg, golden -6..+4 deg,
+// day > 25 deg elevation). Measured via src/diorama/environment/solar.ts
+// sunState().elevDeg on 2026-07-03:
+//   morning 04:10Z -> elevDeg ~= +4.57 (golden, rising)
+//   dusk    19:03Z -> elevDeg ~= +2.55 (golden, descending; matches the
+//                     env capture matrix's dusk sample)
+//   night   23:00Z -> elevDeg ~= -18.81 (night, unchanged)
 const DAYSTATES = {
-  morning: { at: '2026-07-03T09:00:00Z', wx: 'clear' },
-  dusk: { at: '2026-07-03T20:15:00Z', wx: 'clear' },
+  morning: { at: '2026-07-03T04:10:00Z', wx: 'clear' },
+  dusk: { at: '2026-07-03T19:03:00Z', wx: 'clear' },
   night: { at: '2026-07-03T23:00:00Z', wx: 'clear' },
 };
 const { at: AT, wx: WX } = DAYSTATES[DAYSTATE] ?? DAYSTATES.morning;
