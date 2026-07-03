@@ -137,6 +137,14 @@ export const precipLook = {
   rainAlpha: 0.4, snowAlpha: 0.85,
 } as const;
 
+// Precipitation box/count value sets. `room` = the prototype's former
+// COUNT/BOX constants (unchanged); `city` = curated starting values for the
+// KSW scene (Task 6 capture-review tunes further).
+export const precipBoxLook = {
+  room: { boxX: 24, boxY: 14, boxZ: 20, count: 3000 },
+  city: { boxX: 90, boxY: 40, boxZ: 90, count: 4500 },
+} as const;
+
 // Curated cloud tint colors for applyEnvironment. Day mixes the sun color
 // toward litWhite; night uses fixed lit/shadow tints.
 export const cloudLook = {
@@ -452,6 +460,15 @@ export const kswCity = {
 // cut-edge tone. Separate from roofFadePolicy — the cutaway drives the MAIN
 // KSW building only, never the city roofs.
 export const kswS3 = { cutHeight: 3.2, cutSeam: 0.25, fadeStartR: 90, fadeEndR: 55, seamColor: 0xf3e2c8 } as const;
+
+// Night sky (star field + moon disc) value sets. `room` values are EXACTLY
+// the former look.ts inline constants (STAR_R=17, quad 0.05, count 420, moon
+// radius 0.46 @ distance 17); `city` scales onto the KSW dome (domeRadius
+// 400) with curatable star quad/count — Task 6 capture-review tunes further.
+export const nightSkyLook = {
+  room: { starRadius: 17, starQuad: 0.05, starCount: 420, moonRadius: 0.46, moonDistance: 17 },
+  city: { starRadius: kswScene.domeRadius * 0.85, starQuad: 0.6, starCount: 400, moonRadius: 3.4, moonDistance: kswScene.domeRadius * 0.82 },
+} as const;
 
 // Diorama-style layer for the geodetic city (style slice). Additive only.
 export const kswCityStyle = {

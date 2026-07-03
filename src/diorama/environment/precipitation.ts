@@ -5,7 +5,7 @@
 // the diorama via `mod`. CPU cost per frame: 4 uniform writes, no matrix work.
 import * as THREE from 'three/webgpu';
 import { float, hash, instanceIndex, mix, positionLocal, uniform, vec3, vec4 } from 'three/tsl';
-import { precipLook, weatherLook } from '../designTokens';
+import { precipLook, precipBoxLook, weatherLook } from '../designTokens';
 import type { PrecipType } from './environment';
 
 export type PrecipitationSystem = {
@@ -13,12 +13,18 @@ export type PrecipitationSystem = {
   object3d: THREE.Object3D;
 };
 
-const COUNT = 3000;
-const BOX = { x: 24, y: 14, z: 20 } as const;
+export type PrecipOpts = { boxX: number; boxY: number; boxZ: number; count: number };
+
 const RAIN_SPEED = 9; // m/s fall
 const SNOW_SPEED = 1.1;
 
-export function createPrecipitation(): PrecipitationSystem {
+export function createPrecipitation(opts?: Partial<PrecipOpts>): PrecipitationSystem {
+  const COUNT = opts?.count ?? precipBoxLook.room.count;
+  const BOX = {
+    x: opts?.boxX ?? precipBoxLook.room.boxX,
+    y: opts?.boxY ?? precipBoxLook.room.boxY,
+    z: opts?.boxZ ?? precipBoxLook.room.boxZ,
+  } as const;
   const timeU = uniform(0);
   const snowU = uniform(0); // 0 rain, 1 snow
   const windU = uniform(new THREE.Vector2(0, 0)); // horizontal drift m/s (scene x/z)
