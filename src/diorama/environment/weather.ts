@@ -97,13 +97,39 @@ export function sampleWeather(series: WeatherSeries, utc: Date): WeatherState {
 const CACHE_KEY = 'abutown.openMeteo.v1';
 const REFRESH_MS = 15 * 60 * 1000;
 
+// localStorage can throw (Safari private mode, storage disabled, quota
+// exceeded); degrade to no-cache behavior rather than crashing the loop.
+function readCache(): string | null {
+  try {
+    return localStorage.getItem(CACHE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(json: unknown): void {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(json));
+  } catch {
+    // no-op: cache is best-effort
+  }
+}
+
+function clearCache(): void {
+  try {
+    localStorage.removeItem(CACHE_KEY);
+  } catch {
+    // no-op: cache is best-effort
+  }
+}
+
 export function startWeatherLoop(onUpdate: (s: WeatherSeries) => void): void {
-  const cached = localStorage.getItem(CACHE_KEY);
+  const cached = readCache();
   if (cached) {
     try {
       onUpdate(parseOpenMeteo(JSON.parse(cached)));
     } catch {
-      localStorage.removeItem(CACHE_KEY);
+      clearCache();
     }
   }
   let backoffMs = 30_000;
@@ -113,7 +139,7 @@ export function startWeatherLoop(onUpdate: (s: WeatherSeries) => void): void {
       if (!res.ok) throw new Error(`open-meteo http ${res.status}`);
       const json = (await res.json()) as unknown;
       const series = parseOpenMeteo(json);
-      localStorage.setItem(CACHE_KEY, JSON.stringify(json));
+      writeCache(json);
       backoffMs = 30_000;
       onUpdate(series);
     } catch (err) {
