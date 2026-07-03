@@ -36,3 +36,8 @@ scratch/
 # Slice 2 serves these tiles from public/ or a CDN; until then they live here
 # locally after a bake. The small legacy data/winterthur/*.json stay tracked.
 data/winterthur/world/
+
+# Dev-only symlink so `vite dev` serves data/winterthur/world/ over HTTP for
+# worldData.ts's loadWorld() (default baseUrl /winterthur-world/). Create
+# locally after a bake: ln -s ../data/winterthur/world public/winterthur-world
+public/winterthur-world
