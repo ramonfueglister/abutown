@@ -28,6 +28,7 @@ import {
   nightSkyLook,
   palette,
   post,
+  precipLook,
   roofFadePolicy,
 } from '../designTokens';
 import { computeEnvironment, type EnvironmentState } from '../environment/environment';
@@ -35,7 +36,6 @@ import { applyCityEnvironment, type CityEnvironmentTargets } from './applyCityEn
 import { createPrecipitation } from '../environment/precipitation';
 import { createStarField, createMoonDisc } from '../environment/nightSky';
 import { CLEAR_SKY, sampleWeather, startWeatherLoop, type WeatherSeries, type WeatherState } from '../environment/weather';
-import { precipLook } from '../designTokens';
 import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigPosition, roofFade, type CameraRigState } from './cameraRig';
 import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
 import { buildNav } from './nav';
@@ -1098,6 +1098,15 @@ async function boot(): Promise<void> {
     // uniform (incl. cloud drift integration) and the shared currentSunDir.
     lastEnv = computeEnvironment(now(), currentWeather());
     applyCityEnvironment(envTargets, lastEnv, dt);
+    // The precipitation field is periodic (positions wrap via mod inside its
+    // box), so re-centring the mesh on box-multiples of the camera target is
+    // seamless — this keeps rain/snow visible at far ?cam targets (e.g.
+    // bahnhof/zag) instead of only ever falling over the world origin.
+    precipitation.object3d.position.set(
+      Math.round(rig.target[0] / precipLook.city.boxX) * precipLook.city.boxX,
+      0,
+      Math.round(rig.target[2] / precipLook.city.boxZ) * precipLook.city.boxZ,
+    );
     // The follow rig placed sun.position from currentSunDir earlier this frame;
     // apply just moved currentSunDir, so re-sync position/target/far. Cheap: the
     // extent/target math is trivial. The sun creeps continuously in realtime, so

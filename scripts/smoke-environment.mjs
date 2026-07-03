@@ -139,7 +139,7 @@ try {
     }
     // 2) State matrix (wx overrides, no network dependency)
     await probe('at=2026-07-03T04:00:00Z&wx=clear', (e) =>
-      e.sunElevDeg > -8 && e.sunElevDeg < 12 && e.godraysMix >= 0 ? [] : [`dawn state off: elev=${e.sunElevDeg}`]
+      e.sunElevDeg > -8 && e.sunElevDeg < 12 && e.godraysMix > 0 ? [] : [`dawn state off: elev=${e.sunElevDeg} godraysMix=${e.godraysMix}`]
     );
     await probe('at=2026-07-03T19:45:00Z&wx=clear', (e) =>
       e.lampOn01 > 0.3 ? [] : ['dusk should start warming windows']
@@ -202,6 +202,13 @@ try {
     // (e) Winter 16:30Z (17:30 local) is already after sunset over the city.
     await probe('at=2026-01-15T16:30:00Z&wx=clear', (e) =>
       e.sunElevDeg < 0 ? [] : ['city winter 17:30 local should be after sunset'], ''
+    );
+    // (f) Camera-anchored precipitation: a far ?cam preset (bahnhof, ~800m from
+    // the origin) still reports live rain wiring. This is a cheap state-assert
+    // only — it does not prove the particle mesh is visually over the camera
+    // (that needs a capture/screenshot look), but it pins the env plumbing.
+    await probe('cam=bahnhof&at=2026-07-03T15:00:00Z&wx=rain', (e) =>
+      e.precipType === 'rain' ? [] : [`city bahnhof rain off: ${e.precipType}`], ''
     );
 
     await browser.close();
