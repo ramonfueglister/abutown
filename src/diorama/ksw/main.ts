@@ -279,6 +279,14 @@ async function boot(): Promise<void> {
   // identical to the hero while the frustum walks the city. applyCityEnvironment
   // writes it IN-PLACE (day: sun dir, night: moon dir).
   const currentSunDir = initialSunDir.clone();
+  // Shadow-refresh threshold (Slice E + Task 4): the realtime sun creeps
+  // continuously, so re-rendering the cached crowd shadow map on every
+  // direction change would defeat the cache. Track the direction the map was
+  // last rendered at and only refresh once the sun has drifted past this
+  // angle. 0.002 rad =~ one refresh every ~27s of real sun motion
+  // (~0.25deg/min creep) — sub-texel under PCSS, so no visible staleness.
+  const SHADOW_SUN_REFRESH_RAD = 0.002;
+  const lastShadowSunDir = currentSunDir.clone();
 
   // ── dynamic camera: wheel dolly + left-drag orbit ──────────────────────
   const start = camPresets[camPreset];
@@ -563,12 +571,17 @@ async function boot(): Promise<void> {
   // Crowd mode (Slice D): GPU LOD/cull classification + blob shadows instead
   // of real casters. At or below the threshold the authored look is untouched.
   const crowd = spawnSpecs.length > kswAgents.crowdThreshold;
-  // Shadow caching (Slice E): in crowd mode the casters are static (agents use
-  // blob shadows). But Task 4 puts the sun on the realtime clock — it creeps
-  // every frame — so the shadow map must re-render each frame (a frozen map
-  // would go stale as now() advances). Like the old cycle mode, realtime =
-  // sun-moving = never cached; updateShadowFrustum(true) re-renders it per frame.
-  const shadowCached = false;
+  // Shadow caching (Slice E): in crowd mode every caster is static — agents
+  // use blob shadows (castShadow=false, agentMeshes.ts) — so re-rendering the
+  // shadow map every frame buys nothing (it was ~3.5k of ~3.8k draw calls).
+  // Task 4 put the sun on the realtime clock (it creeps ~0.25deg/min), but a
+  // threshold-refresh (SHADOW_SUN_REFRESH_RAD below, in animate()) keeps the
+  // depth map fresh without re-rendering every frame, so the crowd cache is
+  // still worth taking. The r185 node-based shadow system
+  // (ShadowNode.updateBefore) honors the classic light.shadow.autoUpdate /
+  // needsUpdate flags: autoUpdate=false freezes the cached depth map,
+  // needsUpdate=true re-renders it exactly once.
+  const shadowCached = crowd;
   if (shadowCached) {
     sun.shadow.autoUpdate = false;
     sun.shadow.needsUpdate = true; // boot: render the map once, then freeze
@@ -741,18 +754,22 @@ async function boot(): Promise<void> {
   // there is no small fixed plate to pin the frustum to.
   const onHeroPlate = (): boolean => false;
   let shadowExtentNow: number = kswScene.shadowExtent;
-  let shadowTargetNow = new THREE.Vector3(0, 0, 0);
+  const shadowTargetNow = new THREE.Vector3(0, 0, 0);
+  // Scratch for the per-frame "wanted" target — computed fresh every call but
+  // never retained past this function, so one shared instance is safe (avoids
+  // an allocation per frame; see Task-4 review finding).
+  const wantTargetScratch = new THREE.Vector3(0, 0, 0);
   const updateShadowFrustum = (force = false): void => {
     const hero = onHeroPlate() && rig.radius <= 120;
     const wantExtent = hero
       ? kswScene.shadowExtent
       : Math.max(kswScene.shadowExtent, Math.min(kswScene.shadowExtent + (rig.radius - 120) * 0.9, 900));
-    const wantTarget = hero ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(...rig.target);
+    const wantTarget = hero ? wantTargetScratch.set(0, 0, 0) : wantTargetScratch.set(...rig.target);
     const extentJump = Math.abs(wantExtent - shadowExtentNow) > shadowExtentNow * 0.1;
     const targetJump = wantTarget.distanceTo(shadowTargetNow) > 20;
     if (!force && !extentJump && !targetJump) return;
     shadowExtentNow = wantExtent;
-    shadowTargetNow = wantTarget;
+    shadowTargetNow.copy(wantTarget);
     sun.shadow.camera.left = -wantExtent;
     sun.shadow.camera.right = wantExtent;
     sun.shadow.camera.top = wantExtent;
@@ -1076,10 +1093,18 @@ async function boot(): Promise<void> {
     applyCityEnvironment(envTargets, lastEnv, dt);
     // The follow rig placed sun.position from currentSunDir earlier this frame;
     // apply just moved currentSunDir, so re-sync position/target/far. Cheap: the
-    // extent/target math is trivial. In the cached-shadow crowd path this also
-    // marks the depth map dirty (updateShadowFrustum forces needsUpdate), so the
-    // moving sun keeps re-rendering shadows — correct, at a shadow-pass cost.
-    updateShadowFrustum(true);
+    // extent/target math is trivial. The sun creeps continuously in realtime, so
+    // re-rendering the (cached, crowd-mode) shadow map on every direction change
+    // would defeat Slice E's cache; only force a refresh once the sun has drifted
+    // past SHADOW_SUN_REFRESH_RAD since the map was last rendered. Camera moves
+    // (extent/target jumps) still refresh via updateShadowFrustum()'s own
+    // early-out path, unaffected by this threshold.
+    if (lastShadowSunDir.angleTo(currentSunDir) > SHADOW_SUN_REFRESH_RAD) {
+      lastShadowSunDir.copy(currentSunDir);
+      updateShadowFrustum(true);
+    } else {
+      updateShadowFrustum();
+    }
     scene.environmentIntensity = gi.environmentIntensity * giBase.value * kswPost.envScaleScalar;
     window.__ENV_STATE = lastEnv;
     // Amortized GI probe: at most ONE cube face per frame (was: whole scene
