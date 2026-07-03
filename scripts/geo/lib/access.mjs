@@ -2,9 +2,17 @@
 // Fallback Fußweg (7–8), sonst Sentinel. Segment-Lot + Bogenlängen-Offset.
 // Grid-Bucketing (50 m) über Kanten-Segmente — O(n), wie das Door-Muster.
 const NONE = 0xffffffff;
-export function accessPoints({ graph, footprints }) {
-  const CELL = 50;
-  const grid = new Map(); // "gx,gz" -> [{edge, segIdx}]
+const CELL = 50;
+
+// Shared primitive (Task 7 refactor): build the segment grid once for a
+// graph and expose point→nearest-edge-segment projection. Buckets every
+// segment across ALL grid cells its bounding box touches (not just the
+// start cell) — this is the fix from commit 15e11ba for long/undensified
+// segments whose midpoint can sit many cells from their start point.
+// `accessPoints` and `transit.mjs`'s `nearestEdgePoint` both build on this,
+// so the bucketing behavior lives in exactly one place.
+function buildSegmentGrid(graph) {
+  const grid = new Map(); // "gx,gz" -> [{e, i}]
   const segsOf = (e) => {
     const start = graph.edgePtOffset[e];
     const end = e + 1 < graph.edgePtOffset.length ? graph.edgePtOffset[e + 1] : graph.edgePtX.length;
@@ -40,20 +48,45 @@ export function accessPoints({ graph, footprints }) {
       arc += Math.hypot(graph.edgePtX[i + 1] - graph.edgePtX[i], graph.edgePtZ[i + 1] - graph.edgePtZ[i]);
     return arc + t * Math.hypot(graph.edgePtX[segIdx + 1] - graph.edgePtX[segIdx], graph.edgePtZ[segIdx + 1] - graph.edgePtZ[segIdx]);
   };
+  const candidatesAt = (px, pz) => {
+    const gx = Math.floor(px / CELL), gz = Math.floor(pz / CELL);
+    const out = [];
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++)
+      for (const c of grid.get(`${gx + dx},${gz + dz}`) ?? []) out.push(c);
+    return out;
+  };
+  return { candidatesAt, project, arcTo };
+}
+
+// Nearest point on any edge whose class passes `classOk` (or, when omitted,
+// any edge) within maxDist. Returns { edge, offsetM } or null. Used directly
+// by transit.mjs (class ≤6 filter) and internally by accessPoints, which
+// keeps its own two-tier drivable-beats-footway ranking on top.
+export function nearestEdgePoint(graph, x, z, maxDist, classOk = () => true) {
+  const { candidatesAt, project, arcTo } = buildSegmentGrid(graph);
+  let best = null;
+  for (const { e, i } of candidatesAt(x, z)) {
+    if (!classOk(graph.edgeClass[e])) continue;
+    const p = project(x, z, e, i);
+    if (p.d > maxDist) continue;
+    if (!best || p.d < best.d) best = { d: p.d, edge: e, offsetM: arcTo(e, i, p.t) };
+  }
+  return best ? { edge: best.edge, offsetM: Math.round(best.offsetM * 10) / 10 } : null;
+}
+
+export function accessPoints({ graph, footprints }) {
+  const { candidatesAt, project, arcTo } = buildSegmentGrid(graph);
   return footprints.map((fp) => {
     const cx = fp.reduce((s, [x]) => s + x, 0) / fp.length;
     const cz = fp.reduce((s, [, z]) => s + z, 0) / fp.length;
     let best = null;
-    const gx = Math.floor(cx / CELL), gz = Math.floor(cz / CELL);
-    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
-      for (const { e, i } of grid.get(`${gx + dx},${gz + dz}`) ?? []) {
-        const p = project(cx, cz, e, i);
-        if (p.d > 80) continue;
-        const drivable = graph.edgeClass[e] <= 6;
-        const rank = drivable ? 0 : 1;
-        if (!best || rank < best.rank || (rank === best.rank && p.d < best.d))
-          best = { rank, d: p.d, edge: e, offsetM: arcTo(e, i, p.t) };
-      }
+    for (const { e, i } of candidatesAt(cx, cz)) {
+      const p = project(cx, cz, e, i);
+      if (p.d > 80) continue;
+      const drivable = graph.edgeClass[e] <= 6;
+      const rank = drivable ? 0 : 1;
+      if (!best || rank < best.rank || (rank === best.rank && p.d < best.d))
+        best = { rank, d: p.d, edge: e, offsetM: arcTo(e, i, p.t) };
     }
     return best ? { edge: best.edge, offsetM: Math.round(best.offsetM * 10) / 10 } : { edge: NONE, offsetM: 0 };
   });
