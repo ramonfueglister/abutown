@@ -38,7 +38,13 @@ const BASE_MATRIX = [
   // "Amber unter Teal" — whereas the old 19:35Z was already past sunset
   // (elev −1.6°) and read as near-night black.
   ['dusk', 'at=2026-07-03T19:03:00Z&wx=clear'],
-  ['night', 'at=2026-07-03T23:30:00Z&wx=clear'],
+  // Moon-honest night: at the old 2026-07-03T23:30Z the real Winterthur moon
+  // sat at only +16.3° near the horizon (illum 0.86) and drifted to the frame
+  // edge — the sky read moonless. 2026-08-27T23:00Z is a real deep-night moment
+  // with the moon high and full: measured moonElev +31.1°, illumination 1.00,
+  // sunElev −31.9° (via src/diorama/environment/solar moonState/sunState). Same
+  // honesty principle as the DAYSTATES comments in capture-ksw.mjs.
+  ['night', 'at=2026-08-27T23:00:00Z&wx=clear'],
   ['overcast', 'at=2026-07-03T11:00:00Z&wx=overcast'],
   ['rain', 'at=2026-07-03T15:00:00Z&wx=rain'],
   ['snow', 'at=2026-01-15T11:00:00Z&wx=snow'],
@@ -51,7 +57,8 @@ const BASE_MATRIX = [
 const CITY_CAM = [
   ['city-dawn', 'at=2026-07-03T04:10:00Z&wx=clear&cam=city'],
   ['city-noon', 'at=2026-07-03T11:00:00Z&wx=clear&cam=city'],
-  ['city-night', 'at=2026-07-03T23:30:00Z&wx=clear&cam=city'],
+  // moon-honest (see night above): moonElev +31.1°, illum 1.00, sunElev −31.9°
+  ['city-night', 'at=2026-08-27T23:00:00Z&wx=clear&cam=city'],
 ];
 
 const MATRIX = IS_CITY ? [...BASE_MATRIX, ...CITY_CAM] : BASE_MATRIX;
