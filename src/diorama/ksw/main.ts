@@ -86,8 +86,9 @@ const S3_INTERIM = true;
 type CamPresetName = 'overview' | 'er' | 'ops' | 'bahnhof' | 'zag' | 'city';
 const camPresets: Record<CamPresetName, { target: [number, number, number]; radius: number; yaw: number; pitch: number }> = {
   // Reframed for the real KSW complex (tower + wings) instead of the
-  // stylized hero hospital footprint (S3a/T15).
-  overview: { target: [0, 6, -20], radius: 260, yaw: -0.55, pitch: 0.95 },
+  // stylized hero hospital footprint (S3a/T15): high and wide enough that
+  // the whole campus plus a ring of city context reads as one diorama.
+  overview: { target: [0, 4, -15], radius: 520, yaw: -0.55, pitch: 1.02 },
   // zoomed into the emergency ward: radius below roofFadeNear, roofs gone
   er: { target: [-22.5, 0.4, 12], radius: 14, yaw: -0.5, pitch: 0.72 },
   // surgery block from above the open roof, south-east
