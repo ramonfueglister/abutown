@@ -1,0 +1,118 @@
+// backend/crates/protocol/proto/world.proto
+// Welt-Artefakte des Winterthur-Bakes (Spec 2026-07-03 endless-horizon).
+// SoA-Spalten: parallele repeated-Felder gleicher Länge, ECS-ready.
+// Vertrag: Kacheln sind statisch; Positionen lokal-Meter um den Anker.
+syntax = "proto3";
+package abutown.world;
+
+message Projection {
+  double anchor_lon = 1;
+  double anchor_lat = 2;
+}
+
+message TileRef {
+  uint32 level = 1; // 0..2
+  uint32 x = 2;
+  uint32 y = 3;
+  string path = 4;      // "tiles/L1/3_2.pb" relativ zum Manifest
+  uint32 byte_size = 5;
+}
+
+message WorldManifest {
+  uint32 bake_version = 1;
+  Projection projection = 2;
+  // Weltausdehnung in lokalen Metern (Wurzelzelle des Quadtrees).
+  double min_x = 3; double min_z = 4; double size = 5; // Quadrat
+  repeated TileRef tiles = 6;
+  repeated double boundary_ring = 7; // Gemeindegrenze, [x0,z0,x1,z1,...]
+  repeated string attribution = 8;
+}
+
+message RoadGraph {
+  // Knoten (OSM-Kreuzungen), SoA:
+  repeated sint64 node_osm_id = 1;
+  repeated double node_x = 2;
+  repeated double node_z = 3;
+  repeated double node_y = 4;      // DEM-Höhe
+  repeated bool node_signal = 5;   // Ampel
+
+  // Kanten, SoA (Index in node_*-Arrays):
+  repeated uint32 edge_a = 10;
+  repeated uint32 edge_b = 11;
+  repeated uint32 edge_class = 12;   // enum RoadClass
+  repeated double edge_width = 13;
+  repeated uint32 edge_oneway = 14;  // 0 beide, 1 a→b, 2 b→a
+  repeated uint32 edge_maxspeed = 15; // km/h, 0 = unbekannt
+  repeated uint32 edge_lanes = 16;    // 0 = unbekannt
+  // Polylinie + Höhenprofil je Kante, flach mit Offsets:
+  repeated uint32 edge_pt_offset = 17; // Start in edge_pt_*; Länge = next-offset
+  repeated double edge_pt_x = 18;
+  repeated double edge_pt_z = 19;
+  repeated double edge_pt_y = 20;
+
+  // Abbiegeverbote: (von-Kante, über-Knoten, nach-Kante)
+  repeated uint32 restriction_from_edge = 30;
+  repeated uint32 restriction_via_node = 31;
+  repeated uint32 restriction_to_edge = 32;
+}
+
+enum RoadClass {
+  ROAD_CLASS_UNSPECIFIED = 0;
+  MOTORWAY = 1; PRIMARY = 2; SECONDARY = 3; RESIDENTIAL = 4;
+  SERVICE = 5; TRACK = 6; PATH = 7; FOOTWAY = 8; CYCLEWAY = 9; RAIL = 10;
+}
+
+message TransitLayer {
+  repeated string line_ref = 1;      // "Bus 2", "S12"
+  repeated uint32 line_mode = 2;     // 0 bus, 1 tram, 2 train
+  repeated uint32 line_stop_offset = 3;
+  repeated uint32 stop_edge = 4;     // Graph-Kanten-Index
+  repeated double stop_offset_m = 5; // Meter entlang der Kante
+  repeated string stop_name = 6;
+}
+
+message WorldTile {
+  uint32 level = 1; uint32 x = 2; uint32 y = 3;
+
+  // Terrain-Patch: reguläres Grid, Zeilen-major.
+  uint32 grid_n = 10;          // Vertices pro Seite
+  double cell_size = 11;       // Meter
+  double origin_x = 12; double origin_z = 13;
+  repeated float height = 14;          // grid_n²
+  repeated uint32 landcover = 15;      // grid_n², enum Landcover
+
+  // Gebäude, SoA. L0/L1: nur Prismen (footprint+height), L2: volle Meshes.
+  repeated string b_id = 20;
+  repeated uint32 b_usage = 21;        // enum Usage
+  repeated double b_height = 22;
+  repeated double b_base_y = 23;       // reale Höhenkote
+  repeated uint32 b_fp_offset = 24;    // Offsets in b_fp_x/z
+  repeated double b_fp_x = 25;
+  repeated double b_fp_z = 26;
+  repeated uint32 b_access_edge = 27;  // Graph-Kante, uint32max = keiner
+  repeated double b_access_offset = 28;
+  // L2: gebakte Meshes, flach konkateniert mit Offsets:
+  repeated uint32 b_mesh_voffset = 29; repeated float b_mesh_pos = 30;
+  repeated uint32 b_mesh_ioffset = 31; repeated uint32 b_mesh_idx = 32;
+
+  // Straßen-Render-Bänder (aus dem Graph generiert, drapiert):
+  repeated uint32 r_class = 40;
+  repeated double r_width = 41;
+  repeated uint32 r_pt_offset = 42;
+  repeated double r_pt_x = 43; repeated double r_pt_z = 44; repeated double r_pt_y = 45;
+
+  // Bäume (instanziert):
+  repeated double t_x = 50; repeated double t_z = 51;
+  repeated double t_h = 52; repeated double t_r = 53;
+  repeated uint32 t_kind = 54; // 0 broad, 1 conifer
+}
+
+enum Landcover {
+  LANDCOVER_UNSPECIFIED = 0; MEADOW = 1; FOREST = 2; FARMLAND = 3;
+  RESIDENTIAL_LU = 4; INDUSTRIAL_LU = 5; WATER = 6; ROCK = 7;
+}
+
+enum Usage {
+  USAGE_UNSPECIFIED = 0; RESIDENTIAL_U = 1; COMMERCIAL = 2;
+  INDUSTRIAL_U = 3; PUBLIC = 4; AGRICULTURE = 5;
+}
