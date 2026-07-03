@@ -50,47 +50,50 @@ export type EnvKeyframe = {
   giScale: number; saturation: number; contrast: number;
   godraysMix: number; lampOn01: number;
   turbidity: number; rayleigh: number; mieCoefficient: number; mieG: number;
-  sunBoost: number; cloudCoverageBase: number;
+  sunBoost: number;
 };
 
 export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; goldenEvening: EnvKeyframe; day: EnvKeyframe } = {
+  // hemiIntensity values below fold in the old prototype's gi.hemiCut=0.5
+  // (deleted from environment.ts) so hemisphere brightness matches the
+  // art-directed original instead of coming out 2x too bright.
   night: {
-    hemiSky: 0x4a5f7d, hemiGround: 0x3d4652, hemiIntensity: 0.4,
+    hemiSky: 0x4a5f7d, hemiGround: 0x3d4652, hemiIntensity: 0.2,
     fogColor: 0x2c3a50, fogNear: 18, fogFar: 46,
     exposure: 0.95, mistColor: 0x46586e, mistOpacity: 0.18,
     giScale: 0.9, saturation: 1.08, contrast: 1.05,
     godraysMix: 0, lampOn01: 1,
     turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8,
-    sunBoost: 0, cloudCoverageBase: 0.4,
+    sunBoost: 0,
   },
   goldenMorning: {
-    hemiSky: 0xc4dcda, hemiGround: 0xe4d3ba, hemiIntensity: 0.6,
+    hemiSky: 0xc4dcda, hemiGround: 0xe4d3ba, hemiIntensity: 0.3,
     fogColor: 0xeee2cf, fogNear: 20, fogFar: 48,
     exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.16,
     giScale: 0.7, saturation: 1.1, contrast: 1.0,
     godraysMix: 0.35, lampOn01: 0,
     turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8,
-    sunBoost: 1.3, cloudCoverageBase: 0.44,
+    sunBoost: 1.3,
   },
   // The DREDGE moment — amber horizon under deep teal — now fires at the REAL dusk.
   goldenEvening: {
-    hemiSky: 0x4f7d84, hemiGround: 0x5c5348, hemiIntensity: 0.42,
+    hemiSky: 0x4f7d84, hemiGround: 0x5c5348, hemiIntensity: 0.21,
     fogColor: 0x486e74, fogNear: 18, fogFar: 46,
     exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.22,
     giScale: 0.55, saturation: 1.12, contrast: 1.06,
     godraysMix: 0.6, lampOn01: 1,
     turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9,
-    sunBoost: 2.3, cloudCoverageBase: 0.62,
+    sunBoost: 2.3,
   },
   // NEW curation: bright, neutral midday — flat contrast, no drama, lamp off.
   day: {
-    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.75,
+    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.375,
     fogColor: 0xe8eef2, fogNear: 22, fogFar: 52,
     exposure: 1.12, mistColor: 0xf2f3ee, mistOpacity: 0.1,
     giScale: 0.75, saturation: 1.04, contrast: 1.0,
     godraysMix: 0.15, lampOn01: 0,
     turbidity: 3, rayleigh: 2.2, mieCoefficient: 0.005, mieG: 0.8,
-    sunBoost: 1.0, cloudCoverageBase: 0.44,
+    sunBoost: 1.0,
   },
 };
 
@@ -144,8 +147,6 @@ export const post = {
   dof: { focusDistance: 16.5, focalLength: 1.4, bokehScale: 2.2 },
   bloom: { strength: 0.12, radius: 0.3, threshold: 0.9 },
   filmGrain: 0.08,
-  godraysMix: 0.35,
-  godraysMixDusk: 0.6,
   godraysDensity: 0.35,
   godraysMaxDensity: 0.32,
 } as const;
