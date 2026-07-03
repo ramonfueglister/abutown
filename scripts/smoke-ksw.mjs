@@ -140,14 +140,17 @@ try {
   const drift = Math.hypot(settled2.target[0] - settled.target[0], settled2.target[2] - settled.target[2]);
   check('pan stops when the cursor leaves the edge', drift < 0.05, `drift ${drift.toFixed(3)}`);
 
+  // S3-interim (T19 reactivates): the stylized hospital's crowd is detached
+  // along with its group (S3a/T15) — no agents are spawned until the real
+  // KSW interior + agent spawn are rebuilt. Camera checks above still run.
   // people actually move through the hospital
-  const a0 = s4.agents;
-  check('a full crowd is spawned', a0.total >= 60, `total=${a0.total}`);
-  await page.waitForTimeout(6000);
-  const a1 = (await state()).agents;
-  const moved = a0.samples.filter((p, i) => Math.hypot(p[0] - a1.samples[i][0], p[1] - a1.samples[i][1]) > 0.3).length;
-  check('people walk around (sampled positions change)', moved >= 2, `${moved}/12 samples moved`);
-  check('someone is walking at any given moment', a0.walking + a1.walking > 0, `walking=${a0.walking}->${a1.walking}`);
+  // const a0 = s4.agents;
+  // check('a full crowd is spawned', a0.total >= 60, `total=${a0.total}`);
+  // await page.waitForTimeout(6000);
+  // const a1 = (await state()).agents;
+  // const moved = a0.samples.filter((p, i) => Math.hypot(p[0] - a1.samples[i][0], p[1] - a1.samples[i][1]) > 0.3).length;
+  // check('people walk around (sampled positions change)', moved >= 2, `${moved}/12 samples moved`);
+  // check('someone is walking at any given moment', a0.walking + a1.walking > 0, `walking=${a0.walking}->${a1.walking}`);
 
   if (errors.length) {
     console.error('--- page errors ---');

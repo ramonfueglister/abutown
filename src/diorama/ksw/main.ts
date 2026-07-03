@@ -29,11 +29,12 @@ import {
   nightGlow,
   palette,
   post,
+  radii,
   roofFadePolicy,
   skyPhys,
   sunArcCfg,
 } from '../designTokens';
-import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigFromLookAt, rigPosition, roofFade, type CameraRigState } from './cameraRig';
+import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigPosition, roofFade, type CameraRigState } from './cameraRig';
 import { buildHospital } from './building';
 import { kswPlan } from './floorPlan';
 import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
@@ -43,10 +44,11 @@ import { ANIMATED_TAGS } from './staticBatch';
 import { advancePlanCursor, createAgent, updateAgent, type Agent } from './agents';
 import { GiProbeScheduler, renderProbeFace } from './giProbe';
 import { boxGeo } from './geometryCache';
-import { clayMat } from './props';
+import { box, clayMat } from './props';
 import { buildCityMassing } from './geo/cityMassing';
+import { buildKswCampus } from './geo/kswCampus';
 import { buildRoads } from './geo/roads';
-import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads } from './geo/geoData';
+import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
 import { buildNature } from './geo/nature';
@@ -75,12 +77,17 @@ declare global {
   }
 }
 
+// S3 interim (T15): the stylized hero hospital is replaced by the real KSW
+// campus shell. This flag guards the now-dead hospital-specific rendering
+// (roofs/agents/animated bits) so the code keeps compiling while T16-T19
+// rebuild the interior/agents/plaza on top of the real hull. Remove in T19.
+const S3_INTERIM = true;
+
 type CamPresetName = 'overview' | 'er' | 'ops' | 'bahnhof' | 'zag' | 'city';
 const camPresets: Record<CamPresetName, { target: [number, number, number]; radius: number; yaw: number; pitch: number }> = {
-  overview: (() => {
-    const s = rigFromLookAt(kswCamera.overviewPosition, kswCamera.target);
-    return { target: kswCamera.target, radius: s.radius, yaw: s.yaw, pitch: s.pitch };
-  })(),
+  // Reframed for the real KSW complex (tower + wings) instead of the
+  // stylized hero hospital footprint (S3a/T15).
+  overview: { target: [0, 6, -20], radius: 260, yaw: -0.55, pitch: 0.95 },
   // zoomed into the emergency ward: radius below roofFadeNear, roofs gone
   er: { target: [-22.5, 0.4, 12], radius: 14, yaw: -0.5, pitch: 0.72 },
   // surgery block from above the open roof, south-east
@@ -407,10 +414,30 @@ async function boot(): Promise<void> {
   const hemi = new THREE.HemisphereLight(preset.hemiSky, preset.hemiGround, preset.hemiIntensity * gi.hemiCut);
   scene.add(hemi);
 
-  // ── the hospital ───────────────────────────────────────────────────────
+  // ── the hospital (S3 interim, T15): the stylized hero hospital shell is no
+  // longer added to the scene — the real KSW campus (below) replaces it.
+  // buildHospital still runs so kswPlan-derived downstream code (nav, agent
+  // spawn, smoke) keeps compiling until T16-T19 rebuild those on the real
+  // hull; its group/roofs/animated tags are simply never attached or driven.
   const { group: hospital, roofs } = buildHospital(kswPlan, { lampGlow: preset.lampOn });
-  scene.add(hospital);
-  roofs.setFade(roofFade(rig.radius, kswCamera));
+  if (!S3_INTERIM) {
+    scene.add(hospital);
+    roofs.setFade(roofFade(rig.radius, kswCamera));
+  }
+
+  // Hero plate (S3 interim, T15): buildHospital used to also build the plaza
+  // base plate. With the hospital group no longer added, a standalone hero
+  // plate keeps the plaza slab + mist ring working — same 72×56 lawn-box
+  // recipe as building.ts:194 (T19 re-orders the plaza around the real door).
+  const heroPlate = box(kswPlan.plate.w, kswScene.plateThickness, kswPlan.plate.d, palette.lawn, radii.l);
+  heroPlate.position.y = -kswScene.plateThickness / 2;
+  scene.add(heroPlate);
+
+  // ── the real KSW campus (S3a, T15): reuses the city clay-massing pipeline
+  // on the 26 baked zone==='ksw' buildings — walls with the TSL facade
+  // shader, roofs, plinth/eave trim. Facade detail is always on (hero/near).
+  const { group: kswCampus } = buildKswCampus(kswBuildings, { lampGlow: preset.lampOn });
+  scene.add(kswCampus);
 
   // ── the real Winterthur city around it (swisstopo LoD2 + OSM, clay) ──────
   // The hero hospital keeps its own authored plate; the city sits on a bigger
@@ -471,10 +498,15 @@ async function boot(): Promise<void> {
 
   // collect animated bits: ambulance light pulses, helicopter rotor idles.
   // Tag contract shared with staticBatch.isAnimated via ANIMATED_TAGS.
+  // S3 interim (T15): the hospital group isn't in the scene, so there is
+  // nothing to animate — empty arrays keep animate() type-safe until T19
+  // reintroduces these props on the real campus.
   const animated: Record<(typeof ANIMATED_TAGS)[number], THREE.Object3D[]> = { blink: [], rotor: [] };
-  hospital.traverse((o) => {
-    for (const tag of ANIMATED_TAGS) if (o.userData[tag]) animated[tag].push(o);
-  });
+  if (!S3_INTERIM) {
+    hospital.traverse((o) => {
+      for (const tag of ANIMATED_TAGS) if (o.userData[tag]) animated[tag].push(o);
+    });
+  }
   const blinkers = animated.blink as THREE.Mesh[];
   const rotors = animated.rotor;
 
@@ -483,12 +515,18 @@ async function boot(): Promise<void> {
   // Rendering is per-role instanced (agentMeshes.ts): the shader animates
   // squash/waddle/yaw from storage buffers, the CPU keeps only the agent
   // state machine plus flat smoothing slots (eased y, lerped yaw, roll).
+  // S3 interim (T15): the crowd lived inside the stylized hospital's rooms;
+  // with that group detached from the scene there is no interior to spawn
+  // into yet (T17 rebuilds it on the real hull, T19 reactivates agents).
+  // `liveAgents` stays empty and `inBuilding` always false so animate() and
+  // kswSnapshot.agents keep their types with zero live crowd.
   const nav = buildNav(kswPlan);
   const inBuilding = (x: number, z: number): boolean =>
+    !S3_INTERIM &&
     Math.abs(x - kswPlan.building.x) < kswPlan.building.w / 2 &&
     Math.abs(z - kswPlan.building.z) < kswPlan.building.d / 2;
   // The authored plan people first, then seeded extras up to ?agents=N.
-  const spawnSpecs = buildSpawnSpecs(kswPlan, nav, agentTarget);
+  const spawnSpecs = S3_INTERIM ? [] : buildSpawnSpecs(kswPlan, nav, agentTarget);
   // Crowd mode (Slice D): GPU LOD/cull classification + blob shadows instead
   // of real casters. At or below the threshold the authored look is untouched.
   const crowd = spawnSpecs.length > kswAgents.crowdThreshold;
@@ -519,7 +557,9 @@ async function boot(): Promise<void> {
   const roleCounts: Partial<Record<PersonRole, number>> = {};
   for (const s of spawnSpecs) roleCounts[s.spec.role] = (roleCounts[s.spec.role] ?? 0) + 1;
   const agentInstances = createAgentInstances(roleCounts, { crowd });
-  for (const m of agentInstances.meshes) hospital.add(m);
+  if (!S3_INTERIM) {
+    for (const m of agentInstances.meshes) hospital.add(m);
+  }
   type LiveAgent = { agent: Agent; slot: AgentSlot; idx: number; y: number; yaw: number; roll: number };
   const liveAgents: LiveAgent[] = [];
   for (const [idx, s] of spawnSpecs.entries()) {
