@@ -182,6 +182,73 @@ if (allBuildings.length > 0 && skippedShort > allBuildings.length * 0.1)
 allBuildings = usable;
 console.log(`buildings: ${allBuildings.length} total (skipped ${skippedShort} sub-${MIN_H}m structures)`);
 
+// ---- Step 3b: building usage metadata (the future sim seed) ---------------
+// swissBUILDINGS3D carries no usage; OSM does (building=/amenity=/healthcare=).
+// Join OSM building polygons onto each swiss footprint by centroid containment
+// and map the tag to the Usage enum (world.proto). transform.mjs's
+// nameForFootprint does the same containment but O(buildings x polys) with no
+// index — 29k x 46k ≈ 1.3e9 point-in-ring tests, hours at municipality scale.
+// So bucket the ~46k OSM polygons into a 100 m grid (a polygon lands in every
+// cell its bbox spans) and query only the footprint-centroid's cell: any
+// polygon that can contain the centroid has a bbox covering that cell, so one
+// cell lookup is exhaustive. Smallest containing polygon wins (a department
+// inside a campus gets its own use, not the campus's).
+function usageNum(u) {
+  if (!u || u === 'yes') return 0;
+  const s = String(u).toLowerCase();
+  if (/(house|resid|apart|dormitory|terrace|detached|bungalow)/.test(s)) return 1; // residential
+  if (/(retail|commercial|shop|office|hotel|supermarket|kiosk|marketplace|bank|restaurant)/.test(s)) return 2; // commercial
+  if (/(industr|warehouse|factory|manufacture|works)/.test(s)) return 3; // industrial
+  if (/(hospital|clinic|healthcare|school|university|college|kindergarten|civic|public|government|church|chapel|townhall|hall|fire_station|police|museum|library)/.test(s)) return 4; // public
+  if (/(farm|barn|agric|greenhouse|stable|silo)/.test(s)) return 5; // agriculture
+  return 0;
+}
+{
+  const osmRaw = loadJson(`${SCRATCH}/osm-buildings.json`);
+  const USE_CELL = 100;
+  const useGrid = new Map(); // "gx,gz" -> [{ring, area, use}]
+  const ringAreaAbs = (ring) => {
+    let a = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    return Math.abs(a / 2);
+  };
+  let polyCount = 0;
+  for (const el of osmRaw.elements ?? []) {
+    const geom = el.type === 'way' ? el.geometry : el.members?.find((m) => m.role === 'outer')?.geometry;
+    if (!geom || geom.length < 3 || !el.tags) continue;
+    const use = usageNum(el.tags.healthcare || el.tags.amenity || el.tags.building);
+    if (use === 0) continue; // only index polygons that carry a usable class
+    const ring = geom.map(({ lon, lat }) => projector.toLocal(lon, lat));
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (const [x, z] of ring) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (z < minZ) minZ = z; if (z > maxZ) maxZ = z; }
+    const entry = { ring, area: ringAreaAbs(ring), use };
+    const gx0 = Math.floor(minX / USE_CELL), gx1 = Math.floor(maxX / USE_CELL);
+    const gz0 = Math.floor(minZ / USE_CELL), gz1 = Math.floor(maxZ / USE_CELL);
+    for (let gz = gz0; gz <= gz1; gz++) for (let gx = gx0; gx <= gx1; gx++) {
+      const k = `${gx},${gz}`;
+      if (!useGrid.has(k)) useGrid.set(k, []);
+      useGrid.get(k).push(entry);
+    }
+    polyCount++;
+  }
+  let tagged = 0;
+  for (const b of allBuildings) {
+    let cx = 0, cz = 0;
+    for (const [x, z] of b.footprint) { cx += x; cz += z; }
+    cx /= b.footprint.length; cz /= b.footprint.length;
+    const cands = useGrid.get(`${Math.floor(cx / USE_CELL)},${Math.floor(cz / USE_CELL)}`);
+    if (!cands) { b.usage = 0; continue; }
+    let best = null;
+    for (const c of cands) {
+      if (!pointInRing(cx, cz, c.ring)) continue;
+      if (!best || c.area < best.area) best = c;
+    }
+    b.usage = best ? best.use : 0;
+    if (best) tagged++;
+  }
+  console.log(`building usage: ${tagged}/${allBuildings.length} tagged from ${polyCount} classed OSM polygons (${(100 * tagged / allBuildings.length).toFixed(1)}%)`);
+}
+
 // Gate: real observed count on a full 30-GDB clipped run (municipality-wide
 // swissBUILDINGS3D, clipped to boundary+4km pad, sub-2m structures already
 // dropped) is 29,450 buildings. Floor set at 15,000 — well below the
