@@ -18,10 +18,12 @@
 
 pub mod fleet;
 pub mod idm;
+pub mod mobil;
 pub mod rng;
 pub mod tick;
 
 pub use fleet::{Fleet, LaneIndex, RouteHandle, VehId};
 pub use idm::{IdmParams, idm_accel};
+pub use mobil::{Follower, LaneNeighbourhood, MobilDecision, MobilParams};
 pub use rng::u01;
 pub use tick::{Core, DT};
