@@ -5,6 +5,7 @@ members = [
   "crates/sim-server",
   "crates/traffic-net",
   "crates/traffic-core",
+  "crates/winterthur-traffic",
 ]
 
 [workspace.package]
@@ -17,6 +18,7 @@ anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
 http-body-util = "0.1"
 dotenvy = "0.15"
+fast_paths = "1"
 jsonwebtoken = "9"
 prost = "0.13"
 prost-build = "0.13"

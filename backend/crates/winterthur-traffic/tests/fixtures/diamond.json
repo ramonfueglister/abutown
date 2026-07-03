@@ -1,0 +1,183 @@
+{
+  "meta": {
+    "anchor": { "lon": 8.7285, "lat": 47.5069 },
+    "laneWidth": 3,
+    "cellSize": 128
+  },
+  "nodes": [
+    { "id": 0, "x": 0, "z": 0, "kind": "dead_end", "signal": null },
+    { "id": 1, "x": 100, "z": 0, "kind": "priority", "signal": null },
+    { "id": 2, "x": 200, "z": 50, "kind": "priority", "signal": null },
+    { "id": 3, "x": 200, "z": -50, "kind": "priority", "signal": null },
+    { "id": 4, "x": 300, "z": 0, "kind": "priority", "signal": null },
+    { "id": 5, "x": 400, "z": 0, "kind": "dead_end", "signal": null }
+  ],
+  "edges": [
+    {
+      "id": 0,
+      "from": 0,
+      "to": 1,
+      "speedMs": 10,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [0]
+    },
+    {
+      "id": 1,
+      "from": 1,
+      "to": 2,
+      "speedMs": 20,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [1]
+    },
+    {
+      "id": 2,
+      "from": 1,
+      "to": 3,
+      "speedMs": 10,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [2]
+    },
+    {
+      "id": 3,
+      "from": 2,
+      "to": 4,
+      "speedMs": 20,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [3]
+    },
+    {
+      "id": 4,
+      "from": 3,
+      "to": 4,
+      "speedMs": 10,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [4]
+    },
+    {
+      "id": 5,
+      "from": 4,
+      "to": 5,
+      "speedMs": 10,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [5]
+    }
+  ],
+  "lanes": [
+    {
+      "id": 0,
+      "edge": 0,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [0, 0],
+        [100, 0]
+      ]
+    },
+    {
+      "id": 1,
+      "edge": 1,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [100, 0],
+        [100, 100]
+      ]
+    },
+    {
+      "id": 2,
+      "edge": 2,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [100, 0],
+        [100, -100]
+      ]
+    },
+    {
+      "id": 3,
+      "edge": 3,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [100, 100],
+        [200, 100]
+      ]
+    },
+    {
+      "id": 4,
+      "edge": 4,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [100, -100],
+        [200, -100]
+      ]
+    },
+    {
+      "id": 5,
+      "edge": 5,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [200, 100],
+        [300, 100]
+      ]
+    }
+  ],
+  "turns": [
+    {
+      "id": 0,
+      "fromLane": 0,
+      "toLane": 1,
+      "node": 1,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 1,
+      "fromLane": 0,
+      "toLane": 2,
+      "node": 1,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 2,
+      "fromLane": 1,
+      "toLane": 3,
+      "node": 2,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 3,
+      "fromLane": 2,
+      "toLane": 4,
+      "node": 3,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 4,
+      "fromLane": 3,
+      "toLane": 5,
+      "node": 4,
+      "conflictsWith": [4],
+      "yieldsTo": []
+    },
+    {
+      "id": 5,
+      "fromLane": 4,
+      "toLane": 5,
+      "node": 4,
+      "conflictsWith": [3],
+      "yieldsTo": []
+    }
+  ]
+}
