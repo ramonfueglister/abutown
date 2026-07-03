@@ -404,6 +404,23 @@ export const nightSkyLook = {
   city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 5.5, starCount: 2200, moonRadius: 26, moonDistance: kswCity.domeRadius * 0.82 },
 } as const;
 
+// Terrain landcover tint table (geo terrain tiles, Task 11). Anchored to the
+// existing city-nature palette: meadow reuses kswCity.parkGreen exactly,
+// forest a touch deeper than kswCity.woodGreen (bare grid terrain reads
+// flatter than instanced tree canopies, so it wants a bit more contrast),
+// water reuses kswCity.water exactly. Residential/industrial/farmland/rock
+// are new muted clay tones kept inside the same desaturated family — no
+// saturated "landuse map" colors.
+export const terrainLook = {
+  meadow: kswCity.parkGreen,
+  forest: 0x6f9b64,
+  farmland: 0xcdb583,
+  residentialLu: 0xd8c7ab,
+  industrialLu: 0xb9ac9a,
+  water: kswCity.water,
+  rock: 0x9a978d,
+} as const;
+
 // Diorama-style layer for the geodetic city (style slice). Additive only.
 export const kswCityStyle = {
   plinthH: 0.5, plinthOut: 0.12, plinthSink: 0.3, // sockel: height, outset, below-plate sink

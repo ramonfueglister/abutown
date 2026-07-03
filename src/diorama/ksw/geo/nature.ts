@@ -67,7 +67,7 @@ function riverRibbons(rivers: CityNature['rivers'], color: THREE.Color): Array<{
   return quads;
 }
 
-function vertexTintMat(base: number): THREE.MeshPhysicalMaterial {
+export function vertexTintMat(base: number): THREE.MeshPhysicalMaterial {
   const m = clayMat(base).clone();
   m.vertexColors = true;
   m.color = new THREE.Color(0xffffff);
