@@ -140,7 +140,12 @@ export const precipLook = {
   snowSx: 0.06, snowSy: 0.06, // small square snow flake
   rainAlpha: 0.4, snowAlpha: 0.85,
   room: { boxX: 24, boxY: 14, boxZ: 20, count: 3000 },
-  city: { boxX: 90, boxY: 40, boxZ: 90, count: 4500 },
+  // City precip read too thin at the diorama scale (Task-4 note): the 0.02×0.55
+  // rain streak and 0.06 snow flake all but vanished over the 90-unit box. Give
+  // the city its own slightly heavier streak/flake + higher count so rain fäden
+  // and snow flocken actually register at the pulled-back city framing.
+  rainCitySx: 0.05, rainCitySy: 0.9, snowCitySx: 0.14, snowCitySy: 0.14,
+  city: { boxX: 90, boxY: 40, boxZ: 90, count: 7000 },
 } as const;
 
 // Curated cloud tint colors for applyEnvironment. Day mixes the sun color
@@ -380,7 +385,14 @@ export const kswS3 = { cutHeight: 3.2, cutSeam: 0.25, fadeStartR: 90, fadeEndR: 
 // 400) with curatable star quad/count — Task 6 capture-review tunes further.
 export const nightSkyLook = {
   room: { starRadius: 17, starQuad: 0.05, starCount: 420, moonRadius: 0.46, moonDistance: 17 },
-  city: { starRadius: kswScene.domeRadius * 0.85, starQuad: 0.6, starCount: 400, moonRadius: 3.4, moonDistance: kswScene.domeRadius * 0.82 },
+  // Scale the night sky onto the CITY dome (kswCity.domeRadius 1800), not the
+  // hero dome (kswScene.domeRadius 400). The establishing cam=city framing
+  // dollies out to radius 820 — well outside the old 340-unit star sphere, so
+  // stars + moon fell behind the camera and city-night rendered black. The
+  // cloud layer already swaps onto the 1800 dome; the sky must too. Quad/moon
+  // sizes scale up proportionally (~×4.5) to keep the same apparent size, and
+  // the star count is raised so the far-larger sphere doesn't read sparse.
+  city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 2.7, starCount: 900, moonRadius: 15, moonDistance: kswCity.domeRadius * 0.82 },
 } as const;
 
 // Diorama-style layer for the geodetic city (style slice). Additive only.

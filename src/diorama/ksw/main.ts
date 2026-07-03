@@ -848,7 +848,13 @@ async function boot(): Promise<void> {
   postProcessing.outputNode = film(graded, float(post.filmGrain));
 
   // Precipitation: GPU instanced rain/snow, driven by applyCityEnvironment.
-  const precipitation = createPrecipitation(precipLook.city);
+  const precipitation = createPrecipitation({
+    ...precipLook.city,
+    rainSx: precipLook.rainCitySx,
+    rainSy: precipLook.rainCitySy,
+    snowSx: precipLook.snowCitySx,
+    snowSy: precipLook.snowCitySy,
+  });
   scene.add(precipitation.object3d);
 
   // Weather: live Open-Meteo loop unless a ?wx override pins a fixed state.

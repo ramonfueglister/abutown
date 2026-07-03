@@ -13,7 +13,18 @@ export type PrecipitationSystem = {
   object3d: THREE.Object3D;
 };
 
-export type PrecipOpts = { boxX: number; boxY: number; boxZ: number; count: number };
+export type PrecipOpts = {
+  boxX: number;
+  boxY: number;
+  boxZ: number;
+  count: number;
+  // Per-scene streak/flake overrides. The city framing needs heavier rain
+  // fäden / bigger snow flocken than the room to read at the pulled-back scale.
+  rainSx: number;
+  rainSy: number;
+  snowSx: number;
+  snowSy: number;
+};
 
 const RAIN_SPEED = 9; // m/s fall
 const SNOW_SPEED = 1.1;
@@ -60,9 +71,14 @@ export function createPrecipitation(opts?: Partial<PrecipOpts>): PrecipitationSy
     const x = f(x0.add(f(windU.x).mul(drift)).add(wobble).add(BOX.x / 2).mod(BOX.x).sub(BOX.x / 2));
     const z = f(z0.add(f(windU.y).mul(drift)).add(BOX.z / 2).mod(BOX.z).sub(BOX.z / 2));
 
-    // rain: thin vertical streak; snow: small square.
-    const sx = mix(float(precipLook.rainSx), float(precipLook.snowSx), snowU);
-    const sy = mix(float(precipLook.rainSy), float(precipLook.snowSy), snowU);
+    // rain: thin vertical streak; snow: small square. Sizes are per-scene
+    // (opts override the shared room defaults so the city can run heavier).
+    const rainSx = opts?.rainSx ?? precipLook.rainSx;
+    const rainSy = opts?.rainSy ?? precipLook.rainSy;
+    const snowSx = opts?.snowSx ?? precipLook.snowSx;
+    const snowSy = opts?.snowSy ?? precipLook.snowSy;
+    const sx = mix(float(rainSx), float(snowSx), snowU);
+    const sy = mix(float(rainSy), float(snowSy), snowU);
     const local = f(positionLocal).mul(vec3(sx, sy, float(1)));
     mat.positionNode = f(local).add(vec3(x, y, z));
 
