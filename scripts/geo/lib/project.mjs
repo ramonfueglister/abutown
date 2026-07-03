@@ -13,6 +13,8 @@ export function makeProjector(anchor) {
   const rad = Math.PI / 180;
   const cos0 = Math.cos(anchor.lat * rad);
   return {
+    anchorLon: anchor.lon,
+    anchorLat: anchor.lat,
     toLocal(lon, lat) {
       const x = (lon - anchor.lon) * rad * R * cos0;
       const north = (lat - anchor.lat) * rad * R;
