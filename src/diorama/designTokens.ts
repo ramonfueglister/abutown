@@ -140,7 +140,7 @@ export const nightGlow = {
 } as const;
 
 // Moonlight (the night preset's key light — the sun arc is parked below horizon).
-export const moonLight = { color: 0xa8c4e8, intensity: 1.0, position: [-6, 7, 6] as [number, number, number] } as const;
+export const moonLight = { color: 0xa8c4e8, intensity: 1.0 } as const;
 
 // Post-processing recipe — the miniature magic. All post values live here.
 export const post = {

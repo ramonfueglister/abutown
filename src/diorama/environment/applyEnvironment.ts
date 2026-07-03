@@ -2,8 +2,8 @@
 // no geometry rebuilds, no allocations in the hot path.
 
 import * as THREE from 'three/webgpu';
-import { nightGlow } from '../designTokens';
-import type { EnvironmentState } from './environment';
+import { moonLight, nightGlow } from '../designTokens';
+import { moonPhaseLightDir, type EnvironmentState } from './environment';
 import type { PrecipitationSystem } from './precipitation';
 
 export type EnvironmentTargets = {
@@ -29,7 +29,7 @@ export type EnvironmentTargets = {
   mistMaterial: THREE.MeshBasicMaterial;
   sunDisc: THREE.Mesh;
   moonDisc: THREE.Mesh;
-  moonLightObj: THREE.DirectionalLight | null; // null: moon shares `sun` light at night (see look.ts wiring)
+  moonPhaseDir: { value: THREE.Vector3 };
   lampLight: THREE.PointLight;
   lampBulb: THREE.Mesh;
   stars: THREE.Points;
@@ -74,7 +74,7 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
   } else {
     const moonDir = t.scratch.v3.set(env.moonDir[0], Math.max(env.moonDir[1], 0.15), env.moonDir[2]).normalize();
     t.sun.position.copy(moonDir).multiplyScalar(12);
-    t.sun.color.set(0xa8c4e8);
+    t.sun.color.set(moonLight.color);
     t.sun.intensity = Math.max(env.moonIntensity, 0.12);
     t.cloudUniforms.lightDir.value.copy(moonDir);
     t.cloudUniforms.lit.value.set(CLOUD_NIGHT_LIT);
@@ -105,6 +105,7 @@ export function applyEnvironment(t: EnvironmentTargets, env: EnvironmentState, d
   t.sunDisc.visible = env.sunDir[1] > 0.015;
   t.moonDisc.position.set(env.moonDir[0], env.moonDir[1], env.moonDir[2]).multiplyScalar(60);
   t.moonDisc.visible = env.moonDir[1] > 0.02 && env.starVisibility > 0.02;
+  t.moonPhaseDir.value.set(...moonPhaseLightDir(env.moonPhase));
 
   // Lamp (warm windows)
   t.lampLight.intensity = nightGlow.lampIntensity * 1.2 * env.lampOn01;

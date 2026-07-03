@@ -414,11 +414,16 @@ async function boot(): Promise<void> {
     new THREE.MeshBasicMaterial({ color: 0xfff0d5, fog: false }),
   );
   scene.add(sunDisc);
-  const moonDisc = new THREE.Mesh(
-    new THREE.SphereGeometry(1.6, 20, 20),
-    // Task 6 replaces this with a phase-shaded material; a flat disc for now.
-    new THREE.MeshBasicMaterial({ color: palette.star, fog: false }),
-  );
+  const moonPhaseDirU = uniform(new THREE.Vector3(0, 0, -1));
+  const moonMat = new THREE.MeshBasicNodeMaterial({ fog: false });
+  {
+    // TSL uniform nodes expose a runtime `.value`; @types/three r185 doesn't
+    // model that on the node union, so the uniform is cast at this boundary only.
+    const litSide = dot(normalView.negate(), moonPhaseDirU as unknown as ReturnType<typeof vec3>);
+    const lit = smoothstep(float(-0.15), float(0.15), litSide);
+    moonMat.colorNode = mix(vec3(0.16, 0.18, 0.23), vec3(0.87, 0.91, 0.95), lit);
+  }
+  const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 20), moonMat);
   moonDisc.visible = false;
   scene.add(moonDisc);
 
@@ -779,7 +784,7 @@ async function boot(): Promise<void> {
     mistMaterial: mistMat,
     sunDisc,
     moonDisc,
-    moonLightObj: null,
+    moonPhaseDir: moonPhaseDirU as unknown as EnvironmentTargets['moonPhaseDir'],
     lampLight,
     lampBulb,
     stars,

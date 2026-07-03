@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { envAnchors, envKeyframes, weatherLook } from '../../src/diorama/designTokens';
-import { computeEnvironment, lerpColorHex } from '../../src/diorama/environment/environment';
+import { computeEnvironment, lerpColorHex, moonPhaseLightDir } from '../../src/diorama/environment/environment';
 import { CLEAR_SKY } from '../../src/diorama/environment/weather';
 import { sunState } from '../../src/diorama/environment/solar';
 
@@ -118,5 +118,19 @@ describe('computeEnvironment — weather modulation', () => {
     const e = computeEnvironment(night, CLEAR_SKY);
     expect(e.moonIntensity).toBeGreaterThanOrEqual(0);
     expect(e.moonIntensity).toBeLessThanOrEqual(1.6);
+  });
+});
+
+describe('moonPhaseLightDir', () => {
+  it('full moon (phase 0.5): lit from the front (toward viewer of the disc)', () => {
+    const d = moonPhaseLightDir(0.5);
+    expect(d[2]).toBeLessThan(-0.9); // light from -z in disc-local space = fully lit face
+  });
+  it('new moon (phase 0): lit from behind', () => {
+    expect(moonPhaseLightDir(0)[2]).toBeGreaterThan(0.9);
+  });
+  it('quarter (phase 0.25): lit from the side', () => {
+    const d = moonPhaseLightDir(0.25);
+    expect(Math.abs(d[0])).toBeGreaterThan(0.9);
   });
 });

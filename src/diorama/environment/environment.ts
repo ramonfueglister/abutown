@@ -33,6 +33,13 @@ export function lerpColorHex(a: number, b: number, t: number): number {
   return (ch(16) << 16) | (ch(8) << 8) | ch(0);
 }
 
+// Direction of sunlight on the moon disc in DISC-LOCAL space (disc faces the
+// camera; -z = toward viewer). phase 0 = new (lit from behind), 0.5 = full.
+export function moonPhaseLightDir(phase: number): [number, number, number] {
+  const a = 2 * Math.PI * phase;
+  return [Math.sin(a), 0, Math.cos(a)];
+}
+
 function lerpKeyframe(a: EnvKeyframe, b: EnvKeyframe, t: number): EnvKeyframe {
   const s = smooth(t);
   const colorKeys: Array<keyof EnvKeyframe> = ['hemiSky', 'hemiGround', 'fogColor', 'mistColor'];
