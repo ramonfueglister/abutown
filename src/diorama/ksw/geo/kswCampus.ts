@@ -109,7 +109,9 @@ export function buildKswCampus(
 
   // Eave band sits near the top — fade it with the roof so it doesn't poke
   // through the open cut.
-  const eaveY = Math.max(mainBuilding.height - 2, kswCityStyle.plinthH + 0.5);
+  // Anchor at the baked eave: mainBuilding.height is the RIDGE (the tower),
+  // so a height-derived band floats far above the footprint volume's real eave.
+  const eaveY = Math.max(mainBuilding.eaveH, kswCityStyle.plinthH + 0.5);
   const eaveParts = ringBandParts(mainBuilding.footprint, eaveY - kswCityStyle.eaveBandH, eaveY, kswCityStyle.eaveBandOut);
   const mainEaveMat = clayMat(kswPalette.roofTrim).clone();
   mainEaveMat.transparent = true;

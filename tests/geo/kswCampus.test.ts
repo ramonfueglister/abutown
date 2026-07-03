@@ -29,4 +29,16 @@ describe('buildKswCampus', () => {
     const walls = group.getObjectByName('kswCampusWalls') as THREE.Mesh;
     expect(walls.geometry.getAttribute('position').count).toBeGreaterThan(0);
   });
+
+  it('anchors the main-building eave band at the baked eave, never above it', () => {
+    // mainBuilding.height is the RIDGE (the tower, ~70 m); the real eave of
+    // the footprint volume is mainBuilding.eaveH (~13 m). A height-derived
+    // band floats ~55 m in the air as a footprint-shaped ring.
+    const eave = group.getObjectByName('kswMainEave') as THREE.Mesh;
+    const pos = eave.geometry.getAttribute('position');
+    let maxY = -Infinity;
+    for (let i = 0; i < pos.count; i++) maxY = Math.max(maxY, pos.getY(i));
+    expect(maxY).toBeLessThanOrEqual(mainBuilding.eaveH + 0.01);
+    expect(maxY).toBeGreaterThan(mainBuilding.eaveH - 1);
+  });
 });
