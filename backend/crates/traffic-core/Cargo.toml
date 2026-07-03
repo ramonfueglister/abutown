@@ -1,0 +1,13 @@
+[package]
+name = "traffic-core"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+traffic-net = { path = "../traffic-net" }
+rayon.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
