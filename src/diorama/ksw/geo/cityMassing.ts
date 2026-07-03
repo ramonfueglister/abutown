@@ -8,9 +8,9 @@
 // of the hero hospital's palette.
 import * as THREE from 'three/webgpu';
 import {
-  attribute, float, max as tslMax, min as tslMin, mix, smoothstep, uniform, vec3,
+  Fn, attribute, float, max as tslMax, min as tslMin, mix, positionWorld, smoothstep, uniform, vec3,
 } from 'three/tsl';
-import { clay, kswCityStyle, kswPalette, palette } from '../../designTokens';
+import { clay, kswCityStyle, kswPalette, kswS3, palette } from '../../designTokens';
 import { NIGHT_WINDOW_SHARE } from '../staticBatch';
 import { clayMat } from '../props';
 import type { BakedBuilding, BakedMesh, BakedWallMesh } from './geoData';
@@ -38,7 +38,7 @@ function tintFor(base: THREE.Color, seed: number): THREE.Color {
   return c;
 }
 
-function mergeTinted(buildings: BakedBuilding[], pick: (b: BakedBuilding) => BakedMesh, base: number): THREE.BufferGeometry {
+export function mergeTinted(buildings: BakedBuilding[], pick: (b: BakedBuilding) => BakedMesh, base: number): THREE.BufferGeometry {
   let vtx = 0;
   let tri = 0;
   for (const b of buildings) {
@@ -82,7 +82,7 @@ function mergeTinted(buildings: BakedBuilding[], pick: (b: BakedBuilding) => Bak
 // facade shader can draw an eave-clamped window raster. One extra vec2 + float
 // per vertex; the tint stays the base clay colour (window tone is mixed in the
 // shader, not baked).
-function mergeWalls(buildings: BakedBuilding[], base: number): THREE.BufferGeometry {
+export function mergeWalls(buildings: BakedBuilding[], base: number): THREE.BufferGeometry {
   let vtx = 0;
   let tri = 0;
   for (const b of buildings) {
@@ -188,11 +188,18 @@ function ringBand(fp: number[][], y0: number, y1: number, out: number): { pos: n
   return { pos: pos.map((v) => Math.round(v * 100)), idx };
 }
 
+// A single footprint's trim band (plinth/eave) as a ready BufferGeometry —
+// used by kswCampus (T18) to build the split main-building trim bands with the
+// same recipe buildCityMassing uses internally.
+export function ringBandParts(fp: number[][], y0: number, y1: number, out: number): THREE.BufferGeometry {
+  return mergeBakedParts([ringBand(fp, y0, y1, out)]);
+}
+
 // A clay material whose diffuse comes from the per-vertex tint (color = white
 // so vertexColors passes the baked colour straight through). Cloned from the
 // shared clayMat so the sheen/roughness recipe matches the hero, without
 // mutating the cached hero material.
-function tintedClay(base: number): THREE.MeshPhysicalMaterial {
+export function tintedClay(base: number): THREE.MeshPhysicalMaterial {
   const m = clayMat(base).clone();
   m.vertexColors = true;
   m.color = new THREE.Color(palette.trueWhite);
@@ -218,7 +225,16 @@ type FacadeMaterial = THREE.MeshPhysicalNodeMaterial & {
   facadeDetail: ReturnType<typeof uniform>;
 };
 
-function facadeMaterial(base: number, opts: { lampGlow: boolean }): FacadeMaterial {
+// Cutaway-enabled facade material (T18): additionally carries `cutH` +
+// `upperFade` uniforms so the MAIN KSW building can be sliced open like a
+// dollhouse. cutH = 1e6 / upperFade = 1 at rest → byte-identical to the plain
+// facade material (the discard/seam nodes are pure no-ops at those values).
+export type CutawayFacadeMaterial = FacadeMaterial & {
+  cutH: ReturnType<typeof uniform>;
+  upperFade: ReturnType<typeof uniform>;
+};
+
+export function facadeMaterial(base: number, opts: { lampGlow: boolean; cutaway?: boolean }): FacadeMaterial {
   const s = kswCityStyle;
   const glass = new THREE.Color(palette.glass);
   const frameCol = new THREE.Color(palette.white);
@@ -289,7 +305,29 @@ function facadeMaterial(base: number, opts: { lampGlow: boolean }): FacadeMateri
   const frameTone = vec3(frameCol.r, frameCol.g, frameCol.b);
   const windowTone = mix(glassTone, frameTone, frameMask);
 
-  m.colorNode = mix(clayBase, windowTone, windowMask.mul(gate));
+  const facadeColor = mix(clayBase, windowTone, windowMask.mul(gate));
+
+  // Dollhouse cutaway (T18): slice the building at world-y `cutH` (discard
+  // everything above), and paint a bright seam band in the `cutSeam` metres
+  // just below the cut. At rest (cutH = 1e6) both nodes are no-ops, so the
+  // closed building is byte-identical to the plain facade material. The
+  // discard MUST run inside a Fn so it appends to the fragment stack — a bare
+  // Discard() at construction time attaches to no stack and is silently dropped.
+  const cutH = uniform(1e6);
+  const upperFade = uniform(1);
+  if (opts.cutaway) {
+    const seam = new THREE.Color(kswS3.seamColor);
+    const seamTone = vec3(seam.r, seam.g, seam.b);
+    m.colorNode = Fn(() => {
+      const wy = positionWorld.y;
+      wy.greaterThan(cutH).discard();
+      // seam band: cutH − cutSeam < y ≤ cutH → mix to seamColor
+      const inSeam = wy.greaterThan(cutH.sub(float(kswS3.cutSeam))).and(wy.lessThanEqual(cutH));
+      return mix(facadeColor, seamTone, inSeam.select(float(1), float(0)));
+    })();
+  } else {
+    m.colorNode = facadeColor;
+  }
 
   if (opts.lampGlow) {
     // deterministic per-cell hash on the facade grid cell (u-cell + storey),
@@ -302,7 +340,7 @@ function facadeMaterial(base: number, opts: { lampGlow: boolean }): FacadeMateri
     m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(0.9)));
   }
 
-  return Object.assign(m, { facadeDetail }) as FacadeMaterial;
+  return Object.assign(m, { facadeDetail, cutH, upperFade }) as CutawayFacadeMaterial;
 }
 
 export function buildCityMassing(buildings: BakedBuilding[], opts: { lampGlow: boolean } = { lampGlow: false }): THREE.Group {

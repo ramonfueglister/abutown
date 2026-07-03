@@ -48,8 +48,9 @@ import { box, clayMat } from './props';
 import { buildCityMassing } from './geo/cityMassing';
 import { buildKswCampus } from './geo/kswCampus';
 import { decomposeToZones } from './interior/zones';
-import { generateInteriorPlan } from './interior/generatePlan';
+import { generateInteriorPlan, departmentCenter } from './interior/generatePlan';
 import { buildInterior } from './interior/buildInterior';
+import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { buildWindows } from './geo/windows';
@@ -92,10 +93,11 @@ const camPresets: Record<CamPresetName, { target: [number, number, number]; radi
   // stylized hero hospital footprint (S3a/T15): high and wide enough that
   // the whole campus plus a ring of city context reads as one diorama.
   overview: { target: [0, 4, -15], radius: 520, yaw: -0.55, pitch: 1.02 },
-  // zoomed into the emergency ward: radius below roofFadeNear, roofs gone
-  er: { target: [-22.5, 0.4, 12], radius: 14, yaw: -0.5, pitch: 0.72 },
-  // surgery block from above the open roof, south-east
-  ops: { target: [-24, 0.2, -16], radius: 13, yaw: 0.45, pitch: 1.05 },
+  // er/ops are re-aimed at boot onto the generated Notfall / OP zone centers
+  // (departmentCenter, T18) with the cutaway-active radii (40 / 35). These are
+  // provisional and overwritten before the rig initializes.
+  er: { target: [-22.5, 0.4, 12], radius: 40, yaw: -0.5, pitch: 0.72 },
+  ops: { target: [-24, 0.2, -16], radius: 35, yaw: 0.45, pitch: 1.05 },
   // real city landmarks (local meters from the KSW anchor, see cityMeta):
   // pulled back and tilted down so the camera sits above the dense district
   bahnhof: { target: [cityMeta.landmarks.bahnhof[0], 2, cityMeta.landmarks.bahnhof[1]], radius: 280, yaw: -0.6, pitch: 1.02 },
@@ -112,17 +114,35 @@ async function boot(): Promise<void> {
   const cityCams: CamPresetName[] = ['er', 'ops', 'bahnhof', 'zag', 'city'];
   const camPreset: CamPresetName = cityCams.includes(camRaw as CamPresetName) ? (camRaw as CamPresetName) : 'overview';
   const cycleMode = params.get('cycle') === '1';
-  // S3-interim (T17): ?interior=1 drops the generated zone-ladder interior into
-  // the real shell for judging (no cutaway yet — T18 reveals it). ?shell=0
-  // additionally suppresses the real KSW main-building wall/roof meshes so the
-  // interior is visible from outside; other campus buildings stay. Both flags
-  // are interim and replaced by the T18 dollhouse cutaway.
-  const showInterior = params.get('interior') === '1';
-  const hideShell = params.get('shell') === '0';
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
   const preset = lightPresets[presetName];
+
+  // ── generated interior plan (S3b, T17) computed up front so the T18 cutaway
+  // presets (er/ops) can re-aim onto the Notfall / OP zone centers. The plan is
+  // pure/deterministic; the built interior group is added to the scene below.
+  const mainBuildingFp = kswBuildings.reduce((best, b) => {
+    const area = (fp: number[][]): number => {
+      let a = 0;
+      for (let i = 0; i < fp.length; i++) {
+        const [x1, z1] = fp[i];
+        const [x2, z2] = fp[(i + 1) % fp.length];
+        a += x1 * z2 - x2 * z1;
+      }
+      return Math.abs(a) / 2;
+    };
+    return area(b.footprint) > area(best.footprint) ? b : best;
+  }, kswBuildings[0]);
+  const interiorZones = decomposeToZones(mainBuildingFp.footprint);
+  const mainDoor = mainBuildingFp.door ?? { x: interiorZones[0]?.x ?? 0, z: interiorZones[0]?.z ?? 0, yaw: 0 };
+  const interiorPlan = generateInteriorPlan(interiorZones, mainDoor);
+  // Re-aim er/ops onto the real department centers (radius keeps the cutaway
+  // active: 40 for the emergency ward, 35 for the surgery block).
+  const [erX, erZ] = departmentCenter(interiorPlan, 'Notfall');
+  const [opX, opZ] = departmentCenter(interiorPlan, 'OP');
+  camPresets.er = { target: [erX, 0.4, erZ], radius: 40, yaw: -0.5, pitch: 0.72 };
+  camPresets.ops = { target: [opX, 0.2, opZ], radius: 35, yaw: 0.45, pitch: 1.05 };
 
   const renderer = new THREE.WebGPURenderer({ antialias: false });
   await renderer.init();
@@ -449,25 +469,41 @@ async function boot(): Promise<void> {
   // shader, roofs, plinth/eave trim. Facade detail is always on (hero/near).
   // mainBuilding always comes from the FULL campus so zone decomposition keys
   // off the true largest footprint even when the shell mesh is suppressed.
-  const { mainBuilding } = buildKswCampus(kswBuildings, { lampGlow: preset.lampOn });
-  // ?shell=0 (S3-interim, T17): rebuild the campus WITHOUT the main building so
-  // the generated interior is visible from outside for judging. Other campus
-  // buildings stay. Default (shell on) renders the full campus.
-  const campusBuildings = hideShell ? kswBuildings.filter((b) => b.id !== mainBuilding.id) : kswBuildings;
-  const { group: kswCampus } = buildKswCampus(campusBuildings, { lampGlow: preset.lampOn });
+  const { group: kswCampus, mainBuilding } = buildKswCampus(kswBuildings, { lampGlow: preset.lampOn });
   scene.add(kswCampus);
+  const setCutaway = kswCampus.userData.setCutaway as (u: { cutH: number; upperFade: number }) => void;
 
-  // ── the generated zone-ladder interior (S3b, T17): decompose the real main
-  // building footprint into zones, generate an authored department FloorPlan
-  // per zone, and drop the built interior at the campus origin (footprints are
-  // already in the local world frame). Interim: only rendered with ?interior=1
-  // (the T18 cutaway will reveal it inside the closed shell).
-  if (showInterior) {
-    const zones = decomposeToZones(mainBuilding.footprint);
-    const door = mainBuilding.door ?? { x: zones[0]?.x ?? 0, z: zones[0]?.z ?? 0, yaw: 0 };
-    const interiorPlan = generateInteriorPlan(zones, door);
-    scene.add(buildInterior(interiorPlan));
-  }
+  // ── the generated zone-ladder interior (S3b, T17): the built interior is
+  // ALWAYS present now (T18); the dollhouse cutaway drives its visibility —
+  // hidden when the main building is closed, revealed when it opens. Footprints
+  // are already in the local world frame, so it drops at the campus origin.
+  const interior = buildInterior(interiorPlan);
+  interior.visible = false; // closed at boot (overview) — the cutaway shows it
+  scene.add(interior);
+
+  // Main-building bbox: the cutaway only engages when the camera target sits
+  // over the main building (else the state is forced off so distant/other
+  // buildings are never sliced). Derived from the same footprint the interior
+  // and mainBuilding came from.
+  const mbBounds = (() => {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const [x, z] of mainBuilding.footprint) {
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z);
+      maxZ = Math.max(maxZ, z);
+    }
+    // a little slack so a target near the wall still counts as "inside"
+    return { minX: minX - 6, maxX: maxX + 6, minZ: minZ - 6, maxZ: maxZ + 6 };
+  })();
+  const targetOverMain = (): boolean =>
+    rig.target[0] >= mbBounds.minX &&
+    rig.target[0] <= mbBounds.maxX &&
+    rig.target[2] >= mbBounds.minZ &&
+    rig.target[2] <= mbBounds.maxZ;
 
   // ── the real Winterthur city around it (swisstopo LoD2 + OSM, clay) ──────
   // The hero hospital keeps its own authored plate; the city sits on a bigger
@@ -851,6 +887,22 @@ async function boot(): Promise<void> {
   let prevFade = roofFade(rig.radius, kswCamera);
   let fadeWasMid = prevFade > roofFadePolicy.visible && prevFade < roofFadePolicy.opaque;
 
+  // ── Dollhouse cutaway (T18): computed each frame from the zoom radius, but
+  // only when the camera target sits over the main building — otherwise forced
+  // to the closed state (cutH 1e6, fade 1) so the other campus buildings and
+  // the distant city are never sliced. Crossing the fade < 0.15 (slice engages)
+  // and fade < 0.5 (interior becomes visible) thresholds is treated like a
+  // roof-fade threshold crossing: the GI probe + (cached) shadow map refresh so
+  // the newly-revealed interior lights correctly. The state below is applied
+  // once at boot so the starting preset (overview closed / er open) is correct
+  // on the very first frame.
+  const closedCut = { cutH: 1e6, upperFade: 1 };
+  const computeCut = (): { cutH: number; upperFade: number } =>
+    targetOverMain() ? cutawayState(rig.radius) : closedCut;
+  let cut = computeCut();
+  setCutaway(cut);
+  interior.visible = cut.upperFade < 0.5;
+
   let frameCount = 0;
   let prevT = 0;
   const clock = new THREE.Clock();
@@ -901,6 +953,28 @@ async function boot(): Promise<void> {
     }
     fadeWasMid = fadeIsMid;
     prevFade = fade;
+
+    // ── dollhouse cutaway (T18): drive the main-building slice + interior
+    // reveal off the zoom radius. Crossing the fade < 0.15 (slice engages) or
+    // fade < 0.5 (interior appears) thresholds refreshes GI + the cached shadow
+    // map so the freshly-revealed ground floor lights correctly.
+    const nextCut = computeCut();
+    const wasSliced = cut.upperFade < 0.15;
+    const nowSliced = nextCut.upperFade < 0.15;
+    const wasOpen = cut.upperFade < 0.5;
+    const nowOpen = nextCut.upperFade < 0.5;
+    if (nextCut.cutH !== cut.cutH || nextCut.upperFade !== cut.upperFade) {
+      setCutaway(nextCut);
+    }
+    if (nowOpen !== wasOpen) interior.visible = nowOpen;
+    if (nowSliced !== wasSliced || nowOpen !== wasOpen) {
+      // the sliced/open state flipped: the probe + shadow map see a different
+      // scene (upper mass gone, interior revealed) — refresh both.
+      giScheduler.markDirty();
+      if (shadowCached) sun.shadow.needsUpdate = true;
+    }
+    cut = nextCut;
+
     focusU.value = rig.radius;
     // edge mist is a close-up treatment; from the overview it would read as
     // separate discs, so it thins out as the camera pulls back
