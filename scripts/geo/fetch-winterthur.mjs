@@ -310,5 +310,14 @@ await overpass(
   `${OUT}/osm-nature.json`,
   5000, // observed ~134,994
 );
-
+// traffic control nodes (signals, stop/give-way, crossings) — the traffic-net
+// bake reads these to classify intersections (bake-traffic-net.mjs)
+await overpass(
+  (bbox) => `[out:json][timeout:60];(
+    node["highway"~"^(traffic_signals|stop|give_way|crossing)$"](${bbox});
+  );out;`,
+  OSM_BBOX,
+  `${OUT}/osm-traffic-nodes.json`,
+  1, // sentinel-only floor; count varies with real intersection density
+);
 console.log('fetch complete');
