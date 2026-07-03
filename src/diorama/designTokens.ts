@@ -305,3 +305,38 @@ export const cameraContract = {
   position: [-9.2, 6.8, 10.8] as [number, number, number],
   target: [0.4, 0.9, -0.5] as [number, number, number],
 } as const;
+
+// Winterthur city context (geo slices S1/S2). Scale-extension values only —
+// the hero look tokens above are untouched; these govern the big city plate.
+export const kswCity = {
+  radiusMax: 1500, // wheel dolly ceiling to frame the whole Bahnhof↔ZAG span
+  domeRadius: 1800, // clouds/stars dome swallows the city plate
+  skyScale: 4000,
+  cameraFar: 12000,
+  roadY: 0.04, // road ribbons float just above the plate (no z-fight)
+  railY: 0.05,
+  // nature layer (real OSM greens/water/trees), below the road ribbons
+  greenY: 0.025,
+  waterY: 0.03,
+  parkGreen: 0xa9cf92, // parks, grass, pitches — a step livelier than the lawn
+  woodGreen: 0x86b478, // forest/wood patches read deeper
+  water: 0xa8cfdd, // Eulach + ponds, calm glass blue
+  treeGreen: 0x8fbf83, // canopy base; per-instance tint varies around it
+  treeTrunk: 0xb08a62,
+  // roads v2: per-class colors + heights (carriage/footway/rail on distinct
+  // levels so junctions never z-fight; footways read thinner+lighter)
+  roadColors: { carriage: 0xcfc4b2, footway: 0xe5dcc8, rail: 0x8d949c, railBed: 0xb9b2a4 },
+  roadYs: { carriage: 0.04, footway: 0.045, railBed: 0.035, rail: 0.05 },
+} as const;
+
+// Diorama-style layer for the geodetic city (style slice). Additive only.
+export const kswCityStyle = {
+  plinthH: 0.5, plinthOut: 0.12, plinthSink: 0.3, // sockel: height, outset, below-plate sink
+  eaveBandH: 0.18, eaveBandOut: 0.08,
+  tintL: 0.06, tintHue: 0.012, // tamed variation (was ±14% L)
+  windowW: 1.3, windowH: 1.4, windowSpacing: 2.4, storeyH: 3.0, sillFrac: 0.32,
+  doorW: 1.5, doorH: 2.2,
+  lamp: { spacing: { primary: 25, secondary: 28, tertiary: 30, residential: 35, unclassified: 35, living_street: 35, service: 45, pedestrian: 30 } as Record<string, number>, sideOffset: 1.2 },
+  lod: { nearR: 150, midR: 600, hysteresis: 0.1 },
+  cloudSwap: { start: 300, end: 600 },
+} as const;

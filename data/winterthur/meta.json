@@ -1,0 +1,49 @@
+{
+ "anchor": {
+  "lon": 8.7285,
+  "lat": 47.5069
+ },
+ "bbox": {
+  "lonMin": 8.715,
+  "latMin": 47.4955,
+  "lonMax": 8.73,
+  "latMax": 47.5085
+ },
+ "plate": {
+  "cx": -451,
+  "cz": 545,
+  "w": 1187,
+  "d": 1506
+ },
+ "landmarks": {
+  "bahnhof": [
+   -338,
+   734
+  ],
+  "zagTurbinenstrasse": [
+   -774,
+   1067
+  ],
+  "zagKonradstrasse": [
+   -496,
+   523
+  ]
+ },
+ "counts": {
+  "buildings": 846,
+  "kswBuildings": 26,
+  "named": 69,
+  "roads": 2057,
+  "rails": 239,
+  "triangles": 240773,
+  "greens": 119,
+  "waterAreas": 5,
+  "rivers": 5,
+  "trees": 4453
+ },
+ "attribution": [
+  "Gebäude: © swisstopo (swissBUILDINGS3D 3.0)",
+  "Karte: © OpenStreetMap-Mitwirkende (ODbL)"
+ ],
+ "sourceTile": "swissbuildings3d_3_0_2019_1072-14"
+}

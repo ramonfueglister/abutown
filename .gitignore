@@ -25,3 +25,7 @@ src/proto/*_pb.ts
 # not version-controlled (see docs/literature/README.md).
 docs/literature/**/*.pdf
 tools/grfcodec/
+
+# Raw geodata fetched out-of-band by scripts/geo/fetch-winterthur.mjs; only
+# the baked data/winterthur/*.json artifacts are version-controlled.
+scratch/
