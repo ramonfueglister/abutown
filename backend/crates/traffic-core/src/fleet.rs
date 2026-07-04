@@ -52,6 +52,16 @@ pub struct Fleet {
 
     /// Free-list of despawned slots available for reuse (LIFO).
     free: Vec<VehId>,
+
+    /// Per-slot reuse generation. Incremented every time a slot is freed, so a
+    /// slot reused after despawn carries a distinct generation from its prior
+    /// occupant. Pure gateway/wire bookkeeping: the kernel never reads this and
+    /// [`crate::Core::state_hash`] deliberately excludes it (it has no bearing
+    /// on simulation state — two runs that despawn different-but-equivalent
+    /// slots must still hash equal). The gateway composes `slot | (gen << 12)`
+    /// into a wire-stable vehicle id so a Task-9 client dead-reckoning by id
+    /// cannot confuse a recycled slot for its former occupant.
+    generation: Vec<u32>,
 }
 
 impl Fleet {
@@ -68,6 +78,7 @@ impl Fleet {
             alive: Vec::with_capacity(cap),
             route_lanes: Vec::with_capacity(cap),
             free: Vec::new(),
+            generation: Vec::with_capacity(cap),
         }
     }
 
@@ -130,6 +141,7 @@ impl Fleet {
             self.route.push(handle);
             self.route_lanes.push(route.to_vec());
             self.alive.push(true);
+            self.generation.push(0);
             id
         }
     }
@@ -152,8 +164,21 @@ impl Fleet {
         let i = id as usize;
         if self.alive[i] {
             self.alive[i] = false;
+            // Bump the reuse generation so the next occupant of this slot gets a
+            // distinct wire id. Wrapping is fine — the gateway packs only the
+            // low 20 bits, and a collision needs 2^20 reuses of the same slot
+            // between two frames a client dead-reckons across (never happens).
+            self.generation[i] = self.generation[i].wrapping_add(1);
             self.free.push(id);
         }
+    }
+
+    /// The current reuse generation of a slot. See [`Fleet::generation`]. The
+    /// gateway composes this with the slot id to produce a wire-stable vehicle
+    /// id; the kernel itself never consults it.
+    #[inline]
+    pub fn generation(&self, slot: usize) -> u32 {
+        self.generation[slot]
     }
 }
 
@@ -256,5 +281,29 @@ impl LaneIndex {
                     .then(a.cmp(&b))
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A slot reused via the free-list carries a distinct generation from its
+    /// former occupant, so the gateway's composed wire id changes across reuse.
+    #[test]
+    fn reused_slot_bumps_generation() {
+        let mut fleet = Fleet::with_capacity(4);
+        let a = fleet.alloc(0, 0.0, 0.0, 4.0, &[0]);
+        assert_eq!(fleet.generation(a as usize), 0);
+
+        fleet.free(a);
+        // LIFO free-list: the next alloc reuses slot `a`.
+        let b = fleet.alloc(0, 0.0, 0.0, 4.0, &[0]);
+        assert_eq!(b, a, "LIFO free-list must reuse the just-freed slot");
+        assert_eq!(
+            fleet.generation(b as usize),
+            1,
+            "reused slot must advance its generation"
+        );
     }
 }
