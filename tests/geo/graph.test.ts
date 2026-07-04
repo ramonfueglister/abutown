@@ -3,7 +3,7 @@ import { buildRoadGraph } from '../../scripts/geo/lib/graph.mjs';
 import { ANCHOR, makeProjector } from '../../scripts/geo/lib/project.mjs';
 
 const dLon = 0.000013; // ≈ 1 m Ost am Anker
-const pt = (i) => ({ lon: ANCHOR.lon + i * dLon * 10, lat: ANCHOR.lat });
+const pt = (i: number) => ({ lon: ANCHOR.lon + i * dLon * 10, lat: ANCHOR.lat });
 const osmRoads = { elements: [
   { type: 'way', id: 100, tags: { highway: 'residential', maxspeed: '30', lanes: '2' },
     nodes: [1, 2, 3], geometry: [pt(0), pt(1), pt(2)] },

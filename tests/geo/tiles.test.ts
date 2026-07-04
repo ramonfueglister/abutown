@@ -4,7 +4,7 @@ import { WorldTileSchema } from '../../src/proto/world_pb.js';
 import { assignToTiles, encodeTile, tileGridFor } from '../../scripts/geo/lib/tiles.mjs';
 
 const boundary = [[-4000, -4000], [4000, -4000], [4000, 4000], [-4000, 4000]];
-const dem = { heightAt: (x, z) => 400 + x / 1000 };
+const dem = { heightAt: (x: number, z: number) => 400 + x / 1000 };
 
 describe('tiles', () => {
   it('roots a 1km-aligned square over boundary+ring', () => {
@@ -24,7 +24,7 @@ describe('tiles', () => {
   it('encodes a decodable tile with the right grid resolution', () => {
     const g = tileGridFor(boundary, 4000);
     const tiles = assignToTiles(g, { buildings: [], trees: [], landuse: [], graph: { edgeA: [], edgePtOffset: [], edgePtX: [], edgePtZ: [], edgePtY: [], edgeClass: [], edgeWidth: [] } });
-    const [id, bucket] = [...tiles.entries()].find(([k]) => k.startsWith('L0/'));
+    const [id, bucket] = [...tiles.entries()].find(([k]) => k.startsWith('L0/'))!;
     const bin = encodeTile(bucket, dem);
     const t = fromBinary(WorldTileSchema, bin);
     expect(t.gridN).toBe(21);

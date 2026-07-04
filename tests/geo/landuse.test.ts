@@ -22,7 +22,7 @@ describe('transformLanduse', () => {
   });
 
   it('maps every known kind correctly', () => {
-    const mk = (tag) => ({ type: 'way', tags: { landuse: tag }, geometry: way.geometry });
+    const mk = (tag: string) => ({ type: 'way', tags: { landuse: tag }, geometry: way.geometry });
     const elements = ['meadow', 'grass', 'wood', 'farmland', 'residential', 'commercial', 'basin'].map(mk);
     const out = transformLanduse({ osmLanduse: { elements }, projector: makeProjector(ANCHOR) });
     expect(out.map((o) => o.kind)).toEqual([1, 1, 2, 3, 4, 5, 6]);
