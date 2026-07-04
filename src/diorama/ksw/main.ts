@@ -59,6 +59,8 @@ import { lampGlowU } from './glowUniform';
 import { buildNature } from './geo/nature';
 import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
+import { TrafficClient, DEFAULT_TRAFFIC_WS } from '../traffic/trafficClient';
+import { createCarLayer } from '../traffic/carLayer';
 
 declare global {
   interface Window {
@@ -126,6 +128,10 @@ async function boot(): Promise<void> {
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
+  // ?traffic=1 enables the live instanced car layer (WS to the winterthur-traffic
+  // gateway). ?trafficWs=… overrides the endpoint (default ws://localhost:8790/traffic).
+  const trafficEnabled = params.get('traffic') === '1';
+  const trafficWsUrl = params.get('trafficWs') ?? DEFAULT_TRAFFIC_WS;
   // Realtime environment: physical sun/moon/stars for now() steered by live (or
   // ?wx-pinned) weather. Re-evaluated every frame; this is the boot seed.
   let lastEnv: EnvironmentState = computeEnvironment(now(), WX_OVERRIDES[wxParam ?? ''] ?? CLEAR_SKY);
@@ -538,6 +544,28 @@ async function boot(): Promise<void> {
   cityRoot.add(buildWindows(cityBuildings));
   cityRoot.add(buildLamps(cityRoads));
   scene.add(cityRoot);
+
+  // ── live traffic (Task 9, ?traffic=1): instanced cars dead-reckoned from the
+  // winterthur-traffic gateway. The client fetches trafficnet.json, opens the
+  // WS, and manages camera-driven AOI cell subscriptions; the car layer draws
+  // its dead-reckoned vehicle table each frame. Both are null until the async
+  // connect resolves, so the animate loop guards on `trafficClient`.
+  let trafficClient: TrafficClient | null = null;
+  const carLayer = trafficEnabled ? createCarLayer() : null;
+  if (carLayer) cityRoot.add(carLayer.object3d);
+  let lastTrafficCamUpdate = 0; // wall-clock seconds, throttled to ~2 Hz
+  if (trafficEnabled) {
+    void TrafficClient.connect({ url: trafficWsUrl })
+      .then((client) => {
+        trafficClient = client;
+        // Prime the subscription immediately from the boot camera target.
+        client.updateCamera(rig.target[0], rig.target[2]);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[traffic] connect failed:', err);
+      });
+  }
 
   // 3-ring semantic LOD (Task 10, spec §2c): detail follows the camera radius.
   // getObjectByName can legitimately miss (design-legal), so refs are
@@ -1113,6 +1141,15 @@ async function boot(): Promise<void> {
     if (agentInstances.lod) {
       agentInstances.lod.frame(camera);
       renderer.compute(agentInstances.lod.node);
+    }
+    // ── live traffic (Task 9): throttle camera-driven subscriptions to ~2 Hz,
+    // then dead-reckon + draw the cars every frame.
+    if (trafficClient && carLayer) {
+      if (t - lastTrafficCamUpdate > 0.5) {
+        lastTrafficCamUpdate = t;
+        trafficClient.updateCamera(rig.target[0], rig.target[2]);
+      }
+      carLayer.update(trafficClient.net, trafficClient.vehicles, trafficClient.serverTick);
     }
     frameCount++;
     // ── realtime environment: physical sun/moon/stars for now(), steered by
