@@ -61,6 +61,7 @@ import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
 import { TrafficClient, DEFAULT_TRAFFIC_WS } from '../traffic/trafficClient';
 import { createCarLayer } from '../traffic/carLayer';
+import { poseAt } from '../traffic/deadReckon';
 
 declare global {
   interface Window {
@@ -81,6 +82,24 @@ declare global {
       // main-thread cost per frame (EMA, ms): whole animate body, the agent
       // behavior+buffer-write loop, and the render call (command encoding)
       cpu: { frame: number; agents: number; render: number };
+    };
+    // Dev-only traffic debug surface, present ONLY under ?traffic=1 (Task 10
+    // browser smoke). Exposes the live vehicle count + a dead-reckoned pose
+    // sampler so the smoke can assert cars stream, move, and drive on the right
+    // without instrumenting the WS at the app layer. `sample()` returns each
+    // tracked vehicle's id, its lane id, and its current world pose (x, z, yaw)
+    // — the SAME poseAt the car layer draws, so the numbers match the pixels.
+    __traffic?: {
+      count: () => number;
+      serverTick: () => number;
+      sample: () => Array<{ id: number; lane: number; x: number; z: number; yaw: number }>;
+      // Re-aim the CAMERA (and therefore the AOI subscription, which follows
+      // rig.target) at a world (x, z) with an optional zoom radius + orbit
+      // angles — lets the smoke/capture harness frame a dense corridor or a
+      // named landmark deterministically, without synthetic mouse input. A near-
+      // top-down pitch (~1.5 rad) gives the capture harness a clear read on which
+      // side of the road each car is on.
+      lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => void;
     };
   }
 }
@@ -560,6 +579,34 @@ async function boot(): Promise<void> {
         trafficClient = client;
         // Prime the subscription immediately from the boot camera target.
         client.updateCamera(rig.target[0], rig.target[2]);
+        // Dev-only debug surface for the Task 10 browser smoke: read the live
+        // vehicle table + dead-reckon each vehicle to the newest server tick
+        // (the SAME poseAt the car layer draws with). Gated behind ?traffic=1
+        // by living inside this connect block.
+        window.__traffic = {
+          count: () => client.vehicles.size,
+          serverTick: () => client.serverTick,
+          sample: () => {
+            const out: Array<{ id: number; lane: number; x: number; z: number; yaw: number }> = [];
+            for (const [id, veh] of client.vehicles) {
+              const pose = poseAt(client.net, veh, client.serverTick);
+              out.push({ id, lane: veh.lane, x: pose.x, z: pose.z, yaw: pose.yaw });
+            }
+            return out;
+          },
+          lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => {
+            rig = {
+              ...rig,
+              target: [x, rig.target[1], z],
+              radius: opts?.radius ?? rig.radius,
+              yaw: opts?.yaw ?? rig.yaw,
+              pitch: opts?.pitch ?? rig.pitch,
+            };
+            if (opts?.radius !== undefined) zoomTarget = opts.radius;
+            applyRig();
+            client.updateCamera(x, z);
+          },
+        };
       })
       .catch((err) => {
         // eslint-disable-next-line no-console

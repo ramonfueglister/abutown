@@ -77,6 +77,13 @@ export function createCarLayer(): CarLayer {
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  // Instances are placed all over the net each frame, far from the base
+  // geometry's origin-centred bounding sphere. Three's default per-object
+  // frustum cull tests that stale sphere, so as soon as the camera looks away
+  // from the world origin the ENTIRE car mesh is culled and no cars render
+  // (Task 10 finding). Disable per-object culling — matches the agent instanced
+  // meshes (agentMeshes.ts), which place instances the same way.
+  mesh.frustumCulled = false;
   mesh.count = 0;
   // Per-instance colour (stable per vehicle id via the id->slot map below).
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CAR_CAPACITY * 3), 3);
