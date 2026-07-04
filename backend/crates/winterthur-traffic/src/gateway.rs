@@ -39,10 +39,10 @@ use crate::cells::CellGrid;
 use crate::shell::{Snapshot, SnapshotHook};
 use bytes::Bytes;
 use prost::Message;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::sync::mpsc;
+use tokio::sync::Notify;
 
 use abutown_protocol::traffic::{CellFrame, TrafficClientMsg, TrafficServerMsg, VehicleState};
 
@@ -57,14 +57,111 @@ pub const KEYFRAME_EVERY_N_PUBLISHES: u64 = 25;
 /// 64 frames of slack absorbs a scheduling hiccup, past which we drop-oldest.
 pub const SESSION_CHANNEL_CAP: usize = 64;
 
+/// Cap on the number of cells a single session may subscribe to. A browser AOI
+/// is a handful of cells; anything past this is a malformed / hostile client,
+/// so excess subscribe ids are dropped (logged once at debug).
+pub const MAX_SUBSCRIPTIONS_PER_SESSION: usize = 256;
+
+// --- Wire vehicle-id composition ------------------------------------------
+//
+// The on-wire vehicle id is NOT the raw fleet slot. A slot recycled after
+// despawn would otherwise be indistinguishable from its former occupant, and a
+// client dead-reckoning by id would ghost/teleport it if the departed delta was
+// lost. We therefore pack the slot's reuse generation into the high bits:
+//
+//     wire_id = slot | (generation << SLOT_BITS)   (generation wraps)
+//
+// The fleet cap is `MAX_CONCURRENT = 1500 < 4096 = 2^12`, so 12 bits hold every
+// slot and the remaining 20 bits carry the generation. `assert_slot_cap_fits`
+// enforces `cap < 2^SLOT_BITS` at grid/publisher construction so this split can
+// never silently truncate a slot id.
+/// Low bits of the wire id that hold the fleet slot (`2^12 = 4096 > 1500` cap).
+pub const SLOT_BITS: u32 = 12;
+/// Mask selecting the slot portion of a composed wire id.
+pub const SLOT_MASK: u32 = (1 << SLOT_BITS) - 1;
+
+/// Compose a wire-stable vehicle id from a fleet `slot` and its reuse
+/// `generation`. The generation occupies the high `32 - SLOT_BITS` bits.
+#[inline]
+fn compose_wire_id(slot: u32, generation: u32) -> u32 {
+    debug_assert!(slot <= SLOT_MASK, "slot {slot} exceeds SLOT_BITS");
+    slot | (generation << SLOT_BITS)
+}
+
+/// Assert the fleet capacity fits in [`SLOT_BITS`]. Called at construction so a
+/// future cap bump past 4096 fails loudly instead of truncating wire ids.
+fn assert_slot_cap_fits(cap: u32) {
+    assert!(
+        cap <= SLOT_MASK + 1,
+        "fleet cap {cap} exceeds the {} slot ids representable in SLOT_BITS={SLOT_BITS}; \
+         widen the wire-id split before raising the cap",
+        SLOT_MASK + 1
+    );
+}
+
 /// An outbound, already-encoded WS message (a `TrafficServerMsg`), shared by
 /// `Arc` across every session it fans out to.
 type Frame = Arc<[u8]>;
 
+/// A per-session outbound queue the publisher can *trim from either end*. A
+/// tokio mpsc can't drop its own oldest entry (the receiver owns the head), so
+/// we hold the queue explicitly: the publisher pushes to the back and, on
+/// overflow, pops from the front (true drop-oldest — the newest state always
+/// survives), then wakes the writer via [`Notify`]. Lock scopes are tiny and
+/// the publisher never awaits while holding them, preserving the never-block-
+/// the-sim guarantee.
+struct OutQueue {
+    /// FIFO of pending frames, capped at [`SESSION_CHANNEL_CAP`].
+    deque: Mutex<VecDeque<Frame>>,
+    /// Wakes the writer task when a frame is pushed (or the session closes).
+    notify: Notify,
+    /// Set once when the session is torn down so the writer can exit its wait.
+    closed: std::sync::atomic::AtomicBool,
+}
+
+impl OutQueue {
+    fn new() -> Self {
+        OutQueue {
+            deque: Mutex::new(VecDeque::with_capacity(SESSION_CHANNEL_CAP)),
+            notify: Notify::new(),
+            closed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Push a frame, dropping the OLDEST if the queue is over capacity, then
+    /// wake the writer. Lock is held only for the push/pop; `notify` is fired
+    /// after the guard drops. Never blocks — safe on the sim/publish path.
+    fn push_drop_oldest(&self, frame: Frame) {
+        {
+            let mut q = self.deque.lock().unwrap();
+            q.push_back(frame);
+            if q.len() > SESSION_CHANNEL_CAP {
+                q.pop_front(); // oldest dropped; newest state retained
+            }
+        }
+        self.notify.notify_one();
+    }
+
+    /// Mark the queue closed and wake the writer so it can exit.
+    fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+
+    /// Drain all currently-queued frames into `out` (cleared first). Returns
+    /// the number drained. Tiny lock scope, no await.
+    fn drain_into(&self, out: &mut Vec<Frame>) -> usize {
+        out.clear();
+        let mut q = self.deque.lock().unwrap();
+        out.extend(q.drain(..));
+        out.len()
+    }
+}
+
 /// A connected session as seen by the publisher and the axum handler.
 struct Session {
-    /// Bounded outbound queue to this session's writer task.
-    tx: mpsc::Sender<Frame>,
+    /// Bounded, trim-from-front outbound queue to this session's writer task.
+    out: OutQueue,
     /// Cells this session currently subscribes to. Mutated by the session's
     /// reader task; read by the publisher. `RwLock` so the publisher's frequent
     /// reads don't serialise against each other.
@@ -87,18 +184,17 @@ impl Registry {
         Self::default()
     }
 
-    /// Register a new session, returning its id and outbound receiver. The
-    /// caller (axum handler) owns the receiver and spawns the writer task.
-    fn add(&self) -> (u64, Arc<Session>, mpsc::Receiver<Frame>) {
-        let (tx, rx) = mpsc::channel(SESSION_CHANNEL_CAP);
+    /// Register a new session, returning its id and shared handle. The caller
+    /// (axum handler) drives the writer off the session's [`OutQueue`].
+    fn add(&self) -> (u64, Arc<Session>) {
         let session = Arc::new(Session {
-            tx,
+            out: OutQueue::new(),
             subscriptions: RwLock::new(HashSet::new()),
             pending_keyframes: Mutex::new(Vec::new()),
         });
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.inner.write().unwrap().insert(id, Arc::clone(&session));
-        (id, session, rx)
+        (id, session)
     }
 
     fn remove(&self, id: u64) {
@@ -116,43 +212,43 @@ impl Registry {
 
 /// Apply a client message to a session: update its subscription set and queue
 /// initial keyframes for newly-subscribed cells.
-fn apply_client_msg(session: &Session, msg: &TrafficClientMsg) {
+///
+/// Validation (finding 4): subscribe ids `>= cell_count` are silently ignored
+/// (a client can only ask for cells that exist), and the total live
+/// subscription set is capped at [`MAX_SUBSCRIPTIONS_PER_SESSION`] — excess ids
+/// are dropped and logged once at debug so one misbehaving client can neither
+/// index out of bounds nor balloon the fan-out cost.
+fn apply_client_msg(session: &Session, msg: &TrafficClientMsg, cell_count: u32) {
     let mut subs = session.subscriptions.write().unwrap();
     let mut newly = Vec::new();
+    let mut dropped_over_cap = 0usize;
     for &c in &msg.subscribe_cells {
-        if subs.insert(c) {
-            newly.push(c);
+        if c >= cell_count {
+            continue; // invalid cell id — ignore
         }
+        if subs.contains(&c) {
+            continue;
+        }
+        if subs.len() >= MAX_SUBSCRIPTIONS_PER_SESSION {
+            dropped_over_cap += 1;
+            continue;
+        }
+        subs.insert(c);
+        newly.push(c);
     }
     for &c in &msg.unsubscribe_cells {
         subs.remove(&c);
     }
     drop(subs);
+    if dropped_over_cap > 0 {
+        tracing::debug!(
+            dropped = dropped_over_cap,
+            cap = MAX_SUBSCRIPTIONS_PER_SESSION,
+            "session exceeded subscription cap; excess cells dropped"
+        );
+    }
     if !newly.is_empty() {
         session.pending_keyframes.lock().unwrap().extend(newly);
-    }
-}
-
-/// Try to enqueue a frame to a session; on a full channel drop the OLDEST
-/// queued frame and retry once, so the newest state always wins and the
-/// publish path never blocks. Returns `false` if the session is gone (receiver
-/// dropped), signalling the publisher to prune it.
-fn send_drop_oldest(session: &Session, frame: &Frame) -> bool {
-    match session.tx.try_send(Arc::clone(frame)) {
-        Ok(()) => true,
-        Err(mpsc::error::TrySendError::Full(_)) => {
-            // Drop-oldest: pop one, then push the newest. `try_recv` on the
-            // sender side isn't available, so we rely on the writer task
-            // draining; if it's wedged we simply drop this frame (still newest
-            // state arrives on the next publish). Best-effort, never blocks.
-            // A single retry keeps steady-state latency bounded.
-            match session.tx.try_send(Arc::clone(frame)) {
-                Ok(()) => true,
-                Err(mpsc::error::TrySendError::Full(_)) => true, // dropped this frame
-                Err(mpsc::error::TrySendError::Closed(_)) => false,
-            }
-        }
-        Err(mpsc::error::TrySendError::Closed(_)) => false,
     }
 }
 
@@ -199,6 +295,9 @@ fn quantise(s: f32, v: f32) -> (u32, u32) {
 
 impl PublisherState {
     fn new(grid: CellGrid, registry: Registry) -> Self {
+        // The wire-id split packs the fleet slot into SLOT_BITS; assert the cap
+        // still fits so a future bump past 4096 fails loudly (finding 1).
+        assert_slot_cap_fits(crate::spawner::MAX_CONCURRENT as u32);
         let n = grid.cell_count() as usize;
         PublisherState {
             grid,
@@ -210,13 +309,25 @@ impl PublisherState {
         }
     }
 
+    /// Whether `cell` is due its periodic re-sync keyframe on publish `seq`.
+    /// Staggered by cell id (finding 3): `(seq + cell) % N == 0` spreads the
+    /// keyframe burst across `N` publishes instead of firing every cell on the
+    /// same tick, smoothing the fan-out cost and per-session queue pressure.
+    #[inline]
+    fn cell_due_keyframe(seq: u64, cell: u32) -> bool {
+        (seq.wrapping_add(cell as u64)).is_multiple_of(KEYFRAME_EVERY_N_PUBLISHES)
+    }
+
     /// One publish pass. Called on every `PUBLISH_EVERY_N_TICKS`-th tick.
     fn publish(&mut self, snap: &Snapshot<'_>) {
         let seq = self.publish_seq;
         self.publish_seq += 1;
-        let force_keyframe = seq.is_multiple_of(KEYFRAME_EVERY_N_PUBLISHES);
 
-        // 1) Recompute this tick's membership for every occupied cell.
+        // 1) Recompute this tick's membership for every occupied cell. Vehicle
+        //    ids are composed as `slot | (generation << SLOT_BITS)` so the wire
+        //    id is stable across a slot's despawn+reuse — and, crucially, the
+        //    rolling `prev` maps hold the SAME composed ids, so a `departed`
+        //    entry always matches exactly what the client last saw for the cell.
         for m in self.scratch_members.values_mut() {
             m.clear();
         }
@@ -235,15 +346,16 @@ impl PublisherState {
                 continue;
             };
             let (s_q, v_q) = quantise(view.s, view.v);
+            let wire_id = compose_wire_id(veh, core.fleet.generation(veh as usize));
             self.scratch_members
                 .entry(cell)
                 .or_default()
-                .insert(veh, (view.lane, s_q, v_q));
+                .insert(wire_id, (view.lane, s_q, v_q));
         }
 
         // 2) Determine which cells changed vs last publish. A cell is "dirty"
-        //    if its membership map differs, or it's due a forced keyframe while
-        //    non-empty, or it just emptied.
+        //    if its membership map differs, or it's due a staggered keyframe
+        //    while non-empty, or it just emptied.
         self.registry.snapshot_into(&mut self.scratch_sessions);
         let no_sessions = self.scratch_sessions.is_empty();
 
@@ -251,7 +363,7 @@ impl PublisherState {
         let mut touched: HashSet<u32> = HashSet::new();
         for (&cell, members) in &self.scratch_members {
             let prev = &self.cells[cell as usize].members;
-            if force_keyframe || members != prev {
+            if Self::cell_due_keyframe(seq, cell) || members != prev {
                 touched.insert(cell);
             }
         }
@@ -266,6 +378,13 @@ impl PublisherState {
         //    the encode entirely if no session subscribes to it (saves work at
         //    idle) — but still update rolling state so a late subscriber gets a
         //    correct keyframe.
+        //
+        //    Ordering note (finding 5): a cell delta built here is pushed to a
+        //    session's queue BEFORE that session's on-subscribe keyframe (step
+        //    4). If both land in the same publish for the same cell, the client
+        //    receives the delta first and the keyframe after — harmless, since
+        //    the keyframe is a full-membership re-sync that supersedes whatever
+        //    the delta did, and both ride the same ordered per-session queue.
         for &cell in &touched {
             let now = self.scratch_members.get(&cell).cloned().unwrap_or_default();
             let prev = std::mem::take(&mut self.cells[cell as usize].members);
@@ -277,7 +396,7 @@ impl PublisherState {
                     .any(|s| s.subscriptions.read().unwrap().contains(&cell));
 
             if any_subscriber {
-                let frame = if force_keyframe {
+                let frame = if Self::cell_due_keyframe(seq, cell) {
                     build_keyframe(cell, snap.tick, &now)
                 } else {
                     build_delta(cell, snap.tick, &prev, &now)
@@ -291,32 +410,28 @@ impl PublisherState {
         }
 
         // 4) Serve pending on-subscribe keyframes (per session, from committed
-        //    rolling state).
+        //    rolling state). See the ordering note above.
         self.serve_pending_keyframes(snap.tick);
 
-        // 5) Prune sessions whose receiver was dropped (writer task ended).
+        // 5) Release the session snapshot. Sessions whose reader tore down are
+        //    already gone from the registry, so next publish simply won't see
+        //    them — no explicit prune needed.
         self.scratch_sessions.clear();
     }
 
-    /// Send `frame` to every session subscribing `cell`; prune dead sessions.
+    /// Push `frame` to every session subscribing `cell` (drop-oldest on
+    /// overflow; never blocks the sim path).
     fn fan_out(&self, cell: u32, frame: &Frame) {
-        let mut dead = Vec::new();
         for session in &self.scratch_sessions {
-            if session.subscriptions.read().unwrap().contains(&cell)
-                && !send_drop_oldest(session, frame)
-            {
-                dead.push(Arc::as_ptr(session));
+            if session.subscriptions.read().unwrap().contains(&cell) {
+                session.out.push_drop_oldest(Arc::clone(frame));
             }
-        }
-        if !dead.is_empty() {
-            self.prune(&dead);
         }
     }
 
     /// Emit any owed on-subscribe keyframes. Each is per-session (built from the
     /// committed rolling membership), so not shared — but rare (subscribe only).
     fn serve_pending_keyframes(&self, tick: u64) {
-        let mut dead = Vec::new();
         for session in &self.scratch_sessions {
             let pending: Vec<u32> = {
                 let mut p = session.pending_keyframes.lock().unwrap();
@@ -338,20 +453,9 @@ impl PublisherState {
                     .unwrap_or_default();
                 let frame = build_keyframe(cell, tick, &members);
                 let encoded = encode_frame(frame);
-                if !send_drop_oldest(session, &encoded) {
-                    dead.push(Arc::as_ptr(session));
-                    break;
-                }
+                session.out.push_drop_oldest(encoded);
             }
         }
-        if !dead.is_empty() {
-            self.prune(&dead);
-        }
-    }
-
-    fn prune(&self, dead: &[*const Session]) {
-        let mut table = self.registry.inner.write().unwrap();
-        table.retain(|_, s| !dead.contains(&Arc::as_ptr(s)));
     }
 }
 
@@ -437,39 +541,69 @@ use axum::{
     routing::get,
 };
 
-/// Build the axum router exposing the `/traffic` WS endpoint, sharing
-/// `registry` with the publisher. `/healthz` is added by
-/// [`crate::shell::run_loop_with_router`], which merges this router onto the
-/// same port.
-pub fn router(registry: Registry) -> AxumRouter {
-    AxumRouter::new()
-        .route("/traffic", get(ws_upgrade))
-        .with_state(registry)
+/// Axum state for the `/traffic` endpoint: the shared session registry plus the
+/// grid's cell count, used to validate client subscribe ids (finding 4).
+#[derive(Clone)]
+struct GatewayState {
+    registry: Registry,
+    cell_count: u32,
 }
 
-async fn ws_upgrade(ws: WebSocketUpgrade, State(registry): State<Registry>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, registry))
+/// Build the axum router exposing the `/traffic` WS endpoint, sharing
+/// `registry` with the publisher. `cell_count` is the AOI grid size, used to
+/// clamp client-requested cell ids. `/healthz` is added by
+/// [`crate::shell::run_loop_with_router`], which merges this router onto the
+/// same port.
+pub fn router(registry: Registry, cell_count: u32) -> AxumRouter {
+    AxumRouter::new()
+        .route("/traffic", get(ws_upgrade))
+        .with_state(GatewayState {
+            registry,
+            cell_count,
+        })
+}
+
+async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<GatewayState>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 /// One connected client: split the socket, register the session, then run a
 /// reader (client → subscription updates) and a writer (outbound frames)
 /// concurrently. Either side ending tears down the session.
-async fn handle_socket(socket: WebSocket, registry: Registry) {
+async fn handle_socket(socket: WebSocket, state: GatewayState) {
     use futures_util::{SinkExt, StreamExt};
 
-    let (id, session, mut rx) = registry.add();
+    let GatewayState {
+        registry,
+        cell_count,
+    } = state;
+    let (id, session) = registry.add();
     let (mut sink, mut stream) = socket.split();
 
-    // Writer: drain the outbound queue to the socket.
+    // Writer: wait on the session's Notify, drain its trim-from-front queue,
+    // and flush each frame to the socket. The publisher never blocks on us: it
+    // pushes (dropping the oldest on overflow) and wakes us. We exit when the
+    // queue is closed (session torn down) or the socket errors.
+    let writer_session = Arc::clone(&session);
     let writer = tokio::spawn(async move {
-        while let Some(frame) = rx.recv().await {
-            if sink
-                .send(WsMessage::Binary(frame.to_vec().into()))
-                .await
-                .is_err()
-            {
-                break;
+        let mut batch: Vec<Frame> = Vec::new();
+        loop {
+            // Drain anything already queued before parking on the notify, so a
+            // frame pushed between drains is never missed.
+            writer_session.out.drain_into(&mut batch);
+            for frame in batch.drain(..) {
+                if sink
+                    .send(WsMessage::Binary(frame.to_vec().into()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
             }
+            if writer_session.out.closed.load(Ordering::Acquire) {
+                return;
+            }
+            writer_session.out.notify.notified().await;
         }
     });
 
@@ -478,7 +612,7 @@ async fn handle_socket(socket: WebSocket, registry: Registry) {
         match msg {
             WsMessage::Binary(bytes) => {
                 if let Ok(client_msg) = TrafficClientMsg::decode(bytes.as_ref()) {
-                    apply_client_msg(&session, &client_msg);
+                    apply_client_msg(&session, &client_msg, cell_count);
                 }
             }
             WsMessage::Close(_) => break,
@@ -486,8 +620,62 @@ async fn handle_socket(socket: WebSocket, registry: Registry) {
         }
     }
 
-    // Reader ended → tear down: drop the session (closes the mpsc, ending the
-    // writer) and remove it from the registry.
+    // Reader ended → tear down: remove the session from the registry (the
+    // publisher stops seeing it next tick) and close its queue so the writer
+    // task wakes from its notify and exits cleanly, flushing any last frames.
     registry.remove(id);
-    writer.abort();
+    session.out.close();
+    let _ = writer.await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(byte: u8) -> Frame {
+        Arc::from([byte].as_ref())
+    }
+
+    /// True drop-oldest (finding 2): pushing past the cap evicts the FRONT
+    /// (oldest) entries; a drain sees the most recent `SESSION_CHANNEL_CAP`
+    /// frames, and the newest push is always present.
+    #[test]
+    fn out_queue_drops_oldest_keeps_newest() {
+        let q = OutQueue::new();
+        let total = SESSION_CHANNEL_CAP + 10;
+        for i in 0..total {
+            q.push_drop_oldest(frame(i as u8));
+        }
+        let mut out = Vec::new();
+        let n = q.drain_into(&mut out);
+        assert_eq!(n, SESSION_CHANNEL_CAP, "queue must be capped at capacity");
+
+        // The retained frames are the newest `cap`: bytes [total-cap .. total).
+        let expected_first = (total - SESSION_CHANNEL_CAP) as u8;
+        assert_eq!(
+            out.first().map(|f| f[0]),
+            Some(expected_first),
+            "oldest surviving frame must be the (total-cap)-th push, not frame 0"
+        );
+        assert_eq!(
+            out.last().map(|f| f[0]),
+            Some((total - 1) as u8),
+            "newest push must always survive"
+        );
+        // Frame 0 (the very oldest) must have been dropped.
+        assert!(
+            !out.iter().any(|f| f[0] == 0),
+            "the oldest frames must have been evicted"
+        );
+    }
+
+    /// The wire-id split round-trips: the slot occupies the low bits and the
+    /// generation the high bits, and two generations of the same slot differ.
+    #[test]
+    fn wire_id_composition_separates_generations() {
+        let a = compose_wire_id(1500 & SLOT_MASK, 0);
+        let b = compose_wire_id(1500 & SLOT_MASK, 1);
+        assert_ne!(a, b, "same slot, different generation -> different wire id");
+        assert_eq!(a & SLOT_MASK, b & SLOT_MASK, "slot bits preserved");
+    }
 }

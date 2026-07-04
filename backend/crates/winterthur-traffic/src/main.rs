@@ -63,10 +63,11 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(cols, rows, cells = cols * rows, "AOI grid built");
 
     let registry = Registry::new();
+    let cell_count = grid.cell_count();
     let (mut world, schedule) = shell::build_sim(net, seed);
     world.insert_resource(make_publisher(grid, registry.clone()));
 
-    let extra = gateway::router(registry);
+    let extra = gateway::router(registry, cell_count);
     tracing::info!(%port, "healthz + /traffic listening; entering tick loop");
     shell::run_loop_with_router(world, schedule, port, Some(extra)).await?;
     Ok(())

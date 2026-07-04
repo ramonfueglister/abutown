@@ -19,7 +19,12 @@ message TrafficClientMsg {
 
 // One vehicle's kinematic state within a cell frame.
 message VehicleState {
-  uint32 id = 1;    // VehId (fleet slot).
+  // Wire-stable vehicle id: `slot | (generation << 12)`. The low 12 bits are
+  // the fleet slot (cap 1500 < 4096); the high 20 bits are the slot's reuse
+  // generation, so a slot recycled after despawn gets a distinct id and a
+  // client dead-reckoning by id never confuses it with its former occupant.
+  // Opaque to the client — use it only as an identity key, never decode it.
+  uint32 id = 1;
   uint32 lane = 2;  // Lane id the vehicle occupies.
   uint32 s_q = 3;   // Arc position along the lane, quantised: round(s * 10) dm.
   uint32 v_q = 4;   // Speed, quantised: round(v * 4) in 0.25 m/s units.

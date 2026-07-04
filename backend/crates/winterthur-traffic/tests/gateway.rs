@@ -71,10 +71,10 @@ fn build_gateway_world(registry: &Registry) -> (World, Schedule, CellGrid) {
     (world, schedule, grid)
 }
 
-async fn start_server(registry: Registry) -> u16 {
+async fn start_server(registry: Registry, cell_count: u32) -> u16 {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = gateway::router(registry);
+    let app = gateway::router(registry, cell_count);
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -109,8 +109,8 @@ fn warmup(world: &mut World, schedule: &mut Schedule, ticks: u64) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn subscribe_yields_keyframe_with_vehicles_then_deltas() {
     let registry = Registry::new();
-    let port = start_server(registry.clone()).await;
     let (mut world, mut schedule, grid) = build_gateway_world(&registry);
+    let port = start_server(registry.clone(), grid.cell_count()).await;
 
     // Warm up ~40 sim-seconds so the central grid is busy.
     warmup(&mut world, &mut schedule, 400);
@@ -182,8 +182,8 @@ async fn subscribe_yields_keyframe_with_vehicles_then_deltas() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unsubscribed_cells_yield_no_frames() {
     let registry = Registry::new();
-    let port = start_server(registry.clone()).await;
     let (mut world, mut schedule, grid) = build_gateway_world(&registry);
+    let port = start_server(registry.clone(), grid.cell_count()).await;
 
     warmup(&mut world, &mut schedule, 400);
     let busy = busy_cells(&world, &grid);
@@ -228,6 +228,66 @@ async fn unsubscribed_cells_yield_no_frames() {
             }
         }
     }
+}
+
+/// Finding 1 — generation-tagged wire ids. Fleet slots recycle via a LIFO
+/// free-list, so a slot reused after despawn would collide on the wire with its
+/// former occupant unless we tag it. Over a long run the spawner churns
+/// hundreds of vehicles through the same slots; we subscribe to every cell and
+/// collect the full set of wire ids ever emitted, then assert that some fleet
+/// slot (the low `SLOT_BITS`) appears under two DISTINCT full wire ids — i.e.
+/// the generation tag distinguished a reused slot from its predecessor. Without
+/// the fix every reuse would reproduce the identical raw slot id and this could
+/// never be observed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reused_slots_get_distinct_wire_ids() {
+    use std::collections::{HashMap, HashSet};
+
+    let registry = Registry::new();
+    let (mut world, mut schedule, grid) = build_gateway_world(&registry);
+    let port = start_server(registry.clone(), grid.cell_count()).await;
+
+    // Warm up so slots are populated, then subscribe to all cells.
+    warmup(&mut world, &mut schedule, 200);
+    let all_cells: Vec<u32> = (0..grid.cell_count()).collect();
+    let mut ws = connect(port).await;
+    ws.send(WsMessage::Binary(subscribe_msg(&all_cells)))
+        .await
+        .unwrap();
+
+    // slot (low SLOT_BITS) -> the set of full wire ids seen for it.
+    let mut ids_by_slot: HashMap<u32, HashSet<u32>> = HashMap::new();
+
+    // Drive a long window so many routes complete and their slots recycle.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    let mut found = false;
+    while tokio::time::Instant::now() < deadline && !found {
+        warmup(&mut world, &mut schedule, 10);
+        while let Ok(Some(Ok(msg))) =
+            tokio::time::timeout(Duration::from_millis(20), ws.next()).await
+        {
+            if let WsMessage::Binary(bytes) = msg {
+                let server_msg = TrafficServerMsg::decode(bytes.as_ref()).unwrap();
+                for frame in &server_msg.cells {
+                    for v in &frame.vehicles {
+                        let slot = v.id & gateway::SLOT_MASK;
+                        let set = ids_by_slot.entry(slot).or_default();
+                        set.insert(v.id);
+                        if set.len() >= 2 {
+                            found = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        found,
+        "expected at least one fleet slot to appear under two distinct \
+         generation-tagged wire ids after slot reuse; saw {} distinct slots",
+        ids_by_slot.len()
+    );
 }
 
 /// The default no-op hook must remain installable and harmless — the seam is
