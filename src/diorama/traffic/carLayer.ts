@@ -103,12 +103,12 @@ export function createCarLayer(): CarLayer {
       mat.compose(pos, quat, scl);
       mesh.setMatrixAt(i, mat);
 
-      let cIdx = colorOfId.get(id);
-      if (cIdx === undefined) {
-        cIdx = BODY_COLORS[hashId(id) % BODY_COLORS.length];
-        colorOfId.set(id, cIdx);
+      let bodyColor = colorOfId.get(id);
+      if (bodyColor === undefined) {
+        bodyColor = BODY_COLORS[hashId(id) % BODY_COLORS.length];
+        colorOfId.set(id, bodyColor);
       }
-      col.set(cIdx);
+      col.set(bodyColor);
       mesh.setColorAt(i, col);
       i++;
     }
