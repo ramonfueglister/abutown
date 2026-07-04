@@ -14,30 +14,15 @@
 /// Stable vehicle slot index into the [`Fleet`] SoA arrays.
 pub type VehId = u32;
 
-/// Opaque handle to a vehicle's route: a `[start, end)` span into the fleet's
-/// flat `route_lanes` buffer plus the index of the lane the vehicle is
-/// currently on. Kept small and `Copy` so it lives inline in the SoA array.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The vehicle's cursor within its route. The route itself is stored
+/// per-slot in [`Fleet::route_lanes`] (indexed by [`VehId`]); this handle just
+/// carries the index of the lane the vehicle currently occupies. Kept small and
+/// `Copy` so it lives inline in the SoA array.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RouteHandle {
-    /// Start offset into `Fleet::route_lanes`.
-    pub start: u32,
-    /// End offset (exclusive) into `Fleet::route_lanes`.
-    pub end: u32,
-    /// Index within `[start, end)` of the lane the vehicle currently occupies.
+    /// Index into the slot's route (`route_lanes[slot]`) of the lane the vehicle
+    /// currently occupies.
     pub cursor: u32,
-}
-
-impl RouteHandle {
-    /// Number of lanes in the route.
-    #[inline]
-    pub fn len(&self) -> u32 {
-        self.end - self.start
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.start == self.end
-    }
 }
 
 /// SoA vehicle fleet. Index is the [`VehId`] slot; `alive[i] == false` marks a
@@ -57,8 +42,13 @@ pub struct Fleet {
     /// Slot liveness.
     pub alive: Vec<bool>,
 
-    /// Flat backing store for all routes; [`RouteHandle`] spans index into it.
-    pub route_lanes: Vec<u32>,
+    /// Per-slot route storage: `route_lanes[slot]` is the lane-id sequence the
+    /// vehicle in that slot follows. Reused across respawns — `spawn`/`reroute`
+    /// `clear()` + `extend` the slot's `Vec`, which retains its capacity, so
+    /// after warm-up there is no per-spawn allocation and total storage is
+    /// bounded by `cap × max-route-len` (never the append-only unbounded growth
+    /// of a single flat buffer). The [`RouteHandle::cursor`] indexes into this.
+    pub route_lanes: Vec<Vec<u32>>,
 
     /// Free-list of despawned slots available for reuse (LIFO).
     free: Vec<VehId>,
@@ -76,7 +66,7 @@ impl Fleet {
             route: Vec::with_capacity(cap),
             len_m: Vec::with_capacity(cap),
             alive: Vec::with_capacity(cap),
-            route_lanes: Vec::with_capacity(cap * 4),
+            route_lanes: Vec::with_capacity(cap),
             free: Vec::new(),
         }
     }
@@ -87,28 +77,48 @@ impl Fleet {
         self.alive.len()
     }
 
+    /// The route (lane-id sequence) a slot currently follows.
+    #[inline]
+    pub fn route_slice(&self, slot: usize) -> &[u32] {
+        &self.route_lanes[slot]
+    }
+
+    /// Total lane ids held across all per-slot route buffers (their `len`s), a
+    /// probe for the bounded-storage regression test. This is the *used* count,
+    /// not reserved capacity; see [`route_storage_capacity`](Self::route_storage_capacity).
+    pub fn route_storage_len(&self) -> usize {
+        self.route_lanes.iter().map(|r| r.len()).sum()
+    }
+
+    /// Total lane-id capacity reserved across all per-slot route buffers. Stays
+    /// bounded (does not grow across respawn/reroute churn once warmed up),
+    /// which is the leak-freedom the regression test asserts.
+    pub fn route_storage_capacity(&self) -> usize {
+        self.route_lanes.iter().map(|r| r.capacity()).sum()
+    }
+
     /// Count of currently-alive vehicles.
     pub fn alive_count(&self) -> usize {
         self.alive.iter().filter(|a| **a).count()
     }
 
-    /// Allocate a vehicle slot, reusing a free one if available. Returns the
-    /// slot id. Internal: [`crate::Core::spawn`] wraps this with route setup.
-    pub(crate) fn alloc(
-        &mut self,
-        lane: u32,
-        s: f32,
-        v: f32,
-        len_m: f32,
-        route: RouteHandle,
-    ) -> VehId {
+    /// Allocate a vehicle slot, reusing a free one if available. The slot's
+    /// route buffer is `clear()`ed and re-filled from `route` (capacity retained
+    /// on reuse → no per-spawn allocation after warm-up); the cursor resets to
+    /// 0. Returns the slot id. Internal: [`crate::Core::spawn`] wraps this.
+    pub(crate) fn alloc(&mut self, lane: u32, s: f32, v: f32, len_m: f32, route: &[u32]) -> VehId {
+        let handle = RouteHandle { cursor: 0 };
         if let Some(id) = self.free.pop() {
             let i = id as usize;
             self.lane[i] = lane;
             self.s[i] = s;
             self.v[i] = v;
             self.len_m[i] = len_m;
-            self.route[i] = route;
+            self.route[i] = handle;
+            // Reuse the slot's existing buffer: clear() keeps its capacity.
+            let buf = &mut self.route_lanes[i];
+            buf.clear();
+            buf.extend_from_slice(route);
             self.alive[i] = true;
             id
         } else {
@@ -117,15 +127,27 @@ impl Fleet {
             self.s.push(s);
             self.v.push(v);
             self.len_m.push(len_m);
-            self.route.push(route);
+            self.route.push(handle);
+            self.route_lanes.push(route.to_vec());
             self.alive.push(true);
             id
         }
     }
 
-    /// Mark a slot free for reuse. The route span in `route_lanes` is left in
-    /// place (not reclaimed) — cheap and keeps handles stable; acceptable
-    /// because routes are bounded by `cap`.
+    /// Rewrite an alive slot's route in place (used by [`crate::Core::reroute`]).
+    /// Clears + refills the slot's route buffer (capacity retained) and resets
+    /// the cursor to 0.
+    pub(crate) fn set_route(&mut self, id: VehId, route: &[u32]) {
+        let i = id as usize;
+        let buf = &mut self.route_lanes[i];
+        buf.clear();
+        buf.extend_from_slice(route);
+        self.route[i].cursor = 0;
+    }
+
+    /// Mark a slot free for reuse. The slot's route buffer is left in place
+    /// (capacity retained) so the next `alloc` reusing this slot pays no
+    /// allocation; storage stays bounded by the live slot count.
     pub(crate) fn free(&mut self, id: VehId) {
         let i = id as usize;
         if self.alive[i] {

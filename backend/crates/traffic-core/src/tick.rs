@@ -16,7 +16,7 @@
 //! This is required both for the closed ring (wrap-around) and for real roads
 //! where a gap straddles a lane end.
 
-use crate::fleet::{Fleet, LaneIndex, RouteHandle, VehId};
+use crate::fleet::{Fleet, LaneIndex, VehId};
 use crate::idm::{IdmParams, idm_accel};
 use crate::junction::{self, APPROACH_ZONE_M, JunctionModel, MANDATORY_ZONE_M, NodeOccupancy};
 use crate::mobil::{self, Follower, LaneNeighbourhood, MobilParams};
@@ -295,15 +295,7 @@ impl Core {
         if self.fleet.alive_count() >= self.intents.len() {
             return None; // would exceed cap and force a realloc
         }
-        let start = self.fleet.route_lanes.len() as u32;
-        self.fleet.route_lanes.extend_from_slice(route);
-        let end = self.fleet.route_lanes.len() as u32;
-        let handle = RouteHandle {
-            start,
-            end,
-            cursor: 0,
-        };
-        let id = self.fleet.alloc(lane, s, 0.0, VEHICLE_LEN, handle);
+        let id = self.fleet.alloc(lane, s, 0.0, VEHICLE_LEN, route);
         // Seed the lane index so the very first tick sees correct occupancy.
         self.index.rebuild(&self.fleet);
         Some(id)
@@ -323,9 +315,9 @@ impl Core {
     /// or its head is not the current lane. Used by the server's periodic
     /// congestion re-routing (Task 7); the kernel itself never re-routes.
     ///
-    /// Like [`spawn`](Self::spawn), the new route is appended to `route_lanes`
-    /// (the old span is left in place); route storage is bounded by the churn
-    /// of a run, matching the existing spawn allocation model.
+    /// Like [`spawn`](Self::spawn), the new route is written into the slot's own
+    /// route buffer (clear + refill, capacity retained), so route storage stays
+    /// bounded by the live fleet — reroute churn does not grow memory.
     pub fn reroute(&mut self, veh: VehId, new_route: &[u32]) -> bool {
         let i = veh as usize;
         if i >= self.fleet.slots() || !self.fleet.alive[i] {
@@ -334,14 +326,7 @@ impl Core {
         if new_route.is_empty() || new_route[0] != self.fleet.lane[i] {
             return false;
         }
-        let start = self.fleet.route_lanes.len() as u32;
-        self.fleet.route_lanes.extend_from_slice(new_route);
-        let end = self.fleet.route_lanes.len() as u32;
-        self.fleet.route[i] = RouteHandle {
-            start,
-            end,
-            cursor: 0,
-        };
+        self.fleet.set_route(veh, new_route);
         true
     }
 
@@ -593,10 +578,10 @@ impl Core {
                     self.fleet.s[i] = it.s;
                     self.fleet.lane[i] = to_lane;
                     self.fleet.route[i].cursor = it.cursor;
-                    let rh = self.fleet.route[i];
-                    let idx = (rh.start + rh.cursor) as usize;
-                    if idx < rh.end as usize {
-                        self.fleet.route_lanes[idx] = to_lane;
+                    let cur = self.fleet.route[i].cursor as usize;
+                    let route = &mut self.fleet.route_lanes[i];
+                    if cur < route.len() {
+                        route[cur] = to_lane;
                     }
                 } else {
                     // Lost: hold at the stop line on the origin lane.
@@ -658,9 +643,8 @@ impl Core {
                 // Keep the route cursor consistent: the vehicle now travels the
                 // adjacent lane, so rewrite the current cursor's lane id. Lanes
                 // of one edge share arc-length, so `s` is unchanged.
-                let rh = self.fleet.route[i];
-                let idx = (rh.start + rh.cursor) as usize;
-                self.fleet.route_lanes[idx] = target;
+                let cur = self.fleet.route[i].cursor as usize;
+                self.fleet.route_lanes[i][cur] = target;
 
                 // Route reconciliation (carry-forward a): MOBIL is turn-unaware,
                 // so after moving sideways the next planned route lane may no
@@ -671,9 +655,9 @@ impl Core {
                 // change near the node; far from the node we leave it and the
                 // junction gate will hold the vehicle (surfacing the mismatch)
                 // rather than teleport it.
-                let next_idx = (rh.start + rh.cursor + 1) as usize;
-                if next_idx < rh.end as usize {
-                    let planned_next = self.fleet.route_lanes[next_idx];
+                let next_idx = cur + 1;
+                if next_idx < self.fleet.route_lanes[i].len() {
+                    let planned_next = self.fleet.route_lanes[i][next_idx];
                     let next_edge = self.net.lanes[planned_next as usize].edge;
                     // Already reachable? Then nothing to do.
                     if junction::turn_between(&self.net, target, planned_next).is_none() {
@@ -685,7 +669,7 @@ impl Core {
                             .map(|&tid| self.net.turns[tid as usize].to_lane)
                             .find(|&tl| self.net.lanes[tl as usize].edge == next_edge)
                         {
-                            self.fleet.route_lanes[next_idx] = remapped;
+                            self.fleet.route_lanes[i][next_idx] = remapped;
                         }
                     }
                 }
@@ -706,9 +690,8 @@ impl Core {
     /// in-progress overtake (which moved left) is never undone mid-manoeuvre.
     fn rightmost_clear_entry(&self, slot: usize, to_lane: u32) -> u32 {
         // Next route edge the entered lane must keep serving (if any).
-        let rh = self.fleet.route[slot];
-        let route = &self.fleet.route_lanes[rh.start as usize..rh.end as usize];
-        let cursor = rh.cursor as usize;
+        let cursor = self.fleet.route[slot].cursor as usize;
+        let route = self.fleet.route_slice(slot);
         let next_edge = route
             .get(cursor + 1)
             .map(|&nl| self.net.lanes[nl as usize].edge);
@@ -896,9 +879,8 @@ fn evaluate_lane_change(
 /// The edge id of the route's *next* lane (the lane after the cursor), or `None`
 /// if the vehicle is on its final route lane. Used by the mandatory-lane gate.
 fn route_next_edge(fleet: &Fleet, net: &TrafficNet, veh: usize) -> Option<u32> {
-    let rh = fleet.route[veh];
-    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
-    let cursor = rh.cursor as usize;
+    let cursor = fleet.route[veh].cursor as usize;
+    let route = fleet.route_slice(veh);
     let next_lane = *route.get(cursor + 1)?;
     Some(net.lanes[next_lane as usize].edge)
 }
@@ -1018,14 +1000,14 @@ fn leader_across_boundary(
     s: f32,
     v: f32,
 ) -> (f32, f32) {
-    let rh = fleet.route[follower];
+    let cursor = fleet.route[follower].cursor as usize;
     // Distance from follower to the end of its current lane.
     let mut ahead = lane_len[lane as usize] - s;
 
     // Walk forward along the route looking for the rear-most vehicle on each
     // subsequent lane. Bound the walk to the route length to avoid infinite
     // loops on degenerate data; the ring's route is short so this is cheap.
-    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
+    let route = fleet.route_slice(follower);
     let n = route.len();
     if n == 0 {
         return (f32::INFINITY, 0.0);
@@ -1048,13 +1030,13 @@ fn leader_across_boundary(
     // loop-vs-open distinction for despawn.
     let last_lane = route[n - 1];
     let is_loop = junction::turn_between(net, last_lane, route[0]).is_some();
-    if !is_loop && (rh.cursor as usize) + 1 >= n {
+    if !is_loop && cursor + 1 >= n {
         // Already on (or beyond) the final lane of an open route: nothing
         // ahead but free road until the route completes.
         return (f32::INFINITY, 0.0);
     }
 
-    let mut cur = rh.cursor as usize;
+    let mut cur = cursor;
     for _ in 0..n {
         cur = (cur + 1) % n;
         let next_lane = route[cur];
@@ -1078,13 +1060,13 @@ fn leader_across_boundary(
 /// now we wrap, which is correct for the ring and harmless until intersections
 /// land (open routes are not yet spawned).
 fn advance_route(fleet: &Fleet, lane_len: &[f32], veh: usize, mut new_s: f32) -> (u32, u32, f32) {
-    let rh = fleet.route[veh];
-    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
+    let start_cursor = fleet.route[veh].cursor;
+    let route = fleet.route_slice(veh);
     let n = route.len();
     if n == 0 {
-        return (fleet.lane[veh], rh.cursor, new_s);
+        return (fleet.lane[veh], start_cursor, new_s);
     }
-    let mut cursor = rh.cursor as usize;
+    let mut cursor = start_cursor as usize;
     let mut lane = route[cursor];
 
     // Move forward while we've run past the end of the current lane.
@@ -1123,13 +1105,12 @@ enum Boundary {
 /// successor edge (cursor at the end and no loop turn back to the first edge)
 /// is an *open* route completing.
 fn route_boundary(fleet: &Fleet, net: &TrafficNet, veh: usize, lane: u32) -> Boundary {
-    let rh = fleet.route[veh];
-    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
+    let cursor = fleet.route[veh].cursor as usize;
+    let route = fleet.route_slice(veh);
     let n = route.len();
     if n == 0 {
         return Boundary::RouteEnd;
     }
-    let cursor = rh.cursor as usize;
     if cursor + 1 < n {
         let next_edge = net.lanes[route[cursor + 1] as usize].edge;
         match turn_onto_edge(net, lane, next_edge) {
@@ -1158,13 +1139,12 @@ fn turn_onto_edge(net: &TrafficNet, lane: u32, edge: u32) -> Option<u32> {
 /// Whether a vehicle has completed its (open) route: it sits at the end of its
 /// final route lane and there is no onward turn back to the route start.
 fn route_completed(fleet: &Fleet, net: &TrafficNet, lane_len: &[f32], veh: usize) -> bool {
-    let rh = fleet.route[veh];
-    let route = &fleet.route_lanes[rh.start as usize..rh.end as usize];
+    let cursor = fleet.route[veh].cursor as usize;
+    let route = fleet.route_slice(veh);
     let n = route.len();
     if n == 0 {
         return true;
     }
-    let cursor = rh.cursor as usize;
     if cursor + 1 < n {
         return false; // still lanes ahead
     }

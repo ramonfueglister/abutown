@@ -192,9 +192,8 @@ fn winterthur_end_to_end_soak() {
                     continue;
                 }
                 let lane = core.fleet.lane[i];
-                let rh = core.fleet.route[i];
-                let route = &core.fleet.route_lanes[rh.start as usize..rh.end as usize];
-                let cursor = rh.cursor as usize;
+                let cursor = core.fleet.route[i].cursor as usize;
+                let route = core.fleet.route_slice(i);
                 // The turn the vehicle is executing = current lane -> next lane.
                 let Some(&next_lane) = route.get(cursor + 1) else {
                     continue;
