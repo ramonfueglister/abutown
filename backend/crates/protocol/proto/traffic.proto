@@ -1,0 +1,48 @@
+syntax = "proto3";
+package traffic.v1;
+
+// Wire schema for the winterthur-traffic WS gateway (Task 8). The server
+// simulates the fleet headless at 10 Hz and publishes per-AOI-cell frames at
+// 5 Hz over `/traffic`; the browser client (Task 9) subscribes to the cells it
+// can see and renders the vehicles inside them.
+//
+// Quantisation keeps frames small: positions to the decimetre, speeds to
+// 0.25 m/s. These are lossy on purpose — the client interpolates between
+// frames, so sub-decimetre precision would only cost bandwidth.
+
+// Client → server. A subscription delta: cells to start / stop receiving. The
+// server keyframes every newly-subscribed cell immediately.
+message TrafficClientMsg {
+  repeated uint32 subscribe_cells = 1;
+  repeated uint32 unsubscribe_cells = 2;
+}
+
+// One vehicle's kinematic state within a cell frame.
+message VehicleState {
+  uint32 id = 1;    // VehId (fleet slot).
+  uint32 lane = 2;  // Lane id the vehicle occupies.
+  uint32 s_q = 3;   // Arc position along the lane, quantised: round(s * 10) dm.
+  uint32 v_q = 4;   // Speed, quantised: round(v * 4) in 0.25 m/s units.
+}
+
+// The state of a single AOI cell at a given tick.
+//
+//  * `keyframe = true`: `vehicles` is the full membership of the cell (sent on
+//    subscribe and every 5 s per cell); `departed` is empty.
+//  * `keyframe = false`: a delta — `vehicles` are the entries that changed
+//    (moved / entered), `departed` are ids that left the cell since the last
+//    frame for this cell.
+message CellFrame {
+  uint32 cell = 1;
+  uint64 tick = 2;
+  bool keyframe = 3;
+  repeated VehicleState vehicles = 4;
+  repeated uint32 departed = 5;
+}
+
+// Server → client. A batch of cell frames produced by one publish tick. Only
+// cells the session subscribes to, and only cells that changed (or are due a
+// keyframe), appear.
+message TrafficServerMsg {
+  repeated CellFrame cells = 1;
+}
