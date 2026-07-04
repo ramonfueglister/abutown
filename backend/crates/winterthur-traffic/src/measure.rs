@@ -20,7 +20,10 @@ use traffic_net::TrafficNet;
 /// Simulation timestep (s), echoed from the kernel.
 const DT: f32 = traffic_core::DT;
 
-/// Window length: 5 sim-minutes = 300 s / 0.1 s = 3000 ticks.
+/// Default window length: 5 sim-minutes = 300 s / 0.1 s = 3000 ticks. The
+/// per-instance window is [`EdgeMeasure::window_ticks`], defaulting to this;
+/// tests inject a shorter window via [`EdgeMeasure::with_window`] to drive a
+/// window close cheaply.
 pub const WINDOW_TICKS: u64 = (300.0 / DT) as u64;
 
 /// Speeds below this (m/s) are floored before reciprocal so a stopped vehicle
@@ -36,15 +39,28 @@ pub struct EdgeMeasure {
     count: Vec<u32>,
     /// Representative length (m) per edge, precomputed from its first lane.
     edge_len_m: Vec<f32>,
-    /// Free-flow travel time (s) per edge, used as the harmonic-speed fallback
-    /// is not applied (we skip un-sampled edges instead); kept for reference /
-    /// tests.
+    /// Free-flow travel time (s) per edge (`length / free speed`). Not used as a
+    /// fallback for un-sampled edges — those are skipped (their `NaN` time is
+    /// ignored by `update_weights`) rather than snapped back to free-flow. Kept
+    /// for reference / tests and a future remaining-route delay proxy.
     free_flow_s: Vec<f32>,
+    /// Window length in ticks for this accumulator (defaults to
+    /// [`WINDOW_TICKS`]; injectable so tests can drive a close cheaply).
+    window_ticks: u64,
 }
 
 impl EdgeMeasure {
-    /// Build accumulators sized to the net's edge count.
+    /// Build accumulators sized to the net's edge count, with the default
+    /// [`WINDOW_TICKS`] window.
     pub fn new(net: &TrafficNet) -> Self {
+        Self::with_window(net, WINDOW_TICKS)
+    }
+
+    /// Like [`new`](Self::new) but with an explicit window length (ticks). Used
+    /// by tests to close a window in a few ticks instead of 3000. Panics if
+    /// `window_ticks == 0` (a zero window would close every tick).
+    pub fn with_window(net: &TrafficNet, window_ticks: u64) -> Self {
+        assert!(window_ticks > 0, "window_ticks must be positive");
         let n = net.edges.len();
         let mut edge_len_m = vec![0.0f32; n];
         let mut free_flow_s = vec![0.0f32; n];
@@ -58,7 +74,13 @@ impl EdgeMeasure {
             count: vec![0; n],
             edge_len_m,
             free_flow_s,
+            window_ticks,
         }
+    }
+
+    /// This accumulator's window length in ticks.
+    pub fn window_ticks(&self) -> u64 {
+        self.window_ticks
     }
 
     /// Free-flow travel time (s) for `edge`. Exposed for tests.
@@ -81,9 +103,10 @@ impl EdgeMeasure {
         }
     }
 
-    /// Whether tick `t` closes a measurement window (and a rebuild is due).
-    pub fn window_closes(t: u64) -> bool {
-        t > 0 && t.is_multiple_of(WINDOW_TICKS)
+    /// Whether tick `t` closes this accumulator's measurement window (and a
+    /// rebuild is due).
+    pub fn window_closes(&self, t: u64) -> bool {
+        t > 0 && t.is_multiple_of(self.window_ticks)
     }
 
     /// Close the current window: derive per-edge travel times, push them into

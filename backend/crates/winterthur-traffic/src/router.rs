@@ -161,8 +161,16 @@ impl Router {
             input_graph.add_edge(from, to, weight_ms);
         }
         // Ensure every edge id 0..n_edges is a known node even if it has no
-        // arcs (isolated / dead-end edges), so `route` bounds checks against
-        // `n_edges` stay meaningful and fast_paths doesn't choke on gaps.
+        // arcs (isolated / dead-end edges). fast_paths derives its node count
+        // from the max node id it has seen and sizes the `PathCalculator` to
+        // it, so an isolated highest-id edge would otherwise leave
+        // `num_nodes < n_edges` and a query for that edge would index out of
+        // bounds. A self-loop is fast_paths' only lever to register a node id:
+        // `do_add_edge` SKIPS a `from == to` edge (it is never a real arc) but
+        // still bumps `num_nodes = max(num_nodes, id + 1)` — exactly what we
+        // want. The skip logs one WARN per id on the `fast_paths` target; the
+        // binary filters that target (see `main::init_tracing`) since the flood
+        // is a benign artifact of this deliberate node-registration trick.
         for id in 0..n_edges {
             input_graph.add_edge(id, id, usize::MAX / 4);
         }
@@ -214,6 +222,13 @@ impl Router {
         lanes.push(last_lane);
 
         Some(lanes)
+    }
+
+    /// The current smoothed travel time (s) recorded for `edge`, or `None` if
+    /// out of range. A probe for tests that assert the measure→router wiring
+    /// actually mutated a weight after a window flush.
+    pub fn edge_time_s(&self, edge: u32) -> Option<f32> {
+        self.edge_time_s.get(edge as usize).copied()
     }
 
     /// Record newly measured per-edge travel times (seconds), MSA-smoothed

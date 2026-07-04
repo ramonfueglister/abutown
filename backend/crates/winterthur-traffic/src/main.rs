@@ -62,6 +62,14 @@ async fn main() -> anyhow::Result<()> {
 
 fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt};
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // `Router::rebuild` re-freezes the CH every 5 sim-min and re-adds one
+    // self-loop per edge to register isolated node ids (see
+    // `Router::input_graph_from_arcs`). fast_paths skips each self-loop with a
+    // WARN, ~1750 lines per rebuild — a benign flood from a deliberate trick.
+    // Silence just that target at ERROR while keeping everything else at the
+    // requested level (default `info`). An explicit `RUST_LOG` still wins.
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+        .add_directive("fast_paths=error".parse().expect("valid directive"));
     let _ = fmt().with_env_filter(filter).try_init();
 }

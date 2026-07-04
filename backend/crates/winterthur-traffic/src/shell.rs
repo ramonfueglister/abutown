@@ -285,21 +285,12 @@ fn core_tick(
     registry: Res<TripRegistry>,
     seed: Res<SimSeed>,
     mut clock: ResMut<SimClock>,
-    measure: Res<MeasureRes>,
 ) {
     let t = clock.tick;
     core.0.tick(t);
 
     if t > 0 && t.is_multiple_of(REROUTE_INTERVAL_TICKS) {
-        reroute_congested(
-            &mut core.0,
-            &net.0,
-            &router.0,
-            &measure.0,
-            &registry,
-            seed.0,
-            t,
-        );
+        reroute_congested(&mut core.0, &net.0, &router.0, &registry, seed.0, t);
     }
 
     clock.tick = t + 1;
@@ -316,8 +307,9 @@ fn measure_edges(
 ) {
     measure.0.sample(&core.0, &net.0);
     // `clock.tick` was already advanced in `core_tick`, so the window closes on
-    // the tick *after* the WINDOW_TICKS-th sim step — one flush per 5 sim-min.
-    if EdgeMeasure::window_closes(clock.tick) {
+    // the tick *after* the window's sim steps — one flush per window length
+    // (5 sim-min by default).
+    if measure.0.window_closes(clock.tick) {
         measure.0.flush(&mut router.0);
     }
 }
@@ -344,15 +336,18 @@ fn publish_snapshot(
 /// Sample alive vehicles on congested edges and, with [`REROUTE_PROBABILITY`],
 /// re-query the router from the vehicle's current edge to its destination and
 /// swap its route (keeping the current lane). Deterministic: candidacy and the
-/// probability draw are pure functions of `u01(seed, t, veh)`.
+/// probability draw are pure functions of `u01(seed, t, veh | (1<<63))` (the
+/// re-route draw stream is namespaced away from the spawner's).
 ///
 /// # Limitations (documented per the plan)
-///  * The delay proxy is the congestion factor of the vehicle's **current
-///    edge** (measured / free-flow travel time), not a full remaining-route
-///    expected-vs-free-flow ratio — the kernel does not track per-vehicle
-///    expected time, and this is the cheapest deterministic proxy that reacts
-///    to real congestion. A vehicle stuck behind a jam it has not yet reached
-///    is not re-routed until it enters the congested edge.
+///  * The delay proxy is the vehicle's **current-edge** congestion factor —
+///    the edge's free speed over the vehicle's live speed — not a full
+///    remaining-route expected-vs-free-flow ratio. The kernel does not track
+///    per-vehicle expected time, and this is the cheapest deterministic proxy
+///    that reacts to real congestion. A vehicle stuck behind a jam it has not
+///    yet reached is not re-routed until it enters the congested edge. (A
+///    future remaining-route proxy would consult [`EdgeMeasure::free_flow_s`];
+///    it is not wired here yet, so the accumulator is not read in this pass.)
 ///  * The swap only takes effect when the router returns a route whose head is
 ///    the vehicle's current lane's edge and whose first lane is the current
 ///    lane (via `Core::reroute`'s guard); otherwise the vehicle keeps its old
@@ -361,7 +356,6 @@ fn reroute_congested(
     core: &mut Core,
     net: &TrafficNet,
     router: &Router,
-    measure: &EdgeMeasure,
     registry: &TripRegistry,
     seed: u64,
     t: u64,
@@ -379,23 +373,25 @@ fn reroute_congested(
             continue;
         }
 
-        // Congestion factor on the current edge.
-        let free = measure.free_flow_s(view.edge);
-        // Effective travel time now = free-flow scaled by how slow the vehicle
-        // is going vs the edge free speed (a per-vehicle congestion proxy).
+        // Congestion factor on the current edge: how slow the vehicle is going
+        // vs the edge free speed (a per-vehicle congestion proxy).
         let edge_speed = net.edges[view.edge as usize].speed_ms.max(0.1);
         let ratio = if view.v <= 0.05 {
             f32::INFINITY
         } else {
             edge_speed / view.v
         };
-        let _ = free; // reserved for a future remaining-route proxy
         if ratio <= DELAY_RATIO_THRESHOLD {
             continue;
         }
 
-        // Probability gate (deterministic).
-        if u01(seed, t, veh as u64) >= REROUTE_PROBABILITY {
+        // Probability gate (deterministic). Namespace the re-route draw stream
+        // away from the spawner's `u01(seed, t, draw_counter)` (finding 2): the
+        // spawner and this pass would otherwise share the `id` space at the same
+        // `(seed, t)` and their draws would correlate. Setting the high bit puts
+        // re-route draws in a disjoint half of the id space.
+        let reroute_id = (veh as u64) | (1 << 63);
+        if u01(seed, t, reroute_id) >= REROUTE_PROBABILITY {
             continue;
         }
 
