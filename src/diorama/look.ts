@@ -15,6 +15,7 @@ import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { palette, radii, clay, cameraContract, post, nightGlow, gi, grade, cloudVol, moonLight, nightSkyLook } from './designTokens';
 import { computeEnvironment, type EnvironmentState } from './environment/environment';
+import { parseAtParam } from './environment/atParam';
 import { applyEnvironment, type EnvironmentTargets } from './environment/applyEnvironment';
 import { createPrecipitation } from './environment/precipitation';
 import { createStarField, createMoonDisc } from './environment/nightSky';
@@ -290,9 +291,8 @@ function sideTable(): THREE.Group {
 
 async function boot(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
-  const atParam = params.get('at');
-  const frozenAt = atParam ? new Date(atParam) : null;
-  if (frozenAt && Number.isNaN(frozenAt.getTime())) throw new Error(`invalid ?at=${atParam}`);
+  // ?at= freezes the clock: full ISO instant, or HH:MM = today local time.
+  const frozenAt = parseAtParam(params.get('at'));
   const wxParam = params.get('wx'); // 'clear'|'overcast'|'rain'|'snow'|'fog'|null
   const camModeRaw = params.get('cam');
   const camMode = camModeRaw === 'far' || camModeRaw === 'sky' ? camModeRaw : 'default';
