@@ -63,6 +63,40 @@ export function decodeWorld(
   return { manifest, graph, tiles };
 }
 
+/**
+ * Ground height (absolute DEM metres) at world-origin (0,0), read from the
+ * finest-level tile whose grid covers the origin. Used to shift the terrain
+ * so the anchor (hero city + KSW, which sit at y≈0) lines up with real
+ * ground level: `terrainRoot.position.y = -anchorGroundHeight(world)`.
+ *
+ * Picks the nearest grid VERTEX to (0,0) rather than interpolating — plenty
+ * precise at tile cellSize resolution for an anchor offset.
+ */
+export function anchorGroundHeight(world: World): number {
+  let best: { levelRank: number; height: number } | null = null;
+
+  for (const { level, tile } of world.tiles) {
+    const { gridN, cellSize, originX, originZ, height } = tile;
+    const maxX = originX + (gridN - 1) * cellSize;
+    const maxZ = originZ + (gridN - 1) * cellSize;
+    if (0 < originX || 0 > maxX || 0 < originZ || 0 > maxZ) continue;
+
+    // nearest grid vertex to (0,0), clamped into [0, gridN-1]
+    const i = Math.min(gridN - 1, Math.max(0, Math.round((0 - originX) / cellSize)));
+    const j = Math.min(gridN - 1, Math.max(0, Math.round((0 - originZ) / cellSize)));
+    const n = j * gridN + i;
+
+    if (best === null || level > best.levelRank) {
+      best = { levelRank: level, height: height[n] };
+    }
+  }
+
+  if (best === null) {
+    throw new Error('anchorGroundHeight: no tile in world.tiles covers the world origin (0,0)');
+  }
+  return best.height;
+}
+
 async function fetchBinary(url: string): Promise<Uint8Array> {
   const res = await fetch(url);
   if (!res.ok) {

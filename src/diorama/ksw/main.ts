@@ -26,7 +26,6 @@ import {
   kswScene,
   nightGlow,
   nightSkyLook,
-  palette,
   post,
   precipLook,
   roofFadePolicy,
@@ -43,8 +42,6 @@ import { buildSpawnSpecs } from './agentSpawn';
 import { ANIMATED_TAGS } from './staticBatch';
 import { advancePlanCursor, createAgent, updateAgent, type Agent } from './agents';
 import { GiProbeScheduler, renderProbeFace } from './giProbe';
-import { boxGeo } from './geometryCache';
-import { clayMat } from './props';
 import { buildCityMassing } from './geo/cityMassing';
 import { buildKswCampus } from './geo/kswCampus';
 import { decomposeToZones, type Zone } from './interior/zones';
@@ -54,6 +51,8 @@ import { buildPlaza, buildHelipad } from './interior/plaza';
 import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
+import { loadWorld, anchorGroundHeight } from './geo/worldData';
+import { buildTerrainTiles } from './geo/terrain';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
 import { lampGlowU } from './glowUniform';
@@ -297,6 +296,10 @@ async function boot(): Promise<void> {
     target: start.target,
   };
   const camera = new THREE.PerspectiveCamera(kswCamera.fov, window.innerWidth / window.innerHeight, 0.1, kswCity.cameraFar);
+  // layer 1 = terrainRoot (real DEM backdrop): visible to the main camera but
+  // excluded from the GI probe's cube-face cameras (see terrainRoot below),
+  // which stay on the default layer-0-only mask.
+  camera.layers.enable(1);
   // zoom config: hero settings, but the dolly may pull back far enough to
   // frame the whole Bahnhof↔ZAG city (roof-fade still keyed off kswCamera)
   const zoomCfg = { ...kswCamera, radiusMax: kswCity.radiusMax };
@@ -476,16 +479,37 @@ async function boot(): Promise<void> {
     rig.target[2] >= mbBounds.minZ &&
     rig.target[2] <= mbBounds.maxZ;
 
+  // ── real terrain under the whole diorama (Task 12, Slice 1) ─────────────
+  // Replaces the flat cityPlate slab: the baked municipality tile pyramid
+  // (scripts/geo/bake-world.mjs) gives real DEM heights + landcover. Only the
+  // terrain surface renders here — the wider municipality's buildings/roads
+  // are deferred to Slice 3; the existing hero city (below, from geoData)
+  // keeps rendering exactly as before, unchanged.
+  //
+  // Failure here is a hard boot error (no silent fallback to a flat plate):
+  // if `/winterthur-world/` 404s, that's a dev-setup problem (missing the
+  // `public/winterthur-world` symlink to `data/winterthur/world/`, see
+  // worldData.ts) or a deploy problem, and should surface loudly rather than
+  // quietly reverting to the old flat look.
+  const world = await loadWorld();
+  const terrainRoot = new THREE.Group();
+  terrainRoot.name = 'terrainRoot';
+  terrainRoot.add(buildTerrainTiles(world.tiles, { level: 2 }));
+  // Tile heights are absolute DEM metres (~400-590 m); the hero city + KSW
+  // sit at y≈0 (the anchor). Shift the whole terrain group down by the
+  // anchor's ground height so the anchor point lines up with real y≈0 and
+  // hills rise/fall around it from there.
+  terrainRoot.position.y = -anchorGroundHeight(world);
+  // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
+  // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
+  // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so
+  // putting terrainRoot on a dedicated layer that only the main `camera`
+  // enables keeps it out of every renderProbeFace() call without touching
+  // the city's own (unchanged, still-included) GI behavior below.
+  terrainRoot.traverse((o) => o.layers.set(1));
+  scene.add(terrainRoot);
+
   // ── the real Winterthur city around it (swisstopo LoD2 + OSM, clay) ──────
-  // The hero hospital keeps its own authored plate; the city sits on a bigger
-  // slab 2 cm lower so the two never z-fight. Massing + roads render through
-  // the existing clay builders, so the town reads as the same handmade model.
-  const cityPlate = new THREE.Mesh(
-    boxGeo(cityMeta.plate.w, kswScene.plateThickness, cityMeta.plate.d),
-    clayMat(palette.lawn),
-  );
-  cityPlate.position.set(cityMeta.plate.cx, -kswScene.plateThickness / 2 - 0.02, cityMeta.plate.cz);
-  cityPlate.receiveShadow = true;
   // The whole city lives under one named group — later tasks (LOD rings,
   // follow-mode shadows, the wandering GI probe) hang their objects here too.
   // Quality gate: the city STAYS inside the GI probe scene (scene.add(cityRoot)
@@ -494,7 +518,6 @@ async function boot(): Promise<void> {
   // the only allowed knob is kswGi.staticFaceInterval, never excluding the city.
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
-  cityRoot.add(cityPlate);
   cityRoot.add(buildCityMassing(cityBuildings));
   cityRoot.add(buildRoads(cityRoads, cityRails));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
