@@ -51,7 +51,7 @@ import { buildPlaza, buildHelipad } from './interior/plaza';
 import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
-import { loadWorld, anchorGroundHeight } from './geo/worldData';
+import { loadWorld, anchorGroundHeight, makeHeightSampler } from './geo/worldData';
 import { buildTerrainTiles } from './geo/terrain';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
@@ -524,7 +524,15 @@ async function boot(): Promise<void> {
   // sit at y≈0 (the anchor). Shift the whole terrain group down by the
   // anchor's ground height so the anchor point lines up with real y≈0 and
   // hills rise/fall around it from there.
-  terrainRoot.position.y = -anchorGroundHeight(world);
+  const anchorGround = anchorGroundHeight(world);
+  terrainRoot.position.y = -anchorGround;
+  // Ground-height sampler shared by the draped road ribbons AND the traffic
+  // cars: heightAt returns absolute DEM metres, and terrainRoot is shifted by
+  // -anchorGround, so the visible surface y (in the y=0 cityRoot frame) is
+  // heightAt(x,z) - anchorGround. Roads drape onto it (else the flat ribbons
+  // bury under / float over the undulating plate) and cars ride it per-vehicle.
+  const worldHeightAt = makeHeightSampler(world);
+  const groundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
   // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
   // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
   // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so
@@ -544,7 +552,7 @@ async function boot(): Promise<void> {
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
   cityRoot.add(buildCityMassing(cityBuildings));
-  cityRoot.add(buildRoads(cityRoads, cityRails));
+  cityRoot.add(buildRoads(cityRoads, cityRails, groundYAt));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
   // Tree canopies default to no cast-shadow (nature.ts) — cheap far-field
@@ -570,7 +578,10 @@ async function boot(): Promise<void> {
   // its dead-reckoned vehicle table each frame. Both are null until the async
   // connect resolves, so the animate loop guards on `trafficClient`.
   let trafficClient: TrafficClient | null = null;
-  const carLayer = trafficEnabled ? createCarLayer() : null;
+  // Per-vehicle ground height so cars sit ON the draped road everywhere on the
+  // traffic plate (the DEM undulates ~±10 m across the net) — same sampler the
+  // road ribbons drape onto, so cars ride exactly the visible surface.
+  const carLayer = trafficEnabled ? createCarLayer(groundYAt) : null;
   if (carLayer) cityRoot.add(carLayer.object3d);
   let lastTrafficCamUpdate = 0; // wall-clock seconds, throttled to ~2 Hz
   if (trafficEnabled) {
@@ -595,9 +606,13 @@ async function boot(): Promise<void> {
             return out;
           },
           lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => {
+            // Aim the target at the DRAPED ground height under (x, z), not the
+            // boot cam's fixed y. Post-#119 the traffic plate sits ~3-10 m below
+            // y=0, so keeping the old target y floated the aim point above the
+            // road and pushed it out of the tight capture frames (Task 10).
             rig = {
               ...rig,
-              target: [x, rig.target[1], z],
+              target: [x, groundYAt(x, z), z],
               radius: opts?.radius ?? rig.radius,
               yaw: opts?.yaw ?? rig.yaw,
               pitch: opts?.pitch ?? rig.pitch,

@@ -9,10 +9,17 @@
 // from deadReckon.poseAt is atan2(tangentX, tangentZ), so a car heading +x is
 // rotated +PI/2 about y — a +z-facing base geometry lands correct).
 //
-// Cars sit ON the carriage road surface: kswCity.roadYs.carriage plus a small
-// lift so the body clears the ribbon. The lane polylines are already offset to
+// Cars sit ON the carriage road surface plus a small lift so the body clears
+// the ribbon. Post-#119 the whole traffic plate is draped on real DEM terrain
+// (it spans ~-1460..+200 x / ~-410..+1440 z, where the ground undulates from
+// ~-10 m to ~+9 m relative to the anchor), so a single flat y left every car
+// floating above or sunk below the visible road. The layer therefore samples
+// the ground height PER VEHICLE via the `groundYAt(x, z)` callback the host
+// passes in (built from the world DEM in main.ts) and adds the carriage+lift
+// offset. Without a sampler it falls back to the old flat carriage y (used by
+// unit tests, which have no world). The lane polylines are already offset to
 // the Swiss right-hand side (baked), so following them exactly puts cars on the
-// correct side of two-way streets — the layer applies NO extra offset.
+// correct side of two-way streets — the layer applies NO horizontal offset.
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -60,6 +67,12 @@ function buildCarGeometry(): THREE.BufferGeometry {
   return merged;
 }
 
+/** Ground-surface height (in the car layer's local frame) at a world (x, z) —
+ * i.e. the visible draped road/terrain y at that point, BEFORE the carriage +
+ * lift offset. In main.ts this is `heightAt(x,z) - anchorGroundHeight`, matching
+ * the shifted terrainRoot; unit tests omit it and the layer falls back to flat. */
+export type GroundYAt = (x: number, z: number) => number;
+
 /** The car layer object + its per-frame update entry point. */
 export interface CarLayer {
   /** Add this to the scene. */
@@ -69,7 +82,7 @@ export interface CarLayer {
   update(net: TrafficNetGeom, vehicles: Map<number, VehKinematics>, nowTick: number): void;
 }
 
-export function createCarLayer(): CarLayer {
+export function createCarLayer(groundYAt?: GroundYAt): CarLayer {
   const geometry = buildCarGeometry();
   const material = clayMat(BODY_COLORS[0]);
   const mesh = new THREE.InstancedMesh(geometry, material, CAR_CAPACITY);
@@ -87,7 +100,10 @@ export function createCarLayer(): CarLayer {
   mesh.count = 0;
   // Per-instance colour (stable per vehicle id via the id->slot map below).
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CAR_CAPACITY * 3), 3);
-  const baseY = kswCity.roadYs.carriage + CAR_LIFT;
+  // Carriage-surface offset above the (possibly draped) ground. When no ground
+  // sampler is supplied the ground is treated as flat y=0, reproducing the
+  // pre-#119 single-plate behaviour that the unit tests assert.
+  const surfaceOffset = kswCity.roadYs.carriage + CAR_LIFT;
 
   // Reused scratch — no per-frame allocation on the hot path.
   const mat = new THREE.Matrix4();
@@ -105,7 +121,8 @@ export function createCarLayer(): CarLayer {
     for (const [id, veh] of vehicles) {
       if (i >= CAR_CAPACITY) break;
       const pose = poseAt(net, veh, nowTick);
-      pos.set(pose.x, baseY, pose.z);
+      const groundY = groundYAt ? groundYAt(pose.x, pose.z) : 0;
+      pos.set(pose.x, groundY + surfaceOffset, pose.z);
       quat.setFromAxisAngle(up, pose.yaw);
       mat.compose(pos, quat, scl);
       mesh.setMatrixAt(i, mat);
