@@ -159,8 +159,17 @@ async function main() {
       `?traffic=1&trafficWs=ws://${HOST}:${TRAFFIC_PORT}/traffic` +
       `&cam=bahnhof&at=2026-07-03T08:00:00Z&wx=clear`;
     console.log(`[smoke] opening ${url}`);
-    await page.goto(url, { waitUntil: 'load', timeout: 30000 });
-    await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: 40000 });
+    await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+    // Post-#119 the boot streams the 77 MB world pyramid before __LOOK_READY;
+    // a cold dev-server load takes well over the old 40 s. Env-tunable for CI.
+    const readyMs = Number(process.env.SMOKE_READY_TIMEOUT_MS ?? 180000);
+    try {
+      await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: readyMs });
+    } catch (e) {
+      console.error(`[smoke] __LOOK_READY not set after ${readyMs}ms; page console errors so far:`);
+      for (const line of errors) console.error(`  ${line}`);
+      throw e;
+    }
     await page.waitForFunction(() => typeof window.__traffic?.lookAt === 'function', { timeout: 20000 });
 
     // Let the server fleet build up (spawns ~3.6+ veh/s), then aim the camera —

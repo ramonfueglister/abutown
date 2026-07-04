@@ -19,7 +19,7 @@
 //   3. dense-corridor     — [8, 289], the busiest AOI cell (probe-density.mjs)
 
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { startTrafficStack, HOST } from './lib/traffic-stack.mjs';
 
 const TRAFFIC_PORT = 8790;
@@ -27,28 +27,80 @@ const VITE_PORT = 5188; // distinct from the smoke's 5187 so both can run
 const SEED = 42;
 const OUT_DIR = new URL('../scratch/traffic-captures/', import.meta.url).pathname;
 
-// Each shot first aims the AOI subscription at a dense cell (found via
-// probe-density.mjs), then RE-FRAMES onto the centroid of the actually-present
-// cars with a radius that fits their spread — because vehicles scatter across
-// the full 3×3 AOI (~384 m), a fixed tight framing usually misses them. A high
-// aerial pitch reads which side of the road each car is on. Auto-framing makes
-// the shot robust to the fleet's live distribution.
-// A ~0.95 rad pitch is oblique enough to keep the camera clear of building
-// roofs (a steeper near-top-down framing can clip inside a tall block when the
-// car centroid lands next to one) while still reading which side of the road
-// each car is on.
-const PITCH = 0.95;
-const SHOTS = [
-  // 1. bahnhof — the required station landmark (meta.json). Traffic is genuinely
-  //    light here (~2 veh in the AOI), so this frames the station in context
-  //    rather than a busy road. Wide radius keeps the camera clear of the roofs.
-  { name: 'bahnhof', aoi: [-338, 734], radius: 320, yaw: -0.6, pitch: 1.02, autoFrame: false },
-  // 2. dense central spine (cell 81, ~17 veh).
-  { name: 'central-spine', aoi: [26, 249], yaw: -0.2, pitch: PITCH, autoFrame: true },
-  // 3. eastern corridor (cell 96, ~14 veh) — an open junction away from the
-  //    tall central blocks.
-  { name: 'east-corridor', aoi: [136, 417], yaw: 0.3, pitch: PITCH, autoFrame: true },
-];
+// The traffic net's world extent, from the baked lanes — used to lay down a
+// coarse grid of AOI aim points that sweeps the client's subscription across
+// the whole plate so we can find the globally busiest corridors.
+const NET = JSON.parse(readFileSync(new URL('../data/winterthur/trafficnet.json', import.meta.url), 'utf8'));
+const NET_BOUNDS = (() => {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const l of NET.lanes)
+    for (const [x, z] of l.pts) {
+      if (x < minX) minX = x;
+      if (z < minZ) minZ = z;
+      if (x > maxX) maxX = x;
+      if (z > maxZ) maxZ = z;
+    }
+  return { minX, minZ, maxX, maxZ };
+})();
+
+/** Sweep the camera (and thus the AOI subscription) across a coarse grid over
+ * the whole net, reading the app's OWN dead-reckoned vehicle table at each stop
+ * and accumulating unique vehicle world positions. This finds the globally
+ * busiest corridors using the client's correct decode (units, ghost-heal) — the
+ * app's live AOI only ever holds the cells around the camera, so one look isn't
+ * enough. */
+async function sampleWholeNet(page) {
+  const { minX, minZ, maxX, maxZ } = NET_BOUNDS;
+  const STEP = 300; // AOI sweep stride (m); radius 320 overlaps neighbours.
+  const seen = new Map(); // id -> {x,z} (latest position wins)
+  for (let z = minZ + 150; z <= maxZ; z += STEP) {
+    for (let x = minX + 150; x <= maxX; x += STEP) {
+      await page.evaluate((a) => window.__traffic.lookAt(a[0], a[1], { radius: 320 }), [x, z]);
+      await page.waitForTimeout(700);
+      const cars = await page.evaluate(() => window.__traffic.sample());
+      for (const c of cars) seen.set(c.id, { x: c.x, z: c.z });
+    }
+  }
+  return [...seen.values()];
+}
+
+// Post-#119 the traffic plate is draped on real DEM terrain and hardcoded AOI
+// coords drift off the live fleet's densest corridors, so instead of fixed
+// coordinates each shot is aimed at a DENSE CLUSTER discovered from the client's
+// own vehicle table (window.__traffic.sample()) — the same idea the smoke uses
+// to find a busy corridor. We bin every present car into 128 m cells, pick the
+// three busiest well-separated cells, then tightly frame the cars in each so
+// they read clearly rather than as specks in a wide overview.
+//
+// A ~1.0 rad pitch is oblique enough to keep the camera clear of building roofs
+// while still reading which side of the road each car drives on.
+const PITCH = 1.05;
+const CELL = 128; // clustering bin size (m), matches the AOI cell grid.
+
+/** Bin cars into CELL-sized cells, return the top-N densest cells (as centroids
+ * with counts), greedily skipping cells within `minSep` of an already-picked
+ * one so the three shots don't all land on the same junction. */
+function densestClusters(cars, n, minSep) {
+  const bins = new Map();
+  for (const c of cars) {
+    const key = `${Math.floor(c.x / CELL)},${Math.floor(c.z / CELL)}`;
+    let b = bins.get(key);
+    if (!b) bins.set(key, (b = { n: 0, sx: 0, sz: 0 }));
+    b.n++;
+    b.sx += c.x;
+    b.sz += c.z;
+  }
+  const ranked = [...bins.values()]
+    .map((b) => ({ n: b.n, x: b.sx / b.n, z: b.sz / b.n }))
+    .sort((a, b) => b.n - a.n);
+  const picked = [];
+  for (const cell of ranked) {
+    if (picked.length >= n) break;
+    if (picked.some((p) => Math.hypot(p.x - cell.x, p.z - cell.z) < minSep)) continue;
+    picked.push(cell);
+  }
+  return picked;
+}
 
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
@@ -70,8 +122,10 @@ async function main() {
       `?traffic=1&trafficWs=ws://${HOST}:${TRAFFIC_PORT}/traffic` +
       `&cam=bahnhof&at=2026-07-03T08:00:00Z&wx=clear`;
     console.log(`[capture] opening ${url}`);
-    await page.goto(url, { waitUntil: 'load', timeout: 30000 });
-    await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: 40000 });
+    await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+    // Post-#119 a cold dev load streams the 77 MB world pyramid; env-tunable.
+    const readyMs = Number(process.env.SMOKE_READY_TIMEOUT_MS ?? 180000);
+    await page.waitForFunction(() => window.__LOOK_READY === true, { timeout: readyMs });
     await page.waitForFunction(() => typeof window.__traffic?.lookAt === 'function', { timeout: 20000 });
 
     // Let the morning-peak fleet build up before framing.
@@ -79,8 +133,23 @@ async function main() {
 
     const cdp = await page.context().newCDPSession(page);
 
-    for (const shot of SHOTS) {
-      // 1. Point the AOI subscription at the dense cell and let it populate
+    // Sweep the whole net to find the globally busiest corridors to frame.
+    // A modest separation (150 m) keeps the three shots distinct while still
+    // letting all three land on genuinely busy stretches of the central spine —
+    // forcing wider geographic spread drove shots into sparse village corridors
+    // with a single car, which read worse than three views of live traffic.
+    const allCars = await sampleWholeNet(page);
+    const clusters = densestClusters(allCars, 3, 150);
+    console.log(`[capture] ${allCars.length} cars sampled across the net; ${clusters.length} dense clusters:`, clusters.map((c) => `[${c.x.toFixed(0)},${c.z.toFixed(0)}]×${c.n}`).join(' '));
+
+    // Fixed yaws so the three shots read from distinct angles. A moderate pitch
+    // (PITCH) is oblique enough to read the scene without the disorienting
+    // near-top-down tilt a steeper angle gives at a tight radius.
+    const YAWS = [-0.5, 0.3, 1.1];
+    const shots = clusters.map((c, i) => ({ name: `cluster-${i + 1}`, aoi: [c.x, c.z], yaw: YAWS[i % YAWS.length], pitch: PITCH }));
+
+    for (const shot of shots) {
+      // 1. Point the AOI subscription at the cluster and let it populate
       //    (keyframes replace cell membership within ≤5 s).
       await page.evaluate(
         (s) => window.__traffic.lookAt(s.aoi[0], s.aoi[1], { radius: 260, yaw: s.yaw, pitch: s.pitch }),
@@ -88,22 +157,31 @@ async function main() {
       );
       await page.waitForTimeout(5000);
 
-      // 2. Compute the framing. For autoFrame shots, aim at the centroid of the
-      //    present cars and size the radius to their spread (with sane bounds).
+      // 2. Re-frame onto the DENSEST local knot of cars in this AOI so the frame
+      //    centres on vehicles-on-road, not empty tarmac or a building roof. We
+      //    aim at the car with the most neighbours within 60 m (a real on-road
+      //    point) and size the radius to hold its ~8 nearest neighbours.
       let target = [...shot.aoi];
-      let radius = shot.radius ?? 120;
-      if (shot.autoFrame) {
-        const s = await page.evaluate(() => window.__traffic.sample());
-        if (s.length > 0) {
-          const cx = s.reduce((a, v) => a + v.x, 0) / s.length;
-          const cz = s.reduce((a, v) => a + v.z, 0) / s.length;
-          // spread = max distance of a car from the centroid (95th pct-ish via
-          // sort to ignore a lone straggler blowing up the radius).
-          const dists = s.map((v) => Math.hypot(v.x - cx, v.z - cz)).sort((a, b) => a - b);
-          const spread = dists[Math.floor(dists.length * 0.85)] ?? 60;
-          target = [cx, cz];
-          radius = Math.max(70, Math.min(160, spread * 1.6));
+      let radius = 90;
+      const s = await page.evaluate(() => window.__traffic.sample());
+      const near = s.filter((v) => Math.hypot(v.x - shot.aoi[0], v.z - shot.aoi[1]) < 200);
+      const pool = near.length >= 3 ? near : s;
+      if (pool.length > 0) {
+        let best = pool[0];
+        let bestN = -1;
+        for (const c of pool) {
+          const n = pool.filter((o) => Math.hypot(o.x - c.x, o.z - c.z) < 60).length;
+          if (n > bestN) {
+            bestN = n;
+            best = c;
+          }
         }
+        target = [best.x, best.z];
+        // radius = distance to the 8th-nearest car (clamped), so a handful of
+        // cars share the frame at a legible size.
+        const dists = pool.map((v) => Math.hypot(v.x - best.x, v.z - best.z)).sort((a, b) => a - b);
+        const k = Math.min(dists.length - 1, 7);
+        radius = Math.max(60, Math.min(110, (dists[k] ?? 60) * 1.3 + 25));
       }
 
       // 3. Re-frame (keeps the AOI subscription on the same corridor) and let a
