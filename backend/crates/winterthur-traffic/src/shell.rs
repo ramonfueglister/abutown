@@ -225,13 +225,29 @@ fn load_sibling_buildings() -> String {
 ///
 /// Loops forever (until the process exits); the health task is spawned and left
 /// running. Returns only on a bind error.
-pub async fn run_loop(mut world: World, mut schedule: Schedule, port: u16) -> std::io::Result<()> {
+pub async fn run_loop(world: World, schedule: Schedule, port: u16) -> std::io::Result<()> {
+    run_loop_with_router(world, schedule, port, None).await
+}
+
+/// Like [`run_loop`] but merges an extra axum router (e.g. the WS gateway's
+/// `/traffic`) onto the same port alongside `/healthz`. The publish hook must
+/// already be installed on `world` (see [`crate::gateway::make_publisher`]).
+pub async fn run_loop_with_router(
+    mut world: World,
+    mut schedule: Schedule,
+    port: u16,
+    extra: Option<axum::Router>,
+) -> std::io::Result<()> {
     use axum::{Router as AxumRouter, routing::get};
     use tokio::time::{Duration, MissedTickBehavior, interval};
 
-    let health = AxumRouter::new()
+    let mut app = AxumRouter::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/", get(|| async { "winterthur-traffic" }));
+    if let Some(extra) = extra {
+        app = app.merge(extra);
+    }
+    let health = app;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tokio::spawn(async move {

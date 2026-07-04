@@ -17,10 +17,12 @@
 //!  * `TRAFFIC_SEED` — u64 sim seed (default `0`).
 //!  * `TRAFFIC_PORT` — health endpoint port (default `8790`).
 //!
-//! The WS gateway (Task 8) will install a real publish hook via
-//! [`SnapshotHook`](winterthur_traffic::shell::SnapshotHook); this binary
-//! leaves the default no-op seam in place.
+//! The WS gateway (Task 8) installs a real publish hook via
+//! [`SnapshotHook`](winterthur_traffic::shell::SnapshotHook) and serves the
+//! `/traffic` WebSocket endpoint on the same [`TRAFFIC_PORT`] as `/healthz`.
 
+use winterthur_traffic::cells::CellGrid;
+use winterthur_traffic::gateway::{self, Registry, make_publisher};
 use winterthur_traffic::shell;
 
 /// Default health endpoint port.
@@ -54,9 +56,19 @@ async fn main() -> anyhow::Result<()> {
         "winterthur-traffic booting"
     );
 
-    let (world, schedule) = shell::build_sim(net, seed);
-    tracing::info!(%port, "healthz listening; entering tick loop");
-    shell::run_loop(world, schedule, port).await?;
+    // Build the AOI cell grid from the net geometry *before* `build_sim`
+    // consumes the net, then install the real publish hook + serve `/traffic`.
+    let grid = CellGrid::build(&net);
+    let (cols, rows) = grid.dims();
+    tracing::info!(cols, rows, cells = cols * rows, "AOI grid built");
+
+    let registry = Registry::new();
+    let (mut world, schedule) = shell::build_sim(net, seed);
+    world.insert_resource(make_publisher(grid, registry.clone()));
+
+    let extra = gateway::router(registry);
+    tracing::info!(%port, "healthz + /traffic listening; entering tick loop");
+    shell::run_loop_with_router(world, schedule, port, Some(extra)).await?;
     Ok(())
 }
 
