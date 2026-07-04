@@ -32,4 +32,9 @@ describe('makeProjector', () => {
     expect(x).toBeLessThan(-300);
     expect(z).toBeGreaterThan(600);
   });
+
+  it('exposes anchorLon/anchorLat for inverse projection (DEM sampler)', () => {
+    expect(proj.anchorLon).toBe(ANCHOR.lon);
+    expect(proj.anchorLat).toBe(ANCHOR.lat);
+  });
 });

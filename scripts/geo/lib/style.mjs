@@ -155,6 +155,27 @@ export function treeSpec(tags, x, z) {
 // Declared forest fill: a hash-gridded scatter of broad-leaf trees inside a
 // real wood/forest polygon, at ~1/60 m² density. Never placed within 4 m of a
 // tree OSM already mapped individually — those are the ground truth.
+//
+// Municipality-scale bakes (Task 9) can carry hundreds of thousands of
+// forest-fill candidates across a couple hundred forest/wood polygons — the
+// original `existingTrees.some(...)` linear scan per candidate made this
+// O(total_trees^2) across the whole bake (existingTrees is the same
+// accumulating array for every forest, per transformNature's loop), which
+// measured multiple CPU-minutes and climbing on the real Winterthur forest
+// coverage (~37 km² estimated forest bbox area, easily 10^5+ candidates).
+// A 4 m spatial hash grid over existingTrees turns the "any tree within 4 m"
+// check into an O(1)-ish 3x3-cell lookup — same exclusion radius, same
+// candidate order (grid scan is unchanged), so output is identical, just fast.
+function existingTreeGrid(existingTrees, cell) {
+  const grid = new Map(); // "gx,gz" -> [{x,z}]
+  for (const t of existingTrees) {
+    const gx = Math.floor(t.x / cell), gz = Math.floor(t.z / cell);
+    const k = `${gx},${gz}`;
+    (grid.get(k) ?? grid.set(k, []).get(k)).push(t);
+  }
+  return grid;
+}
+
 export function forestFill(ring, existingTrees, density = 1 / 60) {
   const cell = Math.sqrt(1 / density);
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -162,6 +183,19 @@ export function forestFill(ring, existingTrees, density = 1 / 60) {
     x0 = Math.min(x0, x); x1 = Math.max(x1, x);
     z0 = Math.min(z0, z); z1 = Math.max(z1, z);
   }
+  const EXCLUDE = 4;
+  const grid = existingTreeGrid(existingTrees, EXCLUDE);
+  const tooClose = (x, z) => {
+    const gx = Math.floor(x / EXCLUDE), gz = Math.floor(z / EXCLUDE);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const pts = grid.get(`${gx + dx},${gz + dz}`);
+        if (!pts) continue;
+        for (const t of pts) if (Math.hypot(t.x - x, t.z - z) < EXCLUDE) return true;
+      }
+    }
+    return false;
+  };
   const out = [];
   for (let gx = Math.floor(x0 / cell); gx * cell < x1; gx++) {
     for (let gz = Math.floor(z0 / cell); gz * cell < z1; gz++) {
@@ -170,7 +204,7 @@ export function forestFill(ring, existingTrees, density = 1 / 60) {
       const x = (gx + 0.5) * cell + jx;
       const z = (gz + 0.5) * cell + jz;
       if (!pointInRing(x, z, ring)) continue;
-      if (existingTrees.some((t) => Math.hypot(t.x - x, t.z - z) < 4)) continue;
+      if (tooClose(x, z)) continue;
       out.push({ x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, kind: 'broad',
         h: Math.round(vary(TREE_DEFAULTS.broad.h, x, z) * 10) / 10,
         r: Math.round(vary(TREE_DEFAULTS.broad.r, x + 31, z - 17) * 10) / 10 });

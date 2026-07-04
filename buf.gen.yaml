@@ -7,5 +7,11 @@ plugins:
     opt:
       - target=ts
       - import_extension=js
+  # Plain-JS für die node-.mjs-Bake-Skripte (kein TS-Loader nötig).
+  - local: ./node_modules/.bin/protoc-gen-es
+    out: scripts/geo/proto
+    opt:
+      - target=js
+      - import_extension=js
 inputs:
   - directory: backend/crates/protocol/proto

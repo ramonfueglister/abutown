@@ -29,3 +29,15 @@ tools/grfcodec/
 # Raw geodata fetched out-of-band by scripts/geo/fetch-winterthur.mjs; only
 # the baked data/winterthur/*.json artifacts are version-controlled.
 scratch/
+
+# The municipality-wide tile pyramid (scripts/geo/bake-world.mjs, ~77 MB of
+# .pb tiles) is NOT committed: too large for git history and fully
+# deterministic to regenerate (`npm run geo:fetch && npm run geo:bake-world`).
+# Slice 2 serves these tiles from public/ or a CDN; until then they live here
+# locally after a bake. The small legacy data/winterthur/*.json stay tracked.
+data/winterthur/world/
+
+# Dev-only symlink so `vite dev` serves data/winterthur/world/ over HTTP for
+# worldData.ts's loadWorld() (default baseUrl /winterthur-world/). Create
+# locally after a bake: ln -s ../data/winterthur/world public/winterthur-world
+public/winterthur-world
