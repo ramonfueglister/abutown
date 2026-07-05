@@ -5,6 +5,7 @@
 //! docs/superpowers/specs/2026-07-05-mmorpg-m1-persistent-world-design.md
 
 pub mod clock;
+pub mod econ;
 pub mod model;
 
 pub use clock::{TICKS_PER_SECOND, WORLD_TIME_SCALE, WorldClock};

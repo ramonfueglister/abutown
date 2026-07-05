@@ -281,10 +281,10 @@ pub fn run_tick_audit_at_tick(accounts: &AccountBook, ledger: &mut TradeLedger, 
 | attribution.rs, materialize.rs, trader_render.rs | NICHT ernten (M1 ohne Attribution/Trader-Renderer) |
 | systems.rs | NICHT ernten — Neuaufbau in Task 6 (schlankere Kette ohne Attribution/Materialize/LOD) |
 
-- [ ] **Step 1:** Module per `git show` extrahieren (Reihenfolge: ids→money→accounts→inventory→goods→orders→auction→ledger→market_goods→pools→production→producers→pricing→wages→flow_shipments→flow_telemetry→audit), `econ/mod.rs` mit `pub mod`-Liste anlegen. Bei jedem Modul: Imports fixen, auskompilieren lassen.
-- [ ] **Step 2:** `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p world-core` → die geernteten Unit-Tests (Dutzende: Auktion, EWMA, Konservierung, prorata…) PASSEN. Scheitert ein geernteter Test, ist die Ernte falsch — nicht den Test ändern.
-- [ ] **Step 3:** clippy -D warnings + fmt grün.
-- [ ] **Step 4: Commit** — `git commit -m "feat(world-core): harvest geometry-free economy core from bbd0159 (accounts, auction, pricing, wages, SFC audit)"`.
+- [x] **Step 1:** Module per `git show` extrahieren (Reihenfolge: ids→money→accounts→inventory→goods→orders→auction→ledger→market_goods→pools→production→producers→pricing→wages→flow_shipments→flow_telemetry→audit), `econ/mod.rs` mit `pub mod`-Liste anlegen. Bei jedem Modul: Imports fixen, auskompilieren lassen.
+- [x] **Step 2:** `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p world-core` → die geernteten Unit-Tests (Dutzende: Auktion, EWMA, Konservierung, prorata…) PASSEN. Scheitert ein geernteter Test, ist die Ernte falsch — nicht den Test ändern.
+- [x] **Step 3:** clippy -D warnings + fmt grün.
+- [x] **Step 4: Commit** — `git commit -m "feat(world-core): harvest geometry-free economy core from bbd0159 (accounts, auction, pricing, wages, SFC audit)"`.
 
 ### Task 5: Märkte/Firmen auf echten Orten seeden (`economy.json`)
 
