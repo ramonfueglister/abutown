@@ -116,8 +116,10 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   // GI probe intensity base; animate() finalizes scene.environmentIntensity.
   t.giBase.value = env.giScale;
 
-  // Sun disc: read env.* directly (scratch was reused above).
-  t.sunDisc.position.set(env.sunDir[0], env.sunDir[1], env.sunDir[2]).multiplyScalar(kswScene.domeRadius * 0.82);
+  // Sun disc: read env.* directly (scratch was reused above). Distance is the
+  // city sky dome (nightSkyLook.city.sunDistance) — same dome as the moon; the
+  // old kswScene.domeRadius (hero 400) parked it low over the city as a white ball.
+  t.sunDisc.position.set(env.sunDir[0], env.sunDir[1], env.sunDir[2]).multiplyScalar(nightSkyLook.city.sunDistance);
   t.sunDisc.visible = env.sunDir[1] > 0.015;
 
   // Moon
