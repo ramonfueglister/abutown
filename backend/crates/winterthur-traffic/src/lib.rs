@@ -11,6 +11,7 @@ pub mod audit;
 pub mod cells;
 pub mod clock;
 pub mod demand;
+pub mod flow;
 pub mod gateway;
 pub mod measure;
 pub mod router;

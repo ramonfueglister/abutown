@@ -36,11 +36,12 @@
 //! The wire therefore cannot feed back into the simulation.
 
 use crate::cells::CellGrid;
+use crate::flow::{self, FLOW_EVERY_N_TICKS};
 use crate::shell::{Snapshot, SnapshotHook};
 use bytes::Bytes;
 use prost::Message;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::Notify;
 
@@ -174,6 +175,12 @@ struct Session {
     /// Cells that were subscribed since the last publish and still owe an
     /// initial keyframe. Drained by the publisher each tick.
     pending_keyframes: Mutex<Vec<u32>>,
+    /// Whether this session currently wants the aggregate flow channel
+    /// (Task 11). Toggled by `TrafficClientMsg.subscribe_flow`; default off —
+    /// most sessions only want per-cell vehicle frames. `AtomicBool` (not
+    /// `RwLock`) since it's a single flag read every publish and written only
+    /// by the reader task.
+    flow_subscribed: AtomicBool,
 }
 
 /// The shared session table. Cloneable `Arc` handle shared between the axum
@@ -196,6 +203,7 @@ impl Registry {
             out: OutQueue::new(),
             subscriptions: RwLock::new(HashSet::new()),
             pending_keyframes: Mutex::new(Vec::new()),
+            flow_subscribed: AtomicBool::new(false),
         });
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.inner.write().unwrap().insert(id, Arc::clone(&session));
@@ -245,6 +253,12 @@ fn apply_client_msg(session: &Session, msg: &TrafficClientMsg, cell_count: u32) 
         subs.remove(&c);
     }
     drop(subs);
+    // `subscribe_flow`: true=on, false=off, absent (None)=no change (finding
+    // per the brief — mirrors the additive-optional-field pattern already used
+    // for `TrafficServerMsg.flow`).
+    if let Some(on) = msg.subscribe_flow {
+        session.flow_subscribed.store(on, Ordering::Relaxed);
+    }
     if dropped_over_cap > 0 {
         tracing::debug!(
             dropped = dropped_over_cap,
@@ -260,7 +274,23 @@ fn apply_client_msg(session: &Session, msg: &TrafficClientMsg, cell_count: u32) 
 /// Encode one `CellFrame` as a standalone `TrafficServerMsg{cells:[frame]}` so
 /// the same `Arc<[u8]>` fans out to every subscriber of that cell.
 fn encode_frame(frame: CellFrame) -> Frame {
-    let msg = TrafficServerMsg { cells: vec![frame] };
+    let msg = TrafficServerMsg {
+        cells: vec![frame],
+        flow: None,
+    };
+    let bytes: Bytes = msg.encode_to_vec().into();
+    Arc::from(bytes.as_ref())
+}
+
+/// Encode one `FlowFrame` (Task 11) as a standalone
+/// `TrafficServerMsg{flow: Some(frame)}` so the same `Arc<[u8]>` fans out to
+/// every flow-subscribed session — mirrors [`encode_frame`]'s one-encode,
+/// many-recipients shape.
+fn encode_flow_frame(frame: abutown_protocol::traffic::FlowFrame) -> Frame {
+    let msg = TrafficServerMsg {
+        cells: Vec::new(),
+        flow: Some(frame),
+    };
     let bytes: Bytes = msg.encode_to_vec().into();
     Arc::from(bytes.as_ref())
 }
@@ -417,6 +447,28 @@ impl PublisherState {
         // 4) Serve pending on-subscribe keyframes (per session, from committed
         //    rolling state). See the ordering note above.
         self.serve_pending_keyframes(snap.tick);
+
+        // 4b) Aggregate flow channel (Task 11): every FLOW_EVERY_N_TICKS sim
+        //     ticks, sample the fleet once into a per-edge FlowFrame and fan it
+        //     out to flow-subscribed sessions only. Read-only (see flow.rs);
+        //     gated independently of the cell-publish cadence above, and
+        //     skipped entirely if nobody wants it (mirrors the `any_subscriber`
+        //     early-out for cells).
+        if snap.tick.is_multiple_of(FLOW_EVERY_N_TICKS) {
+            let any_flow_subscriber = self
+                .scratch_sessions
+                .iter()
+                .any(|s| s.flow_subscribed.load(Ordering::Relaxed));
+            if any_flow_subscriber {
+                let flow_frame = flow::sample_flow_frame(snap.core, snap.net, snap.tick);
+                let encoded = encode_flow_frame(flow_frame);
+                for session in &self.scratch_sessions {
+                    if session.flow_subscribed.load(Ordering::Relaxed) {
+                        session.out.push_drop_oldest(Arc::clone(&encoded));
+                    }
+                }
+            }
+        }
 
         // 5) Release the session snapshot. Sessions whose reader tore down are
         //    already gone from the registry, so next publish simply won't see

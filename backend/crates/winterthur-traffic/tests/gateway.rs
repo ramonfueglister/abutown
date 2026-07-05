@@ -70,6 +70,18 @@ fn subscribe_msg(cells: &[u32]) -> Vec<u8> {
     TrafficClientMsg {
         subscribe_cells: cells.to_vec(),
         unsubscribe_cells: Vec::new(),
+        subscribe_flow: None,
+    }
+    .encode_to_vec()
+}
+
+/// A `TrafficClientMsg` that only toggles the flow subscription (no cell
+/// subscribe/unsubscribe).
+fn subscribe_flow_msg(on: bool) -> Vec<u8> {
+    TrafficClientMsg {
+        subscribe_cells: Vec::new(),
+        unsubscribe_cells: Vec::new(),
+        subscribe_flow: Some(on),
     }
     .encode_to_vec()
 }
@@ -314,6 +326,77 @@ async fn reused_slots_get_distinct_wire_ids() {
         "expected at least one fleet slot to appear under two distinct \
          generation-tagged wire ids after slot reuse; saw {} distinct slots",
         ids_by_slot.len()
+    );
+}
+
+/// A session that sent `subscribe_flow=true` receives a `TrafficServerMsg`
+/// carrying a populated `flow` within 25 published (cell-publish) ticks — well
+/// past the [`winterthur_traffic::flow::FLOW_EVERY_N_TICKS`] (20 sim-ticks = 2 s)
+/// flow cadence — while a session that never subscribed to flow receives none,
+/// even though both watch the same warmed-up, vehicle-occupied world.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn flow_subscriber_receives_frame_non_subscriber_does_not() {
+    let registry = Registry::new();
+    let (mut world, mut schedule, grid) = build_gateway_world(&registry);
+    let port = start_server(registry.clone(), grid.cell_count()).await;
+
+    // Warm up so the fleet is non-empty (flow frames from an empty world are
+    // legal but trivial — we want a frame with edges to assert against).
+    warmup(&mut world, &mut schedule, 400);
+
+    let mut flow_ws = connect(port).await;
+    flow_ws
+        .send(WsMessage::Binary(subscribe_flow_msg(true)))
+        .await
+        .unwrap();
+
+    let mut plain_ws = connect(port).await;
+    // No subscribe_flow message sent at all for this session.
+
+    // Drive up to 25 *published* ticks (PUBLISH_EVERY_N_TICKS=2 sim-ticks per
+    // publish -> 50 sim-ticks), reading both sockets after each burst.
+    let mut got_flow_frame = false;
+    let mut plain_saw_flow = false;
+    for _ in 0..25 {
+        warmup(&mut world, &mut schedule, gateway::PUBLISH_EVERY_N_TICKS);
+
+        while let Ok(Some(Ok(msg))) =
+            tokio::time::timeout(Duration::from_millis(20), flow_ws.next()).await
+        {
+            if let WsMessage::Binary(bytes) = msg {
+                let server_msg = TrafficServerMsg::decode(bytes.as_ref()).unwrap();
+                if let Some(flow) = server_msg.flow {
+                    got_flow_frame = true;
+                    assert!(
+                        !flow.edges.is_empty(),
+                        "expected the warmed-up world to populate at least one edge"
+                    );
+                }
+            }
+        }
+        while let Ok(Some(Ok(msg))) =
+            tokio::time::timeout(Duration::from_millis(20), plain_ws.next()).await
+        {
+            if let WsMessage::Binary(bytes) = msg {
+                let server_msg = TrafficServerMsg::decode(bytes.as_ref()).unwrap();
+                if server_msg.flow.is_some() {
+                    plain_saw_flow = true;
+                }
+            }
+        }
+
+        if got_flow_frame {
+            break;
+        }
+    }
+
+    assert!(
+        got_flow_frame,
+        "flow-subscribed session must receive a populated flow frame within 25 published ticks"
+    );
+    assert!(
+        !plain_saw_flow,
+        "a session that never subscribed to flow must never receive one"
     );
 }
 
