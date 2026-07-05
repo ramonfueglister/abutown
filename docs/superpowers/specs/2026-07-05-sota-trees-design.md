@@ -98,9 +98,14 @@ silhouette envelope** (hard rule from Task 14: LOD swaps must not pop).
 
 ## 3. Rendering (WebGPU / TSL)
 
-- **BatchedMesh** replaces the five InstancedMeshes: all archetypes + trunks in
-  a few batches; per-instance transform + tint as today. The Task-10 LOD ring's
-  `getObjectByName` coupling (`lod.ts`) is migrated to the new node names.
+- **One InstancedMesh per archetype** (~20 draw calls for near trees) instead
+  of a BatchedMesh migration. Amended 2026-07-05 during planning: per-instance
+  TSL access (`instanceIndex`, per-instance nodes) is proven in this codebase
+  on InstancedMesh (agentMeshes.ts) but unverified on BatchedMesh in three
+  0.185's WebGPU path; ~20 draw calls is comfortably inside budget and each
+  archetype mesh carries trunk+crown in one geometry (selective tint via the
+  `aPuff` vertex attribute). The Task-10 LOD ring's `getObjectByName` coupling
+  (`lod.ts`) is migrated to the new tree-layer contract.
 - **Per-instance shader variation:** `instanceIndex`-seeded puff jitter and
   asymmetric squash in the vertex stage; two-tone crown gradient (lit top
   lighter — Nova Roma read) in the color node. No two trees identical, zero
@@ -113,9 +118,15 @@ silhouette envelope** (hard rule from Task 14: LOD swaps must not pop).
   ~8×8 hemispherical view directions into a shared atlas; far trees draw as
   camera-facing quads sampling the view-blended atlas. Tint + squash still
   per-instance so near↔far agree.
-- **GPU culling/LOD:** move the near/far classification into a compute pass
-  (pattern already established by the 10k-agent LOD compute), writing
-  per-instance visibility/LOD instead of CPU ring toggling. Near ring keeps
+- **Per-instance LOD without the ring toggle.** Amended 2026-07-05 during
+  planning: a compute pass that only flags instances still pays the vertex
+  cost of collapsed far trees (WebGPU indirect draws are not exposed by the
+  renderer, so flags cannot skip draws). Instead: (a) full-detail meshes hold
+  only the near set — a throttled (~2 Hz, camera-move-driven) CPU compaction
+  over a prebuilt spatial grid rewrites instance matrices and `count`, so far
+  trees cost zero vertices; (b) the impostor mesh contains ALL trees always
+  (8-vertex quads, trivial) and collapses near-camera quads in the vertex
+  stage via `cameraPosition` distance — zero CPU per frame. Near ring keeps
   shadow casting; far field never touches the shadow map.
 
 ## 4. Slicing
