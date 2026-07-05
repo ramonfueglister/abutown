@@ -31,6 +31,7 @@ import {
   roofFadePolicy,
 } from '../designTokens';
 import { computeEnvironment, type EnvironmentState } from '../environment/environment';
+import { parseAtParam } from '../environment/atParam';
 import { applyCityEnvironment, type CityEnvironmentTargets } from './applyCityEnvironment';
 import { createPrecipitation } from '../environment/precipitation';
 import { createStarField, createMoonDisc } from '../environment/nightSky';
@@ -114,10 +115,8 @@ const WX_OVERRIDES: Record<string, WeatherState> = {
 
 async function boot(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
-  // ?at= freezes the clock to a fixed UTC instant (else real now()).
-  const atParam = params.get('at');
-  const frozenAt = atParam ? new Date(atParam) : null;
-  if (frozenAt && Number.isNaN(frozenAt.getTime())) throw new Error(`invalid ?at=${atParam}`);
+  // ?at= freezes the clock: full ISO instant, or HH:MM = today local time.
+  const frozenAt = parseAtParam(params.get('at'));
   const wxParam = params.get('wx'); // 'clear'|'overcast'|'rain'|'snow'|'fog'|null
   const now = (): Date => frozenAt ?? new Date();
   const camRaw = params.get('cam');
