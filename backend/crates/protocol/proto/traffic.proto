@@ -15,6 +15,7 @@ package traffic.v1;
 message TrafficClientMsg {
   repeated uint32 subscribe_cells = 1;
   repeated uint32 unsubscribe_cells = 2;
+  optional bool subscribe_flow = 3;   // NEW: true=on, false=off
 }
 
 // One vehicle's kinematic state within a cell frame.
@@ -45,9 +46,27 @@ message CellFrame {
   repeated uint32 departed = 5;
 }
 
+// A far-LOD, per-edge aggregate of vehicle flow: how many vehicles are on an
+// edge and their mean speed, without per-vehicle identity. Intended for
+// clients zoomed out past the point where individual vehicles are legible —
+// cheaper to send than a CellFrame per subscribed cell.
+message FlowState {
+  uint32 edge = 1;    // edge id
+  uint32 count = 2;   // vehicles on edge, saturating at 255
+  uint32 v_q = 3;     // mean speed, 0.25 m/s units (same quantization as VehicleState.v_q)
+}
+
+// One publish tick's full flow snapshot. Self-contained (no deltas) — the
+// client replaces its whole flow picture with each frame.
+message FlowFrame {
+  uint64 tick = 1;
+  repeated FlowState edges = 2;  // only edges with count >= 1; self-contained (no deltas)
+}
+
 // Server → client. A batch of cell frames produced by one publish tick. Only
 // cells the session subscribes to, and only cells that changed (or are due a
 // keyframe), appear.
 message TrafficServerMsg {
   repeated CellFrame cells = 1;
+  optional FlowFrame flow = 2;   // NEW
 }
