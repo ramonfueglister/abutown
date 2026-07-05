@@ -565,8 +565,8 @@ message LiveServerMsg {
 }
 ```
 
-- [ ] **Step 1:** proto schreiben, `build.rs` erweitern, `buf lint` grün, `scripts/cargo-serial.sh build --manifest-path backend/Cargo.toml -p abutown-protocol` grün, `npm run generate:proto` erzeugt `src/proto/live_pb.ts`, `npm run typecheck` grün.
-- [ ] **Step 2: Commit** — `git commit -m "feat(protocol): live.proto — citizen AOI frames, vitals, building deltas"`.
+- [x] **Step 1:** proto schreiben, `build.rs` erweitern, `buf lint` grün, `scripts/cargo-serial.sh build --manifest-path backend/Cargo.toml -p abutown-protocol` grün, `npm run generate:proto` erzeugt `src/proto/live_pb.ts`, `npm run typecheck` grün.
+- [x] **Step 2: Commit** — `git commit -m "feat(protocol): live.proto — citizen AOI frames, vitals, building deltas"`.
 
 ### Task 13: Gateway-Erweiterung + sim-server wird DER Prozess
 

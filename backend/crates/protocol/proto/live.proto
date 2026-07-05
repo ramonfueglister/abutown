@@ -1,0 +1,46 @@
+syntax = "proto3";
+package live.v1;
+
+message LiveClientMsg {
+  repeated uint32 subscribe_cells = 1;    // gleiche 128m-CellGrid-IDs wie traffic
+  repeated uint32 unsubscribe_cells = 2;
+  optional bool subscribe_vitals = 3;
+}
+
+message CitizenState {
+  uint32 id = 1;
+  sint32 x_dm = 2;                        // Position in Dezimetern (lokale Meter ×10)
+  sint32 z_dm = 3;
+  uint32 activity = 4;                    // 0=home 1=work 2=market 3=walking 4=driving
+}
+
+message CitizenCellFrame {
+  uint32 cell = 1;
+  uint64 world_tick = 2;
+  bool keyframe = 3;
+  repeated CitizenState citizens = 4;
+  repeated uint32 departed = 5;
+}
+
+message EconomyVitals {
+  uint64 world_tick = 1;
+  uint32 s_of_world_day = 2;
+  uint64 population = 3;
+  int64 total_money = 4;                  // raw ×1000
+  uint32 audit_ok = 5;                    // 1 = letzte Audit-Prüfung ok
+  repeated MarketPrice prices = 6;
+  uint64 trips_active = 7;
+}
+message MarketPrice { uint32 market_id = 1; uint32 good_id = 2; int64 ewma_price = 3; string market_name = 4; }
+
+message BuildingDelta {
+  string building_uuid = 1;
+  uint32 lifecycle = 2;                   // BuildingLifecycle als Zahl
+  uint64 world_tick = 3;
+}
+
+message LiveServerMsg {
+  repeated CitizenCellFrame cells = 1;
+  optional EconomyVitals vitals = 2;      // 1× pro Sekunde an vitals-Subscriber
+  repeated BuildingDelta buildings = 3;   // an alle
+}
