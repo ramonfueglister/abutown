@@ -47,13 +47,23 @@ type FamilyParams = {
 // conic = classic christmas tree, slender = tight spire. Broad families
 // differ in crown base, reach, branch pitch and envelope curvature.
 const FAMILY_PARAMS: Record<TreeFamily, FamilyParams> = {
+  // Puff radii are deliberately LARGE relative to the branch-tip offsets (puff
+  // radius ≈ crownRadius, offsets ≈ crownRadius) so the 6–12 puffs heavily
+  // overlap into ONE cohesive clay mass that swallows the branch skeleton —
+  // the deleted nature.ts BROAD_PUFFS vocabulary (radii 0.42..0.75 at ±0.45
+  // offsets, i.e. radius ≈ offset). Only the trunk + a few branch stubs below
+  // the crown base should read as bare wood.
   spreading: {
     crownBaseY: 0.35,
     crownRadius: 0.55,
     puffMax: 12,
-    puffR: [0.17, 0.25],
+    // radius floor kept HIGH so even the smallest puff still overlaps its
+    // neighbours after the per-instance jitter shrink — no gaps → no exposed
+    // branches. Raised elevation (below) also keeps the low branches tucked up
+    // inside the crown mass rather than fanning out flat beneath it.
+    puffR: [0.42, 0.54],
     branches: [4, 5],
-    elevation: [0.1, 0.4],
+    elevation: [0.35, 0.6],
     apexY: 0.78,
     // fat mid, flattened top — widest just above the crown base
     envelope: (t) => 1 - 0.45 * Math.abs(t - 0.35) - 0.25 * t,
@@ -62,7 +72,7 @@ const FAMILY_PARAMS: Record<TreeFamily, FamilyParams> = {
     crownBaseY: 0.3,
     crownRadius: 0.4,
     puffMax: 10,
-    puffR: [0.15, 0.22],
+    puffR: [0.36, 0.46],
     branches: [3, 5],
     elevation: [0.5, 0.9],
     apexY: 0.86,
@@ -73,7 +83,7 @@ const FAMILY_PARAMS: Record<TreeFamily, FamilyParams> = {
     crownBaseY: 0.25,
     crownRadius: 0.3,
     puffMax: 9,
-    puffR: [0.13, 0.18],
+    puffR: [0.3, 0.38],
     branches: [3, 4],
     elevation: [0.9, 1.2],
     apexY: 0.94,
@@ -105,7 +115,8 @@ const FAMILY_PARAMS: Record<TreeFamily, FamilyParams> = {
 
 const TRUNK_R: [number, number] = [0.022, 0.035]; // trunk radius band (normalized)
 const BRANCH_R = 0.014; // level-1 branch radius; level 2 is thinner
-const BRANCH_LEN: [number, number] = [0.28, 0.45]; // level-1 length band
+const BRANCH_LEN: [number, number] = [0.24, 0.38]; // level-1 length band (kept
+// short enough that the branch stubs stay tucked inside the puff crown mass)
 const L2_LEN_FACTOR = 0.5; // level-2 length relative to its parent
 const PUFF_DETAIL = 1; // icosahedron detail (42 welded verts/puff)
 const STRUT_SEGMENTS = 5; // branch cylinders — open-ended, ends hide in puffs/trunk
@@ -222,10 +233,23 @@ function buildBroad(params: FamilyParams, rng: Rng): THREE.BufferGeometry {
     }
   }
 
+  // Puffs cluster into ONE cohesive crown mass. Instances scale non-uniformly
+  // (XZ by r/crownRadius ≈ 2-4, Y by h ≈ 3-16), so a puff at a far branch tip
+  // stretches into a thin vertical sliver that no longer overlaps its
+  // neighbours horizontally — the branch skeleton then shows through (the
+  // "naked-skeleton" failure). To keep the crown reading as a single chunky
+  // clay mass under ANY h/r aspect, pull each puff's CENTER a fraction of the
+  // way back toward the crown's central axis (x=z=0) so the large puffs pile
+  // up and overlap horizontally, while the full-reach struts stay as the
+  // branch stubs poking out of the mass. The apex (i=0) and trunk-top (i=1)
+  // anchors are already near-axial, so this mostly tightens the outer tips.
+  const PUFF_INSET = 0.55; // keep 55% of the horizontal offset; 0 = all on axis
   const puffCount = Math.min(anchors.length, params.puffMax);
   for (let i = 0; i < puffCount; i++) {
     const r = lerp(params.puffR[0], params.puffR[1], rng());
-    parts.push(puff(anchors[i], r, i));
+    const a = anchors[i];
+    const c = new THREE.Vector3(a.x * PUFF_INSET, a.y, a.z * PUFF_INSET);
+    parts.push(puff(c, r, i));
   }
   return mergeGeometries(parts)!;
 }

@@ -155,9 +155,21 @@ export function assignTrees(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TSLNode = any;
 
-// GPU-side deterministic hash (visual-only). CPU/GPU float determinism is NOT
-// required to match — this only needs to decorrelate per instance/puff.
-const fractHash = (n: TSLNode): TSLNode => fract(sin(n.mul(12.9898)).mul(43758.5453));
+// GPU-side deterministic hash (visual-only) → [0,1). CPU/GPU float determinism
+// is NOT required to match — this only needs to decorrelate per instance/puff.
+//
+// Deliberately transcendental-FREE. The classic `fract(sin(x)*43758)` blows up
+// for large x: here the seed is `float(instanceIndex)*13 + puffIndex`, easily
+// in the thousands, and float32 `sin()` of a large argument loses so much
+// precision it returns garbage / non-finite values — which propagate as NaN
+// through the puff-jitter scale and fling the ENTIRE crown of the affected
+// instances off to infinity (the "naked-skeleton" trees). A pure fract-multiply
+// hash (pre-fracted seed, no sin) is bounded and precise for ANY seed size.
+const fractHash = (n: TSLNode): TSLNode => {
+  const p = fract(n.mul(0.1031)); // bound the seed to [0,1) first
+  const q = fract(p.add(0.1031).mul(p.add(19.19)).mul(103.71));
+  return fract(q.mul(q.add(7.13)).mul(31.77));
+};
 
 const TRUNK_R = ((kswCity.treeTrunk >> 16) & 0xff) / 255;
 const TRUNK_G = ((kswCity.treeTrunk >> 8) & 0xff) / 255;
@@ -185,9 +197,13 @@ function treeMaterial(arch: TreeArchetype, aTintNode: TSLNode): THREE.MeshPhysic
 
   // ── positionNode: puff jitter (crown only) then wind sway ───────────────
   // Puff jitter: scale each crown vertex around its puff center by a per-puff,
-  // per-instance factor in [0.85, 1.15]. Wood vertices skip jitter.
+  // per-instance factor in [0.94, 1.06]. Wood vertices skip jitter.
   const jitterSeed = idxF.mul(float(13)).add(aPuff.w);
-  const jitter = float(0.85).add(fractHash(jitterSeed).mul(float(0.3)));
+  // Gentle per-puff scale variety, centred on 1.0 so it never SHRINKS a puff
+  // enough to open a gap and expose the branch skeleton (the puffs are tuned to
+  // just-overlap; a 0.85× shrink was enough to break marginal crowns). Kept
+  // small — the crown must always read as one solid mass.
+  const jitter = float(0.94).add(fractHash(jitterSeed).mul(float(0.12)));
   const fromCenter: TSLNode = positionLocal.sub(aPuff.xyz);
   const jittered = aPuff.xyz.add(fromCenter.mul(jitter));
   const crownP = select(isWood, positionLocal, jittered);
