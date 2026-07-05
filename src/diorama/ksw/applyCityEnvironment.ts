@@ -15,6 +15,7 @@ import { cloudLook, kswScene, moonLight, nightGlow, nightSkyLook } from '../desi
 import { moonPhaseLightDir, type EnvironmentState } from '../environment/environment';
 import { POLE_AXIS } from '../environment/applyEnvironment';
 import type { PrecipitationSystem } from '../environment/precipitation';
+import { windAmpU, windDirU, windAmplitude } from './windUniform';
 
 export type CityEnvironmentTargets = {
   renderer: THREE.WebGPURenderer;
@@ -141,4 +142,10 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
 
   // Precipitation
   t.precipitation.update(env.precipType, env.precipIntensity, env.windSpeedMs, env.windDirRad, dtSeconds);
+
+  // Wind uniforms: direction convention matches precipitation.ts (wind blows TOWARD,
+  // so we add PI to windDirRad and use sin/cos with negative cosine for x/z).
+  windAmpU.value = windAmplitude(env.windSpeedMs);
+  const toward = env.windDirRad + Math.PI;
+  (windDirU.value as THREE.Vector2).set(Math.sin(toward), -Math.cos(toward));
 }
