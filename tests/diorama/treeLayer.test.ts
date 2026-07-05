@@ -53,3 +53,24 @@ describe('buildTreeLayer', () => {
     expect(layer.fullMeshes.every((m) => !m.castShadow)).toBe(true);
   });
 });
+
+describe('compactNear', () => {
+  it('keeps only trees within NEAR_TREE_DIST of the camera', () => {
+    const far: TreeSpec = { x: 5000, z: 5000, h: 8, r: 2.5, kind: 'broad' };
+    const near: TreeSpec = { x: 3, z: 4, h: 8, r: 2.5, kind: 'broad' };
+    const layer = buildTreeLayer([near, far]);
+    layer.compactNear(0, 0);
+    expect(layer.fullMeshes.reduce((s, m) => s + m.count, 0)).toBe(1);
+    layer.compactNear(5000, 5000);
+    expect(layer.fullMeshes.reduce((s, m) => s + m.count, 0)).toBe(1);
+  });
+  it('restores instances when the camera returns (no destructive drop)', () => {
+    const layer = buildTreeLayer(specs);
+    const all = layer.instances.length;
+    layer.compactNear(1e6, 1e6);
+    expect(layer.fullMeshes.reduce((s, m) => s + m.count, 0)).toBe(0);
+    layer.compactNear(specs[0].x, specs[0].z);
+    expect(layer.fullMeshes.reduce((s, m) => s + m.count, 0)).toBeGreaterThan(0);
+    expect(layer.instances.length).toBe(all); // assignment untouched
+  });
+});

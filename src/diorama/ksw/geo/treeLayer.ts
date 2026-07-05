@@ -31,7 +31,7 @@ import {
   time,
   vec3,
 } from 'three/tsl';
-import { kswCity } from '../../designTokens';
+import { kswCity, kswCityStyle } from '../../designTokens';
 import { clayMat } from '../props';
 import { windAmpU, windDirU } from '../windUniform';
 import { allArchetypes, archetypeIndexFor, hash01, type TreeArchetype } from './treeArchetypes';
@@ -60,6 +60,61 @@ function squashFor(x: number, z: number): number {
 }
 
 export type TreeInstance = { spec: TreeSpec; archetype: number; tint: THREE.Color; squash: number };
+
+// Task 4: near-set compaction. Full-detail trees are drawn out to 10% beyond
+// the impostor-collapse radius (kswCityStyle.lod.nearR) — the overlap band
+// means the full mesh is already up before the impostor takes over, so there
+// is no visible gap during the LOD handoff.
+export const NEAR_TREE_DIST = kswCityStyle.lod.nearR * 1.1;
+
+// Coarse spatial grid over the tree set, built once at layer construction.
+// Cell = 64 m; plain Map<string, TreeInstance[]> keyed by integer cell coords.
+const GRID_CELL = 64;
+
+function cellKey(cx: number, cz: number): string {
+  return `${cx},${cz}`;
+}
+
+function cellOf(x: number, z: number): [number, number] {
+  return [Math.floor(x / GRID_CELL), Math.floor(z / GRID_CELL)];
+}
+
+function buildGrid(instances: readonly TreeInstance[]): Map<string, TreeInstance[]> {
+  const grid = new Map<string, TreeInstance[]>();
+  for (const inst of instances) {
+    const [cx, cz] = cellOf(inst.spec.x, inst.spec.z);
+    const key = cellKey(cx, cz);
+    let bucket = grid.get(key);
+    if (!bucket) {
+      bucket = [];
+      grid.set(key, bucket);
+    }
+    bucket.push(inst);
+  }
+  return grid;
+}
+
+// Query all instances within `dist` of (camX, camZ) by scanning the grid
+// cells overlapping the camera disc's bounding square, then filtering by
+// exact distance.
+function queryNear(grid: Map<string, TreeInstance[]>, camX: number, camZ: number, dist: number): TreeInstance[] {
+  const [cxMin, czMin] = cellOf(camX - dist, camZ - dist);
+  const [cxMax, czMax] = cellOf(camX + dist, camZ + dist);
+  const dist2 = dist * dist;
+  const out: TreeInstance[] = [];
+  for (let cx = cxMin; cx <= cxMax; cx++) {
+    for (let cz = czMin; cz <= czMax; cz++) {
+      const bucket = grid.get(cellKey(cx, cz));
+      if (!bucket) continue;
+      for (const inst of bucket) {
+        const dx = inst.spec.x - camX;
+        const dz = inst.spec.z - camZ;
+        if (dx * dx + dz * dz <= dist2) out.push(inst);
+      }
+    }
+  }
+  return out;
+}
 
 export type TreeLayer = {
   group: THREE.Group; // name 'cityTrees'
@@ -166,6 +221,10 @@ export function buildTreeLayer(
   const byArch: TreeInstance[][] = archetypes.map(() => []);
   for (const inst of instances) byArch[inst.archetype].push(inst);
 
+  // Coarse spatial grid, built once — compactNear queries it per call instead
+  // of rescanning every instance.
+  const grid = buildGrid(instances);
+
   const fullMeshes: THREE.InstancedMesh[] = [];
   // Per-mesh aTint attributes, kept so compactNear can rewrite them.
   const tintAttrs: THREE.InstancedBufferAttribute[] = [];
@@ -210,10 +269,15 @@ export function buildTreeLayer(
     setTreeShadows(on: boolean) {
       for (const m of fullMeshes) m.castShadow = on;
     },
-    // Task 3: full refill — write EVERY instance (camera args ignored). Task 4
-    // slots the distance filter in exactly here, replacing the `byArch[i]` loop
-    // source with a near-set.
-    compactNear(_camX: number, _camZ: number) {
+    // Near-set compaction: query the grid for instances within NEAR_TREE_DIST
+    // of the camera point, group the hits by archetype, and rewrite each
+    // mesh's matrices/tint in the SAME order for both attributes so instance
+    // k's matrix and tint always describe the same tree post-compaction.
+    compactNear(camX: number, camZ: number) {
+      const near = queryNear(grid, camX, camZ, NEAR_TREE_DIST);
+      const nearByArch: TreeInstance[][] = archetypes.map(() => []);
+      for (const inst of near) nearByArch[inst.archetype].push(inst);
+
       const m = new THREE.Matrix4();
       const q = new THREE.Quaternion();
       const pos = new THREE.Vector3();
@@ -221,7 +285,7 @@ export function buildTreeLayer(
       for (let i = 0; i < fullMeshes.length; i++) {
         const mesh = fullMeshes[i];
         const arch = archetypes[i];
-        const list = byArch[i]; // ← Task 4: replace with distance-filtered near-set
+        const list = nearByArch[i];
         const tintArray = tintAttrs[i].array as Float32Array;
         for (let k = 0; k < list.length; k++) {
           const { spec, tint, squash } = list[k];
@@ -235,6 +299,8 @@ export function buildTreeLayer(
           tintArray[k * 3 + 1] = tint.g;
           tintArray[k * 3 + 2] = tint.b;
         }
+        // 0-hit archetypes get count = 0; capacity (cap = Math.max(1, n))
+        // stays >= 1 — buffers are never shrunk, only the visible count.
         mesh.count = list.length;
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
