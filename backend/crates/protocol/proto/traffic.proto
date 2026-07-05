@@ -19,8 +19,8 @@ message TrafficClientMsg {
 
 // One vehicle's kinematic state within a cell frame.
 message VehicleState {
-  // Wire-stable vehicle id: `slot | (generation << 12)`. The low 12 bits are
-  // the fleet slot (cap 1500 < 4096); the high 20 bits are the slot's reuse
+  // Wire-stable vehicle id: `slot | (generation << 15)`. The low 15 bits are
+  // the fleet slot (cap 30000 < 32768); the high 17 bits are the slot's reuse
   // generation, so a slot recycled after despawn gets a distinct id and a
   // client dead-reckoning by id never confuses it with its former occupant.
   // Opaque to the client — use it only as an identity key, never decode it.

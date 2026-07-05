@@ -76,9 +76,12 @@ use traffic_core::{Core, u01};
 use traffic_net::TrafficNet;
 
 /// Hard cap on the concurrent fleet; spawns are suppressed at or above it.
-/// Also the natural pre-size for the kernel's slot capacity. Kept at v1's
-/// value; Task 8 recalibrates `demand_scale` against the measured budget.
-pub const MAX_CONCURRENT: usize = 1500;
+/// Also the natural pre-size for the kernel's slot capacity. Raised from
+/// v1's 1500 to the spec §7 target (30 k) in Task 8: the measured morning
+/// peak at `demand_scale = 1.0` is ~1.5–2 k alive with mean tick well under
+/// the 50 ms budget, so the valve is a genuine safety valve again instead of
+/// the binding constraint it was during Tasks 6–7.
+pub const MAX_CONCURRENT: usize = 30_000;
 
 /// Salt XOR-folded into the seed for the thinning draw so it can never alias
 /// the kernel's per-vehicle noise stream or the shell's re-route stream.

@@ -71,12 +71,16 @@ pub const MAX_SUBSCRIPTIONS_PER_SESSION: usize = 256;
 //
 //     wire_id = slot | (generation << SLOT_BITS)   (generation wraps)
 //
-// The fleet cap is `MAX_CONCURRENT = 1500 < 4096 = 2^12`, so 12 bits hold every
-// slot and the remaining 20 bits carry the generation. `assert_slot_cap_fits`
-// enforces `cap < 2^SLOT_BITS` at grid/publisher construction so this split can
-// never silently truncate a slot id.
-/// Low bits of the wire id that hold the fleet slot (`2^12 = 4096 > 1500` cap).
-pub const SLOT_BITS: u32 = 12;
+// The fleet cap is `MAX_CONCURRENT = 30_000 < 32_768 = 2^15` (raised from
+// v1's 1500 in Task 8, which widened this split 12 -> 15 bits), so 15 bits
+// hold every slot — including the kernel's +64 slot headroom — and the
+// remaining 17 bits carry the generation (which wraps by design).
+// `assert_slot_cap_fits` enforces `cap <= 2^SLOT_BITS` at grid/publisher
+// construction so this split can never silently truncate a slot id. Clients
+// treat wire ids as opaque keys (map + hash-color), so widening the split is
+// wire-compatible.
+/// Low bits of the wire id that hold the fleet slot (`2^15 = 32768 > 30_064`).
+pub const SLOT_BITS: u32 = 15;
 /// Mask selecting the slot portion of a composed wire id.
 pub const SLOT_MASK: u32 = (1 << SLOT_BITS) - 1;
 
@@ -89,7 +93,8 @@ fn compose_wire_id(slot: u32, generation: u32) -> u32 {
 }
 
 /// Assert the fleet capacity fits in [`SLOT_BITS`]. Called at construction so a
-/// future cap bump past 4096 fails loudly instead of truncating wire ids.
+/// future cap bump past `2^SLOT_BITS` fails loudly instead of truncating wire
+/// ids (it caught the Task 8 1500 -> 30k raise and forced the 15-bit split).
 fn assert_slot_cap_fits(cap: u32) {
     assert!(
         cap <= SLOT_MASK + 1,
