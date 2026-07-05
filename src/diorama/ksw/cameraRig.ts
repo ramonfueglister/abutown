@@ -24,6 +24,7 @@ export type RigConfig = {
   panSpeed: number; // world units/s at full ramp
   panBoundsX: number; // |target.x| clamp
   panBoundsZ: number; // |target.z| clamp
+  keyRotateSpeed: number; // rad/s for Q/E keyboard rotation
 };
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
@@ -90,6 +91,22 @@ export function edgePanVelocity(
   const sy = ramp(mouseY) - ramp(height - 1 - mouseY); // +1 top edge, -1 bottom edge
   if (sx === 0 && sy === 0) return [0, 0];
   // screen-right and screen-up (ground-projected) for an orbit camera at yaw
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const fwdX = -Math.sin(yaw);
+  const fwdZ = -Math.cos(yaw);
+  return [(sx * rightX + sy * fwdX) * cfg.panSpeed, (sx * rightZ + sy * fwdZ) * cfg.panSpeed];
+}
+
+export type PanKeys = { up: boolean; down: boolean; left: boolean; right: boolean };
+
+// WASD/arrow keyboard pan: mirrors edgePanVelocity's screen->world basis so
+// keyboard and edge scrolling agree exactly. Held direction flags collapse to
+// screen axes (sx = right-left, sy = up-down), then project through the yaw.
+export function keyboardPanVelocity(held: PanKeys, yaw: number, cfg: RigConfig): [number, number] {
+  const sx = (held.right ? 1 : 0) - (held.left ? 1 : 0);
+  const sy = (held.up ? 1 : 0) - (held.down ? 1 : 0);
+  if (sx === 0 && sy === 0) return [0, 0];
   const rightX = Math.cos(yaw);
   const rightZ = -Math.sin(yaw);
   const fwdX = -Math.sin(yaw);

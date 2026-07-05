@@ -36,7 +36,7 @@ import { applyCityEnvironment, type CityEnvironmentTargets } from './applyCityEn
 import { createPrecipitation } from '../environment/precipitation';
 import { createStarField, createMoonDisc } from '../environment/nightSky';
 import { CLEAR_SKY, sampleWeather, startWeatherLoop, type WeatherSeries, type WeatherState } from '../environment/weather';
-import { applyDrag, applyPan, applyZoom, edgePanVelocity, rigPosition, roofFade, type CameraRigState } from './cameraRig';
+import { applyDrag, applyPan, applyZoom, edgePanVelocity, keyboardPanVelocity, rigPosition, roofFade, type CameraRigState } from './cameraRig';
 import { approach, createAgentInstances, lerpAngle, type AgentSlot } from './agentMeshes';
 import { buildNav } from './nav';
 import { buildSpawnSpecs } from './agentSpawn';
@@ -349,10 +349,12 @@ async function boot(): Promise<void> {
   // it sits inside the edge margin (paused during drag-rotation)
   let mouse: { x: number; y: number } | null = null;
   renderer.domElement.addEventListener('pointerdown', (e: PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 2) return; // right button rotates (Cities-Skylines standard)
     dragging = true;
     renderer.domElement.setPointerCapture(e.pointerId);
   });
+  // right-drag rotates → suppress the browser context menu over the canvas
+  renderer.domElement.addEventListener('contextmenu', (e: Event) => e.preventDefault());
   renderer.domElement.addEventListener('pointermove', (e: PointerEvent) => {
     mouse = { x: e.clientX, y: e.clientY };
     if (!dragging) return;
@@ -369,6 +371,46 @@ async function boot(): Promise<void> {
   };
   renderer.domElement.addEventListener('pointerup', endDrag);
   renderer.domElement.addEventListener('pointercancel', endDrag);
+
+  // ── keyboard: WASD/arrows pan, Q/E rotate (Cities-Skylines standard) ──────
+  const held = { up: false, down: false, left: false, right: false, rotL: false, rotR: false };
+  const keyFlag = (code: string): keyof typeof held | null => {
+    switch (code) {
+      case 'KeyW':
+      case 'ArrowUp':
+        return 'up';
+      case 'KeyS':
+      case 'ArrowDown':
+        return 'down';
+      case 'KeyA':
+      case 'ArrowLeft':
+        return 'left';
+      case 'KeyD':
+      case 'ArrowRight':
+        return 'right';
+      case 'KeyQ':
+        return 'rotL';
+      case 'KeyE':
+        return 'rotR';
+      default:
+        return null;
+    }
+  };
+  const typingTarget = (): boolean => {
+    const el = document.activeElement;
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+  };
+  window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (typingTarget()) return;
+    const f = keyFlag(e.code);
+    if (!f) return;
+    held[f] = true;
+    if (e.code.startsWith('Arrow')) e.preventDefault(); // no page scroll
+  });
+  window.addEventListener('keyup', (e: KeyboardEvent) => {
+    const f = keyFlag(e.code);
+    if (f) held[f] = false;
+  });
 
   // ── light rig ──────────────────────────────────────────────────────────
   // The key light is fully driven by applyCityEnvironment (color/intensity/dir);
@@ -1083,13 +1125,27 @@ async function boot(): Promise<void> {
       const k = 1 - Math.exp(-dt * kswCamera.zoomSmoothing);
       rig = { ...rig, radius: rig.radius + (zoomTarget - rig.radius) * k };
     }
+    // panning feels map-relative: slower when zoomed in close. radius is fixed
+    // for the rest of the frame (pan moves the target, not the radius), so both
+    // pan sources share one scale.
+    const panZoomScale = Math.min(Math.max(rig.radius / 110, 0.15), 1);
     if (mouse && !dragging) {
       const [vx, vz] = edgePanVelocity(mouse.x, mouse.y, window.innerWidth, window.innerHeight, rig.yaw, kswCamera);
       if (vx !== 0 || vz !== 0) {
-        // panning feels map-relative: slower when zoomed in close
-        const zoomScale = Math.min(Math.max(rig.radius / 110, 0.15), 1);
-        rig = applyPan(rig, vx * zoomScale, vz * zoomScale, dt, kswCamera);
+        rig = applyPan(rig, vx * panZoomScale, vz * panZoomScale, dt, kswCamera);
       }
+    }
+    // keyboard pan (WASD/arrows) — same map-relative zoom scaling as edge-pan
+    const [kvx, kvz] = keyboardPanVelocity(held, rig.yaw, kswCamera);
+    if (kvx !== 0 || kvz !== 0) {
+      rig = applyPan(rig, kvx * panZoomScale, kvz * panZoomScale, dt, kswCamera);
+    }
+    // keyboard rotate (Q/E) via the shared drag path: convert a rad/s rate into
+    // the equivalent horizontal drag-pixel delta (applyDrag: yaw -= dxPx*dragSpeed)
+    if (held.rotL !== held.rotR) {
+      const dir = held.rotL ? 1 : -1;
+      const dxPx = (dir * kswCamera.keyRotateSpeed * dt) / kswCamera.dragSpeed;
+      rig = applyDrag(rig, dxPx, 0, kswCamera);
     }
     applyRig();
     // camera-following light: walk the shadow frustum + roaming GI anchor with
