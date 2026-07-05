@@ -153,7 +153,7 @@ impl SimWorld {
 ```
 - Consumes: `data/winterthur/simworld.json` (Task 1).
 
-- [ ] **Step 1: Crate anlegen** — `backend/crates/world-core/Cargo.toml`:
+- [x] **Step 1: Crate anlegen** — `backend/crates/world-core/Cargo.toml`:
 
 ```toml
 [package]
@@ -172,7 +172,7 @@ traffic-net = { path = "../traffic-net" }
 ```
 
 (Workspace-Dependency-Namen exakt aus `backend/Cargo.toml` übernehmen; fehlt eine im Workspace-`[workspace.dependencies]`, dort ergänzen.) Member in `backend/Cargo.toml` eintragen.
-- [ ] **Step 2: Failing test** — in `src/model/mod.rs` `#[cfg(test)]`-Modul; Fixture INLINE (kein Filesystem im Unit-Test):
+- [x] **Step 2: Failing test** — in `src/model/mod.rs` `#[cfg(test)]`-Modul; Fixture INLINE (kein Filesystem im Unit-Test):
 
 ```rust
 #[cfg(test)]
@@ -199,10 +199,10 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3:** `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p world-core` → FAIL (Typen fehlen).
-- [ ] **Step 4: Implementieren.** `SimWorld::load` parst JSON (serde), **sortiert Gebäude nach `uuid`** (macht BuildingId=Index bake-stabil), baut `residential`/`workplaces`-Indizes einmalig. `within_radius` = linearer Scan (29k Einträge, nur beim Seeding benutzt — kein Hot-Path). `usage` ausserhalb 0–5 → `WorldError::BadUsage`.
-- [ ] **Step 5:** Test grün → PASS. fmt+clippy: `scripts/cargo-serial.sh fmt --manifest-path backend/Cargo.toml` und `clippy -p world-core -- -D warnings`.
-- [ ] **Step 6: Commit** — `git commit -m "feat(world-core): crate skeleton + SimWorld loader"`.
+- [x] **Step 3:** `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p world-core` → FAIL (Typen fehlen).
+- [x] **Step 4: Implementieren.** `SimWorld::load` parst JSON (serde), **sortiert Gebäude nach `uuid`** (macht BuildingId=Index bake-stabil), baut `residential`/`workplaces`-Indizes einmalig. `within_radius` = linearer Scan (29k Einträge, nur beim Seeding benutzt — kein Hot-Path). `usage` ausserhalb 0–5 → `WorldError::BadUsage`.
+- [x] **Step 5:** Test grün → PASS. fmt+clippy: `scripts/cargo-serial.sh fmt --manifest-path backend/Cargo.toml` und `clippy -p world-core -- -D warnings`.
+- [x] **Step 6: Commit** — `git commit -m "feat(world-core): crate skeleton + SimWorld loader"`.
 
 ### Task 3: `WorldClock` — 4h-Weltentag, frozen-time
 
@@ -225,7 +225,7 @@ impl WorldClock {
 ```
 - Später konsumiert von: Rhythmus-Systemen (Task 8), Traffic-Spawner-Umhängung (Task 9), Persistenz (Task 10).
 
-- [ ] **Step 1: Failing tests** (im selben File):
+- [x] **Step 1: Failing tests** (im selben File):
 
 ```rust
 #[test]
@@ -245,8 +245,8 @@ fn resume_continues_exactly() {
 }
 ```
 
-- [ ] **Step 2:** Test FAIL → implementieren (reine Ganzzahl-Arithmetik: `world_seconds = world_tick * WORLD_TIME_SCALE / TICKS_PER_SECOND`) → PASS.
-- [ ] **Step 3: Commit** — `git commit -m "feat(world-core): WorldClock — 4h world day, tick-based frozen time"`.
+- [x] **Step 2:** Test FAIL → implementieren (reine Ganzzahl-Arithmetik: `world_seconds = world_tick * WORLD_TIME_SCALE / TICKS_PER_SECOND`) → PASS.
+- [x] **Step 3: Commit** — `git commit -m "feat(world-core): WorldClock — 4h world day, tick-based frozen time"`.
 
 ---
 
