@@ -12,9 +12,9 @@
 // node, and setColorAt() only feeds the fixed-function pipeline — it does NOT
 // reach a node material's colorNode. So each mesh carries its own `aTint`
 // InstancedBufferAttribute (vec3, one RGB per instance) read via the
-// `instancedBufferAttribute` node inside colorNode. setColorAt is still called
-// for parity with any fixed-function consumer, but aTint is the source of truth
-// the shader reads.
+// `instancedBufferAttribute` node inside colorNode. instanceColor is never
+// bound — the full mesh already uses 8/8 vertex buffers, so an ever-bound
+// instanceColor would overflow to a 9th.
 
 import * as THREE from 'three/webgpu';
 import {
@@ -310,7 +310,6 @@ export function buildTreeLayer(
           scl.set(s, spec.h * squash, s);
           m.compose(pos, q, scl);
           mesh.setMatrixAt(k, m);
-          mesh.setColorAt(k, tint);
           tintArray[k * 3] = tint.r;
           tintArray[k * 3 + 1] = tint.g;
           tintArray[k * 3 + 2] = tint.b;
@@ -319,7 +318,6 @@ export function buildTreeLayer(
         // stays >= 1 — buffers are never shrunk, only the visible count.
         mesh.count = list.length;
         mesh.instanceMatrix.needsUpdate = true;
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         tintAttrs[i].needsUpdate = true;
       }
     },

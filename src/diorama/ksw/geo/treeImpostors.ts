@@ -13,9 +13,10 @@
 //  - hemiOctUv / viewDirFor are pure and round-trip exactly (unit-tested). They
 //    speak GRID-CELL space: (0..OCT_GRID-1)², zenith → center, horizon → border.
 //  - Per-instance transform is carried ENTIRELY in attributes, not the
-//    instanceMatrix (which stays identity — three applies it on top of
-//    positionNode, so a matrix scale would also scale the node's translation;
-//    same identity-matrix pattern as agentMeshes.ts): `aCenter` = world
+//    instanceMatrix (which stays identity: the packed attributes
+//    (aCenterArch/aSizeTint) already carry the full transform, so
+//    instanceMatrix has nothing left to contribute — same identity-matrix
+//    pattern as agentMeshes.ts): `aCenter` = world
 //    (x,0,z), `aSize` = world (2·r, h·squash). Those are exactly the full
 //    mesh's world extents under treeLayer's compose (geometry reach
 //    ±crownRadius × y∈[0,1], scale (r/crownRadius, h·squash)), and the bake
@@ -329,9 +330,9 @@ export function buildImpostorMesh(
   // from the per-instance aSize = (2·r, h·squash) — i.e. half-width r and
   // height h·squash, exactly the full mesh's world extents (its geometry
   // reaches ±crownRadius × y∈[0,1], scaled by (r/crownRadius, h·squash)). The
-  // instanceMatrix stays IDENTITY (agentMeshes pattern): three applies it on
-  // top of positionNode, so any non-identity scale would also scale the
-  // aCenter translation — everything lives in the node instead.
+  // instanceMatrix stays IDENTITY (agentMeshes pattern): the packed
+  // attributes (aCenterArch/aSizeTint) carry the full transform, so identity
+  // leaves nothing for the matrix to contribute — everything lives in the node.
   const toCam: Node = vec3(camPos.x.sub(aCenter.x), float(0), camPos.z.sub(aCenter.z));
   const yaw: Node = atan(toCam.x, toCam.z); // yaw about +y, +z toward camera
   const cy = cos(yaw);
