@@ -141,7 +141,10 @@ try {
   await page.waitForTimeout(150);
   const kb1 = await state();
   const kbMoved = Math.hypot(kb1.target[0] - kb0.target[0], kb1.target[2] - kb0.target[2]);
-  check('holding W pans the camera target (WASD)', kbMoved > 3, `moved ${kbMoved.toFixed(1)} units`);
+  // must travel a real city distance, not stall at the old hero-room ±34 clamp:
+  // at the overview radius the zoom-scaled pan covers hundreds of world units in
+  // 0.7 s (the pre-fix capped pan moved only ~21 and clamped at 34).
+  check('holding W pans a real city distance (WASD, not clamped)', kbMoved > 100, `moved ${kbMoved.toFixed(1)} units`);
 
   // AoE2 edge scrolling: cursor parked at the right edge pans the target
   const before = await state();
