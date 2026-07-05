@@ -107,17 +107,24 @@ impl SimWorld {
     }
 }
 
+/// 3-Gebäude-Fixture (Wohnhaus {B1} 200 m²/9 m → 3 Geschosse/Kapazität 15,
+/// Workplace {A2}, Unknown {C3}) — geteilt von model-, citizens- und
+/// rhythm-Tests.
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const FIXTURE: &str = r#"{
+pub(crate) mod test_fixture {
+    pub(crate) const FIXTURE: &str = r#"{
       "meta": {"anchor": {"lon": 8.7285, "lat": 47.5069}, "bake_version": 1},
       "buildings": [
         {"id":"{B1}","usage":1,"x":0.0,"z":0.0,"area_m2":200.0,"height_m":9.0,"access_edge":5,"access_offset":2.0},
         {"id":"{A2}","usage":2,"x":100.0,"z":0.0,"area_m2":400.0,"height_m":12.0,"access_edge":7,"access_offset":1.0},
         {"id":"{C3}","usage":0,"x":500.0,"z":500.0,"area_m2":50.0,"height_m":4.0,"access_edge":-1,"access_offset":0.0}
       ]}"#;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_fixture::FIXTURE;
+    use super::*;
 
     #[test]
     fn loads_and_indexes_by_usage() {

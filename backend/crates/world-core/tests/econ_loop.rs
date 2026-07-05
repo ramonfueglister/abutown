@@ -7,7 +7,7 @@ use std::sync::Arc;
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::Schedule;
 use world_core::econ::{EconomyEvent, EconomySeed};
-use world_core::{SimWorld, WorldClock, WorldCorePlugin, econ, install_world_systems};
+use world_core::{SeedParams, SimWorld, WorldClock, WorldCorePlugin, econ, install_world_systems};
 
 /// The REAL authored seed — the test proves the shipped data trades.
 const ECONOMY_JSON: &str = include_str!("../../../../data/winterthur/economy.json");
@@ -28,6 +28,12 @@ fn build_test_sim() -> (World, Schedule) {
     let plugin = WorldCorePlugin {
         seed,
         sim_world: sim,
+        seed_params: SeedParams {
+            center: (0.0, 0.0),
+            radius_m: 10_000.0,
+            residents_per_40m2: 1.0,
+            seed: 42,
+        },
     };
     let mut world = World::new();
     let mut schedule = Schedule::default();

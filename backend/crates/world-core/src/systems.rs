@@ -14,6 +14,7 @@ use std::sync::Arc;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
+use crate::citizens::{SeedParams, seed_citizens};
 use crate::clock::WorldClock;
 use crate::econ::{
     self, AccountBook, BuyerOutlays, CapitaFactor, DemandPools, DirtyMarketGoods, EconomyConfig,
@@ -52,6 +53,7 @@ pub struct SharedSimWorld(pub Arc<SimWorld>);
 pub struct WorldCorePlugin {
     pub seed: econ::seed::EconomySeed,
     pub sim_world: Arc<SimWorld>,
+    pub seed_params: SeedParams,
 }
 
 /// Insert all world/economy resources, seed the economy from the authored
@@ -79,6 +81,13 @@ pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin:
 
     econ::seed::seed_economy(world, &plugin.seed, &plugin.sim_world)
         .expect("seed_economy: the authored economy.json seed must apply cleanly at boot");
+
+    // Bürger NACH der Wirtschaft: seed_citizens koppelt die Kopfzahl in die
+    // eben geseedete `HouseholdSector`-Resource. Beide Seeds sind idempotent
+    // (hydrate-sicher). SeedParams bleibt als Resource liegen — der
+    // Tagesrhythmus (Task 8) liest denselben deterministischen `seed`.
+    world.insert_resource(plugin.seed_params);
+    seed_citizens(world, &plugin.sim_world, &plugin.seed_params);
 
     schedule.add_systems(
         (

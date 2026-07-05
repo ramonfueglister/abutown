@@ -386,9 +386,9 @@ pub fn seed_citizens(world: &mut World, sim: &SimWorld, p: &SeedParams) -> u64; 
 ```
 - Regeln: Wohnkapazität = `floor(area_m2 * floors / 40)` mit `floors = max(1, round(height_m / 3))`; Arbeitsplatz = nächstgelegenes Workplace-Gebäude gewichtet mit `u01(seed, citizen_id, 0xW0RK)` über die 8 nächsten (Distanz-Rang-Gewichte 8..1); alle Draws via `traffic_core::u01`.
 
-- [ ] **Step 1: Failing tests**: (a) Fixture aus Task 2 (1 Wohnhaus 200m²/3 Geschosse → 15 Bürger, alle home=B1, work=A2); (b) Determinismus: zweimal seeden auf frischen Welten → identische `(id, home, work)`-Tripel; (c) Idempotenz: zweiter `seed_citizens`-Aufruf auf derselben Welt → count unverändert.
-- [ ] **Step 2:** FAIL → implementieren → PASS. `HouseholdSector.population` = count setzen (Wirtschafts-Kopplung).
-- [ ] **Step 3: Commit** — `git commit -m "feat(world-core): deterministic citizen seeding into real buildings"`.
+- [x] **Step 1: Failing tests**: (a) Fixture aus Task 2 (1 Wohnhaus 200m²/3 Geschosse → 15 Bürger, alle home=B1, work=A2); (b) Determinismus: zweimal seeden auf frischen Welten → identische `(id, home, work)`-Tripel; (c) Idempotenz: zweiter `seed_citizens`-Aufruf auf derselben Welt → count unverändert.
+- [x] **Step 2:** FAIL → implementieren → PASS. `HouseholdSector.population` = count setzen (Wirtschafts-Kopplung).
+- [x] **Step 3: Commit** — `git commit -m "feat(world-core): deterministic citizen seeding into real buildings"`.
 
 ### Task 8: Tagesrhythmus auf der WorldClock
 
