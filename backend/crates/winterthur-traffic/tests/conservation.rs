@@ -51,12 +51,13 @@ fn make_schedule(name: &str, net_json: &str, weekday: &[TripRecord]) -> TripSche
 fn conservation_holds_with_gateway_sinks_on_fixture() {
     let json = fixture_json();
     let net = traffic_net::load(&json).expect("diamond-gateway fixture must validate");
-    // Steady demand over the whole run: departures every sim-second from
-    // 07:30:00 (= 27 000 s) for 450 s, all through-traffic gateway→gateway
+    // Steady demand over the whole run: departures every 6 WORLD seconds
+    // (= 1 real second at the 6× world clock, Task 9) from 07:30:00
+    // (= 27 000 s) for 450 releases, all through-traffic gateway→gateway
     // (origin lane 0 leaves gateway node 0; dest lane 5 ends at gateway 5).
     let trips: Vec<TripRecord> = (0..450)
         .map(|k| TripRecord {
-            departure_s: 27_000 + k,
+            departure_s: 27_000 + 6 * k,
             origin_lane: 0,
             dest_lane: 5,
             segment: output::SEGMENT_THROUGH,
@@ -70,6 +71,7 @@ fn conservation_holds_with_gateway_sinks_on_fixture() {
         schedule,
         common::workday_clock("07:30"),
         SpawnerCfg::default(),
+        None,
     );
 
     for block in 1..=10u32 {

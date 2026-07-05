@@ -335,6 +335,32 @@ impl Core {
         self.net.lanes[lane as usize].edge
     }
 
+    /// Length (m) of `lane`, from the precomputed dense table. Read-only seam
+    /// for consumers that need to detect "at the end of a lane" (e.g. the
+    /// citizen-trip bridge's destination-edge arrival check).
+    pub fn lane_len(&self, lane: u32) -> f32 {
+        self.lane_len[lane as usize]
+    }
+
+    /// Remove an alive vehicle from the kernel outside the tick's own
+    /// end-of-route path (external consumer despawn, e.g. the citizen-trip
+    /// bridge freeing a car that reached its destination edge). Returns
+    /// `false` for a free/out-of-range slot. Rebuilds the occupancy index so
+    /// the next tick's phase 1 never sees the freed slot as a ghost leader.
+    ///
+    /// Deliberately NOT added to [`Core::despawned_last_tick`]: that buffer is
+    /// the kernel's own end-of-route observation seam; external despawns are
+    /// the caller's bookkeeping.
+    pub fn despawn(&mut self, veh: VehId) -> bool {
+        let i = veh as usize;
+        if i >= self.fleet.slots() || !self.fleet.alive[i] {
+            return false;
+        }
+        self.fleet.free(veh);
+        self.index.rebuild(&self.fleet);
+        true
+    }
+
     /// Read-only view of an alive vehicle's `(lane, edge)` and remaining route
     /// as edge ids, for the server's re-routing / snapshot seam. Returns `None`
     /// for a free slot.

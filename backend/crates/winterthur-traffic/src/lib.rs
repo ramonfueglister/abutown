@@ -17,5 +17,7 @@ pub mod measure;
 pub mod router;
 pub mod shell;
 pub mod spawner;
+pub mod trip_router;
 
 pub use router::Router;
+pub use trip_router::ChTripRouter;

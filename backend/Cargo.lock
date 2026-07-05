@@ -3767,6 +3767,7 @@ dependencies = [
  "tracing-subscriber",
  "traffic-core",
  "traffic-net",
+ "world-core",
 ]
 
 [[package]]
@@ -3873,6 +3874,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "traffic-core",
+ "traffic-net",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@
 //! pure Funktion von `(seed, citizen_id, kontext)`, nie ein stateful RNG.
 
 pub mod rhythm;
+pub mod trips;
 
 use std::collections::BTreeMap;
 

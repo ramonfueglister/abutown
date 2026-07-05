@@ -268,6 +268,7 @@ async fn reused_slots_get_distinct_wire_ids() {
         empty_schedule_for(&json),
         workday_clock("07:30"),
         SpawnerCfg::default(),
+        None,
     );
     world.insert_resource(make_publisher(grid.clone(), registry.clone()));
     let port = start_server(registry.clone(), grid.cell_count()).await;

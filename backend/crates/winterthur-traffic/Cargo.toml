@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 traffic-net = { path = "../traffic-net" }
 traffic-core = { path = "../traffic-core" }
+world-core = { path = "../world-core" }
 abutown-protocol = { path = "../protocol" }
 anyhow.workspace = true
 blake3.workspace = true

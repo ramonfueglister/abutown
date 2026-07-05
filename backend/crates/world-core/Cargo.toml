@@ -12,3 +12,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 traffic-core = { path = "../traffic-core" }
+
+[dev-dependencies]
+traffic-net = { path = "../traffic-net" }

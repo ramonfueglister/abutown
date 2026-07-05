@@ -108,8 +108,10 @@ async fn main() -> anyhow::Result<()> {
 
     let registry = Registry::new();
     let cell_count = grid.cell_count();
+    // Traffic-only binary: the world-sim extension (citizens + economy) is
+    // wired by the sim-server (Task 13), not here.
     let (mut world, schedule) =
-        shell::build_sim(net, seed, trips, clock, SpawnerCfg { demand_scale });
+        shell::build_sim(net, seed, trips, clock, SpawnerCfg { demand_scale }, None);
     world.insert_resource(make_publisher(grid, registry.clone()));
 
     let extra = gateway::router(registry, cell_count);

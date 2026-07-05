@@ -57,5 +57,12 @@ pub fn build_real_sim(seed: u64, at: &str) -> (World, Schedule) {
     let json = load_real_net_json();
     let net = load_real_net(&json);
     let trips = load_real_trips(&json);
-    shell::build_sim(net, seed, trips, workday_clock(at), SpawnerCfg::default())
+    shell::build_sim(
+        net,
+        seed,
+        trips,
+        workday_clock(at),
+        SpawnerCfg::default(),
+        None,
+    )
 }

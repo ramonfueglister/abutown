@@ -430,11 +430,11 @@ pub fn arrivals_system(/* Driving: vehicle_view none/route-Ende → Ankunft; Wal
 ```
 - Modus-Wahl: Distanz (euklidisch home→ziel) > 800 m UND beide Gebäude mit access_edge ⇒ Auto, sonst Walk. Auto-Route: CH-Router von access_edge(from) zu access_edge(to); scheitert Routing ⇒ Walk-Fallback (einziger erlaubter Fallback — Netz-Inseln sind real).
 
-- [ ] **Step 1: Failing test** `backend/crates/world-core/tests/trips.rs` mit dem Test-Fixture-Netz `backend/crates/traffic-core/tests/fixtures/diamond-gateway.json`: 1 Bürger, home/work an zwei Netz-Kanten >800m, ToWork-Request → nach `dispatch` existiert 1 Fahrzeug im Core; Route bis Ende ticken → `arrivals_system` setzt `CitizenState::AtWork`, Fahrzeug despawnt.
-- [ ] **Step 2:** FAIL → implementieren → PASS.
-- [ ] **Step 3: Zweiter Test:** kurzer Weg (<800m) → kein Fahrzeug, `WalkingUntil` korrekt (`dauer = dist/1.4*10 ticks`), nach Ablauf AtWork.
-- [ ] **Step 4:** Shell-Integration: Systeme in `shell::build_sim`-Schedule einhängen (Signatur um `Option<WorldCorePlugin>` erweitern; Traffic-only-Betrieb bleibt für bestehende Tests/Binary möglich). Bestehende winterthur-traffic-Tests bleiben grün (`scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p winterthur-traffic`).
-- [ ] **Step 5: Commit** — `git commit -m "feat: citizens drive real trips through the traffic core"`.
+- [x] **Step 1: Failing test** `backend/crates/world-core/tests/trips.rs` mit dem Test-Fixture-Netz `backend/crates/traffic-core/tests/fixtures/diamond-gateway.json`: 1 Bürger, home/work an zwei Netz-Kanten >800m, ToWork-Request → nach `dispatch` existiert 1 Fahrzeug im Core; Route bis Ende ticken → `arrivals_system` setzt `CitizenState::AtWork`, Fahrzeug despawnt.
+- [x] **Step 2:** FAIL → implementieren → PASS.
+- [x] **Step 3: Zweiter Test:** kurzer Weg (<800m) → kein Fahrzeug, `WalkingUntil` korrekt (`dauer = dist/1.4*10 ticks`), nach Ablauf AtWork.
+- [x] **Step 4:** Shell-Integration: Systeme in `shell::build_sim`-Schedule einhängen (Signatur um `Option<WorldCorePlugin>` erweitern; Traffic-only-Betrieb bleibt für bestehende Tests/Binary möglich). Bestehende winterthur-traffic-Tests bleiben grün (`scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p winterthur-traffic`).
+- [x] **Step 5: Commit** — `git commit -m "feat: citizens drive real trips through the traffic core"`.
 
 ---
 

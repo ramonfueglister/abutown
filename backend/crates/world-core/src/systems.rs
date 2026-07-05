@@ -12,9 +12,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemParam;
+use bevy_ecs::schedule::ScheduleConfigs;
+use bevy_ecs::system::{ScheduleSystem, SystemParam};
 
 use crate::citizens::rhythm::{TripRequests, rhythm_system};
+use crate::citizens::trips::{ActiveTrips, CitizenCarCounters};
 use crate::citizens::{SeedParams, seed_citizens};
 use crate::clock::WorldClock;
 use crate::econ::{
@@ -57,10 +59,16 @@ pub struct WorldCorePlugin {
     pub seed_params: SeedParams,
 }
 
-/// Insert all world/economy resources, seed the economy from the authored
-/// seed (idempotent — safe on the hydrate path), and register the tick
-/// systems. Seed failure is a boot-time authoring/config bug ⇒ panic.
-pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin: &WorldCorePlugin) {
+/// Insert all world/economy resources and seed economy + citizens from the
+/// authored seed (idempotent — safe on the hydrate path). Seed failure is a
+/// boot-time authoring/config bug ⇒ panic.
+///
+/// Split out of [`install_world_systems`] so the traffic shell
+/// (`winterthur-traffic`) can install the resources and then weave the
+/// world systems into ITS one deterministic chain (rhythm/trip systems must
+/// interleave with the traffic systems in a fixed order — two independent
+/// chained tuples in one schedule would be unordered relative to each other).
+pub fn install_world_resources(world: &mut World, plugin: &WorldCorePlugin) {
     world.init_resource::<WorldClock>();
     world.init_resource::<EconomyConfig>();
     world.init_resource::<CapitaFactor>();
@@ -79,6 +87,8 @@ pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin:
     world.init_resource::<FlowRateEwma>();
     world.init_resource::<LastTickMoney>();
     world.init_resource::<TripRequests>();
+    world.init_resource::<ActiveTrips>();
+    world.init_resource::<CitizenCarCounters>();
     world.insert_resource(SharedSimWorld(Arc::clone(&plugin.sim_world)));
 
     econ::seed::seed_economy(world, &plugin.seed, &plugin.sim_world)
@@ -90,27 +100,49 @@ pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin:
     // Tagesrhythmus (Task 8) liest denselben deterministischen `seed`.
     world.insert_resource(plugin.seed_params);
     seed_citizens(world, &plugin.sim_world, &plugin.seed_params);
+}
 
+/// The econ tick chain (harvested order, ending in the fail-fast SFC audit)
+/// as ONE internally-chained set, so the traffic shell can splice it into its
+/// own deterministic system order without re-listing the 13 systems.
+pub fn econ_systems() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        reset_seller_receipts_system,
+        expire_orders_system,
+        run_regen_system,
+        run_production_system,
+        generate_pool_orders_system,
+        clear_dirty_markets_system,
+        run_macro_flow_system,
+        run_pay_wages_system,
+        run_distribute_profit_system,
+        run_consumption_system,
+        run_adjust_reservation_prices_system,
+        run_consumption_update_system,
+        run_tick_audit_system,
+    )
+        .chain()
+        .into_configs()
+}
+
+/// Insert all world/economy resources, seed the economy from the authored
+/// seed (idempotent — safe on the hydrate path), and register the tick
+/// systems. Standalone wiring (world-core tests / a traffic-less world): the
+/// traffic shell instead calls [`install_world_resources`] + [`econ_systems`]
+/// and splices rhythm/trip systems into its own chain (Task 9).
+pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin: &WorldCorePlugin) {
+    install_world_resources(world, plugin);
     schedule.add_systems(
         (
-            advance_world_clock_system,
-            // Tagesrhythmus: JEDEN Tick (nicht econ-cadenced), direkt nach
-            // der Uhr und vor der Econ-Kette — Bürger reagieren auf die
-            // frisch avancierte Weltzeit.
-            rhythm_system,
-            reset_seller_receipts_system,
-            expire_orders_system,
-            run_regen_system,
-            run_production_system,
-            generate_pool_orders_system,
-            clear_dirty_markets_system,
-            run_macro_flow_system,
-            run_pay_wages_system,
-            run_distribute_profit_system,
-            run_consumption_system,
-            run_adjust_reservation_prices_system,
-            run_consumption_update_system,
-            run_tick_audit_system,
+            (
+                advance_world_clock_system,
+                // Tagesrhythmus: JEDEN Tick (nicht econ-cadenced), direkt nach
+                // der Uhr und vor der Econ-Kette — Bürger reagieren auf die
+                // frisch avancierte Weltzeit.
+                rhythm_system,
+            )
+                .chain(),
+            econ_systems(),
         )
             .chain(),
     );
