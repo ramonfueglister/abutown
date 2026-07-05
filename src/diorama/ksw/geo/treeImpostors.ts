@@ -12,13 +12,15 @@
 // Coordinate / convention notes (self-review anchors):
 //  - hemiOctUv / viewDirFor are pure and round-trip exactly (unit-tested). They
 //    speak GRID-CELL space: (0..OCT_GRID-1)², zenith → center, horizon → border.
-//  - The per-instance world position is carried in an `aCenter`
-//    InstancedBufferAttribute (x,0,z), NOT read from the instanceMatrix
-//    translation node: this three build's TSL reads per-instance world position
-//    from attributes/storage buffers (see agentMeshes.ts), so we follow the
-//    same route the brief blessed as the accepted equivalent. Scale still lives
-//    in the instanceMatrix, composed byte-identically to treeLayer's full mesh
-//    so the silhouette lines up across the LOD swap.
+//  - Per-instance transform is carried ENTIRELY in attributes, not the
+//    instanceMatrix (which stays identity — three applies it on top of
+//    positionNode, so a matrix scale would also scale the node's translation;
+//    same identity-matrix pattern as agentMeshes.ts): `aCenter` = world
+//    (x,0,z), `aSize` = world (2·r, h·squash). Those are exactly the full
+//    mesh's world extents under treeLayer's compose (geometry reach
+//    ±crownRadius × y∈[0,1], scale (r/crownRadius, h·squash)), and the bake
+//    frames precisely that envelope edge-to-edge — silhouettes line up across
+//    the LOD swap.
 //  - Atlas UV: cell (cx,cy) occupies texels [cx·CELL_PX .. +CELL_PX) in X and
 //    [cy·CELL_PX .. +CELL_PX) in Y, TOP-DOWN in atlas-layout space (row 0 = top).
 //    WebGPU render targets are bottom-up in NDC, so when baking we place cell
@@ -49,7 +51,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { kswCity, kswCityStyle } from '../../designTokens';
-import { allArchetypes, type TreeArchetype } from './treeArchetypes';
+import type { TreeArchetype } from './treeArchetypes';
 import type { TreeInstance } from './treeLayer';
 
 export const OCT_GRID = 4; // 4×4 hemi-octahedral views per archetype
@@ -195,25 +197,28 @@ export async function bakeImpostorAtlas(
 
     const blockCol = a % layout.blockCols;
     const blockRow = Math.floor(a / layout.blockCols);
-    // half-width of the ortho frustum: crownRadius reaches ±crownRadius, plus a
-    // hair of margin; height is the unit envelope (1), width 2×crownRadius.
-    const halfW = arch.crownRadius * 1.05;
-    const halfH = 0.55; // covers y 0..1 around target y=0.5 with margin
 
     for (let iy = 0; iy < OCT_GRID; iy++) {
       for (let ix = 0; ix < OCT_GRID; ix++) {
         const dir = viewDirFor(ix, iy);
-        // camera sits along +dir looking at the tree center.
+        // camera sits along +dir looking at the tree center. dir is never
+        // exactly (0,1,0) at any cell center, so lookAt's up=(0,1,0) is safe.
         cam.position.copy(target).addScaledVector(dir, 3);
         cam.up.set(0, 1, 0);
         cam.lookAt(target);
-        // near-square ortho; keep aspect so the tree isn't stretched. We frame
-        // a square cell, so use the max half-extent for both axes.
-        const half = Math.max(halfW, halfH);
-        cam.left = -half;
-        cam.right = half;
-        cam.top = half;
-        cam.bottom = -half;
+        // Frame the EXACT unit envelope, edge-to-edge — no margin, no square
+        // floor: width 2·crownRadius (the tree's true horizontal reach) and
+        // height 1 (y∈[0,1], target y=0.5 → ±0.5). The draw quad maps its uv
+        // 0..1 onto the full cell and is sized to the SAME world box
+        // (aSize = (2r, h·squash), see buildImpostorMesh), so the baked
+        // silhouette lands exactly where the full mesh's does at the handoff.
+        cam.left = -arch.crownRadius;
+        cam.right = arch.crownRadius;
+        cam.top = 0.5;
+        cam.bottom = -0.5;
+        // near/far safely enclose the unit envelope for all 16 view dirs: the
+        // camera is 3 away from target, the geometry's bounding radius around
+        // the target is < 1, so depths span [2, 4] ⊂ [0.01, 10].
         cam.near = 0.01;
         cam.far = 10;
         cam.updateProjectionMatrix();
@@ -269,8 +274,8 @@ export function buildImpostorMesh(
   // WebGPU zero-buffer rule: at least one instance of capacity.
   const cap = Math.max(1, instances.length);
 
-  // Unit quad anchored at y 0..1 (matches the normalized tree envelope): the
-  // instance scale (below) turns it into a world-height billboard.
+  // Unit quad anchored at y 0..1 (matches the normalized tree envelope);
+  // per-instance aSize (below) turns it into the world-sized billboard.
   const quad = new THREE.PlaneGeometry(1, 1);
   quad.translate(0, 0.5, 0); // y 0..1
 
@@ -278,14 +283,17 @@ export function buildImpostorMesh(
   const centerArr = new Float32Array(cap * 3); // world (x,0,z)
   const archArr = new Float32Array(cap); // archetype id (float)
   const tintArr = new Float32Array(cap * 3); // per-instance tint
+  const sizeArr = new Float32Array(cap * 2); // world (width, height) of the billboard
   const centerAttr = new THREE.InstancedBufferAttribute(centerArr, 3);
   const archAttr = new THREE.InstancedBufferAttribute(archArr, 1);
   const tintAttr = new THREE.InstancedBufferAttribute(tintArr, 3);
+  const sizeAttr = new THREE.InstancedBufferAttribute(sizeArr, 2);
   // Runtime-typed nodes: @types/three r185 models these as opaque Node<string>
   // without swizzle/op methods (same situation treeLayer/agentMeshes document).
   const aCenter: Node = instancedBufferAttribute(centerAttr, 'vec3');
   const aArch: Node = instancedBufferAttribute(archAttr, 'float');
   const aTint: Node = instancedBufferAttribute(tintAttr, 'vec3');
+  const aSize: Node = instancedBufferAttribute(sizeAttr, 'vec2');
   const camPos: Node = cameraPosition;
   const posLocal: Node = positionLocal;
   const quadUvN: Node = uv();
@@ -294,24 +302,32 @@ export function buildImpostorMesh(
   const atlasTex: Node = texture(atlas);
 
   // ── positionNode: cylindrical (yaw-only) billboard toward the camera ─────
-  // Instance world position from aCenter; yaw so the quad's +z faces the
-  // camera on the ground plane; height/width from the instanceMatrix scale.
+  // Sizing scheme (must agree with the bake, which frames the exact unit
+  // envelope edge-to-edge — width 2·crownRadius × height 1): the quad is a
+  // shared unit plane (x∈[−½,½], y∈[0,1]) and the WORLD billboard box comes
+  // from the per-instance aSize = (2·r, h·squash) — i.e. half-width r and
+  // height h·squash, exactly the full mesh's world extents (its geometry
+  // reaches ±crownRadius × y∈[0,1], scaled by (r/crownRadius, h·squash)). The
+  // instanceMatrix stays IDENTITY (agentMeshes pattern): three applies it on
+  // top of positionNode, so any non-identity scale would also scale the
+  // aCenter translation — everything lives in the node instead.
   const toCam: Node = vec3(camPos.x.sub(aCenter.x), float(0), camPos.z.sub(aCenter.z));
   const yaw: Node = atan(toCam.x, toCam.z); // yaw about +y, +z toward camera
   const cy = cos(yaw);
   const sy = sin(yaw);
-  // local quad point (x,y,0) after per-instance scale in the instance matrix is
-  // applied by three; we rotate its x/z by yaw then translate to aCenter.
+  // world-sized quad point before yaw: (x·width, y·height, 0)
   const p: Node = posLocal;
-  const rx = p.x.mul(cy).add(p.z.mul(sy));
-  const rz = p.z.mul(cy).sub(p.x.mul(sy));
+  const wx = p.x.mul(aSize.x);
+  const wy = p.y.mul(aSize.y);
+  const rx = wx.mul(cy); // plane z = 0, so the yaw rotation reduces to this
+  const rz = wx.negate().mul(sy);
 
   // Near collapse: inside NEAR_COLLAPSE the full mesh takes over, so shrink the
   // impostor to zero (step is 0 below the radius, 1 above).
   const dist = length2Node(camPos, aCenter);
   const vis = step(float(NEAR_COLLAPSE), dist);
 
-  material.positionNode = vec3(rx.mul(vis).add(aCenter.x), p.y.mul(vis), rz.mul(vis).add(aCenter.z));
+  material.positionNode = vec3(rx.mul(vis).add(aCenter.x), wy.mul(vis), rz.mul(vis).add(aCenter.z));
 
   // ── UV: pick the hemi-oct cell for this view dir, offset into the atlas ──
   // View dir = camera − instance center (normalized), upper hemisphere.
@@ -354,20 +370,16 @@ export function buildImpostorMesh(
   mesh.receiveShadow = false;
   mesh.frustumCulled = false; // always visible; near-collapse handles the near set
 
-  // Fill per-instance data + the scale-only instance matrix (byte-identical
-  // compose to treeLayer's full mesh: pos (x,0,z), scale (r/cr, h·squash, r/cr)).
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const pos = new THREE.Vector3();
-  const scl = new THREE.Vector3();
-  const archetypes = allArchetypes();
+  // Fill per-instance data. The instanceMatrix stays identity — position and
+  // sizing are fully carried by aCenter/aSize in the positionNode (see above);
+  // aSize reproduces treeLayer's compose extents: world half-width r, world
+  // height h·squash.
+  const identity = new THREE.Matrix4();
+  for (let i = 0; i < cap; i++) mesh.setMatrixAt(i, identity);
   for (let i = 0; i < instances.length; i++) {
     const inst = instances[i];
-    const s = inst.spec.r / archetypes[inst.archetype].crownRadius;
-    pos.set(0, 0, 0); // translation lives in aCenter; matrix carries scale only
-    scl.set(s, inst.spec.h * inst.squash, s);
-    m.compose(pos, q, scl);
-    mesh.setMatrixAt(i, m);
+    sizeArr[i * 2] = inst.spec.r * 2; // world billboard width (half-width = r)
+    sizeArr[i * 2 + 1] = inst.spec.h * inst.squash; // world billboard height
     centerArr[i * 3] = inst.spec.x;
     centerArr[i * 3 + 1] = 0;
     centerArr[i * 3 + 2] = inst.spec.z;
