@@ -499,9 +499,9 @@ impl WorldStore {
 ```
 - Boot-Log-Vertrag (der Resume-Beweis, exakt): `tracing::info!(tick, "resuming world-core from persisted snapshot")` bzw. `"seeding fresh world-core state"`.
 
-- [ ] **Step 1: Failing opt-in-Test:** write→read Roundtrip gegen lokale PG (Version bleibt, tick stimmt); read auf fremder world_id → None; write mit höherem tick überschreibt.
-- [ ] **Step 2:** FAIL (gegen lokale Postgres laufen lassen) → implementieren (SQL-Muster exakt wie `postgres_economy.rs` aus bbd0159, siehe Harvest-Report §7) → PASS.
-- [ ] **Step 3: Commit** — `git commit -m "feat(sim-server): world_core_snapshots store with boot resume"`.
+- [x] **Step 1: Failing opt-in-Test:** write→read Roundtrip gegen lokale PG (Version bleibt, tick stimmt); read auf fremder world_id → None; write mit höherem tick überschreibt.
+- [x] **Step 2:** FAIL (gegen lokale Postgres laufen lassen) → implementieren (SQL-Muster exakt wie `postgres_economy.rs` aus bbd0159, siehe Harvest-Report §7) → PASS.
+- [x] **Step 3: Commit** — `git commit -m "feat(sim-server): world_core_snapshots store with boot resume"`.
 
 ---
 

@@ -2458,6 +2458,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "world-core",
 ]
 
 [[package]]

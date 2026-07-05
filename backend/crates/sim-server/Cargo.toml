@@ -29,6 +29,7 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+world-core = { path = "../world-core" }
 
 [dev-dependencies]
 http-body-util.workspace = true
