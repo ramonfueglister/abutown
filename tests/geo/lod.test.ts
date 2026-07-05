@@ -26,32 +26,27 @@ describe('applyCityLod', () => {
       setFacadeDetail,
       lamps: { visible: true } as CityLodRefs['lamps'],
       footways: { visible: true } as CityLodRefs['footways'],
-      treesFull: [{ visible: true } as never, { visible: true } as never],
-      // two impostor meshes since Task 14: broad 4-puff + conifer cone
-      treeImpostors: [{ visible: false } as never, { visible: false } as never],
+      // Trees no longer ring-toggle visibility (compaction + vertex collapse
+      // handle distance LOD); the ring only drives tree shadows.
       setTreeShadows,
     };
   }
 
-  it('far: facade detail off + hides lamps/footways/full-trees, shows impostors, shadows off', () => {
+  it('far: facade detail off + hides lamps/footways, shadows off', () => {
     const refs = makeRefs();
     applyCityLod('far', refs);
     expect(refs.setFacadeDetail).toHaveBeenCalledWith(false);
     expect(refs.lamps?.visible).toBe(false);
     expect(refs.footways?.visible).toBe(false);
-    expect(refs.treesFull.every((t) => t.visible === false)).toBe(true);
-    expect(refs.treeImpostors.every((t) => t.visible === true)).toBe(true);
     expect(refs.setTreeShadows).toHaveBeenCalledWith(false);
   });
 
-  it('mid: facade detail on + shows footways/lamps + full trees, impostors off, shadows off', () => {
+  it('mid: facade detail on + shows footways/lamps, shadows off', () => {
     const refs = makeRefs();
     applyCityLod('mid', refs);
     expect(refs.setFacadeDetail).toHaveBeenCalledWith(true);
     expect(refs.lamps?.visible).toBe(true);
     expect(refs.footways?.visible).toBe(true);
-    expect(refs.treesFull.every((t) => t.visible === true)).toBe(true);
-    expect(refs.treeImpostors.every((t) => t.visible === false)).toBe(true);
     expect(refs.setTreeShadows).toHaveBeenCalledWith(false);
   });
 
@@ -61,8 +56,6 @@ describe('applyCityLod', () => {
     expect(refs.setFacadeDetail).toHaveBeenCalledWith(true);
     expect(refs.lamps?.visible).toBe(true);
     expect(refs.footways?.visible).toBe(true);
-    expect(refs.treesFull.every((t) => t.visible === true)).toBe(true);
-    expect(refs.treeImpostors.every((t) => t.visible === false)).toBe(true);
     expect(refs.setTreeShadows).toHaveBeenCalledWith(true);
   });
 
@@ -73,8 +66,6 @@ describe('applyCityLod', () => {
       setFacadeDetail,
       lamps: null,
       footways: { visible: true } as CityLodRefs['footways'],
-      treesFull: [],
-      treeImpostors: [],
       setTreeShadows,
     };
     expect(() => applyCityLod('far', refs)).not.toThrow();

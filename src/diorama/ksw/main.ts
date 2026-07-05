@@ -58,6 +58,10 @@ import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
 import { lampGlowU } from './glowUniform';
 import { buildNature } from './geo/nature';
+import { buildTreeLayer } from './geo/treeLayer';
+import { bakeImpostorAtlas, buildImpostorMesh } from './geo/treeImpostors';
+import { allArchetypes } from './geo/treeArchetypes';
+import { windAmpU } from './windUniform';
 import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
 import { TrafficClient, DEFAULT_TRAFFIC_WS } from '../traffic/trafficClient';
@@ -101,6 +105,14 @@ declare global {
       // top-down pitch (~1.5 rad) gives the capture harness a clear read on which
       // side of the road each car is on.
       lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => void;
+    };
+    // Dev tree-layer debug surface (unconditional): the archetype count, the
+    // live full-detail instance count (post-compaction), and the current
+    // weather-coupled wind amplitude. The tree browser smoke asserts on these.
+    __trees?: {
+      archetypes: number;
+      fullCount: () => number;
+      windAmp: () => number;
     };
   }
 }
@@ -601,16 +613,29 @@ async function boot(): Promise<void> {
   // Tree canopies default to no cast-shadow (nature.ts) — cheap far-field
   // trees don't need to punch holes in the sun's shadow map; the LOD ring
   // (Task 10) re-enables it for the near ring around the camera.
-  cityRoot.add(
-    buildNature(cityNature, {
-      excludeRect: {
-        x: interiorPlan.building.x,
-        z: interiorPlan.building.z,
-        w: interiorPlan.building.w,
-        d: interiorPlan.building.d,
-      },
-    }),
-  );
+  const heroRect = {
+    x: interiorPlan.building.x,
+    z: interiorPlan.building.z,
+    w: interiorPlan.building.w,
+    d: interiorPlan.building.d,
+  };
+  cityRoot.add(buildNature(cityNature, { excludeRect: heroRect }));
+  // Trees: the archetype tree layer (instanced full-detail near-set + octahedral
+  // impostor field). Same excludeRect as nature so the hero plate keeps its own
+  // authored trees. The impostor mesh is added after the renderer bakes its
+  // atlas (below); full trees + compaction are ready immediately.
+  const treeLayer = buildTreeLayer(cityNature.trees, { excludeRect: heroRect });
+  cityRoot.add(treeLayer.group);
+  // Bake the octahedral impostor atlas now that the renderer exists (it
+  // restores renderer state), then attach the far-field impostor mesh.
+  const treeAtlas = await bakeImpostorAtlas(renderer, allArchetypes());
+  treeLayer.group.add(buildImpostorMesh(treeLayer.instances, treeAtlas, allArchetypes().length));
+  // Dev tree-layer debug surface (unconditional) — the browser smoke reads it.
+  window.__trees = {
+    archetypes: allArchetypes().length,
+    fullCount: () => treeLayer.fullMeshes.reduce((s, m) => s + m.count, 0),
+    windAmp: () => windAmpU.value as number,
+  };
   cityRoot.add(buildWindows(cityBuildings));
   cityRoot.add(buildLamps(cityRoads));
   scene.add(cityRoot);
@@ -627,6 +652,13 @@ async function boot(): Promise<void> {
   const carLayer = trafficEnabled ? createCarLayer(groundYAt) : null;
   if (carLayer) cityRoot.add(carLayer.object3d);
   let lastTrafficCamUpdate = 0; // wall-clock seconds, throttled to ~2 Hz
+  // Tree near-set compaction: throttled like the traffic AOI update. Recompact
+  // when the camera moved > 5 m (planar) since the last compaction, or ≥ 500 ms
+  // passed and it moved at all. Uses the camera's world position, not rig.target.
+  treeLayer.compactNear(camera.position.x, camera.position.z);
+  let lastTreeCompaction = 0; // wall-clock seconds
+  let lastTreeCamX = camera.position.x;
+  let lastTreeCamZ = camera.position.z;
   if (trafficEnabled) {
     void TrafficClient.connect({ url: trafficWsUrl })
       .then((client) => {
@@ -682,18 +714,7 @@ async function boot(): Promise<void> {
     },
     lamps: cityRoot.getObjectByName('cityLamps') ?? null,
     footways: cityRoot.getObjectByName('footwayRibbons') ?? null,
-    treesFull: ['treeCanopies', 'treeConifers']
-      .map((n) => cityRoot.getObjectByName(n))
-      .filter((o): o is THREE.Object3D => o !== undefined),
-    treeImpostors: ['treeImpostors', 'treeImpostorsConifer']
-      .map((n) => cityRoot.getObjectByName(n))
-      .filter((o): o is THREE.Object3D => o !== undefined),
-    setTreeShadows: (on: boolean) => {
-      const canopies = cityRoot.getObjectByName('treeCanopies');
-      const conifers = cityRoot.getObjectByName('treeConifers');
-      if (canopies) canopies.castShadow = on;
-      if (conifers) conifers.castShadow = on;
-    },
+    setTreeShadows: (on: boolean) => treeLayer.setTreeShadows(on),
   };
   let cityRing = cityLodState(rig.radius, 'far');
   applyCityLod(cityRing, lodRefs);
@@ -1272,6 +1293,21 @@ async function boot(): Promise<void> {
         trafficClient.updateCamera(rig.target[0], rig.target[2]);
       }
       carLayer.update(trafficClient.net, trafficClient.vehicles, trafficClient.serverTick);
+    }
+    // ── tree near-set compaction: recompact when the camera moved > 5 m
+    // (planar) since the last compaction, or ≥ 500 ms passed and it moved.
+    {
+      const cx = camera.position.x;
+      const cz = camera.position.z;
+      const dx = cx - lastTreeCamX;
+      const dz = cz - lastTreeCamZ;
+      const moved2 = dx * dx + dz * dz;
+      if (moved2 > 25 || (t - lastTreeCompaction > 0.5 && moved2 > 1e-6)) {
+        lastTreeCompaction = t;
+        lastTreeCamX = cx;
+        lastTreeCamZ = cz;
+        treeLayer.compactNear(cx, cz);
+      }
     }
     frameCount++;
     // ── realtime environment: physical sun/moon/stars for now(), steered by
