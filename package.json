@@ -14,6 +14,7 @@
     "geo:fetch": "node scripts/geo/fetch-winterthur.mjs",
     "geo:bake": "node scripts/geo/bake-winterthur.mjs",
     "geo:bake-world": "node --max-old-space-size=6144 scripts/geo/bake-world.mjs",
+    "geo:bake-sim": "node --max-old-space-size=6144 scripts/geo/bake-sim-world.mjs",
     "geo:bake-traffic": "node scripts/geo/bake-traffic-net.mjs",
     "geo:fetch-demand": "node scripts/geo/fetch-demand-data.mjs"
   },

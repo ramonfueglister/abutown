@@ -78,7 +78,7 @@ Der Sim-Server braucht Gebäude (ID, Nutzung, Position, Fläche, Strassen-Zugang
 ```
   - `usage` = Usage-Enum aus world.proto (0–5), `x/z` = Footprint-Centroid in lokalen Metern (gleicher Anker), `access_edge/offset` = RoadGraph-Kante (graph.pb-Index) + Meter entlang der Kante.
 
-- [ ] **Step 1: Failing test schreiben** — `tests/geo/simworld.test.ts` (vitest, läuft nur wenn Datei existiert → Test prüft Existenz + Invarianten):
+- [x] **Step 1: Failing test schreiben** — `tests/geo/simworld.test.ts` (vitest, läuft nur wenn Datei existiert → Test prüft Existenz + Invarianten):
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -109,8 +109,8 @@ describe('simworld artifact', () => {
 });
 ```
 
-- [ ] **Step 2: Test laufen lassen** — `npx vitest run tests/geo/simworld.test.ts` → FAIL (Datei fehlt).
-- [ ] **Step 3: `scripts/geo/bake-sim-world.mjs` schreiben.** Kein neuer Fetch: das Script liest die GLEICHEN Zwischenprodukte wie `bake-world.mjs` (scratch/geo/…). Wenn `scratch/` fehlt, bricht es mit klarer Meldung ab (`npm run geo:fetch` zuerst). Struktur: kopiere aus `scripts/geo/bake-world.mjs` die Schritte Boundary→lokal, GDB-Gebäude-Extraktion, Usage-Klassifikation (die `usageNum()`-Regex-Zuordnung), Road-Graph-Bau und Access-Point-Berechnung (`scripts/geo/lib/access.mjs`) — aber statt Tiles zu enkodieren, schreibe pro Gebäude Centroid + Shoelace-Fläche:
+- [x] **Step 2: Test laufen lassen** — `npx vitest run tests/geo/simworld.test.ts` → FAIL (Datei fehlt).
+- [x] **Step 3: `scripts/geo/bake-sim-world.mjs` schreiben.** Kein neuer Fetch: das Script liest die GLEICHEN Zwischenprodukte wie `bake-world.mjs` (scratch/geo/…). Wenn `scratch/` fehlt, bricht es mit klarer Meldung ab (`npm run geo:fetch` zuerst). Struktur: kopiere aus `scripts/geo/bake-world.mjs` die Schritte Boundary→lokal, GDB-Gebäude-Extraktion, Usage-Klassifikation (die `usageNum()`-Regex-Zuordnung), Road-Graph-Bau und Access-Point-Berechnung (`scripts/geo/lib/access.mjs`) — aber statt Tiles zu enkodieren, schreibe pro Gebäude Centroid + Shoelace-Fläche:
 
 ```js
 function centroidAndArea(ring) {
@@ -126,8 +126,8 @@ function centroidAndArea(ring) {
 ```
 
 Output deterministisch: Gebäude nach `id` sortiert, Zahlen auf 2 Dezimalen gerundet (`Math.round(v*100)/100`), `JSON.stringify` mit stabiler Feldreihenfolge. Gate im Script: 20k–40k Gebäude, ≥90% mit access_edge, sonst `process.exit(1)`.
-- [ ] **Step 4: Backen + Test grün** — `npm run geo:fetch` falls scratch fehlt (dauert; siehe Memory diorama-smoke-needs-world-bake), dann `node scripts/geo/bake-sim-world.mjs`, dann `npx vitest run tests/geo/simworld.test.ts` → PASS. Zweiter Bake-Lauf → `git diff --stat data/winterthur/simworld.json` leer (Determinismus-Beweis).
-- [ ] **Step 5: package.json-Script `geo:bake-sim` ergänzen, committen** — `git add scripts/geo/bake-sim-world.mjs data/winterthur/simworld.json tests/geo/simworld.test.ts package.json && git commit -m "feat(geo): bake compact simworld artifact for world-core"`.
+- [x] **Step 4: Backen + Test grün** — `npm run geo:fetch` falls scratch fehlt (dauert; siehe Memory diorama-smoke-needs-world-bake), dann `node scripts/geo/bake-sim-world.mjs`, dann `npx vitest run tests/geo/simworld.test.ts` → PASS. Zweiter Bake-Lauf → `git diff --stat data/winterthur/simworld.json` leer (Determinismus-Beweis).
+- [x] **Step 5: package.json-Script `geo:bake-sim` ergänzen, committen** — `git add scripts/geo/bake-sim-world.mjs data/winterthur/simworld.json tests/geo/simworld.test.ts package.json && git commit -m "feat(geo): bake compact simworld artifact for world-core"`.
 
 ### Task 2: Crate `world-core` + `SimWorld`-Loader
 
