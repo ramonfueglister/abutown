@@ -157,7 +157,11 @@ Replaces the v1 synthetic spawner (`winterthur-traffic/src/spawner.rs`).
 - **Dev override:** server flag/env `ABUTOWN_TRAFFIC_AT=HH:MM` fixes
   `boot_s_of_day` for tests and demos — the backend counterpart of the
   frontend's `?at=` (#120). The two are independent by design; smoke
-  scripts set both.
+  scripts set both. Extended form `YYYY-MM-DDTHH:MM` additionally pins the
+  boot *date* (and with it `day_kind`): `day_kind` is part of the
+  determinism anchor above, so a reproducible harness (the browser smoke)
+  must pin it — an `HH:MM`-only override silently flips workday↔weekend
+  demand with the run day.
 - Routing, re-routing, measured live weights: unchanged from v1.
 
 ## 6. Stage 2 — far LOD (aggregate flow channel)

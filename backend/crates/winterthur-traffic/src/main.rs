@@ -16,8 +16,10 @@
 //!  * `TRIPS_BIN` — path to the census trip table (default
 //!    `data/winterthur/trips.bin`); must have been baked against the exact
 //!    `TRAFFICNET_JSON` bytes (net-hash checked, hard error on mismatch).
-//!  * `ABUTOWN_TRAFFIC_AT` — dev override `HH:MM`: fixes the boot
-//!    time-of-day (Europe/Zurich) for demos/tests; malformed = hard error.
+//!  * `ABUTOWN_TRAFFIC_AT` — dev override `HH:MM` (fixes the boot
+//!    time-of-day, Europe/Zurich; real date) or `YYYY-MM-DDTHH:MM` (also
+//!    pins the boot date, and with it `day_kind` — required for
+//!    reproducible harnesses); malformed = hard error.
 //!  * `DEMAND_SCALE` — f32 trip-thinning factor (default `1.0`).
 //!  * `TRAFFIC_SEED` — u64 sim seed (default `0`).
 //!  * `TRAFFIC_PORT` — health endpoint port (default `8790`).
@@ -59,10 +61,9 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => 1.0,
     };
     let override_at = match std::env::var("ABUTOWN_TRAFFIC_AT") {
-        Ok(s) => Some(
-            clock::parse_hhmm(&s)
-                .ok_or_else(|| anyhow::anyhow!("ABUTOWN_TRAFFIC_AT {s:?} is not HH:MM"))?,
-        ),
+        Ok(s) => Some(clock::parse_at(&s).ok_or_else(|| {
+            anyhow::anyhow!("ABUTOWN_TRAFFIC_AT {s:?} is not HH:MM or YYYY-MM-DDTHH:MM")
+        })?),
         Err(_) => None,
     };
 
@@ -74,7 +75,11 @@ async fn main() -> anyhow::Result<()> {
     // The census trip table must match the exact net bytes we just loaded.
     let trips = TripSchedule::load(std::path::Path::new(&trips_path), json.as_bytes())
         .map_err(|e| anyhow::anyhow!("load {trips_path}: {e}"))?;
-    let clock = WallClock::new(chrono::Utc::now(), override_at);
+    let clock = match override_at {
+        Some(clock::AtOverride::DateTime(date, time)) => WallClock::anchored(date, time),
+        Some(clock::AtOverride::Time(time)) => WallClock::new(chrono::Utc::now(), Some(time)),
+        None => WallClock::new(chrono::Utc::now(), None),
+    };
 
     tracing::info!(
         edges = net.edges.len(),

@@ -39,6 +39,28 @@ pub fn parse_hhmm(s: &str) -> Option<NaiveTime> {
     NaiveTime::parse_from_str(s, "%H:%M").ok()
 }
 
+/// A parsed `ABUTOWN_TRAFFIC_AT` dev override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AtOverride {
+    /// `HH:MM` — fixes the boot time-of-day, keeps the real local date
+    /// (spec §5; `day_kind` still tracks the actual calendar).
+    Time(NaiveTime),
+    /// `YYYY-MM-DDTHH:MM` — fixes BOTH the boot time-of-day and the boot
+    /// date. `day_kind` is part of the determinism anchor
+    /// `(seed, trips.bin, boot_s_of_day, day_kind)`, so reproducible
+    /// harnesses (the browser smoke) must pin the date too — an `HH:MM`-only
+    /// override silently flips workday↔weekend demand with the run day.
+    DateTime(NaiveDate, NaiveTime),
+}
+
+/// Parse `ABUTOWN_TRAFFIC_AT` in either supported form (see [`AtOverride`]).
+pub fn parse_at(s: &str) -> Option<AtOverride> {
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
+        return Some(AtOverride::DateTime(dt.date(), dt.time()));
+    }
+    parse_hhmm(s).map(AtOverride::Time)
+}
+
 /// Wall-clock anchor captured at boot, in Europe/Zurich local time.
 #[derive(Debug, Clone, Copy)]
 pub struct WallClock {
@@ -58,6 +80,16 @@ impl WallClock {
         WallClock {
             boot_s_of_day: time.num_seconds_from_midnight(),
             boot_date: local.date_naive(),
+        }
+    }
+
+    /// Anchor the clock at a FIXED local date + time-of-day (the
+    /// [`AtOverride::DateTime`] form) — fully reproducible independent of
+    /// the wall clock at launch.
+    pub fn anchored(date: NaiveDate, time: NaiveTime) -> WallClock {
+        WallClock {
+            boot_s_of_day: time.num_seconds_from_midnight(),
+            boot_date: date,
         }
     }
 
@@ -109,6 +141,38 @@ mod tests {
         assert_eq!(parse_hhmm("24:00"), None);
         assert_eq!(parse_hhmm("7h30"), None);
         assert_eq!(parse_hhmm(""), None);
+    }
+
+    #[test]
+    fn parse_at_accepts_both_forms() {
+        assert_eq!(
+            parse_at("07:30"),
+            Some(AtOverride::Time(NaiveTime::from_hms_opt(7, 30, 0).unwrap()))
+        );
+        assert_eq!(
+            parse_at("2026-07-03T07:30"),
+            Some(AtOverride::DateTime(
+                NaiveDate::from_ymd_opt(2026, 7, 3).unwrap(),
+                NaiveTime::from_hms_opt(7, 30, 0).unwrap()
+            ))
+        );
+        assert_eq!(parse_at("2026-07-03"), None);
+        assert_eq!(parse_at("garbage"), None);
+    }
+
+    #[test]
+    fn anchored_fixes_date_and_day_kind_independent_of_launch_day() {
+        // Friday 2026-07-03 pinned: workday demand, whatever day it runs on.
+        let clock = WallClock::anchored(
+            NaiveDate::from_ymd_opt(2026, 7, 3).unwrap(),
+            NaiveTime::from_hms_opt(7, 30, 0).unwrap(),
+        );
+        assert_eq!(clock.s_of_day(0), 27_000);
+        assert_eq!(clock.day_kind(0), DayKind::Workday);
+        // Next day (Saturday) is weekend, proving the date advances from the
+        // pinned anchor.
+        let day = 86_400 * 10;
+        assert_eq!(clock.day_kind(day), DayKind::Weekend);
     }
 
     #[test]
