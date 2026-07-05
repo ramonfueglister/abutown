@@ -1,8 +1,10 @@
 // KSW interaction smoke: real browser, real input events. Verifies the
-// dynamic camera contract end-to-end:
-//   1. wheel up   -> radius shrinks (zoom in) -> roofs fade out
-//   2. wheel down -> radius grows (zoom out)  -> roofs fade back in
-//   3. left-drag  -> yaw changes (orbit), radius unchanged
+// dynamic camera contract end-to-end (Cities-Skylines controls):
+//   1. wheel up    -> radius shrinks (zoom in) -> roofs fade out
+//   2. wheel down  -> radius grows (zoom out)  -> roofs fade back in
+//   3. right-drag  -> yaw changes (orbit), radius unchanged
+//   4. left-drag   -> nothing (freed for future selection)
+//   5. hold W      -> camera target pans (WASD)
 // Exits non-zero on any violation. Usage: node scripts/smoke-ksw.mjs
 
 import { chromium } from 'playwright';
@@ -108,22 +110,38 @@ try {
   check('wheel down zooms back out', s2.radius > s1.radius + 5, `${s1.radius.toFixed(1)} -> ${s2.radius.toFixed(1)}`);
   check('zooming out brings the roofs back', s2.roofFade > 0.95, `fade=${s2.roofFade.toFixed(3)}`);
 
-  // left-drag: orbit
+  // right-drag: orbit (Cities-Skylines standard)
+  await page.mouse.move(640, 400);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(880, 430, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(250);
+  const s3 = await state();
+  check('right-drag rotates the camera (yaw changes)', Math.abs(s3.yaw - s2.yaw) > 0.2, `${s2.yaw.toFixed(2)} -> ${s3.yaw.toFixed(2)}`);
+  // eased zoom may still be settling by a hair — drag itself must not dolly
+  check('drag does not change the zoom radius', Math.abs(s3.radius - s2.radius) < 0.5, `${s2.radius.toFixed(2)} vs ${s3.radius.toFixed(2)}`);
+
+  // left-drag must NOT rotate any more (freed for future selection)
   await page.mouse.move(640, 400);
   await page.mouse.down({ button: 'left' });
   await page.mouse.move(880, 430, { steps: 12 });
   await page.mouse.up({ button: 'left' });
   await page.waitForTimeout(250);
-  const s3 = await state();
-  check('left-drag rotates the camera (yaw changes)', Math.abs(s3.yaw - s2.yaw) > 0.2, `${s2.yaw.toFixed(2)} -> ${s3.yaw.toFixed(2)}`);
-  // eased zoom may still be settling by a hair — drag itself must not dolly
-  check('drag does not change the zoom radius', Math.abs(s3.radius - s2.radius) < 0.5, `${s2.radius.toFixed(2)} vs ${s3.radius.toFixed(2)}`);
-
-  // moving without the button held must not rotate
-  await page.mouse.move(400, 300, { steps: 6 });
-  await page.waitForTimeout(150);
   const s4 = await state();
-  check('hover without button held does not rotate', Math.abs(s4.yaw - s3.yaw) < 1e-6, `${s3.yaw.toFixed(3)} vs ${s4.yaw.toFixed(3)}`);
+  check('left-drag no longer rotates the camera', Math.abs(s4.yaw - s3.yaw) < 1e-6, `${s3.yaw.toFixed(3)} vs ${s4.yaw.toFixed(3)}`);
+
+  // keyboard pan: holding W moves the camera target (Cities-Skylines WASD).
+  // click first so the page (window keydown listener) has focus; left-click is
+  // a no-op now, so it can't perturb the camera.
+  await page.mouse.click(640, 400);
+  const kb0 = await state();
+  await page.keyboard.down('w');
+  await page.waitForTimeout(700);
+  await page.keyboard.up('w');
+  await page.waitForTimeout(150);
+  const kb1 = await state();
+  const kbMoved = Math.hypot(kb1.target[0] - kb0.target[0], kb1.target[2] - kb0.target[2]);
+  check('holding W pans the camera target (WASD)', kbMoved > 3, `moved ${kbMoved.toFixed(1)} units`);
 
   // AoE2 edge scrolling: cursor parked at the right edge pans the target
   const before = await state();
