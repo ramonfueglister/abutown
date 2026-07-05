@@ -409,7 +409,8 @@ export const nightSkyLook = {
   // ~×1.8) until a real starfield reads at the city framing, and the moon disc
   // enlarged so it's an unmistakable disc, not a dot. Apparent-size honesty
   // holds — the moon still sits at its true elevation for the capture time.
-  city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 5.5, starCount: 2200, moonRadius: 26, moonDistance: kswCity.domeRadius * 0.82 },
+  // sunDistance == moonDistance: sun and moon share the one city sky dome.
+  city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 5.5, starCount: 2200, moonRadius: 26, moonDistance: kswCity.domeRadius * 0.82, sunDistance: kswCity.domeRadius * 0.82 },
 } as const;
 
 // Terrain landcover tint table (geo terrain tiles, Task 11). Anchored to the
