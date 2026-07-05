@@ -406,9 +406,9 @@ pub fn rhythm_system(/* liest WorldClock, Citizen, CitizenState; schreibt TripRe
 ```
 - Fahrplan (s_of_world_day, pro Bürger gejittert mit `u01(seed, citizen_id, world_day)` ± 45 Welt-Minuten): 07:30 → ToWork, 12:00 ± Streuung 20% der Bürger → ToMarket (nächster Markt zum Arbeitsplatz) und 13:00 zurück (ToWork-Trip mit Ziel work), 17:30 → ToHome. Ein Bürger emittiert pro Zustand genau EINEN Request (State-Wechsel auf Commuting verhindert Doppel-Emission).
 
-- [ ] **Step 1: Failing test**: Welt mit 15 Fixture-Bürgern; WorldClock auf 07:29 Weltzeit stellen (`world_tick` passend), 2 Welt-Stunden ticken → alle 15 haben genau einen ToWork-Request emittiert (nicht mehr), Zustände = Commuting.
-- [ ] **Step 2:** FAIL → implementieren → PASS.
-- [ ] **Step 3: Commit** — `git commit -m "feat(world-core): citizen daily rhythm on the 4h world day"`.
+- [x] **Step 1: Failing test**: Welt mit 15 Fixture-Bürgern; WorldClock auf 07:29 Weltzeit stellen (`world_tick` passend), 2 Welt-Stunden ticken → alle 15 haben genau einen ToWork-Request emittiert (nicht mehr), Zustände = Commuting.
+- [x] **Step 2:** FAIL → implementieren → PASS.
+- [x] **Step 3: Commit** — `git commit -m "feat(world-core): citizen daily rhythm on the 4h world day"`.
 
 ### Task 9: Trip-Brücke Bürger↔Verkehr + Ankunft
 

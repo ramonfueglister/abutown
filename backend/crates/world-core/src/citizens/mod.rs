@@ -8,6 +8,8 @@
 //! Bakes hinweg stabil); jeder Zufalls-Draw ist `traffic_core::u01` — eine
 //! pure Funktion von `(seed, citizen_id, kontext)`, nie ein stateful RNG.
 
+pub mod rhythm;
+
 use std::collections::BTreeMap;
 
 use bevy_ecs::prelude::*;

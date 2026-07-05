@@ -14,6 +14,7 @@ use std::sync::Arc;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
+use crate::citizens::rhythm::{TripRequests, rhythm_system};
 use crate::citizens::{SeedParams, seed_citizens};
 use crate::clock::WorldClock;
 use crate::econ::{
@@ -77,6 +78,7 @@ pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin:
     world.init_resource::<RealizedFlows>();
     world.init_resource::<FlowRateEwma>();
     world.init_resource::<LastTickMoney>();
+    world.init_resource::<TripRequests>();
     world.insert_resource(SharedSimWorld(Arc::clone(&plugin.sim_world)));
 
     econ::seed::seed_economy(world, &plugin.seed, &plugin.sim_world)
@@ -92,6 +94,10 @@ pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin:
     schedule.add_systems(
         (
             advance_world_clock_system,
+            // Tagesrhythmus: JEDEN Tick (nicht econ-cadenced), direkt nach
+            // der Uhr und vor der Econ-Kette — Bürger reagieren auf die
+            // frisch avancierte Weltzeit.
+            rhythm_system,
             reset_seller_receipts_system,
             expire_orders_system,
             run_regen_system,
