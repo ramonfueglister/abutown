@@ -45,7 +45,6 @@ import {
   smoothstep,
   step,
   texture,
-  uv,
   vec2,
   vec3,
   vec4,
@@ -275,28 +274,50 @@ export function buildImpostorMesh(
   const cap = Math.max(1, instances.length);
 
   // Unit quad anchored at y 0..1 (matches the normalized tree envelope);
-  // per-instance aSize (below) turns it into the world-sized billboard.
+  // per-instance size (below) turns it into the world-sized billboard.
+  //
+  // WebGPU vertex-buffer budget (hard limit 8): every distinct vertex/instanced
+  // attribute costs one buffer slot. PlaneGeometry ships position+normal+uv (3)
+  // and InstancedMesh's instanceMatrix costs ~4 more — so we MUST keep the
+  // custom per-instance attributes lean. We:
+  //   - drop `normal` (MeshBasicNodeMaterial never reads it) and `uv` (the quad
+  //     is unit-sized, so uv is just positionLocal.x+0.5 / positionLocal.y);
+  //   - pack the four per-instance channels (center xyz, arch, tint rgb, size
+  //     wh — 9 floats) into TWO vec4 instanced buffers instead of four.
+  // Net budget: position(1) + instanceMatrix(4) + aCenterArch(1) + aSizeTint(1)
+  // = 7 ≤ 8.
   const quad = new THREE.PlaneGeometry(1, 1);
+  quad.deleteAttribute('normal');
+  quad.deleteAttribute('uv');
   quad.translate(0, 0.5, 0); // y 0..1
 
-  // Per-instance attributes.
-  const centerArr = new Float32Array(cap * 3); // world (x,0,z)
-  const archArr = new Float32Array(cap); // archetype id (float)
-  const tintArr = new Float32Array(cap * 3); // per-instance tint
-  const sizeArr = new Float32Array(cap * 2); // world (width, height) of the billboard
-  const centerAttr = new THREE.InstancedBufferAttribute(centerArr, 3);
-  const archAttr = new THREE.InstancedBufferAttribute(archArr, 1);
-  const tintAttr = new THREE.InstancedBufferAttribute(tintArr, 3);
-  const sizeAttr = new THREE.InstancedBufferAttribute(sizeArr, 2);
+  // Per-instance attributes, packed into two vec4s.
+  //   aCenterArch = (x, 0, z, archIndex)
+  //   aSizeTint   = (width, height, packedTint, unused)
+  // packedTint encodes RGB as three 8-bit channels in one float (0..2^24), a
+  // lossless-enough clay tint (the far field is imperceptibly graded).
+  const centerArchArr = new Float32Array(cap * 4);
+  const sizeTintArr = new Float32Array(cap * 4);
+  const centerArchAttr = new THREE.InstancedBufferAttribute(centerArchArr, 4);
+  const sizeTintAttr = new THREE.InstancedBufferAttribute(sizeTintArr, 4);
   // Runtime-typed nodes: @types/three r185 models these as opaque Node<string>
   // without swizzle/op methods (same situation treeLayer/agentMeshes document).
-  const aCenter: Node = instancedBufferAttribute(centerAttr, 'vec3');
-  const aArch: Node = instancedBufferAttribute(archAttr, 'float');
-  const aTint: Node = instancedBufferAttribute(tintAttr, 'vec3');
-  const aSize: Node = instancedBufferAttribute(sizeAttr, 'vec2');
+  const aCenterArch: Node = instancedBufferAttribute(centerArchAttr, 'vec4');
+  const aSizeTint: Node = instancedBufferAttribute(sizeTintAttr, 'vec4');
+  const aCenter: Node = aCenterArch.xyz;
+  const aArch: Node = aCenterArch.w;
+  const aSize: Node = aSizeTint.xy;
+  // unpack packedTint (channel-major, 8 bits each) back to a vec3 in [0,1].
+  const packed: Node = aSizeTint.z;
+  const rByte = floor(packed.div(float(65536)));
+  const gByte = floor(packed.div(float(256))).mod(float(256));
+  const bByte = packed.mod(float(256));
+  const aTint: Node = vec3(rByte, gByte, bByte).div(float(255));
   const camPos: Node = cameraPosition;
   const posLocal: Node = positionLocal;
-  const quadUvN: Node = uv();
+  // Derive quad uv from the unit plane's local position (x∈[−½,½] → [0,1];
+  // y already ∈[0,1] after the translate above).
+  const quadUvN: Node = vec2(posLocal.x.add(float(0.5)), posLocal.y);
 
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, alphaTest: 0.5 });
   const atlasTex: Node = texture(atlas);
@@ -378,15 +399,20 @@ export function buildImpostorMesh(
   for (let i = 0; i < cap; i++) mesh.setMatrixAt(i, identity);
   for (let i = 0; i < instances.length; i++) {
     const inst = instances[i];
-    sizeArr[i * 2] = inst.spec.r * 2; // world billboard width (half-width = r)
-    sizeArr[i * 2 + 1] = inst.spec.h * inst.squash; // world billboard height
-    centerArr[i * 3] = inst.spec.x;
-    centerArr[i * 3 + 1] = 0;
-    centerArr[i * 3 + 2] = inst.spec.z;
-    archArr[i] = inst.archetype;
-    tintArr[i * 3] = inst.tint.r;
-    tintArr[i * 3 + 1] = inst.tint.g;
-    tintArr[i * 3 + 2] = inst.tint.b;
+    // aCenterArch = (x, 0, z, archIndex)
+    centerArchArr[i * 4] = inst.spec.x;
+    centerArchArr[i * 4 + 1] = 0;
+    centerArchArr[i * 4 + 2] = inst.spec.z;
+    centerArchArr[i * 4 + 3] = inst.archetype;
+    // aSizeTint = (width, height, packedTint, 0). width = 2·r (half-width = r),
+    // height = h·squash — exactly the full mesh's world extents.
+    const r8 = Math.round(Math.min(1, Math.max(0, inst.tint.r)) * 255);
+    const g8 = Math.round(Math.min(1, Math.max(0, inst.tint.g)) * 255);
+    const b8 = Math.round(Math.min(1, Math.max(0, inst.tint.b)) * 255);
+    sizeTintArr[i * 4] = inst.spec.r * 2;
+    sizeTintArr[i * 4 + 1] = inst.spec.h * inst.squash;
+    sizeTintArr[i * 4 + 2] = r8 * 65536 + g8 * 256 + b8;
+    sizeTintArr[i * 4 + 3] = 0;
   }
   mesh.count = instances.length;
   mesh.instanceMatrix.needsUpdate = true;
