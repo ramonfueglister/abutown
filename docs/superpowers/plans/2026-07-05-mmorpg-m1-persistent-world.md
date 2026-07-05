@@ -464,9 +464,9 @@ pub fn migrate_snapshot(raw: serde_json::Value) -> Result<WorldCoreSnapshot, Mig
 ```
 - Fahrzeug-Policy beim Resume (bewusst, dokumentiert im Code): laufende Auto-Trips werden als `WalkingUntil` mit Rest-Distanz/1.4 m/s fortgesetzt (traffic-core-Fleet ist nicht persistiert — akzeptierter M1-Schnitt; kein Bürger geht verloren, Konservierung unberührt).
 
-- [ ] **Step 1: Failing tests:** (a) Roundtrip: Sim 500 Ticks laufen lassen → extract → frische Welt (Seeds via Guards übersprungen) → apply → weitere 500 Ticks → `total_money` identisch mit Durchlauf ohne Unterbrechung? NEIN — zu strikt wegen Trip-Policy; stattdessen: total_money konserviert UND CitizenRegistry.count gleich UND WorldClock fortgesetzt. (b) `migrate_snapshot` mit `{"version": 99}` → Err. (c) `migrate_snapshot(serde_json::to_value(extract(...)))` → Ok.
-- [ ] **Step 2:** FAIL → implementieren → PASS.
-- [ ] **Step 3: Commit** — `git commit -m "feat(world-core): versioned snapshot with migration chain (no-wipe principle)"`.
+- [x] **Step 1: Failing tests:** (a) Roundtrip: Sim 500 Ticks laufen lassen → extract → frische Welt (Seeds via Guards übersprungen) → apply → weitere 500 Ticks → `total_money` identisch mit Durchlauf ohne Unterbrechung? NEIN — zu strikt wegen Trip-Policy; stattdessen: total_money konserviert UND CitizenRegistry.count gleich UND WorldClock fortgesetzt. (b) `migrate_snapshot` mit `{"version": 99}` → Err. (c) `migrate_snapshot(serde_json::to_value(extract(...)))` → Ok.
+- [x] **Step 2:** FAIL → implementieren → PASS.
+- [x] **Step 3: Commit** — `git commit -m "feat(world-core): versioned snapshot with migration chain (no-wipe principle)"`.
 
 ### Task 11: Postgres-Store + Boot-Resume im sim-server
 

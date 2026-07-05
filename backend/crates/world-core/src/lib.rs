@@ -8,6 +8,7 @@ pub mod citizens;
 pub mod clock;
 pub mod econ;
 pub mod model;
+pub mod persist;
 pub mod systems;
 
 pub use citizens::rhythm::{TripRequest, TripRequests, rhythm_system};
@@ -17,8 +18,13 @@ pub use citizens::trips::{
 };
 pub use citizens::{Citizen, CitizenRegistry, CitizenState, SeedParams, TripKind, seed_citizens};
 pub use clock::{TICKS_PER_SECOND, WORLD_TIME_SCALE, WorldClock};
-pub use model::{BuildingLifecycle, SimBuilding, SimWorld, Usage, WorldError};
+pub use model::{BuildingLifecycle, BuildingStates, SimBuilding, SimWorld, Usage, WorldError};
+pub use persist::{
+    CitizenSnap, EconSnap, MigrateError, PersistedWalk, WORLD_SNAPSHOT_VERSION, WorldCoreSnapshot,
+    migrate_snapshot,
+};
 pub use systems::{
     ECONOMY_CADENCE_TICKS, SharedSimWorld, WorldCorePlugin, advance_world_clock_system,
-    econ_systems, install_world_resources, install_world_systems,
+    econ_systems, install_world_resources, install_world_resources_with_snapshot,
+    install_world_systems, install_world_systems_with_snapshot,
 };

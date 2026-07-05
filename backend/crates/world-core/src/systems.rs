@@ -30,7 +30,8 @@ use crate::econ::{
     run_generate_input_orders_at_tick, run_macro_flow_at_tick, run_pay_wages_at_tick,
     run_production_at_tick, run_regen_at_tick, run_tick_audit_at_tick,
 };
-use crate::model::SimWorld;
+use crate::model::{BuildingStates, SimWorld};
+use crate::persist::WorldCoreSnapshot;
 
 /// The economy chain runs every Nth world tick (10 ticks @ 10 Hz = 1 Hz).
 /// `EconomyConfig::macro_flow_interval_ticks` (default 10) stays phase-locked:
@@ -89,6 +90,7 @@ pub fn install_world_resources(world: &mut World, plugin: &WorldCorePlugin) {
     world.init_resource::<TripRequests>();
     world.init_resource::<ActiveTrips>();
     world.init_resource::<CitizenCarCounters>();
+    world.init_resource::<BuildingStates>();
     world.insert_resource(SharedSimWorld(Arc::clone(&plugin.sim_world)));
 
     econ::seed::seed_economy(world, &plugin.seed, &plugin.sim_world)
@@ -131,7 +133,35 @@ pub fn econ_systems() -> ScheduleConfigs<ScheduleSystem> {
 /// traffic shell instead calls [`install_world_resources`] + [`econ_systems`]
 /// and splices rhythm/trip systems into its own chain (Task 9).
 pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin: &WorldCorePlugin) {
+    install_world_systems_with_snapshot(world, schedule, plugin, None);
+}
+
+/// Wie [`install_world_resources`], aber mit optionalem Resume: ein
+/// vorhandener [`WorldCoreSnapshot`] wird per [`crate::persist::apply`]
+/// VOR den Seed-Guards eingespielt (Lehre PR #86) — die dadurch gefüllten
+/// `Markets`/`CitizenRegistry` machen `seed_economy`/`seed_citizens` zu
+/// No-ops, während die authored Config (capita-Ramp, `ProducerPolicies`,
+/// `SeedParams`) weiterhin bei jedem Boot frisch angewandt wird.
+pub fn install_world_resources_with_snapshot(
+    world: &mut World,
+    plugin: &WorldCorePlugin,
+    snapshot: Option<WorldCoreSnapshot>,
+) {
+    if let Some(snap) = snapshot {
+        crate::persist::apply(world, snap);
+    }
     install_world_resources(world, plugin);
+}
+
+/// Standalone-Wiring mit optionalem Resume — [`install_world_systems`] mit
+/// Snapshot-Pfad (siehe [`install_world_resources_with_snapshot`]).
+pub fn install_world_systems_with_snapshot(
+    world: &mut World,
+    schedule: &mut Schedule,
+    plugin: &WorldCorePlugin,
+    snapshot: Option<WorldCoreSnapshot>,
+) {
+    install_world_resources_with_snapshot(world, plugin, snapshot);
     schedule.add_systems(
         (
             (

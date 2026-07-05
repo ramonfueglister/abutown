@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+
+use bevy_ecs::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
 /// Nutzungsklasse eines Gebäudes; Zahlenwerte = `Usage`-Enum aus
@@ -39,6 +42,13 @@ pub enum BuildingLifecycle {
     Demolished,
     UnderConstruction,
 }
+
+/// Lebenszyklus-Abweichungen vom Default [`BuildingLifecycle::Occupied`],
+/// BuildingId → Zustand. Nur ABWEICHUNGEN werden gehalten (und persistiert,
+/// Task 10) — ein fehlender Eintrag IST `Occupied`. In M1 praktisch leer;
+/// das Datenmodell steht für die späteren Übergangs-Systeme.
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct BuildingStates(pub BTreeMap<u32, BuildingLifecycle>);
 
 /// Ein Gebäude aus dem gebackenen Sim-Welt-Artefakt (`simworld.json`).
 /// Positionen in lokalen Metern (Anker 8.7285°E / 47.5069°N, +x Ost, +z Süd).

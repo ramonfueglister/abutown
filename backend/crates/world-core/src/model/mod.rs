@@ -1,6 +1,6 @@
 mod building;
 
-pub use building::{BuildingLifecycle, SimBuilding, Usage};
+pub use building::{BuildingLifecycle, BuildingStates, SimBuilding, Usage};
 
 use serde::Deserialize;
 use thiserror::Error;

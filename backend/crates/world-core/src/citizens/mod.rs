@@ -29,7 +29,8 @@ const M2_PER_RESIDENT: f32 = 40.0;
 
 /// Grund einer laufenden Pendel-Bewegung. Formal Teil des Tagesrhythmus
 /// (Task 8), aber hier definiert, weil `CitizenState::Commuting` ihn trägt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Serde: Teil des pro Bürger persistierten `CitizenState` (Task 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TripKind {
     ToWork,
     ToMarket,
@@ -44,8 +45,9 @@ pub struct Citizen {
     pub work: u32,
 }
 
-/// Wo der Bürger gerade ist bzw. was er tut.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+/// Wo der Bürger gerade ist bzw. was er tut. Serde: wird pro Bürger im
+/// [`crate::persist::WorldCoreSnapshot`] persistiert (Task 10).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CitizenState {
     AtHome,
     AtWork,
