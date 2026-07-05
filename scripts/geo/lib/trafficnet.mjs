@@ -647,55 +647,14 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor, 
 
   // 11) conflict + yield geometry. Two turns at the same node conflict when
   //     their straight chords (in-direction → out-direction through the node)
-  //     cross. yieldsTo: minor→major (lower priorityRoad/class yields to
-  //     higher), entry→circulating at roundabouts, and left-turner→oncoming
+  //     either CROSS or pass within CONFLICT_CLEARANCE_M of each other without
+  //     crossing (distance-based detection — root-cause fix for cross-stream
+  //     near-collisions the pure-intersection test missed), OR they merge onto
+  //     the same toLane. yieldsTo: minor→major (lower priorityRoad/class yields
+  //     to higher), entry→circulating at roundabouts, and left-turner→oncoming
   //     straight.
-  const turnsByNode = new Map();
-  for (const t of turns) {
-    if (!turnsByNode.has(t.node)) turnsByNode.set(t.node, []);
-    turnsByNode.get(t.node).push(t);
-  }
   const rankOfEdge = (eid) => CLASS_RANK[edges[eid].cls] ?? 0;
-
-  for (const [nodeId, group] of turnsByNode) {
-    const node = nodes[nodeId];
-    for (let i = 0; i < group.length; i++) {
-      for (let j = 0; j < group.length; j++) {
-        if (i === j) continue;
-        const a = group[i];
-        const b = group[j];
-        // share the same incoming edge → never conflict (they diverge)
-        if (a.inEdge === b.inEdge) continue;
-        if (turnPathsCross(a, b, edges, dirInto, dirOutOf)) {
-          if (!a.conflictsWith.includes(b.id)) a.conflictsWith.push(b.id);
-        }
-      }
-    }
-    // yields
-    for (const a of group) {
-      for (const b of group) {
-        if (a === b) continue;
-        if (!a.conflictsWith.includes(b.id)) continue;
-        let yields = false;
-        // roundabout: entry (from a non-ring edge) yields to circulating turns
-        if (node.kind === 'roundabout') {
-          const aEntry = !roundaboutNodeIds.has(edges[a.inEdge].from);
-          const bCirc = roundaboutNodeIds.has(edges[b.inEdge].from);
-          if (aEntry && bCirc) yields = true;
-        }
-        // minor road yields to major road
-        if (rankOfEdge(a.inEdge) < rankOfEdge(b.inEdge)) yields = true;
-        // priority: unmarked approaches yield to the priority through road
-        if (!edges[a.inEdge].priorityRoad && edges[b.inEdge].priorityRoad) yields = true;
-        // left-turner yields to oncoming straight (right-hand traffic): if a
-        // turns left and b comes from a's opposite approach going straight.
-        if (isLeftTurn(a, edges, dirInto, dirOutOf) && isStraight(b, edges, dirInto, dirOutOf)) {
-          yields = true;
-        }
-        if (yields && !a.yieldsTo.includes(b.id)) a.yieldsTo.push(b.id);
-      }
-    }
-  }
+  deriveConflictsAndYields({ nodes, edges, turns, dirInto, dirOutOf, rankOfEdge, roundaboutNodeIds });
 
   // 12) signal phases (Webster-style). Group the incoming turns of a signal
   //     node into phases by approach (incoming edge); green split ∝ approach
@@ -786,6 +745,68 @@ function normalize(dx, dz) {
   return [dx / len, dz / len];
 }
 
+/**
+ * Populate every turn's `conflictsWith` + `yieldsTo` in place (the single
+ * source of truth for junction arbitration, used by both `buildTrafficNet` and
+ * the in-place re-derive script). Pure over the passed structures.
+ *
+ * `turns[i]` must carry `{ id, node, inEdge, outEdge, fromLane, toLane,
+ * conflictsWith:[], yieldsTo:[] }`; `edges[eid]` must carry `{ from, to,
+ * priorityRoad }`; `nodes[nodeId]` must carry `{ kind }`. `dirInto(eid)` /
+ * `dirOutOf(eid)` return the unit travel direction into/out of an edge at the
+ * node; `rankOfEdge(eid)` returns the road-class rank (higher = major);
+ * `roundaboutNodeIds` is a Set of node ids on a roundabout ring.
+ *
+ * @param {{nodes:any[], edges:any[], turns:any[], dirInto:(eid:number)=>number[], dirOutOf:(eid:number)=>number[], rankOfEdge:(eid:number)=>number, roundaboutNodeIds:Set<number>}} args
+ */
+export function deriveConflictsAndYields({ nodes, edges, turns, dirInto, dirOutOf, rankOfEdge, roundaboutNodeIds }) {
+  const turnsByNode = new Map();
+  for (const t of turns) {
+    if (!turnsByNode.has(t.node)) turnsByNode.set(t.node, []);
+    turnsByNode.get(t.node).push(t);
+  }
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  for (const [nodeId, group] of turnsByNode) {
+    const node = nodeById.get(nodeId);
+    for (let i = 0; i < group.length; i++) {
+      for (let j = 0; j < group.length; j++) {
+        if (i === j) continue;
+        const a = group[i];
+        const b = group[j];
+        if (turnsConflict(a, b, edges, dirInto, dirOutOf)) {
+          if (!a.conflictsWith.includes(b.id)) a.conflictsWith.push(b.id);
+        }
+      }
+    }
+    // yields — computed over the (now enlarged) conflict set so any new minor↔
+    // major conflict also gets its yield, reusing the existing priority rules.
+    for (const a of group) {
+      for (const b of group) {
+        if (a === b) continue;
+        if (!a.conflictsWith.includes(b.id)) continue;
+        let yields = false;
+        // roundabout: entry (from a non-ring edge) yields to circulating turns
+        if (node && node.kind === 'roundabout') {
+          const aEntry = !roundaboutNodeIds.has(edges[a.inEdge].from);
+          const bCirc = roundaboutNodeIds.has(edges[b.inEdge].from);
+          if (aEntry && bCirc) yields = true;
+        }
+        // minor road yields to major road
+        if (rankOfEdge(a.inEdge) < rankOfEdge(b.inEdge)) yields = true;
+        // priority: unmarked approaches yield to the priority through road
+        if (!edges[a.inEdge].priorityRoad && edges[b.inEdge].priorityRoad) yields = true;
+        // left-turner yields to oncoming straight (right-hand traffic): if a
+        // turns left and b comes from a's opposite approach going straight.
+        if (isLeftTurn(a, edges, dirInto, dirOutOf) && isStraight(b, edges, dirInto, dirOutOf)) {
+          yields = true;
+        }
+        if (yields && !a.yieldsTo.includes(b.id)) a.yieldsTo.push(b.id);
+      }
+    }
+  }
+}
+
 // signed turn angle from the incoming travel dir to the outgoing travel dir,
 // in the (+x east, +z south) plane. Positive = clockwise = a RIGHT turn (in a
 // left-handed screen sense z-down); we classify by magnitude/sign consistently.
@@ -810,30 +831,119 @@ function isLeftTurn(t, edges, dirInto, dirOutOf) {
   return a < -Math.PI / 6;
 }
 
-// Do two turns' paths through the node cross? Model each turn as a single
-// straight chord from an entry point (behind the node, along the incoming
-// heading) to an exit point (ahead of the node, along the outgoing heading).
-// The node centre is the origin. Two turns proper-cross when their chords
-// intersect strictly between their endpoints — this captures the classic
-// conflicts (opposing left-turn vs oncoming straight, cross-traffic straights)
-// without false-flagging turns that merely share the entry or exit approach
-// (those share an endpoint, which is not a proper crossing).
-function turnPathsCross(a, b, edges, dirInto, dirOutOf) {
-  const chord = (t) => {
-    const [ix, iz] = dirInto(t.inEdge);
-    const [ox, oz] = dirOutOf(t.outEdge);
-    const L = 12;
-    return [
-      [-ix * L, -iz * L], // entry (behind node)
-      [ox * L, oz * L], // exit (ahead of node)
-    ];
-  };
-  // Turns sharing the same exit edge merge (never conflict); sharing the same
-  // entry edge diverge (already filtered by the caller).
-  if (a.outEdge === b.outEdge) return false;
-  const A = chord(a);
-  const B = chord(b);
-  return segsIntersect(A[0], A[1], B[0], B[1]);
+// Clearance (m) for distance-based conflict detection: two turn chords that
+// pass within this distance of each other (without crossing) still conflict —
+// they would let two streams occupy overlapping node space simultaneously.
+// Sized just over a lane width (3 m) so genuinely separated parallel movements
+// on adjacent lanes do NOT serialize, while near-perpendicular streams grazing
+// the shared node point DO. This is the root-cause fix for the cross-stream
+// near-collisions the pure chord-INTERSECTION test missed (two turn chords that
+// pass within <2 m without a proper crossing were treated as non-conflicting).
+export const CONFLICT_CLEARANCE_M = 2.5;
+
+// Direction chords whose unit tangents differ by less than this dot magnitude
+// from parallel/anti-parallel are treated as NON-conflicting when they only
+// come close (never actually cross). This guards the classic opposing-through
+// case: two straight movements on opposite directions of the same road have
+// collinear chords (min-distance ≈ 0) but are physically separated onto their
+// own lanes and must not serialize. cos(15°) ≈ 0.966.
+const PARALLEL_DOT = 0.966;
+
+// The node-origin direction chord of a turn: a straight segment from an entry
+// point (behind the node, along the incoming heading) to an exit point (ahead
+// of the node, along the outgoing heading), with the node centre at the origin.
+// Pure direction (no lane offset) so opposing straight-throughs are collinear
+// (handled by the parallel guard) rather than laterally 3 m apart.
+function turnChord(t, dirInto, dirOutOf) {
+  const [ix, iz] = dirInto(t.inEdge);
+  const [ox, oz] = dirOutOf(t.outEdge);
+  const L = 12;
+  return [
+    [-ix * L, -iz * L], // entry (behind node)
+    [ox * L, oz * L], // exit (ahead of node)
+  ];
+}
+
+// Do two turns at the same node conflict? A turn `a` conflicts with `b` when:
+//   * they share the same incoming edge → NEVER (they diverge from one lane);
+//   * they are parallel same-movement (same inEdge AND same outEdge, i.e. a
+//     multilane through movement) → NEVER (no false serialization of a
+//     two-lane through-street);
+//   * they merge onto the SAME toLane → ALWAYS (two vehicles would land on the
+//     same lane at s≈0 — closes the Task-7 "bake should emit shared-toLane
+//     conflicts" follow-up; the kernel's implicit shared-toLane rule stays as
+//     belt-and-braces);
+//   * their direction chords CROSS → conflict (classic proper crossing);
+//   * their direction chords pass within CONFLICT_CLEARANCE_M without crossing
+//     AND are not near-parallel → conflict (distance-based near-miss, the
+//     root-cause fix). The parallel guard prevents opposing/aligned throughs,
+//     whose chords are collinear, from being flagged.
+function turnsConflict(a, b, edges, dirInto, dirOutOf) {
+  // Same incoming edge → diverging streams, never conflict.
+  if (a.inEdge === b.inEdge) return false;
+  // Parallel same-movement (same in-edge already excluded above; this catches
+  // the general multilane-same-movement pair which shares both edges).
+  if (a.inEdge === b.inEdge && a.outEdge === b.outEdge) return false;
+  // Explicit merge conflict: two distinct turns feeding the SAME toLane share a
+  // physical merge point.
+  if (a.toLane === b.toLane) return true;
+  const A = turnChord(a, dirInto, dirOutOf);
+  const B = turnChord(b, dirInto, dirOutOf);
+  return chordsConflict(A, B);
+}
+
+// Pure geometric conflict test between two direction chords (each `[[x,z],
+// [x,z]]`): they conflict when they cross, OR pass within
+// CONFLICT_CLEARANCE_M without crossing AND are not near-parallel. Exported so
+// the distance-vs-intersection behaviour can be unit-tested on hand-built
+// chords independently of the OSM plumbing.
+export function chordsConflict(A, B) {
+  if (segsIntersect(A[0], A[1], B[0], B[1])) return true;
+  if (segSegDist(A[0], A[1], B[0], B[1]) < CONFLICT_CLEARANCE_M) {
+    const da = [A[1][0] - A[0][0], A[1][1] - A[0][1]];
+    const db = [B[1][0] - B[0][0], B[1][1] - B[0][1]];
+    const la = Math.hypot(da[0], da[1]) || 1;
+    const lb = Math.hypot(db[0], db[1]) || 1;
+    const dot = (da[0] * db[0] + da[1] * db[1]) / (la * lb);
+    if (Math.abs(dot) < PARALLEL_DOT) return true;
+  }
+  return false;
+}
+
+// Minimum distance between two 2-D segments p1p2 and p3p4. Standard clamped
+// projection (Ericson, Real-Time Collision Detection §5.1.9): solve the
+// unconstrained closest-point parameters, clamp to [0,1], recover the points.
+function segSegDist(p1, p2, p3, p4) {
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const ux = p2[0] - p1[0];
+  const uy = p2[1] - p1[1];
+  const vx = p4[0] - p3[0];
+  const vy = p4[1] - p3[1];
+  const wx = p1[0] - p3[0];
+  const wy = p1[1] - p3[1];
+  const a = ux * ux + uy * uy;
+  const b = ux * vx + uy * vy;
+  const c = vx * vx + vy * vy;
+  const d = ux * wx + uy * wy;
+  const e = vx * wx + vy * wy;
+  const D = a * c - b * b;
+  let sc;
+  let tc;
+  if (D < 1e-9) {
+    // Parallel (or a degenerate chord): fix sc at the start, solve tc.
+    sc = 0;
+    tc = c > 1e-9 ? e / c : 0;
+  } else {
+    sc = (b * e - c * d) / D;
+    tc = (a * e - b * d) / D;
+  }
+  sc = clamp01(sc);
+  tc = clamp01(tc);
+  const cx1 = p1[0] + sc * ux;
+  const cy1 = p1[1] + sc * uy;
+  const cx2 = p3[0] + tc * vx;
+  const cy2 = p3[1] + tc * vy;
+  return Math.hypot(cx1 - cx2, cy1 - cy2);
 }
 
 function segsIntersect(p1, p2, p3, p4) {
