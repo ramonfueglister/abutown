@@ -1,0 +1,21 @@
+[package]
+name = "demand-gen"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+name = "demand_gen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "demand-gen"
+path = "src/main.rs"
+
+[dependencies]
+traffic-net = { path = "../traffic-net" }
+traffic-core = { path = "../traffic-core" }
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true

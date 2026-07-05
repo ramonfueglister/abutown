@@ -6,6 +6,7 @@ members = [
   "crates/traffic-net",
   "crates/traffic-core",
   "crates/winterthur-traffic",
+  "crates/demand-gen",
 ]
 
 [workspace.package]
@@ -16,6 +17,7 @@ publish = false
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
+blake3 = "1"
 bevy_ecs = "0.18"
 bytes = "1"
 futures-util = "0.3"
