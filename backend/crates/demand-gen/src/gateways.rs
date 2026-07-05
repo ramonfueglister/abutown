@@ -7,6 +7,7 @@
 //! Gateways lacking the needed direction (one-way stubs) are never picked —
 //! that IS the deterministic "bearing-next" fallback.
 
+use crate::reach::Reach;
 use traffic_net::TrafficNet;
 
 /// Edges at/above this free-flow speed are motorways (100 km/h = 27.78 m/s).
@@ -40,6 +41,12 @@ pub struct GwInfo {
     pub spawn_lane: Option<u32>,
     /// Lowest lane id of edges ending at this gateway (sink direction), if any.
     pub sink_lane: Option<u32>,
+    /// `spawn_lane` exists AND its edge reaches the routable core — required
+    /// for sampled commuter demand ([`pick`]), whose counterpart endpoint is
+    /// always a core zone lane (Task 8).
+    pub spawn_core: bool,
+    /// `sink_lane` exists AND its edge is reachable from the routable core.
+    pub sink_core: bool,
 }
 
 /// Bearing of a world-space point from the origin: `atan2(east, north)` with
@@ -55,7 +62,15 @@ pub fn ang_dist(a: f64, b: f64) -> f64 {
 }
 
 /// Extract [`GwInfo`] for every gateway node, sorted by node id.
-pub fn gateway_infos(net: &TrafficNet) -> Vec<GwInfo> {
+///
+/// The lanes are raw net geometry; the `*_core` flags additionally require
+/// router-reachability to/from the routable core (`reach`, Task 8). Sampled
+/// commuter demand ([`pick`]) needs the core flags — its counterpart endpoint
+/// is always a core zone lane. Authored through pairs use the raw lanes plus
+/// a pair-wise [`Reach::edge_reaches`] validation instead, since a
+/// boundary-to-boundary motorway chunk may legitimately be detached from the
+/// core (no ramps inside the Gemeinde) yet perfectly routable end to end.
+pub fn gateway_infos(net: &TrafficNet, reach: &Reach) -> Vec<GwInfo> {
     net.gateways()
         .iter()
         .map(|&node_id| {
@@ -67,6 +82,8 @@ pub fn gateway_infos(net: &TrafficNet) -> Vec<GwInfo> {
             let mut motorway = false;
             let mut spawn_lane: Option<u32> = None;
             let mut sink_lane: Option<u32> = None;
+            let mut spawn_core = false;
+            let mut sink_core = false;
             for e in &net.edges {
                 if e.from != node_id && e.to != node_id {
                     continue;
@@ -75,9 +92,11 @@ pub fn gateway_infos(net: &TrafficNet) -> Vec<GwInfo> {
                 let min_lane = e.lanes.iter().copied().min();
                 if e.from == node_id {
                     spawn_lane = min_opt(spawn_lane, min_lane);
+                    spawn_core |= reach.reaches_core[e.id as usize];
                 }
                 if e.to == node_id {
                     sink_lane = min_opt(sink_lane, min_lane);
+                    sink_core |= reach.from_core[e.id as usize];
                 }
             }
             GwInfo {
@@ -88,6 +107,8 @@ pub fn gateway_infos(net: &TrafficNet) -> Vec<GwInfo> {
                 motorway,
                 spawn_lane,
                 sink_lane,
+                spawn_core,
+                sink_core,
             }
         })
         .collect()
@@ -104,9 +125,11 @@ fn min_opt(a: Option<u32>, b: Option<u32>) -> Option<u32> {
 /// per the bearing-with-motorway-preference rule. Ties break on lower node
 /// id. Returns `None` only if NO gateway has the needed direction.
 pub fn pick<'a>(infos: &'a [GwInfo], bearing: f64, dist_km: f64, need: Need) -> Option<&'a GwInfo> {
+    // Core-connectivity is part of "has the direction": a commuter trip's
+    // other endpoint is always a core zone lane (Task 8).
     let has_lane = |g: &GwInfo| match need {
-        Need::Spawn => g.spawn_lane.is_some(),
-        Need::Sink => g.sink_lane.is_some(),
+        Need::Spawn => g.spawn_lane.is_some() && g.spawn_core,
+        Need::Sink => g.sink_lane.is_some() && g.sink_core,
     };
     // total order on (angular distance, node id) — f64 ang distance is finite
     let best_of = |it: &mut dyn Iterator<Item = &'a GwInfo>| -> Option<&'a GwInfo> {
@@ -143,6 +166,8 @@ mod tests {
             motorway,
             spawn_lane: spawn.then_some(node * 10),
             sink_lane: sink.then_some(node * 10 + 1),
+            spawn_core: spawn,
+            sink_core: sink,
         }
     }
 

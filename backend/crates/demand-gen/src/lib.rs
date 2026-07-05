@@ -12,6 +12,7 @@ pub mod gravity;
 pub mod inputs;
 pub mod output;
 pub mod profiles;
+pub mod reach;
 
 use gateways::{GwInfo, Need};
 use inputs::{Authored, wgs84_to_world};
@@ -225,6 +226,18 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
         let dest_lane = to
             .sink_lane
             .ok_or_else(|| format!("authored toGateway {} has no sink lane", entry.to_gateway))?;
+        // Authored pairs may live on a core-detached motorway chunk; what
+        // matters is that this exact origin edge reaches this exact dest
+        // edge in the directed router graph (Task 8).
+        let origin_edge = net.lanes[origin_lane as usize].edge;
+        let dest_edge = net.lanes[dest_lane as usize].edge;
+        if !model.reach.edge_reaches(origin_edge, dest_edge) {
+            return Err(format!(
+                "authored through pair {} -> {} is not router-reachable \
+                 (edge {origin_edge} cannot reach edge {dest_edge})",
+                entry.from_gateway, entry.to_gateway
+            ));
+        }
         let expected = entry.veh_per_day * authored.trips_scale;
         let n_wd = stochastic_round(expected, u01(SEED, e_idx as u64, SALT_THR_COUNT_WD));
         for _ in 0..n_wd {
@@ -322,6 +335,8 @@ struct Model {
     dest_cum: Vec<f64>,
     origin_cum: Vec<f64>,
     gateways: Vec<GwInfo>,
+    /// Directed edge-graph reachability, for authored-pair validation.
+    reach: reach::Reach,
 }
 
 impl Model {
@@ -364,12 +379,20 @@ impl Model {
             }
         }
 
-        // midpoints of drivable non-motorway lanes, ascending lane id
+        // Router-reachability (Task 8): the bake prunes by UNDIRECTED
+        // component, so directed one-way fragments survive that the runtime
+        // CH router can never leave or enter — endpoints snapped there are
+        // guaranteed no-route trips. Snap only onto the routable core.
+        let reach = reach::analyze(net);
+
+        // midpoints of drivable non-motorway CORE lanes, ascending lane id
         let edge_speed: HashMap<u32, f32> = net.edges.iter().map(|e| (e.id, e.speed_ms)).collect();
         let mut lane_mid: Vec<(u32, f64, f64)> = net
             .lanes
             .iter()
-            .filter(|l| edge_speed[&l.edge] < gateways::MOTORWAY_SPEED_MS)
+            .filter(|l| {
+                edge_speed[&l.edge] < gateways::MOTORWAY_SPEED_MS && reach.core[l.edge as usize]
+            })
             .map(|l| {
                 let (p, _) = polyline_midpoint(&l.pts);
                 (l.id, p[0] as f64, p[1] as f64)
@@ -377,7 +400,7 @@ impl Model {
             .collect();
         lane_mid.sort_by_key(|&(id, _, _)| id);
         if lane_mid.is_empty() {
-            return Err("net has no non-motorway lanes to snap zones onto".into());
+            return Err("net has no routable non-motorway lanes to snap zones onto".into());
         }
         let snap = |x: f64, z: f64| -> u32 {
             let mut best = lane_mid[0].0;
@@ -441,7 +464,8 @@ impl Model {
             origin_cum: cum(&origins),
             origins,
             dests,
-            gateways: gateways::gateway_infos(net),
+            gateways: gateways::gateway_infos(net, &reach),
+            reach,
         })
     }
 
