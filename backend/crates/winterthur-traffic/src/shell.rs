@@ -27,6 +27,7 @@
 //! starts. No WS code lives here — only the seam.
 
 use crate::Router;
+use crate::audit::Conservation;
 use crate::clock::WallClock;
 use crate::demand::TripSchedule;
 use crate::measure::EdgeMeasure;
@@ -180,6 +181,7 @@ pub fn build_sim(
     world.insert_resource(CommandQueue::default());
     world.insert_resource(SpawnScratch::default());
     world.insert_resource(SnapshotHook::default());
+    world.insert_resource(Conservation::default());
 
     let mut schedule = Schedule::default();
     schedule.add_systems(
@@ -258,7 +260,12 @@ fn drain_commands(mut queue: ResMut<CommandQueue>) {
     queue.pending.clear();
 }
 
-/// Release this tick's scheduled trips and record their destinations.
+/// Release this tick's scheduled trips, record their destinations and book
+/// them into the conservation ledger.
+// A bevy system's "arguments" are its resource accesses — the count is the
+// ECS wiring surface, not a call-site burden (systems are never called
+// directly).
+#[allow(clippy::too_many_arguments)]
 fn spawn_trips(
     mut core: ResMut<CoreRes>,
     net: Res<TrafficNetRes>,
@@ -267,6 +274,7 @@ fn spawn_trips(
     clock: Res<SimClock>,
     mut registry: ResMut<TripRegistry>,
     mut scratch: ResMut<SpawnScratch>,
+    mut conservation: ResMut<Conservation>,
 ) {
     scratch.0.clear();
     spawner
@@ -275,10 +283,14 @@ fn spawn_trips(
     for rec in &scratch.0 {
         registry.record(rec.veh, rec.dest_edge);
     }
+    conservation.spawned += scratch.0.len() as u64;
+    conservation.skipped_no_route = spawner.0.counters().skipped_no_route;
 }
 
-/// Advance the kernel one tick (signals gate internally), then run the periodic
-/// congestion re-route, then bump the clock.
+/// Advance the kernel one tick (signals gate internally), book this tick's
+/// end-of-route despawns as arrivals (incl. gateway sinks) and check the
+/// conservation invariant, then run the periodic congestion re-route, then
+/// bump the clock.
 fn core_tick(
     mut core: ResMut<CoreRes>,
     net: Res<TrafficNetRes>,
@@ -286,9 +298,18 @@ fn core_tick(
     registry: Res<TripRegistry>,
     seed: Res<SimSeed>,
     mut clock: ResMut<SimClock>,
+    mut conservation: ResMut<Conservation>,
 ) {
     let t = clock.tick;
     core.0.tick(t);
+
+    conservation.arrived += core.0.despawned_last_tick().len() as u64;
+    debug_assert!(
+        conservation.holds(core.0.fleet.alive_count()),
+        "vehicle conservation violated at tick {t}: {:?} alive={}",
+        *conservation,
+        core.0.fleet.alive_count()
+    );
 
     if t > 0 && t.is_multiple_of(REROUTE_INTERVAL_TICKS) {
         reroute_congested(&mut core.0, &net.0, &router.0, &registry, seed.0, t);

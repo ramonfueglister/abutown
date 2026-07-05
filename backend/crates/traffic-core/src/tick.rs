@@ -352,6 +352,15 @@ impl Core {
         })
     }
 
+    /// The vehicle slots despawned by the most recent [`Core::tick`] call —
+    /// every end-of-route removal, including gateway-sink arrivals (a route
+    /// ending on a boundary stub's in-lane is a normal route end). Read-only
+    /// observation seam for the shell's conservation audit; the buffer is
+    /// cleared at the start of the next tick.
+    pub fn despawned_last_tick(&self) -> &[VehId] {
+        &self.despawn
+    }
+
     /// Advance the simulation one timestep. `t` is the tick number, folded into
     /// deterministic per-vehicle noise.
     pub fn tick(&mut self, t: u64) {

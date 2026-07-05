@@ -277,9 +277,16 @@ async fn reused_slots_get_distinct_wire_ids() {
     let mut found = false;
     while tokio::time::Instant::now() < deadline && !found {
         {
-            let core = &mut world.resource_mut::<CoreRes>().0;
-            if core.fleet.alive_count() == 0 {
+            let spawn_now = world.resource::<CoreRes>().0.fleet.alive_count() == 0;
+            if spawn_now {
+                let core = &mut world.resource_mut::<CoreRes>().0;
                 core.spawn(0, 95.0, &[0]).expect("fixture spawn must fit");
+                // Out-of-band spawn (bypasses the shell's spawn path): book it
+                // into the conservation ledger or the shell's per-tick
+                // invariant check trips.
+                world
+                    .resource_mut::<winterthur_traffic::audit::Conservation>()
+                    .spawned += 1;
             }
         }
         warmup(&mut world, &mut schedule, 10);
