@@ -1125,19 +1125,20 @@ async function boot(): Promise<void> {
       const k = 1 - Math.exp(-dt * kswCamera.zoomSmoothing);
       rig = { ...rig, radius: rig.radius + (zoomTarget - rig.radius) * k };
     }
+    // panning feels map-relative: slower when zoomed in close. radius is fixed
+    // for the rest of the frame (pan moves the target, not the radius), so both
+    // pan sources share one scale.
+    const panZoomScale = Math.min(Math.max(rig.radius / 110, 0.15), 1);
     if (mouse && !dragging) {
       const [vx, vz] = edgePanVelocity(mouse.x, mouse.y, window.innerWidth, window.innerHeight, rig.yaw, kswCamera);
       if (vx !== 0 || vz !== 0) {
-        // panning feels map-relative: slower when zoomed in close
-        const zoomScale = Math.min(Math.max(rig.radius / 110, 0.15), 1);
-        rig = applyPan(rig, vx * zoomScale, vz * zoomScale, dt, kswCamera);
+        rig = applyPan(rig, vx * panZoomScale, vz * panZoomScale, dt, kswCamera);
       }
     }
     // keyboard pan (WASD/arrows) — same map-relative zoom scaling as edge-pan
     const [kvx, kvz] = keyboardPanVelocity(held, rig.yaw, kswCamera);
     if (kvx !== 0 || kvz !== 0) {
-      const zoomScale = Math.min(Math.max(rig.radius / 110, 0.15), 1);
-      rig = applyPan(rig, kvx * zoomScale, kvz * zoomScale, dt, kswCamera);
+      rig = applyPan(rig, kvx * panZoomScale, kvz * panZoomScale, dt, kswCamera);
     }
     // keyboard rotate (Q/E) via the shared drag path: convert a rad/s rate into
     // the equivalent horizontal drag-pixel delta (applyDrag: yaw -= dxPx*dragSpeed)
