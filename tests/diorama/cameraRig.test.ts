@@ -5,10 +5,12 @@ import {
   applyPan,
   applyZoom,
   edgePanVelocity,
+  keyboardPanVelocity,
   rigFromLookAt,
   rigPosition,
   roofFade,
   type CameraRigState,
+  type PanKeys,
   type RigConfig,
 } from '../../src/diorama/ksw/cameraRig';
 
@@ -25,6 +27,7 @@ const cfg: RigConfig = {
   panSpeed: 26,
   panBoundsX: 34,
   panBoundsZ: 26,
+  keyRotateSpeed: 1.2,
 };
 
 describe('rigFromLookAt / rigPosition roundtrip', () => {
@@ -208,5 +211,41 @@ describe('roofFade', () => {
     }
     const mid = roofFade((cfg.roofFadeNear + cfg.roofFadeFar) / 2, cfg);
     expect(mid).toBeCloseTo(0.5, 5);
+  });
+});
+
+describe('keyboardPanVelocity (WASD/arrow keyboard pan)', () => {
+  const none: PanKeys = { up: false, down: false, left: false, right: false };
+
+  it('is zero when nothing is held', () => {
+    expect(keyboardPanVelocity(none, 0, cfg)).toEqual([0, 0]);
+  });
+
+  it('is zero when opposing keys cancel (up+down)', () => {
+    expect(keyboardPanVelocity({ ...none, up: true, down: true }, 0, cfg)).toEqual([0, 0]);
+  });
+
+  it('W (up) pans screen-up = world -z at yaw 0', () => {
+    const [dx, dz] = keyboardPanVelocity({ ...none, up: true }, 0, cfg);
+    expect(dz).toBeLessThan(0);
+    expect(Math.abs(dx)).toBeLessThan(1e-9);
+  });
+
+  it('D (right) pans world +x at yaw 0', () => {
+    const [dx, dz] = keyboardPanVelocity({ ...none, right: true }, 0, cfg);
+    expect(dx).toBeGreaterThan(0);
+    expect(Math.abs(dz)).toBeLessThan(1e-9);
+  });
+
+  it('pan direction rotates with the camera yaw (90 deg: screen-right -> world -z)', () => {
+    const [dx, dz] = keyboardPanVelocity({ ...none, right: true }, Math.PI / 2, cfg);
+    expect(Math.abs(dx)).toBeLessThan(1e-6);
+    expect(dz).toBeLessThan(0);
+  });
+
+  it('diagonal (up+right) has both components non-zero', () => {
+    const [dx, dz] = keyboardPanVelocity({ ...none, up: true, right: true }, 0, cfg);
+    expect(dx).toBeGreaterThan(0);
+    expect(dz).toBeLessThan(0);
   });
 });

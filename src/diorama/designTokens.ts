@@ -270,6 +270,7 @@ export const kswCamera = {
   panSpeed: 30,
   panBoundsX: 34,
   panBoundsZ: 26,
+  keyRotateSpeed: 1.2, // rad/s for Q/E keyboard rotation (~69 deg/s)
 } as const;
 
 // Scene scale-up relative to the one-room prototype.
