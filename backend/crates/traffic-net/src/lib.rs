@@ -35,6 +35,13 @@ pub struct TrafficNet {
     /// Per-lane cumulative arc length at each polyline vertex (same length as
     /// `lanes[i].pts`), used by `pos_at` for O(log n) interpolation.
     arc_lut: Vec<Vec<f32>>,
+
+    /// Gateway node ids (kind `gateway`), sorted ascending.
+    gateways: Vec<u32>,
+    /// Lanes whose edge ends at (`to`) a gateway node, sorted by lane id.
+    gateway_lanes_in: Vec<u32>,
+    /// Lanes whose edge starts at (`from`) a gateway node, sorted by lane id.
+    gateway_lanes_out: Vec<u32>,
 }
 
 /// Parse + validate a baked `trafficnet.json` document, returning a
@@ -96,6 +103,28 @@ impl TrafficNet {
             })
             .collect();
 
+        // Gateway index: node ids plus the lanes feeding into / out of them
+        // (demand sources/sinks at the Gemeinde boundary), all id-sorted.
+        let mut gateways: Vec<u32> = doc
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Gateway)
+            .map(|n| n.id)
+            .collect();
+        gateways.sort_unstable();
+        let mut gateway_lanes_in: Vec<u32> = Vec::new();
+        let mut gateway_lanes_out: Vec<u32> = Vec::new();
+        for e in &doc.edges {
+            if gateways.binary_search(&e.to).is_ok() {
+                gateway_lanes_in.extend_from_slice(&e.lanes);
+            }
+            if gateways.binary_search(&e.from).is_ok() {
+                gateway_lanes_out.extend_from_slice(&e.lanes);
+            }
+        }
+        gateway_lanes_in.sort_unstable();
+        gateway_lanes_out.sort_unstable();
+
         TrafficNet {
             meta: doc.meta,
             nodes: doc.nodes,
@@ -105,7 +134,28 @@ impl TrafficNet {
             turns_from_offsets,
             turns_from_ids,
             arc_lut,
+            gateways,
+            gateway_lanes_in,
+            gateway_lanes_out,
         }
+    }
+
+    /// Gateway node ids (Gemeinde-boundary stubs, kind `gateway`), sorted
+    /// ascending. Empty for nets baked without a boundary (test nets).
+    pub fn gateways(&self) -> &[u32] {
+        &self.gateways
+    }
+
+    /// Lanes whose edge ends at (`to`) a gateway node — where outbound demand
+    /// leaves the network. Sorted by lane id.
+    pub fn gateway_lanes_in(&self) -> &[u32] {
+        &self.gateway_lanes_in
+    }
+
+    /// Lanes whose edge starts at (`from`) a gateway node — where inbound
+    /// demand enters the network. Sorted by lane id.
+    pub fn gateway_lanes_out(&self) -> &[u32] {
+        &self.gateway_lanes_out
     }
 
     fn lane_index_of_id(&self, lane: u32) -> Option<usize> {

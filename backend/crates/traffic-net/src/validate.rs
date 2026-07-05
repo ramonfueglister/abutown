@@ -56,6 +56,14 @@ pub enum NetError {
     UncoveredTurnNode { node: u32, kind: NodeKind },
 
     #[error(
+        "gateway node {node} has total degree {degree}, but gateway boundary stubs must have degree <= 2"
+    )]
+    GatewayDegreeExceeded { node: u32, degree: u32 },
+
+    #[error("gateway node {node} has turn {turn}, but gateway boundary stubs must have no turns")]
+    GatewayHasTurn { node: u32, turn: u32 },
+
+    #[error(
         "signal node {node} phases do not exactly cover its incoming turns (gated {gated:?}, incoming {incoming:?})"
     )]
     SignalPhaseCoverageMismatch {
@@ -170,16 +178,39 @@ pub fn validate(doc: &TrafficNetDoc) -> Result<(), NetError> {
         }
     }
 
-    // turn coverage: every non-dead_end node with >=1 in and >=1 out edge has >=1 turn
     let mut in_count: HashMap<u32, u32> = HashMap::new();
     let mut out_count: HashMap<u32, u32> = HashMap::new();
     for e in &doc.edges {
         *out_count.entry(e.from).or_insert(0) += 1;
         *in_count.entry(e.to).or_insert(0) += 1;
     }
+
+    // gateway nodes are boundary stubs: total degree <= 2 (at most one in-edge
+    // and one out-edge from the cut two-way road) and never any turns — they
+    // are pure demand sources/sinks, the network ends there.
+    for n in &doc.nodes {
+        if n.kind != NodeKind::Gateway {
+            continue;
+        }
+        let degree =
+            in_count.get(&n.id).copied().unwrap_or(0) + out_count.get(&n.id).copied().unwrap_or(0);
+        if degree > 2 {
+            return Err(NetError::GatewayDegreeExceeded { node: n.id, degree });
+        }
+        if let Some(t) = doc.turns.iter().find(|t| t.node == n.id) {
+            return Err(NetError::GatewayHasTurn {
+                node: n.id,
+                turn: t.id,
+            });
+        }
+    }
+
+    // turn coverage: every non-dead_end, non-gateway node with >=1 in and
+    // >=1 out edge has >=1 turn (gateways legitimately have in+out from a cut
+    // two-way road but no turns — traffic never passes through the boundary).
     let turn_nodes: HashSet<u32> = doc.turns.iter().map(|t| t.node).collect();
     for n in &doc.nodes {
-        if n.kind == NodeKind::DeadEnd {
+        if matches!(n.kind, NodeKind::DeadEnd | NodeKind::Gateway) {
             continue;
         }
         let has_in = in_count.get(&n.id).copied().unwrap_or(0) >= 1;
