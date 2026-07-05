@@ -439,5 +439,10 @@ export const kswCityStyle = {
   doorW: 1.5, doorH: 2.2,
   lamp: { spacing: { primary: 25, secondary: 28, tertiary: 30, residential: 35, unclassified: 35, living_street: 35, service: 45, pedestrian: 30 } as Record<string, number>, sideOffset: 1.2 },
   lod: { nearR: 150, midR: 600, hysteresis: 0.1 },
-  cloudSwap: { start: 300, end: 600 },
+  // end must not exceed kswScene.domeRadius (400): the hero cloud dome is an
+  // origin-centred BackSide sphere of that radius, so it has to be fully faded
+  // out by the time the camera dollies past its shell — otherwise the camera
+  // sits outside a still-opaque dome and sees its far inner shell as a dark
+  // translucent hemisphere over the city. The city dome (1800) takes over.
+  cloudSwap: { start: 300, end: 400 },
 } as const;

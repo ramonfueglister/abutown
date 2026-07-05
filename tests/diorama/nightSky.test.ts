@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kswScene, nightSkyLook } from '../../src/diorama/designTokens';
+import { kswCityStyle, kswScene, nightSkyLook } from '../../src/diorama/designTokens';
 import { starDirections } from '../../src/diorama/environment/nightSky';
 
 describe('starDirections', () => {
@@ -28,5 +28,21 @@ describe('city celestial dome — sun and moon share one distance', () => {
 
   it('sun and moon are the same celestial distance (same sky dome)', () => {
     expect(nightSkyLook.city.sunDistance).toBe(nightSkyLook.city.moonDistance);
+  });
+});
+
+// The hero cloud dome is an origin-centred BackSide sphere of radius
+// kswScene.domeRadius, faded out over cloudSwap as the camera dollies out. If
+// the fade only completes AFTER the camera has left the sphere (cloudSwap.end
+// > domeRadius), the camera sits outside a still-opaque BackSide dome and sees
+// its far inner shell as a dark translucent hemisphere over the city. The fade
+// must finish no later than the sphere's own radius.
+describe('hero cloud dome fades out before the camera exits it', () => {
+  it('cloudSwap.end does not exceed the hero dome radius', () => {
+    expect(kswCityStyle.cloudSwap.end).toBeLessThanOrEqual(kswScene.domeRadius);
+  });
+
+  it('the crossfade is still a real band (start strictly below end)', () => {
+    expect(kswCityStyle.cloudSwap.start).toBeLessThan(kswCityStyle.cloudSwap.end);
   });
 });
