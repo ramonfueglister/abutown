@@ -30,6 +30,7 @@ pub mod pools;
 pub mod pricing;
 pub mod producers;
 pub mod production;
+pub mod seed;
 pub mod wages;
 
 pub use accounts::*;
@@ -51,6 +52,7 @@ pub use pools::*;
 pub use pricing::*;
 pub use producers::*;
 pub use production::*;
+pub use seed::*;
 pub use wages::*;
 
 /// Reserved account that receives transport-cost payments (keeps money conserved).

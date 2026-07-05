@@ -324,9 +324,9 @@ pub fn seed_economy(world: &mut bevy_ecs::world::World, seed: &EconomySeed, sim:
 
 (lon/lat → lokale Meter im Loader über die Anker-Formel aus `scripts/geo/lib/project.mjs`, in Rust nachgebaut: `x=(lon-8.7285)*rad*R*cos(47.5069°)`, `z=-(lat-47.5069)*rad*R`, R=6371008.8.)
 
-- [ ] **Step 1: Failing test** in `seed.rs`: `seed_economy` auf frischer `World` mit dem 3-Gebäude-Fixture aus Task 2 → danach `Markets.len()==4`, `AccountBook.total_money()` == Summe aus initial_cash, zweiter Aufruf ändert nichts (`total_money` identisch, Markets weiterhin 4).
-- [ ] **Step 2:** FAIL → implementieren: JSON parsen, lon/lat→Meter, Resources befüllen (`Markets`, `AccountBook` via deposit, `RawDeposit`/`InputPool`/`ProductionPool` gemäss firms, `MarketDistances` = euclid_m paarweise, `HouseholdSector { population: 0, … }`). → PASS.
-- [ ] **Step 3: Commit** — `git commit -m "feat(world-core): authored economy seed on real Winterthur locations"`.
+- [x] **Step 1: Failing test** in `seed.rs`: `seed_economy` auf frischer `World` mit dem 3-Gebäude-Fixture aus Task 2 → danach `Markets.len()==4`, `AccountBook.total_money()` == Summe aus initial_cash, zweiter Aufruf ändert nichts (`total_money` identisch, Markets weiterhin 4).
+- [x] **Step 2:** FAIL → implementieren: JSON parsen, lon/lat→Meter, Resources befüllen (`Markets`, `AccountBook` via deposit, `RawDeposit`/`InputPool`/`ProductionPool` gemäss firms, `MarketDistances` = euclid_m paarweise, `HouseholdSector { population: 0, … }`). → PASS.
+- [x] **Step 3: Commit** — `git commit -m "feat(world-core): authored economy seed on real Winterthur locations"`.
 
 ### Task 6: Economy-Tick-Kette (`systems.rs`) + Konservierungs-Beweis
 
