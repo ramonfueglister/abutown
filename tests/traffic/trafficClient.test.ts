@@ -32,6 +32,8 @@ import { buildLaneNet, type RawLane } from '../../src/diorama/traffic/deadReckon
 // banner above).
 const CROSSING_LANE: RawLane = {
   id: 42,
+  edge: 42,
+  index: 0,
   lengthM: 300,
   pts: [[0, 0], [100, 0], [150, 0], [300, 0]],
 };
@@ -83,8 +85,8 @@ describe('TrafficClientCore.updateCamera — stale-vehicle eviction', () => {
   // Two lanes far apart so their cells never overlap: lane 1 sits at the
   // origin (cells around col 0), lane 2 sits 1000 m east (well outside any
   // 5x5 band centred near the origin).
-  const NEAR_LANE: RawLane = { id: 1, lengthM: 50, pts: [[0, 0], [50, 0]] };
-  const FAR_LANE: RawLane = { id: 2, lengthM: 50, pts: [[1000, 1000], [1050, 1000]] };
+  const NEAR_LANE: RawLane = { id: 1, edge: 1, index: 0, lengthM: 50, pts: [[0, 0], [50, 0]] };
+  const FAR_LANE: RawLane = { id: 2, edge: 2, index: 0, lengthM: 50, pts: [[1000, 1000], [1050, 1000]] };
 
   function makeCore(): TrafficClientCore {
     const net = buildLaneNet([NEAR_LANE, FAR_LANE]);
@@ -129,7 +131,7 @@ describe('TrafficClientCore.updateCamera — stale-vehicle eviction', () => {
 });
 
 describe('TrafficClientCore.applyFrame — keyframe ghost-heal uses the canonical cell path', () => {
-  const NEAR_LANE: RawLane = { id: 1, lengthM: 50, pts: [[0, 0], [50, 0]] };
+  const NEAR_LANE: RawLane = { id: 1, edge: 1, index: 0, lengthM: 50, pts: [[0, 0], [50, 0]] };
 
   it('evicts a stale vehicle resolved (via cellOfLaneS) to the keyframed cell but absent from it', () => {
     const net = buildLaneNet([NEAR_LANE]);

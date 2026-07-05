@@ -62,6 +62,7 @@ import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
 import { TrafficClient, DEFAULT_TRAFFIC_WS } from '../traffic/trafficClient';
 import { createCarLayer } from '../traffic/carLayer';
+import { createFlowLayer } from '../traffic/flowLayer';
 import { poseAt } from '../traffic/deadReckon';
 
 declare global {
@@ -93,6 +94,10 @@ declare global {
     __traffic?: {
       count: () => number;
       serverTick: () => number;
+      // Number of far-LOD flow impostor instances currently drawn (Task 13
+      // smoke assertion (g)) — mirrors flowLayer's InstancedMesh.count after
+      // its last update() call, i.e. exactly what's on screen this frame.
+      flowCount: () => number;
       sample: () => Array<{ id: number; lane: number; x: number; z: number; yaw: number }>;
       // Re-aim the CAMERA (and therefore the AOI subscription, which follows
       // rig.target) at a world (x, z) with an optional zoom radius + orbit
@@ -626,11 +631,18 @@ async function boot(): Promise<void> {
   // road ribbons drape onto, so cars ride exactly the visible surface.
   const carLayer = trafficEnabled ? createCarLayer(groundYAt) : null;
   if (carLayer) cityRoot.add(carLayer.object3d);
+  // Far-LOD impostor flow layer (Task 12): built once the client's net + grid
+  // are available (they come from the same connect() resolution as the car
+  // layer's dead-reckoning source). Renders ONLY outside the subscribed AOI
+  // (minus the one-CELL_SIZE_M fade ring) — see flowLayer.ts's module banner.
+  let flowLayer: ReturnType<typeof createFlowLayer> | null = null;
   let lastTrafficCamUpdate = 0; // wall-clock seconds, throttled to ~2 Hz
   if (trafficEnabled) {
     void TrafficClient.connect({ url: trafficWsUrl })
       .then((client) => {
         trafficClient = client;
+        flowLayer = createFlowLayer(client.net, client.grid, groundYAt);
+        cityRoot.add(flowLayer.object3d);
         // Prime the subscription immediately from the boot camera target.
         client.updateCamera(rig.target[0], rig.target[2]);
         // Dev-only debug surface for the Task 10 browser smoke: read the live
@@ -640,6 +652,7 @@ async function boot(): Promise<void> {
         window.__traffic = {
           count: () => client.vehicles.size,
           serverTick: () => client.serverTick,
+          flowCount: () => flowLayer?.count() ?? 0,
           sample: () => {
             const out: Array<{ id: number; lane: number; x: number; z: number; yaw: number }> = [];
             for (const [id, veh] of client.vehicles) {
@@ -1272,6 +1285,9 @@ async function boot(): Promise<void> {
         trafficClient.updateCamera(rig.target[0], rig.target[2]);
       }
       carLayer.update(trafficClient.net, trafficClient.vehicles, trafficClient.serverTick);
+      if (flowLayer) {
+        flowLayer.update(trafficClient.flow, trafficClient.subscribedCells, t);
+      }
     }
     frameCount++;
     // ── realtime environment: physical sun/moon/stars for now(), steered by

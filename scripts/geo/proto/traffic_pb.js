@@ -8,7 +8,7 @@ import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
  * Describes the file traffic.proto.
  */
 export const file_traffic = /*@__PURE__*/
-  fileDesc("Cg10cmFmZmljLnByb3RvEgp0cmFmZmljLnYxIkYKEFRyYWZmaWNDbGllbnRNc2cSFwoPc3Vic2NyaWJlX2NlbGxzGAEgAygNEhkKEXVuc3Vic2NyaWJlX2NlbGxzGAIgAygNIkIKDFZlaGljbGVTdGF0ZRIKCgJpZBgBIAEoDRIMCgRsYW5lGAIgASgNEgsKA3NfcRgDIAEoDRILCgN2X3EYBCABKA0idwoJQ2VsbEZyYW1lEgwKBGNlbGwYASABKA0SDAoEdGljaxgCIAEoBBIQCghrZXlmcmFtZRgDIAEoCBIqCgh2ZWhpY2xlcxgEIAMoCzIYLnRyYWZmaWMudjEuVmVoaWNsZVN0YXRlEhAKCGRlcGFydGVkGAUgAygNIjgKEFRyYWZmaWNTZXJ2ZXJNc2cSJAoFY2VsbHMYASADKAsyFS50cmFmZmljLnYxLkNlbGxGcmFtZWIGcHJvdG8z");
+  fileDesc("Cg10cmFmZmljLnByb3RvEgp0cmFmZmljLnYxInYKEFRyYWZmaWNDbGllbnRNc2cSFwoPc3Vic2NyaWJlX2NlbGxzGAEgAygNEhkKEXVuc3Vic2NyaWJlX2NlbGxzGAIgAygNEhsKDnN1YnNjcmliZV9mbG93GAMgASgISACIAQFCEQoPX3N1YnNjcmliZV9mbG93IkIKDFZlaGljbGVTdGF0ZRIKCgJpZBgBIAEoDRIMCgRsYW5lGAIgASgNEgsKA3NfcRgDIAEoDRILCgN2X3EYBCABKA0idwoJQ2VsbEZyYW1lEgwKBGNlbGwYASABKA0SDAoEdGljaxgCIAEoBBIQCghrZXlmcmFtZRgDIAEoCBIqCgh2ZWhpY2xlcxgEIAMoCzIYLnRyYWZmaWMudjEuVmVoaWNsZVN0YXRlEhAKCGRlcGFydGVkGAUgAygNIjUKCUZsb3dTdGF0ZRIMCgRlZGdlGAEgASgNEg0KBWNvdW50GAIgASgNEgsKA3ZfcRgDIAEoDSI/CglGbG93RnJhbWUSDAoEdGljaxgBIAEoBBIkCgVlZGdlcxgCIAMoCzIVLnRyYWZmaWMudjEuRmxvd1N0YXRlImsKEFRyYWZmaWNTZXJ2ZXJNc2cSJAoFY2VsbHMYASADKAsyFS50cmFmZmljLnYxLkNlbGxGcmFtZRIoCgRmbG93GAIgASgLMhUudHJhZmZpYy52MS5GbG93RnJhbWVIAIgBAUIHCgVfZmxvd2IGcHJvdG8z");
 
 /**
  * Describes the message traffic.v1.TrafficClientMsg.
@@ -32,9 +32,23 @@ export const CellFrameSchema = /*@__PURE__*/
   messageDesc(file_traffic, 2);
 
 /**
+ * Describes the message traffic.v1.FlowState.
+ * Use `create(FlowStateSchema)` to create a new message.
+ */
+export const FlowStateSchema = /*@__PURE__*/
+  messageDesc(file_traffic, 3);
+
+/**
+ * Describes the message traffic.v1.FlowFrame.
+ * Use `create(FlowFrameSchema)` to create a new message.
+ */
+export const FlowFrameSchema = /*@__PURE__*/
+  messageDesc(file_traffic, 4);
+
+/**
  * Describes the message traffic.v1.TrafficServerMsg.
  * Use `create(TrafficServerMsgSchema)` to create a new message.
  */
 export const TrafficServerMsgSchema = /*@__PURE__*/
-  messageDesc(file_traffic, 3);
+  messageDesc(file_traffic, 5);
 

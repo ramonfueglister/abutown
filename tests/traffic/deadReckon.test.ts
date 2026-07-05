@@ -20,7 +20,7 @@ import { buildLaneNet, posAt, poseAt, type TrafficNetGeom } from '../../src/dior
 // An L-shaped 2-segment lane: (0,0) -> (10,0) -> (10,10).
 // Arc LUT = [0, 10, 20]; total length 20.
 const L_LANE: TrafficNetGeom = buildLaneNet([
-  { id: 7, lengthM: 20, pts: [[0, 0], [10, 0], [10, 10]] },
+  { id: 7, edge: 7, index: 0, lengthM: 20, pts: [[0, 0], [10, 0], [10, 10]] },
 ]);
 
 const close = (a: number, b: number, eps = 1e-5): boolean => Math.abs(a - b) <= eps;
@@ -79,7 +79,7 @@ describe('posAt — port of server pos_at', () => {
 describe('poseAt — dead-reckoning advance + yaw', () => {
   // A single straight east-west lane so advance is easy to hand-check.
   const STRAIGHT: TrafficNetGeom = buildLaneNet([
-    { id: 3, lengthM: 100, pts: [[0, 0], [100, 0]] },
+    { id: 3, edge: 3, index: 0, lengthM: 100, pts: [[0, 0], [100, 0]] },
   ]);
 
   it('advances s by v·(now - tickAt)·SIM_DT and yaws from the tangent', () => {

@@ -17,6 +17,13 @@
 //   1. bahnhof            — the station forecourt (meta.json landmark)
 //   2. signal-corridor    — signal node 724 [8, 161] on the dense central spine
 //   3. dense-corridor     — [8, 289], the busiest AOI cell (probe-density.mjs)
+//
+// Task 13 addition: a ZOOMED-OUT far-LOD shot (flow-a1-zoomout.png) framing a
+// long stretch of the A1 mainline from high up, where per-vehicle CellFrames
+// don't reach (the 3×3 AOI covers only 384 m around the camera target) and
+// the impostor flow layer (Task 12) must carry the traffic impression.
+// CAPTURE_FLOW_ONLY=1 skips the slow whole-net sweep + cluster shots and
+// takes just this one.
 
 import { chromium } from 'playwright';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -105,7 +112,11 @@ function densestClusters(cars, n, minSep) {
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   console.log(`[capture] launching stack (traffic :${TRAFFIC_PORT} seed=${SEED}, vite :${VITE_PORT})…`);
-  const stack = await startTrafficStack({ trafficPort: TRAFFIC_PORT, vitePort: VITE_PORT, seed: SEED });
+  // Pin the backend to the workday morning rush (same anchor as the smoke's
+  // scenario 1) so the fleet — including the authored A1 through traffic the
+  // Task 13 flow shot frames — is reproducibly dense regardless of the real
+  // run time.
+  const stack = await startTrafficStack({ trafficPort: TRAFFIC_PORT, vitePort: VITE_PORT, seed: SEED, at: '2026-07-03T07:30' });
 
   const browser = await chromium.launch({
     headless: true,
@@ -132,6 +143,39 @@ async function main() {
     await page.waitForTimeout(12000);
 
     const cdp = await page.context().newCDPSession(page);
+
+    // ── Task 13: zoomed-out far-LOD flow shot over the A1 mainline ─────────
+    {
+      // The A1 mainline point closest to the city centre (~1.9 km out, from a
+      // one-off motorway-lane scan: speedMs > 27) — inside the well-baked
+      // world pyramid area (the far east A1 segment sits on blurry far-LOD
+      // landcover with no road ribbons, unusable for a visual check).
+      const A1 = { x: -897, z: -1677 };
+      // r=650: far past the 3×3 AOI (384 m) so most of the framed motorway
+      // renders from the flow layer, but close enough that a 4.5 m impostor
+      // is still ~6 px and below the distance haze that washes out r>1500.
+      // Near-top-down pitch reads the carriageway streams unambiguously.
+      await page.evaluate(
+        (a) => window.__traffic.lookAt(a.x, a.z, { radius: 650, yaw: -0.4, pitch: 1.4 }),
+        A1,
+      );
+      // Give the warm-started A1 through traffic time to spread along the
+      // mainline + the 2 s flow channel a few publish cycles.
+      await page.waitForTimeout(25000);
+      const flowCount = await page.evaluate(() => window.__traffic?.flowCount?.() ?? 0);
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
+      const file = `${OUT_DIR}flow-a1-zoomout.png`;
+      writeFileSync(file, Buffer.from(data, 'base64'));
+      written.push({ file, count: flowCount, target: [A1.x, A1.z], radius: 650 });
+      console.log(`[capture] flow-a1-zoomout: ${flowCount} impostors drawn -> ${file}`);
+    }
+
+    if (process.env.CAPTURE_FLOW_ONLY === '1') {
+      await browser.close();
+      console.log('\nCAPTURES:');
+      for (const w of written) console.log(`  ${w.file}  (${w.count} impostors/veh, target [${w.target}])`);
+      return;
+    }
 
     // Sweep the whole net to find the globally busiest corridors to frame.
     // A modest separation (150 m) keeps the three shots distinct while still

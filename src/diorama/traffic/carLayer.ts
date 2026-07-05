@@ -57,8 +57,10 @@ const BODY_COLORS = [
 ] as const;
 
 /** Build the merged two-box car geometry, local origin at the wheel line,
- * long axis along +z. */
-function buildCarGeometry(): THREE.BufferGeometry {
+ * long axis along +z. Exported so flowLayer.ts's far-LOD impostor mesh can
+ * reuse the EXACT same shape (per the Task 12 brief: "second InstancedMesh
+ * reusing the clay-car geometry") rather than duplicating the box-merge. */
+export function buildCarGeometry(): THREE.BufferGeometry {
   const body = boxGeo(BODY_W, BODY_H, BODY_L).clone();
   body.translate(0, BODY_H / 2, 0);
   const cabin = boxGeo(CABIN_W, CABIN_H, CABIN_L).clone();

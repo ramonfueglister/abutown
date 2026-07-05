@@ -222,6 +222,10 @@ export class TrafficClientCore {
   readonly vehicles = new Map<number, VehKinematics>();
   /** Newest sim tick seen on any frame — the dead-reckoning "now". */
   serverTick = 0;
+  /** Latest decoded FlowFrame (Task 11/12): edge id -> aggregate {count,
+   * v (m/s, decoded from the 0.25 m/s wire unit)}. Replaced wholesale on every
+   * flow frame (self-contained, no deltas — see traffic.proto FlowFrame). */
+  flow = new Map<number, { count: number; v: number }>();
 
   private subscribed = new Set<number>();
   private coordChecked = false;
@@ -296,6 +300,18 @@ export class TrafficClientCore {
     this.maybeCoordCheck(frame);
   }
 
+  /** Apply one decoded FlowFrame (Task 11/12 wire): replace the whole flow
+   * picture (self-contained, no deltas — traffic.proto FlowFrame comment).
+   * Decodes v_q (0.25 m/s units) to m/s, matching WireVehicle.vQ's decode in
+   * `upsert` above. */
+  applyFlowFrame(frame: { tick: bigint | number; edges: readonly WireFlowEdge[] }): void {
+    const tick = Number(frame.tick);
+    if (tick > this.serverTick) this.serverTick = tick;
+    const next = new Map<number, { count: number; v: number }>();
+    for (const e of frame.edges) next.set(e.edge, { count: e.count, v: e.vQ / 4 });
+    this.flow = next;
+  }
+
   private applyKeyframe(cell: number, vehicles: readonly WireVehicle[], tick: number): void {
     const present = new Set<number>();
     for (const v of vehicles) {
@@ -363,12 +379,24 @@ export class TrafficClient {
     return this.core.grid;
   }
 
+  /** The current subscription set (3×3 cells around the last camera target).
+   * Used by flowLayer.ts to suppress impostors inside the AOI where real
+   * cars already render (see the Task 12 exclusion invariant). */
+  get subscribedCells(): ReadonlySet<number> {
+    return this.core.subscribedCells;
+  }
+
   get vehicles(): Map<number, VehKinematics> {
     return this.core.vehicles;
   }
 
   get serverTick(): number {
     return this.core.serverTick;
+  }
+
+  /** Latest decoded FlowFrame edge -> {count, v (m/s)} (Task 11/12). */
+  get flow(): Map<number, { count: number; v: number }> {
+    return this.core.flow;
   }
 
   /** Build the net + grid from the build-time-imported trafficnet.json and
@@ -386,9 +414,14 @@ export class TrafficClient {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.addEventListener('open', () => {
-      // Re-send the current subscription set on (re)connect.
+      // Re-send the current subscription set on (re)connect, plus subscribe
+      // to the aggregate flow channel ALWAYS-ON (Task 12 deviation-log
+      // decision: simpler than a zoom-gated toggle, and the far-LOD impostor
+      // layer only renders it where visible — outside the subscribed AOI
+      // minus the fade ring — so the always-on ~30 KB/s flow stream is spent
+      // whether or not impostors are currently drawn).
       const subscribed = [...this.core.subscribedCells];
-      if (subscribed.length > 0) this.send(subscribed, []);
+      this.send(subscribed, [], true);
     });
     ws.addEventListener('message', (ev) => this.onMessage(ev));
     ws.addEventListener('close', () => {
@@ -411,11 +444,12 @@ export class TrafficClient {
     this.send(subscribe, unsubscribe);
   }
 
-  private send(subscribe: number[], unsubscribe: number[]): void {
+  private send(subscribe: number[], unsubscribe: number[], subscribeFlow?: boolean): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const msg = create(TrafficClientMsgSchema, {
       subscribeCells: subscribe,
       unsubscribeCells: unsubscribe,
+      subscribeFlow,
     });
     this.ws.send(toBinary(TrafficClientMsgSchema, msg));
   }
@@ -424,6 +458,7 @@ export class TrafficClient {
     if (!(ev.data instanceof ArrayBuffer)) return;
     const server = fromBinary(TrafficServerMsgSchema, new Uint8Array(ev.data));
     for (const frame of server.cells) this.core.applyFrame(frame);
+    if (server.flow) this.core.applyFlowFrame(server.flow);
   }
 
   close(): void {
@@ -439,5 +474,12 @@ interface WireVehicle {
   id: number;
   lane: number;
   sQ: number;
+  vQ: number;
+}
+
+/** Minimal structural view of a decoded FlowState (Task 11/12). */
+interface WireFlowEdge {
+  edge: number;
+  count: number;
   vQ: number;
 }

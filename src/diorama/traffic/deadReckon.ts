@@ -22,20 +22,36 @@
 /** Sim tick period in seconds. The server steps the fleet at 10 Hz. */
 export const SIM_DT = 0.1;
 
-/** One baked lane: id, declared length (m), and its [x, z] polyline vertices. */
+/** One baked lane: id, its owning traffic-net EDGE id, its ordinal within that
+ * edge, declared length (m), and its [x, z] polyline vertices. `edge`/`index`
+ * are needed to resolve the per-EDGE FlowFrame channel (see the flow layer):
+ * FlowState is keyed by edge id, but all client geometry is keyed by lane id,
+ * and the two are INDEPENDENT 0-based id spaces (18340 edges vs 18957 lanes),
+ * so an edge id must be mapped through `lane.edge` to reach geometry. */
 export interface RawLane {
   id: number;
+  edge: number;
+  index: number;
   lengthM: number;
   pts: number[][];
 }
 
 /** Query-ready lane geometry: raw pts + the precomputed per-lane arc-length LUT,
- * indexed by lane id for O(1) lookup. */
+ * indexed by lane id for O(1) lookup, plus an edge->representative-lane map so
+ * the per-edge FlowFrame channel can be resolved back to lane geometry. */
 export interface TrafficNetGeom {
   /** lane id -> polyline vertices ([x, z] each). */
   pts: Map<number, number[][]>;
   /** lane id -> cumulative arc length at each vertex (same length as pts). */
   arcLut: Map<number, number[]>;
+  /** traffic-net EDGE id -> a REPRESENTATIVE lane id of that edge (the lane
+   * with the lowest `index`, i.e. index 0). FlowState (traffic.proto) is keyed
+   * by edge, but geometry is keyed by lane and the id spaces are independent —
+   * this map is the ONLY correct bridge from an edge to a drawable polyline.
+   * Using one representative lane (rather than distributing an edge's impostor
+   * count across all its lanes) is acceptable at far-LOD distances, where the
+   * per-lane offset within an edge is sub-pixel. */
+  edgeToLane: Map<number, number>;
 }
 
 /** A dead-reckoned vehicle's last-known kinematic state (units already decoded
@@ -59,6 +75,10 @@ export interface Pose {
 export function buildLaneNet(lanes: RawLane[]): TrafficNetGeom {
   const pts = new Map<number, number[][]>();
   const arcLut = new Map<number, number[]>();
+  const edgeToLane = new Map<number, number>();
+  // edge -> lowest lane `index` seen so far, so edgeToLane always resolves to
+  // the edge's representative lane (index 0) regardless of doc order.
+  const edgeBestIndex = new Map<number, number>();
   for (const lane of lanes) {
     pts.set(lane.id, lane.pts);
     const acc: number[] = [0];
@@ -70,8 +90,18 @@ export function buildLaneNet(lanes: RawLane[]): TrafficNetGeom {
       acc.push(running);
     }
     arcLut.set(lane.id, acc);
+    // Constraint the code can't show: FlowState (traffic.proto) is PER-EDGE,
+    // but geometry is PER-LANE, and the id spaces are independent. Map each
+    // edge to ONE representative lane so the flow layer can resolve
+    // FlowState.edge to a drawable polyline; a single representative lane is
+    // acceptable at far-LOD distances (an edge's lanes sit metres apart).
+    const best = edgeBestIndex.get(lane.edge);
+    if (best === undefined || lane.index < best) {
+      edgeBestIndex.set(lane.edge, lane.index);
+      edgeToLane.set(lane.edge, lane.id);
+    }
   }
-  return { pts, arcLut };
+  return { pts, arcLut, edgeToLane };
 }
 
 /** Position + unit tangent at arc length `s` on `lane`. `s` is clamped to
