@@ -113,6 +113,12 @@ declare global {
       archetypes: number;
       fullCount: () => number;
       windAmp: () => number;
+      // Re-aim the camera at a world (x, z) with an optional zoom radius, then
+      // force an immediate near-set recompaction — lets the Task 7 browser
+      // smoke drive the compaction LOD deterministically (street vs.
+      // establishing framing) without synthetic mouse input, mirroring
+      // __traffic.lookAt above.
+      lookAt: (x: number, z: number, radius?: number) => void;
     };
   }
 }
@@ -635,6 +641,16 @@ async function boot(): Promise<void> {
     archetypes: allArchetypes().length,
     fullCount: () => treeLayer.fullMeshes.reduce((s, m) => s + m.count, 0),
     windAmp: () => windAmpU.value as number,
+    lookAt: (x: number, z: number, radius?: number) => {
+      rig = {
+        ...rig,
+        target: [x, groundYAt(x, z), z],
+        radius: radius ?? rig.radius,
+      };
+      if (radius !== undefined) zoomTarget = radius;
+      applyRig();
+      treeLayer.compactNear(camera.position.x, camera.position.z);
+    },
   };
   cityRoot.add(buildWindows(cityBuildings));
   cityRoot.add(buildLamps(cityRoads));
