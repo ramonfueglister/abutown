@@ -228,35 +228,15 @@ async function boot(): Promise<void> {
   // noise y-component stays drift-free). Coverage is a shared live uniform.
   const driftUV = uniform(new THREE.Vector2(0, 0));
   const coverageU = uniform(0.44);
-  // Two-layer clouds (spec §4): the hero dome fades out as the camera pulls
-  // back to the city framing and a bigger, coarser city dome fades in. Both
-  // opacities are driven by cloudMix (kswCityStyle.cloudSwap) in animate().
-  const heroCloudOpacity = uniform(1);
-  const cityCloudOpacity = uniform(0);
-  const cloudMatDome = new THREE.MeshBasicNodeMaterial();
-  cloudMatDome.transparent = true;
-  cloudMatDome.side = THREE.BackSide;
-  cloudMatDome.depthWrite = false;
-  cloudMatDome.fog = false;
-  {
-    const dir = positionWorld.normalize();
-    const p = vec3(dir.x.mul(float(cloudCfg.scale)).add(driftUV.x), dir.y.mul(float(cloudCfg.scale * 1.6)), dir.z.mul(float(cloudCfg.scale)).add(driftUV.y));
-    const n = mx_fractal_noise_float(p, 4, 2.0, 0.55, 1.0);
-    const dens = smoothstep(float(0.06), float(0.34), n.add(coverageU.sub(0.5)));
-    const horizonFade = smoothstep(float(0.0), float(0.07), dir.y);
-    // fold the hero fade into the opacity node before the material compiles
-    cloudMatDome.opacityNode = dens.mul(horizonFade).mul(heroCloudOpacity);
-    const facing = dot(dir, sunDirUniform).mul(0.5).add(0.5);
-    type Vec3Node = ReturnType<typeof vec3>;
-    const shadowN = cloudShadow as unknown as Vec3Node;
-    const litN = (cloudLit as unknown as Vec3Node).mul(float(cloudCfg.litBoost));
-    cloudMatDome.colorNode = mix(shadowN, litN, facing.pow(2.0));
-  }
-  const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(kswScene.domeRadius, 32, 24), cloudMatDome);
-  scene.add(cloudDome);
+  // Single city cloud layer (the hero dome was removed): the 1800 city dome is
+  // the only cloud layer, always on. The old hero dome was an origin-centred
+  // BackSide sphere of radius kswScene.domeRadius (400) that the camera dollied
+  // out of past ~400, showing its far inner shell as a dark hemisphere over the
+  // KSW. The city dome (1800 > radiusMax 1500) is never exited. The mist still
+  // fades with zoom via cloudMix in animate().
+  const cityCloudOpacity = uniform(1);
 
-  // city cloud layer: same recipe, big dome, coarser noise (scale × 3) — takes
-  // over as the hero dome fades out on zoom-out (spec: two-layer clouds).
+  // city cloud layer: big dome (kswCity.domeRadius), coarser noise (scale × 3).
   const cloudMatCity = new THREE.MeshBasicNodeMaterial();
   cloudMatCity.transparent = true;
   cloudMatCity.side = THREE.BackSide;
@@ -1226,12 +1206,10 @@ async function boot(): Promise<void> {
     // separate discs, so it thins out as the camera pulls back. Base opacity is
     // the per-frame environment value (mistBaseOpacity), fade/cloudMix on top.
     mistMat.opacity = mistBaseOpacity.value * (1 - fade * 0.75);
-    // two-layer clouds + city mist crossfade on the 300→600 zoom-out ramp:
-    // hero dome & hero mist rule up close, the city dome & city rim take over.
+    // city mist fades IN on the 300→600 zoom-out ramp (the city rim reads only
+    // from the overview). The city cloud dome is always on now (hero dome gone).
     const swap = kswCityStyle.cloudSwap;
     const cloudMix = Math.min(1, Math.max(0, (rig.radius - swap.start) / (swap.end - swap.start)));
-    heroCloudOpacity.value = 1 - cloudMix;
-    cityCloudOpacity.value = cloudMix;
     cityMistMat.opacity = mistBaseOpacity.value * 0.8 * cloudMix;
     kswSnapshot.radius = rig.radius;
     kswSnapshot.yaw = rig.yaw;
