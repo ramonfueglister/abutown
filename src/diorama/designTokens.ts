@@ -356,6 +356,13 @@ export const cameraContract = {
 // the hero look tokens above are untouched; these govern the big city plate.
 export const kswCity = {
   radiusMax: 1500, // wheel dolly ceiling to frame the whole Bahnhof↔ZAG span
+  // Pan roam bounds for the whole-Gemeinde world (Endless Horizon #119) —
+  // kswCamera's ±34/±26 is a hero-room leftover, smaller than the KSW footprint.
+  // The built city plate (meta.json: center (-451, 545), 1187×1506) reaches
+  // x=1044.5, z=1298 from the KSW origin; these clear it with margin so WASD /
+  // edge pan can roam KSW↔Bahnhof↔ZAG and a ring of surrounding terrain.
+  panBoundsX: 1500,
+  panBoundsZ: 1800,
   domeRadius: 1800, // clouds/stars dome swallows the city plate
   skyScale: 4000,
   cameraFar: 12000,

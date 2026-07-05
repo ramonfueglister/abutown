@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kswCamera } from '../../src/diorama/designTokens';
+import { kswCamera, kswCity } from '../../src/diorama/designTokens';
 import {
   applyDrag,
   applyPan,
@@ -247,5 +247,25 @@ describe('keyboardPanVelocity (WASD/arrow keyboard pan)', () => {
     const [dx, dz] = keyboardPanVelocity({ ...none, up: true, right: true }, 0, cfg);
     expect(dx).toBeGreaterThan(0);
     expect(dz).toBeLessThan(0);
+  });
+});
+
+// The city diorama (main.ts) pans with kswCity's bounds, NOT kswCamera's tiny
+// hero-room ±34/±26 clamp. The bounds must let the target reach the whole built
+// city so WASD/edge pan can actually roam it. Reference: data/winterthur/meta.json
+// plate center (-451, 545), size 1187×1506 → reach from the KSW origin is
+// x=1044.5, z=1298; landmarks ZAG (-774, 1067), Bahnhof (-338, 734).
+describe('city pan bounds cover the built city (Endless Horizon world)', () => {
+  it('panBoundsX reaches the far (west) edge of the city plate', () => {
+    expect(kswCity.panBoundsX).toBeGreaterThanOrEqual(1044.5);
+  });
+
+  it('panBoundsZ reaches the far (north) edge of the city plate', () => {
+    expect(kswCity.panBoundsZ).toBeGreaterThanOrEqual(1298);
+  });
+
+  it('the city does not inherit the hero-room ±34/±26 clamp', () => {
+    expect(kswCity.panBoundsX).toBeGreaterThan(kswCamera.panBoundsX);
+    expect(kswCity.panBoundsZ).toBeGreaterThan(kswCamera.panBoundsZ);
   });
 });

@@ -327,6 +327,8 @@ async function boot(): Promise<void> {
   // zoom config: hero settings, but the dolly may pull back far enough to
   // frame the whole Bahnhof↔ZAG city (roof-fade still keyed off kswCamera)
   const zoomCfg = { ...kswCamera, radiusMax: kswCity.radiusMax };
+  // pan uses the whole-Gemeinde roam bounds, not kswCamera's hero-room ±34/±26
+  const panCfg = { ...kswCamera, panBoundsX: kswCity.panBoundsX, panBoundsZ: kswCity.panBoundsZ };
   const applyRig = (): void => {
     camera.position.set(...rigPosition(rig));
     camera.lookAt(...rig.target);
@@ -1125,20 +1127,23 @@ async function boot(): Promise<void> {
       const k = 1 - Math.exp(-dt * kswCamera.zoomSmoothing);
       rig = { ...rig, radius: rig.radius + (zoomTarget - rig.radius) * k };
     }
-    // panning feels map-relative: slower when zoomed in close. radius is fixed
-    // for the rest of the frame (pan moves the target, not the radius), so both
-    // pan sources share one scale.
-    const panZoomScale = Math.min(Math.max(rig.radius / 110, 0.15), 1);
+    // pan is map-relative: speed scales with zoom radius so a zoomed-out view
+    // traverses the whole city quickly and a close-up nudges precisely (Cities-
+    // Skylines feel). No upper cap — over the 20 km world the overview (radius
+    // ~1500) must cover ground fast; the 0.15 floor keeps interior pans gentle.
+    // radius is fixed for the rest of the frame (pan moves the target, not the
+    // radius), so both pan sources share one scale.
+    const panZoomScale = Math.max(rig.radius / 110, 0.15);
     if (mouse && !dragging) {
-      const [vx, vz] = edgePanVelocity(mouse.x, mouse.y, window.innerWidth, window.innerHeight, rig.yaw, kswCamera);
+      const [vx, vz] = edgePanVelocity(mouse.x, mouse.y, window.innerWidth, window.innerHeight, rig.yaw, panCfg);
       if (vx !== 0 || vz !== 0) {
-        rig = applyPan(rig, vx * panZoomScale, vz * panZoomScale, dt, kswCamera);
+        rig = applyPan(rig, vx * panZoomScale, vz * panZoomScale, dt, panCfg);
       }
     }
     // keyboard pan (WASD/arrows) — same map-relative zoom scaling as edge-pan
-    const [kvx, kvz] = keyboardPanVelocity(held, rig.yaw, kswCamera);
+    const [kvx, kvz] = keyboardPanVelocity(held, rig.yaw, panCfg);
     if (kvx !== 0 || kvz !== 0) {
-      rig = applyPan(rig, kvx * panZoomScale, kvz * panZoomScale, dt, kswCamera);
+      rig = applyPan(rig, kvx * panZoomScale, kvz * panZoomScale, dt, panCfg);
     }
     // keyboard rotate (Q/E) via the shared drag path: convert a rad/s rate into
     // the equivalent horizontal drag-pixel delta (applyDrag: yaw -= dxPx*dragSpeed)
