@@ -13,7 +13,7 @@ interface Node {
   id: number;
   x: number;
   z: number;
-  kind: 'signal' | 'roundabout' | 'priority' | 'uncontrolled' | 'dead_end';
+  kind: 'signal' | 'roundabout' | 'priority' | 'uncontrolled' | 'dead_end' | 'gateway';
   signal: { cycleS: number; phases: { greenS: number; turns: number[] }[] } | null;
 }
 interface Edge {
@@ -41,7 +41,12 @@ interface Turn {
   yieldsTo: number[];
 }
 interface TrafficNet {
-  meta: { anchor: { lon: number; lat: number }; laneWidth: number; cellSize: number };
+  meta: {
+    anchor: { lon: number; lat: number };
+    laneWidth: number;
+    cellSize: number;
+    gatewayCount: number;
+  };
   nodes: Node[];
   edges: Edge[];
   lanes: Lane[];
@@ -69,6 +74,13 @@ describe('trafficnet baked asset', () => {
     expect(net.edges.length).toBeGreaterThan(100);
   });
 
+  it('(a2) Gemeinde scale: ≥10 gateways counted in meta, and a motorway-speed edge exists', () => {
+    const gateways = net.nodes.filter((n) => n.kind === 'gateway');
+    expect(net.meta.gatewayCount).toBe(gateways.length);
+    expect(gateways.length).toBeGreaterThanOrEqual(10);
+    expect(net.edges.some((e) => e.speedMs >= 27)).toBe(true);
+  });
+
   it('(b) every lane/edge/turn id reference resolves', () => {
     for (const l of net.lanes) expect(edgeById.has(l.edge)).toBe(true);
     for (const e of net.edges) {
@@ -85,7 +97,7 @@ describe('trafficnet baked asset', () => {
     }
   });
 
-  it('(c) every non-dead_end node with ≥1 in and ≥1 out edge has ≥1 turn', () => {
+  it('(c) every non-dead_end/non-gateway node with ≥1 in and ≥1 out edge has ≥1 turn', () => {
     const inCount = new Map<number, number>();
     const outCount = new Map<number, number>();
     for (const e of net.edges) {
@@ -94,7 +106,9 @@ describe('trafficnet baked asset', () => {
     }
     const turnNodes = new Set(net.turns.map((t) => t.node));
     for (const n of net.nodes) {
-      if (n.kind === 'dead_end') continue;
+      // dead_ends have no cross traffic; gateways are boundary spawn/despawn
+      // portals — sources/sinks only, deliberately without turns.
+      if (n.kind === 'dead_end' || n.kind === 'gateway') continue;
       if ((inCount.get(n.id) ?? 0) >= 1 && (outCount.get(n.id) ?? 0) >= 1) {
         expect(turnNodes.has(n.id)).toBe(true);
       }

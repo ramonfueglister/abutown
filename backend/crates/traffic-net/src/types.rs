@@ -27,6 +27,9 @@ pub enum NodeKind {
     Priority,
     Uncontrolled,
     DeadEnd,
+    /// Degree-1 boundary stub where a road crosses the Gemeinde boundary —
+    /// pure demand source/sink, never has turns (enforced by `validate`).
+    Gateway,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

@@ -163,6 +163,116 @@ function isOneway(tags, cls) {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Boundary clipping (Gemeinde-scale bake). The municipality boundary is a
+// GeoJSON Polygon/MultiPolygon in lon/lat; drivable ways are clipped BEFORE
+// projection: inside parts are kept, each boundary crossing inserts the
+// intersection point as a new terminal vertex whose node later becomes a
+// `gateway`. Point-in-polygon by ray casting on lon/lat — roads cross the
+// boundary transversally, so exactness at vertices is irrelevant.
+
+// Normalize a boundary input (Feature / FeatureCollection / geometry) to an
+// array of polygons, each an array of rings of [lon, lat] (altitude dropped).
+function normalizeBoundary(boundary) {
+  let geom = boundary;
+  if (geom?.type === 'FeatureCollection') geom = geom.features[0]?.geometry;
+  else if (geom?.type === 'Feature') geom = geom.geometry;
+  if (geom?.type === 'Polygon') return [geom.coordinates];
+  if (geom?.type === 'MultiPolygon') return geom.coordinates;
+  throw new Error(`boundary must be a GeoJSON Polygon/MultiPolygon (got ${geom?.type})`);
+}
+
+function pointInRing(lon, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygons(lon, lat, polys) {
+  for (const rings of polys) {
+    if (!pointInRing(lon, lat, rings[0])) continue;
+    let inHole = false;
+    for (let r = 1; r < rings.length; r++) {
+      if (pointInRing(lon, lat, rings[r])) {
+        inHole = true;
+        break;
+      }
+    }
+    if (!inHole) return true;
+  }
+  return false;
+}
+
+// Parameter t ∈ [0,1] along a→b where it crosses segment c→d, or null.
+function segCrossT(a, b, c, d) {
+  const rX = b.lon - a.lon;
+  const rY = b.lat - a.lat;
+  const sX = d[0] - c[0];
+  const sY = d[1] - c[1];
+  const denom = rX * sY - rY * sX;
+  if (denom === 0) return null;
+  const t = ((c[0] - a.lon) * sY - (c[1] - a.lat) * sX) / denom;
+  const u = ((c[0] - a.lon) * rY - (c[1] - a.lat) * rX) / denom;
+  if (t < -1e-9 || t > 1 + 1e-9 || u < -1e-9 || u > 1 + 1e-9) return null;
+  return Math.min(1, Math.max(0, t));
+}
+
+// Where does the way segment a→b (one endpoint inside, one outside) cross the
+// boundary? With multiple crossings: exiting takes the FIRST (min t), entering
+// the LAST (max t) — both keep the returned point on the inside portion's rim.
+function boundaryCrossing(a, b, polys, exiting) {
+  let best = null;
+  for (const rings of polys) {
+    for (const ring of rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const t = segCrossT(a, b, ring[j], ring[i]);
+        if (t === null) continue;
+        if (best === null || (exiting ? t < best : t > best)) best = t;
+      }
+    }
+  }
+  // PIP said the segment crosses, so an intersection must exist; a numeric
+  // near-tangency could still miss — fall back to the midpoint (≤ half a
+  // segment of error, deterministic).
+  const t = best ?? 0.5;
+  return { lon: a.lon + (b.lon - a.lon) * t, lat: a.lat + (b.lat - a.lat) * t };
+}
+
+// Clip one way geometry ([{lon,lat},…]) at the boundary. Returns the inside
+// segments in way order, each `{ pts, startGateway, endGateway }` — the
+// gateway flags mark terminal vertices created by a boundary cut. A way fully
+// outside yields []; in-out-in ways yield multiple segments.
+function clipWayAtBoundary(geometry, polys) {
+  const inside = geometry.map((p) => pointInPolygons(p.lon, p.lat, polys));
+  const segments = [];
+  let cur = null;
+  for (let i = 0; i < geometry.length; i++) {
+    if (inside[i]) {
+      if (!cur) cur = { pts: [], startGateway: false, endGateway: false };
+      cur.pts.push(geometry[i]);
+    }
+    if (i < geometry.length - 1 && inside[i] !== inside[i + 1]) {
+      const ip = boundaryCrossing(geometry[i], geometry[i + 1], polys, inside[i]);
+      if (inside[i]) {
+        cur.pts.push(ip);
+        cur.endGateway = true;
+        segments.push(cur);
+        cur = null;
+      } else {
+        cur = { pts: [ip], startGateway: true, endGateway: false };
+      }
+    }
+  }
+  if (cur) segments.push(cur);
+  return segments.filter((s) => s.pts.length >= 2);
+}
+
 // Split a drivable way's vertex list into segments at any vertex shared by ≥2
 // kept ways (or an endpoint of another kept way). `shared` is a Set of
 // coordinate keys that are intersection points; every way endpoint is always a
@@ -183,13 +293,39 @@ function splitAtIntersections(way, sharedKeys) {
 
 /**
  * Build the traffic network.
- * @param {{osmRoads:object, osmTrafficNodes:object, projector:{toLocal:(lon:number,lat:number)=>[number,number]}, anchor:{lon:number,lat:number}}} args
+ * @param {{osmRoads:object, osmTrafficNodes:object, projector:{toLocal:(lon:number,lat:number)=>[number,number]}, anchor:{lon:number,lat:number}, boundary?:object}} args
+ *   `boundary` (optional): GeoJSON Polygon/MultiPolygon (or Feature/
+ *   FeatureCollection wrapping one) in lon/lat — the municipality limit.
+ *   Ways are clipped at it; boundary-cut terminal nodes get kind 'gateway'.
  */
-export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor }) {
+export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor, boundary }) {
   // 1) filter to drivable ways, sorted by OSM id for determinism
-  const ways = (osmRoads.elements ?? [])
+  let ways = (osmRoads.elements ?? [])
     .filter((e) => e.type === 'way' && e.geometry && e.geometry.length >= 2 && isDrivable(e.tags))
     .sort((a, b) => a.id - b.id);
+
+  // 1b) boundary clip (before projection). Each way is replaced by its inside
+  //     segments in way order (splitting preserves the id sort, so ids stay
+  //     deterministic downstream); the cut points' topology keys are recorded
+  //     so their nodes classify as gateways later.
+  const gatewayKeys = new Set();
+  if (boundary) {
+    const polys = normalizeBoundary(boundary);
+    const clipped = [];
+    for (const w of ways) {
+      for (const seg of clipWayAtBoundary(w.geometry, polys)) {
+        clipped.push({ ...w, geometry: seg.pts });
+        if (seg.startGateway) {
+          gatewayKeys.add(coordKey(seg.pts[0].lon, seg.pts[0].lat));
+        }
+        if (seg.endGateway) {
+          const last = seg.pts[seg.pts.length - 1];
+          gatewayKeys.add(coordKey(last.lon, last.lat));
+        }
+      }
+    }
+    ways = clipped;
+  }
 
   // 2) topology: count how many kept ways touch each coordinate. A vertex is an
   //    intersection when ≥2 way-vertices coincide there OR it is a way endpoint
@@ -205,27 +341,84 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor }
   const sharedKeys = new Set();
   for (const [k, c] of vertexCount) if (c >= 2) sharedKeys.add(k);
 
-  // 3) nodes: every split point becomes a node. Deterministic order — sort node
-  //    keys by their (lon,lat) then assign sequential ids. We remember the
-  //    original lon/lat for signal proximity + projection.
-  const nodeKeyToInfo = new Map(); // key -> { lon, lat }
-  const rememberNode = (lon, lat) => {
-    const k = coordKey(lon, lat);
-    if (!nodeKeyToInfo.has(k)) nodeKeyToInfo.set(k, { lon, lat });
-    return k;
-  };
-
-  // 4) split ways into raw segments; collect the node keys used.
-  const rawSegs = []; // { wayId, tags, cls, pts:[{lon,lat}], fromKey, toKey }
+  // 3+4) split ways into raw segments at intersection vertices.
+  let rawSegs = []; // { wayId, tags, cls, pts:[{lon,lat}], fromKey, toKey }
   for (const w of ways) {
     const cls = baseClass(w.tags.highway);
     const segs = splitAtIntersections(w, sharedKeys);
     for (const [s, e] of segs) {
       const pts = w.geometry.slice(s, e + 1);
-      const fromKey = rememberNode(pts[0].lon, pts[0].lat);
-      const toKey = rememberNode(pts[pts.length - 1].lon, pts[pts.length - 1].lat);
+      const fromKey = coordKey(pts[0].lon, pts[0].lat);
+      const toKey = coordKey(pts[pts.length - 1].lon, pts[pts.length - 1].lat);
       if (fromKey === toKey && pts.length < 3) continue; // degenerate
       rawSegs.push({ wayId: w.id, tags: w.tags, cls, pts, fromKey, toKey });
+    }
+  }
+
+  // 4b) largest-connected-component pruning: OSM extracts contain dead
+  //     fragments (parking aisles, clipped stubs) that would strand vehicles.
+  //     Keep only the component with the greatest lane length (centreline
+  //     length × directed lane count); gateway stubs attached to it survive
+  //     by construction. Union-find over topology keys, insertion-ordered →
+  //     deterministic.
+  if (rawSegs.length > 0) {
+    const parent = new Map();
+    const find = (k) => {
+      let r = k;
+      while (parent.get(r) !== r) r = parent.get(r);
+      // path compression
+      let c = k;
+      while (parent.get(c) !== r) {
+        const next = parent.get(c);
+        parent.set(c, r);
+        c = next;
+      }
+      return r;
+    };
+    const ensure = (k) => {
+      if (!parent.has(k)) parent.set(k, k);
+    };
+    for (const seg of rawSegs) {
+      ensure(seg.fromKey);
+      ensure(seg.toKey);
+      parent.set(find(seg.fromKey), find(seg.toKey));
+    }
+    const weightByRoot = new Map();
+    for (const seg of rawSegs) {
+      const pts = seg.pts.map((p) => projector.toLocal(p.lon, p.lat));
+      const { forward, backward } = laneCounts(seg.tags, isOneway(seg.tags, seg.cls));
+      seg.laneLenM = polylineLength(pts) * (forward + backward);
+      const r = find(seg.fromKey);
+      weightByRoot.set(r, (weightByRoot.get(r) ?? 0) + seg.laneLenM);
+    }
+    let bestRoot = null;
+    let bestW = -1;
+    for (const [r, w] of weightByRoot) {
+      if (w > bestW) {
+        bestW = w;
+        bestRoot = r;
+      }
+    }
+    const total = [...weightByRoot.values()].reduce((s, w) => s + w, 0);
+    const dropped = total - bestW;
+    if (dropped > 0) {
+      rawSegs = rawSegs.filter((seg) => find(seg.fromKey) === bestRoot);
+      console.log(
+        `trafficnet: dropped ${Math.round(dropped)} m lane-length in ${weightByRoot.size - 1} disconnected fragment(s); ` +
+          `kept ${((bestW / total) * 100).toFixed(2)}% of ${Math.round(total)} m`,
+      );
+    }
+  }
+
+  // 4c) node registry from the kept segments only (endpoints become nodes).
+  const nodeKeyToInfo = new Map(); // key -> { lon, lat }
+  for (const seg of rawSegs) {
+    if (!nodeKeyToInfo.has(seg.fromKey)) {
+      nodeKeyToInfo.set(seg.fromKey, { lon: seg.pts[0].lon, lat: seg.pts[0].lat });
+    }
+    if (!nodeKeyToInfo.has(seg.toKey)) {
+      const last = seg.pts[seg.pts.length - 1];
+      nodeKeyToInfo.set(seg.toKey, { lon: last.lon, lat: last.lat });
     }
   }
 
@@ -357,6 +550,11 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor }
   const nearSignal = (nx, nz) =>
     signalLocal.some(([sx, sz]) => Math.hypot(sx - nx, sz - nz) <= 20);
 
+  const gatewayNodeIds = new Set();
+  for (const k of gatewayKeys) {
+    if (nodeIdOf.has(k)) gatewayNodeIds.add(nodeIdOf.get(k));
+  }
+
   for (const n of nodes) {
     const inN = incomingByNode.get(n.id)?.length ?? 0;
     const outN = outgoingByNode.get(n.id)?.length ?? 0;
@@ -367,11 +565,16 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor }
       ]),
     );
     degree.delete(n.id);
-    // A stub with a single neighbour is a dead_end regardless of a nearby
-    // signal — it has no cross-traffic to control, and its only "turn" would be
-    // a U-turn (which we don't emit). Checking this before `signal` keeps such
-    // nodes out of the turn-coverage requirement.
-    if (degree.size <= 1) {
+    // A terminal created by a boundary cut is a gateway — a spawn/despawn
+    // portal for external demand. Takes precedence over dead_end (gateways
+    // are degree-1 by construction) and everything else.
+    if (gatewayNodeIds.has(n.id)) {
+      n.kind = 'gateway';
+    } else if (degree.size <= 1) {
+      // A stub with a single neighbour is a dead_end regardless of a nearby
+      // signal — it has no cross-traffic to control, and its only "turn" would
+      // be a U-turn (which we don't emit). Checking this before `signal` keeps
+      // such nodes out of the turn-coverage requirement.
       n.kind = 'dead_end';
     } else if (nearSignal(n.x, n.z)) {
       n.kind = 'signal';
@@ -415,7 +618,9 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor }
   };
 
   for (const n of nodes) {
-    if (n.kind === 'dead_end') continue;
+    // dead_ends have no cross traffic; gateways are pure spawn/despawn portals
+    // (sources/sinks only — the Rust validator enforces "no turns at gateways")
+    if (n.kind === 'dead_end' || n.kind === 'gateway') continue;
     const ins = incomingByNode.get(n.id) ?? [];
     const outs = outgoingByNode.get(n.id) ?? [];
     for (const ie of ins) {
@@ -563,7 +768,12 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor }
   }));
 
   return {
-    meta: { anchor: { lon: anchor.lon, lat: anchor.lat }, laneWidth: LANE_WIDTH, cellSize: CELL_SIZE },
+    meta: {
+      anchor: { lon: anchor.lon, lat: anchor.lat },
+      laneWidth: LANE_WIDTH,
+      cellSize: CELL_SIZE,
+      gatewayCount: gatewayNodeIds.size,
+    },
     nodes: outNodes,
     edges: outEdges,
     lanes: outLanes,

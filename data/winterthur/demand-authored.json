@@ -1,0 +1,44 @@
+{
+  "notes": "Tuning constants + authored A1 through traffic for demand-gen (spec 2026-07-05 winterthur-traffic-demand-plan2 §4). car_share 0.36 ~ BFS modal-split order for Winterthur; workers_per_resident 0.5 and lambda_km 4.0 per plan Task 4. Through volumes: ASTRA automatic-count AADT on the A1 near Winterthur is ~60-70k veh/day both directions (~30-35k/direction); roughly half of that is through traffic w.r.t. the Gemeinde, so ~18k/direction is authored. The A1 weaves across the municipal boundary, so each contiguous inside segment gets its own gateway pair per direction (one physical through vehicle appears once per segment it traverses); all pairs below were verified >95% motorway-speed shortest paths on the baked net.",
+  "trips_scale": 1.0,
+  "workers_per_resident": 0.5,
+  "car_share": 0.36,
+  "lambda_km": 4.0,
+  "through": [
+    {
+      "fromGateway": 2021,
+      "toGateway": 1305,
+      "vehPerDay": 18000,
+      "profile": "through",
+      "notes": "A1 toward St. Gallen: south entry (Kemptthal side) -> northwest exit, 8.2 km mainline"
+    },
+    {
+      "fromGateway": 2483,
+      "toGateway": 2651,
+      "vehPerDay": 18000,
+      "profile": "through",
+      "notes": "A1 toward St. Gallen: short 0.6 km boundary re-entry segment"
+    },
+    {
+      "fromGateway": 4271,
+      "toGateway": 8242,
+      "vehPerDay": 18000,
+      "profile": "through",
+      "notes": "A1 toward St. Gallen: center re-entry -> east exit, 3.4 km"
+    },
+    {
+      "fromGateway": 8246,
+      "toGateway": 4270,
+      "vehPerDay": 18000,
+      "profile": "through",
+      "notes": "A1 toward Zurich: east entry -> center exit, 3.4 km"
+    },
+    {
+      "fromGateway": 1300,
+      "toGateway": 2031,
+      "vehPerDay": 18000,
+      "profile": "through",
+      "notes": "A1 toward Zurich: northwest entry -> south exit (Kemptthal side), 8.2 km mainline"
+    }
+  ]
+}

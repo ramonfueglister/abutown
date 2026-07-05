@@ -1,262 +1,485 @@
-//! Trip spawner v1 (synthetic-structured; STATPOP OD is Plan 2).
+//! Wall-clock census trip spawner (Plan 2, spec §5).
 //!
-//! # Attractor set
+//! Replaces the v1 synthetic attractor spawner: trips are no longer sampled
+//! from a two-peak curve over building clusters — they come from the offline
+//! `demand-gen` census bake ([`TripSchedule`], `trips.bin`) and are released
+//! against the real Europe/Zurich time-of-day via [`WallClock`].
 //!
-//! Origins/destinations are sampled from a weighted **attractor** set, where
-//! each attractor is a network *edge* the trip enters/leaves the plate through:
+//! # Release windows
 //!
-//!  * **Gateways** — plate-boundary edges: an edge is a gateway when either of
-//!    its endpoint nodes has graph degree 1 (a genuine dead-end stub where
-//!    traffic enters the modelled area) or lies within [`BORDER_M`] of the
-//!    node-coordinate bounding box border. Gateways are weighted
-//!    [`GATEWAY_WEIGHT`]× a cluster so through-traffic dominates, matching a
-//!    real city plate where most trips cross the boundary.
-//!  * **Clusters** — the [`N_CLUSTERS`] heaviest building clusters from
-//!    `buildings.json`. Footprint centroids are averaged per spatial cell and
-//!    the densest cells are kept; each cluster centre is snapped to the nearest
-//!    lane, and that lane's edge becomes the attractor.
+//! Per tick `t` the release window is `[s_of_day(t), s_of_day(t+1))` in local
+//! seconds-of-day. Since `DT = 0.1 s`, `s_of_day` only advances every 10th
+//! tick, so 9 of 10 ticks carry an empty window and release nothing. A window
+//! that wraps midnight (`s_of_day(t+1) < s_of_day(t)`) is split into the old
+//! day's tail `[s, 86400)` and the new day's head `[0, e)` with the
+//! [`DayKind`] re-evaluated for each half, so the weekday/weekend block flips
+//! exactly at the wrap.
 //!
-//! # Trip rate
+//! # Thinning (`demand_scale`)
 //!
-//! A trip's spawn instants follow a two-peak daily demand curve (morning
-//! 07–08 h and evening 17–18 h rush, each at 100 % of [`SpawnConfig::max_rate`],
-//! `BASE_FRACTION` off-peak; piecewise linear between). Sim time-of-day is
-//! `tick·dt` seconds after 06:00, wrapping every 24 h.
+//! Every trip gets one deterministic draw
+//! `u01(seed ^ 0x5EED_DE44, day_kind as u64, trip.index as u64)` and spawns
+//! iff the draw is `< demand_scale`. The draw is a pure function of the
+//! trip's identity — `(day block, index)`, since record indices restart per
+//! block — and is **tick-independent**, so the same subset of the census
+//! spawns every day at any scale, and the warm start reuses the identical
+//! draw (no double randomness). The day-kind discriminant rides in `u01`'s
+//! `tick` parameter so a weekday and a weekend trip with equal indices get
+//! independent draws.
 //!
-//! ## Concurrency arithmetic (documenting the [`MAX_CONCURRENT`] target)
+//! # Spawn kinematics
 //!
-//! By Little's law the steady-state concurrent fleet is `λ · E[trip time]`.
-//! Mean trip length across the plate is ≈ 2 km at ≈ 11 m/s ⇒ `E[T] ≈ 180 s`.
-//! With `max_rate = 18 veh/s`, unconstrained peak concurrency would be
-//! `18 · 180 ≈ 3240` — so the hard [`MAX_CONCURRENT`] = 1500 cap binds at the
-//! rush peaks (spawns are suppressed while `alive ≥ MAX_CONCURRENT`), holding
-//! the peak fleet at ~1500. Off-peak (`0.2 · 18 = 3.6 veh/s`) gives
-//! `3.6 · 180 ≈ 650` concurrent, comfortably under the cap.
+//! A trip whose origin lane leaves a gateway node (Gemeinde-boundary stub,
+//! [`TrafficNet::gateway_lanes_out`]) represents traffic *entering* the
+//! modelled area at speed: it spawns at the lane entry rolling at
+//! `0.8 × edge speed`, **capped** so the entry speed is dissipable within
+//! the measured gap to the nearest downstream vehicle along the route
+//! (`v ≤ √(2·b·gap)`, comfortable-braking kinematics) — a car merging into
+//! a queue must not enter faster than it can stop. Internal origins spawn
+//! standing (`v = 0`), as v1 did.
 //!
-//! # Determinism
+//! The entry point is `s = ENTRY_S` (one car length into the lane) so the
+//! spawned body lies fully inside the lane — a spawn at exactly `s = 0`
+//! would hang its rear back through the junction, where an upstream vehicle
+//! mid-crossing can already be (observed as a real collision on the
+//! Gemeinde net). A spawn is dropped — counted in
+//! [`SpawnCounters::blocked_entry`] — when any of these hold:
 //!
-//! All randomness is [`traffic_core::u01`]`(seed, tick, draw)` — a pure
-//! function of a per-spawner draw counter, so a run is bit-reproducible for a
-//! fixed seed regardless of wall-clock timing.
+//!  * the start lane is a micro connector shorter than
+//!    [`MIN_SPAWN_LANE_M`];
+//!  * the start lane holds a vehicle within [`SPAWN_CLEARANCE_M`] of the
+//!    entry point;
+//!  * a vehicle on a feeder lane (any turn into the start lane) is within
+//!    its own braking-plus-headway distance of the junction, i.e. it may
+//!    cross in before the fresh spawn could get moving.
+//!
+//! # Warm start
+//!
+//! Booting mid-day must not start with an empty world: at construction the
+//! trips with `departure_s ∈ [boot_s − 900, boot_s)` that pass the *same*
+//! thinning draw are queued and released uniformly over the first 600 ticks
+//! (deterministic slot `trip.index % 600`). If the boot is less than 15 min
+//! after midnight the lookback clamps at 00:00 rather than reaching into the
+//! previous day's block (documented trade-off: a boot in that sliver warm
+//! starts with slightly fewer trips).
+//!
+//! # Safety valve
+//!
+//! While `core.fleet.alive_count() >= MAX_CONCURRENT` every release is
+//! dropped (not backlogged) and counted; one rate-limited log line fires per
+//! closed window that saw suppression — same valve semantics as v1.
 
 use crate::Router;
+use crate::clock::WallClock;
+use crate::demand::{DayKind, Trip, TripSchedule};
 use traffic_core::{Core, u01};
 use traffic_net::TrafficNet;
 
-/// Timestep echoed from the kernel so spawn accumulation matches `Core::tick`.
-const DT: f32 = traffic_core::DT;
+/// Hard cap on the concurrent fleet; spawns are suppressed at or above it.
+/// Also the natural pre-size for the kernel's slot capacity. Raised from
+/// v1's 1500 to the spec §7 target (30 k) in Task 8: the measured morning
+/// peak at `demand_scale = 1.0` is ~1.5–2 k alive with mean tick well under
+/// the 50 ms budget, so the valve is a genuine safety valve again instead of
+/// the binding constraint it was during Tasks 6–7.
+pub const MAX_CONCURRENT: usize = 30_000;
 
-/// Number of building clusters kept as attractors.
-pub const N_CLUSTERS: usize = 30;
+/// Salt XOR-folded into the seed for the thinning draw so it can never alias
+/// the kernel's per-vehicle noise stream or the shell's re-route stream.
+const THINNING_SALT: u64 = 0x5EED_DE44;
 
-/// A gateway attractor's weight is this multiple of a cluster's.
-pub const GATEWAY_WEIGHT: f32 = 2.0;
+/// Warm-start lookback: trips departed within this many seconds before boot
+/// are considered "currently en route" and back-filled.
+const WARM_LOOKBACK_S: u32 = 900;
 
-/// Off-peak demand as a fraction of `max_rate`.
-pub const BASE_FRACTION: f32 = 0.2;
+/// Warm-start release horizon: queued trips are spread uniformly over the
+/// first this-many ticks (60 s at 10 Hz) via `trip.index % 600`.
+const WARM_RELEASE_TICKS: u64 = 600;
 
-/// A node within this many metres of the bbox border marks its incident edges
-/// as plate gateways. Sized to the real Winterthur plate: the modelled area is
-/// ~1.6 km × 1.85 km with sparse peripheral nodes, so a 30 m band captures only
-/// ~18 edges (too few distinct entrances → OD collisions + gateway-lane
-/// gridlock). A 150 m band yields ~156 boundary edges, a realistic gateway ring.
-pub const BORDER_M: f32 = 150.0;
+/// Minimum clear bumper distance (m) required around the entry point on the
+/// start lane, so the first tick sees a sane leader gap (kept from v1).
+const SPAWN_CLEARANCE_M: f32 = 12.0;
 
-/// Target peak concurrent fleet; spawns are suppressed at or above it. Also
-/// the natural pre-size for the kernel's slot capacity.
-pub const MAX_CONCURRENT: usize = 1500;
+/// Arc position of the entry point: one kernel vehicle length (4.5 m) plus
+/// margin into the lane, so the spawned body never pokes back through the
+/// junction behind it.
+const ENTRY_S: f32 = 5.0;
 
-/// Spatial cell size (m) for clustering building centroids before ranking.
-const CLUSTER_CELL_M: f32 = 120.0;
+/// Minimum start-lane length (m) for a spawn: the body must fit fully
+/// inside the lane at [`ENTRY_S`] with front margin. Trips whose route head
+/// is a shorter micro connector lane are dropped ([`SpawnCounters::
+/// blocked_entry`]) — a 4.5 m body on a ~2 m lane permanently straddles the
+/// junction and collides with crossing traffic (observed on the real net).
+const MIN_SPAWN_LANE_M: f32 = 2.0 * ENTRY_S;
 
-/// Tunable spawn parameters.
+/// Upstream guard time (s): a feeder-lane vehicle closer to the junction
+/// than `headway·v + v²/(2b)` may cross in before a fresh standing spawn
+/// can move — the spawn is blocked. Matches the kernel's IDM `T` (1.5 s).
+const UPSTREAM_HEADWAY_S: f32 = 1.5;
+
+/// Gateway origins enter rolling at this fraction of their edge's speed.
+const GATEWAY_ENTRY_SPEED_FRACTION: f32 = 0.8;
+
+/// How far down the route the entry-speed cap scans for a leader (m).
+const ENTRY_LOOKAHEAD_M: f32 = 150.0;
+
+/// Braking rate assumed by the entry-speed cap (m/s²). Deliberately below
+/// the kernel's comfortable deceleration `b = 2.0` (Treiber et al. 2000) so
+/// a rolling gateway entry always has braking headroom.
+const ENTRY_BRAKE: f32 = 1.5;
+
+/// Seconds per day.
+const DAY_S: u32 = 86_400;
+
+/// Runtime spawner tuning.
 #[derive(Debug, Clone, Copy)]
-pub struct SpawnConfig {
-    /// Peak spawn rate (vehicles per second) at the rush-hour maxima.
-    pub max_rate: f32,
+pub struct SpawnerCfg {
+    /// Demand thinning factor ∈ (0, 1]: the fraction of census trips that
+    /// actually spawn. 1.0 until Task 8 measures the tick budget.
+    pub demand_scale: f32,
 }
 
-impl Default for SpawnConfig {
+impl Default for SpawnerCfg {
     fn default() -> Self {
-        // See the concurrency arithmetic in the module docs.
-        SpawnConfig { max_rate: 30.0 }
+        SpawnerCfg { demand_scale: 1.0 }
     }
 }
 
-/// A weighted trip endpoint: an edge id and its sampling weight.
+/// One successful spawn, reported to the caller for destination tracking
+/// (re-routing) and test introspection.
 #[derive(Debug, Clone, Copy)]
-struct Attractor {
-    edge: u32,
-    weight: f32,
+pub struct SpawnRecord {
+    /// Kernel slot id of the spawned vehicle.
+    pub veh: u32,
+    /// Destination edge (the trip's `dest_lane`'s edge).
+    pub dest_edge: u32,
+    /// The trip's block-local record index (deterministic identity).
+    pub trip_index: u32,
 }
 
-/// Deterministic weighted trip generator over a fixed attractor set.
-pub struct Spawner {
-    cfg: SpawnConfig,
-    /// Cumulative-weight table over attractors for O(log n) sampling.
-    attractors: Vec<Attractor>,
-    cumulative: Vec<f32>,
-    total_weight: f32,
-    /// Fractional spawn carry so a sub-1 per-tick rate still spawns on average.
-    accumulator: f32,
-    /// Monotonic per-spawner draw counter feeding `u01`'s `id` argument, so
-    /// every random decision uses a distinct, replayable stream position.
-    draw: u64,
+/// Monotonic outcome counters over the spawner's lifetime.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SpawnCounters {
+    /// Vehicles actually placed into the kernel.
+    pub spawned: u64,
+    /// Trips dropped because the router found no origin→destination path.
+    pub skipped_no_route: u64,
+    /// Trips dropped by the [`MAX_CONCURRENT`] valve (incl. kernel-cap
+    /// refusals, which only occur at the same boundary).
+    pub suppressed: u64,
+    /// Trips dropped because the entry point was physically occupied.
+    pub blocked_entry: u64,
+}
+
+/// The wall-clock census trip spawner. Owns the loaded [`TripSchedule`] and
+/// the boot-anchored [`WallClock`]; driven once per tick by the shell's
+/// `spawn_trips` system.
+pub struct TripSpawner {
+    schedule: TripSchedule,
+    clock: WallClock,
+    cfg: SpawnerCfg,
     seed: u64,
+    /// Warm-start queue: `(release_tick, trip)`, sorted by release tick then
+    /// trip index; `warm_next` is the cursor of the next unreleased entry.
+    warm: Vec<(u64, Trip)>,
+    warm_next: usize,
+    counters: SpawnCounters,
+    /// Suppressions accumulated since the last per-window log flush.
+    window_suppressed: u64,
+    /// Reusable buffer of thinned trips for the current window.
+    pending: Vec<Trip>,
 }
 
-impl Spawner {
-    /// Build the attractor set from the net + building clusters and seed the
-    /// deterministic draw stream.
-    pub fn new(net: &TrafficNet, buildings_json: &str, cfg: SpawnConfig, seed: u64) -> Self {
-        let mut attractors = gateway_attractors(net);
-        attractors.extend(cluster_attractors(net, buildings_json));
+impl TripSpawner {
+    /// Build the spawner and queue the warm start (see module docs). `seed`
+    /// is the sim seed; the thinning stream is salted so it is disjoint from
+    /// every other `u01` consumer.
+    pub fn new(schedule: TripSchedule, clock: WallClock, cfg: SpawnerCfg, seed: u64) -> Self {
+        let boot_s = clock.s_of_day(0);
+        let boot_day = clock.day_kind(0);
+        let lo = boot_s.saturating_sub(WARM_LOOKBACK_S);
+        let mut warm: Vec<(u64, Trip)> = schedule
+            .trips_in(boot_day, lo..boot_s)
+            .iter()
+            .filter(|t| thinning_passes(seed, cfg.demand_scale, boot_day, t.index))
+            .map(|t| (u64::from(t.index) % WARM_RELEASE_TICKS, *t))
+            .collect();
+        warm.sort_by_key(|&(slot, t)| (slot, t.index));
 
-        // Guard against a degenerate net with no attractors (shouldn't happen
-        // on the real bake) by falling back to every edge at unit weight.
-        if attractors.is_empty() {
-            attractors = net
-                .edges
-                .iter()
-                .map(|e| Attractor {
-                    edge: e.id,
-                    weight: 1.0,
-                })
-                .collect();
-        }
-
-        let mut cumulative = Vec::with_capacity(attractors.len());
-        let mut running = 0.0f32;
-        for a in &attractors {
-            running += a.weight;
-            cumulative.push(running);
-        }
-        let total_weight = running;
-
-        Spawner {
+        TripSpawner {
+            schedule,
+            clock,
             cfg,
-            attractors,
-            cumulative,
-            total_weight,
-            accumulator: 0.0,
-            draw: 0,
             seed,
+            warm,
+            warm_next: 0,
+            counters: SpawnCounters::default(),
+            window_suppressed: 0,
+            pending: Vec::new(),
         }
     }
 
-    /// Number of attractors (gateways + clusters).
-    pub fn attractor_count(&self) -> usize {
-        self.attractors.len()
+    /// Lifetime outcome counters.
+    pub fn counters(&self) -> SpawnCounters {
+        self.counters
     }
 
-    /// The demand fraction ∈ `[BASE_FRACTION, 1.0]` at sim tick `t`, following
-    /// the two-peak daily curve. Public so the shell/tests can introspect it.
-    pub fn demand_fraction(&self, t: u64) -> f32 {
-        demand_fraction_at(t)
+    /// Number of trips queued for warm-start release at construction.
+    pub fn warm_queue_len(&self) -> usize {
+        self.warm.len()
     }
 
-    /// Advance the spawner one tick: accumulate the fractional spawn budget for
-    /// the current demand level and emit that many trips into `core` (subject
-    /// to the [`MAX_CONCURRENT`] cap). Each vehicle actually placed is appended
-    /// to `spawned` as `(veh_id, dest_edge)` so the caller can track trip
-    /// destinations for re-routing. Returns the count spawned this tick.
+    /// The boot-anchored wall clock (read-only; for boot logging).
+    pub fn clock(&self) -> &WallClock {
+        &self.clock
+    }
+
+    /// Advance one tick: release the warm-start slot for `t` (first 600
+    /// ticks only) plus every scheduled trip in this tick's second-of-day
+    /// window, thinned by `demand_scale`. Successful spawns are appended to
+    /// `spawned`; returns the count placed this tick.
     pub fn step(
         &mut self,
         core: &mut Core,
         net: &TrafficNet,
         router: &Router,
         t: u64,
-        spawned: &mut Vec<(u32, u32)>,
+        spawned: &mut Vec<SpawnRecord>,
     ) -> usize {
-        let fraction = demand_fraction_at(t);
-        self.accumulator += self.cfg.max_rate * fraction * DT;
-
         let mut n = 0;
-        // Budget is measured in *successful* spawns. A draw can be lost (same
-        // endpoint, disconnected OD pair, router lane-head mismatch), so we
-        // retry lost draws within a bounded attempt budget per unit so demand
-        // is realised rather than silently thinned by routing topology.
-        const MAX_ATTEMPTS_PER_SPAWN: u32 = 8;
-        while self.accumulator >= 1.0 {
-            if core.fleet.alive_count() >= MAX_CONCURRENT {
-                // Cap reached: drop the budget (do not backlog) so the fleet
-                // holds near the target instead of surging once cars clear.
-                self.accumulator = 0.0;
-                break;
-            }
-            let mut placed = false;
-            for _ in 0..MAX_ATTEMPTS_PER_SPAWN {
-                if let Some(rec) = self.try_spawn_one(core, net, router, t) {
-                    spawned.push(rec);
-                    placed = true;
-                    break;
+
+        // Warm start: release queued trips whose slot has come up. Already
+        // thinned at construction — no second draw.
+        if t < WARM_RELEASE_TICKS {
+            while self.warm_next < self.warm.len() && self.warm[self.warm_next].0 <= t {
+                let trip = self.warm[self.warm_next].1;
+                self.warm_next += 1;
+                if self.spawn_trip(core, net, router, trip, spawned) {
+                    n += 1;
                 }
             }
-            // Consume one unit of budget whether or not a spawn landed, so a
-            // pathological all-lost tick can't spin forever.
-            self.accumulator -= 1.0;
-            if placed {
-                n += 1;
+        }
+
+        // Live window: [s_of_day(t), s_of_day(t+1)), split at a midnight wrap
+        // with the day kind re-evaluated per half.
+        let start = self.clock.s_of_day(t);
+        let end = self.clock.s_of_day(t + 1);
+        if start != end {
+            if end > start {
+                n += self.release_window(
+                    core,
+                    net,
+                    router,
+                    self.clock.day_kind(t),
+                    start..end,
+                    spawned,
+                );
+            } else {
+                n += self.release_window(
+                    core,
+                    net,
+                    router,
+                    self.clock.day_kind(t),
+                    start..DAY_S,
+                    spawned,
+                );
+                n += self.release_window(
+                    core,
+                    net,
+                    router,
+                    self.clock.day_kind(t + 1),
+                    0..end,
+                    spawned,
+                );
+            }
+            // The window closed with this tick: flush the suppression log
+            // (at most one line per window — the v1 valve-log semantics).
+            if self.window_suppressed > 0 {
+                tracing::warn!(
+                    suppressed = self.window_suppressed,
+                    alive = core.fleet.alive_count(),
+                    max_concurrent = MAX_CONCURRENT,
+                    "spawn valve engaged: trips dropped this window"
+                );
+                self.window_suppressed = 0;
             }
         }
+
         n
     }
 
-    /// Sample an (origin, destination) attractor pair, route between them, and
-    /// spawn a vehicle at the route head. Returns `(veh_id, dest_edge)` on
-    /// success, or `None` when the draw is lost (same endpoint, disconnected
-    /// pair, or the fleet is full) — fine for a synthetic generator.
-    fn try_spawn_one(
+    /// Release every trip of `day` departing within `window`, thinned by the
+    /// per-trip draw. Returns the number actually spawned.
+    fn release_window(
         &mut self,
         core: &mut Core,
         net: &TrafficNet,
         router: &Router,
-        t: u64,
-    ) -> Option<(u32, u32)> {
-        let from = self.sample_attractor(t);
-        let to = self.sample_attractor(t);
-        if from == to {
-            return None;
+        day: DayKind,
+        window: core::ops::Range<u32>,
+        spawned: &mut Vec<SpawnRecord>,
+    ) -> usize {
+        // Copy the thinned window into a reusable buffer so the schedule
+        // borrow ends before the &mut self spawn calls below.
+        let mut pending = std::mem::take(&mut self.pending);
+        pending.clear();
+        pending.extend(
+            self.schedule
+                .trips_in(day, window)
+                .iter()
+                .filter(|t| thinning_passes(self.seed, self.cfg.demand_scale, day, t.index))
+                .copied(),
+        );
+
+        let mut n = 0;
+        for &trip in &pending {
+            if self.spawn_trip(core, net, router, trip, spawned) {
+                n += 1;
+            }
         }
-        let route = router.route(net, from, to)?;
-        if route.len() < 2 {
-            return None;
-        }
-        let start_lane = route[0];
-        // Enter a short way onto the first lane so the very first tick has a
-        // sane leader gap; clamp to a small positive offset within the lane.
-        let s0 = (net.lane_len(start_lane) * 0.1).clamp(1.0, 5.0);
-        // Refuse to spawn on top of an existing vehicle: if any car on the
-        // start lane sits within a spawn clearance of `s0`, drop this draw
-        // (a real vehicle can't materialise inside another). Without this two
-        // trips sharing a gateway lane in one tick would overlap at identical
-        // `s`, which the kernel reads as a collision.
-        if !start_lane_clear(core, start_lane, s0) {
-            return None;
-        }
-        let veh = core.spawn(start_lane, s0, &route)?;
-        Some((veh, to))
+        self.pending = pending;
+        n
     }
 
-    /// Draw one attractor edge ∝ weight via the cumulative table.
-    fn sample_attractor(&mut self, t: u64) -> u32 {
-        let r = u01(self.seed, t, self.draw) * self.total_weight;
-        self.draw = self.draw.wrapping_add(1);
-        // First cumulative bucket strictly above `r`.
-        let idx = self
-            .cumulative
-            .partition_point(|&c| c <= r)
-            .min(self.attractors.len() - 1);
-        self.attractors[idx].edge
+    /// Route and place one trip. Returns `true` iff a vehicle was spawned;
+    /// every failure path increments exactly one counter.
+    fn spawn_trip(
+        &mut self,
+        core: &mut Core,
+        net: &TrafficNet,
+        router: &Router,
+        trip: Trip,
+        spawned: &mut Vec<SpawnRecord>,
+    ) -> bool {
+        if core.fleet.alive_count() >= MAX_CONCURRENT {
+            self.counters.suppressed += 1;
+            self.window_suppressed += 1;
+            return false;
+        }
+
+        let origin_edge = lane_edge(net, trip.origin_lane);
+        let dest_edge = lane_edge(net, trip.dest_lane);
+        let Some(route) = router.route(net, origin_edge, dest_edge) else {
+            self.counters.skipped_no_route += 1;
+            // Rate-limited: log only at power-of-two counts (1, 2, 4, 8, …).
+            if self.counters.skipped_no_route.is_power_of_two() {
+                tracing::warn!(
+                    origin_edge,
+                    dest_edge,
+                    total = self.counters.skipped_no_route,
+                    "trip skipped: no route (rate-limited log)"
+                );
+            }
+            return false;
+        };
+
+        // The router picks the concrete lane on the origin edge (lowest lane
+        // with a turn towards the next hop) — spawn on that lane at s = 0.
+        let start_lane = route[0];
+        let s0 = ENTRY_S;
+        if net.lanes[start_lane as usize].length_m < MIN_SPAWN_LANE_M
+            || !start_lane_clear(core, start_lane, s0)
+            || !upstream_clear(core, net, start_lane)
+        {
+            self.counters.blocked_entry += 1;
+            return false;
+        }
+
+        // Gateway origins enter the plate rolling (capped by the braking
+        // kinematics against the nearest downstream vehicle); internal
+        // origins start standing. Computed BEFORE the spawn so the scan
+        // never sees the entering vehicle itself.
+        let v0 = if net.gateway_lanes_out().binary_search(&start_lane).is_ok() {
+            let target = GATEWAY_ENTRY_SPEED_FRACTION * net.edges[origin_edge as usize].speed_ms;
+            entry_speed_cap(core, net, &route, s0, target)
+        } else {
+            0.0
+        };
+
+        let Some(veh) = core.spawn(start_lane, s0, &route) else {
+            // Kernel slot-cap refusal: same valve, same counter.
+            self.counters.suppressed += 1;
+            self.window_suppressed += 1;
+            return false;
+        };
+        core.fleet.v[veh as usize] = v0;
+
+        self.counters.spawned += 1;
+        spawned.push(SpawnRecord {
+            veh,
+            dest_edge,
+            trip_index: trip.index,
+        });
+        true
     }
 }
 
-/// Minimum clear bumper distance (m) required around a spawn point on the
-/// start lane. A few car lengths so the first tick sees a comfortable gap.
-const SPAWN_CLEARANCE_M: f32 = 12.0;
+/// The deterministic thinning gate: pure in `(seed, day block, trip index)`,
+/// independent of the tick the trip is released on (see module docs).
+fn thinning_passes(seed: u64, demand_scale: f32, day: DayKind, index: u32) -> bool {
+    u01(seed ^ THINNING_SALT, day as u64, u64::from(index)) < demand_scale
+}
 
-/// Whether `start_lane` has no existing vehicle within [`SPAWN_CLEARANCE_M`] of
-/// arc position `s0`. Scans the lane's live occupancy (small — a single lane).
+/// The edge a lane belongs to. Lane ids are array indices on every validated
+/// bake (the baker emits dense id == index arrays); the debug assert guards
+/// the convention in tests.
+fn lane_edge(net: &TrafficNet, lane: u32) -> u32 {
+    let l = &net.lanes[lane as usize];
+    debug_assert_eq!(l.id, lane, "lane ids must be dense array indices");
+    l.edge
+}
+
+/// The largest safe entry speed at `s0` on the head of `route`, at most
+/// `target`: `v ≤ √(2·b·gap)` against the nearest vehicle rear within
+/// [`ENTRY_LOOKAHEAD_M`] along the route (minus [`SPAWN_CLEARANCE_M`] of
+/// margin). An empty road ahead returns `target` unchanged.
+fn entry_speed_cap(core: &Core, net: &TrafficNet, route: &[u32], s0: f32, target: f32) -> f32 {
+    let mut offset = -s0; // entry point → start of the current route lane
+    let mut min_gap = f32::INFINITY;
+    for &lane in route {
+        if offset > ENTRY_LOOKAHEAD_M {
+            break;
+        }
+        for &veh in core.index.on_lane(lane) {
+            let j = veh as usize;
+            let rear = offset + core.fleet.s[j] - core.fleet.len_m[j];
+            if rear >= 0.0 {
+                min_gap = min_gap.min(rear);
+            }
+        }
+        offset += net.lanes[lane as usize].length_m;
+    }
+    if min_gap == f32::INFINITY {
+        return target;
+    }
+    let usable = (min_gap - SPAWN_CLEARANCE_M).max(0.0);
+    target.min((2.0 * ENTRY_BRAKE * usable).sqrt())
+}
+
+/// Whether no vehicle on a feeder lane (any turn into `start_lane`) is close
+/// enough to the junction to cross in on top of a fresh spawn: blocked when
+/// `dist_to_lane_end < SPAWN_CLEARANCE_M + headway·v + v²/(2b)`. Gateway
+/// origin lanes have no feeder turns, so this never blocks a gateway entry.
+fn upstream_clear(core: &Core, net: &TrafficNet, start_lane: u32) -> bool {
+    for turn in &net.turns {
+        if turn.to_lane != start_lane {
+            continue;
+        }
+        let feeder = turn.from_lane;
+        let feeder_len = net.lanes[feeder as usize].length_m;
+        for &veh in core.index.on_lane(feeder) {
+            let j = veh as usize;
+            let v = core.fleet.v[j];
+            let reach = SPAWN_CLEARANCE_M + UPSTREAM_HEADWAY_S * v + v * v / (2.0 * ENTRY_BRAKE);
+            if feeder_len - core.fleet.s[j] < reach {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Whether `start_lane` has no existing vehicle within [`SPAWN_CLEARANCE_M`]
+/// of arc position `s0`. Scans the lane's live occupancy (kept from v1).
 fn start_lane_clear(core: &Core, start_lane: u32, s0: f32) -> bool {
     let fleet = &core.fleet;
     for &veh in core.index.on_lane(start_lane) {
@@ -268,177 +491,317 @@ fn start_lane_clear(core: &Core, start_lane: u32, s0: f32) -> bool {
     true
 }
 
-/// The two-peak demand fraction at tick `t`: morning (07–08 h) and evening
-/// (17–18 h) rush at 1.0, `BASE_FRACTION` elsewhere, piecewise-linear ramps
-/// into each peak over the hour on either side. Sim time starts at 06:00.
-fn demand_fraction_at(t: u64) -> f32 {
-    const START_H: f32 = 6.0;
-    let sim_seconds = t as f32 * DT;
-    let hour = (START_H + sim_seconds / 3600.0).rem_euclid(24.0);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveTime, TimeZone, Utc};
+    use demand_gen::output::{self, TripRecord};
+    use std::io::Write as _;
+    use std::path::PathBuf;
 
-    // Triangular peaks: ramp up over the hour before the maximum, ramp down
-    // over the hour after. Morning maximum at 07:30, evening at 17:30 keep the
-    // 07–08 / 17–18 windows near full.
-    let peak = |centre: f32| -> f32 {
-        let d = (hour - centre).abs();
-        if d >= 1.0 {
-            0.0
-        } else {
-            1.0 - d // linear falloff to 0 at ±1 h
-        }
-    };
-    let intensity = peak(7.5).max(peak(17.5));
-    BASE_FRACTION + (1.0 - BASE_FRACTION) * intensity
-}
-
-/// Gateway attractors: edges incident to a degree-1 node or a node within
-/// [`BORDER_M`] of the node-coordinate bounding box.
-fn gateway_attractors(net: &TrafficNet) -> Vec<Attractor> {
-    // Node degree over the (undirected) edge graph.
-    let mut degree = vec![0u32; net.nodes.len()];
-    // Nodes are id==index on the real bake, but don't assume it: build an
-    // id->index map to stay robust.
-    let idx_of: std::collections::HashMap<u32, usize> = net
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| (n.id, i))
-        .collect();
-    for e in &net.edges {
-        if let Some(&i) = idx_of.get(&e.from) {
-            degree[i] += 1;
-        }
-        if let Some(&i) = idx_of.get(&e.to) {
-            degree[i] += 1;
-        }
-    }
-
-    // Bounding box over node coords.
-    let mut min_x = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
-    let mut min_z = f32::INFINITY;
-    let mut max_z = f32::NEG_INFINITY;
-    for n in &net.nodes {
-        min_x = min_x.min(n.x);
-        max_x = max_x.max(n.x);
-        min_z = min_z.min(n.z);
-        max_z = max_z.max(n.z);
-    }
-
-    let is_border = |n: &traffic_net::Node| -> bool {
-        (n.x - min_x).abs() <= BORDER_M
-            || (max_x - n.x).abs() <= BORDER_M
-            || (n.z - min_z).abs() <= BORDER_M
-            || (max_z - n.z).abs() <= BORDER_M
-    };
-
-    let node_is_gateway = |id: u32| -> bool {
-        match idx_of.get(&id) {
-            Some(&i) => degree[i] <= 1 || is_border(&net.nodes[i]),
-            None => false,
-        }
-    };
-
-    net.edges
-        .iter()
-        .filter(|e| node_is_gateway(e.from) || node_is_gateway(e.to))
-        .map(|e| Attractor {
-            edge: e.id,
-            weight: GATEWAY_WEIGHT,
-        })
-        .collect()
-}
-
-/// Cluster attractors: parse building footprint centroids, bucket them into
-/// [`CLUSTER_CELL_M`] cells, keep the [`N_CLUSTERS`] densest cells, and snap
-/// each cell centroid to the nearest lane's edge.
-fn cluster_attractors(net: &TrafficNet, buildings_json: &str) -> Vec<Attractor> {
-    let centroids = building_centroids(buildings_json);
-    if centroids.is_empty() {
-        return Vec::new();
-    }
-
-    // Bucket centroids into a coarse grid; track per-cell sum + count so we can
-    // rank by density and recover each cell's mean position deterministically.
-    use std::collections::BTreeMap;
-    // Per-cell accumulator: (sum_x, sum_z, count).
-    type CellAgg = (f32, f32, u32);
-    let mut cells: BTreeMap<(i32, i32), CellAgg> = BTreeMap::new();
-    for (x, z) in centroids {
-        let key = (
-            (x / CLUSTER_CELL_M).floor() as i32,
-            (z / CLUSTER_CELL_M).floor() as i32,
+    /// The diamond fixture with gateway endpoints: node 0 (lane 0 out) and
+    /// node 5 (lane 5 in) are `kind: "gateway"`.
+    fn fixture_json() -> String {
+        let p = format!(
+            "{}/tests/fixtures/diamond-gateway.json",
+            env!("CARGO_MANIFEST_DIR")
         );
-        let e = cells.entry(key).or_insert((0.0, 0.0, 0));
-        e.0 += x;
-        e.1 += z;
-        e.2 += 1;
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {p}: {e}"))
     }
 
-    // Rank cells by count descending (tie-break by key via the stable sort over
-    // the BTreeMap's ascending-key iteration) and keep the top N.
-    let mut ranked: Vec<((i32, i32), CellAgg)> = cells.into_iter().collect();
-    ranked.sort_by(|a, b| b.1.2.cmp(&a.1.2).then(a.0.cmp(&b.0)));
-    ranked.truncate(N_CLUSTERS);
+    fn fixture_net(json: &str) -> TrafficNet {
+        traffic_net::load(json).expect("diamond-gateway fixture must validate")
+    }
 
-    ranked
-        .into_iter()
-        .filter_map(|(_key, (sx, sz, count))| {
-            let cx = sx / count as f32;
-            let cz = sz / count as f32;
-            nearest_lane_edge(net, cx, cz).map(|edge| Attractor { edge, weight: 1.0 })
-        })
-        .collect()
-}
+    fn rec(dep: u32, o: u32, d: u32, seg: u8) -> TripRecord {
+        TripRecord {
+            departure_s: dep,
+            origin_lane: o,
+            dest_lane: d,
+            segment: seg,
+            vehicle_class: 0,
+        }
+    }
 
-/// Parse building footprint centroids from `buildings.json`. Each building has
-/// a `footprint: [[x, z], ...]`; the centroid is the mean of its vertices.
-fn building_centroids(buildings_json: &str) -> Vec<(f32, f32)> {
-    let Ok(doc) = serde_json::from_str::<serde_json::Value>(buildings_json) else {
-        return Vec::new();
-    };
-    let Some(buildings) = doc.get("buildings").and_then(|b| b.as_array()) else {
-        return Vec::new();
-    };
-    let mut out = Vec::with_capacity(buildings.len());
-    for b in buildings {
-        let Some(fp) = b.get("footprint").and_then(|f| f.as_array()) else {
-            continue;
+    /// Write a trips.bin for `net_json` to a unique temp file and load it.
+    fn make_schedule(
+        name: &str,
+        net_json: &str,
+        weekday: &[TripRecord],
+        weekend: &[TripRecord],
+    ) -> TripSchedule {
+        let net_hash = *blake3::hash(net_json.as_bytes()).as_bytes();
+        let mut bytes = Vec::new();
+        output::write_trips(&mut bytes, &net_hash, weekday, weekend).unwrap();
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "winterthur-traffic-spawner-test-{}-{name}.bin",
+            std::process::id()
+        ));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&bytes).unwrap();
+        TripSchedule::load(&path, net_json.as_bytes()).unwrap()
+    }
+
+    /// A clock anchored to a fixed WORKDAY (Friday 2026-07-03) at `hh:mm`.
+    fn clock_at(hh: u32, mm: u32) -> WallClock {
+        let now = Utc.with_ymd_and_hms(2026, 7, 3, 12, 0, 0).unwrap();
+        WallClock::new(now, Some(NaiveTime::from_hms_opt(hh, mm, 0).unwrap()))
+    }
+
+    /// Drive spawner + kernel for `ticks` in the shell's order (spawn, then
+    /// tick). Returns `(core, spawner, spawned trip indices in order)`.
+    fn run(
+        json: &str,
+        weekday: &[TripRecord],
+        clock: WallClock,
+        cfg: SpawnerCfg,
+        seed: u64,
+        ticks: u64,
+        name: &str,
+    ) -> (Core, TripSpawner, Vec<u32>) {
+        let net = fixture_net(json);
+        let router = Router::new(&net);
+        let mut core = Core::new(&net, MAX_CONCURRENT + 64, seed);
+        let schedule = make_schedule(name, json, weekday, &[]);
+        let mut spawner = TripSpawner::new(schedule, clock, cfg, seed);
+        let mut indices = Vec::new();
+        let mut recs = Vec::new();
+        for t in 0..ticks {
+            recs.clear();
+            spawner.step(&mut core, &net, &router, t, &mut recs);
+            indices.extend(recs.iter().map(|r| r.trip_index));
+            core.tick(t);
+        }
+        (core, spawner, indices)
+    }
+
+    /// Morning-peak trips file: 30 trips every 2 s in [27000, 27060) and two
+    /// stragglers at 03:00 — the ratio fixture for the peak test.
+    fn peak_trips() -> Vec<TripRecord> {
+        let mut trips: Vec<TripRecord> = vec![
+            rec(10_800, 0, 5, output::SEGMENT_INBOUND),
+            rec(10_830, 0, 5, output::SEGMENT_INBOUND),
+        ];
+        for k in 0..30 {
+            trips.push(rec(27_000 + 2 * k, 0, 5, output::SEGMENT_INBOUND));
+        }
+        trips
+    }
+
+    #[test]
+    fn morning_peak_spawns_far_more_than_night() {
+        let json = fixture_json();
+        let trips = peak_trips();
+        let cfg = SpawnerCfg::default();
+
+        let (_, sp_peak, _) = run(&json, &trips, clock_at(7, 30), cfg, 7, 600, "peak-0730");
+        let (_, sp_night, _) = run(&json, &trips, clock_at(3, 0), cfg, 7, 600, "peak-0300");
+
+        let peak = sp_peak.counters().spawned;
+        let night = sp_night.counters().spawned;
+        assert!(night >= 1, "03:00 must still spawn its scheduled trips");
+        assert!(
+            peak > 5 * night,
+            "07:30 must out-spawn 03:00 by > 5x over 600 ticks: peak={peak} night={night}"
+        );
+    }
+
+    #[test]
+    fn demand_scale_half_spawns_same_subset_across_runs() {
+        let json = fixture_json();
+        let trips = peak_trips();
+        let cfg = SpawnerCfg { demand_scale: 0.5 };
+
+        let (core_a, sp_a, idx_a) = run(&json, &trips, clock_at(7, 30), cfg, 42, 700, "half-a");
+        let (core_b, sp_b, idx_b) = run(&json, &trips, clock_at(7, 30), cfg, 42, 700, "half-b");
+
+        assert_eq!(idx_a, idx_b, "the thinned subset must be run-invariant");
+        assert_eq!(sp_a.counters(), sp_b.counters());
+        assert_eq!(core_a.state_hash(), core_b.state_hash());
+        // Thinning actually thinned: strictly between none and all 30 peak
+        // trips (2 + 30 total in the file; the 03:00 ones never release).
+        let n = sp_a.counters().spawned;
+        assert!(
+            (1..30).contains(&n),
+            "demand_scale=0.5 should spawn a strict subset, got {n}"
+        );
+    }
+
+    #[test]
+    fn warm_start_populates_world_after_midday_boot() {
+        let json = fixture_json();
+        // 40 trips departed in the 15 min before a 12:00 boot.
+        let trips: Vec<TripRecord> = (0..40)
+            .map(|k| rec(42_300 + 20 * k, 0, 5, output::SEGMENT_INBOUND))
+            .collect();
+
+        let (core, sp, _) = run(
+            &json,
+            &trips,
+            clock_at(12, 0),
+            SpawnerCfg::default(),
+            9,
+            300,
+            "warm",
+        );
+        assert!(
+            sp.warm_queue_len() > 0,
+            "boot at 12:00 must queue warm-start trips from [11:45, 12:00)"
+        );
+        assert!(
+            core.fleet.alive_count() > 0,
+            "warm start must populate the world by tick 300"
+        );
+        assert!(sp.counters().spawned > 0);
+    }
+
+    #[test]
+    fn deterministic_same_anchor_same_hash_different_anchor_diverges() {
+        let json = fixture_json();
+        let trips = peak_trips();
+        let cfg = SpawnerCfg::default();
+
+        let (core_a, _, idx_a) = run(&json, &trips, clock_at(7, 30), cfg, 5, 650, "det-a");
+        let (core_b, _, idx_b) = run(&json, &trips, clock_at(7, 30), cfg, 5, 650, "det-b");
+        assert_eq!(idx_a, idx_b);
+        assert_eq!(
+            core_a.state_hash(),
+            core_b.state_hash(),
+            "same (seed, trips, boot anchor) must reproduce the state"
+        );
+
+        let (core_c, _, idx_c) = run(&json, &trips, clock_at(3, 0), cfg, 5, 650, "det-c");
+        assert_ne!(
+            idx_a, idx_c,
+            "a different boot anchor must release a different spawn pattern"
+        );
+        assert_ne!(core_a.state_hash(), core_c.state_hash());
+    }
+
+    /// Spec §5 gateway sinks: a route ending on a gateway in-lane despawns
+    /// via the kernel's normal end-of-route path — no traffic-core change.
+    #[test]
+    fn gateway_arrival_despawns_via_end_of_route() {
+        let json = fixture_json();
+        let net = fixture_net(&json);
+        // Sanity: the fixture really has gateway stubs on both ends.
+        assert_eq!(net.gateways(), &[0, 5]);
+        assert_eq!(net.gateway_lanes_out(), &[0]);
+        assert_eq!(net.gateway_lanes_in(), &[5]);
+
+        // One trip, departing one second after a 07:30 boot, gateway→gateway.
+        let trips = vec![rec(27_001, 0, 5, output::SEGMENT_THROUGH)];
+        let (core, sp, _) = run(
+            &json,
+            &trips,
+            clock_at(7, 30),
+            SpawnerCfg::default(),
+            1,
+            3_000,
+            "gateway-sink",
+        );
+        assert_eq!(sp.counters().spawned, 1, "the trip must have spawned");
+        assert_eq!(
+            core.fleet.alive_count(),
+            0,
+            "the vehicle must despawn on arrival at the gateway in-lane"
+        );
+    }
+
+    /// Midnight wrap: the window splits into the old day's tail and the new
+    /// day's head, and the day kind (weekday→weekend block) flips with it.
+    #[test]
+    fn midnight_wrap_flips_day_block() {
+        let json = fixture_json();
+        let net = fixture_net(&json);
+        let router = Router::new(&net);
+        let seed = 3u64;
+        let mut core = Core::new(&net, MAX_CONCURRENT + 64, seed);
+
+        // Friday 23:59:30 boot; 60 s later it is Saturday (weekend block).
+        let now = Utc.with_ymd_and_hms(2026, 7, 3, 12, 0, 0).unwrap();
+        let clock = WallClock::new(now, Some(NaiveTime::from_hms_opt(23, 59, 30).unwrap()));
+        // Weekday trip in the Friday tail, weekend trip just after midnight.
+        let weekday = vec![rec(86_395, 0, 5, output::SEGMENT_INBOUND)];
+        let weekend = vec![rec(2, 3, 5, output::SEGMENT_INTERNAL)];
+        let schedule = make_schedule("midnight", &json, &weekday, &weekend);
+        let mut spawner = TripSpawner::new(schedule, clock, SpawnerCfg::default(), seed);
+
+        let mut recs = Vec::new();
+        for t in 0..600 {
+            spawner.step(&mut core, &net, &router, t, &mut recs);
+            core.tick(t);
+        }
+        let indices: Vec<u32> = recs.iter().map(|r| r.trip_index).collect();
+        assert_eq!(
+            recs.len(),
+            2,
+            "both the weekday tail trip and the weekend head trip must spawn, got {indices:?}"
+        );
+        assert_eq!(spawner.counters().spawned, 2);
+    }
+
+    /// Gateway entries roll in at 0.8 × edge speed on a free road, but the
+    /// entry speed is capped by braking kinematics when a vehicle already
+    /// occupies the road ahead — never faster than the gap can dissipate.
+    #[test]
+    fn gateway_entry_speed_is_capped_by_downstream_gap() {
+        let json = fixture_json();
+        let net = fixture_net(&json);
+        let router = Router::new(&net);
+        let seed = 11u64;
+
+        // One gateway-origin trip departing one second after a 07:30 boot.
+        let trips = vec![rec(27_001, 0, 5, output::SEGMENT_INBOUND)];
+        let spawn_one = |core: &mut Core, name: &str| -> u32 {
+            let schedule = make_schedule(name, &json, &trips, &[]);
+            let mut sp = TripSpawner::new(schedule, clock_at(7, 30), SpawnerCfg::default(), seed);
+            let mut recs = Vec::new();
+            for t in 0..20 {
+                // No core.tick: the pre-placed leader must stay put.
+                sp.step(core, &net, &router, t, &mut recs);
+            }
+            assert_eq!(recs.len(), 1, "the single trip must spawn");
+            recs[0].veh
         };
-        let mut sx = 0.0f64;
-        let mut sz = 0.0f64;
-        let mut n = 0u32;
-        for pt in fp {
-            let Some(arr) = pt.as_array() else { continue };
-            if arr.len() >= 2
-                && let (Some(x), Some(z)) = (arr[0].as_f64(), arr[1].as_f64())
-            {
-                sx += x;
-                sz += z;
-                n += 1;
-            }
-        }
-        if n > 0 {
-            out.push(((sx / n as f64) as f32, (sz / n as f64) as f32));
-        }
-    }
-    out
-}
 
-/// The edge id of the lane whose polyline passes closest to `(x, z)`. Scans
-/// every lane's vertices — O(total polyline vertices), run once at startup.
-fn nearest_lane_edge(net: &TrafficNet, x: f32, z: f32) -> Option<u32> {
-    let mut best: Option<(f32, u32)> = None;
-    for lane in &net.lanes {
-        for p in &lane.pts {
-            let dx = p[0] - x;
-            let dz = p[1] - z;
-            let d2 = dx * dx + dz * dz;
-            match best {
-                Some((bd, _)) if bd <= d2 => {}
-                _ => best = Some((d2, lane.edge)),
-            }
-        }
+        // Free road: the full 0.8 × edge speed (edge 0: 10 m/s → 8 m/s).
+        let mut free = Core::new(&net, 64, seed);
+        let veh = spawn_one(&mut free, "entry-free");
+        assert!(
+            (free.fleet.v[veh as usize] - 8.0).abs() < 1e-5,
+            "free-road gateway entry must roll at 0.8 x edge speed, got {}",
+            free.fleet.v[veh as usize]
+        );
+
+        // A standing leader 30 m in: entry must slow to what the remaining
+        // gap can absorb at ENTRY_BRAKE (strictly below the free-road 8).
+        let mut jammed = Core::new(&net, 64, seed);
+        jammed.spawn(0, 30.0, &[0]).expect("leader spawn");
+        let veh = spawn_one(&mut jammed, "entry-jammed");
+        let v = jammed.fleet.v[veh as usize];
+        assert!(
+            v > 0.0 && v < 6.5,
+            "jammed gateway entry must be gap-capped (expected ~6.4), got {v}"
+        );
     }
-    best.map(|(_, edge)| edge)
+
+    /// Thinning is a pure function of (seed, day block, index): weekday and
+    /// weekend trips with equal indices draw independently.
+    #[test]
+    fn thinning_is_day_block_scoped_and_tick_independent() {
+        let seed = 0xF00D;
+        for index in 0..64u32 {
+            let wd = thinning_passes(seed, 0.5, DayKind::Workday, index);
+            // Re-evaluating must be stable (tick plays no part).
+            assert_eq!(wd, thinning_passes(seed, 0.5, DayKind::Workday, index));
+        }
+        // Independence: over enough indices the two blocks must disagree at
+        // least once (they'd be identical if day_kind were ignored).
+        let disagree = (0..256u32).any(|i| {
+            thinning_passes(seed, 0.5, DayKind::Workday, i)
+                != thinning_passes(seed, 0.5, DayKind::Weekend, i)
+        });
+        assert!(disagree, "weekday/weekend draws must be independent");
+    }
 }

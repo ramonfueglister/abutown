@@ -28,8 +28,10 @@ import { boxGeo } from '../ksw/geometryCache';
 import { clayMat } from '../ksw/props';
 import { poseAt, type TrafficNetGeom, type VehKinematics } from './deadReckon';
 
-/** Instance capacity. The fleet cap is 1500 (< 4096); 4096 leaves headroom and
- * matches the wire-id slot space. */
+/** Instance capacity for VISIBLE cars (the AOI-subscribed cells only, not the
+ * whole fleet — the server-side fleet cap is 30k since Task 8, but a browser
+ * AOI sees a small fraction; the measured whole-Gemeinde morning peak is
+ * ~2.4k alive at demand_scale 1.0). */
 export const CAR_CAPACITY = 4096;
 
 /** Ground clearance above the carriage ribbon so the body doesn't z-fight it. */

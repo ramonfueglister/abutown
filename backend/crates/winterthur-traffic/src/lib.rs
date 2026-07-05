@@ -7,7 +7,10 @@
 //! is a dev-dependency used only by integration tests that spawn a computed
 //! route into the sim kernel.
 
+pub mod audit;
 pub mod cells;
+pub mod clock;
+pub mod demand;
 pub mod gateway;
 pub mod measure;
 pub mod router;

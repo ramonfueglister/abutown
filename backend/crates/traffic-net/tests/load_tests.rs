@@ -158,6 +158,98 @@ fn malformed_json_is_a_parse_error() {
     }
 }
 
+// ---- gateway nodes (Gemeinde-scale nets, boundary stubs) ----
+
+/// mini.json with both dead ends re-kinded to `gateway`: node 0 (out-edge 0
+/// only) and node 3 (in-edge 2 only). Degree-1, no turns — a valid gateway.
+fn gateway_mini_json() -> String {
+    let json = replace_one(
+        &mini_json(),
+        r#""id": 0, "x": 0, "z": 0, "kind": "dead_end""#,
+        r#""id": 0, "x": 0, "z": 0, "kind": "gateway""#,
+    );
+    replace_one(
+        &json,
+        r#""id": 3, "x": 300, "z": 0, "kind": "dead_end""#,
+        r#""id": 3, "x": 300, "z": 0, "kind": "gateway""#,
+    )
+}
+
+#[test]
+fn gateway_nodes_load_and_accessors_return_them() {
+    let net = load(&gateway_mini_json()).expect("gateway mini net should load and validate");
+    // node ids, sorted ascending
+    assert_eq!(net.gateways(), &[0, 3]);
+    // lane 3 (edge 2) ends at gateway node 3
+    assert_eq!(net.gateway_lanes_in(), &[3]);
+    // lane 0 (edge 0) starts at gateway node 0
+    assert_eq!(net.gateway_lanes_out(), &[0]);
+}
+
+#[test]
+fn plain_net_without_gateways_has_empty_accessors() {
+    let net = load(&mini_json()).unwrap();
+    assert_eq!(net.gateways(), &[] as &[u32]);
+    assert_eq!(net.gateway_lanes_in(), &[] as &[u32]);
+    assert_eq!(net.gateway_lanes_out(), &[] as &[u32]);
+}
+
+#[test]
+fn gateway_node_with_a_turn_is_rejected() {
+    // Re-point turn 2 (fromLane 1 -> toLane 3) from node 2 onto gateway node 3.
+    // Node 3 stays degree 1, so the turn rule (not the degree rule) must fire.
+    let json = replace_one(
+        &gateway_mini_json(),
+        "\"toLane\": 3,\n      \"node\": 2,",
+        "\"toLane\": 3,\n      \"node\": 3,",
+    );
+    let err = load(&json).expect_err("a turn at a gateway node must fail validation");
+    assert_eq!(err, NetError::GatewayHasTurn { node: 3, turn: 2 });
+    assert!(
+        err.to_string().contains("gateway"),
+        "error message must mention gateway: {err}"
+    );
+}
+
+#[test]
+fn gateway_node_with_degree_three_is_rejected() {
+    // Node 2 has in-edge 1 and out-edges 2+3 (total degree 3); re-kind it.
+    let json = replace_one(
+        &mini_json(),
+        r#""id": 2, "x": 200, "z": 0, "kind": "priority""#,
+        r#""id": 2, "x": 200, "z": 0, "kind": "gateway""#,
+    );
+    let err = load(&json).expect_err("a degree-3 gateway node must fail validation");
+    assert_eq!(err, NetError::GatewayDegreeExceeded { node: 2, degree: 3 });
+    assert!(
+        err.to_string().contains("gateway"),
+        "error message must mention gateway: {err}"
+    );
+}
+
+/// Ignored by default: loads the real baked Gemeinde-scale asset (present in
+/// the repo since the Task-1 bake) and asserts the gateway stubs survived the
+/// Rust load + validation. Run explicitly via:
+///   scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml -p traffic-net -- --ignored
+#[test]
+#[ignore]
+fn baked_winterthur_has_gateways() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../data/winterthur/trafficnet.json"
+    );
+    let json =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
+    let net = load(&json).expect("real baked trafficnet.json must load and validate cleanly");
+    assert!(
+        net.gateways().len() >= 10,
+        "expected >= 10 gateways, got {}",
+        net.gateways().len()
+    );
+    assert!(!net.gateway_lanes_in().is_empty());
+    assert!(!net.gateway_lanes_out().is_empty());
+}
+
 /// Ignored by default: point `TRAFFICNET_JSON` at the real baked asset and
 /// run once to confirm the schema mirrors production exactly, e.g.:
 ///   TRAFFICNET_JSON=../../../data/winterthur/trafficnet.json \

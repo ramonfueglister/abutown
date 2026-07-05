@@ -27,8 +27,11 @@
 //! starts. No WS code lives here — only the seam.
 
 use crate::Router;
+use crate::audit::Conservation;
+use crate::clock::WallClock;
+use crate::demand::TripSchedule;
 use crate::measure::EdgeMeasure;
-use crate::spawner::{MAX_CONCURRENT, SpawnConfig, Spawner};
+use crate::spawner::{MAX_CONCURRENT, SpawnRecord, SpawnerCfg, TripSpawner};
 use bevy_ecs::prelude::*;
 use traffic_core::{Core, u01};
 use traffic_net::TrafficNet;
@@ -60,9 +63,9 @@ pub struct CoreRes(pub Core);
 #[derive(Resource)]
 pub struct RouterRes(pub Router);
 
-/// The trip spawner.
+/// The wall-clock census trip spawner.
 #[derive(Resource)]
-pub struct SpawnerRes(pub Spawner);
+pub struct SpawnerRes(pub TripSpawner);
 
 /// The per-edge harmonic-mean-speed measurement accumulator.
 #[derive(Resource)]
@@ -108,10 +111,10 @@ pub struct CommandQueue {
 #[derive(Debug, Clone)]
 pub enum SimCommand {}
 
-/// Scratch buffer reused by `spawn_trips` for the `(veh, dest_edge)` records a
-/// tick produces, so the hot path allocates nothing steady-state.
+/// Scratch buffer reused by `spawn_trips` for the [`SpawnRecord`]s a tick
+/// produces, so the hot path allocates nothing steady-state.
 #[derive(Resource, Default)]
-struct SpawnScratch(Vec<(u32, u32)>);
+struct SpawnScratch(Vec<SpawnRecord>);
 
 // ---------------------------------------------------------------------------
 // Publish seam (Task 8)
@@ -151,24 +154,19 @@ impl SnapshotHook {
 // ---------------------------------------------------------------------------
 
 /// Build the `(World, Schedule)` for a headless run over `net`, seeded with
-/// `seed`. Loads the sibling `buildings.json` for the spawner's clusters from
-/// the same directory as the net; falls back to gateway-only attractors if the
-/// buildings file is absent. No timing / I/O — callers drive `schedule.run`.
-pub fn build_sim(net: TrafficNet, seed: u64) -> (World, Schedule) {
-    let buildings_json = load_sibling_buildings();
-    build_sim_with_buildings(net, seed, &buildings_json)
-}
-
-/// Like [`build_sim`] but with the buildings JSON supplied explicitly (tests /
-/// deployments that bake the data path differently).
-pub fn build_sim_with_buildings(
+/// `seed`, spawning the census `trips` against the boot-anchored wall
+/// `clock`, thinned per `cfg`. No timing / I/O — callers drive
+/// `schedule.run`.
+pub fn build_sim(
     net: TrafficNet,
     seed: u64,
-    buildings_json: &str,
+    trips: TripSchedule,
+    clock: WallClock,
+    cfg: SpawnerCfg,
 ) -> (World, Schedule) {
     let router = Router::new(&net);
     let core = Core::new(&net, MAX_CONCURRENT + 64, seed);
-    let spawner = Spawner::new(&net, buildings_json, SpawnConfig::default(), seed);
+    let spawner = TripSpawner::new(trips, clock, cfg, seed);
     let measure = EdgeMeasure::new(&net);
 
     let mut world = World::new();
@@ -183,6 +181,7 @@ pub fn build_sim_with_buildings(
     world.insert_resource(CommandQueue::default());
     world.insert_resource(SpawnScratch::default());
     world.insert_resource(SnapshotHook::default());
+    world.insert_resource(Conservation::default());
 
     let mut schedule = Schedule::default();
     schedule.add_systems(
@@ -197,18 +196,6 @@ pub fn build_sim_with_buildings(
     );
 
     (world, schedule)
-}
-
-/// Locate `buildings.json` next to the net path via the `TRAFFICNET_JSON` env
-/// override or the default `data/winterthur/` path, returning `""` if unread.
-fn load_sibling_buildings() -> String {
-    let net_path = std::env::var("TRAFFICNET_JSON")
-        .unwrap_or_else(|_| "data/winterthur/trafficnet.json".to_string());
-    let buildings = std::path::Path::new(&net_path)
-        .parent()
-        .map(|d| d.join("buildings.json"))
-        .unwrap_or_else(|| std::path::PathBuf::from("data/winterthur/buildings.json"));
-    std::fs::read_to_string(&buildings).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +260,12 @@ fn drain_commands(mut queue: ResMut<CommandQueue>) {
     queue.pending.clear();
 }
 
-/// Sample + spawn this tick's trips and record their destinations.
+/// Release this tick's scheduled trips, record their destinations and book
+/// them into the conservation ledger.
+// A bevy system's "arguments" are its resource accesses — the count is the
+// ECS wiring surface, not a call-site burden (systems are never called
+// directly).
+#[allow(clippy::too_many_arguments)]
 fn spawn_trips(
     mut core: ResMut<CoreRes>,
     net: Res<TrafficNetRes>,
@@ -282,18 +274,23 @@ fn spawn_trips(
     clock: Res<SimClock>,
     mut registry: ResMut<TripRegistry>,
     mut scratch: ResMut<SpawnScratch>,
+    mut conservation: ResMut<Conservation>,
 ) {
     scratch.0.clear();
     spawner
         .0
         .step(&mut core.0, &net.0, &router.0, clock.tick, &mut scratch.0);
-    for &(veh, dest) in &scratch.0 {
-        registry.record(veh, dest);
+    for rec in &scratch.0 {
+        registry.record(rec.veh, rec.dest_edge);
     }
+    conservation.spawned += scratch.0.len() as u64;
+    conservation.skipped_no_route = spawner.0.counters().skipped_no_route;
 }
 
-/// Advance the kernel one tick (signals gate internally), then run the periodic
-/// congestion re-route, then bump the clock.
+/// Advance the kernel one tick (signals gate internally), book this tick's
+/// end-of-route despawns as arrivals (incl. gateway sinks) and check the
+/// conservation invariant, then run the periodic congestion re-route, then
+/// bump the clock.
 fn core_tick(
     mut core: ResMut<CoreRes>,
     net: Res<TrafficNetRes>,
@@ -301,9 +298,18 @@ fn core_tick(
     registry: Res<TripRegistry>,
     seed: Res<SimSeed>,
     mut clock: ResMut<SimClock>,
+    mut conservation: ResMut<Conservation>,
 ) {
     let t = clock.tick;
     core.0.tick(t);
+
+    conservation.arrived += core.0.despawned_last_tick().len() as u64;
+    debug_assert!(
+        conservation.holds(core.0.fleet.alive_count()),
+        "vehicle conservation violated at tick {t}: {:?} alive={}",
+        *conservation,
+        core.0.fleet.alive_count()
+    );
 
     if t > 0 && t.is_multiple_of(REROUTE_INTERVAL_TICKS) {
         reroute_congested(&mut core.0, &net.0, &router.0, &registry, seed.0, t);

@@ -14,20 +14,32 @@ const OUT = `${OUT_DIR}/trafficnet.json`;
 
 const roadsPath = `${SCRATCH}/osm-roads.json`;
 const nodesPath = `${SCRATCH}/osm-traffic-nodes.json`;
+const boundaryPath = `${SCRATCH}/boundary-winterthur.geojson`;
 if (!existsSync(roadsPath)) throw new Error(`missing ${roadsPath} — run \`node scripts/geo/fetch-winterthur.mjs\` first`);
 if (!existsSync(nodesPath)) throw new Error(`missing ${nodesPath} — run \`node scripts/geo/fetch-winterthur.mjs\` first`);
+if (!existsSync(boundaryPath)) {
+  throw new Error(`missing ${boundaryPath} — run \`node scripts/geo/fetch-winterthur.mjs\` first (gateway stubs need the municipality boundary)`);
+}
 
 const osmRoads = JSON.parse(readFileSync(roadsPath, 'utf8'));
 const osmTrafficNodes = JSON.parse(readFileSync(nodesPath, 'utf8'));
+const boundary = JSON.parse(readFileSync(boundaryPath, 'utf8'));
 
 const net = buildTrafficNet({
   osmRoads,
   osmTrafficNodes,
   projector: makeProjector(ANCHOR),
   anchor: ANCHOR,
+  boundary,
 });
 
 if (net.edges.length < 100) throw new Error(`bake: only ${net.edges.length} edges — expected >100, input looks wrong`);
+if (net.meta.gatewayCount < 10) {
+  throw new Error(`bake: only ${net.meta.gatewayCount} gateways — a Gemeinde-scale net needs ≥10 boundary crossings`);
+}
+if (!net.edges.some((e) => e.speedMs >= 27)) {
+  throw new Error('bake: no motorway-speed edge (≥27 m/s) — the A1 is missing from the net');
+}
 
 mkdirSync(OUT_DIR, { recursive: true });
 // Pretty-print with 2 spaces; key order is already fixed by buildTrafficNet's

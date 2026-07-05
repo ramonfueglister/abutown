@@ -1,14 +1,16 @@
-//! Integration test for the WS gateway (Task 8): connect a real WebSocket
-//! client, subscribe to AOI cells, and assert the keyframe-then-delta protocol.
+//! Integration test for the WS gateway: connect a real WebSocket client,
+//! subscribe to AOI cells, and assert the keyframe-then-delta protocol.
 //!
 //! The sim is driven **manually** (the ECS `Schedule` ticked directly, as in
 //! `tests/shell.rs`) rather than by the 10 Hz wall-clock loop, so the test is
-//! deterministic and fast: we tick to warm up the fleet, discover which cells
-//! hold vehicles from the same `Core` the server publishes from, subscribe to
+//! deterministic and fast: we tick to warm up the fleet (07:30 workday boot —
+//! the census warm start populates the world), discover which cells hold
+//! vehicles from the same `Core` the server publishes from, subscribe to
 //! them, then tick more and read frames off the socket. The axum `/traffic`
 //! server runs on its own task sharing the `Registry` with the publisher.
 
-use std::path::PathBuf;
+mod common;
+
 use std::time::Duration;
 
 use bevy_ecs::prelude::*;
@@ -18,31 +20,12 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use abutown_protocol::traffic::{TrafficClientMsg, TrafficServerMsg};
-use traffic_net::TrafficNet;
+use common::{build_real_sim, workday_clock};
 use winterthur_traffic::cells::CellGrid;
+use winterthur_traffic::demand::TripSchedule;
 use winterthur_traffic::gateway::{self, Registry, make_publisher};
 use winterthur_traffic::shell::{self, CoreRes, SnapshotHook};
-
-fn data_path(file: &str) -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop();
-    p.pop();
-    p.pop();
-    p.push("data/winterthur");
-    p.push(file);
-    p
-}
-
-fn load_real_net() -> TrafficNet {
-    let p = data_path("trafficnet.json");
-    let json = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
-    traffic_net::load(&json).expect("real Winterthur bake must validate")
-}
-
-fn load_buildings() -> String {
-    let p = data_path("buildings.json");
-    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()))
-}
+use winterthur_traffic::spawner::SpawnerCfg;
 
 /// Collect the set of currently-occupied cells from the live `Core`.
 fn busy_cells(world: &World, grid: &CellGrid) -> Vec<u32> {
@@ -60,13 +43,14 @@ fn busy_cells(world: &World, grid: &CellGrid) -> Vec<u32> {
     v
 }
 
-/// Build the world with the gateway publisher installed, plus the grid + the
-/// shared registry. The axum server is started by the caller.
+/// Build the world (real net + real trips, 07:30 workday) with the gateway
+/// publisher installed, plus the grid + the shared registry. The axum server
+/// is started by the caller.
 fn build_gateway_world(registry: &Registry) -> (World, Schedule, CellGrid) {
-    let net = load_real_net();
-    let buildings = load_buildings();
+    let json = common::load_real_net_json();
+    let net = common::load_real_net(&json);
     let grid = CellGrid::build(&net);
-    let (mut world, schedule) = shell::build_sim_with_buildings(net, 0, &buildings);
+    let (mut world, schedule) = build_real_sim(0, "07:30");
     world.insert_resource(make_publisher(grid.clone(), registry.clone()));
     (world, schedule, grid)
 }
@@ -112,7 +96,7 @@ async fn subscribe_yields_keyframe_with_vehicles_then_deltas() {
     let (mut world, mut schedule, grid) = build_gateway_world(&registry);
     let port = start_server(registry.clone(), grid.cell_count()).await;
 
-    // Warm up ~40 sim-seconds so the central grid is busy.
+    // Warm up ~40 sim-seconds so the warm-started fleet occupies cells.
     warmup(&mut world, &mut schedule, 400);
     let cells = busy_cells(&world, &grid);
     assert!(
@@ -230,25 +214,53 @@ async fn unsubscribed_cells_yield_no_frames() {
     }
 }
 
-/// Finding 1 — generation-tagged wire ids. Fleet slots recycle via a LIFO
-/// free-list, so a slot reused after despawn would collide on the wire with its
-/// former occupant unless we tag it. Over a long run the spawner churns
-/// hundreds of vehicles through the same slots; we subscribe to every cell and
-/// collect the full set of wire ids ever emitted, then assert that some fleet
-/// slot (the low `SLOT_BITS`) appears under two DISTINCT full wire ids — i.e.
-/// the generation tag distinguished a reused slot from its predecessor. Without
-/// the fix every reuse would reproduce the identical raw slot id and this could
-/// never be observed.
+/// An EMPTY trip schedule for the tiny fixture net, so a test world sees no
+/// spawner traffic and can drive the `Core` by hand.
+fn empty_schedule_for(net_json: &str) -> TripSchedule {
+    use std::io::Write as _;
+    let net_hash = *blake3::hash(net_json.as_bytes()).as_bytes();
+    let mut bytes = Vec::new();
+    demand_gen::output::write_trips(&mut bytes, &net_hash, &[], &[]).unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "winterthur-traffic-gateway-test-empty-{}.bin",
+        std::process::id()
+    ));
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(&bytes).unwrap();
+    TripSchedule::load(&path, net_json.as_bytes()).unwrap()
+}
+
+/// Generation-tagged wire ids. Fleet slots recycle via a LIFO free-list, so a
+/// slot reused after despawn would collide on the wire with its former
+/// occupant unless we tag it. This test forces reuse deterministically on the
+/// tiny diamond fixture: it repeatedly spawns a vehicle near the end of a
+/// single-lane route directly into the `Core` (no spawner traffic — empty
+/// trip schedule), lets it despawn via end-of-route, and spawns again. The
+/// freed slot is recycled (LIFO) with a bumped generation, so the publisher
+/// must emit two DISTINCT full wire ids for the same low-`SLOT_BITS` slot.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reused_slots_get_distinct_wire_ids() {
     use std::collections::{HashMap, HashSet};
 
+    let json = std::fs::read_to_string(format!(
+        "{}/tests/fixtures/diamond-gateway.json",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let net = traffic_net::load(&json).expect("fixture must validate");
+    let grid = CellGrid::build(&net);
     let registry = Registry::new();
-    let (mut world, mut schedule, grid) = build_gateway_world(&registry);
+    let (mut world, mut schedule) = shell::build_sim(
+        net,
+        0,
+        empty_schedule_for(&json),
+        workday_clock("07:30"),
+        SpawnerCfg::default(),
+    );
+    world.insert_resource(make_publisher(grid.clone(), registry.clone()));
     let port = start_server(registry.clone(), grid.cell_count()).await;
 
-    // Warm up so slots are populated, then subscribe to all cells.
-    warmup(&mut world, &mut schedule, 200);
+    // Subscribe to every cell of the tiny grid.
     let all_cells: Vec<u32> = (0..grid.cell_count()).collect();
     let mut ws = connect(port).await;
     ws.send(WsMessage::Binary(subscribe_msg(&all_cells)))
@@ -258,10 +270,25 @@ async fn reused_slots_get_distinct_wire_ids() {
     // slot (low SLOT_BITS) -> the set of full wire ids seen for it.
     let mut ids_by_slot: HashMap<u32, HashSet<u32>> = HashMap::new();
 
-    // Drive a long window so many routes complete and their slots recycle.
+    // Churn: whenever the world is empty, spawn a fresh vehicle 5 m before
+    // the end of lane 0 with a single-lane route — it despawns within a few
+    // sim-seconds and its slot recycles for the next spawn.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
     let mut found = false;
     while tokio::time::Instant::now() < deadline && !found {
+        {
+            let spawn_now = world.resource::<CoreRes>().0.fleet.alive_count() == 0;
+            if spawn_now {
+                let core = &mut world.resource_mut::<CoreRes>().0;
+                core.spawn(0, 95.0, &[0]).expect("fixture spawn must fit");
+                // Out-of-band spawn (bypasses the shell's spawn path): book it
+                // into the conservation ledger or the shell's per-tick
+                // invariant check trips.
+                world
+                    .resource_mut::<winterthur_traffic::audit::Conservation>()
+                    .spawned += 1;
+            }
+        }
         warmup(&mut world, &mut schedule, 10);
         while let Ok(Some(Ok(msg))) =
             tokio::time::timeout(Duration::from_millis(20), ws.next()).await
@@ -294,8 +321,7 @@ async fn reused_slots_get_distinct_wire_ids() {
 /// unchanged for callers that don't want the gateway.
 #[test]
 fn default_hook_is_noop() {
-    let net = load_real_net();
-    let (mut world, mut schedule) = shell::build_sim_with_buildings(net, 0, &load_buildings());
+    let (mut world, mut schedule) = build_real_sim(0, "07:30");
     world.insert_resource(SnapshotHook::default());
     for _ in 0..10 {
         schedule.run(&mut world);

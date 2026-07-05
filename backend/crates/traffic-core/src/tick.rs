@@ -352,6 +352,15 @@ impl Core {
         })
     }
 
+    /// The vehicle slots despawned by the most recent [`Core::tick`] call —
+    /// every end-of-route removal, including gateway-sink arrivals (a route
+    /// ending on a boundary stub's in-lane is a normal route end). Read-only
+    /// observation seam for the shell's conservation audit; the buffer is
+    /// cleared at the start of the next tick.
+    pub fn despawned_last_tick(&self) -> &[VehId] {
+        &self.despawn
+    }
+
     /// Advance the simulation one timestep. `t` is the tick number, folded into
     /// deterministic per-vehicle noise.
     pub fn tick(&mut self, t: u64) {
@@ -753,6 +762,16 @@ impl Core {
         let target = lc.target_lane;
         let s = self.fleet.s[slot];
         let v = self.fleet.v[slot];
+
+        // Parallel lanes of one edge do NOT always share arc length (curved
+        // edges bake different polyline lengths per lane). A change that
+        // preserves `s` beyond the target lane's end would place the vehicle
+        // past the junction ungated — the boundary-advance then carries it
+        // onto the next lane on top of whatever queues there (observed as a
+        // real collision on the Gemeinde net: 134.2 m → 131.1 m lanes).
+        if s > self.lane_len[target as usize] {
+            return false;
+        }
 
         // Re-find leader and follower on the target lane from live state.
         let nb = lane_neighbourhood(&self.fleet, &self.index, target, s, v, VehId::MAX);
