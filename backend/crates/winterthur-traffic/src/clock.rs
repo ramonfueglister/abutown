@@ -32,6 +32,13 @@ const _: () = assert!(DT == 0.1, "WallClock integer math assumes DT == 0.1 s");
 /// list; worst case those two days run the weekday demand curve.
 const HOLIDAYS: &[(u32, u32)] = &[(1, 1), (1, 2), (8, 1), (12, 25), (12, 26)];
 
+/// Parse the `ABUTOWN_TRAFFIC_AT` dev-override format (`HH:MM`, 24 h) into
+/// a [`NaiveTime`]. `None` on any malformed input — the caller decides
+/// whether that is a hard error (it is, in `main`).
+pub fn parse_hhmm(s: &str) -> Option<NaiveTime> {
+    NaiveTime::parse_from_str(s, "%H:%M").ok()
+}
+
 /// Wall-clock anchor captured at boot, in Europe/Zurich local time.
 #[derive(Debug, Clone, Copy)]
 pub struct WallClock {
@@ -93,6 +100,15 @@ mod tests {
             .single()
             .expect("unambiguous local time")
             .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn parse_hhmm_accepts_valid_and_rejects_garbage() {
+        assert_eq!(parse_hhmm("07:30"), NaiveTime::from_hms_opt(7, 30, 0));
+        assert_eq!(parse_hhmm("23:59"), NaiveTime::from_hms_opt(23, 59, 0));
+        assert_eq!(parse_hhmm("24:00"), None);
+        assert_eq!(parse_hhmm("7h30"), None);
+        assert_eq!(parse_hhmm(""), None);
     }
 
     #[test]

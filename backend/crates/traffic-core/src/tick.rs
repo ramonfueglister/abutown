@@ -754,6 +754,16 @@ impl Core {
         let s = self.fleet.s[slot];
         let v = self.fleet.v[slot];
 
+        // Parallel lanes of one edge do NOT always share arc length (curved
+        // edges bake different polyline lengths per lane). A change that
+        // preserves `s` beyond the target lane's end would place the vehicle
+        // past the junction ungated — the boundary-advance then carries it
+        // onto the next lane on top of whatever queues there (observed as a
+        // real collision on the Gemeinde net: 134.2 m → 131.1 m lanes).
+        if s > self.lane_len[target as usize] {
+            return false;
+        }
+
         // Re-find leader and follower on the target lane from live state.
         let nb = lane_neighbourhood(&self.fleet, &self.index, target, s, v, VehId::MAX);
 

@@ -27,8 +27,10 @@
 //! starts. No WS code lives here — only the seam.
 
 use crate::Router;
+use crate::clock::WallClock;
+use crate::demand::TripSchedule;
 use crate::measure::EdgeMeasure;
-use crate::spawner::{MAX_CONCURRENT, SpawnConfig, Spawner};
+use crate::spawner::{MAX_CONCURRENT, SpawnRecord, SpawnerCfg, TripSpawner};
 use bevy_ecs::prelude::*;
 use traffic_core::{Core, u01};
 use traffic_net::TrafficNet;
@@ -60,9 +62,9 @@ pub struct CoreRes(pub Core);
 #[derive(Resource)]
 pub struct RouterRes(pub Router);
 
-/// The trip spawner.
+/// The wall-clock census trip spawner.
 #[derive(Resource)]
-pub struct SpawnerRes(pub Spawner);
+pub struct SpawnerRes(pub TripSpawner);
 
 /// The per-edge harmonic-mean-speed measurement accumulator.
 #[derive(Resource)]
@@ -108,10 +110,10 @@ pub struct CommandQueue {
 #[derive(Debug, Clone)]
 pub enum SimCommand {}
 
-/// Scratch buffer reused by `spawn_trips` for the `(veh, dest_edge)` records a
-/// tick produces, so the hot path allocates nothing steady-state.
+/// Scratch buffer reused by `spawn_trips` for the [`SpawnRecord`]s a tick
+/// produces, so the hot path allocates nothing steady-state.
 #[derive(Resource, Default)]
-struct SpawnScratch(Vec<(u32, u32)>);
+struct SpawnScratch(Vec<SpawnRecord>);
 
 // ---------------------------------------------------------------------------
 // Publish seam (Task 8)
@@ -151,24 +153,19 @@ impl SnapshotHook {
 // ---------------------------------------------------------------------------
 
 /// Build the `(World, Schedule)` for a headless run over `net`, seeded with
-/// `seed`. Loads the sibling `buildings.json` for the spawner's clusters from
-/// the same directory as the net; falls back to gateway-only attractors if the
-/// buildings file is absent. No timing / I/O — callers drive `schedule.run`.
-pub fn build_sim(net: TrafficNet, seed: u64) -> (World, Schedule) {
-    let buildings_json = load_sibling_buildings();
-    build_sim_with_buildings(net, seed, &buildings_json)
-}
-
-/// Like [`build_sim`] but with the buildings JSON supplied explicitly (tests /
-/// deployments that bake the data path differently).
-pub fn build_sim_with_buildings(
+/// `seed`, spawning the census `trips` against the boot-anchored wall
+/// `clock`, thinned per `cfg`. No timing / I/O — callers drive
+/// `schedule.run`.
+pub fn build_sim(
     net: TrafficNet,
     seed: u64,
-    buildings_json: &str,
+    trips: TripSchedule,
+    clock: WallClock,
+    cfg: SpawnerCfg,
 ) -> (World, Schedule) {
     let router = Router::new(&net);
     let core = Core::new(&net, MAX_CONCURRENT + 64, seed);
-    let spawner = Spawner::new(&net, buildings_json, SpawnConfig::default(), seed);
+    let spawner = TripSpawner::new(trips, clock, cfg, seed);
     let measure = EdgeMeasure::new(&net);
 
     let mut world = World::new();
@@ -197,18 +194,6 @@ pub fn build_sim_with_buildings(
     );
 
     (world, schedule)
-}
-
-/// Locate `buildings.json` next to the net path via the `TRAFFICNET_JSON` env
-/// override or the default `data/winterthur/` path, returning `""` if unread.
-fn load_sibling_buildings() -> String {
-    let net_path = std::env::var("TRAFFICNET_JSON")
-        .unwrap_or_else(|_| "data/winterthur/trafficnet.json".to_string());
-    let buildings = std::path::Path::new(&net_path)
-        .parent()
-        .map(|d| d.join("buildings.json"))
-        .unwrap_or_else(|| std::path::PathBuf::from("data/winterthur/buildings.json"));
-    std::fs::read_to_string(&buildings).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +258,7 @@ fn drain_commands(mut queue: ResMut<CommandQueue>) {
     queue.pending.clear();
 }
 
-/// Sample + spawn this tick's trips and record their destinations.
+/// Release this tick's scheduled trips and record their destinations.
 fn spawn_trips(
     mut core: ResMut<CoreRes>,
     net: Res<TrafficNetRes>,
@@ -287,8 +272,8 @@ fn spawn_trips(
     spawner
         .0
         .step(&mut core.0, &net.0, &router.0, clock.tick, &mut scratch.0);
-    for &(veh, dest) in &scratch.0 {
-        registry.record(veh, dest);
+    for rec in &scratch.0 {
+        registry.record(rec.veh, rec.dest_edge);
     }
 }
 

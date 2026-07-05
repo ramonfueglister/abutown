@@ -1,36 +1,15 @@
 //! Headless integration test for the `winterthur-traffic` bevy_ecs shell.
 //!
-//! Boots the sim on the REAL baked Winterthur network, drives the ECS
-//! `Schedule` directly (no tokio interval — as fast as the CPU allows), and
-//! asserts the population / collision-free / determinism invariants from the
-//! Task 7 brief.
+//! Boots the sim on the REAL baked Winterthur Gemeinde network with the REAL
+//! census trips.bin at a pinned workday 07:30 boot, drives the ECS `Schedule`
+//! directly (no tokio interval — as fast as the CPU allows), and asserts the
+//! population / collision-free / determinism invariants.
 
-use std::path::PathBuf;
-use traffic_net::TrafficNet;
+mod common;
+
+use common::{build_real_sim, load_real_net, load_real_net_json};
 use winterthur_traffic::measure::EdgeMeasure;
 use winterthur_traffic::shell::{self, CoreRes, MeasureRes, RouterRes, SimClock};
-
-fn data_path(file: &str) -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // crate dir is backend/crates/winterthur-traffic; repo root is three up.
-    p.pop();
-    p.pop();
-    p.pop();
-    p.push("data/winterthur");
-    p.push(file);
-    p
-}
-
-fn load_real_net() -> TrafficNet {
-    let p = data_path("trafficnet.json");
-    let json = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
-    traffic_net::load(&json).expect("real Winterthur bake must validate")
-}
-
-fn load_buildings() -> String {
-    let p = data_path("buildings.json");
-    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()))
-}
 
 /// Recompute the minimum bumper-to-bumper gap across every lane over the whole
 /// fleet. A non-positive gap between two distinct vehicles on the same lane is
@@ -66,9 +45,9 @@ fn min_positive_gap(core: &traffic_core::Core) -> f32 {
 
 #[test]
 fn boots_ticks_populates_and_is_collision_free() {
-    let net = load_real_net();
-    let buildings = load_buildings();
-    let (mut world, mut schedule) = shell::build_sim_with_buildings(net, 0xABCD, &buildings);
+    // 07:30 workday boot: warm start (07:15–07:30 departures) + live morning
+    // peak must populate the world.
+    let (mut world, mut schedule) = build_real_sim(0xABCD, "07:30");
 
     for _ in 0..1000 {
         schedule.run(&mut world);
@@ -78,7 +57,7 @@ fn boots_ticks_populates_and_is_collision_free() {
     let pop = core.fleet.alive_count();
     assert!(
         pop > 200,
-        "fleet population must exceed 200 after 1000 ticks, got {pop}"
+        "fleet population must exceed 200 after 1000 ticks at a 07:30 boot, got {pop}"
     );
 
     let min_gap = min_positive_gap(core);
@@ -92,42 +71,46 @@ fn boots_ticks_populates_and_is_collision_free() {
 }
 
 #[test]
-fn deterministic_same_seed_same_hash() {
-    let net = load_real_net();
-
-    let buildings = load_buildings();
-    let run = |seed: u64| -> u64 {
-        let (mut world, mut schedule) =
-            shell::build_sim_with_buildings(net.clone(), seed, &buildings);
+fn deterministic_same_seed_and_anchor_same_hash() {
+    let run = |seed: u64, at: &str| -> u64 {
+        let (mut world, mut schedule) = build_real_sim(seed, at);
         for _ in 0..1000 {
             schedule.run(&mut world);
         }
         world.resource::<CoreRes>().0.state_hash()
     };
 
-    let h1 = run(0x1234);
-    let h2 = run(0x1234);
-    assert_eq!(h1, h2, "same seed must yield identical Core state_hash");
+    let h1 = run(0x1234, "07:30");
+    let h2 = run(0x1234, "07:30");
+    assert_eq!(
+        h1, h2,
+        "same (seed, trips, boot anchor) must yield identical Core state_hash"
+    );
 
-    let h3 = run(0x9999);
+    let h3 = run(0x9999, "07:30");
     assert_ne!(
         h1, h3,
         "different seeds should (almost surely) diverge — sanity check"
     );
+
+    let h4 = run(0x1234, "03:00");
+    assert_ne!(
+        h1, h4,
+        "a different boot anchor must produce a different spawn pattern"
+    );
 }
 
-/// End-to-end wiring test for the measurement → router → CH-rebuild seam
-/// (Task 7 finding 6). Drives the real ECS schedule past one measurement window
-/// close on the real net with an injected short window, then asserts the flush
-/// actually reached the router: at least one edge's smoothed travel time in the
-/// `Router` moved off its free-flow baseline (proof `EdgeMeasure::flush ->
+/// End-to-end wiring test for the measurement → router → CH-rebuild seam.
+/// Drives the real ECS schedule past one measurement window close on the real
+/// net with an injected short window, then asserts the flush actually reached
+/// the router: at least one edge's smoothed travel time in the `Router` moved
+/// off its free-flow baseline (proof `EdgeMeasure::flush ->
 /// Router::update_weights -> rebuild` fired), and the CH still answers a route.
 #[test]
 fn measure_window_flush_updates_router_weights() {
-    let net = load_real_net();
-    let buildings = load_buildings();
-    let (mut world, mut schedule) =
-        shell::build_sim_with_buildings(net.clone(), 0xF00D, &buildings);
+    let json = load_real_net_json();
+    let net = load_real_net(&json);
+    let (mut world, mut schedule) = build_real_sim(0xF00D, "07:30");
 
     // Inject a short measurement window so a flush happens quickly instead of at
     // 3000 ticks. Overwriting the resource is enough: the `measure_edges` system
@@ -195,9 +178,7 @@ fn measure_window_flush_updates_router_weights() {
 /// the real loop on an ephemeral port in a background task and probes health.
 #[tokio::test]
 async fn healthz_stays_responsive_under_live_loop() {
-    let net = load_real_net();
-    let buildings = load_buildings();
-    let (world, schedule) = shell::build_sim_with_buildings(net, 0x5EED, &buildings);
+    let (world, schedule) = build_real_sim(0x5EED, "07:30");
 
     // Pick a high, unlikely-contended port for the test.
     let port = 8791u16;
