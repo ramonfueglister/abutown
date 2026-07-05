@@ -26,7 +26,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { kswCity, palette } from '../designTokens';
 import { boxGeo } from '../ksw/geometryCache';
 import { clayMat } from '../ksw/props';
-import { poseAt, type TrafficNetGeom, type VehKinematics } from './deadReckon';
+import { type TrafficNetGeom, type VehKinematics } from './deadReckon';
+import { poseAtBlended } from './laneBlend';
 
 /** Instance capacity for VISIBLE cars (the AOI-subscribed cells only, not the
  * whole fleet — the server-side fleet cap is 30k since Task 8, but a browser
@@ -124,7 +125,7 @@ export function createCarLayer(groundYAt?: GroundYAt): CarLayer {
     let i = 0;
     for (const [id, veh] of vehicles) {
       if (i >= CAR_CAPACITY) break;
-      const pose = poseAt(net, veh, nowTick);
+      const pose = poseAtBlended(net, veh, nowTick);
       const groundY = groundYAt ? groundYAt(pose.x, pose.z) : 0;
       pos.set(pose.x, groundY + surfaceOffset, pose.z);
       quat.setFromAxisAngle(up, pose.yaw);
