@@ -24,6 +24,18 @@
 //       backend is then relaunched at 03:00 of the same pinned date (same
 //       seed) and the SAME scan-and-park procedure must show under a quarter
 //       of the rush count.
+//   (f) far-LOD flow channel (Task 11/12/13): after the client sends
+//       subscribe_flow=true (always-on per trafficClient.ts), at least one
+//       binary WS frame received over CDP decodes (via the SAME generated
+//       proto the app uses, loaded in-page from vite so the decode is
+//       byte-identical to production, not a re-implementation) to a
+//       TrafficServerMsg carrying a `flow` field with `edges.length > 0`.
+//   (g) far-LOD impostors actually DRAW while zoomed out: with the camera
+//       pulled back far enough that the subscribed 3×3 AOI no longer covers
+//       the busy corridor, `window.__traffic.flowCount() > 0` — the flow
+//       layer's InstancedMesh.count read straight from the debug hook (Task
+//       13), proving the impostors render, not just that the wire carries
+//       flow data.
 //
 // Right-hand derivation (mirrors tests/geo/trafficnet.test.ts case (e), the
 // curvature-robust antiparallel-pair form — NOT the straight node chord):
@@ -165,7 +177,7 @@ const RUSH_MIN_BASE = 8;
  *
  * @returns {Promise<{maxCount:number, sentBinary:number, recvBinary:number,
  *   moved:number, comparable:number, right:number, tested:number,
- *   errors:string[]}>}
+ *   flowFramesWithEdges:number, maxFlowCount:number, errors:string[]}>}
  */
 async function runScenario(browser, { label, full }) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -181,12 +193,20 @@ async function runScenario(browser, { label, full }) {
     await cdp.send('Network.enable');
     const wsSent = [];
     const wsRecv = [];
+    // Raw base64 payloads of received binary frames, kept for the (f) in-page
+    // proto decode below — capped so a long observation window doesn't grow
+    // this unboundedly.
+    const wsRecvPayloads = [];
+    const MAX_KEPT_PAYLOADS = 400;
     cdp.on('Network.webSocketFrameSent', (ev) => {
       // opcode 2 = binary; payloadData is base64 for binary frames.
       wsSent.push({ len: ev.response?.payloadData?.length ?? 0, op: ev.response?.opcode });
     });
     cdp.on('Network.webSocketFrameReceived', (ev) => {
       wsRecv.push({ len: ev.response?.payloadData?.length ?? 0, op: ev.response?.opcode });
+      if (ev.response?.opcode === 2 && ev.response?.payloadData && wsRecvPayloads.length < MAX_KEPT_PAYLOADS) {
+        wsRecvPayloads.push(ev.response.payloadData);
+      }
     });
 
     // Freeze the render clock at morning peak for a reproducible scene.
@@ -299,6 +319,70 @@ async function runScenario(browser, { label, full }) {
       }
     }
 
+    let flowFramesWithEdges = 0;
+    let maxFlowCount = 0;
+
+    if (full) {
+      // (f) evidence: decode a sample of the raw binary WS frames captured
+      // over CDP via the SAME generated proto module the app imports (loaded
+      // in-page from vite, exactly like probe-density.mjs) — this proves the
+      // WIRE carries a FlowFrame with edges, independent of the app's own
+      // TrafficClient decode path.
+      flowFramesWithEdges = await page.evaluate(async (payloads) => {
+        // fromBinary lives in the @bufbuild/protobuf RUNTIME, not the
+        // generated schema module — mirrors trafficClient.ts's import split
+        // and scripts/probe-density.mjs's in-page decode.
+        const { fromBinary } = await import(
+          '/node_modules/@bufbuild/protobuf/dist/esm/index.js'
+        ).catch(() => import('@bufbuild/protobuf'));
+        const pb = await import('/src/proto/traffic_pb.ts');
+        let n = 0;
+        for (const b64 of payloads) {
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          try {
+            const msg = fromBinary(pb.TrafficServerMsgSchema, bytes);
+            if (msg.flow && msg.flow.edges.length > 0) n++;
+          } catch {
+            // not every captured binary frame need be a TrafficServerMsg
+            // (there are none other on this socket, but stay defensive).
+          }
+        }
+        return n;
+      }, wsRecvPayloads);
+      console.log(
+        `[smoke:${label}] (f) ${flowFramesWithEdges}/${wsRecvPayloads.length} sampled binary frames decode to a FlowFrame with edges`,
+      );
+
+      // (g) evidence: zoom the camera OUT far enough that the subscribed 3×3
+      // AOI (128 m cells, radius 1) no longer covers the busy corridor we
+      // parked on — the flow layer should then draw impostors for the traffic
+      // that's still there, just outside the per-vehicle subscription.
+      await page.evaluate(
+        (a) => window.__traffic.lookAt(a.x, a.z, { radius: a.radius }),
+        { ...best.aim, radius: 2400 },
+      );
+      await page.waitForTimeout(6000);
+      const flowCounts = () => page.evaluate(() => window.__traffic?.flowCount?.() ?? 0);
+      const tFlow = Date.now();
+      while (Date.now() - tFlow < 12000) {
+        const fc = await flowCounts();
+        if (fc > maxFlowCount) maxFlowCount = fc;
+        if (maxFlowCount > 0) break;
+        await page.waitForTimeout(1000);
+      }
+      console.log(`[smoke:${label}] (g) max flowCount() while zoomed out (r=2400): ${maxFlowCount}`);
+
+      // Re-park on the busy aim at the normal radius so the round-out window
+      // below keeps observing the same scene the (a)-(e) assertions expect.
+      await page.evaluate(
+        (a) => window.__traffic.lookAt(a.x, a.z, { radius: a.radius }),
+        { ...best.aim, radius: CAM_RADIUS },
+      );
+      await page.waitForTimeout(2000);
+    }
+
     // Round the observation out to the fixed window, polling the table size.
     while (Date.now() - tLook < OBSERVE_MS) {
       await page.waitForTimeout(2000);
@@ -308,7 +392,18 @@ async function runScenario(browser, { label, full }) {
     const sentBinary = wsSent.filter((f) => f.op === 2 && f.len > 0).length;
     const recvBinary = wsRecv.filter((f) => f.op === 2 && f.len > 0).length;
     console.log(`[smoke:${label}] max vehicle-table size over ${OBSERVE_MS / 1000}s: ${maxCount}`);
-    return { maxCount, sentBinary, recvBinary, moved, comparable, right, tested, errors };
+    return {
+      maxCount,
+      sentBinary,
+      recvBinary,
+      moved,
+      comparable,
+      right,
+      tested,
+      flowFramesWithEdges,
+      maxFlowCount,
+      errors,
+    };
   } finally {
     await page.close().catch(() => {});
   }
@@ -366,6 +461,21 @@ async function main() {
       `${rush.right}/${rush.tested} to the right of the oncoming lane (${(ratio * 100).toFixed(0)}%)`,
     );
 
+    // (f) far-LOD flow channel: ≥1 sampled binary frame decodes to a
+    // TrafficServerMsg with a FlowFrame carrying ≥1 edge.
+    check(
+      '(f) subscribe_flow wire carries a FlowFrame with edges',
+      rush.flowFramesWithEdges > 0,
+      `${rush.flowFramesWithEdges} frames with edges.length > 0`,
+    );
+
+    // (g) impostors actually draw while zoomed out past the subscribed AOI.
+    check(
+      '(g) flowCount() > 0 while zoomed out',
+      rush.maxFlowCount > 0,
+      `max flowCount()=${rush.maxFlowCount}`,
+    );
+
     // ── scenario 2: dead of night (03:00), fresh backend, same seed ─────────
     console.log(`[smoke] restarting traffic backend at ${AT_NIGHT} (same seed)…`);
     await stack.restartTraffic({ at: AT_NIGHT, seed: SEED });
@@ -403,7 +513,7 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    '\nSMOKE OK — cars stream, move, drive on the right, and follow the census rush-hour curve (verified in a real WebGPU browser)',
+    '\nSMOKE OK — cars stream, move, drive on the right, follow the census rush-hour curve, and the far-LOD flow channel carries edges + draws impostors zoomed out (verified in a real WebGPU browser)',
   );
 }
 

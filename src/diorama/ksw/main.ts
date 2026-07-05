@@ -94,6 +94,10 @@ declare global {
     __traffic?: {
       count: () => number;
       serverTick: () => number;
+      // Number of far-LOD flow impostor instances currently drawn (Task 13
+      // smoke assertion (g)) — mirrors flowLayer's InstancedMesh.count after
+      // its last update() call, i.e. exactly what's on screen this frame.
+      flowCount: () => number;
       sample: () => Array<{ id: number; lane: number; x: number; z: number; yaw: number }>;
       // Re-aim the CAMERA (and therefore the AOI subscription, which follows
       // rig.target) at a world (x, z) with an optional zoom radius + orbit
@@ -646,6 +650,7 @@ async function boot(): Promise<void> {
         window.__traffic = {
           count: () => client.vehicles.size,
           serverTick: () => client.serverTick,
+          flowCount: () => flowLayer?.count() ?? 0,
           sample: () => {
             const out: Array<{ id: number; lane: number; x: number; z: number; yaw: number }> = [];
             for (const [id, veh] of client.vehicles) {

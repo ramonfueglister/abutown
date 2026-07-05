@@ -180,6 +180,10 @@ export interface FlowLayer {
    * subscribed cell (so a subscribed edge never double-renders real cars +
    * impostors in the same cell — see the module banner). */
   update(flow: Map<number, FlowEdge>, subscribedCells: ReadonlySet<number>, nowS: number): void;
+  /** Number of impostor instances actually drawn as of the last `update()`
+   * call (i.e. `mesh.count`) — exposed for the `?traffic` debug hook
+   * (`window.__traffic.flowCount()`, Task 13 smoke assertion (g)). */
+  count(): number;
 }
 
 /** Per-edge impostor count, scaled down from the raw (saturating-255) count
@@ -255,5 +259,5 @@ export function createFlowLayer(net: TrafficNetGeom, grid: CellGrid, groundYAt?:
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
-  return { object3d: mesh, update };
+  return { object3d: mesh, update, count: () => mesh.count };
 }
