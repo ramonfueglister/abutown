@@ -7,6 +7,7 @@ import * as THREE from 'three/webgpu';
 import { kswCity } from '../../designTokens';
 import { clayMat } from '../props';
 import type { RoadPath } from './geoData';
+import { correctRoadWidths } from '../../traffic/roadWidths';
 
 /** Optional per-vertex ground draping. `groundYAt(x,z)` returns the visible
  * (shifted) terrain height at a world point; the ribbon vertex y becomes that
@@ -140,7 +141,7 @@ function ribbonMat(color: number, polygonOffsetUnits: number): THREE.MeshPhysica
 function stripsMesh(
   name: string,
   paths: RoadPath[],
-  widthOf: (p: RoadPath) => number,
+  widthOf: (p: RoadPath, i: number) => number,
   color: number,
   y: number,
   polygonOffsetUnits: number,
@@ -148,8 +149,9 @@ function stripsMesh(
 ): THREE.Mesh {
   const positions: number[] = [];
   const indices: number[] = [];
-  for (const p of paths) {
-    const s = miterStrip(p.pts, widthOf(p), y, groundYAt);
+  for (let idx = 0; idx < paths.length; idx++) {
+    const p = paths[idx];
+    const s = miterStrip(p.pts, widthOf(p, idx), y, groundYAt);
     const base = positions.length / 3;
     positions.push(...s.positions);
     for (const i of s.indices) indices.push(base + i);
@@ -172,9 +174,16 @@ export function buildRoads(roads: RoadPath[], rails: RoadPath[], groundYAt?: Gro
   group.name = 'cityRoads';
   const carriage = roads.filter((r) => !FOOT.has(r.class));
   const foot = roads.filter((r) => FOOT.has(r.class));
+  // FIX D1: floor each carriage ribbon's render width to the traffic lane pairs
+  // it carries (lanes_both_directions × 3.0 m + 0.8 m shoulders) so a two-way
+  // 3.0 m×2 lane pair is fully covered by the drawn tarmac and cars no longer
+  // overhang onto the grass. Deterministic geometric match against the baked
+  // trafficnet edges; roads with no nearby traffic edge keep their OSM width.
+  const carriageWidths = correctRoadWidths(carriage);
+  const carriageWidthOf = (p: RoadPath, i: number): number => carriageWidths[i] ?? p.width;
   // polygonOffset ladder (units) matches the roadYs height ladder bottom→top:
   // railBed 0 < carriage/footway −1 < rail −3 (more negative = drawn on top).
-  group.add(stripsMesh('carriageRibbons', carriage, (p) => p.width, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
+  group.add(stripsMesh('carriageRibbons', carriage, carriageWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
   group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway, -1, groundYAt));
   group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed, 0, groundYAt));
   group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail, -3, groundYAt));
