@@ -8,7 +8,19 @@ import { kswCity } from '../../designTokens';
 import { clayMat } from '../props';
 import type { RoadPath } from './geoData';
 
-export function miterStrip(pts: number[][], width: number, y: number): { positions: number[]; indices: number[] } {
+/** Optional per-vertex ground draping. `groundYAt(x,z)` returns the visible
+ * (shifted) terrain height at a world point; the ribbon vertex y becomes that
+ * plus the constant layer offset `y`. When omitted the ribbon is flat at `y`,
+ * reproducing the pre-#119 single-plate look (still used near the anchor, where
+ * the drape is ~0, and by any caller without a world). */
+export type GroundYAt = (x: number, z: number) => number;
+
+export function miterStrip(
+  pts: number[][],
+  width: number,
+  y: number,
+  groundYAt?: GroundYAt,
+): { positions: number[]; indices: number[] } {
   const positions: number[] = [];
   const indices: number[] = [];
   const half = width / 2;
@@ -39,7 +51,11 @@ export function miterStrip(pts: number[][], width: number, y: number): { positio
       const cosHalf = Math.max(0.5, mx * -dz0 + mz * dx0); // cap: ≤ 2× width spike
       scale = 1 / cosHalf;
     }
-    positions.push(cx + mx * half * scale, y, cz + mz * half * scale, cx - mx * half * scale, y, cz - mz * half * scale);
+    // Drape each edge vertex onto the terrain (sampled at the centreline point
+    // so both rails of the ribbon share one height and the strip stays planar
+    // across its width — avoids a twisted ribbon on cross-slopes).
+    const gy = groundYAt ? groundYAt(cx, cz) + y : y;
+    positions.push(cx + mx * half * scale, gy, cz + mz * half * scale, cx - mx * half * scale, gy, cz - mz * half * scale);
     if (i > 0) {
       const a = (i - 1) * 2;
       indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
@@ -48,11 +64,18 @@ export function miterStrip(pts: number[][], width: number, y: number): { positio
   return { positions, indices };
 }
 
-function stripsMesh(name: string, paths: RoadPath[], widthOf: (p: RoadPath) => number, color: number, y: number): THREE.Mesh {
+function stripsMesh(
+  name: string,
+  paths: RoadPath[],
+  widthOf: (p: RoadPath) => number,
+  color: number,
+  y: number,
+  groundYAt?: GroundYAt,
+): THREE.Mesh {
   const positions: number[] = [];
   const indices: number[] = [];
   for (const p of paths) {
-    const s = miterStrip(p.pts, widthOf(p), y);
+    const s = miterStrip(p.pts, widthOf(p), y, groundYAt);
     const base = positions.length / 3;
     positions.push(...s.positions);
     for (const i of s.indices) indices.push(base + i);
@@ -70,14 +93,14 @@ function stripsMesh(name: string, paths: RoadPath[], widthOf: (p: RoadPath) => n
 
 const FOOT = new Set(['footway', 'path', 'cycleway', 'steps', 'pedestrian', 'track']);
 
-export function buildRoads(roads: RoadPath[], rails: RoadPath[]): THREE.Group {
+export function buildRoads(roads: RoadPath[], rails: RoadPath[], groundYAt?: GroundYAt): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityRoads';
   const carriage = roads.filter((r) => !FOOT.has(r.class));
   const foot = roads.filter((r) => FOOT.has(r.class));
-  group.add(stripsMesh('carriageRibbons', carriage, (p) => p.width, kswCity.roadColors.carriage, kswCity.roadYs.carriage));
-  group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway));
-  group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed));
-  group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail));
+  group.add(stripsMesh('carriageRibbons', carriage, (p) => p.width, kswCity.roadColors.carriage, kswCity.roadYs.carriage, groundYAt));
+  group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway, groundYAt));
+  group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed, groundYAt));
+  group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail, groundYAt));
   return group;
 }

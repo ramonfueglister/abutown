@@ -97,6 +97,52 @@ export function anchorGroundHeight(world: World): number {
   return best.height;
 }
 
+/**
+ * Build a fast ground-height sampler over the finest-level (largest `level`)
+ * tiles in the world. Returns `heightAt(x, z)` in **absolute DEM metres** —
+ * the same values the terrain mesh renders at (see terrain.ts, which writes
+ * `positions.y = height[n]`). To place an object on the *visible* (shifted)
+ * terrain surface, subtract `anchorGroundHeight(world)`, since the renderer
+ * offsets `terrainRoot.position.y = -anchorGroundHeight(world)`.
+ *
+ * Sampling is bilinear over the covering tile's grid cell, so the height
+ * varies smoothly across a cell rather than snapping to vertices — cars
+ * following a lane read a continuous surface. Out-of-coverage queries fall
+ * back to the anchor height (flat), which only happens outside the baked
+ * pyramid; the traffic net lives well inside it.
+ *
+ * The tiles are pre-sorted finest-first and indexed once; the returned
+ * closure allocates nothing on the hot path.
+ */
+export function makeHeightSampler(world: World): (x: number, z: number) => number {
+  // Finest (highest-level) tiles first so we prefer detail where tiles overlap.
+  const tiles = [...world.tiles].sort((a, b) => b.level - a.level).map((t) => t.tile);
+  const anchor = anchorGroundHeight(world);
+
+  return function heightAt(x: number, z: number): number {
+    for (const t of tiles) {
+      const { gridN, cellSize, originX, originZ, height } = t;
+      const fx = (x - originX) / cellSize;
+      const fz = (z - originZ) / cellSize;
+      if (fx < 0 || fz < 0 || fx > gridN - 1 || fz > gridN - 1) continue;
+      const i0 = Math.floor(fx);
+      const j0 = Math.floor(fz);
+      const i1 = Math.min(i0 + 1, gridN - 1);
+      const j1 = Math.min(j0 + 1, gridN - 1);
+      const tx = fx - i0;
+      const tz = fz - j0;
+      const h00 = height[j0 * gridN + i0];
+      const h10 = height[j0 * gridN + i1];
+      const h01 = height[j1 * gridN + i0];
+      const h11 = height[j1 * gridN + i1];
+      const h0 = h00 + (h10 - h00) * tx;
+      const h1 = h01 + (h11 - h01) * tx;
+      return h0 + (h1 - h0) * tz;
+    }
+    return anchor;
+  };
+}
+
 async function fetchBinary(url: string): Promise<Uint8Array> {
   const res = await fetch(url);
   if (!res.ok) {

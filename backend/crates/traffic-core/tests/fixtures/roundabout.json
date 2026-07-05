@@ -1,0 +1,276 @@
+{
+  "meta": {
+    "anchor": {
+      "lon": 0.0,
+      "lat": 0.0
+    },
+    "laneWidth": 3.5,
+    "cellSize": 1.0
+  },
+  "nodes": [
+    {
+      "id": 0,
+      "x": 0.0,
+      "z": 0.0,
+      "kind": "roundabout",
+      "signal": null
+    },
+    {
+      "id": 1,
+      "x": 30.0,
+      "z": 0.0,
+      "kind": "roundabout",
+      "signal": null
+    },
+    {
+      "id": 2,
+      "x": 30.0,
+      "z": 30.0,
+      "kind": "roundabout",
+      "signal": null
+    },
+    {
+      "id": 3,
+      "x": 0.0,
+      "z": 30.0,
+      "kind": "roundabout",
+      "signal": null
+    },
+    {
+      "id": 4,
+      "x": -40.0,
+      "z": 0.0,
+      "kind": "dead_end",
+      "signal": null
+    },
+    {
+      "id": 5,
+      "x": 70.0,
+      "z": 30.0,
+      "kind": "dead_end",
+      "signal": null
+    }
+  ],
+  "edges": [
+    {
+      "id": 0,
+      "from": 0,
+      "to": 1,
+      "speedMs": 8.0,
+      "laneCount": 1,
+      "priorityRoad": true,
+      "lanes": [
+        0
+      ]
+    },
+    {
+      "id": 1,
+      "from": 1,
+      "to": 2,
+      "speedMs": 8.0,
+      "laneCount": 1,
+      "priorityRoad": true,
+      "lanes": [
+        1
+      ]
+    },
+    {
+      "id": 2,
+      "from": 2,
+      "to": 3,
+      "speedMs": 8.0,
+      "laneCount": 1,
+      "priorityRoad": true,
+      "lanes": [
+        2
+      ]
+    },
+    {
+      "id": 3,
+      "from": 3,
+      "to": 0,
+      "speedMs": 8.0,
+      "laneCount": 1,
+      "priorityRoad": true,
+      "lanes": [
+        3
+      ]
+    },
+    {
+      "id": 4,
+      "from": 4,
+      "to": 0,
+      "speedMs": 8.0,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [
+        4
+      ]
+    },
+    {
+      "id": 5,
+      "from": 2,
+      "to": 5,
+      "speedMs": 8.0,
+      "laneCount": 1,
+      "priorityRoad": true,
+      "lanes": [
+        5
+      ]
+    }
+  ],
+  "lanes": [
+    {
+      "id": 0,
+      "edge": 0,
+      "index": 0,
+      "lengthM": 30.0,
+      "pts": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          30.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": 1,
+      "edge": 1,
+      "index": 0,
+      "lengthM": 30.0,
+      "pts": [
+        [
+          30.0,
+          0.0
+        ],
+        [
+          30.0,
+          30.0
+        ]
+      ]
+    },
+    {
+      "id": 2,
+      "edge": 2,
+      "index": 0,
+      "lengthM": 30.0,
+      "pts": [
+        [
+          30.0,
+          30.0
+        ],
+        [
+          0.0,
+          30.0
+        ]
+      ]
+    },
+    {
+      "id": 3,
+      "edge": 3,
+      "index": 0,
+      "lengthM": 30.0,
+      "pts": [
+        [
+          0.0,
+          30.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": 4,
+      "edge": 4,
+      "index": 0,
+      "lengthM": 40.0,
+      "pts": [
+        [
+          -40.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": 5,
+      "edge": 5,
+      "index": 0,
+      "lengthM": 40.0,
+      "pts": [
+        [
+          30.0,
+          30.0
+        ],
+        [
+          70.0,
+          30.0
+        ]
+      ]
+    }
+  ],
+  "turns": [
+    {
+      "id": 0,
+      "fromLane": 3,
+      "toLane": 0,
+      "node": 0,
+      "conflictsWith": [
+        5
+      ],
+      "yieldsTo": []
+    },
+    {
+      "id": 1,
+      "fromLane": 0,
+      "toLane": 1,
+      "node": 1,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 2,
+      "fromLane": 1,
+      "toLane": 2,
+      "node": 2,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 3,
+      "fromLane": 2,
+      "toLane": 3,
+      "node": 3,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 4,
+      "fromLane": 1,
+      "toLane": 5,
+      "node": 2,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 5,
+      "fromLane": 4,
+      "toLane": 0,
+      "node": 0,
+      "conflictsWith": [
+        0
+      ],
+      "yieldsTo": [
+        0
+      ]
+    }
+  ]
+}

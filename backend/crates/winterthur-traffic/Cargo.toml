@@ -1,0 +1,31 @@
+[package]
+name = "winterthur-traffic"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "winterthur-traffic"
+path = "src/main.rs"
+
+[dependencies]
+traffic-net = { path = "../traffic-net" }
+traffic-core = { path = "../traffic-core" }
+abutown-protocol = { path = "../protocol" }
+anyhow.workspace = true
+fast_paths.workspace = true
+bevy_ecs.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+prost.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+reqwest.workspace = true
+tokio-tungstenite.workspace = true

@@ -1,0 +1,149 @@
+{
+  "meta": {
+    "anchor": { "lon": 8.7285, "lat": 47.5069 },
+    "laneWidth": 3,
+    "cellSize": 128
+  },
+  "nodes": [
+    { "id": 0, "x": 0, "z": 0, "kind": "dead_end", "signal": null },
+    {
+      "id": 1,
+      "x": 100,
+      "z": 0,
+      "kind": "signal",
+      "signal": {
+        "cycleS": 60,
+        "phases": [
+          { "greenS": 26, "turns": [0] },
+          { "greenS": 26, "turns": [1] }
+        ]
+      }
+    },
+    { "id": 2, "x": 200, "z": 0, "kind": "priority", "signal": null },
+    { "id": 3, "x": 300, "z": 0, "kind": "dead_end", "signal": null }
+  ],
+  "edges": [
+    {
+      "id": 0,
+      "from": 0,
+      "to": 1,
+      "speedMs": 13.89,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [0]
+    },
+    {
+      "id": 1,
+      "from": 1,
+      "to": 2,
+      "speedMs": 13.89,
+      "laneCount": 2,
+      "priorityRoad": true,
+      "lanes": [1, 2]
+    },
+    {
+      "id": 2,
+      "from": 2,
+      "to": 3,
+      "speedMs": 13.89,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [3]
+    },
+    {
+      "id": 3,
+      "from": 2,
+      "to": 1,
+      "speedMs": 13.89,
+      "laneCount": 1,
+      "priorityRoad": false,
+      "lanes": [4]
+    }
+  ],
+  "lanes": [
+    {
+      "id": 0,
+      "edge": 0,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [0, 0],
+        [100, 0]
+      ]
+    },
+    {
+      "id": 1,
+      "edge": 1,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [100, 0],
+        [200, 0]
+      ]
+    },
+    {
+      "id": 2,
+      "edge": 1,
+      "index": 1,
+      "lengthM": 100,
+      "pts": [
+        [100, 3],
+        [200, 3]
+      ]
+    },
+    {
+      "id": 3,
+      "edge": 2,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [200, 0],
+        [300, 0]
+      ]
+    },
+    {
+      "id": 4,
+      "edge": 3,
+      "index": 0,
+      "lengthM": 100,
+      "pts": [
+        [200, 0],
+        [100, 0]
+      ]
+    }
+  ],
+  "turns": [
+    {
+      "id": 0,
+      "fromLane": 0,
+      "toLane": 1,
+      "node": 1,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 1,
+      "fromLane": 4,
+      "toLane": 0,
+      "node": 1,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 2,
+      "fromLane": 1,
+      "toLane": 3,
+      "node": 2,
+      "conflictsWith": [],
+      "yieldsTo": []
+    },
+    {
+      "id": 3,
+      "fromLane": 2,
+      "toLane": 4,
+      "node": 2,
+      "conflictsWith": [2],
+      "yieldsTo": [2]
+    }
+  ]
+}

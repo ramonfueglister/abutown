@@ -52,7 +52,7 @@ import { buildPlaza, buildHelipad } from './interior/plaza';
 import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
-import { loadWorld, anchorGroundHeight } from './geo/worldData';
+import { loadWorld, anchorGroundHeight, makeHeightSampler } from './geo/worldData';
 import { buildTerrainTiles } from './geo/terrain';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
@@ -60,6 +60,9 @@ import { lampGlowU } from './glowUniform';
 import { buildNature } from './geo/nature';
 import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
+import { TrafficClient, DEFAULT_TRAFFIC_WS } from '../traffic/trafficClient';
+import { createCarLayer } from '../traffic/carLayer';
+import { poseAt } from '../traffic/deadReckon';
 
 declare global {
   interface Window {
@@ -80,6 +83,24 @@ declare global {
       // main-thread cost per frame (EMA, ms): whole animate body, the agent
       // behavior+buffer-write loop, and the render call (command encoding)
       cpu: { frame: number; agents: number; render: number };
+    };
+    // Dev-only traffic debug surface, present ONLY under ?traffic=1 (Task 10
+    // browser smoke). Exposes the live vehicle count + a dead-reckoned pose
+    // sampler so the smoke can assert cars stream, move, and drive on the right
+    // without instrumenting the WS at the app layer. `sample()` returns each
+    // tracked vehicle's id, its lane id, and its current world pose (x, z, yaw)
+    // — the SAME poseAt the car layer draws, so the numbers match the pixels.
+    __traffic?: {
+      count: () => number;
+      serverTick: () => number;
+      sample: () => Array<{ id: number; lane: number; x: number; z: number; yaw: number }>;
+      // Re-aim the CAMERA (and therefore the AOI subscription, which follows
+      // rig.target) at a world (x, z) with an optional zoom radius + orbit
+      // angles — lets the smoke/capture harness frame a dense corridor or a
+      // named landmark deterministically, without synthetic mouse input. A near-
+      // top-down pitch (~1.5 rad) gives the capture harness a clear read on which
+      // side of the road each car is on.
+      lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => void;
     };
   }
 }
@@ -125,6 +146,10 @@ async function boot(): Promise<void> {
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
+  // ?traffic=1 enables the live instanced car layer (WS to the winterthur-traffic
+  // gateway). ?trafficWs=… overrides the endpoint (default ws://localhost:8790/traffic).
+  const trafficEnabled = params.get('traffic') === '1';
+  const trafficWsUrl = params.get('trafficWs') ?? DEFAULT_TRAFFIC_WS;
   // Realtime environment: physical sun/moon/stars for now() steered by live (or
   // ?wx-pinned) weather. Re-evaluated every frame; this is the boot seed.
   let lastEnv: EnvironmentState = computeEnvironment(now(), WX_OVERRIDES[wxParam ?? ''] ?? CLEAR_SKY);
@@ -498,7 +523,15 @@ async function boot(): Promise<void> {
   // sit at y≈0 (the anchor). Shift the whole terrain group down by the
   // anchor's ground height so the anchor point lines up with real y≈0 and
   // hills rise/fall around it from there.
-  terrainRoot.position.y = -anchorGroundHeight(world);
+  const anchorGround = anchorGroundHeight(world);
+  terrainRoot.position.y = -anchorGround;
+  // Ground-height sampler shared by the draped road ribbons AND the traffic
+  // cars: heightAt returns absolute DEM metres, and terrainRoot is shifted by
+  // -anchorGround, so the visible surface y (in the y=0 cityRoot frame) is
+  // heightAt(x,z) - anchorGround. Roads drape onto it (else the flat ribbons
+  // bury under / float over the undulating plate) and cars ride it per-vehicle.
+  const worldHeightAt = makeHeightSampler(world);
+  const groundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
   // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
   // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
   // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so
@@ -518,7 +551,7 @@ async function boot(): Promise<void> {
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
   cityRoot.add(buildCityMassing(cityBuildings));
-  cityRoot.add(buildRoads(cityRoads, cityRails));
+  cityRoot.add(buildRoads(cityRoads, cityRails, groundYAt));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
   // Tree canopies default to no cast-shadow (nature.ts) — cheap far-field
@@ -537,6 +570,63 @@ async function boot(): Promise<void> {
   cityRoot.add(buildWindows(cityBuildings));
   cityRoot.add(buildLamps(cityRoads));
   scene.add(cityRoot);
+
+  // ── live traffic (Task 9, ?traffic=1): instanced cars dead-reckoned from the
+  // winterthur-traffic gateway. The client fetches trafficnet.json, opens the
+  // WS, and manages camera-driven AOI cell subscriptions; the car layer draws
+  // its dead-reckoned vehicle table each frame. Both are null until the async
+  // connect resolves, so the animate loop guards on `trafficClient`.
+  let trafficClient: TrafficClient | null = null;
+  // Per-vehicle ground height so cars sit ON the draped road everywhere on the
+  // traffic plate (the DEM undulates ~±10 m across the net) — same sampler the
+  // road ribbons drape onto, so cars ride exactly the visible surface.
+  const carLayer = trafficEnabled ? createCarLayer(groundYAt) : null;
+  if (carLayer) cityRoot.add(carLayer.object3d);
+  let lastTrafficCamUpdate = 0; // wall-clock seconds, throttled to ~2 Hz
+  if (trafficEnabled) {
+    void TrafficClient.connect({ url: trafficWsUrl })
+      .then((client) => {
+        trafficClient = client;
+        // Prime the subscription immediately from the boot camera target.
+        client.updateCamera(rig.target[0], rig.target[2]);
+        // Dev-only debug surface for the Task 10 browser smoke: read the live
+        // vehicle table + dead-reckon each vehicle to the newest server tick
+        // (the SAME poseAt the car layer draws with). Gated behind ?traffic=1
+        // by living inside this connect block.
+        window.__traffic = {
+          count: () => client.vehicles.size,
+          serverTick: () => client.serverTick,
+          sample: () => {
+            const out: Array<{ id: number; lane: number; x: number; z: number; yaw: number }> = [];
+            for (const [id, veh] of client.vehicles) {
+              const pose = poseAt(client.net, veh, client.serverTick);
+              out.push({ id, lane: veh.lane, x: pose.x, z: pose.z, yaw: pose.yaw });
+            }
+            return out;
+          },
+          lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => {
+            // Aim the target at the DRAPED ground height under (x, z), not the
+            // boot cam's fixed y. Post-#119 the traffic plate sits ~3-10 m below
+            // y=0, so keeping the old target y floated the aim point above the
+            // road and pushed it out of the tight capture frames (Task 10).
+            rig = {
+              ...rig,
+              target: [x, groundYAt(x, z), z],
+              radius: opts?.radius ?? rig.radius,
+              yaw: opts?.yaw ?? rig.yaw,
+              pitch: opts?.pitch ?? rig.pitch,
+            };
+            if (opts?.radius !== undefined) zoomTarget = opts.radius;
+            applyRig();
+            client.updateCamera(x, z);
+          },
+        };
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[traffic] connect failed:', err);
+      });
+  }
 
   // 3-ring semantic LOD (Task 10, spec §2c): detail follows the camera radius.
   // getObjectByName can legitimately miss (design-legal), so refs are
@@ -1112,6 +1202,15 @@ async function boot(): Promise<void> {
     if (agentInstances.lod) {
       agentInstances.lod.frame(camera);
       renderer.compute(agentInstances.lod.node);
+    }
+    // ── live traffic (Task 9): throttle camera-driven subscriptions to ~2 Hz,
+    // then dead-reckon + draw the cars every frame.
+    if (trafficClient && carLayer) {
+      if (t - lastTrafficCamUpdate > 0.5) {
+        lastTrafficCamUpdate = t;
+        trafficClient.updateCamera(rig.target[0], rig.target[2]);
+      }
+      carLayer.update(trafficClient.net, trafficClient.vehicles, trafficClient.serverTick);
     }
     frameCount++;
     // ── realtime environment: physical sun/moon/stars for now(), steered by

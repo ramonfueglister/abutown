@@ -8,6 +8,12 @@ lint:
     # Single-file schema; directory layout would force a needless move of
     # the .proto and break the codegen paths in buf.gen.yaml / build.rs.
     - PACKAGE_DIRECTORY_MATCH
+    # `abutown.proto` (package abutown.v1) and `traffic.proto` (package
+    # traffic.v1, the winterthur-traffic wire) intentionally live side by side
+    # in one flat proto dir — two distinct wire protocols, one codegen root.
+    # Splitting them into per-package subdirs would again break the flat paths
+    # baked into buf.gen.yaml / build.rs, so we allow the shared directory.
+    - DIRECTORY_SAME_PACKAGE
 breaking:
   use:
     - WIRE_JSON

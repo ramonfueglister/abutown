@@ -5,5 +5,12 @@ pub mod v1 {
     include!(concat!(env!("OUT_DIR"), "/abutown.v1.rs"));
 }
 
+/// Traffic wire schema — see `proto/traffic.proto`. The winterthur-traffic WS
+/// gateway (Task 8) encodes/decodes these; the browser client (Task 9) mirrors
+/// them via the buf TS codegen.
+pub mod traffic {
+    include!(concat!(env!("OUT_DIR"), "/traffic.v1.rs"));
+}
+
 /// Wire protocol version. Bump when the next simulation's schema stabilizes.
 pub const PROTOCOL_VERSION: u16 = 1;

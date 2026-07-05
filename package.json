@@ -13,7 +13,8 @@
     "lint:proto": "buf lint",
     "geo:fetch": "node scripts/geo/fetch-winterthur.mjs",
     "geo:bake": "node scripts/geo/bake-winterthur.mjs",
-    "geo:bake-world": "node --max-old-space-size=6144 scripts/geo/bake-world.mjs"
+    "geo:bake-world": "node --max-old-space-size=6144 scripts/geo/bake-world.mjs",
+    "geo:bake-traffic": "node scripts/geo/bake-traffic-net.mjs"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.0",
