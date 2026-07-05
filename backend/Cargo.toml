@@ -20,6 +20,8 @@ axum = { version = "0.8", features = ["ws"] }
 blake3 = "1"
 bevy_ecs = "0.18"
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
 futures-util = "0.3"
 http-body-util = "0.1"
 dotenvy = "0.15"

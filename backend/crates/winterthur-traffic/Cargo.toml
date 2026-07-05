@@ -14,6 +14,10 @@ traffic-net = { path = "../traffic-net" }
 traffic-core = { path = "../traffic-core" }
 abutown-protocol = { path = "../protocol" }
 anyhow.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+thiserror.workspace = true
 fast_paths.workspace = true
 bevy_ecs.workspace = true
 serde_json.workspace = true
@@ -26,6 +30,7 @@ bytes.workspace = true
 futures-util.workspace = true
 
 [dev-dependencies]
+demand-gen = { path = "../demand-gen" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 reqwest.workspace = true
 tokio-tungstenite.workspace = true
