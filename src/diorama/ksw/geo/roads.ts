@@ -119,12 +119,31 @@ export function miterStrip(
   return { positions, indices };
 }
 
+/** Dedicated ribbon material = the shared clay look PLUS a depth-bias
+ * (polygonOffset). Fix 2 belt-and-braces: the layer height ladder
+ * (designTokens.roadYs) already separates the coplanar ribbons, but at a
+ * rail/road crossing the two layers drape onto independent DEM samples, so we
+ * also bias depth per layer (more-negative `units` = wins the depth test /
+ * drawn "closer"). Ladder units bottom→top: railBed 0 < carriage −1 <
+ * footway −1 < rail −3 so rails always resolve on top of the carriage. We
+ * clone rather than mutate `clayMat` because that cache is shared with props. */
+function ribbonMat(color: number, polygonOffsetUnits: number): THREE.MeshPhysicalMaterial {
+  const m = clayMat(color).clone();
+  if (polygonOffsetUnits !== 0) {
+    m.polygonOffset = true;
+    m.polygonOffsetFactor = -1;
+    m.polygonOffsetUnits = polygonOffsetUnits;
+  }
+  return m;
+}
+
 function stripsMesh(
   name: string,
   paths: RoadPath[],
   widthOf: (p: RoadPath) => number,
   color: number,
   y: number,
+  polygonOffsetUnits: number,
   groundYAt?: GroundYAt,
 ): THREE.Mesh {
   const positions: number[] = [];
@@ -139,7 +158,7 @@ function stripsMesh(
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geo.setIndex(positions.length / 3 > 65535 ? new THREE.BufferAttribute(new Uint32Array(indices), 1) : new THREE.BufferAttribute(new Uint16Array(indices), 1));
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, clayMat(color));
+  const mesh = new THREE.Mesh(geo, ribbonMat(color, polygonOffsetUnits));
   mesh.name = name;
   mesh.receiveShadow = true;
   mesh.castShadow = false;
@@ -153,9 +172,11 @@ export function buildRoads(roads: RoadPath[], rails: RoadPath[], groundYAt?: Gro
   group.name = 'cityRoads';
   const carriage = roads.filter((r) => !FOOT.has(r.class));
   const foot = roads.filter((r) => FOOT.has(r.class));
-  group.add(stripsMesh('carriageRibbons', carriage, (p) => p.width, kswCity.roadColors.carriage, kswCity.roadYs.carriage, groundYAt));
-  group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway, groundYAt));
-  group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed, groundYAt));
-  group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail, groundYAt));
+  // polygonOffset ladder (units) matches the roadYs height ladder bottom→top:
+  // railBed 0 < carriage/footway −1 < rail −3 (more negative = drawn on top).
+  group.add(stripsMesh('carriageRibbons', carriage, (p) => p.width, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
+  group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway, -1, groundYAt));
+  group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed, 0, groundYAt));
+  group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail, -3, groundYAt));
   return group;
 }
