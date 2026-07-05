@@ -45,9 +45,12 @@ export interface FlowEdge {
 }
 
 /** Minimal edge geometry `placeImpostors` needs: the polyline + declared
- * length. A narrowed view of `TrafficNetGeom` for one edge id (edge id ==
- * lane id — `net.edges` in the Rust `TrafficNet` is per-lane, see
- * backend/crates/winterthur-traffic/src/flow.rs's `view.edge`). */
+ * length. A narrowed view of `TrafficNetGeom` for one traffic-net EDGE,
+ * resolved through `net.edgeToLane` — FlowState.edge (see backend/crates/
+ * winterthur-traffic/src/flow.rs's `view.edge`) is an EDGE id, while
+ * `net.pts`/`net.arcLut` are keyed by LANE id, and the two are independent
+ * 0-based id spaces (18340 edges vs 18957 lanes in trafficnet.json). The
+ * geometry drawn is the edge's representative lane (index 0). */
 export interface EdgeGeom {
   pts: number[][];
   lengthM: number;
@@ -138,37 +141,38 @@ export function placeImpostors(
   return out;
 }
 
-/** Distance-based fade in [0, 1] for a world point: 0 if the point's cell is
- * in `subscribedCells`, ramping linearly to 1 over one CELL_SIZE_M ring
- * beyond the subscribed set's nearest edge, 1 beyond that ring. Distance is
- * measured to the NEAREST cell boundary of the subscribed set — approximated
- * here via a simple grid search up to the ring radius (the subscribed set is
- * always a small 3×3-ish block, so this is O(1) in practice: a handful of
- * `cellOf` calls at most). */
+/** Distance-based fade in [0, 1] for a world point: 0 if the point lies
+ * inside a subscribed cell, then a CONTINUOUS linear ramp with actual
+ * euclidean distance from the nearest subscribed cell's boundary, reaching 1
+ * at one full CELL_SIZE_M away (per the Task 12 spec: fade over ONE
+ * CELL_SIZE_M-wide ring, not a discrete per-ring step). Distance to a cell is
+ * the standard point-to-axis-aligned-rectangle distance over the cell's world
+ * rect; the subscribed set is always a small 3×3-ish block, so the scan over
+ * it is O(1) in practice. */
 export function fadeFor(
   grid: CellGrid,
   subscribedCells: ReadonlySet<number>,
   x: number,
   z: number,
 ): number {
-  const cell = grid.cellOf(x, z);
-  if (subscribedCells.has(cell)) return 0;
-  const { col, row } = grid.colRowOf(x, z);
-  // Find the minimum Chebyshev ring distance from (col,row) to ANY
-  // subscribed cell's (col,row) — 1 ring == fully faded in (fade=1), 0 rings
-  // is unreachable here (already returned 0 above via direct membership).
-  let minRing = Infinity;
+  let minDist = Infinity;
   for (const c of subscribedCells) {
     const srow = Math.floor(c / grid.cols);
     const scol = c - srow * grid.cols;
-    const ring = Math.max(Math.abs(col - scol), Math.abs(row - srow));
-    if (ring < minRing) minRing = ring;
+    const minX = grid.minX + scol * CELL_SIZE_M;
+    const minZ = grid.minZ + srow * CELL_SIZE_M;
+    // Point-to-rect distance: 0 inside, else the euclidean distance to the
+    // nearest point of the cell's [minX, minX+CS] × [minZ, minZ+CS] rect.
+    const dx = Math.max(minX - x, 0, x - (minX + CELL_SIZE_M));
+    const dz = Math.max(minZ - z, 0, z - (minZ + CELL_SIZE_M));
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d < minDist) {
+      minDist = d;
+      if (d === 0) break; // inside a subscribed cell — can't get closer
+    }
   }
-  if (!Number.isFinite(minRing)) return 1; // no subscription at all -> fully opaque
-  // ring 1 => the immediately adjacent cell ring: partially faded in. ring 2
-  // and beyond => fully opaque (one full CELL_SIZE_M ring of crossfade).
-  const t = minRing / 2;
-  return Math.min(Math.max(t, 0), 1);
+  if (!Number.isFinite(minDist)) return 1; // no subscription at all -> fully opaque
+  return Math.min(Math.max(minDist / CELL_SIZE_M, 0), 1);
 }
 
 /** The impostor flow layer object + its per-frame update entry point. */
@@ -227,8 +231,13 @@ export function createFlowLayer(net: TrafficNetGeom, grid: CellGrid, groundYAt?:
     for (const [edgeId, edge] of flow) {
       if (i >= FLOW_CAPACITY) break;
       if (edge.count < 1) continue;
-      const pts = net.pts.get(edgeId);
-      const arcLut = net.arcLut.get(edgeId);
+      // FlowState.edge is a traffic-net EDGE id; geometry is keyed by LANE id
+      // (independent id spaces) — resolve through the edge->representative-
+      // lane map built by buildLaneNet, never by id equality.
+      const laneId = net.edgeToLane.get(edgeId);
+      if (laneId === undefined) continue;
+      const pts = net.pts.get(laneId);
+      const arcLut = net.arcLut.get(laneId);
       if (!pts || !arcLut || pts.length < 2) continue;
       const lengthM = arcLut[arcLut.length - 1];
       const edgeGeom: EdgeGeom = { pts, lengthM };

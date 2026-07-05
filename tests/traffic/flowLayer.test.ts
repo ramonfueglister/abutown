@@ -73,7 +73,7 @@ describe('placeImpostors — deterministic placement + advection', () => {
 describe('fadeFor — 0 inside subscribed cells, ramp to 1 over one CELL_SIZE_M ring', () => {
   // Two lanes, one on each side, so the grid spans multiple cells.
   const LANES: RawLane[] = [
-    { id: 1, lengthM: 500, pts: [[0, 0], [500, 0]] },
+    { id: 1, edge: 1, index: 0, lengthM: 500, pts: [[0, 0], [500, 0]] },
   ];
   const grid = CellGrid.build(LANES);
 
@@ -83,18 +83,29 @@ describe('fadeFor — 0 inside subscribed cells, ramp to 1 over one CELL_SIZE_M 
     expect(fade).toBe(0);
   });
 
-  it('ramps up (0, 1) for a point within one CELL_SIZE_M ring outside the subscribed set', () => {
-    const subscribed = grid.cellsAround(0, 0, 0); // just the origin cell
-    // A point one cell-width east of the subscribed cell's edge: still within
-    // one ring, so fade should be a partial value, not fully 1.
-    const fade = fadeFor(grid, subscribed, CELL_SIZE_M + 1, 0);
-    expect(fade).toBeGreaterThan(0);
-    expect(fade).toBeLessThanOrEqual(1);
+  it('ramps CONTINUOUSLY with distance from the subscribed boundary (linear over one CELL_SIZE_M)', () => {
+    const subscribed = grid.cellsAround(0, 0, 0); // just the origin cell (rect [0,CS]×[0,CS])
+    // The subscribed cell's east boundary is at x = CELL_SIZE_M; walking east
+    // from it, fade must equal distance/CELL_SIZE_M — a continuous linear
+    // ramp, NOT a discrete per-ring step.
+    expect(fadeFor(grid, subscribed, CELL_SIZE_M + CELL_SIZE_M * 0.25, 64)).toBeCloseTo(0.25, 6);
+    expect(fadeFor(grid, subscribed, CELL_SIZE_M + CELL_SIZE_M * 0.5, 64)).toBeCloseTo(0.5, 6);
+    expect(fadeFor(grid, subscribed, CELL_SIZE_M + CELL_SIZE_M * 0.75, 64)).toBeCloseTo(0.75, 6);
   });
 
-  it('is 1 (fully opaque impostor) far outside the subscribed set + its fade ring', () => {
+  it('increases monotonically with distance outside the subscribed set', () => {
     const subscribed = grid.cellsAround(0, 0, 0);
-    const fade = fadeFor(grid, subscribed, CELL_SIZE_M * 10, 0);
-    expect(fade).toBe(1);
+    let prev = -1;
+    for (let d = 0; d <= CELL_SIZE_M * 1.5; d += CELL_SIZE_M / 8) {
+      const fade = fadeFor(grid, subscribed, CELL_SIZE_M + d, 64);
+      expect(fade).toBeGreaterThanOrEqual(prev);
+      prev = fade;
+    }
+  });
+
+  it('reaches 1 at exactly one CELL_SIZE_M from the boundary and stays 1 beyond', () => {
+    const subscribed = grid.cellsAround(0, 0, 0);
+    expect(fadeFor(grid, subscribed, CELL_SIZE_M * 2, 64)).toBe(1);
+    expect(fadeFor(grid, subscribed, CELL_SIZE_M * 10, 0)).toBe(1);
   });
 });
