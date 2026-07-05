@@ -72,6 +72,7 @@ fn citizen_commutes_as_real_vehicle_through_the_shell() {
             },
         },
         router: Box::new(router),
+        snapshot: None,
     };
 
     let (mut world, mut schedule) = shell::build_sim(

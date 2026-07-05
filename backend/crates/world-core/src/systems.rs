@@ -48,6 +48,26 @@ fn econ_tick(clock: &WorldClock) -> Option<u64> {
         .then_some(clock.world_tick)
 }
 
+/// Letzter erfolgreicher SFC-Audit (Task 13: die `/live`-Vitals und
+/// `/health` lesen `audit_ok` hieraus). Der Audit ist fail-fast — ein
+/// Verstoss panict den Prozess — also bleibt `ok == true`, solange der
+/// Prozess lebt; die Resource dokumentiert zusätzlich den zuletzt
+/// geprüften Tick (0 = noch keine Econ-Runde gelaufen).
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct AuditStatus {
+    pub ok: bool,
+    pub last_audit_tick: u64,
+}
+
+impl Default for AuditStatus {
+    fn default() -> Self {
+        AuditStatus {
+            ok: true,
+            last_audit_tick: 0,
+        }
+    }
+}
+
 /// `SimWorld` is deliberately NOT a `Resource` (it is shared read-only state,
 /// also owned by the traffic shell); the newtype makes the `Arc` insertable.
 #[derive(Resource, Clone)]
@@ -91,6 +111,7 @@ pub fn install_world_resources(world: &mut World, plugin: &WorldCorePlugin) {
     world.init_resource::<ActiveTrips>();
     world.init_resource::<CitizenCarCounters>();
     world.init_resource::<BuildingStates>();
+    world.init_resource::<AuditStatus>();
     world.insert_resource(SharedSimWorld(Arc::clone(&plugin.sim_world)));
 
     econ::seed::seed_economy(world, &plugin.seed, &plugin.sim_world)
@@ -601,6 +622,7 @@ pub fn run_tick_audit_system(
     accounts: Res<AccountBook>,
     mut ledger: ResMut<TradeLedger>,
     mut last: ResMut<LastTickMoney>,
+    mut status: ResMut<AuditStatus>,
 ) {
     let Some(tick) = econ_tick(&clock) else {
         return;
@@ -610,4 +632,8 @@ pub fn run_tick_audit_system(
             "CONSERVATION VIOLATION at world_tick {tick}: {err:?} — total_money changed between econ rounds (money minted/destroyed); halting. This must never happen."
         );
     }
+    *status = AuditStatus {
+        ok: true,
+        last_audit_tick: tick,
+    };
 }

@@ -102,9 +102,13 @@ pub trait CoreAccess: Resource {
 pub enum ActiveTrip {
     /// Fährt als echtes Fahrzeug im Kernel.
     Driving { veh: VehId, dest_building: u32 },
-    /// Geht zu Fuss; Ankunft, sobald `world_tick >= arrive_tick`.
+    /// Geht zu Fuss; Ankunft, sobald `world_tick >= arrive_tick`. Trägt
+    /// Start-Tick und Start-Gebäude, damit der Live-Kanal (Task 13) die
+    /// Position linear from→to über die Trip-Dauer interpolieren kann.
     WalkingUntil {
+        depart_tick: u64,
         arrive_tick: u64,
+        from_building: u32,
         dest_building: u32,
     },
 }
@@ -178,7 +182,9 @@ pub fn dispatch_trips_system<C: CoreAccess>(
         };
 
         let trip = drive.unwrap_or(ActiveTrip::WalkingUntil {
+            depart_tick: clock.world_tick,
             arrive_tick: clock.world_tick + walk_ticks(dist_m),
+            from_building: req.from_building,
             dest_building: req.to_building,
         });
         let previous = trips.0.insert(req.citizen, trip);
@@ -229,6 +235,7 @@ pub fn arrivals_system<C: CoreAccess>(
             ActiveTrip::WalkingUntil {
                 arrive_tick,
                 dest_building,
+                ..
             } => {
                 if clock.world_tick >= arrive_tick {
                     done.push((citizen, dest_building, None));

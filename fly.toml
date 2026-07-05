@@ -1,5 +1,6 @@
-# Stateless card-hand API (auth + card draws) backed by Supabase Postgres —
-# all durable state lives in the database, not this process.
+# The ONE Abutown process (M1): traffic + world-core sim + /traffic + /live
+# WS gateways + card-hand API. World state persists to Supabase Postgres
+# every 5 s and resumes frozen-time on boot. SINGLE-WRITER: never scale >1.
 app = "abutown-abutopia"
 primary_region = "lhr"  # EU, near Supabase eu-west-1 (cuts persist write latency)
 

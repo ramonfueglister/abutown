@@ -68,7 +68,9 @@ pub const WORLD_SNAPSHOT_VERSION: u32 = 1;
 /// bewegen kein Geld).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersistedWalk {
+    pub depart_tick: u64,
     pub arrive_tick: u64,
+    pub from_building: u32,
     pub dest_building: u32,
 }
 
@@ -224,10 +226,14 @@ fn persist_trip(
 ) -> PersistedWalk {
     match trip {
         ActiveTrip::WalkingUntil {
+            depart_tick,
             arrive_tick,
+            from_building,
             dest_building,
         } => PersistedWalk {
+            depart_tick,
             arrive_tick,
+            from_building,
             dest_building,
         },
         ActiveTrip::Driving { dest_building, .. } => {
@@ -245,7 +251,9 @@ fn persist_trip(
             let to = &sim.buildings[dest_building as usize];
             let dist_m = euclid_m((from.x, from.z), (to.x, to.z));
             PersistedWalk {
+                depart_tick: clock.world_tick,
                 arrive_tick: clock.world_tick + walk_ticks(dist_m),
+                from_building: origin,
                 dest_building,
             }
         }
@@ -380,7 +388,9 @@ pub fn apply(world: &mut World, snap: WorldCoreSnapshot) {
             trips.insert(
                 c.id,
                 ActiveTrip::WalkingUntil {
+                    depart_tick: walk.depart_tick,
                     arrive_tick: walk.arrive_tick,
+                    from_building: walk.from_building,
                     dest_building: walk.dest_building,
                 },
             );
@@ -540,7 +550,9 @@ mod tests {
             trips.0.insert(
                 1,
                 ActiveTrip::WalkingUntil {
+                    depart_tick: 1_100,
                     arrive_tick: 1_300,
+                    from_building: 0,
                     dest_building: 1,
                 },
             );
@@ -553,7 +565,9 @@ mod tests {
         assert_eq!(
             by_id[&0].active_trip,
             Some(PersistedWalk {
+                depart_tick: 1_200,
                 arrive_tick: 1_200 + 715,
+                from_building: 1,
                 dest_building: 0
             }),
             "VehId dropped, remainder resumed on foot"
@@ -562,7 +576,9 @@ mod tests {
         assert_eq!(
             by_id[&1].active_trip,
             Some(PersistedWalk {
+                depart_tick: 1_100,
                 arrive_tick: 1_300,
+                from_building: 0,
                 dest_building: 1
             })
         );
@@ -575,14 +591,18 @@ mod tests {
         assert_eq!(
             trips.0[&0],
             ActiveTrip::WalkingUntil {
+                depart_tick: 1_200,
                 arrive_tick: 1_915,
+                from_building: 1,
                 dest_building: 0
             }
         );
         assert_eq!(
             trips.0[&1],
             ActiveTrip::WalkingUntil {
+                depart_tick: 1_100,
                 arrive_tick: 1_300,
+                from_building: 0,
                 dest_building: 1
             }
         );

@@ -209,7 +209,9 @@ fn short_trip_walks_with_correct_duration() {
         assert_eq!(
             trips.0.get(&0),
             Some(&ActiveTrip::WalkingUntil {
+                depart_tick: 1,
                 arrive_tick: 1 + 715,
+                from_building: 0,
                 dest_building: 1
             }),
             "short trip must walk with duration dist/1.4 m/s in ticks"

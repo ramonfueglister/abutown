@@ -20,8 +20,15 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /build/backend/target/release/sim-server /app/sim-server
 COPY deploy/supabase-prod-ca.crt /app/certs/supabase-ca.crt
+# World data artefacts (M1): traffic net + census trips + sim world + economy
+# seeds. WORKDIR is /app, so the binary's default relative paths resolve.
+COPY data/winterthur/trafficnet.json /app/data/winterthur/trafficnet.json
+COPY data/winterthur/trips.bin /app/data/winterthur/trips.bin
+COPY data/winterthur/simworld.json /app/data/winterthur/simworld.json
+COPY data/winterthur/economy.json /app/data/winterthur/economy.json
 ENV LISTEN_HOST=0.0.0.0 \
     LISTEN_PORT=8080 \
+    ABUTOWN_WORLD_ID=winterthur \
     PGSSLROOTCERT=/app/certs/supabase-ca.crt \
     RUST_LOG=warn,sim_server=info
 EXPOSE 8080

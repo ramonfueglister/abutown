@@ -35,10 +35,13 @@ use crate::spawner::{MAX_CONCURRENT, SpawnRecord, SpawnerCfg, TripSpawner};
 use bevy_ecs::prelude::*;
 use traffic_core::{Core, u01};
 use traffic_net::TrafficNet;
+use world_core::econ::{AccountBook, MarketGoods, Markets};
+use world_core::persist::WorldCoreSnapshot;
 use world_core::{
-    CitizenCarCounters, CoreAccess, TripRouter, TripRouterRes, WorldClock, WorldCorePlugin,
-    advance_world_clock_system, arrivals_system, dispatch_trips_system, econ_systems,
-    install_world_resources, rhythm_system,
+    ActiveTrip, ActiveTrips, AuditStatus, BuildingLifecycle, BuildingStates, Citizen,
+    CitizenCarCounters, CitizenRegistry, CitizenState, CoreAccess, TripRouter, TripRouterRes,
+    WorldClock, WorldCorePlugin, advance_world_clock_system, arrivals_system,
+    dispatch_trips_system, econ_systems, install_world_resources_with_snapshot, rhythm_system,
 };
 
 /// Re-routing cadence: every 30 sim-seconds = 300 ticks at dt=0.1.
@@ -166,6 +169,75 @@ impl SnapshotHook {
 }
 
 // ---------------------------------------------------------------------------
+// Live-world publish seam (Task 13)
+// ---------------------------------------------------------------------------
+
+/// `/live` publish cadence: every 10th world tick = 1 Hz at the 10 Hz sim rate.
+pub const LIVE_PUBLISH_EVERY_N_TICKS: u64 = 10;
+
+/// On-wire activity codes (`live.proto` `CitizenState.activity`).
+pub const ACTIVITY_AT_HOME: u32 = 0;
+pub const ACTIVITY_AT_WORK: u32 = 1;
+pub const ACTIVITY_AT_MARKET: u32 = 2;
+pub const ACTIVITY_WALKING: u32 = 3;
+pub const ACTIVITY_DRIVING: u32 = 4;
+
+/// One citizen's published position + activity. Coordinates are decimetres
+/// (local metres ×10, the `live.proto` quantisation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveCitizenSample {
+    pub id: u32,
+    pub x_dm: i32,
+    pub z_dm: i32,
+    pub activity: u32,
+}
+
+/// One market-good price sample for the vitals frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LivePrice {
+    pub market: u32,
+    pub good: u32,
+    pub ewma: i64,
+    pub name: String,
+}
+
+/// Read-only per-publish view handed to the `/live` hook (1 Hz): citizen
+/// positions, economy vitals, and the current building lifecycle deviations
+/// (the gateway diffs those against its previous publish).
+pub struct LiveSnapshot<'a> {
+    pub world_tick: u64,
+    pub s_of_world_day: u32,
+    pub population: u64,
+    pub total_money: i64,
+    pub audit_ok: bool,
+    pub trips_active: u64,
+    pub prices: Vec<LivePrice>,
+    pub citizens: Vec<LiveCitizenSample>,
+    pub building_states: &'a std::collections::BTreeMap<u32, BuildingLifecycle>,
+}
+
+/// Type of the live publish callback, invoked once per live-publish tick.
+type LiveHookFn = Box<dyn Fn(&LiveSnapshot<'_>) + Send + Sync>;
+
+/// The `/live` publish seam. Default is a no-op; the sim-server installs the
+/// gateway publisher ([`crate::gateway::make_live_publisher`]).
+#[derive(Resource)]
+pub struct LiveHook(pub LiveHookFn);
+
+impl Default for LiveHook {
+    fn default() -> Self {
+        LiveHook(Box::new(|_snap| {}))
+    }
+}
+
+impl LiveHook {
+    /// Install a real live publisher (Task 13).
+    pub fn new(f: impl Fn(&LiveSnapshot<'_>) + Send + Sync + 'static) -> Self {
+        LiveHook(Box::new(f))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
 
@@ -176,6 +248,11 @@ impl SnapshotHook {
 pub struct WorldCoreExt {
     pub plugin: WorldCorePlugin,
     pub router: Box<dyn TripRouter>,
+    /// A persisted world to resume (Task 13). Applied BEFORE the seed guards
+    /// (PR #86 lesson, via `install_world_resources_with_snapshot`); its
+    /// frozen [`WorldClock`] also anchors the census spawner cursor so a
+    /// resume never releases a phantom demand window.
+    pub snapshot: Option<WorldCoreSnapshot>,
 }
 
 /// Background census demand scale when the world sim is active: citizens
@@ -211,7 +288,13 @@ pub fn build_sim(
 ) -> (World, Schedule) {
     let router = Router::new(&net);
     let core = Core::new(&net, MAX_CONCURRENT + 64, seed);
-    let world_clock = world_clock_anchored(&clock);
+    // Resume (Task 13): the persisted frozen clock wins over the boot anchor,
+    // and the spawner's release cursor starts at the SAME world second, so a
+    // resume never releases a phantom census window.
+    let world_clock = match ext.as_ref().and_then(|e| e.snapshot.as_ref()) {
+        Some(snap) => snap.clock,
+        None => world_clock_anchored(&clock),
+    };
     let spawner = TripSpawner::new(trips, clock, cfg, seed, &world_clock);
     let measure = EdgeMeasure::new(&net);
 
@@ -228,6 +311,7 @@ pub fn build_sim(
     world.insert_resource(CommandQueue::default());
     world.insert_resource(SpawnScratch::default());
     world.insert_resource(SnapshotHook::default());
+    world.insert_resource(LiveHook::default());
     world.insert_resource(Conservation::default());
     // The trip-bridge counters exist in both modes so `book_citizen_cars`-
     // free traffic-only code never has to branch (they just stay 0).
@@ -256,8 +340,8 @@ pub fn build_sim(
             // would be unordered relative to each other):
             //   clock → commands → census spawns → rhythm → trip dispatch →
             //   conservation booking → kernel tick → arrivals → econ chain →
-            //   measure → publish.
-            install_world_resources(&mut world, &ext.plugin);
+            //   measure → publish → publish_live.
+            install_world_resources_with_snapshot(&mut world, &ext.plugin, ext.snapshot);
             world.insert_resource(TripRouterRes(ext.router));
             schedule.add_systems(
                 (
@@ -273,7 +357,7 @@ pub fn build_sim(
                     )
                         .chain(),
                     econ_systems(),
-                    (measure_edges, publish_snapshot).chain(),
+                    (measure_edges, publish_snapshot, publish_live).chain(),
                 )
                     .chain(),
             );
@@ -454,6 +538,138 @@ fn publish_snapshot(
         tick: clock.tick,
         core: &core.0,
         net: &net.0,
+    };
+    (hook.0)(&snap);
+}
+
+/// Invoke the `/live` publish seam at 1 Hz (world mode only — registered
+/// exclusively in the `Some(ext)` chain, after `publish_snapshot`).
+///
+/// Citizen positions:
+///  * `Driving` → the kernel vehicle's world position (`pos_at(lane, s)`);
+///    a same-tick kernel despawn (arrival raced the publish) falls back to
+///    the destination building's centroid.
+///  * `WalkingUntil` → linear interpolation from→to over the trip duration.
+///  * otherwise → the building centroid of the citizen's current state
+///    (`AtMarket` anchors at the workplace — M1 markets are not buildings,
+///    matching the rhythm's work→work trip anchoring).
+#[allow(clippy::too_many_arguments)]
+fn publish_live(
+    hook: Res<LiveHook>,
+    world_clock: Res<WorldClock>,
+    core: Res<CoreRes>,
+    net: Res<TrafficNetRes>,
+    sim: Res<world_core::SharedSimWorld>,
+    trips: Res<ActiveTrips>,
+    registry: Res<CitizenRegistry>,
+    accounts: Res<AccountBook>,
+    markets: Res<Markets>,
+    goods: Res<MarketGoods>,
+    buildings: Res<BuildingStates>,
+    audit: Res<AuditStatus>,
+    citizens: Query<(&Citizen, &CitizenState)>,
+) {
+    if !world_clock
+        .world_tick
+        .is_multiple_of(LIVE_PUBLISH_EVERY_N_TICKS)
+    {
+        return;
+    }
+
+    let mut samples = Vec::with_capacity(registry.count as usize);
+    for (citizen, state) in &citizens {
+        let (x, z, activity) = match trips.0.get(&citizen.id) {
+            Some(&ActiveTrip::Driving { veh, dest_building }) => {
+                match core.0.vehicle_view(veh) {
+                    Some(view) => {
+                        let (p, _dir) = net.0.pos_at(view.lane, view.s);
+                        (p[0], p[1], ACTIVITY_DRIVING)
+                    }
+                    None => {
+                        // Kernel despawned this tick; arrivals resolves next
+                        // tick — publish the destination centroid meanwhile.
+                        let b = &sim.0.buildings[dest_building as usize];
+                        (b.x, b.z, ACTIVITY_DRIVING)
+                    }
+                }
+            }
+            Some(&ActiveTrip::WalkingUntil {
+                depart_tick,
+                arrive_tick,
+                from_building,
+                dest_building,
+            }) => {
+                let from = &sim.0.buildings[from_building as usize];
+                let to = &sim.0.buildings[dest_building as usize];
+                let duration = arrive_tick.saturating_sub(depart_tick).max(1);
+                let done = world_clock
+                    .world_tick
+                    .saturating_sub(depart_tick)
+                    .min(duration);
+                let f = done as f32 / duration as f32;
+                (
+                    from.x + (to.x - from.x) * f,
+                    from.z + (to.z - from.z) * f,
+                    ACTIVITY_WALKING,
+                )
+            }
+            None => {
+                let (building, activity) = match *state {
+                    CitizenState::AtHome => (citizen.home, ACTIVITY_AT_HOME),
+                    CitizenState::AtWork => (citizen.work, ACTIVITY_AT_WORK),
+                    CitizenState::AtMarket { .. } => (citizen.work, ACTIVITY_AT_MARKET),
+                    CitizenState::Commuting { .. } => {
+                        // rhythm sets Commuting and dispatch inserts the trip
+                        // BEFORE this publish in the same chained tick, so a
+                        // trip-less Commuting citizen is a desync bug.
+                        debug_assert!(
+                            false,
+                            "citizen {} Commuting without an ActiveTrips entry at publish",
+                            citizen.id
+                        );
+                        (citizen.home, ACTIVITY_WALKING)
+                    }
+                };
+                let b = &sim.0.buildings[building as usize];
+                (b.x, b.z, activity)
+            }
+        };
+        samples.push(LiveCitizenSample {
+            id: citizen.id,
+            x_dm: (x * 10.0).round() as i32,
+            z_dm: (z * 10.0).round() as i32,
+            activity,
+        });
+    }
+
+    let prices: Vec<LivePrice> = goods
+        .0
+        .iter()
+        .map(|(key, state)| LivePrice {
+            market: key.market.0,
+            good: u32::from(key.good.0),
+            ewma: state.ewma_reference_price.0,
+            name: markets
+                .0
+                .get(&key.market)
+                .map(|site| site.name.clone())
+                .unwrap_or_default(),
+        })
+        .collect();
+
+    let snap = LiveSnapshot {
+        world_tick: world_clock.world_tick,
+        s_of_world_day: world_clock.s_of_world_day(),
+        population: registry.count,
+        total_money: accounts
+            .total_money()
+            .expect("total_money overflows i64 — an accounting bug, fail loud")
+            .0,
+        audit_ok: audit.ok,
+        trips_active: trips.0.len() as u64,
+        prices,
+        citizens: samples,
+        building_states: &buildings.0,
     };
     (hook.0)(&snap);
 }

@@ -175,12 +175,13 @@ struct Session {
     /// Cells that were subscribed since the last publish and still owe an
     /// initial keyframe. Drained by the publisher each tick.
     pending_keyframes: Mutex<Vec<u32>>,
-    /// Whether this session currently wants the aggregate flow channel
-    /// (Task 11). Toggled by `TrafficClientMsg.subscribe_flow`; default off —
-    /// most sessions only want per-cell vehicle frames. `AtomicBool` (not
-    /// `RwLock`) since it's a single flag read every publish and written only
-    /// by the reader task.
-    flow_subscribed: AtomicBool,
+    /// Whether this session currently wants the channel's aggregate stream:
+    /// on `/traffic` the flow channel (Task 11, `subscribe_flow`), on `/live`
+    /// the economy vitals (Task 13, `subscribe_vitals`). Default off — most
+    /// sessions only want per-cell frames. `AtomicBool` (not `RwLock`) since
+    /// it's a single flag read every publish and written only by the reader
+    /// task.
+    aux_subscribed: AtomicBool,
 }
 
 /// The shared session table. Cloneable `Arc` handle shared between the axum
@@ -203,7 +204,7 @@ impl Registry {
             out: OutQueue::new(),
             subscriptions: RwLock::new(HashSet::new()),
             pending_keyframes: Mutex::new(Vec::new()),
-            flow_subscribed: AtomicBool::new(false),
+            aux_subscribed: AtomicBool::new(false),
         });
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.inner.write().unwrap().insert(id, Arc::clone(&session));
@@ -257,7 +258,7 @@ fn apply_client_msg(session: &Session, msg: &TrafficClientMsg, cell_count: u32) 
     // per the brief — mirrors the additive-optional-field pattern already used
     // for `TrafficServerMsg.flow`).
     if let Some(on) = msg.subscribe_flow {
-        session.flow_subscribed.store(on, Ordering::Relaxed);
+        session.aux_subscribed.store(on, Ordering::Relaxed);
     }
     if dropped_over_cap > 0 {
         tracing::debug!(
@@ -458,12 +459,12 @@ impl PublisherState {
             let any_flow_subscriber = self
                 .scratch_sessions
                 .iter()
-                .any(|s| s.flow_subscribed.load(Ordering::Relaxed));
+                .any(|s| s.aux_subscribed.load(Ordering::Relaxed));
             if any_flow_subscriber {
                 let flow_frame = flow::sample_flow_frame(snap.core, snap.net, snap.tick);
                 let encoded = encode_flow_frame(flow_frame);
                 for session in &self.scratch_sessions {
-                    if session.flow_subscribed.load(Ordering::Relaxed) {
+                    if session.aux_subscribed.load(Ordering::Relaxed) {
                         session.out.push_drop_oldest(Arc::clone(&encoded));
                     }
                 }
@@ -585,6 +586,348 @@ pub fn make_publisher(grid: CellGrid, registry: Registry) -> SnapshotHook {
 }
 
 // ---------------------------------------------------------------------------
+// /live channel (Task 13): citizen AOI frames + vitals + building deltas
+// ---------------------------------------------------------------------------
+
+use crate::shell::{LiveHook, LiveSnapshot};
+use abutown_protocol::live::{
+    BuildingDelta, CitizenCellFrame, CitizenState as WireCitizenState, EconomyVitals,
+    LiveClientMsg, LiveServerMsg, MarketPrice,
+};
+use std::collections::BTreeMap;
+use world_core::{BuildingLifecycle, SimWorld};
+
+/// Force a `/live` keyframe for every cell this often (in live publishes).
+/// 5 s at the 1 Hz live cadence ([`crate::shell::LIVE_PUBLISH_EVERY_N_TICKS`]).
+pub const LIVE_KEYFRAME_EVERY_N_PUBLISHES: u64 = 5;
+
+/// `BuildingLifecycle` → wire code (`live.proto` `BuildingDelta.lifecycle`).
+fn lifecycle_code(lifecycle: BuildingLifecycle) -> u32 {
+    match lifecycle {
+        BuildingLifecycle::Occupied => 0,
+        BuildingLifecycle::Vacant => 1,
+        BuildingLifecycle::Decaying => 2,
+        BuildingLifecycle::Demolished => 3,
+        BuildingLifecycle::UnderConstruction => 4,
+    }
+}
+
+/// Quantised per-citizen wire state: `(x_dm, z_dm, activity)`.
+type CitizenWire = (i32, i32, u32);
+
+/// Encode a message with one citizen cell frame (shared `Arc` fan-out, same
+/// one-encode-many-recipients shape as [`encode_frame`]).
+fn encode_live_cell(frame: CitizenCellFrame) -> Frame {
+    let msg = LiveServerMsg {
+        cells: vec![frame],
+        vitals: None,
+        buildings: Vec::new(),
+    };
+    let bytes: Bytes = msg.encode_to_vec().into();
+    Arc::from(bytes.as_ref())
+}
+
+/// Encode a vitals-only message.
+fn encode_live_vitals(vitals: EconomyVitals) -> Frame {
+    let msg = LiveServerMsg {
+        cells: Vec::new(),
+        vitals: Some(vitals),
+        buildings: Vec::new(),
+    };
+    let bytes: Bytes = msg.encode_to_vec().into();
+    Arc::from(bytes.as_ref())
+}
+
+/// Encode a building-deltas-only message.
+fn encode_live_buildings(buildings: Vec<BuildingDelta>) -> Frame {
+    let msg = LiveServerMsg {
+        cells: Vec::new(),
+        vitals: None,
+        buildings,
+    };
+    let bytes: Bytes = msg.encode_to_vec().into();
+    Arc::from(bytes.as_ref())
+}
+
+/// Build a `/live` keyframe: full cell membership, empty departed list.
+fn build_live_keyframe(
+    cell: u32,
+    world_tick: u64,
+    members: &HashMap<u32, CitizenWire>,
+) -> CitizenCellFrame {
+    let mut citizens: Vec<WireCitizenState> = members
+        .iter()
+        .map(|(&id, &(x_dm, z_dm, activity))| WireCitizenState {
+            id,
+            x_dm,
+            z_dm,
+            activity,
+        })
+        .collect();
+    citizens.sort_unstable_by_key(|c| c.id);
+    CitizenCellFrame {
+        cell,
+        world_tick,
+        keyframe: true,
+        citizens,
+        departed: Vec::new(),
+    }
+}
+
+/// Build a `/live` delta: changed/entered citizens + ids that left the cell.
+fn build_live_delta(
+    cell: u32,
+    world_tick: u64,
+    prev: &HashMap<u32, CitizenWire>,
+    now: &HashMap<u32, CitizenWire>,
+) -> CitizenCellFrame {
+    let mut citizens = Vec::new();
+    for (&id, &(x_dm, z_dm, activity)) in now {
+        if prev.get(&id) != Some(&(x_dm, z_dm, activity)) {
+            citizens.push(WireCitizenState {
+                id,
+                x_dm,
+                z_dm,
+                activity,
+            });
+        }
+    }
+    citizens.sort_unstable_by_key(|c| c.id);
+
+    let mut departed: Vec<u32> = prev
+        .keys()
+        .filter(|id| !now.contains_key(id))
+        .copied()
+        .collect();
+    departed.sort_unstable();
+
+    CitizenCellFrame {
+        cell,
+        world_tick,
+        keyframe: false,
+        citizens,
+        departed,
+    }
+}
+
+/// Rolling per-cell citizen membership between live publishes.
+#[derive(Default, Clone)]
+struct LiveCellState {
+    members: HashMap<u32, CitizenWire>,
+}
+
+/// Publish-side state of the `/live` channel — the [`Registry`] is its OWN
+/// session table (never shared with `/traffic`), the grid is the SAME 128 m
+/// [`CellGrid`] (identical cell ids on both wires).
+struct LivePublisherState {
+    grid: CellGrid,
+    registry: Registry,
+    sim: Arc<SimWorld>,
+    cells: Vec<LiveCellState>,
+    /// Building lifecycle deviations at the previous publish, diffed each
+    /// publish into `BuildingDelta`s (M1: practically always empty — the
+    /// channel exists, the transition systems come later).
+    prev_building_states: BTreeMap<u32, BuildingLifecycle>,
+    publish_seq: u64,
+    scratch_members: HashMap<u32, HashMap<u32, CitizenWire>>,
+    scratch_sessions: Vec<Arc<Session>>,
+}
+
+impl LivePublisherState {
+    fn new(grid: CellGrid, registry: Registry, sim: Arc<SimWorld>) -> Self {
+        let n = grid.cell_count() as usize;
+        LivePublisherState {
+            grid,
+            registry,
+            sim,
+            cells: vec![LiveCellState::default(); n],
+            prev_building_states: BTreeMap::new(),
+            publish_seq: 0,
+            scratch_members: HashMap::new(),
+            scratch_sessions: Vec::new(),
+        }
+    }
+
+    /// Staggered periodic keyframe, mirroring
+    /// [`PublisherState::cell_due_keyframe`] at the live cadence.
+    #[inline]
+    fn cell_due_keyframe(seq: u64, cell: u32) -> bool {
+        (seq.wrapping_add(cell as u64)).is_multiple_of(LIVE_KEYFRAME_EVERY_N_PUBLISHES)
+    }
+
+    /// One `/live` publish pass (1 Hz — the shell's `publish_live` system
+    /// already gates the cadence). Same diff/keyframe/fan-out shape as the
+    /// `/traffic` publisher, over citizens instead of vehicles.
+    fn publish(&mut self, snap: &LiveSnapshot<'_>) {
+        let seq = self.publish_seq;
+        self.publish_seq += 1;
+
+        // 1) This publish's membership per cell.
+        self.scratch_members.clear();
+        for c in &snap.citizens {
+            let cell = self
+                .grid
+                .cell_of_xz(c.x_dm as f32 * 0.1, c.z_dm as f32 * 0.1);
+            self.scratch_members
+                .entry(cell)
+                .or_default()
+                .insert(c.id, (c.x_dm, c.z_dm, c.activity));
+        }
+
+        self.registry.snapshot_into(&mut self.scratch_sessions);
+        let no_sessions = self.scratch_sessions.is_empty();
+
+        // 2) Touched cells: changed membership, due keyframe, or just emptied.
+        let mut touched: HashSet<u32> = HashSet::new();
+        for (&cell, members) in &self.scratch_members {
+            let prev = &self.cells[cell as usize].members;
+            if Self::cell_due_keyframe(seq, cell) || members != prev {
+                touched.insert(cell);
+            }
+        }
+        for (cell, state) in self.cells.iter().enumerate() {
+            if !state.members.is_empty() && !self.scratch_members.contains_key(&(cell as u32)) {
+                touched.insert(cell as u32);
+            }
+        }
+
+        // 3) Encode + fan out per touched cell; commit rolling state.
+        for &cell in &touched {
+            let now = self.scratch_members.get(&cell).cloned().unwrap_or_default();
+            let prev = std::mem::take(&mut self.cells[cell as usize].members);
+
+            let any_subscriber = !no_sessions
+                && self
+                    .scratch_sessions
+                    .iter()
+                    .any(|s| s.subscriptions.read().unwrap().contains(&cell));
+
+            if any_subscriber {
+                let frame = if Self::cell_due_keyframe(seq, cell) {
+                    build_live_keyframe(cell, snap.world_tick, &now)
+                } else {
+                    build_live_delta(cell, snap.world_tick, &prev, &now)
+                };
+                let encoded = encode_live_cell(frame);
+                for session in &self.scratch_sessions {
+                    if session.subscriptions.read().unwrap().contains(&cell) {
+                        session.out.push_drop_oldest(Arc::clone(&encoded));
+                    }
+                }
+            }
+
+            self.cells[cell as usize].members = now;
+        }
+
+        // 4) On-subscribe keyframes owed to individual sessions.
+        for session in &self.scratch_sessions {
+            let pending: Vec<u32> = {
+                let mut p = session.pending_keyframes.lock().unwrap();
+                if p.is_empty() {
+                    continue;
+                }
+                std::mem::take(&mut *p)
+            };
+            for cell in pending {
+                if !session.subscriptions.read().unwrap().contains(&cell) {
+                    continue;
+                }
+                let members = self
+                    .cells
+                    .get(cell as usize)
+                    .map(|s| &s.members)
+                    .cloned()
+                    .unwrap_or_default();
+                let frame = build_live_keyframe(cell, snap.world_tick, &members);
+                session.out.push_drop_oldest(encode_live_cell(frame));
+            }
+        }
+
+        // 5) Vitals (1 Hz) to vitals-subscribed sessions.
+        let any_vitals = self
+            .scratch_sessions
+            .iter()
+            .any(|s| s.aux_subscribed.load(Ordering::Relaxed));
+        if any_vitals {
+            let vitals = EconomyVitals {
+                world_tick: snap.world_tick,
+                s_of_world_day: snap.s_of_world_day,
+                population: snap.population,
+                total_money: snap.total_money,
+                audit_ok: u32::from(snap.audit_ok),
+                prices: snap
+                    .prices
+                    .iter()
+                    .map(|p| MarketPrice {
+                        market_id: p.market,
+                        good_id: p.good,
+                        ewma_price: p.ewma,
+                        market_name: p.name.clone(),
+                    })
+                    .collect(),
+                trips_active: snap.trips_active,
+            };
+            let encoded = encode_live_vitals(vitals);
+            for session in &self.scratch_sessions {
+                if session.aux_subscribed.load(Ordering::Relaxed) {
+                    session.out.push_drop_oldest(Arc::clone(&encoded));
+                }
+            }
+        }
+
+        // 6) Building lifecycle deltas — to ALL live sessions. A key that
+        //    vanished from the deviation map reverted to Occupied (code 0).
+        if self.prev_building_states != *snap.building_states {
+            let mut deltas: Vec<BuildingDelta> = Vec::new();
+            for (&b, &lifecycle) in snap.building_states {
+                if self.prev_building_states.get(&b) != Some(&lifecycle) {
+                    deltas.push(BuildingDelta {
+                        building_uuid: self.sim.buildings[b as usize].uuid.clone(),
+                        lifecycle: lifecycle_code(lifecycle),
+                        world_tick: snap.world_tick,
+                    });
+                }
+            }
+            for &b in self.prev_building_states.keys() {
+                if !snap.building_states.contains_key(&b) {
+                    deltas.push(BuildingDelta {
+                        building_uuid: self.sim.buildings[b as usize].uuid.clone(),
+                        lifecycle: lifecycle_code(BuildingLifecycle::Occupied),
+                        world_tick: snap.world_tick,
+                    });
+                }
+            }
+            if !deltas.is_empty() && !no_sessions {
+                let encoded = encode_live_buildings(deltas);
+                for session in &self.scratch_sessions {
+                    session.out.push_drop_oldest(Arc::clone(&encoded));
+                }
+            }
+            self.prev_building_states = snap.building_states.clone();
+        }
+
+        self.scratch_sessions.clear();
+    }
+}
+
+/// Build the [`LiveHook`] closure publishing the `/live` channel into
+/// `registry` (its own session table, NOT the `/traffic` one). Install it on
+/// the ECS world before the tick loop starts, alongside the `/traffic`
+/// publisher:
+///
+/// ```ignore
+/// let live_registry = Registry::new();
+/// world.insert_resource(make_live_publisher(grid.clone(), live_registry.clone(), sim));
+/// // ... merge `live_router(live_registry, grid.cell_count())` onto the port ...
+/// ```
+pub fn make_live_publisher(grid: CellGrid, registry: Registry, sim: Arc<SimWorld>) -> LiveHook {
+    let state = Mutex::new(LivePublisherState::new(grid, registry, sim));
+    LiveHook::new(move |snap: &LiveSnapshot<'_>| {
+        state.lock().unwrap().publish(snap);
+    })
+}
+
+// ---------------------------------------------------------------------------
 // axum /traffic endpoint
 // ---------------------------------------------------------------------------
 
@@ -598,12 +941,22 @@ use axum::{
     routing::get,
 };
 
-/// Axum state for the `/traffic` endpoint: the shared session registry plus the
+/// Which wire protocol a WS endpoint speaks. `/traffic` and `/live` share the
+/// session machinery (registry, queues, cell subscriptions); only the client
+/// message decoding differs.
+#[derive(Clone, Copy)]
+enum ChannelKind {
+    Traffic,
+    Live,
+}
+
+/// Axum state for a WS endpoint: the channel's session registry plus the
 /// grid's cell count, used to validate client subscribe ids (finding 4).
 #[derive(Clone)]
 struct GatewayState {
     registry: Registry,
     cell_count: u32,
+    kind: ChannelKind,
 }
 
 /// Build the axum router exposing the `/traffic` WS endpoint, sharing
@@ -617,6 +970,20 @@ pub fn router(registry: Registry, cell_count: u32) -> AxumRouter {
         .with_state(GatewayState {
             registry,
             cell_count,
+            kind: ChannelKind::Traffic,
+        })
+}
+
+/// Build the axum router exposing the `/live` WS endpoint (Task 13) over its
+/// OWN session registry (shared with [`make_live_publisher`], never with
+/// `/traffic`). Same grid ⇒ same `cell_count`.
+pub fn live_router(registry: Registry, cell_count: u32) -> AxumRouter {
+    AxumRouter::new()
+        .route("/live", get(ws_upgrade))
+        .with_state(GatewayState {
+            registry,
+            cell_count,
+            kind: ChannelKind::Live,
         })
 }
 
@@ -633,6 +1000,7 @@ async fn handle_socket(socket: WebSocket, state: GatewayState) {
     let GatewayState {
         registry,
         cell_count,
+        kind,
     } = state;
     let (id, session) = registry.add();
     let (mut sink, mut stream) = socket.split();
@@ -667,11 +1035,26 @@ async fn handle_socket(socket: WebSocket, state: GatewayState) {
     // Reader: decode client subscription messages until the socket closes.
     while let Some(Ok(msg)) = stream.next().await {
         match msg {
-            WsMessage::Binary(bytes) => {
-                if let Ok(client_msg) = TrafficClientMsg::decode(bytes.as_ref()) {
-                    apply_client_msg(&session, &client_msg, cell_count);
+            WsMessage::Binary(bytes) => match kind {
+                ChannelKind::Traffic => {
+                    if let Ok(client_msg) = TrafficClientMsg::decode(bytes.as_ref()) {
+                        apply_client_msg(&session, &client_msg, cell_count);
+                    }
                 }
-            }
+                ChannelKind::Live => {
+                    // `LiveClientMsg` is field-for-field the same shape
+                    // (`subscribe_vitals` ↔ `subscribe_flow`), so it reuses
+                    // the one validated apply path via the traffic shape.
+                    if let Ok(live_msg) = LiveClientMsg::decode(bytes.as_ref()) {
+                        let as_traffic = TrafficClientMsg {
+                            subscribe_cells: live_msg.subscribe_cells,
+                            unsubscribe_cells: live_msg.unsubscribe_cells,
+                            subscribe_flow: live_msg.subscribe_vitals,
+                        };
+                        apply_client_msg(&session, &as_traffic, cell_count);
+                    }
+                }
+            },
             WsMessage::Close(_) => break,
             _ => {}
         }

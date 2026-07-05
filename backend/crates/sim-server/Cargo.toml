@@ -17,6 +17,8 @@ path = "src/main.rs"
 anyhow.workspace = true
 arc-swap = "1"
 axum.workspace = true
+bevy_ecs.workspace = true
+chrono.workspace = true
 dotenvy.workspace = true
 jsonwebtoken.workspace = true
 reqwest.workspace = true
@@ -28,9 +30,17 @@ tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+traffic-net = { path = "../traffic-net" }
 uuid.workspace = true
+winterthur-traffic = { path = "../winterthur-traffic" }
 world-core = { path = "../world-core" }
 
 [dev-dependencies]
+abutown-protocol = { path = "../protocol" }
+blake3.workspace = true
+demand-gen = { path = "../demand-gen" }
+futures-util.workspace = true
 http-body-util.workspace = true
+prost.workspace = true
+tokio-tungstenite.workspace = true
 tower.workspace = true

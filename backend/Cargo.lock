@@ -2441,23 +2441,33 @@ dependencies = [
 name = "sim-server"
 version = "0.1.0"
 dependencies = [
+ "abutown-protocol",
  "anyhow",
  "arc-swap",
  "axum",
+ "bevy_ecs",
+ "blake3",
+ "chrono",
+ "demand-gen",
  "dotenvy",
+ "futures-util",
  "http-body-util",
  "jsonwebtoken",
+ "prost",
  "reqwest",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "traffic-net",
  "uuid",
+ "winterthur-traffic",
  "world-core",
 ]
 

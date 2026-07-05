@@ -31,7 +31,9 @@ fn snapshot(tick: u64) -> WorldCoreSnapshot {
                     trip: world_core::TripKind::ToWork,
                 },
                 active_trip: Some(PersistedWalk {
+                    depart_tick: tick,
                     arrive_tick: tick + 715,
+                    from_building: 1,
                     dest_building: 0,
                 }),
             },

@@ -579,11 +579,11 @@ message LiveServerMsg {
 **Interfaces:**
 - Consumes: alles Vorherige. Produces: EIN Prozess auf EINEM Port (8080): `/health`, `/cards`, `/card-hand`, `/traffic` (WS), `/live` (WS).
 
-- [ ] **Step 1: Failing Rust-Integrationstest** `backend/crates/sim-server/tests/live_ws.rs` (in-memory, ohne PG): Server mit Fixture-Netz + Fixture-SimWorld starten (tokio), WS auf `/live` verbinden, `subscribe_vitals` senden → innerhalb 3 s kommt `LiveServerMsg` mit `vitals.population > 0`.
-- [ ] **Step 2:** FAIL → implementieren → PASS.
-- [ ] **Step 3:** Restart-Test (opt-in PG): Server starten, 20 s laufen, töten, neu starten → Boot-Log enthält `resuming world-core from persisted snapshot`, Vitals-world_tick > vorherigem Wert.
-- [ ] **Step 4:** Volles Backend-Gate: fmt, clippy, `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml --workspace`.
-- [ ] **Step 5: Commit** — `git commit -m "feat(sim-server): one process — traffic + world-core + persistence + card-hand + /live gateway"`.
+- [x] **Step 1: Failing Rust-Integrationstest** `backend/crates/sim-server/tests/live_ws.rs` (in-memory, ohne PG): Server mit Fixture-Netz + Fixture-SimWorld starten (tokio), WS auf `/live` verbinden, `subscribe_vitals` senden → innerhalb 3 s kommt `LiveServerMsg` mit `vitals.population > 0`.
+- [x] **Step 2:** FAIL → implementieren → PASS.
+- [x] **Step 3:** Restart-Test (opt-in PG): Server starten, 20 s laufen, töten, neu starten → Boot-Log enthält `resuming world-core from persisted snapshot`, Vitals-world_tick > vorherigem Wert.
+- [x] **Step 4:** Volles Backend-Gate: fmt, clippy, `scripts/cargo-serial.sh test --manifest-path backend/Cargo.toml --workspace`.
+- [x] **Step 5: Commit** — `git commit -m "feat(sim-server): one process — traffic + world-core + persistence + card-hand + /live gateway"`.
 
 ---
 

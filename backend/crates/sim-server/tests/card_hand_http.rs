@@ -24,7 +24,11 @@ async fn health_reports_ok() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["ok"], true);
-    assert_eq!(json["service"], "abutown-cards");
+    assert_eq!(json["service"], "abutown-sim");
+    // Task 13: the health payload mirrors the world loop's liveness.
+    assert_eq!(json["world_tick"], 0);
+    assert_eq!(json["audit_ok"], true);
+    assert_eq!(json["resumed"], false);
 }
 
 #[tokio::test]
