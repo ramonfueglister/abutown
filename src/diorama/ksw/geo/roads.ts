@@ -15,6 +15,57 @@ import type { RoadPath } from './geoData';
  * the drape is ~0, and by any caller without a world). */
 export type GroundYAt = (x: number, z: number) => number;
 
+// Terrain-follow subdivision (Fix 1). The DEM/terrain mesh tessellates at
+// ~1.25 m (finest pyramid level) while raw road polyline segments span up to
+// ~200 m. A straight 3-D chord between two draped vertices dives under any
+// convex terrain bump between them → the road is buried. We resample each
+// segment to ≤ SUBDIVIDE_M so every ribbon vertex sits on the DEM and the
+// ribbon follows the surface within one terrain-cell error. ADAPTIVE_DEV keeps
+// the vertex/tri count sane: a subdivided point is only inserted where the
+// terrain deviates from the segment's straight chord by more than this (so flat
+// stretches stay coarse; only humps get densified).
+const SUBDIVIDE_M = 2.5;
+const ADAPTIVE_DEV = 0.05; // m of chord-vs-terrain error that triggers a split
+
+/** Resample a centreline so no draped segment hides the terrain under its
+ * chord. Recursively bisects a segment while the terrain at its midpoint
+ * departs from the straight chord midpoint by > ADAPTIVE_DEV, down to a
+ * SUBDIVIDE_M floor. Returns the original pts untouched when no sampler is
+ * given (flat pre-#119 look, and the unit-tested geometry). */
+export function subdivideForDrape(pts: number[][], groundYAt: GroundYAt): number[][] {
+  if (pts.length < 2) return pts;
+  const out: number[][] = [pts[0]];
+  const emit = (
+    ax: number,
+    az: number,
+    ay: number,
+    bx: number,
+    bz: number,
+    by: number,
+    depth: number,
+  ): void => {
+    const len = Math.hypot(bx - ax, bz - az);
+    const mx = (ax + bx) / 2;
+    const mz = (az + bz) / 2;
+    const chordMidY = (ay + by) / 2;
+    const terrainMidY = groundYAt(mx, mz);
+    const needsSplit =
+      depth < 12 && len > SUBDIVIDE_M && Math.abs(terrainMidY - chordMidY) > ADAPTIVE_DEV;
+    if (needsSplit) {
+      emit(ax, az, ay, mx, mz, terrainMidY, depth + 1);
+      emit(mx, mz, terrainMidY, bx, bz, by, depth + 1);
+    } else {
+      out.push([bx, bz]);
+    }
+  };
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1];
+    const [bx, bz] = pts[i];
+    emit(ax, az, groundYAt(ax, az), bx, bz, groundYAt(bx, bz), 0);
+  }
+  return out;
+}
+
 export function miterStrip(
   pts: number[][],
   width: number,
@@ -24,6 +75,10 @@ export function miterStrip(
   const positions: number[] = [];
   const indices: number[] = [];
   const half = width / 2;
+  // Fix 1: when draping, resample the centreline to terrain resolution so the
+  // ribbon follows the DEM instead of chording under convex bumps. No sampler
+  // → untouched pts (flat ribbon, matches the pre-#119 look and the unit tests).
+  if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
   const n = pts.length;
   if (n < 2) return { positions, indices };
   for (let i = 0; i < n; i++) {
