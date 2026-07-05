@@ -343,7 +343,7 @@ pub fn install_world_systems(world: &mut World, schedule: &mut Schedule, plugin:
 ```
 - Kette (an geernteten `run_*_at_tick`-Funktionen, in dieser Reihenfolge): `expire_orders → regen → production → generate_pool_orders → clear_markets → macro_flow → pay_wages → distribute_profit → consume → adjust_reservation_prices → consumption_update → tick_audit`. Audit-`Err` ⇒ `panic!` mit Kontext (fail-fast, Spec).
 
-- [ ] **Step 1: Failing Integrationstest** `backend/crates/world-core/tests/econ_loop.rs`:
+- [x] **Step 1: Failing Integrationstest** `backend/crates/world-core/tests/econ_loop.rs`:
 
 ```rust
 use bevy_ecs::prelude::*;
@@ -362,9 +362,9 @@ fn thousand_econ_ticks_conserve_money_and_trade() {
 }
 ```
 
-- [ ] **Step 2:** FAIL → `systems.rs` implementieren (EconomyCadence: `if clock.world_tick % 10 != 0 { return }` als erste Bedingung in jedem System-Wrapper; Systeme via `.chain()`).
-- [ ] **Step 3:** PASS + clippy/fmt. Läuft der Test >30s, Cadence-Systeme profilieren — nicht den Test kürzen.
-- [ ] **Step 4: Commit** — `git commit -m "feat(world-core): economy tick chain at 1 Hz with fail-fast SFC audit"`.
+- [x] **Step 2:** FAIL → `systems.rs` implementieren (EconomyCadence: `if clock.world_tick % 10 != 0 { return }` als erste Bedingung in jedem System-Wrapper; Systeme via `.chain()`).
+- [x] **Step 3:** PASS + clippy/fmt. Läuft der Test >30s, Cadence-Systeme profilieren — nicht den Test kürzen.
+- [x] **Step 4: Commit** — `git commit -m "feat(world-core): economy tick chain at 1 Hz with fail-fast SFC audit"`.
 
 ---
 
