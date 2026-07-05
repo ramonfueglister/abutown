@@ -610,9 +610,9 @@ export function createLiveClient(opts: {
 ```
 - Muster: Spiegel von `trafficClient.ts` (gleiche CellGrid-Ableitung aus trafficnet.json wiederverwenden — Funktion daraus exportieren statt kopieren), decode via `src/proto/live_pb.ts`.
 
-- [ ] **Step 1: Failing vitest:** Frame-Handling pur testen (decode-Funktion mit handkonstruiertem `LiveServerMsg`-Binary via `@bufbuild/protobuf` create+toBinary): Vitals-Callback bekommt konvertierte Werte (x_dm→Meter /10), keyframe ersetzt Zell-Bestand, delta entfernt departed.
-- [ ] **Step 2:** FAIL → implementieren → PASS. `npm run typecheck` grün (tsconfig.typecheck.json deckt tests ab — CLAUDE.md-Falle beachten).
-- [ ] **Step 3: Commit** — `git commit -m "feat(frontend): live channel client (citizens AOI + vitals)"`.
+- [x] **Step 1: Failing vitest:** Frame-Handling pur testen (decode-Funktion mit handkonstruiertem `LiveServerMsg`-Binary via `@bufbuild/protobuf` create+toBinary): Vitals-Callback bekommt konvertierte Werte (x_dm→Meter /10), keyframe ersetzt Zell-Bestand, delta entfernt departed.
+- [x] **Step 2:** FAIL → implementieren → PASS. `npm run typecheck` grün (tsconfig.typecheck.json deckt tests ab — CLAUDE.md-Falle beachten).
+- [x] **Step 3: Commit** — `git commit -m "feat(frontend): live channel client (citizens AOI + vitals)"`.
 
 ### Task 15: Bürger-Rendering + Vitals-HUD + Attribution + WebGPU-Meldung
 
