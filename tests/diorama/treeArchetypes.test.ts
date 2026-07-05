@@ -55,6 +55,13 @@ describe('treeArchetypes', () => {
     expect(all[0].seed).toBe(0);
   });
 
+  it('every archetype stays under the vertex budget (< 1500 vertices)', () => {
+    for (const arch of allArchetypes()) {
+      const count = arch.geometry.getAttribute('position').count;
+      expect(count).toBeLessThan(1500);
+    }
+  });
+
   it('archetypeIndexFor is deterministic, kind-respecting, and spread out', () => {
     const broadRange = BROAD_FAMILIES.length * SEEDS_PER_FAMILY;
     const seen = new Set<number>();

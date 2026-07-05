@@ -31,9 +31,11 @@
 //   5. Screenshots via CDP Page.captureScreenshot (NOT page.screenshot(),
 //      which hangs on the live WebGPU canvas per project lore) to
 //      scratch/trees/{establishing,street,forest-edge}.png.
-//   6. FPS probe at the establishing shot: rAF-delta sampling over ~3 s,
-//      assert >= 30 fps (a conservative headless-safe bar; the brief's 55 fps
-//      is a relative dev-machine target, not a hard gate here).
+//   6. FPS probe at both the establishing framing (impostors + terrain only,
+//      fullCount=0) and the street framing (~85 full-detail meshes draw):
+//      rAF-delta sampling over ~3 s each, assert >= 30 fps (a conservative
+//      headless-safe bar; the brief's 55 fps is a relative dev-machine
+//      target, not a hard gate here).
 //
 // Usage: node scripts/smoke-trees.mjs
 
@@ -203,30 +205,36 @@ async function main() {
     writeFileSync(`${OUT_DIR}/establishing.png`, Buffer.from(shotEstablishing.data, 'base64'));
     console.log(`[smoke] wrote ${OUT_DIR}/establishing.png`);
 
-    const fps = await page.evaluate(
-      () =>
-        new Promise((resolve) => {
-          const dts = [];
-          let prev = performance.now();
-          const durationMs = 3000;
-          const t0 = performance.now();
-          const loop = () => {
-            const now = performance.now();
-            dts.push(now - prev);
-            prev = now;
-            if (now - t0 >= durationMs) {
-              const total = dts.reduce((a, b) => a + b, 0);
-              resolve((dts.length / total) * 1000);
-            } else {
-              requestAnimationFrame(loop);
-            }
-          };
-          requestAnimationFrame(loop);
-        }),
-    );
-    check('establishing-shot FPS >= 30', fps >= 30, `fps=${fps.toFixed(1)}`);
+    const sampleFps = () =>
+      page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            const dts = [];
+            let prev = performance.now();
+            const durationMs = 3000;
+            const t0 = performance.now();
+            const loop = () => {
+              const now = performance.now();
+              dts.push(now - prev);
+              prev = now;
+              if (now - t0 >= durationMs) {
+                const total = dts.reduce((a, b) => a + b, 0);
+                resolve((dts.length / total) * 1000);
+              } else {
+                requestAnimationFrame(loop);
+              }
+            };
+            requestAnimationFrame(loop);
+          }),
+      );
 
-    // street.png: near/street-level framing (full-detail trees dominate).
+    const fpsEstablishing = await sampleFps();
+    check('establishing-shot FPS >= 30', fpsEstablishing >= 30, `fps=${fpsEstablishing.toFixed(1)}`);
+
+    // street.png: near/street-level framing (full-detail trees dominate,
+    // ~85 full-detail meshes draw here). Sample FPS at this framing too —
+    // the establishing shot alone (impostors + terrain only, fullCount=0)
+    // doesn't exercise the full-detail draw path.
     await page.evaluate(
       (a) => window.__trees.lookAt(a.x, a.z, a.r),
       { x: FOREST_X, z: FOREST_Z, r: STREET_RADIUS },
@@ -235,6 +243,10 @@ async function main() {
     const shotStreet = await cdp.send('Page.captureScreenshot', { format: 'png' });
     writeFileSync(`${OUT_DIR}/street.png`, Buffer.from(shotStreet.data, 'base64'));
     console.log(`[smoke] wrote ${OUT_DIR}/street.png`);
+
+    const fpsStreet = await sampleFps();
+    check('street-shot FPS >= 30', fpsStreet >= 30, `fps=${fpsStreet.toFixed(1)}`);
+    console.log(`[smoke] fps establishing=${fpsEstablishing.toFixed(1)}, street=${fpsStreet.toFixed(1)}`);
 
     // forest-edge.png: pulled back to the cluster's boundary — both near
     // full-detail trees and the start of the impostor field in one frame.
