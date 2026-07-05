@@ -103,11 +103,14 @@ constant, as in the v1 spec):
    1971) balanced with Furness iterations, distance-decay calibrated to the
    observed mean Swiss commute (Ortúzar & Willumsen, 2011, ch. 5).
 2. **In/out commuters:** the BFS matrix row/column for Winterthur. Each
-   external commune is mapped to the gateway that a free-flow shortest
-   route from that commune's centroid would enter through (computed once at
-   bake time on OSM main roads outside the Gemeinde; ties broken by
-   bearing). Inbound trips: gateway → workplace weight; outbound: home →
-   gateway. Evening trips mirror morning trips per person-slot.
+   external commune is mapped to a gateway by **bearing with motorway
+   preference**: if the commune centroid is > 8 km away and a motorway
+   gateway lies within ±60° of the bearing from the Gemeinde centroid,
+   take the nearest such motorway gateway; otherwise the bearing-nearest
+   gateway of any class. (Routing on OSM outside the Gemeinde would be a
+   second routing stack used only at bake time — YAGNI.) Inbound trips:
+   gateway → workplace weight; outbound: home → gateway. Evening trips
+   mirror morning trips per person-slot.
 3. **Through:** gateway → gateway flows on the A1 (and, where the ASTRA
    numbers imply it, the main cantonal axes), routed like any other trip.
 
