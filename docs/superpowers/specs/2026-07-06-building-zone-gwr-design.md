@@ -71,10 +71,14 @@ diorama.
 [interaction]         pointermove raycast    → building id → accessor lookup → ultra-minimal card
 ```
 
-Enrichment is computed **inside the bake, in WGS84, before the plate
-projection collapses coordinates** — reusing `makeProjector`/the raw OSM+
-swissBUILDINGS3D rings — so joins line up with reality and we never invert the
-plate transform.
+Enrichment is computed **inside the bake, in local plate metres**: baked
+footprints only materialize *after* projection (inside `transformBuildings`),
+and `makeProjector` has no inverse — so instead of un-projecting buildings, the
+bake projects the **attribute data into the plate frame** with the same
+`projector.toLocal(lon, lat)` used for everything else. One coordinate system,
+the existing tested projection path, and point-in-polygon in metres (numerically
+nicer than degrees). Distortion over the bake bbox is <0.1 m (see
+`project.mjs`) — negligible vs. parcel-polygon accuracy.
 
 ## Component 1 — offline data acquisition (`geo:fetch-attributes`)
 
@@ -102,11 +106,15 @@ produced by the bake, which *is* committed.
 Extend `bake-winterthur.mjs` (or a `scripts/geo/lib/enrich.mjs` it calls) with
 pure, unit-tested geometry:
 
+Both joins run in **local plate metres**: the bake projects Bauzonen polygon
+rings and GWR points via `projector.toLocal` and joins against the baked
+footprints as-is.
+
 - **Bauzone (allowed)**: point-in-polygon of the building footprint **centroid**
-  (WGS84) within the Bauzonen polygons → `{ bauzone, bauzoneCode }`. Building
+  within the projected Bauzonen polygons → `{ bauzone, bauzoneCode }`. Building
   spanning >1 zone → centroid's zone wins. No match → `bauzone: null`.
-- **GWR (is)**: point-in-polygon of each GWR entrance point within the building
-  footprint (WGS84). A footprint may contain 0/1/many EGIDs:
+- **GWR (is)**: point-in-polygon of each projected GWR point within the building
+  footprint. A footprint may contain 0/1/many EGIDs:
   - 1+ → `egid` = primary (dominant GKAT; ties → lowest EGID for determinism);
     `gwrCategory` = its GKAT label; all matched EGIDs kept in `raw`.
   - 0 → `egid: null`, `gwrCategory: null` (e.g. sheds, sub-divided 3D volumes).
@@ -223,6 +231,9 @@ Worktree `feat/building-zone-gwr` off `origin/main` → PR. Never touches local
 2. **swissBUILDINGS3D 3D volumes** — one real building can be several UUID
    volumes; the GWR spatial join may attach the same EGID to sibling volumes.
    Acceptable (they share the real building); `raw.egids` records the overlap.
-3. **Projection fidelity** — joins must run in WGS84 against the same rings the
-   bake consumes, before `toLocal`. Reuse, don't reinvent, `project.mjs`.
+3. **Bbox mismatch** — `project.mjs` BBOX is the ~1.6 km KSW plate
+   (`8.715–8.73 / 47.4955–47.5085`), while `geo:fetch` pulls the full Gemeinde
+   (`8.63–8.81 / 47.44–47.57`). `fetch-attributes` uses the **Gemeinde bbox**
+   so the data is already there when the building plate grows; the join simply
+   ignores polygons no footprint falls into.
 ```
