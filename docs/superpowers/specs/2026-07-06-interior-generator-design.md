@@ -48,10 +48,12 @@ für den generischen Generator über alle ~846 Gebäude der Gemeinde.
 - Keine Untergeschosse (im Cutaway nie sichtbar).
 - Kein möbliertes Dachvolumen: oberstes Geschoss endet an der Traufe; der
   Dachraum über der Traufe bleibt leer (bewusste Vereinfachung).
-- Keine echten Grundriss-Blueprints: reale Wandpositionen sind in der Schweiz
-  nicht open source. SOTA heisst hier: *prozedurale Layouts, konditioniert auf
-  reale Per-Gebäude-Metadaten* (Footprint, Geschosse, Wohnungsflächen,
-  Zimmerzahlen, Branchen).
+- Keine echten Grundriss-Blueprints *unserer* Gebäude: für die konkreten
+  Winterthur-Adressen sind Wandpositionen nicht open source. SOTA heisst hier:
+  *prozedurale Layouts, konditioniert auf reale Per-Gebäude-Metadaten*
+  (Footprint, Geschosse, Wohnungsflächen, Zimmerzahlen, Branchen) **und auf
+  statistische Priors aus 242k echten Schweizer Räumen** (Swiss Dwellings,
+  §6a).
 - Sim-seitige Raum-Logik (Bürger wohnen in Wohnung X) ist ein Hook (stabile
   Raum-IDs), nicht Scope dieser Arbeit.
 
@@ -147,6 +149,16 @@ OSM-`name` wird als Mieter-Beschilderung an Fassade/Eingang gerendert.
 
 ## 6. Layout-Generator (literatur-fundiert, deterministisch)
 
+**SOTA-Einordnung (verifiziert 2026-07-06):** Die Forschung 2024–2026 kennt
+zwei Zweige: (a) LLM-/Diffusions-Generierung (DiffuScene; DirectLayout,
+NeurIPS 2025; SceneSmith, CVPR 2026) — stark für Einzelszenen aus Text, aber
+nicht-deterministisch und nicht auf einen reproduzierbaren 846-Gebäude-Bake
+skalierbar; (b) constraint-basierte prozedurale Systeme mit hierarchischem
+Solver — Referenz: Infinigen Indoors (Raistrick et al., 2024), gleiches Muster
+in ProcTHOR/Embodied-AI-Sims. Für deterministische, sim-ready Welten ist (b)
+der Standard; dieses Design folgt (b) und grundiert es zusätzlich mit realen
+Schweizer Verteilungen (§6a) — was keiner der beiden Zweige von Haus aus tut.
+
 Pro Geschoss-Unit, im **vollen Footprint** (Ablösung der 61%-Coverage-Zonen):
 
 1. **Kern:** Treppenhaus/Lift-Kern (Pflicht bei >1 Geschoss; zwei Kerne bei
@@ -166,10 +178,35 @@ Pro Geschoss-Unit, im **vollen Footprint** (Ablösung der 61%-Coverage-Zonen):
    Sichtbarster Realismus-Gewinn im Cutaway.
 5. **Möblierung:** pro Raumtyp ein Constraint-Set (Wandabstand, Ausrichtung,
    Türfreihaltung, Paarbeziehungen wie Bett+Nachttisch, Gruppen-Anker wie
-   Teppich unter Sofa+TV) — gelöst per seeded Simulated Annealing im Bake
-   (Yu et al., 2011). In die Spec geschrieben wird **Archetyp + Seed**, nicht
-   die Item-Liste — der Client re-instanziiert deterministisch. Ziel:
-   `interiors.bin` < 2MB gzip für ~40k Räume.
+   Teppich unter Sofa+TV, Symmetrie- und Mengen-Constraints) — gelöst per
+   seeded, **hierarchischem** Simulated Annealing im Bake (Grundriss →
+   Grossmöbel → Kleinobjekte/Dressing), dem Solver-Muster von Infinigen
+   Indoors (Raistrick et al., 2024) folgend, aufbauend auf Yu et al. (2011).
+   In die Spec geschrieben wird **Archetyp + Seed**, nicht die Item-Liste —
+   der Client re-instanziiert deterministisch. Ziel: `interiors.bin` < 2MB
+   gzip für ~40k Räume.
+
+### 6a. Swiss-Dwellings-Priors (Realdaten-Grundierung der Layouts)
+
+Das Swiss Dwellings Dataset (Archilyse; Standfest et al., 2022; CC BY 4.0)
+enthält 42'207 echte Schweizer Wohnungen mit 242'257 semantisch annotierten
+Räumen (Geometrien, Raumtypen, Fenster/Türen). Ein einmaliger Offline-Schritt
+(`geo:derive-dwelling-priors`, läuft nicht in CI) leitet daraus kompakte
+Verteilungen ab und checkt sie als kleines JSON ins Repo ein
+(`data/priors/swiss-dwelling-priors.json`):
+
+- Raumflächen-Anteile nach Raumtyp, konditioniert auf (WAZIM, WAREA-Klasse)
+  — z.B. Küchenanteil in einer 3-Zimmer-80m²-Wohnung.
+- Raum-Adjazenz-Häufigkeiten (Küche↔Wohnzimmer, Bad↔Entrée …) → steuert die
+  KD-Split-Reihenfolge.
+- Seitenverhältnis-Verteilungen pro Raumtyp (verhindert Schlauchzimmer).
+- Fassaden- vs. innenliegend-Quoten pro Raumtyp (validiert die
+  Tageslicht-Regel empirisch statt axiomatisch).
+
+Der Generator sampelt seine Split-Parameter aus diesen Priors (seeded) statt
+aus Daumenregeln. Determinismus bleibt: die Priors sind ein statisches,
+eingechecktes Artefakt mit dokumentierter Ableitung. Attribution CC BY 4.0 im
+Artefakt + UI-Credits.
 6. **Stabile IDs:** `uuid/storey/roomIndex`, plus `EWID` wo vorhanden —
    MMORPG-Hook: Bürger können später echten Wohnungen zugewiesen werden.
 
@@ -307,7 +344,8 @@ message Door { float x = 1; float z = 2; float yaw = 3; }
 - **A — KSW-Fix:** mehrstöckige Klinik-Zonierung + Dollhouse-Peel v2 +
   Voll-Footprint-Zonen + einmalige Hauptgebäude-Wahl + Terrain-Basis.
   Referenz-Härtung des Peels und der Geschoss-Slabs.
-- **B1 — Daten:** `fetch-gwr` + `fetch-osm` + Join-Kaskade + Bake-Report.
+- **B1 — Daten:** `fetch-gwr` + `fetch-osm` + Join-Kaskade + Bake-Report +
+  `derive-dwelling-priors` (Swiss Dwellings → Priors-JSON, §6a).
 - **B2 — Generator + Client:** Layout-Generator (Wohnen + Kern-Archetypen),
   `interiors.bin`, `buildInteriorFromSpec`, Fokus-LOD + Prefetch + LRU.
 - **B3 — Fitout in Prop-Packs:** Wohnen → Gastro/Retail → Büro/Praxis →
@@ -316,6 +354,20 @@ message Door { float x = 1; float z = 2; float yaw = 3; }
 
 ## 13. Literatur (APA 7)
 
+- Raistrick, A., Mei, L., Kayan, K., Yan, D., Zuo, Y., Han, B., Wen, H.,
+  Parakh, M., Alexandropoulos, S., Lipson, L., Ma, Z., & Deng, J. (2024).
+  Infinigen Indoors: Photorealistic indoor scenes using procedural generation.
+  In *Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+  Recognition (CVPR)* (pp. 21783–21794). https://arxiv.org/abs/2406.11824
+- Standfest, M., Franzen, M., Schröder, Y., Gonzalez Medina, L., Villanueva
+  Hernandez, Y., Buck, J. H., Tan, Y.-L., Niedzwiecka, M., & Colmegna, R.
+  (2022). *Swiss Dwellings: A large dataset of apartment models including
+  aggregated geolocation-based simulation results* [Data set]. Zenodo.
+  https://doi.org/10.5281/zenodo.7070952
+- van Engelenburg, C., Mostafavi, F., Kuhn, E., Jeon, Y., Franzen, M.,
+  Standfest, M., van Gemert, J., & Khademi, S. (2024). MSD: A benchmark
+  dataset for floor plan generation of building complexes. *arXiv*.
+  https://arxiv.org/abs/2407.10121
 - Bruls, M., Huizing, K., & van Wijk, J. J. (2000). Squarified treemaps. In
   W. C. de Leeuw & R. van Liere (Eds.), *Data Visualization 2000* (pp. 33–42).
   Springer. https://doi.org/10.1007/978-3-7091-6783-0_4
@@ -332,6 +384,9 @@ message Door { float x = 1; float z = 2; float yaw = 3; }
   https://doi.org/10.1145/2010324.1964981
 
 **Datenquellen:** swisstopo swissBUILDINGS3D (Footprints/Höhen, bereits
-gebakt) · BFS GWR (Geschosse, Wohnungen, WAREA/WAZIM; open data) · ÖREB/GWR
+gebakt) · BFS GWR (Geschosse, Wohnungen, WAREA/WAZIM; Level-A open data,
+Download-Service pro Perimeter, Attribution Pflicht) · ÖREB/GWR
 Attribute-Join (bereits in `building-attributes.json`, #135) · OpenStreetMap
-(POIs, ODbL — Attribution erforderlich).
+(POIs, ODbL — Attribution erforderlich) · Swiss Dwellings / Archilyse
+(242k reale Schweizer Räume → Layout-Priors, CC BY 4.0 — Attribution
+erforderlich).
