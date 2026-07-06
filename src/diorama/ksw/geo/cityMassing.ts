@@ -10,7 +10,7 @@ import * as THREE from 'three/webgpu';
 import {
   Fn, attribute, float, max as tslMax, min as tslMin, mix, positionWorld, smoothstep, uniform, vec3,
 } from 'three/tsl';
-import { clay, kswCityStyle, kswPalette, kswS3, palette } from '../../designTokens';
+import { clay, facadeLook, kswCityStyle, kswPalette, kswS3, palette } from '../../designTokens';
 import { NIGHT_WINDOW_SHARE } from '../staticBatch';
 import { clayMat } from '../props';
 import { lampGlowU } from '../glowUniform';
@@ -296,11 +296,29 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   const localX = u.sub(colIdx.mul(spacing)); // 0..spacing along the wall
   const localY = v.sub(storeyIdx.mul(storeyH)); // 0..storeyH up the storey
 
-  // window rect centred in the cell horizontally, sill-offset vertically
-  const winX0 = spacing.sub(winW).mul(0.5);
-  const winX1 = winX0.add(winW);
-  const winY0 = sill;
-  const winY1 = sill.add(winH);
+  // Per-building hashes (split-grammar seeds): buildingIdx is constant across
+  // a building's vertices, so these gate whole-building rules.
+  const bIdxN = attribute<'float'>('buildingIdx', 'float');
+  const bSin = bIdxN.mul(float(91.17)).sin().mul(float(43758.5453));
+  const bHash = bSin.sub(bSin.floor()); // night lit share (below)
+  const bSin2 = bIdxN.mul(float(57.31)).sin().mul(float(43758.5453));
+  const bHash2 = bSin2.sub(bSin2.floor()); // shopfront gate
+  const bSin3 = bIdxN.mul(float(23.77)).sin().mul(float(43758.5453));
+  const bHash3 = bSin3.sub(bSin3.floor()); // balcony gate
+
+  // Ground-floor shopfront rule: storey 0 of `shopShare` of the buildings
+  // becomes a near-full-width glazed front (taller, wider pane) — the
+  // "ground floor is a different grammar rule" split that makes streets read
+  // inhabited.
+  const isGF = storeyIdx.lessThan(float(0.5));
+  const shopM = isGF.and(bHash2.lessThan(float(facadeLook.shopShare))).select(float(1), float(0));
+
+  // window rect centred in the cell horizontally, sill-offset vertically;
+  // shopfronts override toward full-cell glazing.
+  const winX0 = mix(spacing.sub(winW).mul(0.5), spacing.mul(float(0.08)), shopM);
+  const winX1 = mix(spacing.sub(winW).mul(0.5).add(winW), spacing.mul(float(0.92)), shopM);
+  const winY0 = mix(sill, float(0.45), shopM);
+  const winY1 = mix(sill.add(winH), float(2.7), shopM);
 
   // signed inset from the window rect edges (>0 inside)
   const insetX = tslMin(localX.sub(winX0), winX1.sub(localX));
@@ -328,11 +346,56 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   // further toward the pane edges for inset depth. The white frame ring stays
   // bright — the original white-jamb language.
   const edgeDark = mix(float(0.5), float(0.72), smoothstep(float(0), float(0.35), inset));
-  const glassTone = vec3(glass.r, glass.g, glass.b).mul(edgeDark);
+  // Lintel AO: the top reveal shadows the pane — the classic inset depth cue.
+  const topShade = mix(float(0.62), float(1), smoothstep(float(0.02), float(0.4), winY1.sub(localY)));
+  // Curtain variety: a share of panes soften toward a warm interior tone so
+  // the glass grid doesn't read as one dead material.
+  const curtSin = colIdx.mul(float(29.7)).add(storeyIdx.mul(float(13.3))).add(bIdxN.mul(float(7.1))).sin().mul(float(43758.5453));
+  const curtHash = curtSin.sub(curtSin.floor());
+  const curtM = curtHash.lessThan(float(facadeLook.curtainShare)).select(float(0.55), float(0));
+  const curtain = new THREE.Color(facadeLook.curtain);
+  const glassTone = mix(
+    vec3(glass.r, glass.g, glass.b),
+    vec3(curtain.r, curtain.g, curtain.b),
+    curtM,
+  ).mul(edgeDark).mul(topShade);
   const frameTone = vec3(frameCol.r, frameCol.g, frameCol.b);
   const windowTone = mix(glassTone, frameTone, frameMask);
 
-  const facadeColor = mix(clayBase, windowTone, windowMask.mul(gate));
+  // Balcony relief (shader-drawn): on balconyShare of buildings, balconyCol-
+  // Share of window columns get a parapet balcony on every upper storey —
+  // slab band + solid balustrade under the window, with a contact shadow at
+  // the storey floor. Stacked per column, like real balcony risers.
+  const isUpper = storeyIdx.greaterThan(float(0.5));
+  const colSin = colIdx.mul(float(3.77)).add(bIdxN.mul(float(11.13))).sin().mul(float(43758.5453));
+  const colHash = colSin.sub(colSin.floor());
+  const balcGate = isUpper
+    .and(bHash3.lessThan(float(facadeLook.balconyShare)))
+    .and(colHash.lessThan(float(facadeLook.balconyColShare)))
+    .select(float(1), float(0))
+    .mul(gate)
+    .mul(float(1).sub(shopM));
+  const bx0 = winX0.sub(float(0.35));
+  const bx1 = winX1.add(float(0.35));
+  const inBalcX = smoothstep(float(0), float(0.04), localX.sub(bx0)).mul(smoothstep(float(0), float(0.04), bx1.sub(localX)));
+  const slabM = inBalcX.mul(smoothstep(float(0.04), float(0.1), localY)).mul(smoothstep(float(0), float(0.06), float(0.34).sub(localY)));
+  const parapetM = inBalcX
+    .mul(smoothstep(float(0), float(0.05), localY.sub(float(0.34))))
+    .mul(smoothstep(float(0), float(0.05), winY0.sub(float(0.1)).sub(localY)));
+  const shadowM = inBalcX.mul(smoothstep(float(0.1), float(0.02), localY)); // contact shadow at storey floor
+  const slabC = new THREE.Color(facadeLook.slab);
+  const parapetC = new THREE.Color(facadeLook.parapet);
+  const withBalcony = mix(
+    mix(
+      mix(clayBase, clayBase.mul(float(0.72)), shadowM.mul(balcGate)),
+      vec3(slabC.r, slabC.g, slabC.b),
+      slabM.mul(balcGate),
+    ),
+    vec3(parapetC.r, parapetC.g, parapetC.b),
+    parapetM.mul(balcGate),
+  );
+
+  const facadeColor = mix(withBalcony, windowTone, windowMask.mul(gate));
 
   // Storey-peel cutaway (Phase A): three uniforms. Fragments above
   // `discardAbove` are gone (hard cut — everything above the currently
@@ -377,10 +440,10 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   // so some houses glow, some sleep, and no two windows bloom identically.
   const cellHash = colIdx.mul(float(12.9898)).add(storeyIdx.mul(float(78.233))).sin().mul(float(43758.5453));
   const hash = cellHash.sub(cellHash.floor()); // 0..1 fract via sin, like nightWindowHash
-  const bIdxN = attribute<'float'>('buildingIdx', 'float');
-  const bSin = bIdxN.mul(float(91.17)).sin().mul(float(43758.5453));
-  const bHash = bSin.sub(bSin.floor());
-  const share = float(NIGHT_WINDOW_SHARE).mul(float(0.2).add(bHash.mul(float(1.6)))); // 0.2×..1.8× the base share
+  // per-building share 0.2×..1.8× the base; shopfronts glow more reliably
+  const share = float(NIGHT_WINDOW_SHARE)
+    .mul(float(0.2).add(bHash.mul(float(1.6))))
+    .mul(mix(float(1), float(1.5), shopM));
   const lit = hash.lessThan(share).select(float(1), float(0));
   const paneSin = hash.mul(float(7.13)).add(bHash.mul(float(3.7))).sin().mul(float(43758.5453));
   const paneBright = float(0.55).add(paneSin.sub(paneSin.floor()).mul(float(0.45)));

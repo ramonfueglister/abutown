@@ -116,7 +116,12 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   // 0.45 at the day reference, so the day handoff is unchanged), damp the
   // key weight at night, and clamp so a >1 midday sum can no longer blow the
   // pre-lit atlas to white.
-  const sunW = 0.7 * Math.min(1, t.sun.intensity) * (isDay ? 1 : 0.3);
+  // Elevation-aware sun weight: the unlit atlas can't self-shadow, so at low
+  // sun (golden hour) full sun colour painted EVERY tree a glowing amber blob
+  // over the dark city — real crowns are mostly shadowed then. Fade the sun
+  // term in with elevation (full above ~20°).
+  const sunElevW = isDay ? Math.min(1, Math.max(0, env.sunDir[1] / 0.35)) : 1;
+  const sunW = 0.7 * Math.min(1, t.sun.intensity) * (isDay ? sunElevW : 0.3);
   // Night factor 0.22: the night hemi runs hot (1.3) to keep the CITY readable
   // under AgX; feeding that raw into the unlit impostor atlas made every far
   // tree glow teal brighter than the lamps.

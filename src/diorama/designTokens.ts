@@ -91,10 +91,12 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
     turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8,
     sunBoost: 0,
   },
+  // Golden keyframes de-milked with the same recipe as `day` (2026-07-06):
+  // the short fog range + thick mist veiled the whole city framing grey.
   goldenMorning: {
     hemiSky: 0xc4dcda, hemiGround: 0xe4d3ba, hemiIntensity: 0.3,
-    fogColor: 0xeee2cf, fogNear: 20, fogFar: 48,
-    exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.16,
+    fogColor: 0xeee2cf, fogNear: 30, fogFar: 85,
+    exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.08,
     giScale: 0.7, saturation: 1.1, contrast: 1.0,
     godraysMix: 0.35, lampOn01: 0,
     turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8,
@@ -102,9 +104,11 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   },
   // The DREDGE moment — amber horizon under deep teal — now fires at the REAL dusk.
   goldenEvening: {
-    hemiSky: 0x4f7d84, hemiGround: 0x5c5348, hemiIntensity: 0.21,
-    fogColor: 0x486e74, fogNear: 18, fogFar: 46,
-    exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.22,
+    // warmer, stronger ground bounce — the DREDGE "Amber unter Teal" needs
+    // visible amber on the lit faces, not just a teal veil (2026-07-06).
+    hemiSky: 0x4f7d84, hemiGround: 0x8a7050, hemiIntensity: 0.34,
+    fogColor: 0x486e74, fogNear: 28, fogFar: 80,
+    exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.1,
     giScale: 0.55, saturation: 1.16, contrast: 1.06,
     godraysMix: 0.6, lampOn01: 1,
     turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9,
@@ -460,6 +464,21 @@ export const nightSkyLook = {
   city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 5.5, starCount: 2200, moonRadius: 26, moonDistance: kswCity.domeRadius * 0.82, sunDistance: kswCity.domeRadius * 0.82 },
 } as const;
 
+// Facade depth pass (SOTA 2026-07-06): split-grammar-style differentiation
+// drawn IN the wall shader (cityMassing.facadeMaterial) — no extra geometry.
+// shopShare of buildings get a near-full-width glazed ground floor; balcony
+// buildings get parapet balconies on a subset of window COLUMNS (balconies
+// stack architecturally); curtains break up the dead-glass uniformity.
+export const facadeLook = {
+  shopShare: 0.42, // share of buildings with a shopfront ground floor
+  balconyShare: 0.5, // share of buildings that carry balconies at all
+  balconyColShare: 0.45, // share of window columns with a balcony stack
+  curtainShare: 0.3, // share of panes softened by a curtain tone
+  slab: 0xb9ac9c, // balcony floor slab
+  parapet: 0xd3c8b6, // solid balustrade (Swiss concrete parapet)
+  curtain: 0xdcc6a4, // warm interior curtain
+} as const;
+
 // Tree size policy (SOTA pass 2026-07-06): the baked OSM/estimate heights are
 // data-honest (median 12.5 m, q95 20 m) but park giants of 27 m dwarf the
 // 2–3-storey Winterthur stock and the crowns read as fat broccoli at the city
@@ -482,6 +501,10 @@ export const terrainLook = {
   industrialLu: 0xb9ac9a,
   water: kswCity.water,
   rock: 0x9a978d,
+  // Detail pass (SOTA 2026-07-06): flat vertex fills read as paper — two
+  // octaves of world-space MaterialX noise mottle the luminance, and slopes
+  // dry toward this tone (terrainDetailTint in nature.ts).
+  dry: 0xb3a982,
 } as const;
 
 // Diorama-style layer for the geodetic city (style slice). Additive only.
