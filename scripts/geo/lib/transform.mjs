@@ -620,7 +620,7 @@ function nearFootprint(x, z, grid) {
   return false;
 }
 
-export function transformNature({ osmNature, projector, buildingFootprints = [] }) {
+export function transformNature({ osmNature, projector, buildingFootprints = /** @type {number[][][]} */ ([]) }) {
   const greens = [];
   const waterAreas = [];
   const rivers = [];
