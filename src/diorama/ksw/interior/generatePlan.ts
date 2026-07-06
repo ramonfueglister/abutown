@@ -32,6 +32,7 @@ import type {
 } from '../floorPlan';
 import { kswPlan, type PersonRole } from '../floorPlan';
 import type { Zone } from './zones';
+import { storeyLayout } from './cutaway';
 
 export type MainDoor = { x: number; z: number; yaw: number };
 
@@ -176,6 +177,7 @@ function buildZoneLadder(
   zone: Zone,
   depts: Dept[],
   deptCursor: { i: number },
+  withPeople: boolean,
 ): { rooms: Room[]; corridors: Array<{ x: number; z: number; w: number; d: number }> } {
   const { x: zx, z: zz, w: zw, d: zd } = zone;
   const zNorth = zz - zd / 2;
@@ -230,7 +232,7 @@ function buildZoneLadder(
         doors: [{ wall: doorWall, center: fitDoorCenter(0, doorWall === 'n' || doorWall === 's' ? rect.w : rect.d, doorWidth), width: doorWidth }],
         windows: [],
         props: layProps(rect, dept.propKinds),
-        people: layPeople(rect, dept.roles),
+        people: withPeople ? layPeople(rect, dept.roles) : [],
       };
       rooms.push(room);
     }
@@ -295,7 +297,12 @@ function zoneMstEdges(zones: Zone[]): Array<[number, number]> {
   return edges;
 }
 
-export function generateInteriorPlan(zones: Zone[], mainDoor: MainDoor): FloorPlan {
+function generatePlanWithQueues(
+  zones: Zone[],
+  mainDoor: MainDoor,
+  queueFor: (rank: number, isDoorZone: boolean, isLargest: boolean) => Dept[],
+  withPeople: boolean,
+): FloorPlan {
   if (zones.length === 0) {
     return {
       plate: { w: 1, d: 1 },
@@ -327,9 +334,9 @@ export function generateInteriorPlan(zones: Zone[], mainDoor: MainDoor): FloorPl
     const isDoorZone = zone.id === doorZone.id;
     const isLargest = zone.id === largestZone.id && !isDoorZone;
     const rank = isDoorZone || isLargest ? 0 : otherRank++;
-    const depts = zoneDeptQueue(rank, isDoorZone, isLargest);
+    const depts = queueFor(rank, isDoorZone, isLargest);
     const local = { i: 0 };
-    const { rooms, corridors } = buildZoneLadder(zone, depts, local);
+    const { rooms, corridors } = buildZoneLadder(zone, depts, local, withPeople);
     allRooms.push(...rooms);
     allCorridors.push(...corridors);
   }
@@ -370,6 +377,86 @@ export function generateInteriorPlan(zones: Zone[], mainDoor: MainDoor): FloorPl
     outdoorPeople: [],
     walkers,
   };
+}
+
+export function generateInteriorPlan(zones: Zone[], mainDoor: MainDoor): FloorPlan {
+  return generatePlanWithQueues(zones, mainDoor, zoneDeptQueue, true);
+}
+
+// ── Vertical hospital zoning (Phase A, spec §5 'clinic') ────────────────────
+// Which department families fill which storey. Level 0 keeps the door-zone
+// logic (Empfang + Notfall lead); imaging is heavy machinery → ground floor.
+type LevelBand = 'ground' | 'treatment' | 'ward' | 'technik';
+
+export function levelBand(level: number, storeyCount: number): LevelBand {
+  if (level === 0) return 'ground';
+  if (storeyCount >= 4 && level === storeyCount - 1) return 'technik';
+  const lastTreatment = Math.max(1, Math.floor((storeyCount - 1) / 2));
+  return level <= lastTreatment ? 'treatment' : 'ward';
+}
+
+function bandDepts(band: LevelBand): Dept[] {
+  switch (band) {
+    case 'ground':
+      return [
+        deptFrom('xray', 'Radiologie'),
+        deptFrom('ct', 'Computertomographie'),
+        deptFrom('mri', 'MRI'),
+        deptFrom('apotheke', 'Spitalapotheke'),
+        deptFrom('cafeteria', 'Cafeteria'),
+        deptFrom('admin', 'Verwaltung'),
+      ];
+    case 'treatment':
+      return [
+        deptFrom('op1', 'Zentral-OP'),
+        deptFrom('ips', 'Intensivstation IPS'),
+        deptFrom('lab', 'Zentrallabor'),
+        deptFrom('endo', 'Endoskopie'),
+        deptFrom('cardio', 'Kardiologie'),
+        deptFrom('geburt', 'Gebärsaal'),
+        deptFrom('neo', 'Neonatologie'),
+      ];
+    case 'ward':
+      return [
+        deptFrom('wardChirurgie', 'Bettenstation Chirurgie'),
+        deptFrom('wardMedizin', 'Bettenstation Medizin'),
+        deptFrom('physio', 'Physiotherapie'),
+        deptFrom('onko', 'Onkologie Tagesklinik'),
+        deptFrom('dialyse', 'Dialyse'),
+        deptFrom('kinder', 'Kinderklinik'),
+      ];
+    case 'technik':
+      return [deptFrom('admin', 'Technikgeschoss'), deptFrom('lab', 'Gebäudetechnik')];
+  }
+}
+
+export type BuildingPlan = { storeyCount: number; storeyH: number; storeys: FloorPlan[] };
+
+export function generateBuildingPlan(zones: Zone[], mainDoor: MainDoor, eaveH: number): BuildingPlan {
+  const { storeyCount, storeyH } = storeyLayout(eaveH);
+  const storeys: FloorPlan[] = [];
+  for (let level = 0; level < storeyCount; level++) {
+    const band = levelBand(level, storeyCount);
+    if (band === 'ground') {
+      // level 0 keeps the authored door behavior: Empfang+Notfall lead the
+      // door zone, then the ground-floor families (imaging, Apotheke, …).
+      const groundQueue = (rank: number, isDoorZone: boolean, isLargest: boolean): Dept[] => {
+        const base = bandDepts('ground');
+        if (isDoorZone) return [...doorDepts(), ...base];
+        const offset = (isLargest ? 0 : rank + 1) % base.length;
+        return [...base.slice(offset), ...base.slice(0, offset)];
+      };
+      storeys.push(generatePlanWithQueues(zones, mainDoor, groundQueue, true));
+    } else {
+      const base = bandDepts(band);
+      const levelQueue = (rank: number, _isDoorZone: boolean, isLargest: boolean): Dept[] => {
+        const offset = ((isLargest ? 0 : rank + 1) + level) % base.length;
+        return [...base.slice(offset), ...base.slice(0, offset)];
+      };
+      storeys.push(generatePlanWithQueues(zones, mainDoor, levelQueue, false));
+    }
+  }
+  return { storeyCount, storeyH, storeys };
 }
 
 // The zone containing the door, or the nearest by center distance if the door

@@ -27,7 +27,7 @@
 
 export type Zone = { id: string; x: number; z: number; w: number; d: number };
 
-export type DecomposeOpts = { maxZones?: number; minSize?: number };
+export type DecomposeOpts = { maxZones?: number; minSize?: number; stopCoverage?: number; cell?: number };
 
 const CELL = 2; // meters
 
@@ -118,10 +118,11 @@ const DEFAULT_MAX_ZONES = 14;
 export function decomposeToZones(footprint: number[][], opts: DecomposeOpts = {}): Zone[] {
   const maxZones = opts.maxZones ?? DEFAULT_MAX_ZONES;
   const minSize = opts.minSize ?? 6;
+  const cell = opts.cell ?? CELL;
 
   const { minX, maxX, minZ, maxZ } = boundsOf(footprint);
-  const cols = Math.max(1, Math.ceil((maxX - minX) / CELL));
-  const rows = Math.max(1, Math.ceil((maxZ - minZ) / CELL));
+  const cols = Math.max(1, Math.ceil((maxX - minX) / cell));
+  const rows = Math.max(1, Math.ceil((maxZ - minZ) / cell));
 
   // grid[row][col] = 1 if all four corners of the cell are inside the
   // polygon (see the corner-vs-center rationale in the module doc above).
@@ -129,11 +130,11 @@ export function decomposeToZones(footprint: number[][], opts: DecomposeOpts = {}
   let totalInside = 0;
   for (let r = 0; r < rows; r++) {
     const row = new Uint8Array(cols);
-    const z0 = minZ + r * CELL;
-    const z1 = minZ + (r + 1) * CELL;
+    const z0 = minZ + r * cell;
+    const z1 = minZ + (r + 1) * cell;
     for (let c = 0; c < cols; c++) {
-      const x0 = minX + c * CELL;
-      const x1 = minX + (c + 1) * CELL;
+      const x0 = minX + c * cell;
+      const x1 = minX + (c + 1) * cell;
       const inside =
         pointInRing(x0, z0, footprint) &&
         pointInRing(x1, z0, footprint) &&
@@ -148,15 +149,15 @@ export function decomposeToZones(footprint: number[][], opts: DecomposeOpts = {}
   }
 
   const zones: Zone[] = [];
-  const minCoverageCells = totalInside * 0.15;
+  const minCoverageCells = totalInside * (opts.stopCoverage ?? 0.15);
   let remaining = totalInside;
 
   while (zones.length < maxZones && remaining >= minCoverageCells && remaining > 0) {
     const rect = largestRectangle(grid);
     if (rect === null || rect.area <= 0) break;
 
-    const w = (rect.c1 - rect.c0 + 1) * CELL;
-    const d = (rect.r1 - rect.r0 + 1) * CELL;
+    const w = (rect.c1 - rect.c0 + 1) * cell;
+    const d = (rect.r1 - rect.r0 + 1) * cell;
 
     // Consume the cells regardless of whether the rect survives the
     // minSize filter — otherwise a too-small rect would be re-extracted
@@ -172,10 +173,68 @@ export function decomposeToZones(footprint: number[][], opts: DecomposeOpts = {}
 
     if (w < minSize || d < minSize) continue;
 
-    const x = minX + ((rect.c0 + rect.c1 + 1) / 2) * CELL;
-    const z = minZ + ((rect.r0 + rect.r1 + 1) / 2) * CELL;
+    const x = minX + ((rect.c0 + rect.c1 + 1) / 2) * cell;
+    const z = minZ + ((rect.r0 + rect.r1 + 1) / 2) * cell;
     zones.push({ id: `z${zones.length}`, x, z, w, d });
   }
 
   return zones;
+}
+
+// ── Oriented decomposition (Phase A) ────────────────────────────────────────
+// Real footprints rarely run parallel to the world axes (KSW: ~23°). Extract
+// zones in a frame rotated to the footprint's dominant wall angle so the
+// rectangles hug the facade; the interior THREE group then simply rotates by
+// frame.angle to land back in world space.
+
+export type PlanFrame = {
+  angle: number;
+  toLocal(x: number, z: number): [number, number];
+  toWorld(x: number, z: number): [number, number];
+};
+
+// Length-weighted dominant edge direction, folded to a 90°-periodic domain
+// via the ×4 angle-doubling trick (a wall and its perpendicular vote for the
+// same orientation). Deterministic — pure arithmetic over the ring.
+export function dominantAngle(footprint: number[][]): number {
+  let sx = 0;
+  let sz = 0;
+  const n = footprint.length;
+  for (let i = 0; i < n; i++) {
+    const [ax, az] = footprint[i];
+    const [bx, bz] = footprint[(i + 1) % n];
+    const ex = bx - ax;
+    const ez = bz - az;
+    const len = Math.hypot(ex, ez);
+    if (len < 0.05) continue;
+    const a4 = 4 * Math.atan2(ez, ex);
+    sx += len * Math.cos(a4);
+    sz += len * Math.sin(a4);
+  }
+  return Math.atan2(sz, sx) / 4;
+}
+
+export function makeFrame(angle: number): PlanFrame {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return {
+    angle,
+    // matches THREE group.rotation.y = angle (local → world)
+    toWorld: (lx, lz) => [lx * c + lz * s, -lx * s + lz * c],
+    toLocal: (x, z) => [x * c - z * s, x * s + z * c],
+  };
+}
+
+// Zone extraction knobs for the oriented path: in the rotated frame the walls
+// are near-axis-aligned, so greedy rectangles reach near-full coverage — allow
+// many small zones and stop only when 1% of the raster remains.
+const ORIENTED_OPTS: DecomposeOpts = { maxZones: 150, minSize: 1.8, stopCoverage: 0.01, cell: 0.7 };
+
+export function decomposeOriented(footprint: number[][]): { zones: Zone[]; frame: PlanFrame } {
+  const frame = makeFrame(dominantAngle(footprint));
+  const localRing = footprint.map(([x, z]) => {
+    const [lx, lz] = frame.toLocal(x, z);
+    return [lx, lz];
+  });
+  return { zones: decomposeToZones(localRing, ORIENTED_OPTS), frame };
 }

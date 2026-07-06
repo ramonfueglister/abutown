@@ -394,14 +394,18 @@ export const kswCity = {
   roadYs: { carriage: 0.1, footway: 0.11, railBed: 0.06, rail: 0.16 },
 } as const;
 
-// S3c Dollhouse-Cutaway (T18): additive token block. `cutHeight` = the y (m)
-// the main building is sliced at when the cutaway is fully open (ground floor +
-// seam only); `cutSeam` = the bright trim band thickness just below the cut;
-// `fadeStartR`/`fadeEndR` = the zoom-radius window over which upper storeys fade
-// out (radius ≥ start: closed, radius ≤ end: fully open); `seamColor` = the warm
-// cut-edge tone. Separate from roofFadePolicy — the cutaway drives the MAIN
-// KSW building only, never the city roofs.
-export const kswS3 = { cutHeight: 3.2, cutSeam: 0.25, fadeStartR: 90, fadeEndR: 55, seamColor: 0xf3e2c8 } as const;
+// S3c Dollhouse-Cutaway (T18): additive token block. `cutSeam` = the bright
+// trim band thickness (m) just below the currently-dissolving storey's cut
+// line; `seamColor` = the warm cut-edge tone. The zoom-radius peel window
+// (when the cut engages, how far it opens) has moved to `kswPeel` below —
+// this block only carries the seam's own look. Separate from
+// roofFadePolicy — the cutaway drives the MAIN KSW building only, never the
+// city roofs.
+export const kswS3 = { cutSeam: 0.25, seamColor: 0xf3e2c8 } as const;
+// Storey-peel dollhouse (Phase A): the orbit-radius window over which the main
+// building peels open storey-by-storey (startR: closed; endR: only the EG
+// remains), and the storey-height model derived from the baked eave height.
+export const kswPeel = { startR: 110, endR: 40, nominalStoreyH: 3.4, minStoreyH: 2.4, maxStoreyH: 4.5, maxStoreys: 12 } as const;
 
 // Night sky (star field + moon disc) value sets. `room` values are EXACTLY
 // the former look.ts inline constants (STAR_R=17, quad 0.05, count 420, moon

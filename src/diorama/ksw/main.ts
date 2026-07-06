@@ -22,6 +22,7 @@ import {
   kswCity,
   kswCityStyle,
   kswGi,
+  kswPeel,
   kswPost,
   kswScene,
   nightGlow,
@@ -47,12 +48,12 @@ import { buildCityMassing } from './geo/cityMassing';
 import { createHoverPicker } from './hoverPick';
 import { createHoverCard } from './hoverCard';
 import { getBuildingHoverInfo } from './geo/buildingAttributes';
-import { buildKswCampus } from './geo/kswCampus';
-import { decomposeToZones, type Zone } from './interior/zones';
-import { generateInteriorPlan, departmentCenter } from './interior/generatePlan';
-import { buildInterior } from './interior/buildInterior';
+import { buildKswCampus, largestBuilding, type CutawayUniforms } from './geo/kswCampus';
+import { decomposeOriented, type Zone } from './interior/zones';
+import { departmentCenter, generateBuildingPlan } from './interior/generatePlan';
+import { buildBuildingInterior } from './interior/buildInterior';
 import { buildPlaza, buildHelipad } from './interior/plaza';
-import { cutawayState } from './interior/cutaway';
+import { peelState, closedPeel, type PeelCfg, type PeelState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
 import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
@@ -95,6 +96,7 @@ declare global {
       roofFade: number;
       target: [number, number, number];
       agents: { total: number; walking: number; samples: Array<[number, number]> };
+      peel?: { p: number; storeyCount: number; storeyH: number };
     };
     __KSW_INFO?: () => {
       drawCalls: number;
@@ -234,28 +236,27 @@ async function boot(): Promise<void> {
   // ?wx-pinned) weather. Re-evaluated every frame; this is the boot seed.
   let lastEnv: EnvironmentState = computeEnvironment(now(), WX_OVERRIDES[wxParam ?? ''] ?? CLEAR_SKY);
 
-  // ── generated interior plan (S3b, T17) computed up front so the T18 cutaway
-  // presets (er/ops) can re-aim onto the Notfall / OP zone centers. The plan is
-  // pure/deterministic; the built interior group is added to the scene below.
-  const mainBuildingFp = kswBuildings.reduce((best, b) => {
-    const area = (fp: number[][]): number => {
-      let a = 0;
-      for (let i = 0; i < fp.length; i++) {
-        const [x1, z1] = fp[i];
-        const [x2, z2] = fp[(i + 1) % fp.length];
-        a += x1 * z2 - x2 * z1;
-      }
-      return Math.abs(a) / 2;
-    };
-    return area(b.footprint) > area(best.footprint) ? b : best;
-  }, kswBuildings[0]);
-  const interiorZones = decomposeToZones(mainBuildingFp.footprint);
-  const mainDoor = mainBuildingFp.door ?? { x: interiorZones[0]?.x ?? 0, z: interiorZones[0]?.z ?? 0, yaw: 0 };
-  const interiorPlan = generateInteriorPlan(interiorZones, mainDoor);
-  // Re-aim er/ops onto the real department centers (radius keeps the cutaway
-  // active: 40 for the emergency ward, 35 for the surgery block).
-  const [erX, erZ] = departmentCenter(interiorPlan, 'Notfall');
-  const [opX, opZ] = departmentCenter(interiorPlan, 'OP');
+  // ── generated interior plan (Phase A): ONE source for the main building
+  // (kswCampus.largestBuilding — the same call buildKswCampus makes), zones
+  // decomposed in the footprint's dominant-wall-angle frame, one FloorPlan per
+  // real storey (eaveH-derived). All plan geometry lives in the plan-local
+  // frame; frame.toWorld/group.rotation.y map it back onto the world footprint.
+  const mainBuildingFp = largestBuilding(kswBuildings);
+  const { zones: interiorZones, frame: planFrame } = decomposeOriented(mainBuildingFp.footprint);
+  const mainDoorWorld = mainBuildingFp.door ?? (() => {
+    const [wx, wz] = planFrame.toWorld(interiorZones[0]?.x ?? 0, interiorZones[0]?.z ?? 0);
+    return { x: wx, z: wz, yaw: 0 };
+  })();
+  const [doorLx, doorLz] = planFrame.toLocal(mainDoorWorld.x, mainDoorWorld.z);
+  const mainDoor = { x: doorLx, z: doorLz, yaw: mainDoorWorld.yaw };
+  const buildingPlan = generateBuildingPlan(interiorZones, mainDoor, mainBuildingFp.eaveH);
+  const interiorPlan = buildingPlan.storeys[0]; // EG — nav/agents/plaza anchor (2D systems)
+  // Re-aim er/ops onto the real department centers — departmentCenter returns
+  // plan-local coords, transform to world for the camera targets.
+  const [erLx, erLz] = departmentCenter(interiorPlan, 'Notfall');
+  const [opLx, opLz] = departmentCenter(buildingPlan.storeys[Math.min(1, buildingPlan.storeyCount - 1)], 'OP');
+  const [erX, erZ] = planFrame.toWorld(erLx, erLz);
+  const [opX, opZ] = planFrame.toWorld(opLx, opLz);
   camPresets.er = { target: [erX, 0.4, erZ], radius: 40, yaw: -0.5, pitch: 0.72 };
   camPresets.ops = { target: [opX, 0.2, opZ], radius: 35, yaw: 0.45, pitch: 1.05 };
 
@@ -554,21 +555,21 @@ async function boot(): Promise<void> {
   // off the true largest footprint even when the shell mesh is suppressed.
   const { group: kswCampus, mainBuilding } = buildKswCampus(kswBuildings);
   scene.add(kswCampus);
-  const setCutaway = kswCampus.userData.setCutaway as (u: { cutH: number; upperFade: number }) => void;
+  const setCutaway = kswCampus.userData.setCutaway as (u: CutawayUniforms) => void;
 
-  // ── the generated zone-ladder interior (S3b, T17): the built interior is
-  // ALWAYS present now (T18); the dollhouse cutaway drives its visibility —
-  // hidden when the main building is closed, revealed when it opens. Footprints
-  // are already in the local world frame, so it drops at the campus origin.
-  const interior = buildInterior(interiorPlan);
-  interior.visible = false; // closed at boot (overview) — the cutaway shows it
+  // ── the generated multi-storey interior (Phase A): per-storey groups whose
+  // fades the peel drives every frame. Plan coords are frame-local; the group
+  // rotation maps them onto the world footprint.
+  const interiorCtl = buildBuildingInterior(buildingPlan, planFrame);
+  const interior = interiorCtl.group;
+  interior.visible = false; // closed at boot (overview) — the peel opens it
   scene.add(interior);
 
   // ── the real forecourt + rooftop helipad (T19) ──────────────────────────
   // Plaza: slab at the real main door, a path to the nearest real road, an
   // ambulance under a canopy at the emergency (door) zone edge, and 6 props.
   // The emergency zone is the door zone (Empfang+Notfall lead its ladder).
-  const erZone: Zone =
+  const erZoneLocal: Zone =
     interiorZones.reduce<{ z: Zone; d: number } | null>((best, z) => {
       const d = Math.hypot(mainDoor.x - z.x, mainDoor.z - z.z);
       const inside =
@@ -576,30 +577,30 @@ async function boot(): Promise<void> {
       const score = inside ? d - 1e6 : d;
       return best === null || score < best.d ? { z, d: score } : best;
     }, null)?.z ?? interiorZones[0];
-  const plaza = buildPlaza(mainDoor, erZone, cityRoads);
+  const [ezWx, ezWz] = planFrame.toWorld(erZoneLocal.x, erZoneLocal.z);
+  const erZone: Zone = { ...erZoneLocal, x: ezWx, z: ezWz };
+  const plaza = buildPlaza(mainDoorWorld, erZone, cityRoads);
   scene.add(plaza);
   // Helipad on the main building's largest high flat roof face; fades with the
-  // cutaway upperFade (same as the roof) so it vanishes when the house opens.
+  // cutaway roofFade (same as the roof) so it vanishes when the house opens.
   const { group: helipad, setFade: setHelipadFade } = buildHelipad(mainBuilding);
   scene.add(helipad);
 
-  // Main-building bbox: the cutaway only engages when the camera target sits
-  // over the main building (else the state is forced off so distant/other
-  // buildings are never sliced). Derived from the same footprint the interior
-  // and mainBuilding came from.
-  const mbBounds = (() => {
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (const [x, z] of mainBuilding.footprint) {
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minZ = Math.min(minZ, z);
-      maxZ = Math.max(maxZ, z);
+  // Main-building world bbox (shared by the cutaway-active test below and the
+  // heroRect nature/tree exclusion further down): interiorPlan/interiorZones
+  // are plan-local (frame-rotated), so a rotated rect's local bbox is NOT its
+  // world bbox — derive it straight from the world footprint instead.
+  const fpB = (() => {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const [x, z] of mainBuildingFp.footprint) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
     }
+    return { minX, maxX, minZ, maxZ };
+  })();
+  const mbBounds = (() => {
     // a little slack so a target near the wall still counts as "inside"
-    return { minX: minX - 6, maxX: maxX + 6, minZ: minZ - 6, maxZ: maxZ + 6 };
+    return { minX: fpB.minX - 6, maxX: fpB.maxX + 6, minZ: fpB.minZ - 6, maxZ: fpB.maxZ + 6 };
   })();
   const targetOverMain = (): boolean =>
     rig.target[0] >= mbBounds.minX &&
@@ -706,6 +707,44 @@ async function boot(): Promise<void> {
   // placement) picks this up automatically since they all take the same
   // `groundYAt` function — see task-5c-report.md for the consumer list.
   const groundYAt = makeCorridorGround(cityRoads, cityRails, tileGroundYAt);
+
+  // ── hospital ground elevation (bugfix, task 7) ───────────────────────────
+  // The KSW shell (kswCampus), its generated interior, and the plaza are all
+  // authored with a FLAT base at y=0 (the bake anchors buildings at the world
+  // origin). But the terrain under the footprint is real DEM: after the
+  // -anchorGround shift the surface here sits at ~+3.4 m (mean ~+5 m over the
+  // footprint), so a y=0 building is BURIED — the EG storey (y 0..3) and the
+  // shell base vanish under the grass, and only the upper storeys poke out.
+  // Lift the whole hospital island onto its local ground so the EG sits on the
+  // surface. One flat base can't follow the sloped DEM exactly, so use the
+  // mean over the footprint vertices: it clears the terrain across the framed
+  // (centre) region while keeping the float on the high edge minimal. The peel
+  // cut bands (positionWorld.y in the shell shader) key off this same baseY, so
+  // interior slabs and shell slice heights stay in lockstep.
+  //
+  // Sample the RAW tile terrain (tileGroundYAt), NOT the corridor-aware
+  // groundYAt: the hospital footprint is a building plaza, and if a road/rail
+  // corridor grazes a footprint vertex, groundYAt there returns the road-bench
+  // profile height — which would bias the island off the visible grass surface.
+  // tileGroundYAt is the same finest-first DEM surface the terrain renders, so
+  // the mean lands the EG floor on the ground you actually see. (#139/#140:
+  // makeCorridorGround now wraps tileGroundYAt; pre-merge groundYAt WAS the raw
+  // tile sampler, so tileGroundYAt preserves the original placement semantics.)
+  const hospitalBaseY = (() => {
+    let sum = 0;
+    for (const [vx, vz] of mainBuildingFp.footprint) sum += tileGroundYAt(vx, vz);
+    return sum / mainBuildingFp.footprint.length;
+  })();
+  kswCampus.position.y = hospitalBaseY;
+  interior.position.y = hospitalBaseY;
+  plaza.position.y = hospitalBaseY;
+  helipad.position.y = hospitalBaseY;
+
+  // The er/ops orbit centers were authored against the y=0 ground plane —
+  // lift them onto the DEM island so the camera pivots at the real EG floor.
+  camPresets.er.target[1] += hospitalBaseY;
+  camPresets.ops.target[1] += hospitalBaseY;
+
   // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
   // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
   // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so
@@ -738,10 +777,10 @@ async function boot(): Promise<void> {
   // trees don't need to punch holes in the sun's shadow map; the LOD ring
   // (Task 10) re-enables it for the near ring around the camera.
   const heroRect = {
-    x: interiorPlan.building.x,
-    z: interiorPlan.building.z,
-    w: interiorPlan.building.w,
-    d: interiorPlan.building.d,
+    x: (fpB.minX + fpB.maxX) / 2,
+    z: (fpB.minZ + fpB.maxZ) / 2,
+    w: fpB.maxX - fpB.minX,
+    d: fpB.maxZ - fpB.minZ,
   };
   cityRoot.add(buildNature(cityNature, { excludeRect: heroRect }));
   // Trees: the archetype tree layer (instanced full-detail near-set + octahedral
@@ -1170,7 +1209,8 @@ async function boot(): Promise<void> {
   // closed (overview), revealed through the cutaway when it opens (er/ops). The
   // __KSW agent snapshot below is CPU-driven, so movement is reported even
   // while the meshes are hidden.
-  for (const m of agentInstances.meshes) interior.add(m);
+  const egStorey = interior.getObjectByName('storey-0') ?? interior;
+  for (const m of agentInstances.meshes) egStorey.add(m);
   type LiveAgent = { agent: Agent; slot: AgentSlot; idx: number; y: number; yaw: number; roll: number };
   const liveAgents: LiveAgent[] = [];
   for (const [idx, s] of spawnSpecs.entries()) {
@@ -1193,16 +1233,18 @@ async function boot(): Promise<void> {
     opacity: lastEnv.mistOpacity,
     depthWrite: false,
   });
-  // hug the real campus complex (the generated interior's bounding box) rather
-  // than the old 72×56 hero plate.
-  const rimX = interiorPlan.building.w / 2;
-  const rimZ = interiorPlan.building.d / 2;
-  const rimCx = interiorPlan.building.x;
-  const rimCz = interiorPlan.building.z;
+  // hug the real campus complex rather than the old 72×56 hero plate. Derived
+  // from the world footprint bbox (fpB, same source heroRect uses) — NOT from
+  // interiorPlan.building, which is plan-local (frame-rotated) and would put
+  // the ring off-axis in this world-space consumer.
+  const rimX = (fpB.maxX - fpB.minX) / 2;
+  const rimZ = (fpB.maxZ - fpB.minZ) / 2;
+  const rimCx = (fpB.minX + fpB.maxX) / 2;
+  const rimCz = (fpB.minZ + fpB.maxZ) / 2;
   // walk a rectangle perimeter (an ellipse would dip onto the lawn near the
   // corners) and hug it with small flattened puffs. Parametrized so both the
   // hero plate and the city plate rim share one recipe (spec §4: city mist).
-  const addMistRing = (halfW: number, halfD: number, cx: number, cz: number, mat: THREE.MeshBasicMaterial): void => {
+  const addMistRing = (halfW: number, halfD: number, cx: number, cz: number, mat: THREE.MeshBasicMaterial, baseY: number): void => {
     const pad = 2.2;
     const hw = halfW + pad;
     const hd = halfD + pad;
@@ -1229,18 +1271,18 @@ async function boot(): Promise<void> {
         mz = hd - t;
       }
       const mist = new THREE.Mesh(new THREE.SphereGeometry(2.4 + (i % 3) * 0.5, 16, 16), mat);
-      mist.position.set(mx + cx, 0.25, mz + cz);
+      mist.position.set(mx + cx, baseY + 0.25, mz + cz);
       mist.scale.y = 0.22;
       scene.add(mist);
     }
   };
-  addMistRing(rimX, rimZ, rimCx, rimCz, mistMat);
+  addMistRing(rimX, rimZ, rimCx, rimCz, mistMat, hospitalBaseY);
 
   // city mist rim: same puffs around the city plate, faded in with the clouds
   // (0 below radius 300, up to preset.mistOpacity*0.8 at the city framing).
   const cityMistMat = mistMat.clone();
   cityMistMat.opacity = 0;
-  addMistRing(cityMeta.plate.w / 2, cityMeta.plate.d / 2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat);
+  addMistRing(cityMeta.plate.w / 2, cityMeta.plate.d / 2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat, 0);
 
   // Night life: window glow + lamp bulbs are baked into the glowNight batch
   // at build time (staticBatch.ts) and ride the shared lampGlowU uniform; the
@@ -1252,12 +1294,12 @@ async function boot(): Promise<void> {
   const lampBaseIntensities: number[] = [];
   const glow01 = lastEnv.lampOn01;
   {
-    const [dox, doz] = [Math.sin(mainDoor.yaw), Math.cos(mainDoor.yaw)];
-    const perpX = Math.cos(mainDoor.yaw);
-    const perpZ = -Math.sin(mainDoor.yaw);
+    const [dox, doz] = [Math.sin(mainDoorWorld.yaw), Math.cos(mainDoorWorld.yaw)];
+    const perpX = Math.cos(mainDoorWorld.yaw);
+    const perpZ = -Math.sin(mainDoorWorld.yaw);
     for (const side of [-1, 1]) {
-      const px = mainDoor.x + dox * 6 + perpX * side * 6;
-      const pz = mainDoor.z + doz * 6 + perpZ * side * 6;
+      const px = mainDoorWorld.x + dox * 6 + perpX * side * 6;
+      const pz = mainDoorWorld.z + doz * 6 + perpZ * side * 6;
       const base = nightGlow.cityPool * nightGlow.boost;
       const pool = new THREE.PointLight(nightGlow.bulb, base * glow01, 12, 2);
       pool.position.set(px, 3.0, pz);
@@ -1494,6 +1536,7 @@ async function boot(): Promise<void> {
       walking: 0,
       samples: liveAgents.slice(0, 12).map((la) => [la.agent.pos[0], la.agent.pos[1]]),
     },
+    peel: { p: 0, storeyCount: buildingPlan.storeyCount, storeyH: buildingPlan.storeyH },
   };
   window.__KSW = kswSnapshot;
   const planBudget = { remaining: 0 };
@@ -1511,22 +1554,28 @@ async function boot(): Promise<void> {
   let prevFade = roofFade(rig.radius, kswCamera);
   let fadeWasMid = prevFade > roofFadePolicy.visible && prevFade < roofFadePolicy.opaque;
 
-  // ── Dollhouse cutaway (T18): computed each frame from the zoom radius, but
+  // ── Storey peel (Phase A): computed each frame from the zoom radius, but
   // only when the camera target sits over the main building — otherwise forced
-  // to the closed state (cutH 1e6, fade 1) so the other campus buildings and
-  // the distant city are never sliced. Crossing the fade < 0.15 (slice engages)
-  // and fade < 0.5 (interior becomes visible) thresholds is treated like a
-  // roof-fade threshold crossing: the GI probe + (cached) shadow map refresh so
-  // the newly-revealed interior lights correctly. The state below is applied
-  // once at boot so the starting preset (overview closed / er open) is correct
-  // on the very first frame.
-  const closedCut = { cutH: 1e6, upperFade: 1 };
-  const computeCut = (): { cutH: number; upperFade: number } =>
-    targetOverMain() ? cutawayState(rig.radius) : closedCut;
-  let cut = computeCut();
-  setCutaway(cut);
-  setHelipadFade(cut.upperFade); // helipad fades with the roof when the house opens
-  interior.visible = cut.upperFade < 0.5;
+  // to the fully-closed peel so the other campus buildings and the distant
+  // city are never sliced. The state below is applied once at boot so the
+  // starting preset (overview closed / er open) is correct on the very first
+  // frame.
+  const peelCfg: PeelCfg = {
+    storeyCount: buildingPlan.storeyCount,
+    storeyH: buildingPlan.storeyH,
+    baseY: hospitalBaseY, // real local ground elevation (see hospitalBaseY above): the shell/interior island is lifted onto the DEM, so the cut bands (positionWorld.y) must start here too
+    startR: kswPeel.startR,
+    endR: kswPeel.endR,
+  };
+  const computePeel = (): PeelState => (targetOverMain() ? peelState(rig.radius, peelCfg) : closedPeel(peelCfg));
+  let peel = computePeel();
+  const applyPeel = (s: PeelState): void => {
+    setCutaway({ discardAbove: s.discardAbove, bandLo: s.bandLo, bandFade: s.bandFade, roofFade: s.roofFade });
+    setHelipadFade(s.roofFade);
+    interior.visible = s.p > 0.02;
+    interiorCtl.setStoreyFades(s.storeyFades);
+  };
+  applyPeel(peel);
 
   let frameCount = 0;
   let prevT = 0;
@@ -1599,27 +1648,25 @@ async function boot(): Promise<void> {
     fadeWasMid = fadeIsMid;
     prevFade = fade;
 
-    // ── dollhouse cutaway (T18): drive the main-building slice + interior
-    // reveal off the zoom radius. Crossing the fade < 0.15 (slice engages) or
-    // fade < 0.5 (interior appears) thresholds refreshes GI + the cached shadow
-    // map so the freshly-revealed ground floor lights correctly.
-    const nextCut = computeCut();
-    const wasSliced = cut.upperFade < 0.15;
-    const nowSliced = nextCut.upperFade < 0.15;
-    const wasOpen = cut.upperFade < 0.5;
-    const nowOpen = nextCut.upperFade < 0.5;
-    if (nextCut.cutH !== cut.cutH || nextCut.upperFade !== cut.upperFade) {
-      setCutaway(nextCut);
-      setHelipadFade(nextCut.upperFade);
-    }
-    if (nowOpen !== wasOpen) interior.visible = nowOpen;
-    if (nowSliced !== wasSliced || nowOpen !== wasOpen) {
-      // the sliced/open state flipped: the probe + shadow map see a different
-      // scene (upper mass gone, interior revealed) — refresh both.
+    // ── storey peel: drive shell dissolve + per-storey interior fades off the
+    // zoom radius. GI + the cached shadow map refresh when the peel crosses a
+    // storey boundary or settles (fully closed / fully open) — same policy as
+    // the roof fade above.
+    const nextPeel = computePeel();
+    if (nextPeel.p !== peel.p) applyPeel(nextPeel);
+    const stepChanged = Math.floor(nextPeel.p) !== Math.floor(peel.p);
+    const settled = (nextPeel.p === 0 || nextPeel.p === peelCfg.storeyCount) && nextPeel.p !== peel.p;
+    // also refresh when the interior visibility flips (same threshold as
+    // applyPeel's interior.visible = s.p > 0.02): the probe/shadow pass sees a
+    // different scene the instant the interior first appears/disappears, even
+    // if that doesn't happen to land on a storey-boundary or settle crossing.
+    const visWas = peel.p > 0.02;
+    const visNow = nextPeel.p > 0.02;
+    if (stepChanged || settled || visNow !== visWas) {
       giScheduler.markDirty();
       if (shadowCached) sun.shadow.needsUpdate = true;
     }
-    cut = nextCut;
+    peel = nextPeel;
 
     focusU.value = rig.radius;
     // edge mist is a close-up treatment; from the overview it would read as
@@ -1638,6 +1685,7 @@ async function boot(): Promise<void> {
     kswSnapshot.target[0] = rig.target[0];
     kswSnapshot.target[1] = rig.target[1];
     kswSnapshot.target[2] = rig.target[2];
+    kswSnapshot.peel!.p = peel.p;
     for (const b of blinkers) b.visible = Math.sin(t * 6) > -0.2;
     for (const r of rotors) r.rotation.y = t * 1.4;
     planBudget.remaining = kswAgents.planBudget;

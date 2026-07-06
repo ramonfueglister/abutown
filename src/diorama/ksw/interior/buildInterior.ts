@@ -15,6 +15,7 @@ import { kswPalette, palette, radii } from '../../designTokens';
 import type { FloorPlan } from '../floorPlan';
 import { box, buildProp } from '../props';
 import { FLOOR_H, buildRoomWalls, buildSign, withFloorLift } from '../building';
+import type { BuildingPlan } from './generatePlan';
 
 export function buildInterior(plan: FloorPlan): THREE.Group {
   const group = new THREE.Group();
@@ -47,4 +48,60 @@ export function buildInterior(plan: FloorPlan): THREE.Group {
   for (const p of plan.corridorProps) group.add(withFloorLift(buildProp(p)));
 
   return group;
+}
+
+export type BuildingInteriorControl = {
+  group: THREE.Group;
+  setStoreyFades(fades: number[]): void;
+};
+
+// Stack one buildInterior() group per storey and give every storey its own
+// material clones so the peel can fade levels independently. Clones are made
+// ONCE at build (Map keyed by the original, so materials shared within a
+// storey stay shared); setStoreyFades only writes opacity + visibility.
+export function buildBuildingInterior(bp: BuildingPlan, frame: { angle: number }): BuildingInteriorControl {
+  const group = new THREE.Group();
+  group.name = 'kswInterior';
+  group.rotation.y = frame.angle;
+
+  const storeyMats: THREE.Material[][] = [];
+  const storeyGroups: THREE.Group[] = [];
+  bp.storeys.forEach((plan, level) => {
+    const storey = buildInterior(plan);
+    storey.name = `storey-${level}`;
+    storey.userData.level = level;
+    storey.position.y = level * bp.storeyH;
+
+    const clones = new Map<THREE.Material, THREE.Material>();
+    storey.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const swap = (m: THREE.Material): THREE.Material => {
+        let c = clones.get(m);
+        if (!c) {
+          c = m.clone();
+          c.transparent = true;
+          c.depthWrite = true;
+          clones.set(m, c);
+        }
+        return c;
+      };
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+    });
+    storeyMats.push([...clones.values()]);
+    storeyGroups.push(storey);
+    group.add(storey);
+  });
+
+  const setStoreyFades = (fades: number[]): void => {
+    bp.storeys.forEach((_, level) => {
+      const storey = storeyGroups[level];
+      if (!storey) return;
+      const fade = fades[level] ?? 0;
+      storey.visible = fade > 0.02;
+      for (const m of storeyMats[level]) m.opacity = fade;
+    });
+  };
+
+  return { group, setStoreyFades };
 }
