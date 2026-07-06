@@ -32,11 +32,11 @@ const tileSpecs: TreeSpec[] = Array.from({ length: 25 }, (_, i) => ({
 
 const KEY = 'L2/12_7';
 
-function makeLayer(): TreeLayer {
+function makeLayer(atlas: THREE.Texture = new THREE.Texture()): TreeLayer {
   const layer = buildTreeLayer(bootSpecs);
   // Per-tile impostor meshes share the boot-baked atlas texture; under vitest
   // (no GPU) a bare Texture object suffices — mesh construction is pure JS.
-  layer.setImpostorContext(new THREE.Texture(), allArchetypes().length);
+  layer.setImpostorContext(atlas, allArchetypes().length);
   return layer;
 }
 
@@ -112,6 +112,31 @@ describe('TreeLayer tile pools', () => {
     expect(fullCount(layer)).toBe(bootSpecs.length);
   });
 
+  it('#142 removeTileTrees disposed das per-Tile-Material, aber NIE die geteilte Atlas-Textur', () => {
+    const atlas = new THREE.Texture();
+    const atlasDispose = vi.spyOn(atlas, 'dispose');
+    const layer = makeLayer(atlas);
+
+    layer.addTileTrees(KEY, tileSpecs);
+    const imp = tileImpostor(layer, KEY)!;
+    const matDispose = vi.spyOn(imp.material as THREE.Material, 'dispose');
+
+    layer.removeTileTrees(KEY);
+    expect(matDispose).toHaveBeenCalledTimes(1);
+    expect(atlasDispose).not.toHaveBeenCalled();
+
+    // Der geteilte Atlas lebt weiter: ein ANDERES Tile baut danach noch ein
+    // funktionierendes Impostor-Feld auf derselben Textur.
+    const OTHER = 'L2/5_9';
+    layer.addTileTrees(OTHER, tileSpecs);
+    const other = tileImpostor(layer, OTHER)!;
+    expect(other.count).toBe(tileSpecs.length);
+    expect(atlasDispose).not.toHaveBeenCalled();
+    // …und dessen Remove disposed wieder nur SEIN Material, nicht den Atlas.
+    layer.removeTileTrees(OTHER);
+    expect(atlasDispose).not.toHaveBeenCalled();
+  });
+
   it('throws on duplicate add for the same key', () => {
     const layer = makeLayer();
     layer.addTileTrees(KEY, tileSpecs);
@@ -134,6 +159,35 @@ describe('TreeLayer tile pools', () => {
     expect(tileImpostor(layer, KEY)?.count).toBe(tileSpecs.length);
     layer.compactNear(TILE_X, TILE_Z);
     expect(fullCount(layer)).toBe(tileSpecs.length);
+  });
+
+  it('#141 Subzellen-Keys (L1/x_y#i_j): add/remove/restore wirkt pro Subzelle unabhängig', () => {
+    const layer = makeLayer();
+    const bootN = layer.instances.length;
+    const keyA = 'L1/2_2#1_3';
+    const keyB = 'L1/2_2#2_0';
+    const specsA = tileSpecs.slice(0, 10);
+    const specsB = tileSpecs.slice(10);
+
+    layer.addTileTrees(keyA, specsA);
+    layer.addTileTrees(keyB, specsB);
+    expect(layer.tileKeys()).toEqual([keyA, keyB]);
+    expect(layer.instances.length).toBe(bootN + tileSpecs.length);
+    expect(tileImpostor(layer, keyA)?.count).toBe(specsA.length);
+    expect(tileImpostor(layer, keyB)?.count).toBe(specsB.length);
+
+    // L2 wird live: nur Subzelle A verschwindet, B bleibt vollständig.
+    layer.removeTileTrees(keyA);
+    expect(layer.tileKeys()).toEqual([keyB]);
+    expect(layer.instances.length).toBe(bootN + specsB.length);
+    expect(tileImpostor(layer, keyA)).toBeUndefined();
+    expect(tileImpostor(layer, keyB)?.count).toBe(specsB.length);
+
+    // L2 entlädt: Restore der Subzelle A mit den gehaltenen Specs.
+    layer.addTileTrees(keyA, specsA);
+    expect(layer.tileKeys()).toEqual([keyB, keyA]);
+    expect(layer.instances.length).toBe(bootN + tileSpecs.length);
+    expect(tileImpostor(layer, keyA)?.count).toBe(specsA.length);
   });
 
   it('addTileTrees without impostor context throws (no silent impostor-less pool)', () => {

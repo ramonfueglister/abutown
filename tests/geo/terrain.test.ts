@@ -1,7 +1,7 @@
 // tests/geo/terrain.test.ts
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { buildTerrainTileMesh, buildL0Backdrop } from '../../src/diorama/ksw/geo/terrain';
+import { buildTerrainTileMesh, buildL0Backdrop, buildTileSubCellTerrain } from '../../src/diorama/ksw/geo/terrain';
 import type { DecodedTile } from '../../src/diorama/ksw/geo/worldData';
 import { terrainLook } from '../../src/diorama/designTokens';
 import { Landcover } from '../../src/proto/world_pb';
@@ -106,5 +106,59 @@ describe('buildL0Backdrop', () => {
       expect(mesh.receiveShadow).toBe(true);
       expect(mesh.castShadow).toBe(false);
     }
+  });
+});
+
+describe('buildTileSubCellTerrain (#141 per-sub-cell L1 hide)', () => {
+  // L1-shaped synthetic tile: gridN=5, cellSize=1 → extent 4 m, 4×4 sub-cells
+  // of 1 m each; sub-cell borders fall on source vertices here, and the
+  // resample step is cellSize/2 (nSub = 3 per cell).
+  function makeL1(): DecodedTile {
+    const gridN = 5;
+    const height = Array.from({ length: gridN * gridN }, (_, n) => n * 0.5);
+    const landcover = new Array(gridN * gridN).fill(Landcover.MEADOW);
+    return {
+      level: 1,
+      x: 2,
+      y: 3,
+      tile: { gridN, cellSize: 1, originX: 0, originZ: 0, height, landcover } as unknown as DecodedTile['tile'],
+    };
+  }
+  const { group, meshes } = buildTileSubCellTerrain(makeL1(), 4);
+
+  it('produces 16 sub-meshes keyed "i_j" and named with the tile key', () => {
+    expect(group.children.length).toBe(16);
+    expect(meshes.size).toBe(16);
+    expect(meshes.get('1_2')!.name).toBe('tileTerrain/L1/2_3#1_2');
+    expect(group.name).toBe('tileTerrainCells/L1/2_3');
+  });
+
+  it('resample is exact at source vertices (bilinear identity)', () => {
+    // Sub-cell (0,0) covers x/z ∈ [0,1]; source heights: h(i,j) = (j*5+i)*0.5.
+    const pos = meshes.get('0_0')!.geometry.attributes.position;
+    const at = new Map<string, number>();
+    for (let n = 0; n < pos.count; n++) at.set(`${pos.getX(n)}_${pos.getZ(n)}`, pos.getY(n));
+    expect(at.get('0_0')).toBeCloseTo(0);
+    expect(at.get('1_0')).toBeCloseTo(0.5);
+    expect(at.get('0_1')).toBeCloseTo(2.5);
+    expect(at.get('1_1')).toBeCloseTo(3);
+    // Mid-cell point lies on the bilinear surface: (0.5, 0.5) → mean of corners.
+    expect(at.get('0.5_0.5')).toBeCloseTo((0 + 0.5 + 2.5 + 3) / 4);
+  });
+
+  it('seams are watertight between adjacent sub-cells', () => {
+    const edge = (m: THREE.Mesh, x: number): Map<number, number> => {
+      const pos = m.geometry.attributes.position;
+      const out = new Map<number, number>();
+      for (let n = 0; n < pos.count; n++) {
+        if (Math.abs(pos.getX(n) - x) < 1e-9) out.set(pos.getZ(n), pos.getY(n));
+      }
+      return out;
+    };
+    const a = edge(meshes.get('0_0')!, 1);
+    const b = edge(meshes.get('1_0')!, 1);
+    expect(a.size).toBeGreaterThan(0);
+    expect(a.size).toBe(b.size);
+    for (const [z, y] of a) expect(b.get(z)).toBeCloseTo(y, 9);
   });
 });

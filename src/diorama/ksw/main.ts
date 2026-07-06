@@ -61,7 +61,7 @@ import { loadWorld, anchorGroundHeight, makeHeightSampler, fetchTileBin, decodeT
 import { buildL0Backdrop } from './geo/terrain';
 import { loadCorridorMask } from './geo/corridorMask';
 import { TileStreamer, tileCenter, type TileKey, type TileMeta } from './geo/tileStreamer';
-import { materializeTile, type TileContent } from './geo/tileContent';
+import { materializeTile, subCellKey, type TileContent } from './geo/tileContent';
 import type { TileRef, WorldTile } from '../../proto/world_pb.js';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
@@ -156,6 +156,11 @@ declare global {
     __trees?: {
       archetypes: number;
       fullCount: () => number;
+      // #141 smoke surface: registered tree-pool keys (per-sub-cell keys
+      // `L1/x_y#i_j` + whole-tile L2 keys) and the total impostor instance
+      // count over all pools — proves the mid-ring forest is registered.
+      tileKeys: () => string[];
+      impostorCount: () => number;
       windAmp: () => number;
       // Re-aim the camera at a world (x, z) with an optional zoom radius, then
       // force an immediate near-set recompaction — lets the Task 7 browser
@@ -800,6 +805,13 @@ async function boot(): Promise<void> {
   window.__trees = {
     archetypes: allArchetypes().length,
     fullCount: () => treeLayer.fullMeshes.reduce((s, m) => s + m.count, 0),
+    // #141 smoke surface: registered tile-pool keys (subcell keys L1/x_y#i_j)
+    // and the total far-field impostor instance count across all pools.
+    tileKeys: () => treeLayer.tileKeys(),
+    impostorCount: () =>
+      treeLayer.group.children
+        .filter((c): c is THREE.InstancedMesh => c.name.startsWith('treeImpostors'))
+        .reduce((s, m) => s + m.count, 0),
     windAmp: () => windAmpU.value as number,
     lookAt: (x: number, z: number, radius?: number) => {
       rig = {
@@ -854,9 +866,11 @@ async function boot(): Promise<void> {
   // bake), so an L1 tile whose region has any live L2 tile would double-render
   // them. The bake subdivides 4x4 per level (LEVEL_CELLS = [1, 4, 16] in
   // scripts/geo/lib/tiles.mjs — 16 L1 vs 256 L2 tiles), so L2/x_y lies under
-  // L1/(x>>2)_(y>>2). We count live L2 tiles per L1 parent; a covered L1 tile
-  // hides its whole group (terrain + massing) and unregisters its tree pool,
-  // and reappears when the last covering L2 tile unloads.
+  // L1/(x>>2)_(y>>2). #141: L1 tiles are materialized in 4×4 sub-cells exactly
+  // congruent with their L2 children; a live L2 tile hides ONLY its one
+  // sub-cell (terrain + massing meshes + that sub-cell's tree pool) and the
+  // sub-cell is restored when the L2 tile unloads — hiding the whole 5-km
+  // group killed the mid-ring forest/massing (scratch/streaming/forest.png).
   const plateRect = { x: cityMeta.plate.cx, z: cityMeta.plate.cz, w: cityMeta.plate.w, d: cityMeta.plate.d };
   // Tree-only exclusion, wider than plateRect: converts `samplerRect` (the
   // min/max rect already covering the boot nature-tree bbox, see its
@@ -880,7 +894,6 @@ async function boot(): Promise<void> {
     tileMetas.push({ key, level: ref.level, cx, cz });
   }
   const liveTileContent = new Map<TileKey, TileContent>();
-  const l2CoverCount = new Map<TileKey, number>(); // L1 key → live L2 children
   const registeredTreeKeys = new Set<string>();
   let disposedTileCount = 0;
   // Live streamed tiles (decoded) feed the mutable height sampler: rebuilt on
@@ -902,23 +915,41 @@ async function boot(): Promise<void> {
       registeredTreeKeys.delete(content.treeKey);
     }
   };
-  const l1KeyFor = (ref: TileRef): TileKey => `L1/${ref.x >> 2}_${ref.y >> 2}`;
-  const applyL1Visibility = (l1Key: TileKey): void => {
-    const content = liveTileContent.get(l1Key);
-    if (!content) return;
-    const covered = (l2CoverCount.get(l1Key) ?? 0) > 0;
-    content.group.visible = !covered;
-    setTileTrees(content, !covered);
+  // #141 per-sub-cell L1 hide: an L1 tile is materialized in 4×4 sub-cells
+  // congruent with its L2 children (tileContent.l1SubCellOfL2), and a live L2
+  // tile hides/restores exactly the ONE sub-cell it replaces — meshes via
+  // `visible`, trees via the sub-cell's own pool key (add/removeTileTrees
+  // with the held specs). Coverage is derived directly from liveTileContent
+  // (exactly one L2 child per sub-cell), so no separate cover counter exists.
+  const applyL1SubCell = (l1x: number, l1y: number, i: number, j: number): void => {
+    const content = liveTileContent.get(`L1/${l1x}_${l1y}`);
+    const sc = content?.subCells?.get(subCellKey(i, j));
+    if (!sc) return;
+    const covered = liveTileContent.has(`L2/${l1x * 4 + i}_${l1y * 4 + j}`);
+    for (const m of sc.meshes) m.visible = !covered;
+    if (!sc.treeKey) return;
+    if (!covered && !registeredTreeKeys.has(sc.treeKey)) {
+      treeLayer.addTileTrees(sc.treeKey, sc.trees);
+      registeredTreeKeys.add(sc.treeKey);
+    } else if (covered && registeredTreeKeys.has(sc.treeKey)) {
+      treeLayer.removeTileTrees(sc.treeKey);
+      registeredTreeKeys.delete(sc.treeKey);
+    }
+  };
+  const applyAllL1SubCells = (l1x: number, l1y: number): void => {
+    for (let j = 0; j < 4; j++) {
+      for (let i = 0; i < 4; i++) applyL1SubCell(l1x, l1y, i, j);
+    }
   };
   // Backdrop cell (L2-index space) hides when fine terrain renders above it:
-  // its own L2 tile is live, or its L1 parent is live AND visible (a covered
-  // L1 group is invisible — its cells without a live L2 fall back to the
-  // backdrop instead of leaving a hole).
+  // its own L2 tile is live, or its L1 parent is live — a live L1 always
+  // renders terrain in every sub-cell not covered by a live L2 (#141: only
+  // the exact covered sub-cells are hidden, and those ARE covered by the L2's
+  // fine terrain), so "L1 live" alone guarantees the cell is covered.
   const updateBackdropCell = (x: number, y: number): void => {
     const mesh = backdrop.meshes.get(`${x}_${y}`);
     if (!mesh) return;
-    const l1 = liveTileContent.get(`L1/${x >> 2}_${y >> 2}`);
-    mesh.visible = !(liveTileContent.has(`L2/${x}_${y}`) || (l1 !== undefined && l1.group.visible));
+    mesh.visible = !(liveTileContent.has(`L2/${x}_${y}`) || liveTileContent.has(`L1/${x >> 2}_${y >> 2}`));
   };
   // Any ready/unload in an L1 region can flip that L1's visibility, which
   // affects all 16 backdrop cells under it — refresh the whole region.
@@ -959,13 +990,13 @@ async function boot(): Promise<void> {
       liveTileContent.set(meta.key, content);
       if (ref.level === 2) {
         setTileTrees(content, true);
-        const l1Key = l1KeyFor(ref);
-        l2CoverCount.set(l1Key, (l2CoverCount.get(l1Key) ?? 0) + 1);
-        applyL1Visibility(l1Key);
+        // Hide exactly the parent L1 sub-cell this L2 tile replaces.
+        applyL1SubCell(ref.x >> 2, ref.y >> 2, ref.x & 3, ref.y & 3);
         refreshBackdropRegion(ref.x >> 2, ref.y >> 2);
       } else {
-        // L1: visibility + tree registration depend on current L2 cover.
-        applyL1Visibility(meta.key);
+        // L1: per-sub-cell visibility + tree registration follow the current
+        // L2 cover (covered sub-cells stay hidden/unregistered from the start).
+        applyAllL1SubCells(ref.x, ref.y);
         refreshBackdropRegion(ref.x, ref.y);
       }
     },
@@ -976,16 +1007,25 @@ async function boot(): Promise<void> {
       streamedDecoded.delete(key);
       rebuildHeightSampler();
       setTileTrees(content, false);
+      // Sub-celled (L1) tiles register trees per sub-cell — unregister every
+      // pool this tile still holds before its group leaves the scene.
+      if (content.subCells) {
+        for (const sc of content.subCells.values()) {
+          if (sc.treeKey && registeredTreeKeys.has(sc.treeKey)) {
+            treeLayer.removeTileTrees(sc.treeKey);
+            registeredTreeKeys.delete(sc.treeKey);
+          }
+        }
+      }
       streamRoot.remove(content.group);
       content.dispose();
       disposedTileCount++;
       const ref = refByKey.get(key)!;
       if (ref.level === 2) {
-        const l1Key = l1KeyFor(ref);
-        const n = (l2CoverCount.get(l1Key) ?? 1) - 1;
-        if (n <= 0) l2CoverCount.delete(l1Key);
-        else l2CoverCount.set(l1Key, n);
-        applyL1Visibility(l1Key);
+        // Restore the parent L1 sub-cell this L2 tile was covering (the
+        // liveTileContent delete above already flipped `covered` to false):
+        // meshes back to visible, tree pool re-registered from the held specs.
+        applyL1SubCell(ref.x >> 2, ref.y >> 2, ref.x & 3, ref.y & 3);
         refreshBackdropRegion(ref.x >> 2, ref.y >> 2);
       } else {
         refreshBackdropRegion(ref.x, ref.y);

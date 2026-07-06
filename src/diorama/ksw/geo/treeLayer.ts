@@ -162,8 +162,9 @@ export type TreeLayer = {
    * Throws on a duplicate key or when the impostor context is missing. */
   addTileTrees(key: string, specs: TreeSpec[]): void;
   /** Unregisters a tile: instances leave grid + compaction; the tile's
-   * impostor mesh is disposed (geometry + instance buffers — the atlas
-   * texture and material nodes reference shared state and are NOT disposed). */
+   * impostor mesh is disposed (geometry + instance buffers + the per-mesh
+   * NodeMaterial (#142) — the shared atlas TEXTURE is never disposed:
+   * material.dispose() does not cascade into referenced textures). */
   removeTileTrees(key: string): void;
   /** Registered tile-pool keys, in insertion order (smoke assertion). */
   tileKeys(): string[];
@@ -435,11 +436,18 @@ export function buildTreeLayer(
         if (!gone.has(instances[r])) instances[w++] = instances[r];
       }
       instances.length = w;
-      // Dispose the tile's impostor draw: geometry + instance buffers. The
-      // atlas texture and the material's shared nodes (impostorLightU, the
-      // atlas texture node) are shared across meshes — NOT disposed here.
+      // Dispose the tile's impostor draw: geometry + instance buffers + the
+      // per-mesh NodeMaterial (#142: buildImpostorMeshFor creates ONE material
+      // per tile mesh; never disposing it leaked a material + WebGPU pipeline-
+      // cache entry per tile churn cycle). material.dispose() only fires the
+      // material's own dispose event — three NEVER cascades it into referenced
+      // textures, so the SHARED atlas texture (and the shared impostorLightU
+      // uniform node) survive for every other live/future tile mesh. The
+      // pool-subkey re-add test proves a later addTileTrees still renders off
+      // the same atlas.
       group.remove(pool.impostor);
       pool.impostor.geometry.dispose();
+      (pool.impostor.material as THREE.Material).dispose();
       pool.impostor.dispose();
       layer.compactNear(lastCamX, lastCamZ);
     },

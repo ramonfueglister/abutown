@@ -4,6 +4,13 @@
 // mode) ONE merged building-prism mesh, plus the tile's filtered TreeSpec[]
 // for Task 5's instancing layer — no tree meshes are built here.
 //
+// #141: L1 tiles (level === 1) are materialized in 4×4 SUB-CELLS congruent
+// with their L2 children — terrain split into 16 resampled sub-meshes,
+// massing partitioned by footprint centroid into per-sub-cell merged meshes,
+// trees partitioned into per-sub-cell pool keys (`L1/x_y#i_j`) — so main.ts
+// can hide exactly the one region a live L2 tile replaces instead of the
+// whole 5-km group (which killed the mid-ring forest + massing).
+//
 // Coordinate convention (matches main.ts's
 // `terrainRoot.position.y = -anchorGroundHeight(world)` pattern): all tile
 // content is built in ABSOLUTE bake metres (DEM heights, real bBaseY
@@ -20,7 +27,7 @@
 // only, never materials.
 import * as THREE from 'three/webgpu';
 import { palette } from '../../designTokens';
-import { buildTerrainTileMesh } from './terrain';
+import { buildTerrainTileMesh, buildTileSubCellTerrain } from './terrain';
 import { mergeTinted, ringBand, tintedClay } from './cityMassing';
 import { tileTreeSpecs } from './worldData';
 import type { DecodedTile } from './worldData';
@@ -55,14 +62,47 @@ export type MaterializeCtx = {
   trees: boolean;
 };
 
+// ── #141 per-sub-cell L1 hide: L2 ↔ L1-sub-cell mapping ─────────────────────
+// The bake subdivides 4×4 per level (LEVEL_CELLS = [1, 4, 16]), so every L2
+// tile (x, y) is exactly one quarter-quarter of L1 (x>>2, y>>2) — sub-cell
+// (x & 3, y & 3). L1 tiles are materialized in 16 sub-cells congruent with
+// their L2 children so main.ts can hide precisely the region a live L2 tile
+// replaces (terrain + massing + tree pool) instead of the whole 5-km group.
+export const SUB_CELLS_PER_SIDE = 4;
+
+export function l1SubCellOfL2(x: number, y: number): { l1x: number; l1y: number; i: number; j: number } {
+  return { l1x: x >> 2, l1y: y >> 2, i: x & 3, j: y & 3 };
+}
+
+export function subCellKey(i: number, j: number): string {
+  return `${i}_${j}`;
+}
+
+export type SubCellContent = {
+  /** This sub-cell's scene meshes (terrain sub-mesh + optional massing mesh)
+   * — main.ts toggles `visible` on exactly these when the congruent L2 tile
+   * arrives/leaves. */
+  meshes: THREE.Mesh[];
+  /** Tree-pool key (`L1/x_y#i_j`) for treeLayer add/removeTileTrees; null
+   * when no trees survived the exclusion rects in this sub-cell. */
+  treeKey: string | null;
+  /** The sub-cell's filtered specs, held for re-registration on L2 unload. */
+  trees: TreeSpec[];
+};
+
 export type TileContent = {
   key: TileKey;
   group: THREE.Group;
   /** Identifier Task 5 uses to (un)register this tile's tree batch; null when
-   * the tile contributes no trees (trees:false or none survived the plate). */
+   * the tile contributes no trees (trees:false or none survived the plate) —
+   * and ALWAYS null for sub-celled (L1) tiles, whose trees register per
+   * sub-cell via `subCells` instead. */
   treeKey: string | null;
   /** Plate-filtered specs for Task 5's instancing — no meshes built here. */
   trees: TreeSpec[];
+  /** L1 only (level === 1): the 16 sub-cells keyed `subCellKey(i, j)`; null
+   * for L0/L2 tiles, which keep the single-mesh whole-tile behavior. */
+  subCells: Map<string, SubCellContent> | null;
   dispose(): void;
 };
 
@@ -114,15 +154,47 @@ export function materializeTile(dec: DecodedTile, ctx: MaterializeCtx): TileCont
 
   let plateSkipped = 0;
 
-  // --- Terrain (always) -----------------------------------------------------
-  const terrain = buildTerrainTileMesh(dec, { corridorMask: ctx.corridorMask });
-  terrain.name = `tileTerrain/${key}`;
-  group.add(terrain);
+  // #141: L1 tiles are materialized in 4×4 sub-cells congruent with their L2
+  // children (see l1SubCellOfL2), so a live L2 tile can hide exactly the one
+  // region it replaces. L0/L2 keep the single-mesh whole-tile behavior.
+  const subbed = level === 1;
+  const subCells: Map<string, SubCellContent> | null = subbed ? new Map() : null;
+  if (subCells) {
+    for (let j = 0; j < SUB_CELLS_PER_SIDE; j++) {
+      for (let i = 0; i < SUB_CELLS_PER_SIDE; i++) {
+        subCells.set(subCellKey(i, j), { meshes: [], treeKey: null, trees: [] });
+      }
+    }
+  }
+  // Sub-cell index of a world point — clamped so content that sits exactly on
+  // (or a hair past) the tile border still lands in a valid sub-cell.
+  const subExtent = ((tile.gridN - 1) * tile.cellSize) / SUB_CELLS_PER_SIDE;
+  const subIdxOf = (px: number, pz: number): [number, number] => [
+    Math.min(SUB_CELLS_PER_SIDE - 1, Math.max(0, Math.floor((px - tile.originX) / subExtent))),
+    Math.min(SUB_CELLS_PER_SIDE - 1, Math.max(0, Math.floor((pz - tile.originZ) / subExtent))),
+  ];
 
-  // --- Buildings: one merged prism mesh per tile (L2 only) -------------------
+  // --- Terrain (always) -----------------------------------------------------
+  if (subCells) {
+    // 16 resampled sub-meshes, seam-exact on the source bilinear surface.
+    const { group: cellsGroup, meshes } = buildTileSubCellTerrain(dec, SUB_CELLS_PER_SIDE, {
+      corridorMask: ctx.corridorMask,
+    });
+    group.add(cellsGroup);
+    for (const [k, mesh] of meshes) subCells.get(k)!.meshes.push(mesh);
+  } else {
+    const terrain = buildTerrainTileMesh(dec, { corridorMask: ctx.corridorMask });
+    terrain.name = `tileTerrain/${key}`;
+    group.add(terrain);
+  }
+
+  // --- Buildings: one merged prism mesh per tile (or per L1 sub-cell) --------
   let buildingCount = 0;
   if (ctx.buildings && tile.bHeight.length > 0) {
-    const prisms: BakedMesh[] = [];
+    // Partition slot per sub-cell (footprint-centroid assignment) — or one
+    // global slot for the un-subbed L0/L2 path.
+    const slots = subbed ? SUB_CELLS_PER_SIDE * SUB_CELLS_PER_SIDE : 1;
+    const prismsBySlot: BakedMesh[][] = Array.from({ length: slots }, () => []);
     for (let i = 0; i < tile.bHeight.length; i++) {
       const start = tile.bFpOffset[i];
       const end = i + 1 < tile.bFpOffset.length ? tile.bFpOffset[i + 1] : tile.bFpX.length;
@@ -141,19 +213,26 @@ export function materializeTile(dec: DecodedTile, ctx: MaterializeCtx): TileCont
         plateSkipped++;
         continue;
       }
-      prisms.push(prismParts(fp, tile.bBaseY[i], tile.bBaseY[i] + tile.bHeight[i]));
+      const [si, sj] = subbed ? subIdxOf(cx, cz) : [0, 0];
+      prismsBySlot[subbed ? sj * SUB_CELLS_PER_SIDE + si : 0].push(
+        prismParts(fp, tile.bBaseY[i], tile.bBaseY[i] + tile.bHeight[i]),
+      );
     }
-    if (prisms.length > 0) {
+    for (let slot = 0; slot < slots; slot++) {
+      const prisms = prismsBySlot[slot];
+      if (prisms.length === 0) continue;
       // mergeTinted only calls `pick(b)` — wrap the prisms so we reuse its
       // per-building tint + merge path without inventing a parallel merger.
       const wrapped = prisms.map((prism) => ({ prism })) as unknown as BakedBuilding[];
       const geo = mergeTinted(wrapped, (b) => (b as unknown as { prism: BakedMesh }).prism, palette.creamBase);
       const mesh = new THREE.Mesh(geo, sharedBuildingMat());
-      mesh.name = `tileBuildings/${key}`;
+      const cellK = subCellKey(slot % SUB_CELLS_PER_SIDE, Math.floor(slot / SUB_CELLS_PER_SIDE));
+      mesh.name = subbed ? `tileBuildings/${key}#${cellK}` : `tileBuildings/${key}`;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
-      buildingCount = prisms.length;
+      if (subCells) subCells.get(cellK)!.meshes.push(mesh);
+      buildingCount += prisms.length;
     }
   }
 
@@ -175,6 +254,18 @@ export function materializeTile(dec: DecodedTile, ctx: MaterializeCtx): TileCont
     } else {
       trees = specs;
     }
+    if (subCells) {
+      // Partition the surviving specs into the sub-cells; each non-empty
+      // sub-cell gets its own tree-pool key so main.ts can add/remove pools
+      // per L2 arrival/departure.
+      for (const s of trees) {
+        const [si, sj] = subIdxOf(s.x, s.z);
+        subCells.get(subCellKey(si, sj))!.trees.push(s);
+      }
+      for (const [k, sc] of subCells) {
+        if (sc.trees.length > 0) sc.treeKey = `${key}#${k}`;
+      }
+    }
   }
 
   group.userData.buildingCount = buildingCount;
@@ -191,5 +282,14 @@ export function materializeTile(dec: DecodedTile, ctx: MaterializeCtx): TileCont
     });
   };
 
-  return { key, group, treeKey: trees.length > 0 ? key : null, trees, dispose };
+  return {
+    key,
+    group,
+    // Sub-celled tiles register their trees per sub-cell (subCells[*].treeKey)
+    // — a whole-tile treeKey would double-register them.
+    treeKey: !subbed && trees.length > 0 ? key : null,
+    trees,
+    subCells,
+    dispose,
+  };
 }
