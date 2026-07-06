@@ -125,6 +125,23 @@ their surface height AND the terrain conforms toward it:
   rest) — i.e. graded terrain never pierces the road surface; plus the
   ribbon itself is level across its width by construction (it drapes on
   the profile).
+- **Terrain-discard (measured escalation, 2026-07-06):** grading (2.5 m
+  grid) + corridor-snap tile encoding brought p99 0.99 → 0.596 m but
+  cannot pass the budgets: adjacent parallel ways at conflicting profile
+  heights (footway 4.4 m above a service lane in ONE 12.5 m tile cell —
+  real-world retaining-wall situations) are unrepresentable in any
+  per-vertex heightfield. Definitive mechanism: the bake exports a
+  corridor mask; the terrain shader discards fragments inside road/rail
+  corridors, and ribbons gain side skirts (vertical aprons at the ribbon
+  edges, dropping to min(profile, local tile height) − 1 m) that close
+  the hole. Rendered terrain inside a corridor then does not exist —
+  piercing is impossible by construction.
+- **§9 metric v3 (same criterion, rendered truth):** the criterion "no
+  rendered terrain above the road surface" is unchanged; measurement
+  moves off the heightfield proxy: (a) the discard mask must cover 100 %
+  of corridor stations; (b) tileY − profileY budgets (v2 values) apply
+  only OUTSIDE the mask (blend band), where terrain still renders. Both
+  reported by the metric CLI.
 
 ## 6. Swiss markings & surfaces (render layer)
 
