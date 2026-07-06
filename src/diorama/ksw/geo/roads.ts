@@ -15,6 +15,28 @@ import type { RoadPath } from './geoData';
  * the drape is ~0, and by any caller without a world). */
 export type GroundYAt = (x: number, z: number) => number;
 
+/** Max centreline spacing when draping onto terrain. The Gemeinde bake has
+ * road segments up to ~217 m; a straight chord across rolling terrain cuts
+ * metres under the surface (or floats above it). 10 m ≈ the L2 terrain-grid
+ * relief scale, keeping the ribbon within decimetres of the ground. */
+const DRAPE_STEP_M = 10;
+
+/** Insert interpolated centreline points so no segment exceeds `step`.
+ * Inserted points lie ON the original segment, so miter joints at the
+ * original vertices are unaffected (straight-run normals in between). */
+function densify(pts: number[][], step: number): number[][] {
+  const out: number[][] = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1];
+    const [bx, bz] = pts[i];
+    const len = Math.hypot(bx - ax, bz - az);
+    const cuts = Math.ceil(len / step);
+    for (let k = 1; k < cuts; k++) out.push([ax + ((bx - ax) * k) / cuts, az + ((bz - az) * k) / cuts]);
+    out.push(pts[i]);
+  }
+  return out;
+}
+
 export function miterStrip(
   pts: number[][],
   width: number,
@@ -24,6 +46,7 @@ export function miterStrip(
   const positions: number[] = [];
   const indices: number[] = [];
   const half = width / 2;
+  if (pts.length >= 2 && groundYAt) pts = densify(pts, DRAPE_STEP_M);
   const n = pts.length;
   if (n < 2) return { positions, indices };
   for (let i = 0; i < n; i++) {
