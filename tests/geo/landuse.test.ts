@@ -98,6 +98,68 @@ describe('transformNature Slice-2', () => {
   });
 });
 
+describe('transformLanduse river water', () => {
+  it('maps natural=water to Landcover 6 (WATER)', () => {
+    const naturalWater = { type: 'way', tags: { natural: 'water' }, geometry: way.geometry };
+    const out = transformLanduse({ osmLanduse: { elements: [naturalWater] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+  });
+
+  it('maps waterway=riverbank to Landcover 6 (WATER)', () => {
+    const riverbank = { type: 'way', tags: { waterway: 'riverbank' }, geometry: way.geometry };
+    const out = transformLanduse({ osmLanduse: { elements: [riverbank] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+  });
+
+  it('emits a kind-6 ring for a water multipolygon relation with one closed outer', () => {
+    const rel = {
+      type: 'relation',
+      tags: { natural: 'water', water: 'river' },
+      members: [{ type: 'way', role: 'outer', geometry: way.geometry }],
+    };
+    const out = transformLanduse({ osmLanduse: { elements: [rel] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+    expect(out[0].ring.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('stitches split outer ways of a water relation into one ring', () => {
+    const a = { lon: ANCHOR.lon, lat: ANCHOR.lat };
+    const b = { lon: ANCHOR.lon + 0.002, lat: ANCHOR.lat };
+    const c = { lon: ANCHOR.lon + 0.002, lat: ANCHOR.lat + 0.002 };
+    const d = { lon: ANCHOR.lon, lat: ANCHOR.lat + 0.002 };
+    const rel = {
+      type: 'relation',
+      tags: { natural: 'water', water: 'river' },
+      members: [
+        { type: 'way', role: 'outer', geometry: [a, b, c] },
+        // second half shares both endpoints but runs a→d→c (reversed orientation)
+        { type: 'way', role: 'outer', geometry: [a, d, c] },
+        // inner (island) must be ignored
+        { type: 'way', role: 'inner', geometry: [a, b, c, a] },
+      ],
+    };
+    const out = transformLanduse({ osmLanduse: { elements: [rel] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+    // 4 distinct corners stitched into one closed ring
+    expect(out[0].ring.length).toBeGreaterThanOrEqual(4);
+    expect(out[0].ring[0]).toEqual(out[0].ring[out[0].ring.length - 1]);
+  });
+
+  it('ignores non-water relations (landuse relations stay way-only for now)', () => {
+    const rel = {
+      type: 'relation',
+      tags: { landuse: 'forest' },
+      members: [{ type: 'way', role: 'outer', geometry: way.geometry }],
+    };
+    const out = transformLanduse({ osmLanduse: { elements: [rel] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(0);
+  });
+});
+
 describe('waterRingsFrom', () => {
   it('returns only kind-6 (basin/reservoir → WATER) rings', () => {
     const items = [

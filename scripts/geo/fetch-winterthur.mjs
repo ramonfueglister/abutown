@@ -284,8 +284,14 @@ await overpass(
   `${OUT}/osm-transit.json`,
   100, // observed ~676
 );
+// river water (Töss/Eulach): natural=water polygons + waterway=riverbank
+// polygons join the landuse water rings so terrain grading treats them as
+// WATER too (§4.4 — grading must never touch water). Relations are NOT
+// expanded into multipolygon outer rings here (way-only) — see task-3b
+// report for measured coverage of this simplification.
 await overpass(
-  (bbox) => `[out:json][timeout:180];(way["landuse"](${bbox});rel["landuse"](${bbox}););out body geom;`,
+  (bbox) =>
+    `[out:json][timeout:180];(way["landuse"](${bbox});rel["landuse"](${bbox});way["natural"="water"](${bbox});relation["natural"="water"](${bbox});way["waterway"="riverbank"](${bbox}););out body geom;`,
   OSM_BBOX,
   `${OUT}/osm-landuse.json`,
   500, // observed ~4,483
