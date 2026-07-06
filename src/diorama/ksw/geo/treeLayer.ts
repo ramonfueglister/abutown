@@ -37,6 +37,7 @@ import { kswCity, kswCityStyle } from '../../designTokens';
 import { clayMat } from '../props';
 import { windAmpU, windDirU } from '../windUniform';
 import { allArchetypes, archetypeIndexFor, hash01, type TreeArchetype } from './treeArchetypes';
+import { buildImpostorMeshFor } from './treeImpostors';
 import type { TreeSpec } from './geoData';
 
 // Per-spot deterministic variety — ported verbatim from nature.ts so the
@@ -75,6 +76,10 @@ export type TreeInstance = {
 // is no visible gap during the LOD handoff.
 export const NEAR_TREE_DIST = kswCityStyle.lod.nearR * 1.1;
 
+// Task 5 capacity headroom for the GLOBAL full-detail meshes (see the cap
+// comment in buildTreeLayer). Exported for the capacity test.
+export const FULL_MESH_MIN_CAP = 4096;
+
 // Coarse spatial grid over the tree set, built once at layer construction.
 // Cell = 64 m; plain Map<string, TreeInstance[]> keyed by integer cell coords.
 const GRID_CELL = 64;
@@ -87,18 +92,33 @@ function cellOf(x: number, z: number): [number, number] {
   return [Math.floor(x / GRID_CELL), Math.floor(z / GRID_CELL)];
 }
 
+function gridAdd(grid: Map<string, TreeInstance[]>, inst: TreeInstance): void {
+  const [cx, cz] = cellOf(inst.spec.x, inst.spec.z);
+  const key = cellKey(cx, cz);
+  let bucket = grid.get(key);
+  if (!bucket) {
+    bucket = [];
+    grid.set(key, bucket);
+  }
+  bucket.push(inst);
+}
+
+// Identity-based removal — tile pools keep the exact TreeInstance refs they
+// inserted, so indexOf finds them; empty buckets are dropped to keep the map
+// from accumulating dead cells as tiles stream in and out.
+function gridRemove(grid: Map<string, TreeInstance[]>, inst: TreeInstance): void {
+  const [cx, cz] = cellOf(inst.spec.x, inst.spec.z);
+  const key = cellKey(cx, cz);
+  const bucket = grid.get(key);
+  if (!bucket) return;
+  const i = bucket.indexOf(inst);
+  if (i >= 0) bucket.splice(i, 1);
+  if (bucket.length === 0) grid.delete(key);
+}
+
 function buildGrid(instances: readonly TreeInstance[]): Map<string, TreeInstance[]> {
   const grid = new Map<string, TreeInstance[]>();
-  for (const inst of instances) {
-    const [cx, cz] = cellOf(inst.spec.x, inst.spec.z);
-    const key = cellKey(cx, cz);
-    let bucket = grid.get(key);
-    if (!bucket) {
-      bucket = [];
-      grid.set(key, bucket);
-    }
-    bucket.push(inst);
-  }
+  for (const inst of instances) gridAdd(grid, inst);
   return grid;
 }
 
@@ -130,6 +150,23 @@ export type TreeLayer = {
   instances: TreeInstance[]; // assignment result (impostors + compaction reuse it)
   setTreeShadows(on: boolean): void;
   compactNear(camX: number, camZ: number): void; // Task 4 fills this; Task 3 ships it as full-refill
+  // ── Task 5 (M3 streaming): dynamic per-tile pools ────────────────────────
+  // Full-detail meshes stay GLOBAL — compactNear pulls the near set from ALL
+  // pools (boot stand + streamed tiles) via the shared spatial grid. Only the
+  // far-field impostor quads are per-tile: each addTileTrees builds one small
+  // InstancedMesh (shared atlas texture) that removeTileTrees disposes again.
+  /** Shared impostor atlas for per-tile impostor meshes. Must be called once
+   * (after bakeImpostorAtlas) before the first addTileTrees. */
+  setImpostorContext(atlas: THREE.Texture, archCount: number): void;
+  /** Registers a tile's trees: assignment + grid + per-tile impostor mesh.
+   * Throws on a duplicate key or when the impostor context is missing. */
+  addTileTrees(key: string, specs: TreeSpec[]): void;
+  /** Unregisters a tile: instances leave grid + compaction; the tile's
+   * impostor mesh is disposed (geometry + instance buffers — the atlas
+   * texture and material nodes reference shared state and are NOT disposed). */
+  removeTileTrees(key: string): void;
+  /** Registered tile-pool keys, in insertion order (smoke assertion). */
+  tileKeys(): string[];
 };
 
 // Same excludeRect predicate as nature.ts: a spec is dropped when it lies
@@ -299,8 +336,15 @@ export function buildTreeLayer(
   for (let i = 0; i < archetypes.length; i++) {
     const arch = archetypes[i];
     const n = byArch[i].length;
-    // WebGPU zero-buffer rule: allocate at least one instance, set count after.
-    const cap = Math.max(1, n);
+    // Capacity contract (Task 5): the full-detail meshes are GLOBAL and serve
+    // ALL pools, so the boot-stand size alone no longer bounds the near set —
+    // streamed tiles add instances at runtime. Only trees < NEAR_TREE_DIST
+    // (165 m ring) ever land in the full meshes, so compaction bounds the
+    // count naturally; FULL_MESH_MIN_CAP is a documented, asserted headroom
+    // (compactNear throws if a near set ever exceeds capacity) — 4096 per
+    // archetype ≈ 82k near trees total, far above any plausible 165 m ring.
+    // (WebGPU zero-buffer rule is subsumed: capacity is always ≥ 1.)
+    const cap = Math.max(FULL_MESH_MIN_CAP, n);
 
     // Per-instance tint+scale attribute (vec4: rgb + packScales(sx, sy)) — the
     // node colorNode reads .xyz, the positionNode's space lift reads .w.
@@ -330,6 +374,18 @@ export function buildTreeLayer(
     group.add(mesh);
   }
 
+  // ── Task 5 state: per-tile pools + shared impostor context ───────────────
+  // Each pool keeps the exact TreeInstance refs it pushed into `instances`
+  // and the grid, so removal is identity-exact; the impostor mesh is the
+  // tile's own far-field draw (shared atlas texture).
+  const tilePools = new Map<string, { instances: TreeInstance[]; impostor: THREE.InstancedMesh }>();
+  let impostorAtlas: THREE.Texture | null = null;
+  let impostorArchCount = 0;
+  // Last compaction point: add/remove re-run compactNear here so the full
+  // meshes never draw stale (removed) instances between camera moves.
+  let lastCamX = 0;
+  let lastCamZ = 0;
+
   const layer: TreeLayer = {
     group,
     fullMeshes,
@@ -337,11 +393,66 @@ export function buildTreeLayer(
     setTreeShadows(on: boolean) {
       for (const m of fullMeshes) m.castShadow = on;
     },
+    setImpostorContext(atlas: THREE.Texture, archCount: number) {
+      impostorAtlas = atlas;
+      impostorArchCount = archCount;
+    },
+    addTileTrees(key: string, specs: TreeSpec[]) {
+      if (tilePools.has(key)) {
+        throw new Error(`treeLayer.addTileTrees: duplicate tile key ${key}`);
+      }
+      if (!impostorAtlas) {
+        throw new Error(
+          'treeLayer.addTileTrees: impostor context missing — call setImpostorContext(atlas, archCount) after bakeImpostorAtlas',
+        );
+      }
+      // Same assignment path as the boot stand (excludeRect/groundYAt from
+      // the layer opts) — tile trees plant on the DEM and skip the hero plate
+      // exactly like boot trees.
+      const tileInstances = assignTrees(specs, opts.excludeRect, opts.groundYAt);
+      for (const inst of tileInstances) {
+        instances.push(inst);
+        gridAdd(grid, inst);
+      }
+      const impostor = buildImpostorMeshFor(tileInstances, impostorAtlas, impostorArchCount);
+      impostor.name = `treeImpostors:${key}`;
+      group.add(impostor);
+      tilePools.set(key, { instances: tileInstances, impostor });
+      layer.compactNear(lastCamX, lastCamZ);
+    },
+    removeTileTrees(key: string) {
+      const pool = tilePools.get(key);
+      if (!pool) {
+        throw new Error(`treeLayer.removeTileTrees: unknown tile key ${key}`);
+      }
+      tilePools.delete(key);
+      const gone = new Set(pool.instances);
+      for (const inst of pool.instances) gridRemove(grid, inst);
+      // In-place compaction of the shared `instances` array (callers hold the
+      // array ref — never swap it). Boot instances keep their relative order.
+      let w = 0;
+      for (let r = 0; r < instances.length; r++) {
+        if (!gone.has(instances[r])) instances[w++] = instances[r];
+      }
+      instances.length = w;
+      // Dispose the tile's impostor draw: geometry + instance buffers. The
+      // atlas texture and the material's shared nodes (impostorLightU, the
+      // atlas texture node) are shared across meshes — NOT disposed here.
+      group.remove(pool.impostor);
+      pool.impostor.geometry.dispose();
+      pool.impostor.dispose();
+      layer.compactNear(lastCamX, lastCamZ);
+    },
+    tileKeys() {
+      return [...tilePools.keys()];
+    },
     // Near-set compaction: query the grid for instances within NEAR_TREE_DIST
     // of the camera point, group the hits by archetype, and rewrite each
     // mesh's matrices/tint in the SAME order for both attributes so instance
     // k's matrix and tint always describe the same tree post-compaction.
     compactNear(camX: number, camZ: number) {
+      lastCamX = camX;
+      lastCamZ = camZ;
       const near = queryNear(grid, camX, camZ, NEAR_TREE_DIST);
       const nearByArch: TreeInstance[][] = archetypes.map(() => []);
       for (const inst of near) nearByArch[inst.archetype].push(inst);
@@ -354,6 +465,14 @@ export function buildTreeLayer(
         const mesh = fullMeshes[i];
         const arch = archetypes[i];
         const list = nearByArch[i];
+        // Asserted headroom (see the cap comment above): tile pools can grow
+        // the near set past the boot size, but never past capacity — fail
+        // loudly instead of writing out of bounds.
+        if (list.length > mesh.instanceMatrix.count) {
+          throw new Error(
+            `treeLayer.compactNear: near set for archetype ${i} (${list.length}) exceeds capacity ${mesh.instanceMatrix.count}`,
+          );
+        }
         const tintArray = tintAttrs[i].array as Float32Array;
         for (let k = 0; k < list.length; k++) {
           const { spec, tint, squash, y } = list[k];

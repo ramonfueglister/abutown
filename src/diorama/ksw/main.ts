@@ -678,6 +678,9 @@ async function boot(): Promise<void> {
   // restores renderer state), then attach the far-field impostor mesh.
   const treeAtlas = await bakeImpostorAtlas(renderer, allArchetypes());
   treeLayer.group.add(buildImpostorMesh(treeLayer.instances, treeAtlas, allArchetypes().length));
+  // Task 5 (M3): per-tile pools build their own impostor meshes off the same
+  // atlas — hand the layer the shared texture once, right after the bake.
+  treeLayer.setImpostorContext(treeAtlas, allArchetypes().length);
   // Dev tree-layer debug surface (unconditional) — the browser smoke reads it.
   window.__trees = {
     archetypes: allArchetypes().length,
