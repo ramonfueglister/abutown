@@ -58,6 +58,7 @@ import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { loadWorld, anchorGroundHeight, makeHeightSampler } from './geo/worldData';
 import { buildTerrainTiles } from './geo/terrain';
+import { loadCorridorMask } from './geo/corridorMask';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
 import { lampGlowU } from './glowUniform';
@@ -604,9 +605,15 @@ async function boot(): Promise<void> {
   // worldData.ts) or a deploy problem, and should surface loudly rather than
   // quietly reverting to the old flat look.
   const world = await loadWorld();
+  // Corridor mask (Task 5e, spec §5 terrain-discard): the terrain shader
+  // discards fragments inside road/rail corridors so rendered terrain can never
+  // pierce a road surface; ribbon skirts close the hole. Hard boot error if
+  // mask.bin is missing (no silent skip — a mask that fails to load must
+  // surface loudly, same discipline as the world load above).
+  const corridorMask = await loadCorridorMask();
   const terrainRoot = new THREE.Group();
   terrainRoot.name = 'terrainRoot';
-  terrainRoot.add(buildTerrainTiles(world.tiles, { level: 2 }));
+  terrainRoot.add(buildTerrainTiles(world.tiles, { level: 2, corridorMask }));
   // Tile heights are absolute DEM metres (~400-590 m); the hero city + KSW
   // sit at y≈0 (the anchor). Shift the whole terrain group down by the
   // anchor's ground height so the anchor point lines up with real y≈0 and

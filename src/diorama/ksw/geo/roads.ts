@@ -119,6 +119,82 @@ export function miterStrip(
   return { positions, indices };
 }
 
+/** Vertical side-skirts along BOTH edges of a ribbon (spec §5 terrain-discard,
+ * Task 5e). The terrain shader discards every fragment inside a road/rail
+ * corridor, leaving an open hole between the ribbon edge and the terrain the
+ * discard removed. The skirt is a pair of vertical apron strips — one down each
+ * ribbon edge, from the ribbon-edge top y down to `groundYAt − dropM` (i.e.
+ * `profile − 1.5 m`, since inside a corridor groundYAt returns the profile) —
+ * that close that hole so you never see through the world under a road.
+ *
+ * Geometry mirrors miterStrip exactly (same subdivideForDrape, same miter
+ * offsets) so the skirt top edge coincides with the ribbon edge with no seam.
+ * Per edge, per centreline point: a top vertex at the ribbon edge (draped y +
+ * layer offset `y`) and a bottom vertex at `groundYAt(cx,cz) − dropM`. Merged
+ * into one geometry per layer in buildRoads — no per-frame cost.
+ *
+ * Vertex ys span [profile − dropM, profile + y] on a draped corridor (unit
+ * tested). With no sampler the ribbon is flat at `y` and the skirt drops to
+ * `−dropM` (still a valid apron; only used near the anchor where drape ≈ 0). */
+export function skirtStrip(
+  pts: number[][],
+  width: number,
+  y: number,
+  groundYAt?: GroundYAt,
+  dropM = 1.5,
+): { positions: number[]; indices: number[] } {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const half = width / 2;
+  if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
+  const n = pts.length;
+  if (n < 2) return { positions, indices };
+  // Two skirts: side = +1 (left edge) and −1 (right edge). Each is a vertical
+  // quad strip: top follows the ribbon edge, bottom is dropM below the ground.
+  for (const side of [1, -1]) {
+    const base0 = positions.length / 3;
+    for (let i = 0; i < n; i++) {
+      const [px, pz] = pts[Math.max(0, i - 1)];
+      const [cx, cz] = pts[i];
+      const [nx2, nz2] = pts[Math.min(n - 1, i + 1)];
+      let dx0 = cx - px;
+      let dz0 = cz - pz;
+      let dx1 = nx2 - cx;
+      let dz1 = nz2 - cz;
+      const l0 = Math.hypot(dx0, dz0) || 1;
+      const l1 = Math.hypot(dx1, dz1) || 1;
+      dx0 /= l0; dz0 /= l0; dx1 /= l1; dz1 /= l1;
+      const tx = dx0 + dx1;
+      const tz = dz0 + dz1;
+      const tl = Math.hypot(tx, tz);
+      let mx: number;
+      let mz: number;
+      let scale = 1;
+      if (tl < 1e-6) {
+        mx = -dz0; mz = dx0;
+      } else {
+        mx = -tz / tl; mz = tx / tl;
+        const cosHalf = Math.max(0.5, mx * -dz0 + mz * dx0);
+        scale = 1 / cosHalf;
+      }
+      const ground = groundYAt ? groundYAt(cx, cz) : 0;
+      const topY = ground + y;
+      const botY = ground - dropM;
+      const ex = cx + side * mx * half * scale;
+      const ez = cz + side * mz * half * scale;
+      positions.push(ex, topY, ez, ex, botY, ez); // top then bottom
+      if (i > 0) {
+        const a = base0 + (i - 1) * 2;
+        // one quad per segment (two tris). The apron material is DoubleSide
+        // (skirtMat) so it reads from outside the corridor AND from above where
+        // the discarded terrain used to be — no doubled geometry needed.
+        indices.push(a, a + 1, a + 2, a + 2, a + 1, a + 3);
+      }
+    }
+  }
+  return { positions, indices };
+}
+
 /** Dedicated ribbon material = the shared clay look PLUS a depth-bias
  * (polygonOffset). Fix 2 belt-and-braces: the layer height ladder
  * (designTokens.roadYs) already separates the coplanar ribbons, but at a
@@ -166,6 +242,55 @@ function stripsMesh(
   return mesh;
 }
 
+/** Darken a packed 0xRRGGBB color by a factor (skirt = ribbon color ×0.8). */
+function darken(color: number, factor: number): number {
+  const r = Math.round(((color >> 16) & 0xff) * factor);
+  const g = Math.round(((color >> 8) & 0xff) * factor);
+  const b = Math.round((color & 0xff) * factor);
+  return (r << 16) | (g << 8) | b;
+}
+
+/** Apron material for the skirts: the ribbon clay color darkened ×0.8, rendered
+ * DoubleSide so the vertical strip is visible from outside the corridor and
+ * from above (where the terrain shader discarded the ground). No polygonOffset
+ * — the skirt is genuinely vertical, not coplanar with any ribbon. */
+function skirtMat(color: number): THREE.MeshPhysicalMaterial {
+  const m = clayMat(darken(color, 0.8)).clone();
+  m.side = THREE.DoubleSide;
+  return m;
+}
+
+/** Build the merged side-skirt mesh for a ribbon layer (spec §5 terrain-discard,
+ * Task 5e): every ribbon in `paths` contributes two vertical apron strips down
+ * its edges, closing the hole the terrain-discard shader opens under it. */
+function skirtsMesh(
+  name: string,
+  paths: RoadPath[],
+  widthOf: (p: RoadPath, i: number) => number,
+  color: number,
+  y: number,
+  groundYAt?: GroundYAt,
+): THREE.Mesh {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let idx = 0; idx < paths.length; idx++) {
+    const p = paths[idx];
+    const s = skirtStrip(p.pts, widthOf(p, idx), y, groundYAt);
+    const base = positions.length / 3;
+    positions.push(...s.positions);
+    for (const i of s.indices) indices.push(base + i);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setIndex(positions.length / 3 > 65535 ? new THREE.BufferAttribute(new Uint32Array(indices), 1) : new THREE.BufferAttribute(new Uint16Array(indices), 1));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, skirtMat(color));
+  mesh.name = name;
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  return mesh;
+}
+
 const FOOT = new Set(['footway', 'path', 'cycleway', 'steps', 'pedestrian', 'track']);
 
 export function buildRoads(roads: RoadPath[], rails: RoadPath[], groundYAt?: GroundYAt): THREE.Group {
@@ -180,9 +305,28 @@ export function buildRoads(roads: RoadPath[], rails: RoadPath[], groundYAt?: Gro
   // street-tree verges / grazed facades.
   // polygonOffset ladder (units) matches the roadYs height ladder bottom→top:
   // railBed 0 < carriage/footway −1 < rail −3 (more negative = drawn on top).
-  group.add(stripsMesh('carriageRibbons', carriage, (p) => p.width, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
-  group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway, -1, groundYAt));
-  group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed, 0, groundYAt));
-  group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail, -3, groundYAt));
+  // #134: ribbons render at their real OSM width — the traffic kernel bakes
+  // width-aware lane offsets, so no render-width floor. (The terrain CORRIDOR
+  // still uses corridorWidths — lane-floored — but only for grading/mask/
+  // sampler, never for these ribbons.)
+  const carriageWidthOf = (p: RoadPath): number => p.width;
+  const railBedWidthOf = (p: RoadPath): number => p.width + 2.2;
+  const railWidthOf = (p: RoadPath): number => p.width;
+  const footWidthOf = (p: RoadPath): number => p.width;
+  group.add(stripsMesh('carriageRibbons', carriage, carriageWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
+  group.add(stripsMesh('footwayRibbons', foot, footWidthOf, kswCity.roadColors.footway, kswCity.roadYs.footway, -1, groundYAt));
+  group.add(stripsMesh('railBeds', rails, railBedWidthOf, kswCity.roadColors.railBed, kswCity.roadYs.railBed, 0, groundYAt));
+  group.add(stripsMesh('railRibbons', rails, railWidthOf, kswCity.roadColors.rail, kswCity.roadYs.rail, -3, groundYAt));
+  // Side-skirts (spec §5 terrain-discard): the terrain shader discards fragments
+  // inside every corridor; these vertical aprons close the hole at each ribbon
+  // edge (carriage + footway + the ballast bed — the widest rail layer). Only
+  // built when draping (a sampler is present); the flat pre-#119 anchor look
+  // has no discarded terrain to close. Rails skirt the BED edge (the outermost
+  // rail geometry today; railLook lands in PR 3).
+  if (groundYAt) {
+    group.add(skirtsMesh('carriageSkirts', carriage, carriageWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, groundYAt));
+    group.add(skirtsMesh('footwaySkirts', foot, footWidthOf, kswCity.roadColors.footway, kswCity.roadYs.footway, groundYAt));
+    group.add(skirtsMesh('railBedSkirts', rails, railBedWidthOf, kswCity.roadColors.railBed, kswCity.roadYs.railBed, groundYAt));
+  }
   return group;
 }

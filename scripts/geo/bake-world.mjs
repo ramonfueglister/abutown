@@ -20,6 +20,7 @@ import { laneFloorWidths } from './lib/gradewidths.mjs';
 import { riverCenterlineRings } from './lib/riverrings.mjs';
 import { wayKey, quantizeProfile, shiftProfile } from './lib/roadprofiles.mjs';
 import { makeCorridorSnapSampler } from './lib/corridorsnap.mjs';
+import { buildCorridorMask, encodeCorridorMask, maskCovers } from './lib/corridormask.mjs';
 import { pointInRing } from './lib/join.mjs';
 import { tileGridFor, assignToTiles, encodeTile, encodeManifest, encodeGraph } from './lib/tiles.mjs';
 import { create, toBinary } from '@bufbuild/protobuf';
@@ -530,6 +531,55 @@ if (l0Bytes >= 1 * 1024 * 1024) fail(`L0 tile bytes ${l0Bytes} >= 1MB budget`);
   if (!Buffer.from(a).equals(Buffer.from(b))) fail(`tile ${sampleId} is not deterministic — re-encode produced different bytes`);
   console.log(`in-script determinism check OK (sample tile ${sampleId}, ${a.length} bytes)`);
 }
+
+// ---- Corridor discard mask (spec §5 "Terrain-discard", Task 5e) -----------
+// The definitive "terrain never pierces a road" mechanism. Rasterize every
+// road/rail corridor (the SAME halfWidthM grading flattened — ONE geometric
+// truth, mirrored in src/diorama/ksw/geo/corridorMask.ts + groundSampler.ts)
+// into a packed 1-bit-per-cell world-space raster at 2.5 m, covering the tile
+// root span (the exact extent the terrain tiles render). The runtime terrain
+// shader discards fragments where the mask reads 1; ribbon skirts close the
+// hole. Adjacent parallel ways at conflicting profile heights (Task 5d's
+// unrepresentable-in-a-heightfield case) simply have no rendered terrain
+// between them — piercing is impossible by construction.
+const MASK_CELL_M = 2.5;
+const maskBounds = { minX: root.minX, minZ: root.minZ, maxX: root.minX + root.size, maxZ: root.minZ + root.size };
+const corridorMask = buildCorridorMask(ways, maskBounds, MASK_CELL_M);
+// Hard coverage gate: EVERY way's densified centreline stations must fall in a
+// set mask cell, or terrain could pierce through an uncovered corridor. Loud
+// hard-error listing any offending way (no silent partial mask).
+{
+  const missing = [];
+  for (let wi = 0; wi < ways.length; wi++) {
+    const pts = ways[wi].pts;
+    let uncovered = 0;
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s];
+      const [bx, bz] = pts[s + 1];
+      const segLen = Math.hypot(bx - ax, bz - az);
+      const steps = Math.max(1, Math.ceil(segLen / MASK_CELL_M));
+      for (let k = 0; k <= steps; k++) {
+        const t = k / steps;
+        if (!maskCovers(corridorMask, ax + (bx - ax) * t, az + (bz - az) * t)) uncovered++;
+      }
+    }
+    if (uncovered > 0) missing.push(`way[${wi}] kind=${ways[wi].kind} uncovered=${uncovered}`);
+  }
+  if (missing.length > 0) {
+    fail(`corridor mask misses ${missing.length} way(s) — mask bounds/resolution bug (no silent partial mask). Offenders (first 20): ${missing.slice(0, 20).join(', ')}`);
+  }
+}
+const maskBin = encodeCorridorMask(corridorMask);
+writeFileSync(`${OUT}/mask.bin`, maskBin);
+// Determinism proof: a second build encodes to identical bytes.
+{
+  const again = encodeCorridorMask(buildCorridorMask(ways, maskBounds, MASK_CELL_M));
+  if (!Buffer.from(maskBin).equals(Buffer.from(again))) fail('corridor mask is not deterministic — re-build produced different bytes');
+}
+console.log(
+  `corridor mask: ${corridorMask.cols}×${corridorMask.rows} cells @ ${MASK_CELL_M}m, `
+  + `${(maskBin.length / 1e6).toFixed(2)} MB → ${OUT}/mask.bin (100% way-station coverage)`,
+);
 
 const manifest = {
   bakeVersion: BAKE_VERSION,

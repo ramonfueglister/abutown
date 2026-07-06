@@ -7,7 +7,7 @@
 // heightAt(centre)| at both ±width/2 offsets; the ribbon is planar across
 // its width (§5), so any real cross-slope under it reads as burial.
 import { describe, expect, it } from 'vitest';
-import { burialStats, burialStatsV2 } from '../../scripts/geo/burial-metric.mjs';
+import { burialStats, burialStatsV2, burialStatsV3 } from '../../scripts/geo/burial-metric.mjs';
 import { gradeDem } from '../../scripts/geo/lib/grading.mjs';
 
 /** Bilinear sampler over a flat local-metre grid, same convention as grading.mjs. */
@@ -183,5 +183,60 @@ describe('burialStatsV2 (spec §9 metric v2 — terrain poke-through)', () => {
     const a = burialStatsV2([road], heightAt, 10);
     const b = burialStatsV2([road], heightAt, 10);
     expect(a).toEqual(b);
+  });
+});
+
+describe('burialStatsV3 (spec §9 metric v3 — rendered truth via the discard mask)', () => {
+  const road = {
+    class: 'residential',
+    pts: [[0, 30], [50, 30]],
+    profile: { stepM: 10, ys: [0, 1, 2, 3, 4, 5, 5] },
+  };
+
+  it('reports 100% coverage when the mask covers every station, and applies NO budget there', () => {
+    // Terrain pierces the profile by 3 m everywhere — but every station is
+    // inside the mask (discarded), so the budget max/p99 (measured OUTSIDE the
+    // mask) sees NO samples and passes trivially.
+    const { heightAt } = makeSampler(60, 1, (x) => x * 0.1 + 3);
+    const coversAll = () => true;
+    const stats = burialStatsV3([road], heightAt, coversAll, 10);
+    expect(stats.coveragePct).toBeCloseTo(100, 6);
+    expect(stats.outsideCount).toBe(0);
+    expect(stats.maxM).toBe(0);
+    expect(stats.p99M).toBe(0);
+    expect(stats.offenders.length).toBe(0);
+  });
+
+  it('flags uncovered stations and reports coverage < 100%', () => {
+    const { heightAt } = makeSampler(60, 1, (x) => x * 0.1);
+    // mask covers only x < 25 -> the far half of the road is uncovered
+    const covers = (x: number) => x < 25;
+    const stats = burialStatsV3([road], heightAt, covers, 10);
+    expect(stats.coveragePct).toBeLessThan(100);
+    expect(stats.coveragePct).toBeGreaterThan(0);
+  });
+
+  it('applies the v2 poke-through budget only to stations OUTSIDE the mask', () => {
+    // Inside-mask stations pierce by 3 m (ignored, discarded); outside-mask
+    // stations pierce by 0.2 m (must be measured against the budget).
+    const covers = (x: number) => x < 25; // inside for x<25
+    const heightAt = (x: number) => (x < 25 ? x * 0.1 + 3 : x * 0.1 + 0.2);
+    const stats = burialStatsV3([road], heightAt, covers, 10);
+    // the 3 m inside-mask piercing must NOT appear; only the 0.2 m outside one.
+    expect(stats.maxM).toBeCloseTo(0.2, 6);
+    expect(stats.outsideCount).toBeGreaterThan(0);
+  });
+
+  it('is deterministic across repeated calls', () => {
+    const { heightAt } = makeSampler(60, 1, (x, z) => Math.sin(x / 5) + z * 0.1);
+    const covers = (x: number) => x < 20;
+    const a = burialStatsV3([road], heightAt, covers, 10);
+    const b = burialStatsV3([road], heightAt, covers, 10);
+    expect(a).toEqual(b);
+  });
+
+  it('throws when a road lacks a baked profile', () => {
+    const { heightAt } = makeSampler(60, 1, () => 0);
+    expect(() => burialStatsV3([{ class: 'x', pts: [[0, 0], [10, 0]] }], heightAt, () => true, 10)).toThrow();
   });
 });

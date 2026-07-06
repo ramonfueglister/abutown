@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { fromBinary } from '@bufbuild/protobuf';
 import { WorldManifestSchema, WorldTileSchema } from './proto/world_pb.js';
 import { laneFloorWidths } from './lib/gradewidths.mjs';
+import { decodeCorridorMask, maskCovers } from './lib/corridormask.mjs';
 
 /** Densify a polyline to ≤ 2 m steps, mirroring grading.mjs's densify so
  * station spacing along a road is consistent between grading and metric. */
@@ -268,6 +269,87 @@ export function burialStatsV2(roads, heightAt, stepM = 10) {
   return { maxM, p99M, offenders, sampleCount: n };
 }
 
+/**
+ * §9 metric v3 (spec §5 "Terrain-discard"): rendered truth via the corridor
+ * discard mask. Terrain fragments inside a corridor are DISCARDED by the shader
+ * (they do not render), so the poke-through budget only applies to stations
+ * where terrain still renders — i.e. OUTSIDE the mask (the blend band). Two
+ * parts, both must pass:
+ *   (a) coveragePct = 100 %  — every corridor station falls in a set mask cell
+ *       (an uncovered station is terrain that WOULD render and could pierce).
+ *   (b) v2 poke-through budget (p99 ≤ 0.05 m, max < 0.10 m) over the stations
+ *       OUTSIDE the mask only (inside stations are discarded, so their
+ *       heightfield value is irrelevant — this is what lets Task 5d's
+ *       unrepresentable multi-way conflicts pass: they sit inside the mask).
+ *
+ * @param {{class:string, pts:number[][], profile?:{stepM:number,ys:number[]}}[]} roads
+ * @param {(x:number,z:number)=>number} heightAt tile heightfield (profile frame)
+ * @param {(x:number,z:number)=>boolean} covers corridor-mask reader
+ * @param {number} [stepM]
+ * @returns {{coveragePct:number, sampleCount:number, coveredCount:number, outsideCount:number, maxM:number, p99M:number, offenders:{x:number,z:number,devM:number,class:string}[]}}
+ */
+export function burialStatsV3(roads, heightAt, covers, stepM = 10) {
+  if (!Array.isArray(roads)) throw new Error('burialStatsV3: roads must be an array');
+  if (typeof heightAt !== 'function') throw new Error('burialStatsV3: heightAt must be a function');
+  if (typeof covers !== 'function') throw new Error('burialStatsV3: covers must be a function');
+  if (!(stepM > 0)) throw new Error('burialStatsV3: stepM must be > 0');
+
+  const missing = [];
+  for (let i = 0; i < roads.length; i++) if (!roads[i].profile) missing.push(i);
+  if (missing.length > 0) {
+    throw new Error(
+      `burialStatsV3: ${missing.length} road(s) missing a baked profile (indices: ${missing.slice(0, 20).join(', ')}) — run geo:bake-world → geo:attach-profiles first`,
+    );
+  }
+
+  let sampleCount = 0;
+  let coveredCount = 0;
+  const outside = []; // {x,z,devM,class} for stations where terrain still renders
+
+  for (const road of roads) {
+    if (!Array.isArray(road.pts) || road.pts.length < 2) continue;
+    const dense = densify(road.pts, 2);
+    const stations = stationsAlong(dense, stepM);
+    const arc = arcLengths(dense);
+    const total = arc[arc.length - 1];
+    const targets = [];
+    for (let d = 0; d <= total; d += stepM) targets.push(d);
+    if (targets[targets.length - 1] < total) targets.push(total);
+
+    for (let i = 0; i < stations.length; i++) {
+      const st = stations[i];
+      sampleCount++;
+      if (covers(st.x, st.z)) {
+        coveredCount++;
+        continue; // discarded terrain — no budget applies
+      }
+      const tileY = heightAt(st.x, st.z);
+      const profileY = interpolateProfile(road.profile, targets[i]);
+      outside.push({ x: st.x, z: st.z, devM: Math.max(0, tileY - profileY), class: road.class });
+    }
+  }
+
+  const coveragePct = sampleCount === 0 ? 100 : (coveredCount / sampleCount) * 100;
+
+  if (outside.length === 0) {
+    return { coveragePct, sampleCount, coveredCount, outsideCount: 0, maxM: 0, p99M: 0, offenders: [] };
+  }
+
+  const sorted = outside.slice().sort((a, b) => a.devM - b.devM);
+  const n = sorted.length;
+  const maxM = sorted[n - 1].devM;
+  const p99Idx = Math.min(n - 1, Math.ceil(0.99 * n) - 1);
+  const p99M = sorted[p99Idx].devM;
+  const BUDGET_MAX = 0.10;
+  const offenders = sorted
+    .slice(Math.max(0, n - 10))
+    .reverse()
+    .filter((d) => d.devM >= BUDGET_MAX)
+    .map(({ x, z, devM, class: cls }) => ({ x, z, devM, class: cls }));
+
+  return { coveragePct, sampleCount, coveredCount, outsideCount: n, maxM, p99M, offenders };
+}
+
 // ---- CLI mode: decode the real bake and print the stats table ----------
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
@@ -275,6 +357,7 @@ if (isMain) {
   const ROADS_PATH = 'data/winterthur/roads.json';
   const TRAFFICNET_PATH = 'data/winterthur/trafficnet.json';
   const useV1 = process.argv.includes('--v1');
+  const useV2 = process.argv.includes('--v2');
 
   function fail(msg) {
     console.error(`burial-metric: ${msg}`);
@@ -350,8 +433,8 @@ if (isMain) {
     const pass = stats.maxM < 0.3 && stats.p99M < 0.15;
     console.log('');
     console.log(pass ? 'PASS: within §9 v1 budget' : 'FAIL: exceeds §9 v1 budget');
-  } else {
-    // v2 (spec §5 amendment, Task 5c default): terrain poke-through against
+  } else if (useV2) {
+    // v2 (spec §5 amendment, Task 5c): terrain poke-through against
     // the baked per-way longitudinal profile. Profile ys are stored RELATIVE
     // to the shared anchor (Task 5b: profileAbsoluteMetres − anchorGroundHeight,
     // see .superpowers/sdd/task-5b-report.md), so shift the tile heightfield
@@ -386,5 +469,53 @@ if (isMain) {
     const pass = stats.maxM < 0.10 && stats.p99M <= 0.05;
     console.log('');
     console.log(pass ? 'PASS: within §9 v2 budget' : 'FAIL: exceeds §9 v2 budget');
+  } else {
+    // v3 (spec §5 "Terrain-discard", Task 5e default): rendered truth via the
+    // corridor discard mask. The terrain shader discards fragments inside a
+    // corridor, so the poke-through budget applies ONLY outside the mask (the
+    // blend band, where terrain still renders). Two parts, both MUST pass:
+    //   (a) mask coverage of corridor stations = 100 %
+    //   (b) v2 budgets (p99 ≤ 0.05 m, max < 0.10 m) over OUTSIDE-mask stations.
+    const GRADING_PROFILES_PATH = 'scratch/geo/grading-profiles.json';
+    const MASK_PATH = `${WORLD_DIR}/mask.bin`;
+    if (!existsSync(GRADING_PROFILES_PATH)) {
+      fail(`missing ${GRADING_PROFILES_PATH} — run geo:bake-world (writes anchorGroundHeight) first`);
+    }
+    if (!existsSync(MASK_PATH)) {
+      fail(`missing ${MASK_PATH} — run geo:bake-world (writes the corridor mask) first`);
+    }
+    const { anchorGroundHeight } = JSON.parse(readFileSync(GRADING_PROFILES_PATH, 'utf8'));
+    if (typeof anchorGroundHeight !== 'number') {
+      fail(`${GRADING_PROFILES_PATH} missing numeric anchorGroundHeight`);
+    }
+    const heightAtRel = (x, z) => heightAtAbs(x, z) - anchorGroundHeight;
+    const mask = decodeCorridorMask(readFileSync(MASK_PATH));
+    const covers = (x, z) => maskCovers(mask, x, z);
+
+    const allWays = [...roads, ...rails];
+    const stats = burialStatsV3(allWays, heightAtRel, covers, 10);
+
+    console.log('');
+    console.log('Burial metric v3 (spec §5 terrain-discard) — acceptance: coverage = 100 %, then (outside mask) p99 ≤ 0.05 m, max < 0.10 m');
+    console.log('-------------------------------------------------------------------------------------------------------------------------');
+    console.log(`mask          : ${mask.cols}×${mask.rows} cells @ ${mask.cellSizeM}m`);
+    console.log(`sampleCount   : ${stats.sampleCount} (${stats.coveredCount} covered / ${stats.outsideCount} outside)`);
+    console.log(`coveragePct   : ${stats.coveragePct.toFixed(4)} %`);
+    console.log(`maxM (outside): ${stats.maxM.toFixed(3)} m`);
+    console.log(`p99M (outside): ${stats.p99M.toFixed(3)} m`);
+    console.log('');
+    console.log('Top offenders OUTSIDE the mask (tileY pierces profileY in the blend band):');
+    console.log('  x          z          devM     class');
+    for (const o of stats.offenders) {
+      console.log(
+        `  ${o.x.toFixed(1).padStart(9)}  ${o.z.toFixed(1).padStart(9)}  ${o.devM.toFixed(3).padStart(6)}   ${o.class}`,
+      );
+    }
+    const coverPass = stats.coveragePct >= 100;
+    const budgetPass = stats.maxM < 0.10 && stats.p99M <= 0.05;
+    console.log('');
+    console.log(`coverage: ${coverPass ? 'PASS (100%)' : `FAIL (${stats.coveragePct.toFixed(4)}%)`}`);
+    console.log(`budget (outside mask): ${budgetPass ? 'PASS' : 'FAIL'}`);
+    console.log(coverPass && budgetPass ? 'PASS: within §9 v3 budget' : 'FAIL: exceeds §9 v3 budget');
   }
 }
