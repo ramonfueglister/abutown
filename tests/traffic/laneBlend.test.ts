@@ -26,9 +26,9 @@ import {
 // Two PARALLEL lanes of edge 0: lane 10 at z=0, lane 11 at z=3 (a 3 m lateral
 // lane offset), both running east along +x. A JUNCTION continuation on edge 1:
 // lane 20 starts where lane 10 ends and turns north (−z), a different edge.
-const LANE_A: RawLane = { id: 10, edge: 0, lengthM: 100, pts: [[0, 0], [100, 0]] };
-const LANE_B: RawLane = { id: 11, edge: 0, lengthM: 100, pts: [[0, 3], [100, 3]] };
-const LANE_C: RawLane = { id: 20, edge: 1, lengthM: 100, pts: [[100, 0], [100, -100]] };
+const LANE_A: RawLane = { id: 10, edge: 0, index: 0, lengthM: 100, pts: [[0, 0], [100, 0]] };
+const LANE_B: RawLane = { id: 11, edge: 0, index: 1, lengthM: 100, pts: [[0, 3], [100, 3]] };
+const LANE_C: RawLane = { id: 20, edge: 1, index: 0, lengthM: 100, pts: [[100, 0], [100, -100]] };
 const net = buildLaneNet([LANE_A, LANE_B, LANE_C]);
 
 describe('classifyLaneChange', () => {
