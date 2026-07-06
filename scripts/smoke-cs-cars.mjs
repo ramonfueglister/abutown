@@ -22,7 +22,7 @@
 // WebGPU headless flags + the window.__LOOK_READY gate follow smoke-traffic.mjs.
 
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { startTrafficStack, HOST } from './lib/traffic-stack.mjs';
@@ -31,6 +31,37 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TRAFFIC_PORT = Number(process.env.SMOKE_TRAFFIC_PORT ?? 8791);
 const VITE_PORT = Number(process.env.SMOKE_VITE_PORT ?? 5188);
 const SEED = 42;
+
+/** Fresh-worktree preflight: startTrafficStack spawns the release binary
+ * DIRECTLY (unlike startWorldStack, it never builds it), and the app import
+ * of src/proto/*_pb.ts fails at vite dev-server request time, not at stack
+ * boot — both failure modes surface only as an opaque __LOOK_READY timeout
+ * tens of seconds later. Fail fast with the exact fix commands instead. */
+function preflight() {
+  const missing = [];
+  const trafficBin = path.join(REPO_ROOT, 'backend/target/release/winterthur-traffic');
+  if (!existsSync(trafficBin)) {
+    missing.push(
+      `traffic binary missing: ${trafficBin}\n` +
+        `  fix: scripts/cargo-serial.sh build --manifest-path backend/Cargo.toml --release -p winterthur-traffic`,
+    );
+  }
+  const protoFiles = [
+    'src/proto/world_pb.ts',
+    'src/proto/live_pb.ts',
+    'src/proto/traffic_pb.ts',
+    'src/proto/abutown_pb.ts',
+  ];
+  const missingProto = protoFiles.filter((f) => !existsSync(path.join(REPO_ROOT, f)));
+  if (missingProto.length) {
+    missing.push(`generated proto files missing: ${missingProto.join(', ')}\n  fix: npm run generate:proto`);
+  }
+  if (missing.length) {
+    console.error('[smoke] PREFLIGHT FAILED — this smoke would otherwise die with an opaque timeout:\n');
+    for (const m of missing) console.error(`  - ${m}\n`);
+    process.exit(1);
+  }
+}
 
 // Morning rush, full YYYY-MM-DDTHH:MM form so day_kind is pinned to a workday
 // regardless of the run day (2026-07-03 is a Friday) — same anchor
@@ -57,6 +88,8 @@ async function main() {
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
     if (!ok) failures.push(name);
   };
+
+  preflight();
 
   console.log(
     `[smoke] launching stack (traffic :${TRAFFIC_PORT} seed=${SEED} at=${AT_RUSH}, vite :${VITE_PORT})…`,
@@ -148,6 +181,16 @@ async function main() {
     const slots = [];
     for (let s = 0; s <= 40; s += 4) slots.push(Math.min(s, Math.max(0, wheels - 1)));
     const uniqSlots = [...new Set(slots)];
+    // Diversity guard: with few wheels, clamping collapses most/all of the 11
+    // candidate slots to the same index — degrading "sample ~10 wheels" to
+    // "check one wheel twice," which would pass vacuously even if only ONE
+    // wheel in the whole scene happens to be turning. Require real spread.
+    const minDiverse = Math.max(2, Math.min(5, Math.floor(wheels / 4)));
+    check(
+      '(d) wheel-sample diversity',
+      uniqSlots.length >= minDiverse,
+      `${uniqSlots.length} distinct slots of ${wheels} wheels (need ≥${minDiverse})`,
+    );
     const sampleSlots = (ss) =>
       page.evaluate((arr) => arr.map((i) => window.__traffic.wheelMatrix(i)), ss);
 
@@ -177,10 +220,23 @@ async function main() {
     // sample the pose of a live vehicle and aim the tight frame at it so a car
     // is guaranteed in-shot (the AOI subscription is target-driven, so the aim
     // point stays inside the subscribed cells → the car keeps rendering).
-    const aimPose = await page.evaluate(() => {
+    const aimPose = await page.evaluate((best) => {
       const s = window.__traffic.sample();
-      return s.length ? { x: s[0].x, z: s[0].z } : null;
-    });
+      if (!s.length) return null;
+      // Prefer the sampled vehicle nearest best.aim — sample()[0] may be far
+      // from the corridor that just passed the assertions, framing an empty
+      // patch of road instead of the busy scene the checks above verified.
+      let nearest = s[0];
+      let bestD2 = Infinity;
+      for (const v of s) {
+        const d2 = (v.x - best.x) ** 2 + (v.z - best.z) ** 2;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          nearest = v;
+        }
+      }
+      return { x: nearest.x, z: nearest.z };
+    }, best.aim);
     const shotAim = aimPose ?? best.aim;
     await page.evaluate(
       (a) => window.__traffic.lookAt(a.x, a.z, { radius: a.radius, pitch: a.pitch }),
