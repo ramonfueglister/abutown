@@ -7,13 +7,16 @@
 // collisions. mainBuilding = the largest-footprint-area building (the tower
 // + wing complex) — later tasks (zone decomposition, cutaway) key off it.
 //
-// Dollhouse cutaway (Task 18, S3c): the MAIN building's wall+roof are split off
-// from the other 25 into their own meshes so the cutaway uniforms slice ONLY
-// the main building. Its walls get the cutaway facade material (discard above
-// cutH + a bright seam band); its roof + eave band fade out with upperFade
-// BEFORE the hard slice engages. The other 25 campus buildings stay closed —
-// they render through the plain city pipeline exactly as in T15.
-// `group.userData.setCutaway({ cutH, upperFade })` drives it every frame.
+// Dollhouse cutaway (Task 18, S3c; storey-peel v2 Phase A): the MAIN
+// building's wall+roof are split off from the other 25 into their own meshes
+// so the cutaway uniforms slice ONLY the main building. Its walls get the
+// cutaway facade material (hard discard above `discardAbove`, a dissolving
+// shell band between `bandLo` and `discardAbove`, a bright seam band); its
+// roof + eave band fade out with `roofFade` BEFORE the hard slice engages.
+// The other 25 campus buildings stay closed — they render through the plain
+// city pipeline exactly as in T15.
+// `group.userData.setCutaway({ discardAbove, bandLo, bandFade, roofFade })`
+// drives it every frame.
 import * as THREE from 'three/webgpu';
 import { kswCityStyle, kswPalette, palette } from '../../designTokens';
 import { clayMat } from '../props';
@@ -29,7 +32,7 @@ import type { BakedBuilding } from './geoData';
 
 // shoelace formula, absolute value — footprint rings are simple polygons in
 // local metres (x, z), winding direction doesn't matter for area comparison.
-function footprintArea(fp: number[][]): number {
+export function footprintArea(fp: number[][]): number {
   let area = 0;
   for (let i = 0; i < fp.length; i++) {
     const [x1, z1] = fp[i];
@@ -39,7 +42,7 @@ function footprintArea(fp: number[][]): number {
   return Math.abs(area) / 2;
 }
 
-function largestBuilding(buildings: BakedBuilding[]): BakedBuilding {
+export function largestBuilding(buildings: BakedBuilding[]): BakedBuilding {
   let mainBuilding = buildings[0];
   let maxArea = -Infinity;
   for (const b of buildings) {
@@ -52,7 +55,7 @@ function largestBuilding(buildings: BakedBuilding[]): BakedBuilding {
   return mainBuilding;
 }
 
-export type CutawayUniforms = { cutH: number; upperFade: number };
+export type CutawayUniforms = { discardAbove: number; bandLo: number; bandFade: number; roofFade: number };
 
 export function buildKswCampus(
   buildings: BakedBuilding[],
@@ -125,12 +128,13 @@ export function buildKswCampus(
   // Per-frame cutaway driver (T18). At rest (cutH 1e6, fade 1) every write is
   // a no-op → the closed campus is pixel-identical to T15.
   group.userData.setCutaway = (u: CutawayUniforms): void => {
-    mainWallMat.cutH.value = u.cutH;
-    mainWallMat.upperFade.value = u.upperFade;
-    mainRoofMat.opacity = u.upperFade;
-    mainRoof.visible = u.upperFade > 0.001;
-    mainEaveMat.opacity = u.upperFade;
-    mainEave.visible = u.upperFade > 0.001;
+    mainWallMat.discardAbove.value = u.discardAbove;
+    mainWallMat.bandLo.value = u.bandLo;
+    mainWallMat.bandFade.value = u.bandFade;
+    mainRoofMat.opacity = u.roofFade;
+    mainRoof.visible = u.roofFade > 0.001;
+    mainEaveMat.opacity = u.roofFade;
+    mainEave.visible = u.roofFade > 0.001;
   };
 
   return { group, mainBuilding };

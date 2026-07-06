@@ -237,12 +237,15 @@ type FacadeMaterial = THREE.MeshPhysicalNodeMaterial & {
   facadeDetail: ReturnType<typeof uniform>;
 };
 
-// Cutaway-enabled facade material (T18): additionally carries `cutH` +
-// `upperFade` uniforms so the MAIN KSW building can be sliced open like a
-// dollhouse. cutH = 1e6 / upperFade = 1 at rest → byte-identical to the plain
-// facade material (the discard/seam nodes are pure no-ops at those values).
+// Cutaway-enabled facade material (Phase A): additionally carries
+// `discardAbove` + `bandLo` + `bandFade` + `upperFade` uniforms so the MAIN
+// KSW building can be peeled open storey by storey. At rest (discardAbove =
+// bandLo = 1e6, bandFade = 0, upperFade = 1) every node is a no-op →
+// byte-identical to the plain facade material.
 export type CutawayFacadeMaterial = FacadeMaterial & {
-  cutH: ReturnType<typeof uniform>;
+  discardAbove: ReturnType<typeof uniform>;
+  bandLo: ReturnType<typeof uniform>;
+  bandFade: ReturnType<typeof uniform>;
   upperFade: ReturnType<typeof uniform>;
 };
 
@@ -319,22 +322,31 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
 
   const facadeColor = mix(clayBase, windowTone, windowMask.mul(gate));
 
-  // Dollhouse cutaway (T18): slice the building at world-y `cutH` (discard
-  // everything above), and paint a bright seam band in the `cutSeam` metres
-  // just below the cut. At rest (cutH = 1e6) both nodes are no-ops, so the
-  // closed building is byte-identical to the plain facade material. The
-  // discard MUST run inside a Fn so it appends to the fragment stack — a bare
-  // Discard() at construction time attaches to no stack and is silently dropped.
-  const cutH = uniform(1e6);
-  const upperFade = uniform(1);
+  // Storey-peel cutaway (Phase A): three uniforms. Fragments above
+  // `discardAbove` are gone (hard cut — everything above the currently
+  // dissolving storey). Fragments between `bandLo` and `discardAbove` are the
+  // dissolving storey's shell: a deterministic world-position hash against
+  // `bandFade` gives a stable screen-door dissolve (no transparency sorting).
+  // A warm seam band caps the remaining solid shell just below `bandLo`.
+  // At rest (discardAbove = 1e6, bandFade = 0) every node is a no-op — the
+  // closed building renders byte-identical to the plain facade material.
+  const discardAbove = uniform(1e6);
+  const bandLo = uniform(1e6);
+  const bandFade = uniform(0);
+  const upperFade = uniform(1); // kept: roof/eave opacity driver (roofFade)
   if (opts.cutaway) {
     const seam = new THREE.Color(kswS3.seamColor);
     const seamTone = vec3(seam.r, seam.g, seam.b);
     m.colorNode = Fn(() => {
       const wy = positionWorld.y;
-      wy.greaterThan(cutH).discard();
-      // seam band: cutH − cutSeam < y ≤ cutH → mix to seamColor
-      const inSeam = wy.greaterThan(cutH.sub(float(kswS3.cutSeam))).and(wy.lessThanEqual(cutH));
+      wy.greaterThan(discardAbove).discard();
+      // stable per-fragment hash from world position (same trick as the
+      // night-window hash below — sin-fract, deterministic, no RNG)
+      const n = positionWorld.x.mul(12.9898).add(wy.mul(78.233)).add(positionWorld.z.mul(37.719)).sin().mul(43758.5453);
+      const h = n.sub(n.floor());
+      wy.greaterThan(bandLo).and(h.lessThan(bandFade)).discard();
+      const seamTop = bandLo.add(float(kswS3.cutSeam).mul(bandFade)); // seam grows in as the band dissolves
+      const inSeam = wy.greaterThan(bandLo.sub(float(kswS3.cutSeam))).and(wy.lessThanEqual(seamTop)).and(bandFade.greaterThan(float(0.05)));
       return mix(facadeColor, seamTone, inSeam.select(float(1), float(0)));
     })();
   } else {
@@ -352,7 +364,7 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   const glow = glassMask.mul(gate).mul(lit);
   m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(0.9)).mul(lampGlowU));
 
-  return Object.assign(m, { facadeDetail, cutH, upperFade }) as CutawayFacadeMaterial;
+  return Object.assign(m, { facadeDetail, discardAbove, bandLo, bandFade, upperFade }) as CutawayFacadeMaterial;
 }
 
 export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {
