@@ -93,7 +93,7 @@ describe('mapStations', () => {
       'Autobahnanschluss A1',
       'Bassersdorf',
     ]) {
-      expect(DESTINATIONS[name]).toBeDefined();
+      expect((DESTINATIONS as Record<string, unknown>)[name]).toBeDefined();
     }
   });
 });
