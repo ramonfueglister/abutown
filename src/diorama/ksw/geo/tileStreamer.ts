@@ -81,3 +81,119 @@ export function planStep(
   }
   return { load, unload };
 }
+
+const MAX_PARALLEL_FETCHES = 4;
+const MAX_ATTEMPTS = 2; // 1 initial try + 1 retry
+
+export type TileStreamerOptions = {
+  all: TileMeta[];
+  cfg?: RingConfig;
+  fetchTile: (meta: TileMeta) => Promise<unknown>;
+  onReady: (meta: TileMeta, tile: unknown) => void;
+  onUnload: (key: TileKey) => void;
+  onError?: (meta: TileMeta, err: unknown) => void;
+};
+
+/**
+ * IO layer over the pure ring policy (`planStep`): owns the live tile
+ * bookkeeping, an in-order fetch queue capped at 4 concurrent requests, a
+ * single retry per tile before giving up (`failed`), and stale-drop handling
+ * for tiles that fall out of the desired set while their fetch is in flight.
+ */
+export class TileStreamer {
+  private readonly all: TileMeta[];
+  private readonly cfg: RingConfig;
+  private readonly fetchTile: (meta: TileMeta) => Promise<unknown>;
+  private readonly onReadyCb: (meta: TileMeta, tile: unknown) => void;
+  private readonly onUnloadCb: (key: TileKey) => void;
+  private readonly onErrorCb?: (meta: TileMeta, err: unknown) => void;
+
+  private readonly state: StreamerState = { live: new Map(), tick: 0 };
+  private readonly metaByKey = new Map<TileKey, TileMeta>();
+  private readonly inflight = new Map<TileKey, { meta: TileMeta; attempt: number }>();
+  private readonly queue: TileMeta[] = [];
+  private readonly queuedKeys = new Set<TileKey>();
+  private readonly failedSet = new Set<TileKey>();
+  private lastCam: [number, number] | null = null;
+
+  constructor(opts: TileStreamerOptions) {
+    this.all = opts.all;
+    this.cfg = opts.cfg ?? DEFAULT_RINGS;
+    this.fetchTile = opts.fetchTile;
+    this.onReadyCb = opts.onReady;
+    this.onUnloadCb = opts.onUnload;
+    this.onErrorCb = opts.onError;
+    for (const m of this.all) this.metaByKey.set(m.key, m);
+  }
+
+  get liveCount(): number {
+    return this.state.live.size;
+  }
+
+  get failed(): ReadonlySet<TileKey> {
+    return this.failedSet;
+  }
+
+  update(camX: number, camZ: number): void {
+    this.lastCam = [camX, camZ];
+    const { load, unload } = planStep(this.state, camX, camZ, this.all, this.cfg);
+
+    for (const key of unload) {
+      this.state.live.delete(key);
+      this.onUnloadCb(key);
+    }
+
+    for (const meta of load) {
+      if (this.failedSet.has(meta.key)) continue;
+      if (this.state.live.has(meta.key)) continue;
+      if (this.inflight.has(meta.key)) continue;
+      if (this.queuedKeys.has(meta.key)) continue;
+      this.queue.push(meta);
+      this.queuedKeys.add(meta.key);
+    }
+
+    this.pump();
+  }
+
+  private pump(): void {
+    while (this.inflight.size < MAX_PARALLEL_FETCHES && this.queue.length > 0) {
+      const meta = this.queue.shift()!;
+      this.queuedKeys.delete(meta.key);
+      this.startFetch(meta, 1);
+    }
+  }
+
+  private startFetch(meta: TileMeta, attempt: number): void {
+    this.inflight.set(meta.key, { meta, attempt });
+    this.fetchTile(meta).then(
+      (tile) => this.onFetchResolved(meta, tile),
+      (err) => this.onFetchRejected(meta, attempt, err),
+    );
+  }
+
+  private isStillDesired(meta: TileMeta): boolean {
+    if (!this.lastCam) return false;
+    const [camX, camZ] = this.lastCam;
+    return desiredLevel(camX, camZ, meta, this.cfg);
+  }
+
+  private onFetchResolved(meta: TileMeta, tile: unknown): void {
+    this.inflight.delete(meta.key);
+    if (this.isStillDesired(meta)) {
+      this.state.live.set(meta.key, { lastNear: this.state.tick });
+      this.onReadyCb(meta, tile);
+    }
+    this.pump();
+  }
+
+  private onFetchRejected(meta: TileMeta, attempt: number, err: unknown): void {
+    this.inflight.delete(meta.key);
+    if (attempt < MAX_ATTEMPTS) {
+      this.startFetch(meta, attempt + 1);
+    } else {
+      this.failedSet.add(meta.key);
+      this.onErrorCb?.(meta, err);
+      this.pump();
+    }
+  }
+}

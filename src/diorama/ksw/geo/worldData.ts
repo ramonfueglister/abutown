@@ -152,6 +152,21 @@ async function fetchBinary(url: string): Promise<Uint8Array> {
 }
 
 /**
+ * Thin wrapper around the internal `fetchBinary`, exposed for the M3
+ * per-tile streaming layer (`tileStreamer.ts`'s `TileStreamer.fetchTile`
+ * callback), which fetches one tile at a time instead of `loadWorld`'s
+ * fetch-everything-up-front behavior.
+ */
+export async function fetchTileBin(baseUrl: string, path: string): Promise<Uint8Array> {
+  return fetchBinary(`${baseUrl}${path}`);
+}
+
+/** Decodes a single tile binary. Pure — no I/O. */
+export function decodeTileBin(bin: Uint8Array): WorldTile {
+  return fromBinary(WorldTileSchema, bin);
+}
+
+/**
  * Fetches manifest.pb, graph.pb, and every tile the manifest lists (Slice 1)
  * from `baseUrl`, then decodes via `decodeWorld`.
  *
