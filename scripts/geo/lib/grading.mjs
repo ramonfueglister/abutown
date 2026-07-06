@@ -180,7 +180,49 @@ function prepareWay(dem, way) {
   const stepM = totalLen / Math.max(1, dense.length - 1);
   const rawHeights = dense.map(([x, z]) => sampleGrid(dem, x, z));
   const profile = smoothProfile(rawHeights, stepM > 0 ? stepM : 1, way.windowM, way.maxGrade);
-  return { dense, profile };
+  return { dense, arc, profile };
+}
+
+/** Linear-interpolate the grade-clamped profile at a target arc-length s. */
+function profileAtArc(arc, profile, s) {
+  const total = arc[arc.length - 1];
+  if (s <= 0) return profile[0];
+  if (s >= total) return profile[profile.length - 1];
+  // arc is monotonically non-decreasing; find the bracketing dense segment.
+  let lo = 0;
+  let hi = arc.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (arc[mid] <= s) lo = mid;
+    else hi = mid;
+  }
+  const seg = arc[hi] - arc[lo];
+  if (seg <= 0) return profile[lo];
+  const t = (s - arc[lo]) / seg;
+  return profile[lo] * (1 - t) + profile[hi] * t;
+}
+
+/**
+ * Resample a way's grade-clamped longitudinal profile onto fixed 10 m
+ * arc-length stations from the start, with the exact endpoint appended.
+ * Convention: ys[k] is the profile height at arc-length min(10*k, totalLen)
+ * for k in [0, floor(totalLen/10)], then one final entry at the exact
+ * endpoint (arc = totalLen). Length = floor(totalLen/10) + 2. The last two
+ * entries coincide when totalLen is a multiple of 10, keeping index math
+ * uniform. These are the SAME grade-clamped values the rasterization stamps
+ * (profileAtArc reads the identical `profile` array), so the road-owned
+ * profile matches the terrain grading exactly.
+ */
+const PROFILE_STEP_M = 10;
+function resampleProfile(arc, profile) {
+  const total = arc[arc.length - 1];
+  const k = Math.floor(total / PROFILE_STEP_M);
+  const ys = [];
+  for (let i = 0; i <= k; i++) {
+    ys.push(profileAtArc(arc, profile, i * PROFILE_STEP_M));
+  }
+  ys.push(profileAtArc(arc, profile, total)); // exact endpoint
+  return { stepM: PROFILE_STEP_M, ys };
 }
 
 /** Bilinear sample of the (possibly already-graded) grid at world (x,z). */
@@ -220,10 +262,13 @@ function weightAt(d, halfWidthM, blendM) {
 function accumulateKindGroup(dem, wayGroup, waterTest, sharedWaterSkipped) {
   const { ncols, nrows, cellsize } = dem;
   if (wayGroup.length === 0) {
-    return { cellsChanged: 0, waterSkippedByWay: [] };
+    return { cellsChanged: 0, waterSkippedByWay: [], profiles: [] };
   }
 
   const prepared = wayGroup.map((way) => ({ way, ...prepareWay(dem, way) }));
+  // Per-way 10 m-station profiles, index-aligned with wayGroup, read from the
+  // SAME grade-clamped `profile` array the rasterization stamps below.
+  const profiles = prepared.map((p) => resampleProfile(p.arc, p.profile));
 
   // Sparse accumulators keyed by grid cell index. The first version of this
   // kernel allocated dense (sumW, sumWH) arrays over the UNION bbox of the
@@ -325,7 +370,7 @@ function accumulateKindGroup(dem, wayGroup, waterTest, sharedWaterSkipped) {
     dem.data[idx] = graded;
   }
 
-  return { cellsChanged, waterSkippedByWay };
+  return { cellsChanged, waterSkippedByWay, profiles };
 }
 
 /**
@@ -375,16 +420,25 @@ export function gradeDem(dem, ways, opts) {
   const waterTest = makeWaterTest(opts.waterRings);
   const origin00Before = sampleGrid(dem, 0, 0);
 
-  const roads = ways.filter((w) => w.kind === 'road');
-  const rails = ways.filter((w) => w.kind === 'rail');
+  // Keep each way's original index so per-kind-group profiles can be
+  // reassembled into one array index-aligned with the caller's `ways`.
+  const roads = [];
+  const rails = [];
+  for (let idx = 0; idx < ways.length; idx++) {
+    const w = ways[idx];
+    if (w.kind === 'road') roads.push({ w, idx });
+    else rails.push({ w, idx });
+  }
 
   let cellsChanged = 0;
   const sharedWaterSkipped = { count: 0 };
   const bridgeSites = [];
+  const profiles = new Array(ways.length);
 
-  for (const group of [roads, rails]) {
-    if (group.length === 0) continue;
-    const { cellsChanged: groupChanged, waterSkippedByWay } = accumulateKindGroup(
+  for (const tagged of [roads, rails]) {
+    if (tagged.length === 0) continue;
+    const group = tagged.map((t) => t.w);
+    const { cellsChanged: groupChanged, waterSkippedByWay, profiles: groupProfiles } = accumulateKindGroup(
       dem,
       group,
       waterTest,
@@ -392,12 +446,13 @@ export function gradeDem(dem, ways, opts) {
     );
     cellsChanged += groupChanged;
     bridgeSites.push(...bridgeSitesForGroup(group, waterSkippedByWay, dem.cellsize));
+    for (let gi = 0; gi < tagged.length; gi++) profiles[tagged[gi].idx] = groupProfiles[gi];
   }
 
   const origin00After = sampleGrid(dem, 0, 0);
   const originDeltaM = Math.abs(origin00After - origin00Before);
 
-  return { cellsChanged, waterSkippedCells: sharedWaterSkipped.count, bridgeSites, originDeltaM };
+  return { cellsChanged, waterSkippedCells: sharedWaterSkipped.count, bridgeSites, originDeltaM, profiles };
 }
 
 /**

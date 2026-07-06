@@ -120,6 +120,55 @@ describe('gradeDem', () => {
     expect(Array.from(demA.data)).toEqual(Array.from(demB.data));
   });
 
+  it('returns a per-way smoothed longitudinal profile index-aligned with the input ways', () => {
+    // Two ways of different lengths: profiles must be index-aligned and each
+    // sampled at 10 m arc-length stations from the start plus the endpoint.
+    // Convention: length = floor(totalLen / 10) + 2 (stations 0,10,..,10*k
+    // where k=floor(len/10), then the exact endpoint appended — so the last
+    // two entries can coincide when len is a multiple of 10, keeping index
+    // math uniform and deterministic).
+    const dem = flatDem(60, 1, (x, z) => z * 0.5);
+    const wayA = { pts: [[5, 30], [55, 30]], halfWidthM: 4, blendM: 8, windowM: 40, maxGrade: 0.12, kind: 'road' as const }; // len 50
+    const wayB = { pts: [[10, 20], [10, 44]], halfWidthM: 4, blendM: 8, windowM: 40, maxGrade: 0.12, kind: 'road' as const }; // len 24
+    const report = gradeDem(dem, [wayA, wayB], { waterRings: [] });
+    expect(Array.isArray(report.profiles)).toBe(true);
+    expect(report.profiles.length).toBe(2);
+    expect(report.profiles[0].stepM).toBe(10);
+    expect(report.profiles[1].stepM).toBe(10);
+    // wayA: len 50 → floor(50/10)+2 = 7
+    expect(report.profiles[0].ys.length).toBe(7);
+    // wayB: len 24 → floor(24/10)+2 = 4
+    expect(report.profiles[1].ys.length).toBe(4);
+    // all finite numbers
+    for (const p of report.profiles) for (const y of p.ys) expect(Number.isFinite(y)).toBe(true);
+    // wayA runs along x at constant z=30 → its profile heights should all sit
+    // near the levelled centreline height (z*0.5 = 15), grade-clamped & flat.
+    for (const y of report.profiles[0].ys) expect(Math.abs(y - 15)).toBeLessThan(0.5);
+  });
+
+  it('profile heights are grade-clamped to the way maxGrade between 10 m stations', () => {
+    // Steep synthetic ramp along x; a road with a tight 2% grade must not let
+    // consecutive 10 m stations differ by more than maxGrade*10 = 0.2 m.
+    const n = 120;
+    const dem = flatDem(n, 1, (x) => x * 0.3); // 30% raw slope along x
+    const way = { pts: [[5, 60], [110, 60]], halfWidthM: 4, blendM: 8, windowM: 40, maxGrade: 0.02, kind: 'road' as const };
+    const report = gradeDem(dem, [way], { waterRings: [] });
+    const ys = report.profiles[0].ys;
+    for (let i = 1; i < ys.length - 1; i++) {
+      // between two true 10 m stations (skip the trailing endpoint which may be < 10 m from the last station)
+      expect(Math.abs(ys[i] - ys[i - 1])).toBeLessThanOrEqual(0.02 * 10 + 1e-9);
+    }
+  });
+
+  it('profiles are deterministic across repeated runs on identical input', () => {
+    const demA = flatDem(60, 1, (x, z) => z * 0.5);
+    const demB = flatDem(60, 1, (x, z) => z * 0.5);
+    const way = { pts: [[5, 30], [55, 30]], halfWidthM: 4, blendM: 8, windowM: 40, maxGrade: 0.12, kind: 'road' as const };
+    const rA = gradeDem(demA, [way], { waterRings: [] });
+    const rB = gradeDem(demB, [way], { waterRings: [] });
+    expect(rA.profiles).toEqual(rB.profiles);
+  });
+
   it('throws on invalid way kind instead of silently defaulting', () => {
     const dem = flatDem(10, 1, () => 0);
     const bad = { pts: [[1, 1], [8, 8]], halfWidthM: 2, blendM: 4, windowM: 10, maxGrade: 0.1, kind: 'path' as unknown as 'road' };

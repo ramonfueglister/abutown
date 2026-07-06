@@ -18,6 +18,7 @@ import { transformBuildings, transformNature, transformRoads } from './lib/trans
 import { gradeDem, makeCorridorMask } from './lib/grading.mjs';
 import { laneFloorWidths } from './lib/gradewidths.mjs';
 import { riverCenterlineRings } from './lib/riverrings.mjs';
+import { wayKey, quantizeProfile, shiftProfile } from './lib/roadprofiles.mjs';
 import { pointInRing } from './lib/join.mjs';
 import { tileGridFor, assignToTiles, encodeTile, encodeManifest, encodeGraph } from './lib/tiles.mjs';
 import { create, toBinary } from '@bufbuild/protobuf';
@@ -98,14 +99,19 @@ if (!(originH >= 430 && originH <= 470))
 // convention — lon/lat degrees, row 0 = north, non-square cells), so resample
 // it onto a regular local-metre grid over the boundary+pad extent, grade THAT,
 // and hand every later stage the sampler that reads the mutated local grid.
-// 10 m cellsize is finer than the finest tile step (L2 ≈ 15 m); at this
-// municipality extent the grid + kernel accumulators are ~60 MB total (dense
-// Float64 is fine, no sparse refactor needed — see task-4-report.md).
+// Grid cellsize is 2.5 m (spec §5 "A+B" amendment): most Winterthur streets
+// are ~5 m wide, narrower than the old 10 m grid could represent, so the §9
+// burial budget failed on the coarse grid (max 2.55 m poke-through). At 2.5 m
+// a median carriageway spans multiple graded vertices. The dense Float64 grid
+// is ≈ 7800×7600 ≈ 470 MB; the sparse-stamping kernel (task-4-report) keeps
+// accumulator memory bounded to touched corridor cells only. Runs under the
+// 6 GB heap (npm script sets --max-old-space-size=6144).
 console.log('grading road/rail corridors into the DEM...');
+const GRADE_CELL_M = 2.5;
 const { grid: localGrid, sampler: dem } = makeLocalGrid(
   geoDem,
   { minX: bb.minX - CLIP_PAD_M, minZ: bb.minZ - CLIP_PAD_M, maxX: bb.maxX + CLIP_PAD_M, maxZ: bb.maxZ + CLIP_PAD_M },
-  10,
+  GRADE_CELL_M,
 );
 console.log(`grading grid: ${localGrid.ncols}x${localGrid.nrows} local-metre cells @ ${localGrid.cellsize}m`);
 
@@ -153,6 +159,42 @@ console.log(
   + `${report.bridgeSites.length} bridge sites (untagged water/rail crossings), anchor Δ ${originDelta.toFixed(2)} m`,
 );
 const inCorridor = makeCorridorMask(ways);
+
+// ---- Step 2c: road-owned longitudinal profiles (spec §5 "A+B") --------------
+// The L2 tile heightfield samples ~12.5 m and can't represent a ~6 m
+// carriageway bench regardless of grading resolution. So the bake also hands
+// the runtime each road/rail way's smoothed 10 m-station profile; the runtime
+// builds a corridor-aware ground sampler that returns the profile inside a
+// corridor and the tile field outside. `report.profiles` is index-aligned with
+// `ways` (roads first, then rails — the order this array was built). Heights
+// are stored RELATIVE to the shared anchor (graded ground at origin), matching
+// the runtime's groundYAt = worldHeight − anchorGroundHeight; quantized 0.01 m.
+//
+// roads.json itself is written by bake-winterthur.mjs. bake-world grades the
+// WHOLE Gemeinde; roads.json may carry a clipped SUBSET with byte-identical
+// geometry. So we key each profile by its way geometry (wayKey) rather than
+// array index — bake-winterthur then looks up each of its roads/rails by key
+// and hard-fails if any is missing (no fallback), guaranteeing both artifacts
+// come from THIS one grading run.
+const anchorGround = dem.heightAt(0, 0);
+const byKey = {};
+for (let i = 0; i < roads.length; i++) {
+  byKey[wayKey('road', roads[i])] = quantizeProfile(shiftProfile(report.profiles[i], anchorGround));
+}
+for (let j = 0; j < rails.length; j++) {
+  byKey[wayKey('rail', rails[j])] = quantizeProfile(shiftProfile(report.profiles[roads.length + j], anchorGround));
+}
+const profilesDoc = {
+  stepM: 10,
+  anchorGroundHeight: Math.round(anchorGround * 1000) / 1000,
+  byKey,
+};
+mkdirSync(SCRATCH, { recursive: true });
+writeFileSync(`${SCRATCH}/grading-profiles.json`, JSON.stringify(profilesDoc));
+console.log(
+  `road profiles: ${roads.length} roads + ${rails.length} rails keyed by geometry, `
+  + `anchor ${anchorGround.toFixed(2)} m → scratch/geo/grading-profiles.json`,
+);
 
 // ---- Step 3: buildings from 30 GDBs ------------------------------------
 const gdbList = loadJson(`${SCRATCH}/gdb-list.json`);
