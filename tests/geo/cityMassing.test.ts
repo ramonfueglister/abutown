@@ -1,8 +1,8 @@
 // tests/geo/cityMassing.test.ts
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { buildCityMassing } from '../../src/diorama/ksw/geo/cityMassing';
-import type { BakedBuilding } from '../../src/diorama/ksw/geo/geoData';
+import { buildCityMassing, mergeTinted } from '../../src/diorama/ksw/geo/cityMassing';
+import type { BakedBuilding, BakedMesh } from '../../src/diorama/ksw/geo/geoData';
 
 const cube = (x: number): BakedBuilding => ({
   id: `b${x}`, zone: 'city', footprint: [[x, 0], [x + 5, 0], [x + 5, 5], [x, 5]], height: 6, eaveH: 6,
@@ -83,5 +83,18 @@ describe('buildCityMassing', () => {
     for (let i = 0; i < pos.count; i++) maxY = Math.max(maxY, pos.getY(i));
     expect(maxY).toBeLessThanOrEqual(12); // never above the real eave
     expect(maxY).toBeGreaterThan(11); // and at the eave, not sunk to the floor
+  });
+
+  it('mergeTinted writes a per-vertex buildingIdx attribute', () => {
+    const tri = (o: number): BakedMesh => ({ pos: [o, 0, 0, o + 1, 0, 0, o, 1, 0], idx: [0, 1, 2] });
+    const b = (id: string, o: number): BakedBuilding => ({
+      id, zone: 'city', footprint: [[o, 0], [o + 1, 0], [o, 1]], height: 3, eaveH: 3,
+      wall: { ...tri(o), fuv: [0, 0, 0, 0, 0, 0] }, roof: tri(o),
+    });
+    const geo = mergeTinted([b('{A}', 0), b('{B}', 10)], (x) => x.roof, 0xffffff);
+    const idx = geo.getAttribute('buildingIdx');
+    expect(idx).toBeDefined();
+    expect(idx.getX(0)).toBe(0);  // first building's vertices
+    expect(idx.getX(3)).toBe(1);  // second building's vertices
   });
 });

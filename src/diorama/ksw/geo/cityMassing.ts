@@ -49,11 +49,13 @@ export function mergeTinted(buildings: BakedBuilding[], pick: (b: BakedBuilding)
   }
   const positions = new Float32Array(vtx * 3);
   const colors = new Float32Array(vtx * 3);
+  const buildingIdx = new Float32Array(vtx);
   const indices = vtx > 65535 ? new Uint32Array(tri) : new Uint16Array(tri);
   const baseColor = new THREE.Color(base);
   let vo = 0;
   let io = 0;
   let seed = 0;
+  let bi = 0;
   for (const b of buildings) {
     const p = pick(b);
     const base3 = vo / 3;
@@ -65,14 +67,17 @@ export function mergeTinted(buildings: BakedBuilding[], pick: (b: BakedBuilding)
       colors[vo + i] = tint.r;
       colors[vo + i + 1] = tint.g;
       colors[vo + i + 2] = tint.b;
+      buildingIdx[base3 + i / 3] = bi;
     }
     for (let i = 0; i < p.idx.length; i++) indices[io + i] = base3 + p.idx[i];
     vo += p.pos.length;
     io += p.idx.length;
+    bi++;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('buildingIdx', new THREE.BufferAttribute(buildingIdx, 1));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
   return geo;

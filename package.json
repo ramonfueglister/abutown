@@ -27,6 +27,7 @@
     "@vitejs/plugin-basic-ssl": "^2.1.0",
     "suncalc": "^2.0.0",
     "three": "^0.185.1",
+    "three-mesh-bvh": "^0.9.10",
     "vite": "^8.0.12"
   },
   "devDependencies": {
