@@ -94,19 +94,22 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // Golden keyframes de-milked with the same recipe as `day` (2026-07-06):
   // the short fog range + thick mist veiled the whole city framing grey.
   goldenMorning: {
-    hemiSky: 0xc4dcda, hemiGround: 0xe4d3ba, hemiIntensity: 0.3,
+    // hemi 0.85 (was 0.3): at grazing sun the hemi IS the scene light — the
+    // dawn framing rendered as a flat grey veil under AgX; the AgX ambient
+    // calibration band (night pass) needs ~1.0 for a bright-morning read.
+    hemiSky: 0xa9c6e8, hemiGround: 0xeacfa4, hemiIntensity: 0.85,
     fogColor: 0xeee2cf, fogNear: 30, fogFar: 85,
     exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.08,
-    giScale: 0.7, saturation: 1.1, contrast: 1.0,
-    godraysMix: 0.35, lampOn01: 0,
+    giScale: 0.7, saturation: 1.18, contrast: 1.03,
+    godraysMix: 0.2, lampOn01: 0,
     turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8,
-    sunBoost: 1.3,
+    sunBoost: 2.0,
   },
   // The DREDGE moment — amber horizon under deep teal — now fires at the REAL dusk.
   goldenEvening: {
     // warmer, stronger ground bounce — the DREDGE "Amber unter Teal" needs
     // visible amber on the lit faces, not just a teal veil (2026-07-06).
-    hemiSky: 0x4f7d84, hemiGround: 0x8a7050, hemiIntensity: 0.34,
+    hemiSky: 0x4f7d84, hemiGround: 0x8a7050, hemiIntensity: 0.5,
     fogColor: 0x486e74, fogNear: 28, fogFar: 80,
     exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.1,
     giScale: 0.55, saturation: 1.16, contrast: 1.06,
@@ -122,7 +125,7 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // Push fog out, halve the mist, drop the godrays veil, and let saturation
   // carry the cozy palette instead of haze.
   day: {
-    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.28,
+    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.35,
     fogColor: 0xe8eef2, fogNear: 34, fogFar: 90,
     exposure: 0.98, mistColor: 0xf2f3ee, mistOpacity: 0.04,
     giScale: 0.7, saturation: 1.1, contrast: 1.05,
@@ -237,6 +240,10 @@ export const nightGlow = {
   // under the skyglow hemi — real asphalt swallows light. Ribbons/aprons/
   // skirts mix toward dayColor×roadDim as lampGlowU rises.
   roadDim: 0.62,
+  // Volumetric-look halo: an additive sphere around each lamp head whose
+  // brightness follows normalView·z (center bright, silhouette soft) — the
+  // budget stand-in for a scattering volume, view-robust without billboards.
+  halo: { radius: 0.85, peak: 1.5 },
 } as const;
 
 // Moonlight (the night preset's key light). Only color/intensity are read

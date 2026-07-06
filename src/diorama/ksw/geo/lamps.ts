@@ -2,7 +2,7 @@
 // Street lamps along the REAL road polylines: class-based spacing, alternating
 // sides — deterministic, no scattering. Night: warm bulbs like the original.
 import * as THREE from 'three/webgpu';
-import { float, mix, uv, vec3 } from 'three/tsl';
+import { float, mix, normalView, uv, vec3 } from 'three/tsl';
 import { kswCityStyle, nightGlow, palette } from '../../designTokens';
 import { clayMat } from '../props';
 import { lampGlowU } from '../glowUniform';
@@ -99,6 +99,24 @@ export function buildLamps(roads: RoadPath[], groundYAt?: (x: number, z: number)
   const pools = new THREE.InstancedMesh(poolGeo, poolMat, n);
   pools.name = 'lampPools';
   pools.count = spots.length;
+  // Halo: additive glow sphere around the head — brightness follows the
+  // view-facing normal (center bright, silhouette soft), a view-robust
+  // budget volumetric. Black by day via lampGlowU (additive no-op).
+  const haloGeo = new THREE.SphereGeometry(nightGlow.halo.radius, 10, 8);
+  haloGeo.translate(0, 2.86, 0);
+  const haloMat = new THREE.MeshBasicNodeMaterial();
+  haloMat.transparent = true;
+  haloMat.depthWrite = false;
+  haloMat.blending = THREE.AdditiveBlending;
+  haloMat.fog = false;
+  const facing = normalView.z.clamp(0, 1);
+  haloMat.colorNode = vec3(...rgb01(nightGlow.lampHead))
+    .mul(facing.mul(facing).mul(facing))
+    .mul(float(nightGlow.halo.peak))
+    .mul(lampGlowU);
+  const halos = new THREE.InstancedMesh(haloGeo, haloMat, n);
+  halos.name = 'lampHalos';
+  halos.count = spots.length;
   const m = new THREE.Matrix4();
   spots.forEach((s, i) => {
     m.makeTranslation(s.x, groundYAt ? groundYAt(s.x, s.z) : 0, s.z);
@@ -106,8 +124,9 @@ export function buildLamps(roads: RoadPath[], groundYAt?: (x: number, z: number)
     heads.setMatrixAt(i, m);
     bulbs.setMatrixAt(i, m);
     pools.setMatrixAt(i, m);
+    halos.setMatrixAt(i, m);
   });
-  for (const mesh of [posts, heads, bulbs, pools]) {
+  for (const mesh of [posts, heads, bulbs, pools, halos]) {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     group.add(mesh);

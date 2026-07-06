@@ -124,8 +124,10 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   const sunW = 0.7 * Math.min(1, t.sun.intensity) * (isDay ? sunElevW : 0.3);
   // Night factor 0.22: the night hemi runs hot (1.3) to keep the CITY readable
   // under AgX; feeding that raw into the unlit impostor atlas made every far
-  // tree glow teal brighter than the lamps.
-  const hemiW = 1.6 * t.hemi.intensity * (isDay ? 1 : 0.22);
+  // tree glow teal brighter than the lamps. The hemi term ALSO ramps with sun
+  // elevation by day — at dawn/dusk the physically-lit scene sits in the AgX
+  // toe while a flat 0.48 hemi painted the far trees as pastel confetti.
+  const hemiW = 1.6 * t.hemi.intensity * (isDay ? 0.35 + 0.65 * sunElevW : 0.22);
   impostorLightU.value.setRGB(
     Math.min(1, t.sun.color.r * sunW + t.hemi.color.r * hemiW),
     Math.min(1, t.sun.color.g * sunW + t.hemi.color.g * hemiW),

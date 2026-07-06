@@ -63,11 +63,16 @@ describe('computeEnvironment — keyframe selection', () => {
     expect(e.exposure).toBeCloseTo(0.98, 2);
   });
   it('is continuous across the golden→day boundary (no jumps)', () => {
+    // Guards against keyframe-switch discontinuities (a real jump = the full
+    // keyframe spread in one step). The per-4°-step ceiling follows the
+    // curated spread: the SOTA dawn pass widened goldenMorning→day hemi to
+    // 0.5 (0.85→0.35), whose smooth-eased max slope is ~0.143/step — still a
+    // gradual 20-real-minute drift, not a pop.
     let prev = computeEnvironment(utcAtElevation(3, true), CLEAR_SKY);
     for (const elev of [5, 8, 12, 16, 20, 24, 26]) {
       const cur = computeEnvironment(utcAtElevation(elev, true), CLEAR_SKY);
       expect(Math.abs(cur.exposure - prev.exposure)).toBeLessThan(0.12);
-      expect(Math.abs(cur.hemiIntensity - prev.hemiIntensity)).toBeLessThan(0.12);
+      expect(Math.abs(cur.hemiIntensity - prev.hemiIntensity)).toBeLessThan(0.16);
       prev = cur;
     }
   });
