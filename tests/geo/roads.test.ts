@@ -1,7 +1,7 @@
 // tests/geo/roads.test.ts
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { buildRoads, miterStrip, skirtStrip } from '../../src/diorama/ksw/geo/roads';
+import { buildRoads, miterOffsets, miterStrip, skirtStrip } from '../../src/diorama/ksw/geo/roads';
 
 describe('miterStrip', () => {
   it('builds a continuous strip: 2 verts per point, no seams', () => {
@@ -57,6 +57,31 @@ describe('skirtStrip', () => {
     for (let i = 2; i < midStrip.positions.length; i += 3) zs.push(Math.abs(Math.round(midStrip.positions[i] * 100) / 100));
     expect(zs.every((z) => z === 3 || z === 6)).toBe(true);
     expect(zs.some((z) => z === 0)).toBe(false);
+  });
+});
+
+describe('miterOffsets (shared by miterStrip AND skirtStrip)', () => {
+  const pts = [[0, 0], [10, 0], [10, 10], [0, 0.4]];
+  it('produces the SAME edge offsets both builders consume (no drift)', () => {
+    // miterStrip flat (no drape) and skirtStrip flat (no drape) both consume
+    // miterOffsets on the untouched pts; the ribbon top edge and the skirt top
+    // edge must land on identical x/z. Prove they read the SAME offsets.
+    const offs = miterOffsets(pts);
+    const half = 3; // width 6
+    const ribbon = miterStrip(pts, 6, 0.04); // no groundYAt → no subdivide
+    const skirt = skirtStrip(pts, 6, 0.04); // no groundYAt → no subdivide
+    // ribbon left-edge vertex i = offs[i] applied at +side; skirt side=+1 first
+    for (let i = 0; i < pts.length; i++) {
+      const { mx, mz, scale } = offs[i];
+      const ex = pts[i][0] + mx * half * scale;
+      const ez = pts[i][1] + mz * half * scale;
+      // ribbon vertex 2i is the +side edge (see miterStrip push order)
+      expect(ribbon.positions[i * 6 + 0]).toBeCloseTo(ex, 9);
+      expect(ribbon.positions[i * 6 + 2]).toBeCloseTo(ez, 9);
+      // skirt side=+1 strip: top vertex of point i is at index (i*2)*3
+      expect(skirt.positions[i * 6 + 0]).toBeCloseTo(ex, 9);
+      expect(skirt.positions[i * 6 + 2]).toBeCloseTo(ez, 9);
+    }
   });
 });
 

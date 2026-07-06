@@ -40,6 +40,12 @@ const OUT_DIR = new URL('../scratch/captures/', import.meta.url).pathname;
 //     4.2 m) at a LOW oblique pitch so the vertical side-skirts read as faces
 //     dropping from the ribbon edge to the discarded terrain.
 const SITES = [
+  // Finding 1a proof: a near-vertical TOP-DOWN pitch over a hillside road, where
+  // a see-through hole beside the ribbon (the old grading-width mask stamped a
+  // ~1.5 m annulus the skirt never reached) would show as sky/void beside the
+  // tarmac. With the ribbon-footprint mask (Finding 1a) the graded shoulder keeps
+  // rendered terrain right up to the ribbon edge — no void.
+  { name: 'discard-topdown-hillside', x: -266, z: 474, radius: 90, yaw: 0.0, pitch: 1.53 },
   { name: 'discard-worst-5d-offender', x: 118.9, z: -194.4, radius: 130, yaw: 0.5, pitch: 1.45 },
   { name: 'discard-bruehlberg-hillside', x: -266, z: 474, radius: 130, yaw: -0.4, pitch: 1.1 },
   { name: 'discard-bruehlberg-skirt', x: -218, z: 506, radius: 55, yaw: 0.7, pitch: 0.6 },

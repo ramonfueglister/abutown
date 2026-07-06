@@ -153,7 +153,14 @@ const ways = [
   ...roads.map((r, i) => ({
     pts: r.pts,
     kind: 'road',
-    halfWidthM: Math.max(r.width, floors[i]) / 2 + 1.5, // lane/render width + 1.5 m shoulder (§4.1, §4.4)
+    halfWidthM: Math.max(r.width, floors[i]) / 2 + 1.5, // GRADING width: lane/render width + 1.5 m shoulder (§4.1, §4.4)
+    // RENDER (ribbon) half-width — what buildRoads actually draws: renderWidth/2
+    // where renderWidth = max(OSM width, lane-floor width). NO shoulder. This is
+    // what the discard mask stamps (Finding 1a): stamping the grading width would
+    // discard a ~1.5 m annulus of terrain the skirt never reaches, opening a
+    // see-through hole; stamping the ribbon width lets the graded shoulder keep
+    // RENDERED terrain (corridor-snap already clamps it ≤ profile − 0.05).
+    renderHalfWidthM: Math.max(r.width, floors[i]) / 2,
     blendM: 8,
     windowM: 40,
     maxGrade: 0.12,
@@ -163,7 +170,8 @@ const ways = [
   ...rails.map((r) => ({
     pts: r.pts,
     kind: 'rail',
-    halfWidthM: (r.width + 2.2) / 2 + 2.0, // ballast bed + 2 m shoulder (§4.2)
+    halfWidthM: (r.width + 2.2) / 2 + 2.0, // GRADING width: ballast bed + 2 m shoulder (§4.2)
+    renderHalfWidthM: (r.width + 2.2) / 2, // RENDER: ballast bed half-width (railBed layer, buildRoads) — NO shoulder
     blendM: 8,
     windowM: 200,
     maxGrade: 0.025,
@@ -544,7 +552,14 @@ if (l0Bytes >= 1 * 1024 * 1024) fail(`L0 tile bytes ${l0Bytes} >= 1MB budget`);
 // between them — piercing is impossible by construction.
 const MASK_CELL_M = 2.5;
 const maskBounds = { minX: root.minX, minZ: root.minZ, maxX: root.minX + root.size, maxZ: root.minZ + root.size };
-const corridorMask = buildCorridorMask(ways, maskBounds, MASK_CELL_M);
+// Finding 1a: the mask stamps the RIBBON footprint (renderHalfWidthM), NOT the
+// grading half-width. The grading half-width includes a 1.5/2 m shoulder that
+// the skirts (which sit at the ribbon edge) never reach — stamping it would
+// discard terrain no geometry covers → a see-through annulus. Stamping the
+// ribbon width discards only what the ribbon+skirt cover; the graded shoulder
+// keeps RENDERED terrain (already clamped ≤ profile − 0.05 by corridor-snap).
+const maskWays = ways.map((w) => ({ pts: w.pts, kind: w.kind, halfWidthM: w.renderHalfWidthM }));
+const corridorMask = buildCorridorMask(maskWays, maskBounds, MASK_CELL_M);
 // Hard coverage gate: EVERY way's densified centreline stations must fall in a
 // set mask cell, or terrain could pierce through an uncovered corridor. Loud
 // hard-error listing any offending way (no silent partial mask).
@@ -573,7 +588,7 @@ const maskBin = encodeCorridorMask(corridorMask);
 writeFileSync(`${OUT}/mask.bin`, maskBin);
 // Determinism proof: a second build encodes to identical bytes.
 {
-  const again = encodeCorridorMask(buildCorridorMask(ways, maskBounds, MASK_CELL_M));
+  const again = encodeCorridorMask(buildCorridorMask(maskWays, maskBounds, MASK_CELL_M));
   if (!Buffer.from(maskBin).equals(Buffer.from(again))) fail('corridor mask is not deterministic — re-build produced different bytes');
 }
 console.log(

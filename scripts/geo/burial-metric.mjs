@@ -270,29 +270,56 @@ export function burialStatsV2(roads, heightAt, stepM = 10) {
 }
 
 /**
- * §9 metric v3 (spec §5 "Terrain-discard"): rendered truth via the corridor
- * discard mask. Terrain fragments inside a corridor are DISCARDED by the shader
- * (they do not render), so the poke-through budget only applies to stations
- * where terrain still renders — i.e. OUTSIDE the mask (the blend band). Two
- * parts, both must pass:
- *   (a) coveragePct = 100 %  — every corridor station falls in a set mask cell
- *       (an uncovered station is terrain that WOULD render and could pierce).
- *   (b) v2 poke-through budget (p99 ≤ 0.05 m, max < 0.10 m) over the stations
- *       OUTSIDE the mask only (inside stations are discarded, so their
- *       heightfield value is irrelevant — this is what lets Task 5d's
- *       unrepresentable multi-way conflicts pass: they sit inside the mask).
+ * §9 metric v3 (spec §5 "Terrain-discard"), NON-VACUOUS rewrite (Finding 1b).
+ *
+ * Rendered truth via the corridor discard mask. Terrain fragments inside a
+ * corridor are DISCARDED by the shader, so they cannot pierce a road surface.
+ * The mask now stamps only the RIBBON footprint (Finding 1a), so the graded
+ * SHOULDER (mask edge → grading edge) still RENDERS — and THAT annulus is where
+ * poke-through must be measured. Sampling only on-centreline (as the old v3 did)
+ * is vacuous: the centreline is guaranteed inside the mask → discarded → empty
+ * measured set. Instead, at every centreline station we use the station normal
+ * to sample the SHOULDER ANNULUS on both sides.
+ *
+ * Three reported parts:
+ *   (a) coveragePct = 100 % — every centreline station falls in a set mask cell
+ *       (the ribbon footprint is fully discarded; an uncovered station would be
+ *       rendered terrain under the ribbon that could pierce).
+ *   (b) shoulder-annulus poke-through: for offsets from `maskHW + 0.1 m` to
+ *       `gradeHW + blendM` in 0.5 m steps, both sides, over the annulus samples
+ *       that fall OUTSIDE the mask (rendered terrain), `max(0, tileY − profileY)`
+ *       must satisfy p99 ≤ 0.05 m, max < 0.10 m (v2 budgets).
+ *   (c) skirt-reach: within the annulus INSIDE the mask edge but outside the
+ *       ribbon edge (ribbon edge → mask edge — normally empty since the mask
+ *       stamps the ribbon, so any residual gap), the required skirt drop
+ *       `max(profileY − tileY)` must be ≤ the skirt drop (SKIRT_DROP_M = 1.5 m)
+ *       or a skirt foot would float above the ground it must hide. Reported as
+ *       `skirtReachM` (the real max) with a `skirtReachPass` flag.
  *
  * @param {{class:string, pts:number[][], profile?:{stepM:number,ys:number[]}}[]} roads
  * @param {(x:number,z:number)=>number} heightAt tile heightfield (profile frame)
  * @param {(x:number,z:number)=>boolean} covers corridor-mask reader
- * @param {number} [stepM]
- * @returns {{coveragePct:number, sampleCount:number, coveredCount:number, outsideCount:number, maxM:number, p99M:number, offenders:{x:number,z:number,devM:number,class:string}[]}}
+ * @param {{stepM?:number, maskHalfWidths:number[], gradeHalfWidths:number[], blendM?:number, skirtDropM?:number}} opts
+ * @returns {{coveragePct:number, sampleCount:number, coveredCount:number, outsideCount:number, maxM:number, p99M:number, offenders:{x:number,z:number,devM:number,class:string}[], skirtReachM:number, skirtReachPass:boolean}}
  */
-export function burialStatsV3(roads, heightAt, covers, stepM = 10) {
+export function burialStatsV3(roads, heightAt, covers, opts) {
   if (!Array.isArray(roads)) throw new Error('burialStatsV3: roads must be an array');
   if (typeof heightAt !== 'function') throw new Error('burialStatsV3: heightAt must be a function');
   if (typeof covers !== 'function') throw new Error('burialStatsV3: covers must be a function');
+  if (!opts || typeof opts !== 'object') {
+    throw new Error('burialStatsV3: opts must be { maskHalfWidths, gradeHalfWidths, stepM? } — v3 samples the shoulder annulus (Finding 1b), not the centreline');
+  }
+  const stepM = opts.stepM ?? 10;
+  const blendM = opts.blendM ?? 3;
+  const skirtDropM = opts.skirtDropM ?? 1.5;
+  const { maskHalfWidths, gradeHalfWidths } = opts;
   if (!(stepM > 0)) throw new Error('burialStatsV3: stepM must be > 0');
+  if (!Array.isArray(maskHalfWidths) || maskHalfWidths.length !== roads.length) {
+    throw new Error('burialStatsV3: opts.maskHalfWidths must be an array with one entry per road');
+  }
+  if (!Array.isArray(gradeHalfWidths) || gradeHalfWidths.length !== roads.length) {
+    throw new Error('burialStatsV3: opts.gradeHalfWidths must be an array with one entry per road');
+  }
 
   const missing = [];
   for (let i = 0; i < roads.length; i++) if (!roads[i].profile) missing.push(i);
@@ -302,12 +329,20 @@ export function burialStatsV3(roads, heightAt, covers, stepM = 10) {
     );
   }
 
-  let sampleCount = 0;
+  const ANNULUS_STEP_M = 0.5;
+  let sampleCount = 0; // centreline stations (coverage denominator)
   let coveredCount = 0;
-  const outside = []; // {x,z,devM,class} for stations where terrain still renders
+  const outside = []; // annulus samples OUTSIDE the mask — where terrain renders
+  let skirtReachM = 0; // max(profileY − tileY) inside the mask, ribbon→mask edge
 
-  for (const road of roads) {
+  for (let r = 0; r < roads.length; r++) {
+    const road = roads[r];
     if (!Array.isArray(road.pts) || road.pts.length < 2) continue;
+    const maskHW = maskHalfWidths[r];
+    const gradeHW = gradeHalfWidths[r];
+    if (!(maskHW > 0) || !(gradeHW > 0)) {
+      throw new Error(`burialStatsV3: road[${r}] half-widths must be > 0 (mask ${maskHW}, grade ${gradeHW})`);
+    }
     const dense = densify(road.pts, 2);
     const stations = stationsAlong(dense, stepM);
     const arc = arcLengths(dense);
@@ -319,20 +354,39 @@ export function burialStatsV3(roads, heightAt, covers, stepM = 10) {
     for (let i = 0; i < stations.length; i++) {
       const st = stations[i];
       sampleCount++;
-      if (covers(st.x, st.z)) {
-        coveredCount++;
-        continue; // discarded terrain — no budget applies
-      }
-      const tileY = heightAt(st.x, st.z);
+      if (covers(st.x, st.z)) coveredCount++;
+
       const profileY = interpolateProfile(road.profile, targets[i]);
-      outside.push({ x: st.x, z: st.z, devM: Math.max(0, tileY - profileY), class: road.class });
+      // Left-hand normal to the tangent (x-z plane).
+      const nx = -st.tz;
+      const nz = st.tx;
+      // Shoulder annulus: from just outside the ribbon (mask) edge out to the
+      // grading edge + blend band, sampled both sides.
+      for (let off = maskHW + 0.1; off <= gradeHW + blendM + 1e-9; off += ANNULUS_STEP_M) {
+        for (const side of [1, -1]) {
+          const x = st.x + side * nx * off;
+          const z = st.z + side * nz * off;
+          const tileY = heightAt(x, z);
+          if (covers(x, z)) {
+            // still inside the mask (ribbon edge → mask edge gap): the skirt must
+            // reach DOWN to cover this discarded terrain. requiredDrop = how far
+            // the profile sits above the (discarded) tile here.
+            const reqDrop = profileY - tileY;
+            if (reqDrop > skirtReachM) skirtReachM = reqDrop;
+          } else {
+            // rendered terrain in the graded shoulder — poke-through budget.
+            outside.push({ x, z, devM: Math.max(0, tileY - profileY), class: road.class });
+          }
+        }
+      }
     }
   }
 
   const coveragePct = sampleCount === 0 ? 100 : (coveredCount / sampleCount) * 100;
+  const skirtReachPass = skirtReachM <= skirtDropM;
 
   if (outside.length === 0) {
-    return { coveragePct, sampleCount, coveredCount, outsideCount: 0, maxM: 0, p99M: 0, offenders: [] };
+    return { coveragePct, sampleCount, coveredCount, outsideCount: 0, maxM: 0, p99M: 0, offenders: [], skirtReachM, skirtReachPass };
   }
 
   const sorted = outside.slice().sort((a, b) => a.devM - b.devM);
@@ -347,7 +401,7 @@ export function burialStatsV3(roads, heightAt, covers, stepM = 10) {
     .filter((d) => d.devM >= BUDGET_MAX)
     .map(({ x, z, devM, class: cls }) => ({ x, z, devM, class: cls }));
 
-  return { coveragePct, sampleCount, coveredCount, outsideCount: n, maxM, p99M, offenders };
+  return { coveragePct, sampleCount, coveredCount, outsideCount: n, maxM, p99M, offenders, skirtReachM, skirtReachPass };
 }
 
 // ---- CLI mode: decode the real bake and print the stats table ----------
@@ -470,12 +524,13 @@ if (isMain) {
     console.log('');
     console.log(pass ? 'PASS: within §9 v2 budget' : 'FAIL: exceeds §9 v2 budget');
   } else {
-    // v3 (spec §5 "Terrain-discard", Task 5e default): rendered truth via the
-    // corridor discard mask. The terrain shader discards fragments inside a
-    // corridor, so the poke-through budget applies ONLY outside the mask (the
-    // blend band, where terrain still renders). Two parts, both MUST pass:
-    //   (a) mask coverage of corridor stations = 100 %
-    //   (b) v2 budgets (p99 ≤ 0.05 m, max < 0.10 m) over OUTSIDE-mask stations.
+    // v3 (spec §5 "Terrain-discard", Task 5e default): NON-VACUOUS rendered
+    // truth (Finding 1b). The mask stamps only the RIBBON footprint (Finding 1a),
+    // so the graded SHOULDER still renders. v3 samples that shoulder ANNULUS
+    // (mask edge + 0.1 m → grade edge + blend) via each station normal and
+    // applies the v2 budget only where the sample is OUTSIDE the mask. Three
+    // parts reported: (a) centreline coverage = 100 %, (b) annulus poke-through
+    // budget, (c) skirt-reach (required drop within any ribbon→mask-edge gap).
     const GRADING_PROFILES_PATH = 'scratch/geo/grading-profiles.json';
     const MASK_PATH = `${WORLD_DIR}/mask.bin`;
     if (!existsSync(GRADING_PROFILES_PATH)) {
@@ -492,19 +547,41 @@ if (isMain) {
     const mask = decodeCorridorMask(readFileSync(MASK_PATH));
     const covers = (x, z) => maskCovers(mask, x, z);
 
+    // Per-way half-widths, EXACTLY mirroring bake-world.mjs's `ways` (grading)
+    // and `maskWays` (render/ribbon). roads first, then rails — the same order
+    // buildCorridorMask/attach-profiles use.
+    const trafficNetDoc = JSON.parse(readFileSync(TRAFFICNET_PATH, 'utf8'));
+    const floors = laneFloorWidths(roads, trafficNetDoc);
+    const maskHalfWidths = [
+      ...roads.map((r, i) => Math.max(r.width, floors[i]) / 2), // render ribbon (§ Finding 1a)
+      ...rails.map((r) => (r.width + 2.2) / 2), // ballast bed
+    ];
+    const gradeHalfWidths = [
+      ...roads.map((r, i) => Math.max(r.width, floors[i]) / 2 + 1.5), // grading shoulder (§4.1)
+      ...rails.map((r) => (r.width + 2.2) / 2 + 2.0), // grading shoulder (§4.2)
+    ];
+
     const allWays = [...roads, ...rails];
-    const stats = burialStatsV3(allWays, heightAtRel, covers, 10);
+    const stats = burialStatsV3(allWays, heightAtRel, covers, {
+      stepM: 10,
+      maskHalfWidths,
+      gradeHalfWidths,
+      blendM: 3,
+      skirtDropM: 1.5,
+    });
 
     console.log('');
-    console.log('Burial metric v3 (spec §5 terrain-discard) — acceptance: coverage = 100 %, then (outside mask) p99 ≤ 0.05 m, max < 0.10 m');
-    console.log('-------------------------------------------------------------------------------------------------------------------------');
+    console.log('Burial metric v3 (spec §5 terrain-discard, non-vacuous) — coverage = 100 %, shoulder-annulus p99 ≤ 0.05 m / max < 0.10 m, skirt-reach ≤ 1.5 m');
+    console.log('----------------------------------------------------------------------------------------------------------------------------------------------');
     console.log(`mask          : ${mask.cols}×${mask.rows} cells @ ${mask.cellSizeM}m`);
-    console.log(`sampleCount   : ${stats.sampleCount} (${stats.coveredCount} covered / ${stats.outsideCount} outside)`);
+    console.log(`centreline    : ${stats.sampleCount} stations (${stats.coveredCount} in mask)`);
     console.log(`coveragePct   : ${stats.coveragePct.toFixed(4)} %`);
-    console.log(`maxM (outside): ${stats.maxM.toFixed(3)} m`);
-    console.log(`p99M (outside): ${stats.p99M.toFixed(3)} m`);
+    console.log(`annulus outside: ${stats.outsideCount} samples`);
+    console.log(`maxM (annulus): ${stats.maxM.toFixed(3)} m`);
+    console.log(`p99M (annulus): ${stats.p99M.toFixed(3)} m`);
+    console.log(`skirtReachM   : ${stats.skirtReachM.toFixed(3)} m (skirt drop 1.5 m)`);
     console.log('');
-    console.log('Top offenders OUTSIDE the mask (tileY pierces profileY in the blend band):');
+    console.log('Top offenders in the shoulder annulus (tileY pierces profileY OUTSIDE the mask):');
     console.log('  x          z          devM     class');
     for (const o of stats.offenders) {
       console.log(
@@ -515,7 +592,8 @@ if (isMain) {
     const budgetPass = stats.maxM < 0.10 && stats.p99M <= 0.05;
     console.log('');
     console.log(`coverage: ${coverPass ? 'PASS (100%)' : `FAIL (${stats.coveragePct.toFixed(4)}%)`}`);
-    console.log(`budget (outside mask): ${budgetPass ? 'PASS' : 'FAIL'}`);
-    console.log(coverPass && budgetPass ? 'PASS: within §9 v3 budget' : 'FAIL: exceeds §9 v3 budget');
+    console.log(`budget (shoulder annulus): ${budgetPass ? 'PASS' : 'FAIL'}`);
+    console.log(`skirt-reach: ${stats.skirtReachPass ? 'PASS' : `FAIL (${stats.skirtReachM.toFixed(3)} m > 1.5 m)`}`);
+    console.log(coverPass && budgetPass && stats.skirtReachPass ? 'PASS: within §9 v3 budget' : 'FAIL: exceeds §9 v3 budget');
   }
 }

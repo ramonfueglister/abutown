@@ -34,15 +34,31 @@ import type { RoadPath, RoadProfile } from './geoData';
 
 export type GroundYAt = (x: number, z: number) => number;
 
+/** Runtime corridor GRADING half-width for a road (spec §4.1): the corridor
+ * half-width (max(OSM, lane-floored corridorWidths)/2) plus the 1.5 m grading
+ * shoulder. This is the SAME formula bake-world.mjs's `ways` uses for roads
+ * (`Math.max(r.width, floors[i]) / 2 + 1.5`); the gradewidths parity test pins
+ * the equality so mask/snap/runtime cannot silently diverge (Finding 4). */
+export function roadCorridorHalfWidth(osmWidth: number, correctedWidth: number): number {
+  return Math.max(osmWidth, correctedWidth) / 2 + ROAD_HALFWIDTH_MARGIN_M;
+}
+
+/** Runtime corridor GRADING half-width for a rail (spec §4.2): ballast-bed
+ * half-width ((width + 2.2)/2) plus the 2 m grading shoulder — the SAME formula
+ * bake-world.mjs's `ways` uses for rails (`(r.width + 2.2) / 2 + 2.0`). */
+export function railCorridorHalfWidth(osmWidth: number): number {
+  return (osmWidth + RAIL_BED_PAD_M) / 2 + RAIL_HALFWIDTH_MARGIN_M;
+}
+
 /** Half-width margin added on top of the corridor/OSM road width to define
  * the hard corridor boundary (corridor width source: corridorWidths — the
  * lane-floor is terrain-corridor-only, never the render ribbon, per #134). */
-const ROAD_HALFWIDTH_MARGIN_M = 1.5;
+export const ROAD_HALFWIDTH_MARGIN_M = 1.5;
 /** Rail bed halfWidth: (width + 2.2)/2 + 2, mirroring roads.ts's railBed
  * layer (`p.width + 2.2`) plus a margin so the sampler's corridor is a bit
  * wider than the rendered ballast bed. */
-const RAIL_BED_PAD_M = 2.2;
-const RAIL_HALFWIDTH_MARGIN_M = 2;
+export const RAIL_BED_PAD_M = 2.2;
+export const RAIL_HALFWIDTH_MARGIN_M = 2;
 /** Edge blend band (m) outside the hard corridor boundary where the sampler
  * smoothstep-mixes profile height toward tile ground height. */
 const BLEND_M = 3;
@@ -186,11 +202,10 @@ export function makeCorridorGround(
   };
 
   for (let i = 0; i < roads.length; i++) {
-    const width = Math.max(roads[i].width, correctedRoadWidths[i] ?? roads[i].width);
-    addWay(roads[i], width / 2 + ROAD_HALFWIDTH_MARGIN_M);
+    addWay(roads[i], roadCorridorHalfWidth(roads[i].width, correctedRoadWidths[i] ?? roads[i].width));
   }
   for (let i = 0; i < rails.length; i++) {
-    addWay(rails[i], (rails[i].width + RAIL_BED_PAD_M) / 2 + RAIL_HALFWIDTH_MARGIN_M);
+    addWay(rails[i], railCorridorHalfWidth(rails[i].width));
   }
 
   return (x: number, z: number): number => {

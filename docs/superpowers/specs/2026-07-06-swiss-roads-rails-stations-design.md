@@ -133,9 +133,18 @@ their surface height AND the terrain conforms toward it:
   per-vertex heightfield. Definitive mechanism: the bake exports a
   corridor mask; the terrain shader discards fragments inside road/rail
   corridors, and ribbons gain side skirts (vertical aprons at the ribbon
-  edges, dropping to min(profile, local tile height) − 1 m) that close
-  the hole. Rendered terrain inside a corridor then does not exist —
-  piercing is impossible by construction.
+  edges, dropping to **profile − 1.5 m**) that close the hole. Rendered
+  terrain inside a corridor then does not exist — piercing is impossible
+  by construction. (The skirt drops to `profile − 1.5 m`, not the earlier
+  draft's `min(profile, local tile height) − 1 m`: the `min()` is moot
+  because the terrain UNDER the ribbon footprint is discarded, so there is
+  no local tile height to clamp to; a flat 1.5 m drop below the profile
+  reliably reaches below the graded shoulder the discard mask leaves
+  rendered — verified by the §9 v3 skirt-reach check, `max(profile −
+  tile) ≤ 1.5 m`.) The mask stamps the **ribbon** footprint (renderWidth/2
+  for roads, ballast-bed/2 for rails), NOT the wider grading half-width, so
+  the graded shoulder keeps rendered terrain and no see-through annulus
+  opens beside a road.
 - **§9 metric v3 (same criterion, rendered truth):** the criterion "no
   rendered terrain above the road surface" is unchanged; measurement
   moves off the heightfield proxy: (a) the discard mask must cover 100 %

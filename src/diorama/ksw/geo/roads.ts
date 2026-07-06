@@ -66,21 +66,24 @@ export function subdivideForDrape(pts: number[][], groundYAt: GroundYAt): number
   return out;
 }
 
-export function miterStrip(
-  pts: number[][],
-  width: number,
-  y: number,
-  groundYAt?: GroundYAt,
-): { positions: number[]; indices: number[] } {
-  const positions: number[] = [];
-  const indices: number[] = [];
-  const half = width / 2;
-  // Fix 1: when draping, resample the centreline to terrain resolution so the
-  // ribbon follows the DEM instead of chording under convex bumps. No sampler
-  // → untouched pts (flat ribbon, matches the pre-#119 look and the unit tests).
-  if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
+/** One per-point miter offset: the unit miter normal (mx,mz) perpendicular to
+ * the averaged tangent, and the `scale` = 1/cos(θ/2) that keeps a mitred corner
+ * on the offset ribbon edge (capped at 60° so a hairpin never spikes). */
+export interface MiterOffset {
+  mx: number;
+  mz: number;
+  scale: number;
+}
+
+/** SHARED miter math for miterStrip AND skirtStrip (Task 5e refactor). Given a
+ * centreline `pts`, returns one `{mx, mz, scale}` per point so BOTH the ribbon
+ * top surface and its side-skirt use byte-identical edge offsets and can never
+ * drift. Pure over `pts`: does NOT subdivide (callers subdivide first with the
+ * same groundYAt so the point arrays line up). A single-point path yields one
+ * degenerate offset; callers already guard `n < 2`. */
+export function miterOffsets(pts: number[][]): MiterOffset[] {
   const n = pts.length;
-  if (n < 2) return { positions, indices };
+  const out: MiterOffset[] = [];
   for (let i = 0; i < n; i++) {
     const [px, pz] = pts[Math.max(0, i - 1)];
     const [cx, cz] = pts[i];
@@ -106,6 +109,30 @@ export function miterStrip(
       const cosHalf = Math.max(0.5, mx * -dz0 + mz * dx0); // cap: ≤ 2× width spike
       scale = 1 / cosHalf;
     }
+    out.push({ mx, mz, scale });
+  }
+  return out;
+}
+
+export function miterStrip(
+  pts: number[][],
+  width: number,
+  y: number,
+  groundYAt?: GroundYAt,
+): { positions: number[]; indices: number[] } {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const half = width / 2;
+  // Fix 1: when draping, resample the centreline to terrain resolution so the
+  // ribbon follows the DEM instead of chording under convex bumps. No sampler
+  // → untouched pts (flat ribbon, matches the pre-#119 look and the unit tests).
+  if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
+  const n = pts.length;
+  if (n < 2) return { positions, indices };
+  const offs = miterOffsets(pts);
+  for (let i = 0; i < n; i++) {
+    const [cx, cz] = pts[i];
+    const { mx, mz, scale } = offs[i];
     // Drape each edge vertex onto the terrain (sampled at the centreline point
     // so both rails of the ribbon share one height and the strip stays planar
     // across its width — avoids a twisted ribbon on cross-slopes).
@@ -149,34 +176,17 @@ export function skirtStrip(
   if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
   const n = pts.length;
   if (n < 2) return { positions, indices };
+  // SHARED miter offsets (Task 5e refactor): the SAME per-point {mx,mz,scale}
+  // miterStrip uses, so the skirt top edge coincides exactly with the ribbon
+  // edge and the two can never drift.
+  const offs = miterOffsets(pts);
   // Two skirts: side = +1 (left edge) and −1 (right edge). Each is a vertical
   // quad strip: top follows the ribbon edge, bottom is dropM below the ground.
   for (const side of [1, -1]) {
     const base0 = positions.length / 3;
     for (let i = 0; i < n; i++) {
-      const [px, pz] = pts[Math.max(0, i - 1)];
       const [cx, cz] = pts[i];
-      const [nx2, nz2] = pts[Math.min(n - 1, i + 1)];
-      let dx0 = cx - px;
-      let dz0 = cz - pz;
-      let dx1 = nx2 - cx;
-      let dz1 = nz2 - cz;
-      const l0 = Math.hypot(dx0, dz0) || 1;
-      const l1 = Math.hypot(dx1, dz1) || 1;
-      dx0 /= l0; dz0 /= l0; dx1 /= l1; dz1 /= l1;
-      const tx = dx0 + dx1;
-      const tz = dz0 + dz1;
-      const tl = Math.hypot(tx, tz);
-      let mx: number;
-      let mz: number;
-      let scale = 1;
-      if (tl < 1e-6) {
-        mx = -dz0; mz = dx0;
-      } else {
-        mx = -tz / tl; mz = tx / tl;
-        const cosHalf = Math.max(0.5, mx * -dz0 + mz * dx0);
-        scale = 1 / cosHalf;
-      }
+      const { mx, mz, scale } = offs[i];
       const ground = groundYAt ? groundYAt(cx, cz) : 0;
       const topY = ground + y;
       const botY = ground - dropM;

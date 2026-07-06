@@ -186,57 +186,81 @@ describe('burialStatsV2 (spec §9 metric v2 — terrain poke-through)', () => {
   });
 });
 
-describe('burialStatsV3 (spec §9 metric v3 — rendered truth via the discard mask)', () => {
+describe('burialStatsV3 (spec §9 metric v3 — non-vacuous shoulder-annulus truth)', () => {
+  // A straight x-running road at z=30. maskHW=3 (ribbon), gradeHW=4.5 (ribbon +
+  // 1.5 m shoulder); the annulus lives at |z−30| ∈ [3.1, 4.5+blend]. profile is
+  // flat at 0 so poke-through = tileY there.
   const road = {
     class: 'residential',
-    pts: [[0, 30], [50, 30]],
-    profile: { stepM: 10, ys: [0, 1, 2, 3, 4, 5, 5] },
+    pts: [[0, 30], [60, 30]],
+    profile: { stepM: 10, ys: [0, 0, 0, 0, 0, 0, 0] },
   };
-
-  it('reports 100% coverage when the mask covers every station, and applies NO budget there', () => {
-    // Terrain pierces the profile by 3 m everywhere — but every station is
-    // inside the mask (discarded), so the budget max/p99 (measured OUTSIDE the
-    // mask) sees NO samples and passes trivially.
-    const { heightAt } = makeSampler(60, 1, (x) => x * 0.1 + 3);
-    const coversAll = () => true;
-    const stats = burialStatsV3([road], heightAt, coversAll, 10);
-    expect(stats.coveragePct).toBeCloseTo(100, 6);
-    expect(stats.outsideCount).toBe(0);
-    expect(stats.maxM).toBe(0);
-    expect(stats.p99M).toBe(0);
-    expect(stats.offenders.length).toBe(0);
+  const opts = (extra: object = {}) => ({
+    stepM: 10, maskHalfWidths: [3], gradeHalfWidths: [4.5], blendM: 3, skirtDropM: 1.5, ...extra,
   });
 
-  it('flags uncovered stations and reports coverage < 100%', () => {
-    const { heightAt } = makeSampler(60, 1, (x) => x * 0.1);
-    // mask covers only x < 25 -> the far half of the road is uncovered
-    const covers = (x: number) => x < 25;
-    const stats = burialStatsV3([road], heightAt, covers, 10);
+  it('samples the shoulder annulus (NOT the centreline) and reports 100% centreline coverage', () => {
+    // Terrain flat AT the profile everywhere → no poke-through anywhere; but the
+    // annulus IS sampled (outsideCount > 0), proving the measured set is not empty.
+    const { heightAt } = makeSampler(80, 1, () => 0);
+    const covers = (_x: number, z: number) => Math.abs(z - 30) <= 3; // ribbon footprint only
+    const stats = burialStatsV3([road], heightAt, covers, opts());
+    expect(stats.coveragePct).toBeCloseTo(100, 6); // every centreline station in mask
+    expect(stats.outsideCount).toBeGreaterThan(0); // NON-VACUOUS: annulus measured
+    expect(stats.maxM).toBeCloseTo(0, 6);
+    expect(stats.skirtReachPass).toBe(true);
+  });
+
+  it('MUTATION: a shoulder-annulus breach FAILS the budget (proves non-vacuity)', () => {
+    // The mask still covers only the ribbon (|z−30| ≤ 3), but the graded shoulder
+    // terrain pokes 0.3 m above the profile. The OLD centreline-only v3 would see
+    // this discarded and pass; the new annulus sampler must MEASURE it and exceed
+    // the 0.10 m budget.
+    const { heightAt } = makeSampler(80, 1, (_x, z) => (Math.abs(z - 30) > 3 ? 0.3 : 0));
+    const covers = (_x: number, z: number) => Math.abs(z - 30) <= 3;
+    const stats = burialStatsV3([road], heightAt, covers, opts());
+    expect(stats.outsideCount).toBeGreaterThan(0);
+    expect(stats.maxM).toBeCloseTo(0.3, 6);
+    const budgetPass = stats.maxM < 0.10 && stats.p99M <= 0.05;
+    expect(budgetPass).toBe(false); // the breach is caught
+  });
+
+  it('flags uncovered centreline stations and reports coverage < 100%', () => {
+    const { heightAt } = makeSampler(80, 1, () => 0);
+    // mask covers the ribbon only for x < 25 → the far half of the centreline is uncovered
+    const covers = (x: number, z: number) => x < 25 && Math.abs(z - 30) <= 3;
+    const stats = burialStatsV3([road], heightAt, covers, opts());
     expect(stats.coveragePct).toBeLessThan(100);
     expect(stats.coveragePct).toBeGreaterThan(0);
   });
 
-  it('applies the v2 poke-through budget only to stations OUTSIDE the mask', () => {
-    // Inside-mask stations pierce by 3 m (ignored, discarded); outside-mask
-    // stations pierce by 0.2 m (must be measured against the budget).
-    const covers = (x: number) => x < 25; // inside for x<25
-    const heightAt = (x: number) => (x < 25 ? x * 0.1 + 3 : x * 0.1 + 0.2);
-    const stats = burialStatsV3([road], heightAt, covers, 10);
-    // the 3 m inside-mask piercing must NOT appear; only the 0.2 m outside one.
-    expect(stats.maxM).toBeCloseTo(0.2, 6);
-    expect(stats.outsideCount).toBeGreaterThan(0);
+  it('reports skirt-reach: profile above discarded tile inside a ribbon→mask gap', () => {
+    // Mask over-covers past the ribbon (|z−30| ≤ 4, wider than maskHW=3), so the
+    // annulus band z∈[3.1,4] is INSIDE the mask (discarded). profile sits 2 m
+    // above the tile there → the skirt must drop 2 m > 1.5 m → skirt-reach FAILS.
+    const { heightAt } = makeSampler(80, 1, () => -2); // tile 2 m below profile(0)
+    const covers = (_x: number, z: number) => Math.abs(z - 30) <= 4;
+    const stats = burialStatsV3([road], heightAt, covers, opts());
+    expect(stats.skirtReachM).toBeCloseTo(2.0, 6);
+    expect(stats.skirtReachPass).toBe(false);
   });
 
   it('is deterministic across repeated calls', () => {
-    const { heightAt } = makeSampler(60, 1, (x, z) => Math.sin(x / 5) + z * 0.1);
-    const covers = (x: number) => x < 20;
-    const a = burialStatsV3([road], heightAt, covers, 10);
-    const b = burialStatsV3([road], heightAt, covers, 10);
+    const { heightAt } = makeSampler(80, 1, (x, z) => Math.sin(x / 5) + z * 0.01);
+    const covers = (_x: number, z: number) => Math.abs(z - 30) <= 3;
+    const a = burialStatsV3([road], heightAt, covers, opts());
+    const b = burialStatsV3([road], heightAt, covers, opts());
     expect(a).toEqual(b);
   });
 
   it('throws when a road lacks a baked profile', () => {
-    const { heightAt } = makeSampler(60, 1, () => 0);
-    expect(() => burialStatsV3([{ class: 'x', pts: [[0, 0], [10, 0]] }], heightAt, () => true, 10)).toThrow();
+    const { heightAt } = makeSampler(80, 1, () => 0);
+    expect(() => burialStatsV3([{ class: 'x', pts: [[0, 0], [60, 0]] }], heightAt, () => true, { maskHalfWidths: [3], gradeHalfWidths: [4.5] })).toThrow();
+  });
+
+  it('throws when half-width arrays are missing (guards vacuous centreline-only use)', () => {
+    const { heightAt } = makeSampler(80, 1, () => 0);
+    // @ts-expect-error — passing a bare stepM number is no longer allowed
+    expect(() => burialStatsV3([road], heightAt, () => true, 10)).toThrow();
   });
 });
