@@ -17,7 +17,7 @@ import {
 } from '../../src/diorama/traffic/carModels';
 import { buildWheelGeometry, WHEEL_GEO_RADIUS } from '../../src/diorama/traffic/carModels';
 import { boxGeo } from '../../src/diorama/ksw/geometryCache';
-import { createCarLayer, CAR_CAPACITY } from '../../src/diorama/traffic/carLayer';
+import { createCarLayer, CAR_CAPACITY, buildCarGeometry } from '../../src/diorama/traffic/carLayer';
 import { buildLaneNet, type VehKinematics } from '../../src/diorama/traffic/deadReckon';
 
 describe('carModels selection', () => {
@@ -205,5 +205,19 @@ describe('carLayer instancing', () => {
 
   it('exposes capacity for the wheel mesh at 4× CAR_CAPACITY', () => {
     expect(CAR_CAPACITY).toBe(4096);
+  });
+});
+
+describe('far-LOD impostor geometry', () => {
+  it('is a single merged geometry: sedan body + glass + 4 static wheels', () => {
+    const g = buildCarGeometry();
+    const sedan = CAR_VARIANTS[0];
+    const bodyOnly = sedan.buildBody(boxGeo);
+    expect(g.attributes.position.count).toBeGreaterThan(
+      bodyOnly.attributes.position.count + 4 * 24, // strictly more than body + trivial wheels
+    );
+    g.computeBoundingBox();
+    expect(g.boundingBox!.min.y).toBeLessThan(0.1); // wheels reach (near) the ground
+    expect(g.attributes.color).toBeDefined();
   });
 });

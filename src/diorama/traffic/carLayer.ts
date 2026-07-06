@@ -34,6 +34,7 @@
 // matching glass instance, and four wheel instances into the shared wheel mesh.
 
 import * as THREE from 'three/webgpu';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { kswCity } from '../designTokens';
 import { boxGeo } from '../ksw/geometryCache';
 import { type TrafficNetGeom, type VehKinematics } from './deadReckon';
@@ -69,9 +70,26 @@ export { CAR_PALETTE };
 /** A representative single car geometry for flowLayer.ts's far-LOD impostor
  * mesh (Task 12 brief: "second InstancedMesh reusing the clay-car geometry").
  * Delegates to variant 0 (the plain sedan) — at flow-LOD distances the
- * variant differences are sub-pixel, so one shape stands in for the fleet. */
+ * variant differences are sub-pixel, so one shape stands in for the fleet.
+ * Returns a merged static geometry: sedan body + glass + 4 wheels. */
 export function buildCarGeometry(): THREE.BufferGeometry {
-  return CAR_VARIANTS[0].buildBody(boxGeo);
+  const sedan = CAR_VARIANTS[0];
+  const parts: THREE.BufferGeometry[] = [
+    sedan.buildBody(boxGeo).toNonIndexed(),
+    sedan.buildGlass(),
+  ];
+  const s = sedan.wheels.radius / WHEEL_GEO_RADIUS;
+  for (const off of wheelOffsets(sedan.wheels)) {
+    const w = buildWheelGeometry().clone();
+    w.scale(s, s, s);
+    w.translate(off[0], off[1], off[2]);
+    parts.push(w);
+  }
+  const merged = mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)), false);
+  if (!merged) throw new Error('carLayer: impostor merge failed');
+  merged.computeVertexNormals();
+  merged.computeBoundingSphere();
+  return merged;
 }
 
 /** Ground-surface height (in the car layer's local frame) at a world (x, z) —
