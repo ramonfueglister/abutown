@@ -29,7 +29,7 @@ import { chromium } from 'playwright';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { startTrafficStack, HOST } from './lib/traffic-stack.mjs';
 
-const TRAFFIC_PORT = 8790;
+const TRAFFIC_PORT = Number(process.env.SMOKE_TRAFFIC_PORT ?? 8790);
 const VITE_PORT = 5188; // distinct from the smoke's 5187 so both can run
 const SEED = 42;
 const OUT_DIR = new URL('../scratch/traffic-captures/', import.meta.url).pathname;
