@@ -30,6 +30,9 @@
 //       proto the app uses, loaded in-page from vite so the decode is
 //       byte-identical to production, not a re-implementation) to a
 //       TrafficServerMsg carrying a `flow` field with `edges.length > 0`.
+//   (h) heterogeneous fleet (S1): the decoded vehicle table carries classes
+//       1/2 (Lieferwagen/LKW) at a plausible share, and the car layer draws
+//       >=1 commercial silhouette (van/pickup/truck variant instance).
 //   (g) far-LOD impostors actually DRAW while zoomed out: with the camera
 //       pulled back far enough that the subscribed 3×3 AOI no longer covers
 //       the busy corridor, `window.__traffic.flowCount() > 0` — the flow
@@ -319,6 +322,14 @@ async function runScenario(browser, { label, full }) {
       }
     }
 
+    // (h) evidence: heterogeneous fleet — wire class mix in a fresh sample
+    // plus drawn commercial silhouettes (van/pickup/truck variant instances).
+    const hSample = await page.evaluate(() => window.__traffic?.sample() ?? []);
+    const clsCounts = [0, 0, 0];
+    for (const v of hSample) clsCounts[Math.min(v.cls ?? 0, 2)]++;
+    const variantCounts = await page.evaluate(() => window.__traffic?.cars?.() ?? []);
+    const commercialDrawn = variantCounts.slice(4).reduce((a, b) => a + b, 0);
+
     let flowFramesWithEdges = 0;
     let maxFlowCount = 0;
 
@@ -402,6 +413,8 @@ async function runScenario(browser, { label, full }) {
       tested,
       flowFramesWithEdges,
       maxFlowCount,
+      clsCounts,
+      commercialDrawn,
       errors,
     };
   } finally {
@@ -474,6 +487,23 @@ async function main() {
       '(g) flowCount() > 0 while zoomed out',
       rush.maxFlowCount > 0,
       `max flowCount()=${rush.maxFlowCount}`,
+    );
+
+    // (h) heterogeneous fleet: the wire carries classes 1/2 (S1) and the car
+    // layer draws commercial silhouettes. The urban mix bakes ~11% commercial,
+    // the A1 corridor ~14% — accept a broad 1–40% band on the sampled AOI to
+    // stay location-robust, but require presence in a rush-sized sample.
+    const clsTotal = rush.clsCounts.reduce((a, b) => a + b, 0);
+    const commercial = rush.clsCounts[1] + rush.clsCounts[2];
+    const commercialShare = clsTotal > 0 ? commercial / clsTotal : 0;
+    // Presence, not exact share: the parked AOI often holds only ~10-30
+    // vehicles, so the baked 11% urban mix yields a handful of commercial
+    // vehicles — require >=1 on the wire and >=1 drawn, and a sane upper
+    // bound (a majority-commercial AOI would mean the mapping ran wild).
+    check(
+      '(h) wire carries vehicle classes + commercial silhouettes draw',
+      clsTotal >= 10 && commercial > 0 && commercialShare < 0.5 && rush.commercialDrawn > 0,
+      `sample=${clsTotal} [car,van,truck]=${JSON.stringify(rush.clsCounts)} share=${(commercialShare * 100).toFixed(1)}% drawnCommercial=${rush.commercialDrawn}`,
     );
 
     // ── scenario 2: dead of night (03:00), fresh backend, same seed ─────────
