@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { ANCHOR, makeProjector } from './lib/project.mjs';
 import { parseAAIGrid, makeDemSampler, makeLocalGrid } from './lib/dem.mjs';
 import { buildRoadGraph } from './lib/graph.mjs';
+import { clipWayAtBoundary, normalizeBoundary } from './lib/trafficnet.mjs';
 import { accessPoints } from './lib/access.mjs';
 import { transformLanduse, waterRingsFrom } from './lib/landuse.mjs';
 import { transformTransit } from './lib/transit.mjs';
@@ -118,7 +119,21 @@ const { grid: localGrid, sampler: dem } = makeLocalGrid(
 console.log(`grading grid: ${localGrid.ncols}x${localGrid.nrows} local-metre cells @ ${localGrid.cellsize}m`);
 
 const osmRoads = loadJson(`${SCRATCH}/osm-roads.json`);
-const { roads, rails } = transformRoads({ osmRoads, projector });
+// ONE corridor truth (#133 reconcile): grade the SAME boundary-clipped way set
+// that the committed roads.json renders (rebake-roads-gemeinde.mjs) and the
+// traffic net drives (bake-traffic-net.mjs) — all three use trafficnet.mjs's
+// clipWayAtBoundary. Profiles are geometry-keyed (wayKey over the clipped
+// polyline), so clipping must happen BEFORE grading or every boundary-crossing
+// way would hard-fail the profile attach with an unmatched key.
+const boundaryPolys = normalizeBoundary(boundaryFc);
+const clippedRoadElements = [];
+for (const el of osmRoads.elements ?? []) {
+  if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
+  for (const seg of clipWayAtBoundary(el.geometry, boundaryPolys)) {
+    clippedRoadElements.push({ ...el, geometry: seg.pts });
+  }
+}
+const { roads, rails } = transformRoads({ osmRoads: { elements: clippedRoadElements }, projector });
 const trafficNetDoc = loadJson('data/winterthur/trafficnet.json');
 const floors = laneFloorWidths(roads, trafficNetDoc);
 // Water rings: OSM water POLYGONS (Töss, Eulach where mapped as area) PLUS
@@ -197,12 +212,12 @@ const inCorridor = makeCorridorMask(ways);
 // are stored RELATIVE to the shared anchor (graded ground at origin), matching
 // the runtime's groundYAt = worldHeight − anchorGroundHeight; quantized 0.01 m.
 //
-// roads.json itself is written by bake-winterthur.mjs. bake-world grades the
-// WHOLE Gemeinde; roads.json may carry a clipped SUBSET with byte-identical
-// geometry. So we key each profile by its way geometry (wayKey) rather than
-// array index — bake-winterthur then looks up each of its roads/rails by key
-// and hard-fails if any is missing (no fallback), guaranteeing both artifacts
-// come from THIS one grading run.
+// roads.json itself is written by rebake-roads-gemeinde.mjs / bake-winterthur
+// .mjs over the SAME boundary-clipped way set graded above. We still key each
+// profile by its way geometry (wayKey) rather than array index — the attach
+// step (attachProfilesByKey) looks up each of its roads/rails by key and
+// hard-fails if any is missing (no fallback), guaranteeing both artifacts come
+// from THIS one grading run.
 const anchorGround = dem.heightAt(0, 0);
 const byKey = {};
 for (let i = 0; i < roads.length; i++) {

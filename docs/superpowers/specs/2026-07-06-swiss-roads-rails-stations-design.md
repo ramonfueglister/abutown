@@ -47,8 +47,11 @@ pyramid level so LOD switches don't pop.
 ### 4.1 Road grading
 
 For each drivable/foot way (from `osm-roads.json`, same source as the road
-renderer): corridor = render width (post-#132 `correctRoadWidths` floor)
-plus 1.5 m shoulder each side. Longitudinal target profile = centreline DEM
+renderer): corridor = CORRIDOR width plus 1.5 m shoulder each side.
+(AMENDED post-#134: the RENDER width is the plain OSM width — #134 removed the
+FIX-D1 render floor; the CORRIDOR width is the lane-floor
+`max(OSM, lanes×3.0+0.8)` from `corridorWidths`/`gradewidths.mjs`, used ONLY by
+grading/mask/snap/sampler/metric, never by the drawn ribbon.) Longitudinal target profile = centreline DEM
 heights smoothed with a moving window (default 40 m) and clamped to a max
 grade of 12 % (steep Winterthur lanes stay plausible; authored per-class
 overrides possible in one constants table). DEM cells inside the corridor
@@ -161,7 +164,10 @@ their surface height AND the terrain conforms toward it:
   decision, within the approved A+B architecture): **roads own a PLATFORM =
   ribbon + apron.** The rendered road surface extends from the ribbon edge to
   the DISCARD-MASK edge — an apron strip (Swiss "Bankett"/verge) at profile
-  height, carriage colour ×0.9 — so no void shows from above. The mask edge is
+  height, carriage colour ×0.9 — so no void shows from above. (Post-#134 the
+  drawn ribbon is the plain OSM width while the mask keeps the lane-floored
+  corridor width, so the apron also legitimately bridges the wider
+  ribbon→mask-edge gap — that visible verge band IS the intended Bankett.) The mask edge is
   the render half-width floored at the mask cell size (`max(renderHW,
   MASK_CELL_M)`), computed identically bake-side (corridormask.mjs's
   `Math.max(halfWidthM, cellSize)`) and runtime-side (groundSampler.ts

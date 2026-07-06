@@ -9,6 +9,7 @@ import { ANCHOR, BBOX, makeProjector } from './lib/project.mjs';
 import { transformBuildings, transformNature, transformRoads } from './lib/transform.mjs';
 import { doorForBuilding } from './lib/style.mjs';
 import { attachProfilesByKey } from './lib/roadprofiles.mjs';
+import { clipWayAtBoundary, normalizeBoundary } from './lib/trafficnet.mjs';
 
 const SCRATCH = 'scratch/geo';
 const GDB = `${SCRATCH}/swissBUILDINGS3D_3-0_1072-14.gdb`;
@@ -92,8 +93,23 @@ console.log(
 );
 if (wallRoofQuote < 0.9)
   throw new Error(`bake: wall/roof coverage only ${(wallRoofQuote * 100).toFixed(1)}% — floating-roof regression`);
+// ONE corridor truth (#133 reconcile): clip ways at the municipality boundary
+// exactly like rebake-roads-gemeinde.mjs / bake-traffic-net.mjs / bake-world
+// .mjs. The §5 profiles are geometry-keyed against bake-world's CLIPPED graded
+// set, so an unclipped way here would hard-fail the profile attach below.
+const osmRoadsRaw = JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8'));
+const boundaryPolys = normalizeBoundary(
+  JSON.parse(readFileSync(`${SCRATCH}/boundary-winterthur.geojson`, 'utf8')),
+);
+const clippedRoadElements = [];
+for (const el of osmRoadsRaw.elements ?? []) {
+  if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
+  for (const seg of clipWayAtBoundary(el.geometry, boundaryPolys)) {
+    clippedRoadElements.push({ ...el, geometry: seg.pts });
+  }
+}
 const { roads, rails } = transformRoads({
-  osmRoads: JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8')),
+  osmRoads: { elements: clippedRoadElements },
   projector,
 });
 

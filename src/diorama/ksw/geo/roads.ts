@@ -8,7 +8,7 @@ import { kswCity } from '../../designTokens';
 import { clayMat } from '../props';
 import type { RoadPath } from './geoData';
 import { corridorWidths, type TrafficNetDoc } from '../../traffic/corridorWidths';
-import trafficNetJson from '../../../data/winterthur/trafficnet.json';
+import trafficNetJson from '../../../../data/winterthur/trafficnet.json';
 import { roadMaskHalfWidth, railMaskHalfWidth } from './groundSampler';
 
 /** Optional per-vertex ground draping. `groundYAt(x,z)` returns the visible

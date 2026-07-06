@@ -29,7 +29,7 @@
 // terrain piercing reappears where they disagree. If the corridor definition
 // (half-width source, BLEND_M) changes here, change corridorsnap.mjs too.
 import { corridorWidths, type TrafficNetDoc } from '../../traffic/corridorWidths';
-import trafficNetJson from '../../../data/winterthur/trafficnet.json';
+import trafficNetJson from '../../../../data/winterthur/trafficnet.json';
 import type { RoadPath, RoadProfile } from './geoData';
 
 export type GroundYAt = (x: number, z: number) => number;
