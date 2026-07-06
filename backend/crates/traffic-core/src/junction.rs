@@ -41,6 +41,17 @@ const T_GAP_UNCONTROLLED: f32 = 6.0;
 /// gap is rejected rather than accepted into a hairline miss.
 const GAP_MARGIN_M: f32 = 4.0;
 
+/// A conflicting vehicle slower than this (m/s) is not an *approaching*
+/// priority stream and is skipped by the phase-1 gap check. Gap-acceptance
+/// theory defines the critical gap against approaching priority traffic; a
+/// vehicle standing at its own stop line is itself waiting, and vetoing on it
+/// deadlocks mutual-yield nodes (right-before-left is cyclic by construction
+/// — the S2 calibration run gridlocked to 26.6k of 26.7k vehicles stopped by
+/// world midnight). Physical exclusion at the node stays guaranteed by the
+/// phase-2 conflict-point occupancy (claims + clearance interval), which is
+/// the crossing authority for slow/standing traffic.
+pub const APPROACHING_MIN_V: f32 = 0.5;
+
 /// How close (m) to the lane end a vehicle begins consulting the junction gate.
 /// Beyond this it is treated as free road (its next turn is irrelevant yet).
 pub const APPROACH_ZONE_M: f32 = 40.0;

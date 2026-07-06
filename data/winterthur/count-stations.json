@@ -19,12 +19,12 @@
       "anlageName": "K501 MIV Seenerstrasse",
       "richtung": "NO",
       "richtungName": "Richtung Oberwinterthur",
-      "edge": 5553,
+      "edge": 5470,
       "lanes": [
-        5696
+        5604
       ],
-      "distM": 13.8,
-      "bearingCos": 0.859,
+      "distM": 2,
+      "bearingCos": 0.848,
       "worldX": 2401.6,
       "worldZ": 1503.2
     },
@@ -32,12 +32,12 @@
       "anlageName": "K501 MIV Seenerstrasse",
       "richtung": "SW",
       "richtungName": "Richtung Seen",
-      "edge": 5554,
+      "edge": 5471,
       "lanes": [
-        5697
+        5605
       ],
-      "distM": 11.8,
-      "bearingCos": 0.946,
+      "distM": 1,
+      "bearingCos": 0.939,
       "worldX": 2401.6,
       "worldZ": 1503.2
     },
@@ -58,11 +58,11 @@
       "anlageName": "K606 MIV Untere Vogelsangstrasse",
       "richtung": "N",
       "richtungName": "Richtung Winterthur Zentrum",
-      "edge": 9518,
+      "edge": 217,
       "lanes": [
-        9736
+        219
       ],
-      "distM": 1.6,
+      "distM": 1.1,
       "bearingCos": 0.962,
       "worldX": -857.9,
       "worldZ": 1850.1
@@ -71,12 +71,12 @@
       "anlageName": "K606 MIV Untere Vogelsangstrasse",
       "richtung": "S",
       "richtungName": "Richtung Autobahnanschluss A1",
-      "edge": 10125,
+      "edge": 9618,
       "lanes": [
-        10357
+        9840
       ],
       "distM": 0.6,
-      "bearingCos": 0.988,
+      "bearingCos": 0.971,
       "worldX": -857.9,
       "worldZ": 1850.1
     },

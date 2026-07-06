@@ -112,12 +112,24 @@ export function mapStations(profiles, net) {
           `(best cos ${Math.max(...[...byEdge.values()].map((c) => c.cos)).toFixed(2)}) — check DESTINATIONS`,
       );
     }
-    // Alignment first, distance as tie-break: at a crossing (K501 sits on the
-    // Seenerstrasse×Rudolf-Diesel corner) the closest edge can belong to the
-    // OTHER street while both clear the cos gate — the destination bearing is
-    // the discriminating signal, proximity only breaks near-ties.
-    aligned.sort((a, b) => b[1].cos - a[1].cos || a[1].d2 - b[1].d2);
-    const [edgeId, best] = aligned[0];
+    // Proximity first, alignment as OVERRIDE: the loop lies IN the measured
+    // carriageway (sub-metre), so the nearest aligned edge is almost always
+    // right. But at a crossing (K501 sits on the Seenerstrasse×Rudolf-Diesel
+    // corner) the nearest edge can belong to the OTHER street while still
+    // clearing the cos gate — only then does a markedly better-aligned edge
+    // (cos +0.15) farther out take over. A marginal cos edge must NOT beat a
+    // 12× closer one (first calibration run: 5554 @ 11.8 m/cos .946 stole
+    // Seenerstrasse from the true 5471 @ 1.0 m/cos .939 and measured a side
+    // arm with zero flow).
+    const COS_OVERRIDE = 0.15;
+    aligned.sort((a, b) => a[1].d2 - b[1].d2);
+    let [edgeId, best] = aligned[0];
+    for (const [cand, c] of aligned.slice(1)) {
+      if (c.cos >= best.cos + COS_OVERRIDE) {
+        edgeId = cand;
+        best = c;
+      }
+    }
     const edge = net.edges.find((e) => e.id === edgeId);
 
     out.push({

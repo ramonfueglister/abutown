@@ -1260,7 +1260,13 @@ fn junction_allows(
             let j = lead as usize;
             let dist_to_conflict = (llen - fleet.s[j]).max(0.0);
             let v_conflict = fleet.v[j];
-            if !junction.gap_ok(turn, dist_to_conflict, v_conflict) {
+            // Standing/crawling priority vehicles are not an approaching
+            // stream — skipping them breaks the mutual-yield deadlock; the
+            // phase-2 conflict-point occupancy remains the physical gate
+            // (see junction::APPROACHING_MIN_V).
+            if v_conflict >= junction::APPROACHING_MIN_V
+                && !junction.gap_ok(turn, dist_to_conflict, v_conflict)
+            {
                 return false;
             }
         }

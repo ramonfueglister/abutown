@@ -502,3 +502,72 @@ fn junctions_deterministic_same_seed() {
     }
     assert_eq!(a.state_hash(), b.state_hash());
 }
+
+// ---------------------------------------------------------------------------
+// Mutual-yield deadlock regression (S2 calibration finding): at an
+// UNCONTROLLED crossing whose two turns yield to EACH OTHER (right-before-
+// left is inherently cyclic), two vehicles arriving together must not wait
+// on each other forever. Gap acceptance is defined against the APPROACHING
+// priority stream; a vehicle standing at its own stop line must not veto —
+// the physical conflict point is arbitrated by phase-2 occupancy (claims +
+// clearance). Before the fix this scenario gridlocked permanently and, on
+// the real net, snowballed into 26.6k of 26.7k vehicles stopped by world
+// midnight.
+// ---------------------------------------------------------------------------
+
+/// An uncontrolled X: west feeder (lane 0) -> east exit (lane 1), north
+/// feeder (lane 2) -> south exit (lane 3), crossing at node 4. The two turns
+/// mutually conflict AND mutually yield.
+fn mutual_yield_cross() -> TrafficNet {
+    let json = r#"{
+      "meta": {"anchor":{"lon":0.0,"lat":0.0},"laneWidth":3.5,"cellSize":1.0},
+      "nodes": [
+        {"id":0,"x":0,"z":0,"kind":"dead_end","signal":null},
+        {"id":1,"x":200,"z":0,"kind":"dead_end","signal":null},
+        {"id":2,"x":100,"z":-100,"kind":"dead_end","signal":null},
+        {"id":3,"x":100,"z":100,"kind":"dead_end","signal":null},
+        {"id":4,"x":100,"z":0,"kind":"uncontrolled","signal":null}
+      ],
+      "edges": [
+        {"id":0,"from":0,"to":4,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[0]},
+        {"id":1,"from":4,"to":1,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[1]},
+        {"id":2,"from":2,"to":4,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[2]},
+        {"id":3,"from":4,"to":3,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[3]}
+      ],
+      "lanes": [
+        {"id":0,"edge":0,"index":0,"lengthM":100,"pts":[[0,0],[100,0]]},
+        {"id":1,"edge":1,"index":0,"lengthM":100,"pts":[[100,0],[200,0]]},
+        {"id":2,"edge":2,"index":0,"lengthM":100,"pts":[[100,-100],[100,0]]},
+        {"id":3,"edge":3,"index":0,"lengthM":100,"pts":[[100,0],[100,100]]}
+      ],
+      "turns": [
+        {"id":0,"fromLane":0,"toLane":1,"node":4,"conflictsWith":[1],"yieldsTo":[1]},
+        {"id":1,"fromLane":2,"toLane":3,"node":4,"conflictsWith":[0],"yieldsTo":[0]}
+      ]
+    }"#;
+    traffic_net::load(json).expect("mutual-yield cross must validate")
+}
+
+#[test]
+fn mutual_yield_arrivals_do_not_deadlock() {
+    let net = mutual_yield_cross();
+    let mut core = Core::new(&net, 8, 0xDEAD);
+    // Same distance, same class: both hit the stop line on the same tick —
+    // the worst-case symmetric arrival.
+    core.spawn(0, 50.0, 0, &[0u32, 1]).expect("spawn west");
+    core.spawn(2, 50.0, 0, &[2u32, 3]).expect("spawn north");
+    core.reindex();
+
+    // 100 s of sim time is orders of magnitude beyond one crossing +
+    // clearance; both open routes must have completed (despawned).
+    for t in 0..1000 {
+        core.tick(t);
+        if core.fleet.alive_count() == 0 {
+            return;
+        }
+    }
+    panic!(
+        "mutual-yield crossing deadlocked: {} vehicle(s) still alive after 100 s",
+        core.fleet.alive_count()
+    );
+}

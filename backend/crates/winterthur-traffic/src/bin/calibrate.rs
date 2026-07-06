@@ -33,8 +33,9 @@ use winterthur_traffic::shell::{SnapshotHook, build_sim};
 use winterthur_traffic::spawner::SpawnerCfg;
 
 /// One full world day in sim ticks: 86_400 world-s / (DT · WORLD_TIME_SCALE).
-const TICKS_PER_WORLD_DAY: u64 =
-    world_core::clock::WORLD_SECONDS_PER_DAY * world_core::TICKS_PER_SECOND / world_core::WORLD_TIME_SCALE;
+const TICKS_PER_WORLD_DAY: u64 = world_core::clock::WORLD_SECONDS_PER_DAY
+    * world_core::TICKS_PER_SECOND
+    / world_core::WORLD_TIME_SCALE;
 
 /// World hour of a tick (0..24), mirroring `WorldClock::s_of_world_day`.
 fn world_hour(tick: u64) -> usize {
@@ -60,7 +61,10 @@ fn main() -> anyhow::Result<()> {
     let net_path = env_or("TRAFFICNET_JSON", "data/winterthur/trafficnet.json");
     let trips_path = env_or("TRIPS_BIN", "data/winterthur/trips.bin");
     let stations_path = env_or("COUNT_STATIONS", "data/winterthur/count-stations.json");
-    let out_path = env_or("CALIBRATION_OUT", "scratch/calibration/simulated-profiles.json");
+    let out_path = env_or(
+        "CALIBRATION_OUT",
+        "scratch/calibration/simulated-profiles.json",
+    );
     let seed: u64 = env_or("TRAFFIC_SEED", "0").parse()?;
     let demand_scale: f32 = env_or("DEMAND_SCALE", "1.0").parse()?;
     let date = NaiveDate::parse_from_str(&env_or("CALIBRATE_DATE", "2026-07-07"), "%Y-%m-%d")?;
@@ -107,7 +111,7 @@ fn main() -> anyhow::Result<()> {
     // new edge is monitored (slot-reuse safe: freed slots reset to NONE).
     const NONE: u32 = u32::MAX;
     let state = Arc::new(Mutex::new((
-        vec![NONE; 0] as Vec<u32>,               // prev edge per slot
+        vec![NONE; 0] as Vec<u32>, // prev edge per slot
         vec![[[0u64; 3]; 24]; stations.len()] as Counts,
     )));
     let hook_state = Arc::clone(&state);
@@ -147,12 +151,151 @@ fn main() -> anyhow::Result<()> {
     for t in 0..TICKS_PER_WORLD_DAY {
         schedule.run(&mut world);
         if t % (TICKS_PER_WORLD_DAY / 24) == 0 {
+            let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
+            let mut alive = 0u32;
+            let mut stopped = 0u32;
+            let mut v_sum = 0.0f32;
+            for slot in 0..core.fleet.slots() {
+                if let Some(view) = core.vehicle_view(slot as u32) {
+                    alive += 1;
+                    v_sum += view.v;
+                    if view.v < 0.5 {
+                        stopped += 1;
+                    }
+                }
+            }
             eprintln!(
-                "  world {:02}:00  ({:.0}s elapsed)",
+                "  world {:02}:00  alive={alive} stopped={stopped} mean_v={:.1}  ({:.0}s)",
                 world_hour(t),
+                if alive > 0 { v_sum / alive as f32 } else { 0.0 },
                 started.elapsed().as_secs_f32()
             );
         }
+    }
+
+    // Night-stall classification at world 03:00 equivalent — but since the
+    // loop above already ran to completion we classify at END state instead:
+    // for each stopped vehicle, is it (a) queued behind a leader, (b) held at
+    // a lane end whose next turn's signal is red, (c) held at a lane end with
+    // green/no signal (gap or conflict-point hold, or a NoTurn wall), or
+    // (d) stopped mid-lane with clear road (anomaly)?
+    {
+        use traffic_core::junction::{JunctionModel, turn_between};
+        let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
+        let jm = JunctionModel::build(&net);
+        let (mut queued, mut red, mut hold, mut anomaly, mut route_end) =
+            (0u32, 0u32, 0u32, 0u32, 0u32);
+        let mut hold_samples: Vec<String> = Vec::new();
+        for slot in 0..core.fleet.slots() {
+            let Some(view) = core.vehicle_view(slot as u32) else {
+                continue;
+            };
+            if view.v >= 0.5 {
+                continue;
+            }
+            // Leader within 15 m ahead on the same lane?
+            let mut has_leader = false;
+            let occ = core.index.on_lane(view.lane);
+            for &other in occ {
+                if other == slot as u32 {
+                    continue;
+                }
+                let so = core.fleet.s[other as usize];
+                if so > view.s && so - view.s < 15.0 {
+                    has_leader = true;
+                    break;
+                }
+            }
+            if has_leader {
+                queued += 1;
+                continue;
+            }
+            let lane_len = net.lanes[view.lane as usize].length_m;
+            let dist_to_end = lane_len - view.s;
+            if dist_to_end > 5.0 {
+                anomaly += 1;
+                continue;
+            }
+            // At a lane end with clear road: what governs the boundary?
+            let cursor = core.fleet.route[slot].cursor as usize;
+            let route = core.fleet.route_slice(slot);
+            match route.get(cursor + 1) {
+                None => route_end += 1,
+                Some(&next_lane) => match turn_between(&net, view.lane, next_lane) {
+                    None => {
+                        hold += 1;
+                        if hold_samples.len() < 8 {
+                            hold_samples.push(format!(
+                                "slot {slot}: NO-TURN wall lane {} -> {next_lane} (edge {})",
+                                view.lane, view.edge
+                            ));
+                        }
+                    }
+                    Some(turn) => {
+                        if !jm.signal_green(turn, TICKS_PER_WORLD_DAY, traffic_core::DT) {
+                            red += 1;
+                        } else {
+                            hold += 1;
+                            if hold_samples.len() < 8 {
+                                hold_samples.push(format!(
+                                    "slot {slot}: HOLD at turn {turn} (lane {} edge {} node {}, yields_to={:?})",
+                                    view.lane,
+                                    view.edge,
+                                    net.turns[turn as usize].node,
+                                    net.turns[turn as usize].yields_to
+                                ));
+                            }
+                        }
+                    }
+                },
+            }
+        }
+        eprintln!(
+            "calibrate: stopped classification at end — queued_behind_leader={queued} \
+             signal_red={red} boundary_hold={hold} route_end_wait={route_end} mid_lane_anomaly={anomaly}"
+        );
+        for s in &hold_samples {
+            eprintln!("  {s}");
+        }
+    }
+
+    // Gridlock forensics: where do stuck vehicles sit at world midnight?
+    {
+        let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
+        let mut by_edge: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+        for slot in 0..core.fleet.slots() {
+            if let Some(view) = core.vehicle_view(slot as u32)
+                && view.v < 0.5
+            {
+                *by_edge.entry(view.edge).or_insert(0) += 1;
+            }
+        }
+        let mut top: Vec<(u32, u32)> = by_edge.into_iter().collect();
+        top.sort_by_key(|&(e, n)| (std::cmp::Reverse(n), e));
+        eprintln!("calibrate: top stuck edges at end (edge: stopped vehicles):");
+        for (e, n) in top.iter().take(20) {
+            eprintln!("  edge {e}: {n}");
+        }
+    }
+
+    // Spawner outcome ledger: without this, a level gap in the report is
+    // ambiguous between "demand too low" and "trips failed to spawn".
+    {
+        use winterthur_traffic::shell::SpawnerRes;
+        let counters = world.resource::<SpawnerRes>().0.counters();
+        let alive = world
+            .resource::<winterthur_traffic::shell::CoreRes>()
+            .0
+            .fleet
+            .alive_count();
+        eprintln!(
+            "calibrate: spawned={} skipped_no_route={} suppressed={} blocked_entry={} alive_at_end={}",
+            counters.spawned,
+            counters.skipped_no_route,
+            counters.suppressed,
+            counters.blocked_entry,
+            alive
+        );
     }
 
     let guard = state.lock().expect("hook state poisoned");
