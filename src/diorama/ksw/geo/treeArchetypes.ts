@@ -336,10 +336,22 @@ export function allArchetypes(): TreeArchetype[] {
 }
 
 // stable spot→archetype pick: quantized world xz → avalanche hash → id band
-// for the tree's kind (broad ids come first, conifer ids after)
-export function archetypeIndexFor(x: number, z: number, kind: 'broad' | 'conifer'): number {
+// for the tree's kind (broad ids come first, conifer ids after).
+// If family is provided, picks deterministically within that family's seed band.
+export function archetypeIndexFor(
+  x: number,
+  z: number,
+  kind: 'broad' | 'conifer',
+  family?: TreeFamily,
+): number {
   const h = hash01(Math.round(x * 8) * 92837111 + Math.round(z * 8) * 689287499);
   const broadN = BROAD_FAMILIES.length * SEEDS_PER_FAMILY;
+  if (family) {
+    const bi = (BROAD_FAMILIES as readonly TreeFamily[]).indexOf(family);
+    if (bi >= 0) return bi * SEEDS_PER_FAMILY + Math.floor(h * SEEDS_PER_FAMILY);
+    const ci = (CONIFER_FAMILIES as readonly TreeFamily[]).indexOf(family);
+    if (ci >= 0) return broadN + ci * SEEDS_PER_FAMILY + Math.floor(h * SEEDS_PER_FAMILY);
+  }
   const conifN = CONIFER_FAMILIES.length * SEEDS_PER_FAMILY;
   return kind === 'broad' ? Math.floor(h * broadN) : broadN + Math.floor(h * conifN);
 }

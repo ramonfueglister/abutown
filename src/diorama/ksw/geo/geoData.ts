@@ -44,7 +44,8 @@ export type CityMeta = {
 export type GreenArea = { kind: string; ring: number[][] };
 export type WaterArea = { ring: number[][] };
 export type RiverPath = { width: number; pts: number[][] };
-export type TreeSpec = { x: number; z: number; h: number; r: number; kind: 'broad' | 'conifer' };
+export type TreeFamily = 'spreading' | 'oval' | 'tall' | 'conic' | 'slender';
+export type TreeSpec = { x: number; z: number; h: number; r: number; kind: 'broad' | 'conifer'; family?: TreeFamily };
 export type CityNature = { greens: GreenArea[]; waterAreas: WaterArea[]; rivers: RiverPath[]; trees: TreeSpec[] };
 
 const all = (buildingsJson as { buildings: BakedBuilding[] }).buildings;

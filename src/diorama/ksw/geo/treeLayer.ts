@@ -140,7 +140,7 @@ export function assignTrees(
     const kind = spec.kind === 'conifer' ? 'conifer' : 'broad';
     out.push({
       spec,
-      archetype: archetypeIndexFor(spec.x, spec.z, kind),
+      archetype: archetypeIndexFor(spec.x, spec.z, kind, spec.family),
       tint: tintFor(spec.x, spec.z, kind),
       squash: squashFor(spec.x, spec.z),
     });
