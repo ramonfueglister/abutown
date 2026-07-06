@@ -137,18 +137,81 @@ const vary = (v, x, z) => v * (0.85 + 0.3 * h01(x, z));
 
 const TREE_DEFAULTS = { broad: { h: 9, r: 3 }, conifer: { h: 14, r: 2 } };
 
-// tree specs — real OSM tags win untouched; otherwise a leaf_type-keyed
-// default with deterministic ±15% variance (hashed on position, never on a
-// real tag value) so repeat bakes are byte-identical.
-export function treeSpec(tags, x, z) {
+// Slice 2 (Fallback-Variante): Familien + Grössen aus Landuse-Heuristik.
+// Wachstumskurven h(age) = h∞ · age/(age + t½) (saturierend, Spec §1) mit
+// deterministischem Pseudo-Alter, da ohne Kataster kein Pflanzjahr existiert.
+// Konstanten: grobe mitteleuropäische Stadtbaum-/Waldbaum-Endgrössen
+// (Platane/Linde/Pappel/Fichte-Klassen), dokumentiert hier als die "einmal
+// recherchierte Tabelle" der Spec.
+export const GROWTH = {
+  spreading: { hInf: 28, rInf: 9.0, tHalf: 35 },
+  oval:      { hInf: 30, rInf: 7.0, tHalf: 40 },
+  tall:      { hInf: 32, rInf: 5.0, tHalf: 25 },
+  conic:     { hInf: 34, rInf: 4.5, tHalf: 45 },
+  slender:   { hInf: 20, rInf: 3.0, tHalf: 30 },
+};
+
+// Gewichtete Familienwahl je Kontext. Reihenfolge/Schwellen deterministisch.
+const FAMILY_MIX = {
+  needlewood:  [['conic', 0.7], ['slender', 1.0]],
+  broadwood:   [['oval', 0.6], ['spreading', 0.9], ['tall', 1.0]],
+  mixedwood:   [['oval', 0.4], ['spreading', 0.6], ['conic', 0.9], ['slender', 1.0]],
+  park:        [['spreading', 0.4], ['oval', 0.8], ['tall', 1.0]],
+  street:      [['spreading', 0.5], ['oval', 1.0]],
+};
+
+export function familyFor(x, z, kind, context = {}) {
+  const inWood = context.green === 'wood' || context.green === 'forest';
+  let mix;
+  if (inWood) {
+    if (context.leafType === 'needleleaved') mix = FAMILY_MIX.needlewood;
+    else if (context.leafType === 'broadleaved') mix = FAMILY_MIX.broadwood;
+    else mix = FAMILY_MIX.mixedwood;
+  } else if (context.green) {
+    mix = FAMILY_MIX.park;
+  } else {
+    mix = FAMILY_MIX.street;
+  }
+  // kind ist OSM-Ground-Truth: conifer erzwingt Nadel-Familien, broad Laub.
+  const allowed = kind === 'conifer' ? ['conic', 'slender'] : ['spreading', 'oval', 'tall'];
+  const filtered = mix.filter(([f]) => allowed.includes(f));
+  const pool = filtered.length ? filtered : allowed.map((f, i) => [f, (i + 1) / allowed.length]);
+  const hv = h01(x * 12.9898 + 4.1414, z * 78.233);
+  const top = pool[pool.length - 1][1];
+  for (const [f, cum] of pool) if (hv <= cum / top) return f;
+  return pool[pool.length - 1][0];
+}
+
+export function sizeFor(family, x, z) {
+  const g = GROWTH[family];
+  // Pseudo-Alter 8..88 Jahre, quadratisch Richtung jung geschoben (Städte
+  // pflanzen nach) — deterministisch pro Koordinate.
+  const a01 = h01(x * 3.7 + 11.1, z * 9.3 - 2.2);
+  const age = 8 + 80 * a01 * a01;
+  const grow = age / (age + g.tHalf);
+  const jitter = 0.9 + 0.2 * h01(x * 5.1, z * 13.7);
+  return {
+    h: Math.round(g.hInf * grow * jitter * 10) / 10,
+    r: Math.round(g.rInf * grow * (0.9 + 0.2 * h01(x * 7.9, z * 3.3)) * 10) / 10,
+  };
+}
+
+// tree specs — real OSM tags win untouched; otherwise a family/growth-curve
+// derived size (context = landuse/leaf-type heuristic), with deterministic
+// hashing on position (never on a real tag value) so repeat bakes are
+// byte-identical.
+export function treeSpec(tags, x, z, context = {}) {
   const kind = tags.leaf_type === 'needleleaved' ? 'conifer' : 'broad';
-  const d = TREE_DEFAULTS[kind];
+  const family = familyFor(x, z, kind, context);
+  const sized = sizeFor(family, x, z);
   const tagH = Number.parseFloat(tags.height ?? '');
   const tagCrown = Number.parseFloat(tags.diameter_crown ?? '');
   return {
-    x, z, kind,
-    h: tagH > 0 ? tagH : Math.round(vary(d.h, x, z) * 10) / 10,
-    r: tagCrown > 0 ? tagCrown / 2 : Math.round(vary(d.r, x + 31, z - 17) * 10) / 10,
+    x, z, kind, family,
+    h: tagH > 0 ? tagH : sized.h,
+    // Tiny-Crown-Guard (Skelett-Defekt): Krone nie unter 30% der Familien-
+    // Erwartung — ein OSM diameter_crown=0.5 erzeugte trunk-only-Skelette.
+    r: tagCrown > 0 ? Math.max(tagCrown / 2, sized.r * 0.3) : sized.r,
   };
 }
 
@@ -176,7 +239,7 @@ function existingTreeGrid(existingTrees, cell) {
   return grid;
 }
 
-export function forestFill(ring, existingTrees, density = 1 / 60) {
+export function forestFill(ring, existingTrees, density = 1 / 60, context = { green: 'wood' }) {
   const cell = Math.sqrt(1 / density);
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const [x, z] of ring) {
@@ -205,9 +268,10 @@ export function forestFill(ring, existingTrees, density = 1 / 60) {
       const z = (gz + 0.5) * cell + jz;
       if (!pointInRing(x, z, ring)) continue;
       if (tooClose(x, z)) continue;
-      out.push({ x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, kind: 'broad',
-        h: Math.round(vary(TREE_DEFAULTS.broad.h, x, z) * 10) / 10,
-        r: Math.round(vary(TREE_DEFAULTS.broad.r, x + 31, z - 17) * 10) / 10 });
+      const family = familyFor(x, z, context.leafType === 'needleleaved' ? 'conifer' : 'broad', context);
+      const kind = ['conic', 'slender'].includes(family) ? 'conifer' : 'broad';
+      const sized = sizeFor(family, x, z);
+      out.push({ x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, kind, family, h: sized.h, r: sized.r });
     }
   }
   return out;

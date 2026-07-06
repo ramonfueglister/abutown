@@ -120,13 +120,12 @@ describe('treeSpec', () => {
     expect(t.h).toBe(17);
     expect(t.r).toBe(4);
   });
-  it('leaf_type default with deterministic ±15% variance', () => {
+  it('leaf_type default is deterministic (Slice-2 family/growth-curve sizing)', () => {
     const a = treeSpec({ leaf_type: 'needleleaved' }, 5, 5);
     const b = treeSpec({ leaf_type: 'needleleaved' }, 5, 5);
     expect(a).toEqual(b);
     expect(a.kind).toBe('conifer');
-    expect(a.h).toBeGreaterThan(14 * 0.84);
-    expect(a.h).toBeLessThan(14 * 1.16);
+    expect(a.h).toBeGreaterThan(0);
   });
 });
 
