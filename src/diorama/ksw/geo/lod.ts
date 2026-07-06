@@ -28,10 +28,9 @@ export type CityLodRefs = {
   setFacadeDetail: (on: boolean) => void;
   lamps: THREE.Object3D | null;
   footways: THREE.Object3D | null;
-  treesFull: THREE.Object3D[];
-  // two impostor meshes since Task 14 (broad 4-puff + conifer cone) — same
-  // collect-then-filter pattern as treesFull, so a missing mesh is just absent
-  treeImpostors: THREE.Object3D[];
+  // Trees handle their own distance LOD (near-set compaction + the impostor's
+  // vertex-stage near-collapse), so the ring never toggles tree visibility —
+  // it only drives whether the near-set casts shadows.
   setTreeShadows: (on: boolean) => void;
 };
 
@@ -40,7 +39,5 @@ export function applyCityLod(ring: CityLodRing, r: CityLodRefs): void {
   r.setFacadeDetail(!far);
   if (r.lamps) r.lamps.visible = !far;
   if (r.footways) r.footways.visible = !far;
-  for (const t of r.treesFull) if (t) t.visible = !far;
-  for (const t of r.treeImpostors) if (t) t.visible = far;
   r.setTreeShadows(ring === 'near');
 }
