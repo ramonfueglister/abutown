@@ -16,7 +16,12 @@ export type StreamerState = { live: Map<TileKey, { lastNear: number }>; tick: nu
 // Terrain-Relief + Baum-Impostors (Task-6-Finding, in Task 7 im Browser
 // verifiziert). Kosten: ~1-3 zusätzliche live L1-Tiles (nur Terrain+Impostors),
 // fps am Stadtrand blieb im Task-7-Smoke deutlich über dem 85er-Gate.
-export const DEFAULT_RINGS: RingConfig = { r2: 800, r1: 3600, hysteresis: 1.1, maxLive: 80 };
+// r2=900 deckt die L2-Halbdiagonale (Kante 20000/16 = 1250 m, Halbdiagonale
+// 1250·√2/2 ≈ 884): mit dem alten 800 blieb an Tile-Ecken KEIN L2-Tile
+// desired, die Hysterese (880) rettete das nicht — Eck-Loch im Nahring
+// (Gebäude + Vollbäume fehlten dort). Analog zu r1 (Task 7). Kosten: minimal,
+// nur 1-2 zusätzliche live L2-Tiles an Ecken, fps-Gate bleibt unberührt.
+export const DEFAULT_RINGS: RingConfig = { r2: 900, r1: 3600, hysteresis: 1.1, maxLive: 80 };
 
 function radiusFor(level: number, cfg: RingConfig): number {
   return level === 2 ? cfg.r2 : level === 1 ? cfg.r1 : Infinity;

@@ -29,7 +29,7 @@ describe('tileCenter', () => {
 describe('desiredLevel', () => {
   it('L2 nur im Nahring, L1 im Mittelring, L0 immer', () => {
     expect(desiredLevel(0, 0, { level: 2, cx: 500, cz: 0 }, DEFAULT_RINGS)).toBe(true);
-    expect(desiredLevel(0, 0, { level: 2, cx: 900, cz: 0 }, DEFAULT_RINGS)).toBe(false);
+    expect(desiredLevel(0, 0, { level: 2, cx: 1000, cz: 0 }, DEFAULT_RINGS)).toBe(false);
     // r1=3600 (Task 7: deckt die L1-Halbdiagonale ≈ 3536, s. tileStreamer.ts)
     expect(desiredLevel(0, 0, { level: 1, cx: 3500, cz: 0 }, DEFAULT_RINGS)).toBe(true);
     expect(desiredLevel(0, 0, { level: 1, cx: 3700, cz: 0 }, DEFAULT_RINGS)).toBe(false);
@@ -39,29 +39,29 @@ describe('desiredLevel', () => {
 
 describe('planStep', () => {
   it('lädt distanz-sortiert und entlädt erst jenseits der Hysterese', () => {
-    const all = [t(2, 100, 0), t(2, 700, 0), t(2, 850, 0)];
+    const all = [t(2, 100, 0), t(2, 700, 0), t(2, 950, 0)];
     const s = fresh();
     const p1 = planStep(s, 0, 0, all, DEFAULT_RINGS);
-    expect(p1.load.map((m) => m.cx)).toEqual([100, 700]); // 850 > r2
-    // Kamera rückt zu x=60: Tile 850 ist jetzt 790 entfernt → laden;
-    // Tile 100 bleibt live. Kein Entladen (nichts > 880 = r2·1.1).
+    expect(p1.load.map((m) => m.cx)).toEqual([100, 700]); // 950 > r2
+    // Kamera rückt zu x=60: Tile 950 ist jetzt 890 entfernt → laden;
+    // Tile 100 bleibt live. Kein Entladen (nichts > 990 = r2·1.1).
     for (const m of p1.load) s.live.set(m.key, { lastNear: s.tick });
     const p2 = planStep(s, 60, 0, all, DEFAULT_RINGS);
-    expect(p2.load.map((m) => m.cx)).toEqual([850]);
+    expect(p2.load.map((m) => m.cx)).toEqual([950]);
     expect(p2.unload).toEqual([]);
-    // Kamera springt weit weg: alles jenseits 880 → entladen.
-    s.live.set('L2/850_0', { lastNear: s.tick });
+    // Kamera springt weit weg: alles jenseits 990 → entladen.
+    s.live.set('L2/950_0', { lastNear: s.tick });
     const p3 = planStep(s, 5000, 0, all, DEFAULT_RINGS);
-    expect(new Set(p3.unload)).toEqual(new Set(['L2/100_0', 'L2/700_0', 'L2/850_0']));
+    expect(new Set(p3.unload)).toEqual(new Set(['L2/100_0', 'L2/700_0', 'L2/950_0']));
   });
 
   it('flattert nicht an der Ringgrenze (Hysterese-Band)', () => {
-    const all = [t(2, 800, 0)];
+    const all = [t(2, 900, 0)];
     const s = fresh();
     const p1 = planStep(s, 0, 0, all, DEFAULT_RINGS);
     expect(p1.load.length).toBe(1);
     s.live.set(all[0].key, { lastNear: 0 });
-    // dist 810: > r2, aber < r2·1.1 → weder load noch unload
+    // dist 910: > r2, aber < r2·1.1=990 → weder load noch unload
     const p2 = planStep(s, -10, 0, all, DEFAULT_RINGS);
     expect(p2.load).toEqual([]);
     expect(p2.unload).toEqual([]);
@@ -80,16 +80,16 @@ describe('planStep', () => {
   });
 
   it('LRU-Kappe greift auch INNERHALB des Hysterese-Bands (kein Hysterese-Unload maskiert die Eviction)', () => {
-    // dist(850,0) = 850: > r2=800 (nicht desired) aber <= r2*1.1=880
+    // dist(950,0) = 950: > r2=900 (nicht desired) aber <= r2*1.1=990
     // (kein Hysterese-Unload). Ohne LRU-Kappe bliebe das Tile also live —
     // dieser Test beweist, dass die LRU-Schleife selbst greift, nicht die
     // Hysterese-Logik (die im bestehenden Test bereits das Entladen erledigt).
     const cfg = { ...DEFAULT_RINGS, maxLive: 2 };
     const s = fresh();
-    s.live.set('L2/850_0', { lastNear: 1 }); // live, im Hysterese-Band, alt
-    const all = [t(2, 100, 0), t(2, 200, 0), t(2, 850, 0)];
+    s.live.set('L2/950_0', { lastNear: 1 }); // live, im Hysterese-Band, alt
+    const all = [t(2, 100, 0), t(2, 200, 0), t(2, 950, 0)];
     const p = planStep(s, 0, 0, all, cfg);
     expect(p.load.map((m) => m.cx)).toEqual([100, 200]);
-    expect(p.unload).toContain('L2/850_0');
+    expect(p.unload).toContain('L2/950_0');
   });
 });
