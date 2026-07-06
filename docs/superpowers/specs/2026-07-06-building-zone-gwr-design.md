@@ -62,8 +62,8 @@ diorama.
 ## Data flow
 
 ```
-[network, one-time]   geo:fetch-attributes  → scratch/geo/{gwr,bauzonen}.geojson   (reprojected to EPSG:4326)
-[bake, deterministic] geo:bake (extended)   → spatial-join per building → buildings.json gains {bauzone, bauzoneCode, gwrCategory, egid}
+[network, one-time]   geo:fetch-attributes  → scratch/geo/{bauzonen.geojson, gwr-buildings.json}  (WGS84)
+[bake, deterministic] geo:bake-attributes   → spatial-join against the COMMITTED buildings.json → it gains {bauzone, bauzoneCode, gwrCategory, egid}
                                              → data/winterthur/building-attributes.json  (golden artifact, id-keyed)
 [persist]             backend ingest         → upsert building-attributes.json into Supabase `building_attributes` (via DATABASE_URL)
 [serve, future]       GET /building-attributes?world_id=… → id-keyed enrichment (reads Supabase)
@@ -103,8 +103,14 @@ produced by the bake, which *is* committed.
 
 ## Component 2 — the two joins (deterministic, in the bake)
 
-Extend `bake-winterthur.mjs` (or a `scripts/geo/lib/enrich.mjs` it calls) with
-pure, unit-tested geometry:
+**Plan refinement:** enrichment is a **standalone bake step**
+(`scripts/geo/bake-attributes.mjs`, `npm run geo:bake-attributes`) that reads
+the *committed* `data/winterthur/buildings.json` and writes it back enriched —
+it does NOT extend `bake-winterthur.mjs`. Rationale: the full mesh bake needs
+the multi-GB `scratch/geo` swisstopo tiles and risks mesh regressions; the
+enrichment needs only footprints, which are already baked and committed. The
+step is idempotent (re-running overwrites the four fields). It calls pure,
+unit-tested geometry in `scripts/geo/lib/enrich.mjs`:
 
 Both joins run in **local plate metres**: the bake projects Bauzonen polygon
 rings and GWR points via `projector.toLocal` and joins against the baked
