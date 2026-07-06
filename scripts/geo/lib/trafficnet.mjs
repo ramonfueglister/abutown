@@ -173,7 +173,7 @@ function isOneway(tags, cls) {
 
 // Normalize a boundary input (Feature / FeatureCollection / geometry) to an
 // array of polygons, each an array of rings of [lon, lat] (altitude dropped).
-function normalizeBoundary(boundary) {
+export function normalizeBoundary(boundary) {
   let geom = boundary;
   if (geom?.type === 'FeatureCollection') geom = geom.features[0]?.geometry;
   else if (geom?.type === 'Feature') geom = geom.geometry;
@@ -248,7 +248,7 @@ function boundaryCrossing(a, b, polys, exiting) {
 // segments in way order, each `{ pts, startGateway, endGateway }` — the
 // gateway flags mark terminal vertices created by a boundary cut. A way fully
 // outside yields []; in-out-in ways yield multiple segments.
-function clipWayAtBoundary(geometry, polys) {
+export function clipWayAtBoundary(geometry, polys) {
   const inside = geometry.map((p) => pointInPolygons(p.lon, p.lat, polys));
   const segments = [];
   let cur = null;
