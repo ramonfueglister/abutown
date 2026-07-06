@@ -73,7 +73,24 @@ what carves the classic embankment/cut silhouette of the Winterthur corridor.
   rail wins; the road blends toward the rail profile (visually a ramp until
   the bridges slice lands). These sites are counted and logged by the bake.
 
-### 4.4 Determinism & artifacts
+### 4.4 World consistency (everything placed on the old DEM must follow)
+
+- **Bake order**: grading runs BEFORE building/tree/prop placement so every
+  placed object samples the graded DEM. No re-grounding shims afterwards —
+  order, not patches.
+- **Corridor clearing**: the pass exports the corridor mask; tree/prop
+  scattering excludes it (no trees on carriageways).
+- **Water is untouchable**: grading never modifies cells under water
+  polygons (Töss, Eulach). A road/rail corridor crossing water without an
+  OSM `bridge` tag is counted and logged (honest report for the bridges
+  slice) — never silently graded through the riverbed.
+- **Anchor pinning**: `anchorGroundHeight` is captured BEFORE grading so the
+  global vertical anchor of the world cannot shift.
+- **Traffic-lane coverage**: the road corridor width is the max of the
+  render width and the trafficnet lane extents for that way, so vehicles
+  (which sample `groundYAt` per position) always drive on graded ground.
+
+### 4.5 Determinism & artifacts
 
 Pure function of (DEM, osm-roads, constants): double-bake must be
 byte-identical (golden test, same as #119/#123 discipline). Artifacts stay
