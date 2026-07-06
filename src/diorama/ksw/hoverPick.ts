@@ -41,12 +41,20 @@ export function createHoverPicker({
       // immediately after: three's raycast reads `material.side` off the hit
       // object internally (see three-mesh-bvh's acceleratedRaycast / the
       // vanilla Mesh.raycast), so there's no side-channel to pass this in.
-      const prevSides = meshes.map((m) => (m.material as THREE.Material).side);
-      for (const m of meshes) (m.material as THREE.Material).side = THREE.DoubleSide;
-      const hits = raycaster.intersectObjects(meshes, false);
-      meshes.forEach((m, i) => {
-        (m.material as THREE.Material).side = prevSides[i];
-      });
+      // A mesh's `material` can in principle be an array (multi-material
+      // mesh) — skip the side-toggle for those rather than silently no-op
+      // via a cast, so the behaviour is defined instead of accidental.
+      const toggled = meshes.filter((m) => !Array.isArray(m.material)) as (THREE.Mesh & { material: THREE.Material })[];
+      const prevSides = toggled.map((m) => m.material.side);
+      let hits: THREE.Intersection[];
+      try {
+        for (const m of toggled) m.material.side = THREE.DoubleSide;
+        hits = raycaster.intersectObjects(meshes, false);
+      } finally {
+        toggled.forEach((m, i) => {
+          m.material.side = prevSides[i];
+        });
+      }
       const hit = hits[0];
       if (!hit || !hit.face) return null;
       const attr = (hit.object as THREE.Mesh).geometry.getAttribute('buildingIdx');

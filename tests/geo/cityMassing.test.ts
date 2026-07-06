@@ -1,7 +1,7 @@
 // tests/geo/cityMassing.test.ts
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { buildCityMassing, mergeTinted } from '../../src/diorama/ksw/geo/cityMassing';
+import { buildCityMassing, mergeTinted, mergeWalls } from '../../src/diorama/ksw/geo/cityMassing';
 import type { BakedBuilding, BakedMesh } from '../../src/diorama/ksw/geo/geoData';
 
 const cube = (x: number): BakedBuilding => ({
@@ -96,5 +96,19 @@ describe('buildCityMassing', () => {
     expect(idx).toBeDefined();
     expect(idx.getX(0)).toBe(0);  // first building's vertices
     expect(idx.getX(3)).toBe(1);  // second building's vertices
+  });
+
+  it('mergeWalls writes a per-vertex buildingIdx attribute (walls are the dominant pick surface)', () => {
+    // cityWalls is what hover rays hit most — without buildingIdx every wall
+    // hit resolves to null in hoverPick. Fixtures are cm ints (÷100 in the
+    // merge); each cube contributes one 4-vertex wall quad.
+    const geo = mergeWalls([cube(0), cube(20)], 0xffffff);
+    const idx = geo.getAttribute('buildingIdx');
+    const pos = geo.getAttribute('position');
+    expect(idx).toBeDefined();
+    expect(idx.itemSize).toBe(1);
+    expect(idx.count).toBe(pos.count); // one entry per vertex
+    for (let i = 0; i < 4; i++) expect(idx.getX(i)).toBe(0); // first building
+    for (let i = 4; i < 8; i++) expect(idx.getX(i)).toBe(1); // second building
   });
 });

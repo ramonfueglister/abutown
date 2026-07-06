@@ -99,12 +99,14 @@ export function mergeWalls(buildings: BakedBuilding[], base: number): THREE.Buff
   const colors = new Float32Array(vtx * 3);
   const fuv = new Float32Array(vtx * 2); // metres (u, v)
   const eave = new Float32Array(vtx); // metres, per vertex (constant per building)
+  const buildingIdx = new Float32Array(vtx);
   const indices = vtx > 65535 ? new Uint32Array(tri) : new Uint16Array(tri);
   const baseColor = new THREE.Color(base);
   let vo = 0;
   let uo = 0;
   let io = 0;
   let seed = 0;
+  let bi = 0;
   for (const b of buildings) {
     const p: BakedWallMesh = b.wall;
     const base3 = vo / 3;
@@ -117,6 +119,7 @@ export function mergeWalls(buildings: BakedBuilding[], base: number): THREE.Buff
       colors[vo + i] = tint.r;
       colors[vo + i + 1] = tint.g;
       colors[vo + i + 2] = tint.b;
+      buildingIdx[base3 + i / 3] = bi;
     }
     for (let v = 0; v < nVerts; v++) {
       fuv[uo + v * 2] = p.fuv[v * 2] / FUV_PER_M; // 2-dm units → m
@@ -127,12 +130,14 @@ export function mergeWalls(buildings: BakedBuilding[], base: number): THREE.Buff
     vo += p.pos.length;
     uo += nVerts * 2;
     io += p.idx.length;
+    bi++;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setAttribute('fuv', new THREE.BufferAttribute(fuv, 2));
   geo.setAttribute('eaveH', new THREE.BufferAttribute(eave, 1));
+  geo.setAttribute('buildingIdx', new THREE.BufferAttribute(buildingIdx, 1));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
   return geo;
