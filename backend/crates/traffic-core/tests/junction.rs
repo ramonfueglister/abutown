@@ -82,7 +82,7 @@ fn red_light_queues_and_green_discharges() {
     let route = [0u32, 1u32];
     for k in 0..8u32 {
         let s = 5.0 + k as f32 * 7.0;
-        core.spawn(0, s, &route).expect("spawn feeder seed");
+        core.spawn(0, s, 0, &route).expect("spawn feeder seed");
     }
     core.reindex();
 
@@ -131,7 +131,7 @@ fn red_light_queues_and_green_discharges() {
             if blocked {
                 break;
             }
-            if core.spawn(0, 0.0, &route).is_none() {
+            if core.spawn(0, 0.0, 0, &route).is_none() {
                 break; // fleet full
             }
         }
@@ -258,13 +258,13 @@ fn roundabout_entry_yields_and_no_cooccupancy() {
     // finds a gap early — they occupy the node region continuously.
     for k in 0..3u32 {
         let lane = k; // ring lanes 0,1,2
-        core.spawn(lane, 5.0, &rotate_route(&ring_route, lane))
+        core.spawn(lane, 5.0, 0, &rotate_route(&ring_route, lane))
             .expect("spawn circulating");
     }
     // One entering vehicle, near the entry lane end so it reaches the give-way
     // line quickly.
     let enter = core
-        .spawn(entry_lane, 30.0, &entry_route)
+        .spawn(entry_lane, 30.0, 0, &entry_route)
         .expect("spawn entering");
     core.fleet.v[enter as usize] = 6.0;
     for k in 0..3u32 {
@@ -387,10 +387,10 @@ fn right_before_left_yields_to_priority() {
     });
 
     // Priority vehicle on road A, approaching the node at speed.
-    let prio = core.spawn(0, 50.0, &[0u32, 1]).expect("prio");
+    let prio = core.spawn(0, 50.0, 0, &[0u32, 1]).expect("prio");
     core.fleet.v[prio as usize] = 13.0;
     // Yielding vehicle on road B, also approaching. It must wait until A clears.
-    let yielder = core.spawn(2, 55.0, &[2u32, 3]).expect("yielder");
+    let yielder = core.spawn(2, 55.0, 0, &[2u32, 3]).expect("yielder");
     core.fleet.v[yielder as usize] = 12.0;
     core.reindex();
 
@@ -460,10 +460,15 @@ fn junction_soak_core(seed: u64) -> Core {
     let ring_route: Vec<u32> = vec![0, 1, 2, 3];
     for k in 0..4u32 {
         let lane = k;
-        core.spawn(lane, 3.0 + k as f32 * 2.0, &rotate_route(&ring_route, lane))
-            .expect("spawn circ");
+        core.spawn(
+            lane,
+            3.0 + k as f32 * 2.0,
+            0,
+            &rotate_route(&ring_route, lane),
+        )
+        .expect("spawn circ");
     }
-    core.spawn(4, 20.0, &[4u32, 0, 1, 2, 3])
+    core.spawn(4, 20.0, 0, &[4u32, 0, 1, 2, 3])
         .expect("spawn entry");
     core.reindex();
     core

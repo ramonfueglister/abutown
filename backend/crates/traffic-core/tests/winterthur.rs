@@ -116,7 +116,7 @@ fn winterthur_end_to_end_soak() {
         };
         // Spawn near the lane start so it has road ahead.
         let s = (net.lane_len(start) * 0.2).clamp(1.0, 5.0);
-        if core.spawn(start, s, &route).is_some() {
+        if core.spawn(start, s, 0, &route).is_some() {
             used_lane.insert(start, true);
             spawned += 1;
         }

@@ -41,14 +41,16 @@ pub enum DayKind {
 ///
 /// `index` is the record's position within its block (weekday and weekend
 /// blocks each start at 0) — the stable per-trip identity used for
-/// deterministic thinning by the spawner. `vehicle_class` is dropped at
-/// load time (always 0 = car in format version 1).
+/// deterministic thinning by the spawner. `vehicle_class` indexes the
+/// kernel's per-class IDM table (see [`traffic_core::idm::N_CLASSES`]); an
+/// out-of-range class in the file is a hard load error, not a healed car.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Trip {
     pub departure_s: u32,
     pub origin_lane: u32,
     pub dest_lane: u32,
     pub segment: u8,
+    pub vehicle_class: u8,
     pub index: u32,
 }
 
@@ -107,6 +109,17 @@ pub enum DemandError {
         index: u32,
         prev: u32,
         next: u32,
+    },
+    #[error(
+        "trips file {path} {day:?} block record {index} carries vehicle class {class}, \
+         outside the kernel's class table (0..{})",
+        traffic_core::idm::N_CLASSES
+    )]
+    BadVehicleClass {
+        path: PathBuf,
+        day: DayKind,
+        index: u32,
+        class: u8,
     },
 }
 
@@ -184,8 +197,17 @@ impl TripSchedule {
                     origin_lane: u32::from_le_bytes(r[4..8].try_into().unwrap()),
                     dest_lane: u32::from_le_bytes(r[8..12].try_into().unwrap()),
                     segment: r[12],
+                    vehicle_class: r[13],
                     index,
                 };
+                if trip.vehicle_class as usize >= traffic_core::idm::N_CLASSES {
+                    return Err(DemandError::BadVehicleClass {
+                        path: path.to_path_buf(),
+                        day,
+                        index,
+                        class: trip.vehicle_class,
+                    });
+                }
                 if let Some(prev) = trips.last().map(|p: &Trip| p.departure_s)
                     && prev > trip.departure_s
                 {
@@ -303,6 +325,7 @@ mod tests {
                 origin_lane: 7,
                 dest_lane: 9,
                 segment: output::SEGMENT_INTERNAL,
+                vehicle_class: 0,
                 index: 0,
             }
         );
@@ -361,6 +384,30 @@ mod tests {
         let err = TripSchedule::load(&path, NET_JSON).unwrap_err();
         assert!(
             matches!(err, DemandError::BodyLengthMismatch { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_accepts_known_classes_and_rejects_unknown() {
+        // Classes 0..N_CLASSES load and survive the round trip.
+        let mut van = rec(100, 1, 2, output::SEGMENT_INTERNAL);
+        van.vehicle_class = 1;
+        let mut truck = rec(200, 3, 4, output::SEGMENT_THROUGH);
+        truck.vehicle_class = 2;
+        let path = temp_trips_file("classes-ok", &valid_trips_bytes(&[van, truck], &[]));
+        let sched = TripSchedule::load(&path, NET_JSON).unwrap();
+        let all = sched.trips_in(DayKind::Workday, 0..u32::MAX);
+        assert_eq!(all[0].vehicle_class, 1);
+        assert_eq!(all[1].vehicle_class, 2);
+
+        // An out-of-range class is a hard load error (no healing to car).
+        let mut bogus = rec(100, 1, 2, output::SEGMENT_INTERNAL);
+        bogus.vehicle_class = traffic_core::idm::N_CLASSES as u8;
+        let path = temp_trips_file("classes-bad", &valid_trips_bytes(&[bogus], &[]));
+        let err = TripSchedule::load(&path, NET_JSON).unwrap_err();
+        assert!(
+            matches!(err, DemandError::BadVehicleClass { class, .. } if class == 3),
             "got {err:?}"
         );
     }

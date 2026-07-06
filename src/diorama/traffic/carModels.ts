@@ -370,6 +370,41 @@ function pickupGlass(): THREE.BufferGeometry {
   ], GLASS);
 }
 
+function buildTruck(boxGeo: BoxGeo): THREE.BufferGeometry {
+  // Rigid HGV (Motorwagen): stubby high cab + separate tall cargo box. The sim
+  // drives a 12 m kinematic length (idm::class_len_m); the visual body stays a
+  // touch shorter so the box never pokes into the follower's bumper gap.
+  const L = 10.4, half = L / 2, cabBelt = 1.45, cabRoof = 2.55;
+  const Wv = W + 0.22, u = 0.55;
+  const cab = loft([
+    { z:  half,        yBot: u + 0.10, yTop: u + 0.55,       wBot: Wv - 0.30, wTop: Wv - 0.34 }, // bumper
+    { z:  half - 0.20, yBot: u,        yTop: cabBelt - 0.15, wBot: Wv - 0.06, wTop: Wv - 0.10 }, // flat nose
+    { z:  half - 0.55, yBot: u,        yTop: cabBelt,        wBot: Wv,        wTop: Wv - 0.06 }, // windshield base
+    { z:  half - 1.10, yBot: u,        yTop: cabRoof,        wBot: Wv,        wTop: Wv - 0.26 }, // steep windshield top
+    { z:  half - 2.30, yBot: u,        yTop: cabRoof,        wBot: Wv,        wTop: Wv - 0.26 }, // cab rear
+  ], BODY);
+  // Cargo box: slightly wider/taller than the cab, vertical walls, in the
+  // neutral box-body white (NOT the per-instance tint — set via its own colour
+  // so fleet tints only touch the cab).
+  const box = loft([
+    { z:  half - 2.45, yBot: u + 0.05, yTop: 3.15, wBot: Wv + 0.06, wTop: Wv + 0.06 }, // box front
+    { z: -half + 0.30, yBot: u + 0.05, yTop: 3.15, wBot: Wv + 0.06, wTop: Wv + 0.06 }, // box rear
+    { z: -half + 0.15, yBot: u + 0.10, yTop: 3.05, wBot: Wv - 0.10, wTop: Wv - 0.14 }, // rear doors inset
+  ], BODY);
+  return finishMerged(cab, box, detailBoxes(boxGeo, L, Wv, u, cabBelt));
+}
+
+function truckGlass(): THREE.BufferGeometry {
+  // Cab-only glazing: windshield + door band, nothing on the box.
+  const half = 10.4 / 2, belt = 1.45;
+  const Wv = W + 0.22;
+  return loft([
+    { z:  half - 0.57, yBot: belt, yTop: belt + 0.02, wBot: Wv - 0.10, wTop: Wv - 0.28 }, // windshield base
+    { z:  half - 1.08, yBot: belt, yTop: 2.42,        wBot: Wv - 0.08, wTop: Wv - 0.28 }, // windshield top
+    { z:  half - 2.10, yBot: belt, yTop: 2.42,        wBot: Wv - 0.08, wTop: Wv - 0.28 }, // door band end
+  ], GLASS);
+}
+
 // ── wheel geometry (shared by all variants; carLayer scales instances) ──────
 
 export const WHEEL_GEO_RADIUS = 0.3;
@@ -425,10 +460,49 @@ export interface CarVariant {
 }
 
 export const CAR_VARIANTS: readonly CarVariant[] = [
-  { name: 'sedan',     length: 4.5, wheels: { wheelbase: 2.7, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildSedan,     buildGlass: sedanGlass },
-  { name: 'hatchback', length: 3.9, wheels: { wheelbase: 2.5, track: 1.52, radius: 0.30, width: 0.22 }, buildBody: buildHatchback, buildGlass: hatchbackGlass },
-  { name: 'wagon',     length: 4.6, wheels: { wheelbase: 2.8, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildWagon,     buildGlass: wagonGlass },
-  { name: 'suv',       length: 4.6, wheels: { wheelbase: 2.8, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildSuv,       buildGlass: suvGlass },
-  { name: 'van',       length: 5.2, wheels: { wheelbase: 3.3, track: 1.66, radius: 0.36, width: 0.26 }, buildBody: buildVan,       buildGlass: vanGlass },
-  { name: 'pickup',    length: 5.0, wheels: { wheelbase: 3.1, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildPickup,    buildGlass: pickupGlass },
+  { name: 'sedan',     length: 4.5,  wheels: { wheelbase: 2.7, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildSedan,     buildGlass: sedanGlass },
+  { name: 'hatchback', length: 3.9,  wheels: { wheelbase: 2.5, track: 1.52, radius: 0.30, width: 0.22 }, buildBody: buildHatchback, buildGlass: hatchbackGlass },
+  { name: 'wagon',     length: 4.6,  wheels: { wheelbase: 2.8, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildWagon,     buildGlass: wagonGlass },
+  { name: 'suv',       length: 4.6,  wheels: { wheelbase: 2.8, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildSuv,       buildGlass: suvGlass },
+  { name: 'van',       length: 5.2,  wheels: { wheelbase: 3.3, track: 1.66, radius: 0.36, width: 0.26 }, buildBody: buildVan,       buildGlass: vanGlass },
+  { name: 'pickup',    length: 5.0,  wheels: { wheelbase: 3.1, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildPickup,    buildGlass: pickupGlass },
+  { name: 'truck',     length: 10.4, wheels: { wheelbase: 5.6, track: 1.90, radius: 0.50, width: 0.34 }, buildBody: buildTruck,     buildGlass: truckGlass },
 ] as const;
+
+/** Index of the HGV silhouette in [`CAR_VARIANTS`]. */
+export const TRUCK_VARIANT = CAR_VARIANTS.length - 1;
+
+/** Number of PRIVATE-car silhouettes (the leading entries private traffic may
+ * draw from — everything before van; vans/pickups/trucks are reserved for the
+ * commercial classes so a family sedan never renders as a box van). */
+const PRIVATE_VARIANTS = 4;
+
+/** Silhouette for a (wire vehicle class, id) pair — the class decides the
+ * family, the id hash the member:
+ *  * class 0 (car):       sedan / hatchback / wagon / suv
+ *  * class 1 (delivery):  van (¾) or pickup (¼)
+ *  * class 2 (HGV):       truck
+ * Unknown classes fall back to the car family (wire is additive-only). */
+export function carVariantForClass(cls: number, id: number): number {
+  const h = hashId(id ^ 0x9e3779b9);
+  if (cls === 2) return TRUCK_VARIANT;
+  if (cls === 1) return h % 4 === 0 ? 5 : 4; // pickup : van
+  return h % PRIVATE_VARIANTS;
+}
+
+/** Commercial body colours: white-dominated with silver/grey and a few company
+ * accents — delivery fleets are overwhelmingly white. */
+export const COMMERCIAL_PALETTE: readonly number[] = [
+  0xf2f2ee, 0xf2f2ee, 0xf2f2ee, 0xe8e8e4, // white ×4
+  0xc9ccd1, 0x9aa0a6, // silver / grey
+  0xc9452c, 0x2c5fa8, 0xdba63a, // company accents: red / blue / amber
+];
+
+/** Stable body colour for a (class, id) pair: private cars keep the full
+ * palette, commercial classes draw from the white-heavy commercial palette. */
+export function carColorForClass(cls: number, id: number): number {
+  if (cls === 1 || cls === 2) {
+    return COMMERCIAL_PALETTE[hashId(id) % COMMERCIAL_PALETTE.length];
+  }
+  return carColorForId(id);
+}

@@ -97,8 +97,8 @@ describe('TrafficClientCore.updateCamera — stale-vehicle eviction', () => {
     const core = makeCore();
     // Seed directly (bypassing the wire) — near-lane vehicle should survive,
     // far-lane vehicle should be evicted once the camera centres on the origin.
-    core.vehicles.set(101, { lane: NEAR_LANE.id, s: 10, v: 0, tickAt: 0 });
-    core.vehicles.set(202, { lane: FAR_LANE.id, s: 10, v: 0, tickAt: 0 });
+    core.vehicles.set(101, { lane: NEAR_LANE.id, s: 10, v: 0, tickAt: 0, cls: 0 });
+    core.vehicles.set(202, { lane: FAR_LANE.id, s: 10, v: 0, tickAt: 0, cls: 0 });
 
     const { subscribe } = core.updateCamera(0, 0);
 
@@ -113,14 +113,14 @@ describe('TrafficClientCore.updateCamera — stale-vehicle eviction', () => {
     // Place the "camera" so cell (0,0) is within the 5x5 keep-band radius but
     // outside the 3x3 want-band — e.g. camera at (2*CELL_SIZE_M, 0): the
     // vehicle's cell (col 0) is 2 cells away (within radius 2, outside radius 1).
-    core.vehicles.set(303, { lane: NEAR_LANE.id, s: 10, v: 0, tickAt: 0 });
+    core.vehicles.set(303, { lane: NEAR_LANE.id, s: 10, v: 0, tickAt: 0, cls: 0 });
     core.updateCamera(2 * CELL_SIZE_M, 0);
     expect(core.vehicles.has(303)).toBe(true);
   });
 
   it('evicts once the camera moves far enough that the vehicle leaves the 5x5 band entirely', () => {
     const core = makeCore();
-    core.vehicles.set(303, { lane: NEAR_LANE.id, s: 10, v: 0, tickAt: 0 });
+    core.vehicles.set(303, { lane: NEAR_LANE.id, s: 10, v: 0, tickAt: 0, cls: 0 });
     // First settle near the vehicle so it isn't evicted immediately.
     core.updateCamera(0, 0);
     expect(core.vehicles.has(303)).toBe(true);
@@ -136,7 +136,7 @@ describe('TrafficClientCore.applyFrame — keyframe ghost-heal uses the canonica
   it('evicts a stale vehicle resolved (via cellOfLaneS) to the keyframed cell but absent from it', () => {
     const net = buildLaneNet([NEAR_LANE]);
     const core = new TrafficClientCore([NEAR_LANE], net);
-    core.vehicles.set(7, { lane: NEAR_LANE.id, s: 5, v: 0, tickAt: 0 });
+    core.vehicles.set(7, { lane: NEAR_LANE.id, s: 5, v: 0, tickAt: 0, cls: 0 });
 
     const cell = core.grid.cellOfLaneS(NEAR_LANE.id, 5);
     // Keyframe for that same cell lists a different vehicle only.
@@ -144,7 +144,7 @@ describe('TrafficClientCore.applyFrame — keyframe ghost-heal uses the canonica
       cell,
       tick: 10,
       keyframe: true,
-      vehicles: [{ id: 9, lane: NEAR_LANE.id, sQ: 100, vQ: 0 }],
+      vehicles: [{ id: 9, lane: NEAR_LANE.id, sQ: 100, vQ: 0, class: 0 }],
       departed: [],
     });
 

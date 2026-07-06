@@ -17,7 +17,7 @@
 //! where a gap straddles a lane end.
 
 use crate::fleet::{Fleet, LaneIndex, VehId};
-use crate::idm::{IdmParams, idm_accel};
+use crate::idm::{IdmParams, N_CLASSES, class_len_m, idm_accel};
 use crate::junction::{self, APPROACH_ZONE_M, JunctionModel, MANDATORY_ZONE_M, NodeOccupancy};
 use crate::mobil::{self, Follower, LaneNeighbourhood, MobilParams};
 use rayon::prelude::*;
@@ -39,9 +39,6 @@ pub struct VehicleView {
     /// Speed (m/s).
     pub v: f32,
 }
-
-/// Default vehicle length (m) used for bumper-to-bumper gaps.
-const VEHICLE_LEN: f32 = 4.5;
 
 /// Small setback (m) from a lane end where a held vehicle waits — the "stop
 /// line". Keeps a blocked vehicle strictly short of the boundary so
@@ -124,8 +121,9 @@ pub struct Core {
     /// CSR lane occupancy, leader-first per lane.
     pub index: LaneIndex,
 
-    /// IDM parameters (single vehicle class for now).
-    params: IdmParams,
+    /// Per-class IDM parameter table, indexed by [`Fleet::class`] (see
+    /// [`crate::idm::N_CLASSES`]).
+    params: [IdmParams; N_CLASSES],
 
     /// MOBIL lane-change parameters (single vehicle class for now).
     mobil: MobilParams,
@@ -256,7 +254,7 @@ impl Core {
             lane_count,
             fleet: Fleet::with_capacity(cap),
             index: LaneIndex::new(lane_count, cap),
-            params: IdmParams::default(),
+            params: core::array::from_fn(|c| IdmParams::for_class(c as u8)),
             mobil: MobilParams::default(),
             lane_adj,
             seed,
@@ -269,9 +267,15 @@ impl Core {
         }
     }
 
-    /// Override the IDM parameters (single vehicle class). Mainly for tests.
+    /// Override the IDM parameters for EVERY class (uniform fleet). Mainly for
+    /// tests that want a single-class fleet with bespoke calibration.
     pub fn set_params(&mut self, p: IdmParams) {
-        self.params = p;
+        self.params = [p; N_CLASSES];
+    }
+
+    /// Override the IDM parameters of one vehicle class.
+    pub fn set_class_params(&mut self, class: u8, p: IdmParams) {
+        self.params[class as usize] = p;
     }
 
     /// Override the MOBIL lane-change parameters. Mainly for tests.
@@ -279,23 +283,27 @@ impl Core {
         self.mobil = m;
     }
 
-    /// The desired free-road speed `v0`.
+    /// The desired free-road speed `v0` of the passenger-car class.
     pub fn v0(&self) -> f32 {
-        self.params.v0
+        self.params[0].v0
     }
 
-    /// Spawn a vehicle at arc position `s` on `lane`, following `route` (a
-    /// sequence of lane ids the vehicle traverses in order; `route[0]` must be
-    /// `lane`). Returns `None` if the fleet is at capacity or the route is
-    /// empty / inconsistent.
-    pub fn spawn(&mut self, lane: u32, s: f32, route: &[u32]) -> Option<VehId> {
-        if route.is_empty() || route[0] != lane {
+    /// Spawn a vehicle of `class` (see [`crate::idm::N_CLASSES`]) at arc
+    /// position `s` on `lane`, following `route` (a sequence of lane ids the
+    /// vehicle traverses in order; `route[0]` must be `lane`). Returns `None`
+    /// if the fleet is at capacity, the route is empty / inconsistent, or the
+    /// class is out of range (a corrupt trip table is a caller error, not a
+    /// silently-healed car).
+    pub fn spawn(&mut self, lane: u32, s: f32, class: u8, route: &[u32]) -> Option<VehId> {
+        if route.is_empty() || route[0] != lane || class as usize >= N_CLASSES {
             return None;
         }
         if self.fleet.alive_count() >= self.intents.len() {
             return None; // would exceed cap and force a realloc
         }
-        let id = self.fleet.alloc(lane, s, 0.0, VEHICLE_LEN, route);
+        let id = self
+            .fleet
+            .alloc(lane, s, 0.0, class_len_m(class), class, route);
         // Seed the lane index so the very first tick sees correct occupancy.
         self.index.rebuild(&self.fleet);
         Some(id)
@@ -495,7 +503,7 @@ impl Core {
                     Boundary::NotYet => NO_CROSS,
                 };
 
-                let acc = idm_accel(params, v, dv, gap);
+                let acc = idm_accel(&params[fleet.class[i] as usize], v, dv, gap);
 
                 // Ballistic-safe integration.
                 let mut new_v = (v + acc * DT).max(0.0);
@@ -805,7 +813,12 @@ impl Core {
         if let Some(f) = nb.follower {
             // Gaps are zero-clamped by lane_neighbourhood; a would-be overlap yields
             // gap 0 → IDM projects braking beyond b_safe → rejected by safety check below.
-            let a = crate::idm::idm_accel(&self.params, f.v, f.dv_to_decider, f.gap_to_decider);
+            let a = crate::idm::idm_accel(
+                &self.params[f.class as usize],
+                f.v,
+                f.dv_to_decider,
+                f.gap_to_decider,
+            );
             if a <= -self.mobil.b_safe {
                 return false;
             }
@@ -854,7 +867,7 @@ fn evaluate_lane_change(
     fleet: &Fleet,
     index: &LaneIndex,
     mobil_params: &MobilParams,
-    idm: &IdmParams,
+    params: &[IdmParams; N_CLASSES],
     lane_adj: &[(u32, u32)],
     net: &TrafficNet,
     lane: u32,
@@ -909,7 +922,15 @@ fn evaluate_lane_change(
         // On the target lane the decider is absent, so exclude nothing real;
         // pass an impossible slot id.
         let tgt = lane_neighbourhood(fleet, index, target, s, v, VehId::MAX);
-        let d = mobil::evaluate(mobil_params, idm, v, &cur, &tgt, to_right);
+        let d = mobil::evaluate(
+            mobil_params,
+            params,
+            fleet.class[veh as usize],
+            v,
+            &cur,
+            &tgt,
+            to_right,
+        );
         if d.change {
             match best {
                 Some((_, best_inc)) if best_inc >= d.incentive => {}
@@ -1007,6 +1028,7 @@ fn lane_neighbourhood(
         };
         Follower {
             v: vf,
+            class: fleet.class[j],
             gap_to_decider,
             gap_without_decider,
             dv_to_decider,

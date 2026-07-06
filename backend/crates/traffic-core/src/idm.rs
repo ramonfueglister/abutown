@@ -7,6 +7,29 @@
 //! Leaderless vehicles (free road) pass `gap = f32::INFINITY`, which drops the
 //! interaction term and leaves pure free-road acceleration toward `v0`.
 
+/// Number of vehicle classes carried end-to-end (trips.bin byte 13 → kernel →
+/// wire → silhouette): 0 = passenger car, 1 = delivery van (Lieferwagen),
+/// 2 = HGV/truck (LKW).
+pub const N_CLASSES: usize = 3;
+/// Passenger car (PW).
+pub const CLASS_CAR: u8 = 0;
+/// Light commercial vehicle / delivery van (Lieferwagen).
+pub const CLASS_DELIVERY: u8 = 1;
+/// Heavy goods vehicle (LKW).
+pub const CLASS_TRUCK: u8 = 2;
+
+/// Vehicle length (m) by class, used for bumper-to-bumper gaps: 4.5 m car,
+/// 6.5 m delivery van (Sprinter-class), 12 m rigid HGV. Out-of-range classes
+/// are a caller bug; [`crate::tick::Core::spawn`] rejects them before this is
+/// consulted.
+pub fn class_len_m(class: u8) -> f32 {
+    match class {
+        CLASS_TRUCK => 12.0,
+        CLASS_DELIVERY => 6.5,
+        _ => 4.5,
+    }
+}
+
 /// IDM calibration parameters for one vehicle class.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IdmParams {
@@ -32,6 +55,49 @@ impl Default for IdmParams {
             a_max: 1.4,
             b_comf: 2.0,
             s0: 2.0,
+        }
+    }
+}
+
+impl IdmParams {
+    /// Passenger car: the canonical Treiber et al. (2000) defaults.
+    pub fn car() -> Self {
+        Self::default()
+    }
+
+    /// Delivery van (Lieferwagen): same urban desired speed as a car but a
+    /// slightly longer headway, weaker acceleration and larger jam distance —
+    /// the light-commercial column of the Treiber & Kesting (2013, ch. 11)
+    /// heavy-vehicle calibration, interpolated toward the car values.
+    pub fn delivery() -> Self {
+        IdmParams {
+            v0: 13.9,
+            t_headway: 1.6,
+            a_max: 1.1,
+            b_comf: 2.0,
+            s0: 2.5,
+        }
+    }
+
+    /// HGV (LKW): truck calibration after Treiber & Kesting (2013, ch. 11) —
+    /// markedly weaker acceleration, longer headway and jam distance, and a
+    /// desired speed slightly below the urban limit.
+    pub fn truck() -> Self {
+        IdmParams {
+            v0: 12.5,
+            t_headway: 1.7,
+            a_max: 0.7,
+            b_comf: 2.0,
+            s0: 3.0,
+        }
+    }
+
+    /// The calibration for a wire vehicle class (see [`N_CLASSES`]).
+    pub fn for_class(class: u8) -> Self {
+        match class {
+            CLASS_TRUCK => Self::truck(),
+            CLASS_DELIVERY => Self::delivery(),
+            _ => Self::car(),
         }
     }
 }

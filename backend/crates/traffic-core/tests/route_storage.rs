@@ -81,7 +81,7 @@ fn route_storage_is_bounded_under_spawn_reroute_churn() {
     for k in 0..cap as u32 {
         let lane = k % 4;
         let s = 10.0 + (k as f32) * 20.0 % 200.0;
-        if let Some(v) = core.spawn(lane, s, &route_from(lane)) {
+        if let Some(v) = core.spawn(lane, s, 0, &route_from(lane)) {
             vehs.push(v);
         }
     }

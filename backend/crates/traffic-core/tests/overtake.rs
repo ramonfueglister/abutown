@@ -157,11 +157,11 @@ fn fast_car_overtakes_slow_truck_and_returns_right() {
 
     // A slow "truck": crawling, in the RIGHT lane (index 0) of edge 0 at s=120.
     let truck = core
-        .spawn(lane_id(0, 0), 120.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 120.0, 0, &route_on_index(0, 0))
         .expect("spawn truck");
     // A fast car behind it in the same right lane at s=40, initialised at speed.
     let car = core
-        .spawn(lane_id(0, 0), 40.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 40.0, 0, &route_on_index(0, 0))
         .expect("spawn car");
     // Pin the truck slow by giving the car a head-start in speed; both use the
     // same IDM, but the car approaches and must decide to overtake.
@@ -231,15 +231,15 @@ fn safety_veto_blocks_change_into_fast_adjacent_traffic() {
     // left, but the LEFT lane has a fast car right beside/behind it, so the
     // safety criterion must veto the change.
     let leader = core
-        .spawn(lane_id(0, 0), 60.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 60.0, 0, &route_on_index(0, 0))
         .expect("leader");
     let boxed = core
-        .spawn(lane_id(0, 0), 40.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 40.0, 0, &route_on_index(0, 0))
         .expect("boxed");
     // Fast car in the left lane just behind `boxed`'s position (small gap, high
     // speed) — cutting in front of it would force a hard brake.
     let fast_left = core
-        .spawn(lane_id(0, 1), 38.0, &route_on_index(0, 1))
+        .spawn(lane_id(0, 1), 38.0, 0, &route_on_index(0, 1))
         .expect("fast_left");
     core.fleet.v[leader as usize] = 3.0;
     core.fleet.v[boxed as usize] = 4.0;
@@ -284,7 +284,7 @@ fn crowded_core(seed: u64) -> Core {
         let idx = (k / 4) % 2;
         let s = 20.0 + (k as f32) * 11.0 % (SIDE - 20.0);
         let id = core
-            .spawn(lane_id(e, idx), s, &route_on_index(e, idx))
+            .spawn(lane_id(e, idx), s, 0, &route_on_index(e, idx))
             .expect("spawn crowded");
         core.fleet.v[id as usize] = 5.0 + (k as f32 * 1.7) % 12.0;
     }

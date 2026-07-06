@@ -403,7 +403,7 @@ impl TripSpawner {
             0.0
         };
 
-        let Some(veh) = core.spawn(start_lane, s0, &route) else {
+        let Some(veh) = core.spawn(start_lane, s0, trip.vehicle_class, &route) else {
             // Kernel slot-cap refusal: same valve, same counter.
             self.counters.suppressed += 1;
             self.window_suppressed += 1;
@@ -813,7 +813,7 @@ mod tests {
         // A standing leader 30 m in: entry must slow to what the remaining
         // gap can absorb at ENTRY_BRAKE (strictly below the free-road 8).
         let mut jammed = Core::new(&net, 64, seed);
-        jammed.spawn(0, 30.0, &[0]).expect("leader spawn");
+        jammed.spawn(0, 30.0, 0, &[0]).expect("leader spawn");
         let veh = spawn_one(&mut jammed, "entry-jammed");
         let v = jammed.fleet.v[veh as usize];
         assert!(

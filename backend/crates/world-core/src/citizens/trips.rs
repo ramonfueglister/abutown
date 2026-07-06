@@ -168,9 +168,9 @@ pub fn dispatch_trips_system<C: CoreAccess>(
                     // `spawn` gibt bei Kapazitäts-Cap/inkonsistenter Route
                     // `None` zurück — Walk-Fallback, nie ein gestrandeter
                     // Bürger.
-                    let veh = core
-                        .core_mut()
-                        .spawn(route.lanes[0], route.start_s, &route.lanes)?;
+                    let veh =
+                        core.core_mut()
+                            .spawn(route.lanes[0], route.start_s, 0, &route.lanes)?;
                     counters.spawned += 1;
                     Some(ActiveTrip::Driving {
                         veh,
