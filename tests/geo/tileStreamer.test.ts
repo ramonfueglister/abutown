@@ -30,8 +30,9 @@ describe('desiredLevel', () => {
   it('L2 nur im Nahring, L1 im Mittelring, L0 immer', () => {
     expect(desiredLevel(0, 0, { level: 2, cx: 500, cz: 0 }, DEFAULT_RINGS)).toBe(true);
     expect(desiredLevel(0, 0, { level: 2, cx: 900, cz: 0 }, DEFAULT_RINGS)).toBe(false);
-    expect(desiredLevel(0, 0, { level: 1, cx: 2000, cz: 0 }, DEFAULT_RINGS)).toBe(true);
-    expect(desiredLevel(0, 0, { level: 1, cx: 2600, cz: 0 }, DEFAULT_RINGS)).toBe(false);
+    // r1=3600 (Task 7: deckt die L1-Halbdiagonale ≈ 3536, s. tileStreamer.ts)
+    expect(desiredLevel(0, 0, { level: 1, cx: 3500, cz: 0 }, DEFAULT_RINGS)).toBe(true);
+    expect(desiredLevel(0, 0, { level: 1, cx: 3700, cz: 0 }, DEFAULT_RINGS)).toBe(false);
     expect(desiredLevel(0, 0, { level: 0, cx: 9999, cz: 0 }, DEFAULT_RINGS)).toBe(true);
   });
 });

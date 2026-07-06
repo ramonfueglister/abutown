@@ -10,7 +10,13 @@ export type TileMeta = { key: TileKey; level: number; cx: number; cz: number };
 export type RingConfig = { r2: number; r1: number; hysteresis: number; maxLive: number };
 export type StreamerState = { live: Map<TileKey, { lastNear: number }>; tick: number };
 
-export const DEFAULT_RINGS: RingConfig = { r2: 800, r1: 2500, hysteresis: 1.1, maxLive: 80 };
+// r1=3600 deckt die L1-Halbdiagonale (5000·√2/2 ≈ 3536): mit dem alten 2500
+// blieb ein L1-Tile unsichtbar, sobald die Kamera nahe einer Tile-Ecke stand —
+// der Mittelring des Horizont-Shots zeigte dann nacktes L0-Backdrop statt
+// Terrain-Relief + Baum-Impostors (Task-6-Finding, in Task 7 im Browser
+// verifiziert). Kosten: ~1-3 zusätzliche live L1-Tiles (nur Terrain+Impostors),
+// fps am Stadtrand blieb im Task-7-Smoke deutlich über dem 85er-Gate.
+export const DEFAULT_RINGS: RingConfig = { r2: 800, r1: 3600, hysteresis: 1.1, maxLive: 80 };
 
 function radiusFor(level: number, cfg: RingConfig): number {
   return level === 2 ? cfg.r2 : level === 1 ? cfg.r1 : Infinity;

@@ -165,9 +165,12 @@ declare global {
     // Dev tile-streaming debug surface (unconditional, Task 6/M3): live
     // streamed-tile count (L1+L2, excludes the boot-resident L0), the number
     // of tiles disposed since boot, and the permanently-failed fetch count.
-    // The Task 7 fly-through smoke asserts on all three.
+    // liveKeys lists the materialized tile keys — the Task 7 fly-through
+    // smoke asserts the live SET changes per leg (the raw count can stay
+    // equal across regions with similar coverage while tiles churn).
     __stream?: {
       live: () => number;
+      liveKeys: () => string[];
       disposed: () => number;
       failed: () => number;
     };
@@ -959,6 +962,7 @@ async function boot(): Promise<void> {
   streamer.update(camera.position.x, camera.position.z);
   window.__stream = {
     live: () => streamer.liveCount,
+    liveKeys: () => [...liveTileContent.keys()],
     disposed: () => disposedTileCount,
     failed: () => streamer.failed.size,
   };
