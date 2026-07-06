@@ -15,6 +15,8 @@ import {
   hashId,
   wheelOffsets,
 } from '../../src/diorama/traffic/carModels';
+import { buildWheelGeometry, WHEEL_GEO_RADIUS } from '../../src/diorama/traffic/carModels';
+import { boxGeo } from '../../src/diorama/ksw/geometryCache';
 
 describe('carModels selection', () => {
   it('is stable per id (same colour + variant across calls)', () => {
@@ -115,5 +117,51 @@ describe('CS variant table', () => {
     // front pair (+z) must be listed FIRST (indices 0,1) — carLayer steers them
     expect(offs[0][2]).toBeGreaterThan(0);
     expect(offs[1][2]).toBeGreaterThan(0);
+  });
+});
+
+describe('CS geometry builders', () => {
+  it('every variant builds non-empty body + glass with colour attributes', () => {
+    for (const v of CAR_VARIANTS) {
+      const body = v.buildBody(boxGeo);
+      const glass = v.buildGlass();
+      for (const g of [body, glass]) {
+        expect(g.attributes.position.count).toBeGreaterThan(24); // more than one box
+        expect(g.attributes.color).toBeDefined();
+        expect(g.boundingSphere).not.toBeNull();
+      }
+      // body spans the declared length along z (±3% tolerance)
+      body.computeBoundingBox();
+      const bb = body.boundingBox!;
+      expect(bb.max.z - bb.min.z).toBeGreaterThan(v.length * 0.97);
+      expect(bb.max.z - bb.min.z).toBeLessThan(v.length * 1.03);
+      // body underside clears the ground (wheels live below it): min y ≥ 0.25
+      expect(bb.min.y).toBeGreaterThanOrEqual(0.25);
+      // glass sits above the beltline, inside the body footprint
+      glass.computeBoundingBox();
+      expect(glass.boundingBox!.min.y).toBeGreaterThan(0.8);
+    }
+  });
+
+  it('body bakes non-white detail zones (grille/lights/plates present)', () => {
+    const body = CAR_VARIANTS[0].buildBody(boxGeo);
+    const col = body.attributes.color;
+    let nonWhite = 0;
+    for (let i = 0; i < col.count; i++) {
+      if (col.getX(i) < 0.95 || col.getY(i) < 0.95 || col.getZ(i) < 0.95) nonWhite++;
+    }
+    expect(nonWhite).toBeGreaterThan(20); // grille + 2 headlights + 2 taillights + 2 plates
+    expect(nonWhite).toBeLessThan(col.count / 2); // …but the body is mostly tintable white
+  });
+
+  it('wheel geometry: cylinder about the x axis at the shared geo radius', () => {
+    const wheel = buildWheelGeometry();
+    wheel.computeBoundingBox();
+    const bb = wheel.boundingBox!;
+    expect(bb.max.y).toBeCloseTo(WHEEL_GEO_RADIUS, 2);
+    expect(bb.min.y).toBeCloseTo(-WHEEL_GEO_RADIUS, 2);
+    expect(bb.max.z).toBeCloseTo(WHEEL_GEO_RADIUS, 2);
+    expect(bb.max.x).toBeLessThan(WHEEL_GEO_RADIUS); // width < diameter → axis is x
+    expect(wheel.attributes.color).toBeDefined();
   });
 });
