@@ -934,12 +934,14 @@ async function boot(): Promise<void> {
     opacity: lastEnv.mistOpacity,
     depthWrite: false,
   });
-  // hug the real campus complex (the generated interior's bounding box) rather
-  // than the old 72×56 hero plate.
-  const rimX = interiorPlan.building.w / 2;
-  const rimZ = interiorPlan.building.d / 2;
-  const rimCx = interiorPlan.building.x;
-  const rimCz = interiorPlan.building.z;
+  // hug the real campus complex rather than the old 72×56 hero plate. Derived
+  // from the world footprint bbox (fpB, same source heroRect uses) — NOT from
+  // interiorPlan.building, which is plan-local (frame-rotated) and would put
+  // the ring off-axis in this world-space consumer.
+  const rimX = (fpB.maxX - fpB.minX) / 2;
+  const rimZ = (fpB.maxZ - fpB.minZ) / 2;
+  const rimCx = (fpB.minX + fpB.maxX) / 2;
+  const rimCz = (fpB.minZ + fpB.maxZ) / 2;
   // walk a rectangle perimeter (an ellipse would dip onto the lawn near the
   // corners) and hug it with small flattened puffs. Parametrized so both the
   // hero plate and the city plate rim share one recipe (spec §4: city mist).
@@ -1355,7 +1357,13 @@ async function boot(): Promise<void> {
     if (nextPeel.p !== peel.p) applyPeel(nextPeel);
     const stepChanged = Math.floor(nextPeel.p) !== Math.floor(peel.p);
     const settled = (nextPeel.p === 0 || nextPeel.p === peelCfg.storeyCount) && nextPeel.p !== peel.p;
-    if (stepChanged || settled) {
+    // also refresh when the interior visibility flips (same threshold as
+    // applyPeel's interior.visible = s.p > 0.02): the probe/shadow pass sees a
+    // different scene the instant the interior first appears/disappears, even
+    // if that doesn't happen to land on a storey-boundary or settle crossing.
+    const visWas = peel.p > 0.02;
+    const visNow = nextPeel.p > 0.02;
+    if (stepChanged || settled || visNow !== visWas) {
       giScheduler.markDirty();
       if (shadowCached) sun.shadow.needsUpdate = true;
     }
@@ -1378,7 +1386,7 @@ async function boot(): Promise<void> {
     kswSnapshot.target[0] = rig.target[0];
     kswSnapshot.target[1] = rig.target[1];
     kswSnapshot.target[2] = rig.target[2];
-    kswSnapshot.peel = { p: peel.p, storeyCount: peelCfg.storeyCount, storeyH: peelCfg.storeyH };
+    kswSnapshot.peel!.p = peel.p;
     for (const b of blinkers) b.visible = Math.sin(t * 6) > -0.2;
     for (const r of rotors) r.rotation.y = t * 1.4;
     planBudget.remaining = kswAgents.planBudget;
