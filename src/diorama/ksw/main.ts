@@ -816,6 +816,17 @@ async function boot(): Promise<void> {
   // hides its whole group (terrain + massing) and unregisters its tree pool,
   // and reappears when the last covering L2 tile unloads.
   const plateRect = { x: cityMeta.plate.cx, z: cityMeta.plate.cz, w: cityMeta.plate.w, d: cityMeta.plate.d };
+  // Tree-only exclusion, wider than plateRect: converts `samplerRect` (the
+  // min/max rect already covering the boot nature-tree bbox, see its
+  // definition above) into materializeTile's center/size rect shape. Fixes
+  // the M3 Task-6 double-tree bug — nature.json trees extend past the plate,
+  // and without this the streamed tile trees out there duplicated them.
+  const treeExcludeRect = {
+    x: (samplerRect.minX + samplerRect.maxX) / 2,
+    z: (samplerRect.minZ + samplerRect.maxZ) / 2,
+    w: samplerRect.maxX - samplerRect.minX,
+    d: samplerRect.maxZ - samplerRect.minZ,
+  };
   const worldBase = '/winterthur-world/';
   const refByKey = new Map<TileKey, TileRef>();
   const tileMetas: TileMeta[] = [];
@@ -889,9 +900,16 @@ async function boot(): Promise<void> {
         // L2: full massing + trees; L1: same — its trees render as impostors
         // in practice (the compaction near-set rarely reaches the mid ring)
         // and its massing fills the r1 ring. groundShiftY mirrors terrainRoot.
+        // Buildings still exclude via plateRect only — buildings.json covers
+        // just the plate, so widening the exclusion here would drop massing
+        // the mid ring needs. Trees exclude via `samplerRect` instead: the
+        // boot nature.json trees extend ~100 m+ past the plate (Task 6
+        // finding — 2501/7350 outside plateRect, most coinciding with
+        // streamed tile trees), and `samplerRect` is the exact rect that
+        // already covers that boot nature-tree bbox (+100 m pad).
         // corridorMask: streamed terrain applies the SAME road/rail fragment
         // discard as the boot terrain (spec §5) — else roads sink into it.
-        { plateRect, groundShiftY: -anchorGround, buildings: true, trees: true, corridorMask },
+        { plateRect, treeExcludeRect, groundShiftY: -anchorGround, buildings: true, trees: true, corridorMask },
       );
       // Same GI-probe exclusion as terrainRoot: streamed content is backdrop.
       content.group.traverse((o) => o.layers.set(1));

@@ -152,6 +152,48 @@ describe('materializeTile', () => {
     expect(terrain.geometry.attributes.position.getY(0)).toBeCloseTo(400);
   });
 
+  it('treeExcludeRect grösser als plateRect: filtert Bäume im erweiterten Band, Gebäude bleiben (Platten-Rect)', () => {
+    // Reproduces the M3 Task-6 boot-ring double-tree bug: nature.json trees
+    // extend past the plate; the streamed tile trees must be excluded over
+    // the LARGER samplerRect-equivalent band, while building massing must
+    // still only exclude the (smaller) plateRect — otherwise the mid ring
+    // loses its massing buildings.
+    // Tree at (60,0) sits outside plateRect (w/d=100) but inside a wider
+    // treeExcludeRect (w=140,d=100, still centered at 0,0) that now covers
+    // it too, while (0,70) stays outside (|70| > d/2=50) and survives.
+    const wideRect = { x: 0, z: 0, w: 140, d: 100 };
+    const content = materializeTile(makeDec(), {
+      plateRect,
+      treeExcludeRect: wideRect,
+      groundShiftY: 0,
+      buildings: true,
+      trees: true,
+    });
+    // Building B's centroid (200,200) is still outside the wide rect too,
+    // so it's unaffected here; the point is buildings only ever check
+    // plateRect: building A (centroid 0,0) is dropped because plateRect
+    // covers it, same as the baseline test.
+    expect(content.group.userData.buildingCount).toBe(1);
+    // Trees: (5,5) dropped by plateRect as before; (60,0) is now ALSO
+    // dropped because it falls inside the wider treeExcludeRect; only
+    // (0,70) survives (outside both rects).
+    expect(content.trees).toHaveLength(1);
+    expect(content.trees.map((t) => t.x)).toEqual([0]);
+    expect(content.group.userData.treeCount).toBe(1);
+  });
+
+  it('treeExcludeRect fehlt: fällt auf plateRect für Bäume zurück (Rückwärtskompatibilität)', () => {
+    const content = materializeTile(makeDec(), {
+      plateRect,
+      groundShiftY: 0,
+      buildings: true,
+      trees: true,
+    });
+    // Same as the pre-existing baseline behaviour: only plateRect applies.
+    expect(content.trees).toHaveLength(2);
+    expect(content.trees.map((t) => t.x)).toEqual([60, 0]);
+  });
+
   it('Gebäude-Prisma steht auf bBaseY und reicht bis bBaseY+bHeight', () => {
     const content = materializeTile(makeDec(), {
       plateRect,

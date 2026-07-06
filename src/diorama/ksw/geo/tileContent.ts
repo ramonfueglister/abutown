@@ -34,8 +34,20 @@ export type MaterializeCtx = {
    * sink into un-discarded streamed terrain. Optional for tests. */
   corridorMask?: CorridorMask;
   /** Hero-plate exclusion rect (center x/z, size w/d) or null: buildings whose
-   * footprint CENTROID and trees whose (x,z) fall inside are skipped. */
+   * footprint CENTROID falls inside are skipped. Also the tree-exclusion rect
+   * when `treeExcludeRect` is omitted (back-compat). */
   plateRect: { x: number; z: number; w: number; d: number } | null;
+  /** Tree-only exclusion rect. buildings.json only covers the plate, so
+   * building massing must always exclude via `plateRect` — but the boot
+   * nature.json trees extend ~100 m+ past the plate (M3 Task 6 finding:
+   * 2501/7350 nature trees sit outside plateRect, 72% of those coincide
+   * <0.5 m with streamed tile trees → visible double trees in the boot
+   * near-ring). Pass the larger rect that covers the boot nature-tree bbox
+   * (main.ts's `samplerRect`) here so streamed tile trees are excluded over
+   * the SAME footprint the boot-resident nature trees already cover.
+   * Defaults to `plateRect` when omitted, for callers that don't care
+   * (L0/L1 paths, tests). */
+  treeExcludeRect?: { x: number; z: number; w: number; d: number } | null;
   /** Applied to group.position.y (see header) — never baked into geometry. */
   groundShiftY: number;
   /** L2: buildings+trees, L1: trees only (impostors, Task 5), L0: neither. */
@@ -146,11 +158,15 @@ export function materializeTile(dec: DecodedTile, ctx: MaterializeCtx): TileCont
   }
 
   // --- Trees: filter specs only, Task 5 instantiates -------------------------
+  // Uses treeExcludeRect when given (the wider samplerRect-equivalent band
+  // that covers the boot nature-tree bbox) so streamed tile trees don't
+  // double up with the boot-resident nature trees outside the plate proper;
+  // falls back to plateRect for callers that don't distinguish the two.
   let trees: TreeSpec[] = [];
   if (ctx.trees) {
     const specs = tileTreeSpecs(tile);
-    if (ctx.plateRect) {
-      const rect = ctx.plateRect;
+    const rect = ctx.treeExcludeRect !== undefined ? ctx.treeExcludeRect : ctx.plateRect;
+    if (rect) {
       trees = specs.filter((s) => {
         const skip = insideRect(s.x, s.z, rect);
         if (skip) plateSkipped++;
