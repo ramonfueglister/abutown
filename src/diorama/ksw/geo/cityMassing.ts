@@ -121,10 +121,17 @@ export function mergeWalls(buildings: BakedBuilding[], base: number): THREE.Buff
       colors[vo + i + 2] = tint.b;
       buildingIdx[base3 + i / 3] = bi;
     }
+    // Window-clamp height: the raw eaveH is right for pitched-roof houses
+    // (no windows in the roof), but on flat-roofed/stacked complexes the
+    // baked eave sits at the LOWEST roof junction — the KSW tower (eaveH
+    // 13.2, ridge 69.9) rendered 57 m of blank clay. When the roof delta is
+    // bigger than a real attic, raster windows up to just below the wall top
+    // instead.
+    const winClampH = b.height - b.eaveH > 4.5 ? b.height - 1.2 : b.eaveH;
     for (let v = 0; v < nVerts; v++) {
       fuv[uo + v * 2] = p.fuv[v * 2] / FUV_PER_M; // 2-dm units → m
       fuv[uo + v * 2 + 1] = p.fuv[v * 2 + 1] / FUV_PER_M;
-      eave[uo / 2 + v] = b.eaveH;
+      eave[uo / 2 + v] = winClampH;
     }
     for (let i = 0; i < p.idx.length; i++) indices[io + i] = base3 + p.idx[i];
     vo += p.pos.length;
@@ -362,14 +369,26 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   // on the facade grid cell (u-cell + storey), mirroring nightWindowHash's
   // sin-fract formula but on cell indices so the choice is stable per window,
   // decides which panes glow. Only the glass area glows.
+  //
+  // Variance pass (SOTA 2026-07-06): a uniform 55% lit share read as one flat
+  // speckle carpet over the whole city. Real night cities live from variance —
+  // each BUILDING gets its own lit share (hash(buildingIdx) → ~10%..75%, mean
+  // ≈ NIGHT_WINDOW_SHARE) and each lit pane its own brightness (0.55..1.0),
+  // so some houses glow, some sleep, and no two windows bloom identically.
   const cellHash = colIdx.mul(float(12.9898)).add(storeyIdx.mul(float(78.233))).sin().mul(float(43758.5453));
   const hash = cellHash.sub(cellHash.floor()); // 0..1 fract via sin, like nightWindowHash
-  const lit = hash.lessThan(float(NIGHT_WINDOW_SHARE)).select(float(1), float(0));
-  // 2.4 pushes lit panes past the bloom threshold (kswPost.bloomThreshold
+  const bIdxN = attribute<'float'>('buildingIdx', 'float');
+  const bSin = bIdxN.mul(float(91.17)).sin().mul(float(43758.5453));
+  const bHash = bSin.sub(bSin.floor());
+  const share = float(NIGHT_WINDOW_SHARE).mul(float(0.2).add(bHash.mul(float(1.6)))); // 0.2×..1.8× the base share
+  const lit = hash.lessThan(share).select(float(1), float(0));
+  const paneSin = hash.mul(float(7.13)).add(bHash.mul(float(3.7))).sin().mul(float(43758.5453));
+  const paneBright = float(0.55).add(paneSin.sub(paneSin.floor()).mul(float(0.45)));
+  // 2.6 peak pushes lit panes past the bloom threshold (kswPost.bloomThreshold
   // 1.05) so night windows read as light sources, not painted-on decals —
   // the old 0.9 peak stayed under the threshold and never bloomed.
-  const glow = glassMask.mul(gate).mul(lit);
-  m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(2.4)).mul(lampGlowU));
+  const glow = glassMask.mul(gate).mul(lit).mul(paneBright);
+  m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(2.6)).mul(lampGlowU));
 
   return Object.assign(m, { facadeDetail, discardAbove, bandLo, bandFade }) as CutawayFacadeMaterial;
 }

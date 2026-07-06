@@ -36,7 +36,7 @@ import {
 import { kswCity, kswCityStyle } from '../../designTokens';
 import { clayMat } from '../props';
 import { windAmpU, windDirU } from '../windUniform';
-import { allArchetypes, archetypeIndexFor, hash01, type TreeArchetype } from './treeArchetypes';
+import { allArchetypes, archetypeIndexFor, effectiveTreeSize, hash01, type TreeArchetype } from './treeArchetypes';
 import { buildImpostorMeshFor } from './treeImpostors';
 import type { TreeSpec } from './geoData';
 
@@ -247,6 +247,11 @@ const TRUNK_B = (kswCity.treeTrunk & 0xff) / 255;
 // needs the rotation applied to the delta as well.
 function treeMaterial(arch: TreeArchetype, aTintNode: TSLNode): THREE.MeshPhysicalMaterial {
   const mat = clayMat(kswCity.treeGreen).clone();
+  // The clay sheen recipe lerps 50% toward white — right for buildings, but
+  // it bleached every canopy to pale sage. Foliage keeps a whisper of sheen,
+  // tinted green, so the crowns hold their saturation (SOTA pass 2026-07-06).
+  mat.sheen = 0.2;
+  mat.sheenColor = new THREE.Color(kswCity.treeGreen);
 
   // aPuff (vec4): xyz = puff center (normalized), w = puff index (>=0 crown) or
   // -1 (wood/trunk). The archetype geometry stamps it per vertex.
@@ -484,9 +489,10 @@ export function buildTreeLayer(
         const tintArray = tintAttrs[i].array as Float32Array;
         for (let k = 0; k < list.length; k++) {
           const { spec, tint, squash, y } = list[k];
-          const s = spec.r / arch.crownRadius;
+          const eff = effectiveTreeSize(spec.h, spec.r);
+          const s = eff.r / arch.crownRadius;
           pos.set(spec.x, y, spec.z);
-          scl.set(s, spec.h * squash, s);
+          scl.set(s, eff.h * squash, s);
           // NOTE: identity quaternion — treeMaterial's geometry-space→world
           // displacement lift relies on the matrices staying rotation-free.
           m.compose(pos, q, scl);
@@ -494,7 +500,7 @@ export function buildTreeLayer(
           tintArray[k * 4] = tint.r;
           tintArray[k * 4 + 1] = tint.g;
           tintArray[k * 4 + 2] = tint.b;
-          tintArray[k * 4 + 3] = packScales(s, spec.h * squash);
+          tintArray[k * 4 + 3] = packScales(s, eff.h * squash);
         }
         // 0-hit archetypes get count = 0; capacity (cap = Math.max(1, n))
         // stays >= 1 — buffers are never shrunk, only the visible count.

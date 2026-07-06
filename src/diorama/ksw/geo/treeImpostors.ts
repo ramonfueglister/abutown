@@ -53,7 +53,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { kswCity, kswCityStyle } from '../../designTokens';
-import type { TreeArchetype } from './treeArchetypes';
+import { effectiveTreeSize, type TreeArchetype } from './treeArchetypes';
 import type { TreeInstance } from './treeLayer';
 
 export const OCT_GRID = 4; // 4×4 hemi-octahedral views per archetype
@@ -458,8 +458,9 @@ export function buildImpostorMeshFor(
     const r8 = q(inst.tint.r, base.r);
     const g8 = q(inst.tint.g, base.g);
     const b8 = q(inst.tint.b, base.b);
-    sizeTintArr[i * 4] = inst.spec.r * 2;
-    sizeTintArr[i * 4 + 1] = inst.spec.h * inst.squash;
+    const eff = effectiveTreeSize(inst.spec.h, inst.spec.r);
+    sizeTintArr[i * 4] = eff.r * 2;
+    sizeTintArr[i * 4 + 1] = eff.h * inst.squash;
     sizeTintArr[i * 4 + 2] = r8 * 65536 + g8 * 256 + b8;
     sizeTintArr[i * 4 + 3] = 0;
   }

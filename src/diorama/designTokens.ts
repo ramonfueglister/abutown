@@ -402,7 +402,10 @@ export const kswCity = {
   parkGreen: 0xa9cf92, // parks, grass, pitches — a step livelier than the lawn
   woodGreen: 0x86b478, // forest/wood patches read deeper
   water: 0xa8cfdd, // Eulach + ponds, calm glass blue
-  treeGreen: 0x8fbf83, // canopy base; per-instance tint varies around it
+  // treeGreen deepened + saturated (was 0x8fbf83 pale sage — canopies read as
+  // washed-out eggs at every framing; SOTA pass 2026-07-06). Cozy refs (Tiny
+  // Glade) run saturated mid-greens and let hue variation do the talking.
+  treeGreen: 0x74ad5c, // canopy base; per-instance tint varies around it
   treeTrunk: 0xb08a62,
   // roads v2: per-class colors + heights (carriage/footway/rail on distinct
   // levels so junctions never z-fight; footways read thinner+lighter)
@@ -456,6 +459,13 @@ export const nightSkyLook = {
   // sunDistance == moonDistance: sun and moon share the one city sky dome.
   city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 5.5, starCount: 2200, moonRadius: 26, moonDistance: kswCity.domeRadius * 0.82, sunDistance: kswCity.domeRadius * 0.82 },
 } as const;
+
+// Tree size policy (SOTA pass 2026-07-06): the baked OSM/estimate heights are
+// data-honest (median 12.5 m, q95 20 m) but park giants of 27 m dwarf the
+// 2–3-storey Winterthur stock and the crowns read as fat broccoli at the city
+// framing. Cap the outliers and slim every crown — height stays believable
+// (cozy games keep trees TALL relative to houses), the silhouette gets airier.
+export const treeLook = { maxH: 19, crownSlim: 0.8 } as const;
 
 // Terrain landcover tint table (geo terrain tiles, Task 11). Anchored to the
 // existing city-nature palette: meadow reuses kswCity.parkGreen exactly,

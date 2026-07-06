@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { allArchetypes } from '../../src/diorama/ksw/geo/treeArchetypes';
+import { allArchetypes, effectiveTreeSize } from '../../src/diorama/ksw/geo/treeArchetypes';
 import { assignTrees, buildTreeLayer } from '../../src/diorama/ksw/geo/treeLayer';
 import type { TreeSpec } from '../../src/diorama/ksw/geo/geoData';
 
@@ -42,8 +42,11 @@ describe('buildTreeLayer', () => {
     mesh.getMatrixAt(0, m4);
     const s = new THREE.Vector3().setFromMatrixScale(m4);
     const arch = allArchetypes()[layer.instances[0].archetype];
-    expect(s.y).toBeCloseTo(9 * layer.instances[0].squash, 3);       // height in meters (×squash band 0.85..1.15)
-    expect(s.x * arch.crownRadius).toBeCloseTo(3, 3);                 // crown radius in meters
+    // effectiveTreeSize (treeLook policy) slims/caps the baked h/r before the
+    // envelope mapping — the matrix carries the EFFECTIVE metres.
+    const eff = effectiveTreeSize(9, 3);
+    expect(s.y).toBeCloseTo(eff.h * layer.instances[0].squash, 3);   // height in meters (×squash band 0.85..1.15)
+    expect(s.x * arch.crownRadius).toBeCloseTo(eff.r, 3);            // crown radius in meters
   });
   it('setTreeShadows toggles castShadow on all full meshes', () => {
     const layer = buildTreeLayer(specs);
