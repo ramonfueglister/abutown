@@ -50,6 +50,58 @@ export function railCorridorHalfWidth(osmWidth: number): number {
   return (osmWidth + RAIL_BED_PAD_M) / 2 + RAIL_HALFWIDTH_MARGIN_M;
 }
 
+/** CORRIDOR-footprint half-width for a road: max(OSM, lane-floored
+ * corridorWidths)/2 — NO grading shoulder. NOTE (#134 reconcile): the drawn
+ * carriage ribbon is the plain OSM width (buildRoads, #134); this value is the
+ * CORRIDOR footprint the bake stamps into the discard mask as
+ * `renderHalfWidthM` (Finding 1a), and the platform apron bridges the visible
+ * gap between the narrower drawn ribbon and this mask edge (Bankett design).
+ * MIRROR: bake-world.mjs `ways[roads].renderHalfWidthM`. */
+export function roadRenderHalfWidth(osmWidth: number, correctedWidth: number): number {
+  return Math.max(osmWidth, correctedWidth) / 2;
+}
+
+/** RENDER half-width for a rail: the ballast-BED half-width ((width + 2.2)/2),
+ * the outermost rail geometry buildRoads draws (railBed layer) — NO shoulder.
+ * MIRROR: bake-world.mjs `ways[rails].renderHalfWidthM`. */
+export function railRenderHalfWidth(osmWidth: number): number {
+  return (osmWidth + RAIL_BED_PAD_M) / 2;
+}
+
+/** Discard-mask cell size (m). MIRROR (load-bearing): must equal
+ * `MASK_CELL_M` in scripts/geo/bake-world.mjs. The mask floors every way's
+ * stamping radius at this value (corridormask.mjs `Math.max(halfWidthM,
+ * cellSize)`), so the MASK edge sits at `max(renderHalfWidth, MASK_CELL_M)` —
+ * NOT at the raw ribbon edge for the 54 % of ways narrower than a cell. */
+export const MASK_CELL_M = 2.5;
+
+/** Raster-quantization tolerance (m): a nearest-cell mask SETS a cell iff its
+ * CENTRE lies within maskHW of the centreline, so the discretised mask extent
+ * reaches up to a half-diagonal (cellSize·√2/2) BEYOND the nominal maskHW. The
+ * platform (apron + skirt) must extend by this margin to cover every discarded
+ * cell — otherwise the discarded fringe between the nominal maskHW and the
+ * quantised extent shows as a see-through void on hillsides (measured on the real
+ * bake: extending by this margin covers 100 % of discarded cells near the city;
+ * the apron then over-covers undiscarded terrain by ≤ this margin, harmless — it
+ * sits at profile height over terrain that is either below it or a cut bank
+ * beyond the mask). */
+export const MASK_RASTER_MARGIN_M = (MASK_CELL_M * Math.SQRT2) / 2;
+
+/** Platform OUTER half-width for a road — the edge the apron reaches and the
+ * skirt drops from. The bake mask footprint (`max(renderHW, MASK_CELL_M)`) plus
+ * the raster-quantization margin so the platform covers the full discretised
+ * discard extent (no fringe void). MIRROR: bake-world.mjs
+ * `maskWays[roads].halfWidthM` after `Math.max(halfWidthM, MASK_CELL_M)`, then
+ * + MASK_RASTER_MARGIN_M for the raster extent. */
+export function roadMaskHalfWidth(osmWidth: number, correctedWidth: number): number {
+  return Math.max(roadRenderHalfWidth(osmWidth, correctedWidth), MASK_CELL_M) + MASK_RASTER_MARGIN_M;
+}
+
+/** Platform OUTER half-width for a rail — see roadMaskHalfWidth. */
+export function railMaskHalfWidth(osmWidth: number): number {
+  return Math.max(railRenderHalfWidth(osmWidth), MASK_CELL_M) + MASK_RASTER_MARGIN_M;
+}
+
 /** Half-width margin added on top of the corridor/OSM road width to define
  * the hard corridor boundary (corridor width source: corridorWidths — the
  * lane-floor is terrain-corridor-only, never the render ribbon, per #134). */

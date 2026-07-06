@@ -151,6 +151,44 @@ their surface height AND the terrain conforms toward it:
   of corridor stations; (b) tileY − profileY budgets (v2 values) apply
   only OUTSIDE the mask (blend band), where terrain still renders. Both
   reported by the metric CLI.
+- **Road platform + terrain-grounded skirts (Platform wave, 2026-07-06 —
+  supersedes the v3 shoulder-annulus budget):** measuring v3 non-vacuously
+  exposed that the ribbon-footprint mask + 2.5 m cell FLOOR discards a band
+  BEYOND the ribbon edge for the 54 % of ways narrower than a mask cell
+  (renderHW < 2.5 m), which the ribbon-edge skirt did not cover from above →
+  a see-through band beside narrow ribbons (max 3.05 m shoulder breach, skirt
+  requiredDrop up to 8.49 m vs the constant 1.5 m). Resolution (controller
+  decision, within the approved A+B architecture): **roads own a PLATFORM =
+  ribbon + apron.** The rendered road surface extends from the ribbon edge to
+  the DISCARD-MASK edge — an apron strip (Swiss "Bankett"/verge) at profile
+  height, carriage colour ×0.9 — so no void shows from above. The mask edge is
+  the render half-width floored at the mask cell size (`max(renderHW,
+  MASK_CELL_M)`), computed identically bake-side (corridormask.mjs's
+  `Math.max(halfWidthM, cellSize)`) and runtime-side (groundSampler.ts
+  `roadMaskHalfWidth`/`railMaskHalfWidth`, MIRROR-pinned by
+  gradewidths-parity.test.ts). **Skirts move to the mask edge and drop
+  PER-VERTEX to `tileGround(x,z) − 0.5 m`** (the runtime tile-ground sampler
+  `tileGroundYAt`), so they ALWAYS reach the terrain — on embankments a fill
+  slope, on cuts the terrain rises against the skirt as a cut bank (correct
+  reality; NO budget applies to terrain height beyond the mask). The constant
+  1.5 m skirt drop is retired.
+- **§9 metric v4 (default; v3/v2/v1 kept behind `--v3`/`--v2`/`--v1`):** the
+  criterion "no rendered terrain above the road surface & no see-through gaps"
+  becomes two geometric invariants: **(a) MASK COVERAGE** — stations sampled
+  ACROSS the platform (centreline + offsets to ±(maskHW − εₚ), 0.5 m steps) must
+  be 100 % inside the mask, where εₚ = `cellSize·√2/2` is the mask's own
+  raster-quantization tolerance (a nearest-cell mask guarantees continuous
+  coverage only to `maskHW − cellSize·√2/2`; the thin fringe out to maskHW is the
+  discretised edge, where terrain is either below the apron or a legitimate cut
+  bank). **(b) SKIRT REACH** — at the mask edge the runtime skirt foot is
+  `tileGround − 0.5`; v4 recomputes it from the same tileGround and asserts it
+  sits below the terrain (deficit `max(0, bottom − tileY)` = 0 by construction),
+  so the skirt always overlaps the ground it hides. The v3 annulus poke-through
+  budget is removed: cut banks beyond the mask are legitimate, not a defect.
+  Mutation-tested for non-vacuity: a synthetic mask hole under the platform
+  fails (a); a floating skirt fails (b). Real bake (no re-bake — the mask
+  artifact is unchanged): (a) 100.0000 % (86416/86416 platform-interior samples
+  in mask), (b) skirt-reach deficit 0.000 m — **PASS**.
 
 ## 6. Swiss markings & surfaces (render layer)
 

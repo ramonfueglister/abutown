@@ -40,15 +40,21 @@ const OUT_DIR = new URL('../scratch/captures/', import.meta.url).pathname;
 //     4.2 m) at a LOW oblique pitch so the vertical side-skirts read as faces
 //     dropping from the ribbon edge to the discarded terrain.
 const SITES = [
-  // Finding 1a proof: a near-vertical TOP-DOWN pitch over a hillside road, where
-  // a see-through hole beside the ribbon (the old grading-width mask stamped a
-  // ~1.5 m annulus the skirt never reached) would show as sky/void beside the
-  // tarmac. With the ribbon-footprint mask (Finding 1a) the graded shoulder keeps
-  // rendered terrain right up to the ribbon edge — no void.
-  { name: 'discard-topdown-hillside', x: -266, z: 474, radius: 90, yaw: 0.0, pitch: 1.53 },
-  { name: 'discard-worst-5d-offender', x: 118.9, z: -194.4, radius: 130, yaw: 0.5, pitch: 1.45 },
-  { name: 'discard-bruehlberg-hillside', x: -266, z: 474, radius: 130, yaw: -0.4, pitch: 1.1 },
-  { name: 'discard-bruehlberg-skirt', x: -218, z: 506, radius: 55, yaw: 0.7, pitch: 0.6 },
+  // Platform wave — DECISIVE proof the road platform (ribbon + apron to the mask
+  // edge) closes the see-through band the previous ribbon-footprint mask + 2.5 m
+  // floor re-opened beside narrow ways. THREE shots:
+  //   1. top-down hillside — the exact previous hole site (−266, 474). The old
+  //      capture (scratch/captures/discard-topdown-hillside.png) showed WHITE
+  //      voids beside the narrow ribbons; the apron now fills to the mask edge →
+  //      NO white voids.
+  //   2. Brühlberg oblique — skirts dropping to terrain (fill slopes) and cut
+  //      banks rising against them on the steep slope.
+  //   3. narrow footway close-up — a footway/path (renderHW ~1.0 m < 2.5 m cell)
+  //      where the apron verge is widest relative to the ribbon; proves the verge
+  //      renders (no void) right out to the discarded mask edge.
+  { name: 'platform-topdown-hillside', x: -266, z: 474, radius: 90, yaw: 0.0, pitch: 1.53 },
+  { name: 'platform-bruehlberg-oblique', x: -266, z: 474, radius: 130, yaw: -0.4, pitch: 1.0 },
+  { name: 'platform-narrow-footway', x: -218, z: 506, radius: 40, yaw: 0.7, pitch: 0.65 },
 ];
 
 async function main() {

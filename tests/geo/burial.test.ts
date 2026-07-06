@@ -7,7 +7,7 @@
 // heightAt(centre)| at both ±width/2 offsets; the ribbon is planar across
 // its width (§5), so any real cross-slope under it reads as burial.
 import { describe, expect, it } from 'vitest';
-import { burialStats, burialStatsV2, burialStatsV3 } from '../../scripts/geo/burial-metric.mjs';
+import { burialStats, burialStatsV2, burialStatsV3, burialStatsV4 } from '../../scripts/geo/burial-metric.mjs';
 import { gradeDem } from '../../scripts/geo/lib/grading.mjs';
 
 /** Bilinear sampler over a flat local-metre grid, same convention as grading.mjs. */
@@ -262,5 +262,76 @@ describe('burialStatsV3 (spec §9 metric v3 — non-vacuous shoulder-annulus tru
     const { heightAt } = makeSampler(80, 1, () => 0);
     // @ts-expect-error — passing a bare stepM number is no longer allowed
     expect(() => burialStatsV3([road], heightAt, () => true, 10)).toThrow();
+  });
+});
+
+describe('burialStatsV4 (spec §9 metric v4 — platform coverage + skirt reach)', () => {
+  // A straight x-running road at z=30. maskHW=2.5 (a narrow footway floored at
+  // the mask cell). Platform = |z−30| ≤ 2.5; skirt foot at |z−30| = 2.6.
+  const road = {
+    class: 'footway',
+    pts: [[0, 30], [60, 30]],
+    profile: { stepM: 10, ys: [0, 0, 0, 0, 0, 0, 0] },
+  };
+  const opts = (extra: object = {}) => ({
+    stepM: 10, maskHalfWidths: [2.5], skirtFootM: 0.5, edgeEps: 0.1, ...extra,
+  });
+
+  it('PASS: platform fully inside the mask, skirt foot reaches terrain', () => {
+    // tile ground anywhere = −4 (embankment 4 m below profile). Mask covers the
+    // whole platform (|z−30| ≤ 2.6, comfortably past maskHW−ε). Skirt foot =
+    // tileGround − 0.5 = −4.5 < −4 → deficit 0.
+    const { heightAt } = makeSampler(80, 1, () => -4);
+    const covers = (_x: number, z: number) => Math.abs(z - 30) <= 2.6;
+    const stats = burialStatsV4([road], heightAt, covers, opts());
+    expect(stats.coveragePass).toBe(true);
+    expect(stats.coveragePct).toBeCloseTo(100, 6);
+    expect(stats.platformSamples).toBeGreaterThan(0); // NON-VACUOUS: platform sampled
+    expect(stats.skirtDeficitPass).toBe(true);
+    expect(stats.skirtDeficitM).toBeCloseTo(0, 9);
+  });
+
+  it('MUTATION (a): a mask HOLE under the platform FAILS coverage', () => {
+    // The mask covers the platform EXCEPT a hole at x ∈ [20,40] (rendered terrain
+    // under the road that could pierce). Coverage must drop below 100 % and flag it.
+    const { heightAt } = makeSampler(80, 1, () => -4);
+    const covers = (x: number, z: number) => Math.abs(z - 30) <= 2.6 && !(x >= 20 && x <= 40);
+    const stats = burialStatsV4([road], heightAt, covers, opts());
+    expect(stats.coveragePass).toBe(false);
+    expect(stats.uncoveredCount).toBeGreaterThan(0);
+    expect(stats.coveragePct).toBeLessThan(100);
+  });
+
+  it('MUTATION (b): a floating skirt foot FAILS the reach invariant', () => {
+    // Contract: the skirt foot is tileGround(edge) − skirtFootM, which sits BELOW
+    // the terrain (overlap = skirtFootM ≥ 0) by construction. A skirt that floats
+    // ABOVE the terrain (a negative effective drop, e.g. geometry built to stale-
+    // low ground then terrain raised under it) has bottom > tileY → deficit > 0.
+    // We inject that failure via a negative skirtFootM (bottom = tileGround +
+    // 0.6): the foot floats 0.6 m above the terrain it must hide → (b) FAILS.
+    const { heightAt } = makeSampler(80, 1, () => -4);
+    const covers = (_x: number, z: number) => Math.abs(z - 30) <= 2.6;
+    const stats = burialStatsV4([road], heightAt, covers, opts({ skirtFootM: -0.6 }));
+    expect(stats.skirtDeficitPass).toBe(false);
+    expect(stats.skirtDeficitM).toBeCloseTo(0.6, 6);
+  });
+
+  it('is deterministic across repeated calls', () => {
+    const { heightAt } = makeSampler(80, 1, (x, z) => Math.sin(x / 5) + z * 0.01 - 4);
+    const covers = (_x: number, z: number) => Math.abs(z - 30) <= 2.6;
+    const a = burialStatsV4([road], heightAt, covers, opts());
+    const b = burialStatsV4([road], heightAt, covers, opts());
+    expect(a).toEqual(b);
+  });
+
+  it('throws when a road lacks a baked profile', () => {
+    const { heightAt } = makeSampler(80, 1, () => -4);
+    expect(() => burialStatsV4([{ class: 'x', pts: [[0, 0], [60, 0]] }], heightAt, () => true, { maskHalfWidths: [2.5] })).toThrow();
+  });
+
+  it('throws when maskHalfWidths is missing (guards the vacuous call)', () => {
+    const { heightAt } = makeSampler(80, 1, () => -4);
+    // @ts-expect-error — a bare stepM number is not a valid opts object
+    expect(() => burialStatsV4([road], heightAt, () => true, 10)).toThrow();
   });
 });

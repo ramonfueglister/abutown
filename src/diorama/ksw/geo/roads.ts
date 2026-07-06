@@ -7,6 +7,9 @@ import * as THREE from 'three/webgpu';
 import { kswCity } from '../../designTokens';
 import { clayMat } from '../props';
 import type { RoadPath } from './geoData';
+import { corridorWidths, type TrafficNetDoc } from '../../traffic/corridorWidths';
+import trafficNetJson from '../../../data/winterthur/trafficnet.json';
+import { roadMaskHalfWidth, railMaskHalfWidth } from './groundSampler';
 
 /** Optional per-vertex ground draping. `groundYAt(x,z)` returns the visible
  * (shifted) terrain height at a world point; the ribbon vertex y becomes that
@@ -146,52 +149,114 @@ export function miterStrip(
   return { positions, indices };
 }
 
-/** Vertical side-skirts along BOTH edges of a ribbon (spec §5 terrain-discard,
- * Task 5e). The terrain shader discards every fragment inside a road/rail
- * corridor, leaving an open hole between the ribbon edge and the terrain the
- * discard removed. The skirt is a pair of vertical apron strips — one down each
- * ribbon edge, from the ribbon-edge top y down to `groundYAt − dropM` (i.e.
- * `profile − 1.5 m`, since inside a corridor groundYAt returns the profile) —
- * that close that hole so you never see through the world under a road.
+/** APRON (Swiss "Bankett"/verge) strip — the flat road-platform surface BEYOND
+ * the ribbon edge, filling the annulus from the ribbon edge (`ribbonWidth/2`) to
+ * the DISCARD-MASK edge (`maskWidth/2`) at profile height (spec §5 platform).
  *
- * Geometry mirrors miterStrip exactly (same subdivideForDrape, same miter
- * offsets) so the skirt top edge coincides with the ribbon edge with no seam.
- * Per edge, per centreline point: a top vertex at the ribbon edge (draped y +
- * layer offset `y`) and a bottom vertex at `groundYAt(cx,cz) − dropM`. Merged
- * into one geometry per layer in buildRoads — no per-frame cost.
+ * The discard mask floors every way's stamping radius at the mask cell size
+ * (2.5 m), so for the 54 % of ways narrower than a cell the mask edge sits
+ * BEYOND the ribbon edge — leaving a see-through band the ribbon-edge skirt did
+ * not cover from above. The apron IS the road platform out to that mask edge:
+ * rendered at profile height, so no void is visible from above; the skirt then
+ * drops from the APRON (mask) outer edge, not the ribbon edge.
  *
- * Vertex ys span [profile − dropM, profile + y] on a draped corridor (unit
- * tested). With no sampler the ribbon is flat at `y` and the skirt drops to
- * `−dropM` (still a valid apron; only used near the anchor where drape ≈ 0). */
-export function skirtStrip(
+ * Two flat quad strips (one per side), from the ribbon edge to the mask edge,
+ * both at draped profile y + layer offset. Uses the SHARED `miterOffsets` so the
+ * inner apron edge coincides byte-identically with the ribbon edge (no seam) and
+ * the outer edge coincides with the skirt top edge. Degenerate (mask edge ≤
+ * ribbon edge, i.e. wide ways where renderHW ≥ 2.5 m): emits nothing — the
+ * caller skips it and the skirt sits directly at the ribbon edge. */
+export function apronStrip(
   pts: number[][],
-  width: number,
+  ribbonWidth: number,
+  maskWidth: number,
   y: number,
   groundYAt?: GroundYAt,
-  dropM = 1.5,
 ): { positions: number[]; indices: number[] } {
   const positions: number[] = [];
   const indices: number[] = [];
-  const half = width / 2;
+  const innerHalf = ribbonWidth / 2;
+  const outerHalf = maskWidth / 2;
+  // Degenerate: nothing to fill when the mask edge is at (or inside) the ribbon
+  // edge — 1 cm slack so float noise never emits a zero-area sliver.
+  if (outerHalf <= innerHalf + 0.01) return { positions, indices };
   if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
   const n = pts.length;
   if (n < 2) return { positions, indices };
-  // SHARED miter offsets (Task 5e refactor): the SAME per-point {mx,mz,scale}
-  // miterStrip uses, so the skirt top edge coincides exactly with the ribbon
-  // edge and the two can never drift.
   const offs = miterOffsets(pts);
-  // Two skirts: side = +1 (left edge) and −1 (right edge). Each is a vertical
-  // quad strip: top follows the ribbon edge, bottom is dropM below the ground.
+  // Two aprons: side = +1 (left) and −1 (right). Each is a flat quad strip from
+  // the ribbon edge (inner) to the mask edge (outer) at profile height.
   for (const side of [1, -1]) {
     const base0 = positions.length / 3;
     for (let i = 0; i < n; i++) {
       const [cx, cz] = pts[i];
       const { mx, mz, scale } = offs[i];
-      const ground = groundYAt ? groundYAt(cx, cz) : 0;
-      const topY = ground + y;
-      const botY = ground - dropM;
+      const topY = (groundYAt ? groundYAt(cx, cz) : 0) + y;
+      const ox = side * mx * scale;
+      const oz = side * mz * scale;
+      // inner (ribbon edge) then outer (mask edge)
+      positions.push(cx + ox * innerHalf, topY, cz + oz * innerHalf, cx + ox * outerHalf, topY, cz + oz * outerHalf);
+      if (i > 0) {
+        const a = base0 + (i - 1) * 2;
+        indices.push(a, a + 1, a + 2, a + 2, a + 1, a + 3);
+      }
+    }
+  }
+  return { positions, indices };
+}
+
+/** Vertical side-skirts along BOTH edges of a road platform (spec §5
+ * terrain-discard platform, Task 5e). The terrain shader discards every fragment
+ * inside a road/rail corridor out to the MASK edge; these skirts drop from the
+ * platform's outer (mask) edge down to the real terrain so you never see through
+ * the world under a road, on both embankments (fill slope) and cuts (the terrain
+ * rises against the skirt as a cut bank).
+ *
+ * Top edge: at the MASK edge (`maskWidth/2`), draped profile y + layer offset —
+ * the outer edge of the apron. Bottom edge: PER-VERTEX at `tileGround(cx,cz) −
+ * 0.5 m` (the tile ground sampler, NOT the corridor profile) so the skirt foot
+ * ALWAYS reaches the terrain regardless of embankment/cut depth — no constant
+ * drop budget. `tileGround` is the runtime `tileGroundYAt` (main.ts), threaded
+ * in per way.
+ *
+ * Geometry uses the SHARED `miterOffsets` at the mask half-width so the skirt top
+ * edge coincides byte-identically with the apron outer edge (no seam). Merged
+ * into one geometry per layer in buildRoads — no per-frame cost. With no
+ * groundYAt/tileGround (near the anchor, drape ≈ 0) the skirt drops a nominal
+ * 0.5 m, still a valid apron foot. */
+export function skirtStrip(
+  pts: number[][],
+  maskWidth: number,
+  y: number,
+  groundYAt?: GroundYAt,
+  tileGround?: GroundYAt,
+  footM = 0.5,
+): { positions: number[]; indices: number[] } {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const half = maskWidth / 2;
+  if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
+  const n = pts.length;
+  if (n < 2) return { positions, indices };
+  // SHARED miter offsets (Task 5e refactor): the SAME per-point {mx,mz,scale}
+  // the ribbon and apron use, so the skirt top edge coincides exactly with the
+  // apron (mask) outer edge and the three can never drift.
+  const offs = miterOffsets(pts);
+  // Two skirts: side = +1 (left edge) and −1 (right edge). Each is a vertical
+  // quad strip: top at the mask edge (profile height), bottom PER-VERTEX at the
+  // tile ground − footM so it always reaches terrain (fill slope on embankments,
+  // cut bank on cuts).
+  for (const side of [1, -1]) {
+    const base0 = positions.length / 3;
+    for (let i = 0; i < n; i++) {
+      const [cx, cz] = pts[i];
+      const { mx, mz, scale } = offs[i];
+      const topY = (groundYAt ? groundYAt(cx, cz) : 0) + y;
       const ex = cx + side * mx * half * scale;
       const ez = cz + side * mz * half * scale;
+      // Bottom per-vertex from the TILE ground at the skirt-foot position (not
+      // the centreline, not the profile): the terrain the skirt must reach.
+      const botY = (tileGround ? tileGround(ex, ez) : 0) - footM;
       positions.push(ex, topY, ez, ex, botY, ez); // top then bottom
       if (i > 0) {
         const a = base0 + (i - 1) * 2;
@@ -260,6 +325,18 @@ function darken(color: number, factor: number): number {
   return (r << 16) | (g << 8) | b;
 }
 
+/** Apron (Bankett/verge) material: the ribbon clay color darkened ×0.9 (spec §5
+ * — the platform verge is a touch darker than the carriage), a flat surface at
+ * profile height. Belt-and-braces depth bias like the ribbon so it resolves
+ * coplanar with, but visually distinct from, the ribbon layer. Rendered
+ * DoubleSide so the verge reads from above regardless of strip winding (it is a
+ * genuine top surface, not a thin wall — a flipped normal must not hide it). */
+function apronMat(color: number, polygonOffsetUnits: number): THREE.MeshPhysicalMaterial {
+  const m = ribbonMat(darken(color, 0.9), polygonOffsetUnits);
+  m.side = THREE.DoubleSide;
+  return m;
+}
+
 /** Apron material for the skirts: the ribbon clay color darkened ×0.8, rendered
  * DoubleSide so the vertical strip is visible from outside the corridor and
  * from above (where the terrain shader discarded the ground). No polygonOffset
@@ -270,22 +347,59 @@ function skirtMat(color: number): THREE.MeshPhysicalMaterial {
   return m;
 }
 
-/** Build the merged side-skirt mesh for a ribbon layer (spec §5 terrain-discard,
- * Task 5e): every ribbon in `paths` contributes two vertical apron strips down
- * its edges, closing the hole the terrain-discard shader opens under it. */
-function skirtsMesh(
+/** Build the merged APRON mesh for a layer (spec §5 platform): each way
+ * contributes two flat verge strips from the ribbon edge to the mask edge at
+ * profile height, so the road platform (not void) fills every cell the discard
+ * mask removed. `maskWidthOf` returns the FULL mask width (2×maskHW). */
+function apronsMesh(
   name: string,
   paths: RoadPath[],
-  widthOf: (p: RoadPath, i: number) => number,
+  ribbonWidthOf: (p: RoadPath, i: number) => number,
+  maskWidthOf: (p: RoadPath, i: number) => number,
   color: number,
   y: number,
+  polygonOffsetUnits: number,
   groundYAt?: GroundYAt,
 ): THREE.Mesh {
   const positions: number[] = [];
   const indices: number[] = [];
   for (let idx = 0; idx < paths.length; idx++) {
     const p = paths[idx];
-    const s = skirtStrip(p.pts, widthOf(p, idx), y, groundYAt);
+    const s = apronStrip(p.pts, ribbonWidthOf(p, idx), maskWidthOf(p, idx), y, groundYAt);
+    const base = positions.length / 3;
+    positions.push(...s.positions);
+    for (const i of s.indices) indices.push(base + i);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setIndex(positions.length / 3 > 65535 ? new THREE.BufferAttribute(new Uint32Array(indices), 1) : new THREE.BufferAttribute(new Uint16Array(indices), 1));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, apronMat(color, polygonOffsetUnits));
+  mesh.name = name;
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  return mesh;
+}
+
+/** Build the merged side-skirt mesh for a layer (spec §5 terrain-discard
+ * platform, Task 5e): every way contributes two vertical apron strips from its
+ * platform (MASK) outer edge down to the tile ground − 0.5 m, closing the hole
+ * the terrain-discard shader opens under it. `maskWidthOf` returns the FULL mask
+ * width (2×maskHW); `tileGround` is the tile-ground sampler for the skirt foot. */
+function skirtsMesh(
+  name: string,
+  paths: RoadPath[],
+  maskWidthOf: (p: RoadPath, i: number) => number,
+  color: number,
+  y: number,
+  groundYAt: GroundYAt,
+  tileGround: GroundYAt,
+): THREE.Mesh {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let idx = 0; idx < paths.length; idx++) {
+    const p = paths[idx];
+    const s = skirtStrip(p.pts, maskWidthOf(p, idx), y, groundYAt, tileGround);
     const base = positions.length / 3;
     positions.push(...s.positions);
     for (const i of s.indices) indices.push(base + i);
@@ -303,40 +417,68 @@ function skirtsMesh(
 
 const FOOT = new Set(['footway', 'path', 'cycleway', 'steps', 'pedestrian', 'track']);
 
-export function buildRoads(roads: RoadPath[], rails: RoadPath[], groundYAt?: GroundYAt): THREE.Group {
+/** Build the KSW city road/rail platform (spec §5 platform). Roads own a
+ * platform = ribbon + apron out to the DISCARD-MASK edge, with skirts dropping
+ * from that mask edge to the tile terrain. `groundYAt` is the corridor-aware
+ * profile sampler (drapes ribbon/apron/skirt-top); `tileGround` is the raw tile
+ * ground sampler (main.ts `tileGroundYAt`) used for the per-vertex skirt foot.
+ * Both are required together to build the platform — the flat pre-#119 anchor
+ * look (no sampler) has no discarded terrain and renders bare ribbons. */
+export function buildRoads(
+  roads: RoadPath[],
+  rails: RoadPath[],
+  groundYAt?: GroundYAt,
+  tileGround?: GroundYAt,
+): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityRoads';
   const carriage = roads.filter((r) => !FOOT.has(r.class));
   const foot = roads.filter((r) => FOOT.has(r.class));
-  // Ribbons draw at their real OSM width. The traffic kernel bakes
+  // #134: ribbons render at their real OSM width — the traffic kernel bakes
   // width-aware lane offsets (trafficnet.mjs :: laneOffsets), so cars fit the
-  // real tarmac by construction — the former FIX-D1 width floor is gone: it
-  // widened the world to match a 3.0 m-lane kernel assumption and swallowed
-  // street-tree verges / grazed facades.
+  // real tarmac by construction; the former FIX-D1 render-width floor is gone
+  // (it widened the world and swallowed street-tree verges / grazed facades).
+  // The terrain CORRIDOR still uses the lane-floored corridorWidths — the SAME
+  // widths the bake mask stamps (Finding 1a) — but ONLY for the mask/platform
+  // extents below, never for the drawn ribbon; the apron bridges the visible
+  // ribbon→mask gap (Bankett).
   // polygonOffset ladder (units) matches the roadYs height ladder bottom→top:
   // railBed 0 < carriage/footway −1 < rail −3 (more negative = drawn on top).
-  // #134: ribbons render at their real OSM width — the traffic kernel bakes
-  // width-aware lane offsets, so no render-width floor. (The terrain CORRIDOR
-  // still uses corridorWidths — lane-floored — but only for grading/mask/
-  // sampler, never for these ribbons.)
+  const carriageWidths = corridorWidths(carriage, trafficNetJson as unknown as TrafficNetDoc);
   const carriageWidthOf = (p: RoadPath): number => p.width;
   const railBedWidthOf = (p: RoadPath): number => p.width + 2.2;
   const railWidthOf = (p: RoadPath): number => p.width;
   const footWidthOf = (p: RoadPath): number => p.width;
+  // PLATFORM widths (2×platform half-width) — the apron outer edge and skirt top
+  // edge. The bake mask footprint (renderHW floored at the 2.5 m cell) PLUS the
+  // raster-quantization margin (cell·√2/2) so the platform covers the full
+  // discretised discard extent — no fringe void. apron fills ribbon→platform
+  // edge, skirt drops from platform edge→terrain. Shared helpers in groundSampler
+  // (MIRROR-pinned to bake-world.mjs) so nothing drifts.
+  const carriageMaskWidthOf = (p: RoadPath, i: number): number =>
+    2 * roadMaskHalfWidth(p.width, carriageWidths[i] ?? p.width);
+  const footMaskWidthOf = (p: RoadPath): number => 2 * roadMaskHalfWidth(p.width, p.width);
+  const railBedMaskWidthOf = (p: RoadPath): number => 2 * railMaskHalfWidth(p.width);
   group.add(stripsMesh('carriageRibbons', carriage, carriageWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
   group.add(stripsMesh('footwayRibbons', foot, footWidthOf, kswCity.roadColors.footway, kswCity.roadYs.footway, -1, groundYAt));
   group.add(stripsMesh('railBeds', rails, railBedWidthOf, kswCity.roadColors.railBed, kswCity.roadYs.railBed, 0, groundYAt));
   group.add(stripsMesh('railRibbons', rails, railWidthOf, kswCity.roadColors.rail, kswCity.roadYs.rail, -3, groundYAt));
-  // Side-skirts (spec §5 terrain-discard): the terrain shader discards fragments
-  // inside every corridor; these vertical aprons close the hole at each ribbon
-  // edge (carriage + footway + the ballast bed — the widest rail layer). Only
-  // built when draping (a sampler is present); the flat pre-#119 anchor look
-  // has no discarded terrain to close. Rails skirt the BED edge (the outermost
-  // rail geometry today; railLook lands in PR 3).
-  if (groundYAt) {
-    group.add(skirtsMesh('carriageSkirts', carriage, carriageWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, groundYAt));
-    group.add(skirtsMesh('footwaySkirts', foot, footWidthOf, kswCity.roadColors.footway, kswCity.roadYs.footway, groundYAt));
-    group.add(skirtsMesh('railBedSkirts', rails, railBedWidthOf, kswCity.roadColors.railBed, kswCity.roadYs.railBed, groundYAt));
+  // Platform apron + terrain-grounded skirts (spec §5 platform). The terrain
+  // shader discards fragments inside every corridor OUT TO THE MASK EDGE; the
+  // apron fills that annulus (ribbon edge → mask edge) at profile height so no
+  // void shows from above (closes the Finding-1a see-through band on the 54 % of
+  // ways narrower than a mask cell), and the skirt drops from the mask edge to
+  // the tile terrain (fill slope on embankments, cut bank on cuts). Only built
+  // when draping AND a tile-ground sampler is present (both from main.ts). Rails
+  // use the ballast BED as the platform (the outermost rail geometry today;
+  // railLook lands in PR 3).
+  if (groundYAt && tileGround) {
+    group.add(apronsMesh('carriageAprons', carriage, carriageWidthOf, carriageMaskWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
+    group.add(apronsMesh('footwayAprons', foot, footWidthOf, footMaskWidthOf, kswCity.roadColors.footway, kswCity.roadYs.footway, -1, groundYAt));
+    group.add(apronsMesh('railBedAprons', rails, railBedWidthOf, railBedMaskWidthOf, kswCity.roadColors.railBed, kswCity.roadYs.railBed, 0, groundYAt));
+    group.add(skirtsMesh('carriageSkirts', carriage, carriageMaskWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, groundYAt, tileGround));
+    group.add(skirtsMesh('footwaySkirts', foot, footMaskWidthOf, kswCity.roadColors.footway, kswCity.roadYs.footway, groundYAt, tileGround));
+    group.add(skirtsMesh('railBedSkirts', rails, railBedMaskWidthOf, kswCity.roadColors.railBed, kswCity.roadYs.railBed, groundYAt, tileGround));
   }
   return group;
 }

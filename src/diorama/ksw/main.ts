@@ -655,7 +655,7 @@ async function boot(): Promise<void> {
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
   cityRoot.add(buildCityMassing(cityBuildings));
-  cityRoot.add(buildRoads(cityRoads, cityRails, groundYAt));
+  cityRoot.add(buildRoads(cityRoads, cityRails, groundYAt, tileGroundYAt));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
   // Tree canopies default to no cast-shadow (nature.ts) — cheap far-field
