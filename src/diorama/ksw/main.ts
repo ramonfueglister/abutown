@@ -644,6 +644,11 @@ async function boot(): Promise<void> {
   plaza.position.y = hospitalBaseY;
   helipad.position.y = hospitalBaseY;
 
+  // The er/ops orbit centers were authored against the y=0 ground plane —
+  // lift them onto the DEM island so the camera pivots at the real EG floor.
+  camPresets.er.target[1] += hospitalBaseY;
+  camPresets.ops.target[1] += hospitalBaseY;
+
   // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
   // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
   // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so
@@ -969,7 +974,7 @@ async function boot(): Promise<void> {
   // walk a rectangle perimeter (an ellipse would dip onto the lawn near the
   // corners) and hug it with small flattened puffs. Parametrized so both the
   // hero plate and the city plate rim share one recipe (spec §4: city mist).
-  const addMistRing = (halfW: number, halfD: number, cx: number, cz: number, mat: THREE.MeshBasicMaterial): void => {
+  const addMistRing = (halfW: number, halfD: number, cx: number, cz: number, mat: THREE.MeshBasicMaterial, baseY: number): void => {
     const pad = 2.2;
     const hw = halfW + pad;
     const hd = halfD + pad;
@@ -996,18 +1001,18 @@ async function boot(): Promise<void> {
         mz = hd - t;
       }
       const mist = new THREE.Mesh(new THREE.SphereGeometry(2.4 + (i % 3) * 0.5, 16, 16), mat);
-      mist.position.set(mx + cx, 0.25, mz + cz);
+      mist.position.set(mx + cx, baseY + 0.25, mz + cz);
       mist.scale.y = 0.22;
       scene.add(mist);
     }
   };
-  addMistRing(rimX, rimZ, rimCx, rimCz, mistMat);
+  addMistRing(rimX, rimZ, rimCx, rimCz, mistMat, hospitalBaseY);
 
   // city mist rim: same puffs around the city plate, faded in with the clouds
   // (0 below radius 300, up to preset.mistOpacity*0.8 at the city framing).
   const cityMistMat = mistMat.clone();
   cityMistMat.opacity = 0;
-  addMistRing(cityMeta.plate.w / 2, cityMeta.plate.d / 2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat);
+  addMistRing(cityMeta.plate.w / 2, cityMeta.plate.d / 2, cityMeta.plate.cx, cityMeta.plate.cz, cityMistMat, 0);
 
   // Night life: window glow + lamp bulbs are baked into the glowNight batch
   // at build time (staticBatch.ts) and ride the shared lampGlowU uniform; the
