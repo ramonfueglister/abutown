@@ -644,9 +644,9 @@ export function createLiveClient(opts: {
 4. `s_of_world_day` wächst ~6× Realzeit (Messung über 20 s, Toleranz ±20%).
 5. Restart-Teil (nur mit lokalem PG, `ABUTOWN_TEST_DATABASE_URL`): sim-server killen + neu starten (restartTraffic-Muster) → Boot-Log enthält `resuming world-core from persisted snapshot`, Client reconnected, `world_tick` monoton weiter, `population` unverändert.
 
-- [ ] **Step 1:** Script schreiben, lokal grün laufen lassen (mit lokalem Postgres).
-- [ ] **Step 2:** In CI e2e-Job aufnehmen (`.github/workflows/ci.yml`, Postgres-Service existiert im Rust-Job — e2e analog erweitern; ohne PG-Env läuft der Smoke ohne Restart-Teil).
-- [ ] **Step 3: Commit** — `git commit -m "test: two-client world smoke with restart-resume proof"`.
+- [x] **Step 1:** Script schreiben, lokal grün laufen lassen (mit lokalem Postgres).
+- [x] **Step 2:** In CI e2e-Job aufnehmen (`.github/workflows/ci.yml`). CI-Entscheid: e2e hat den 77-MB-World-Bake nicht (gitignored, Bake in CI zu schwer) → Smoke läuft dort im `--no-render`-Modus (2 Node-WS-Clients gegen /live+/health, gleiche generierte Proto-Decodes + geteilte CellGrid-Ableitung) mit postgres:16-Service + `ABUTOWN_TEST_DATABASE_URL`, damit auch der Restart-Teil in CI läuft; Browser-Modus bleibt das lokale Gate.
+- [x] **Step 3: Commit** — `git commit -m "test: two-client world smoke with restart-resume proof"`.
 
 ### Task 17: PR, Deploy-Runbook, Vercel-Envs
 
