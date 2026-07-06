@@ -107,4 +107,12 @@ describe('storeyLayout', () => {
     expect(low.storeyCount).toBe(1);
     expect(low.storeyH).toBe(2.0);
   });
+  it('enforces the max pitch by adding storeys (5 m eave → 2×2.5 m, not 1×5 m)', () => {
+    expect(storeyLayout(5)).toEqual({ storeyCount: 2, storeyH: 2.5 });
+  });
+  it('best effort when bounds are unsatisfiable: the count bound wins', () => {
+    const s = storeyLayout(100); // 12 storeys max → 8.33 m pitch, outside maxStoreyH
+    expect(s.storeyCount).toBe(12);
+    expect(s.storeyH).toBeCloseTo(100 / 12, 6);
+  });
 });

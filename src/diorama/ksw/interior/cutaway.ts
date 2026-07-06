@@ -66,9 +66,13 @@ export function closedPeel(cfg: PeelCfg): PeelState {
 // 3.4 m pitch, clamp the count to [1, maxStoreys]; the resulting pitch is
 // eaveH / count (a 1-storey shed keeps its real low eave as its pitch).
 export function storeyLayout(eaveH: number): { storeyCount: number; storeyH: number } {
-  const nominal = Math.round(eaveH / kswPeel.nominalStoreyH);
-  const storeyCount = Math.min(kswPeel.maxStoreys, Math.max(1, nominal));
-  return { storeyCount, storeyH: eaveH / storeyCount };
+  let count = Math.min(kswPeel.maxStoreys, Math.max(1, Math.round(eaveH / kswPeel.nominalStoreyH)));
+  // Enforce the pitch bounds by adjusting the count — best effort: when both
+  // bounds are unsatisfiable (very low or very tall eaves), the [1, maxStoreys]
+  // count bound wins and the pitch may fall outside [minStoreyH, maxStoreyH].
+  while (count < kswPeel.maxStoreys && eaveH / count > kswPeel.maxStoreyH) count++;
+  while (count > 1 && eaveH / count < kswPeel.minStoreyH) count--;
+  return { storeyCount: count, storeyH: eaveH / count };
 }
 
 // TEMPORARY (removed in Task 6): legacy single-slice adapter for main.ts.
