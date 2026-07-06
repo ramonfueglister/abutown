@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { transformLanduse, waterRingsFrom } from '../../scripts/geo/lib/landuse.mjs';
+import { stitchOuterRings, transformLanduse, waterRingsFrom } from '../../scripts/geo/lib/landuse.mjs';
 import { transformNature } from '../../scripts/geo/lib/transform.mjs';
 import { ANCHOR, makeProjector } from '../../scripts/geo/lib/project.mjs';
 
@@ -157,6 +157,26 @@ describe('transformLanduse river water', () => {
     };
     const out = transformLanduse({ osmLanduse: { elements: [rel] }, projector: makeProjector(ANCHOR) });
     expect(out).toHaveLength(0);
+  });
+});
+
+describe('stitchOuterRings unclosed-chain accounting', () => {
+  it('reports unclosedCount 0 for a properly closed relation', () => {
+    const members = [{ type: 'way', role: 'outer', geometry: way.geometry }];
+    const { rings, unclosedCount } = stitchOuterRings(members);
+    expect(rings).toHaveLength(1);
+    expect(unclosedCount).toBe(0);
+  });
+
+  it('still yields a ring for an open chain but reports unclosedCount 1', () => {
+    // endpoints never coincide: a straight open chain, not closed
+    const a = { lon: ANCHOR.lon, lat: ANCHOR.lat };
+    const b = { lon: ANCHOR.lon + 0.001, lat: ANCHOR.lat };
+    const c = { lon: ANCHOR.lon + 0.002, lat: ANCHOR.lat + 0.001 };
+    const members = [{ type: 'way', role: 'outer', geometry: [a, b, c] }];
+    const { rings, unclosedCount } = stitchOuterRings(members);
+    expect(rings).toHaveLength(1);
+    expect(unclosedCount).toBe(1);
   });
 });
 

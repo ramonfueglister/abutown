@@ -286,9 +286,10 @@ await overpass(
 );
 // river water (Töss/Eulach): natural=water polygons + waterway=riverbank
 // polygons join the landuse water rings so terrain grading treats them as
-// WATER too (§4.4 — grading must never touch water). Relations are NOT
-// expanded into multipolygon outer rings here (way-only) — see task-3b
-// report for measured coverage of this simplification.
+// WATER too (§4.4 — grading must never touch water). natural=water relations
+// ARE expanded into multipolygon outer rings by transformLanduse (via
+// stitchOuterRings in scripts/geo/lib/landuse.mjs); landuse relations
+// (forest etc.) remain way-only — see task-3b report for details.
 await overpass(
   (bbox) =>
     `[out:json][timeout:180];(way["landuse"](${bbox});rel["landuse"](${bbox});way["natural"="water"](${bbox});relation["natural"="water"](${bbox});way["waterway"="riverbank"](${bbox}););out body geom;`,

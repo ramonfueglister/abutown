@@ -14,13 +14,16 @@ const KIND_MAP = {
 // lon/lat, so exact comparison is safe). Ways may run in either orientation.
 // Rings that fail to close (broken data) are still emitted — polygon fill
 // closes them implicitly, and an approximate water mask beats a missing one.
-function stitchOuterRings(members) {
+// Callers must not swallow this silently: `unclosedCount` reports how many
+// emitted rings relied on that implicit-closure fallback.
+export function stitchOuterRings(members) {
   const segs = (members ?? [])
     .filter((m) => m.role === 'outer' && m.geometry && m.geometry.length >= 2)
     .map((m) => m.geometry.map(({ lon, lat }) => [lon, lat]));
   const eq = (a, b) => a[0] === b[0] && a[1] === b[1];
   const closed = (r) => r.length >= 4 && eq(r[0], r[r.length - 1]);
   const rings = [];
+  let unclosedCount = 0;
   while (segs.length) {
     let ring = segs.pop();
     let extended = true;
@@ -40,9 +43,12 @@ function stitchOuterRings(members) {
         break;
       }
     }
-    if (ring.length >= 3) rings.push(ring);
+    if (ring.length >= 3) {
+      rings.push(ring);
+      if (!closed(ring)) unclosedCount++;
+    }
   }
-  return rings;
+  return { rings, unclosedCount };
 }
 
 export function transformLanduse({ osmLanduse, projector }) {
@@ -65,7 +71,14 @@ export function transformLanduse({ osmLanduse, projector }) {
       // must never touch water (spec §4.4). Other landuse kinds stay
       // way-only until something needs them. Inner rings (islands) are
       // ignored — that slightly over-masks water, which is fine for grading.
-      for (const ring of stitchOuterRings(el.members)) {
+      const { rings, unclosedCount } = stitchOuterRings(el.members);
+      if (unclosedCount > 0) {
+        console.warn(
+          `[landuse] water relation ${el.id ?? '?'}: ${unclosedCount} outer ring(s) did not close; ` +
+            'implicit polygon-fill closure applied',
+        );
+      }
+      for (const ring of rings) {
         out.push({ kind, ring: ring.map(([lon, lat]) => project(lon, lat)) });
       }
     }
