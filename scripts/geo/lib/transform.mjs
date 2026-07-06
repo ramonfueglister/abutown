@@ -6,7 +6,7 @@
 // integer centimeters (JSON size). Throws on buildings that end up with no
 // triangulatable geometry — a bake must never silently drop shape.
 import { triangulatePlanarPolygon } from './triangulate.mjs';
-import { nameForFootprint, ringCentroid, roadStyle } from './join.mjs';
+import { nameForFootprint, pointInRing, ringCentroid, roadStyle } from './join.mjs';
 import {
   footprintValid, forestFill, roadWidthFromTags, roofOutlineFootprint, roofSkirts, treeSpec,
 } from './style.mjs';
@@ -546,11 +546,42 @@ const GREEN_KINDS = new Set([
   'wood', 'scrub', 'grassland', // natural
 ]);
 
-export function transformNature({ osmNature, projector }) {
+// 1 m outward margin for the building-footprint tree exclusion: a footprint
+// edge's own bbox expanded by MARGIN catches trees whose center falls just
+// outside the traced ring but inside the building's real (LoD2-imprecise)
+// outline — cheaper than an exact buffered-polygon test and adequate at this
+// tolerance.
+const FOOTPRINT_MARGIN = 1;
+
+function nearFootprint(x, z, footprints) {
+  for (const fp of footprints) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [fx, fz] of fp) {
+      x0 = Math.min(x0, fx); x1 = Math.max(x1, fx);
+      z0 = Math.min(z0, fz); z1 = Math.max(z1, fz);
+    }
+    if (x < x0 - FOOTPRINT_MARGIN || x > x1 + FOOTPRINT_MARGIN || z < z0 - FOOTPRINT_MARGIN || z > z1 + FOOTPRINT_MARGIN)
+      continue;
+    if (pointInRing(x, z, fp)) return true;
+    // margin band around the ring itself, not just its bbox
+    for (let i = 0, j = fp.length - 1; i < fp.length; j = i++) {
+      const [ax, az] = fp[j];
+      const [bx, bz] = fp[i];
+      const dx = bx - ax, dz = bz - az;
+      const len2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
+      const px = ax + t * dx, pz = az + t * dz;
+      if (Math.hypot(x - px, z - pz) <= FOOTPRINT_MARGIN) return true;
+    }
+  }
+  return false;
+}
+
+export function transformNature({ osmNature, projector, buildingFootprints = [] }) {
   const greens = [];
   const waterAreas = [];
   const rivers = [];
-  const trees = [];
+  const treeNodes = [];
   const toLocal = ({ lon, lat }) => {
     const [x, z] = projector.toLocal(lon, lat);
     return [Math.round(x * 100) / 100, Math.round(z * 100) / 100];
@@ -560,7 +591,7 @@ export function transformNature({ osmNature, projector }) {
     if (el.type === 'node') {
       if (t.natural === 'tree') {
         const [x, z] = toLocal(el);
-        trees.push(treeSpec(t, x, z));
+        treeNodes.push({ tags: t, x, z });
       }
       continue;
     }
@@ -577,14 +608,35 @@ export function transformNature({ osmNature, projector }) {
       continue;
     }
     const kind = t.leisure || t.landuse || t.natural;
-    if (kind && GREEN_KINDS.has(kind)) greens.push({ kind, ring });
+    if (kind && GREEN_KINDS.has(kind)) greens.push({ kind, ring, leafType: t.leaf_type });
+  }
+  // per-tree context: the first green whose ring contains the point wins;
+  // its kind/leaf_type feed the family heuristic (park/wood/street mix).
+  const trees = [];
+  for (const node of treeNodes) {
+    const g = greens.find((green) => pointInRing(node.x, node.z, green.ring));
+    const context = g ? { green: g.kind, leafType: g.leafType } : {};
+    trees.push(treeSpec(node.tags, node.x, node.z, context));
   }
   // declared forest fill: every wood/forest green gets a hash-gridded scatter
   // of additional trees, clear of any tree OSM already mapped individually
   for (const g of greens) {
-    if (g.kind === 'wood' || g.kind === 'forest') trees.push(...forestFill(g.ring, trees));
+    if (g.kind === 'wood' || g.kind === 'forest')
+      trees.push(...forestFill(g.ring, trees, undefined, { green: g.kind, leafType: g.leafType }));
   }
-  return { greens, waterAreas, rivers, trees };
+  // building-footprint exclusion: drop any tree whose center falls inside
+  // (or within FOOTPRINT_MARGIN of) a real building footprint — these are
+  // OSM/forest-fill artifacts placed on top of a roof, not real street trees.
+  let dropped = 0;
+  const filtered = buildingFootprints.length
+    ? trees.filter((tr) => {
+        const inside = nearFootprint(tr.x, tr.z, buildingFootprints);
+        if (inside) dropped += 1;
+        return !inside;
+      })
+    : trees;
+  if (dropped > 0) console.log(`nature: dropped ${dropped} trees inside building footprints`);
+  return { greens, waterAreas, rivers, trees: filtered };
 }
 
 export function transformRoads({ osmRoads, projector }) {

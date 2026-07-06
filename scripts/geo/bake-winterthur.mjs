@@ -90,11 +90,6 @@ const { roads, rails } = transformRoads({
   osmRoads: JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8')),
   projector,
 });
-const nature = transformNature({
-  osmNature: JSON.parse(readFileSync(`${SCRATCH}/osm-nature.json`, 'utf8')),
-  projector,
-});
-if (nature.trees.length < 500) throw new Error(`bake: only ${nature.trees.length} trees — nature fetch broken?`);
 
 // sanity gates. An absurd height means a broken projection/ground-normalize —
 // hard fail. Sub-2 m "buildings" are canopies, ground slabs and degenerate
@@ -116,6 +111,32 @@ if (buildingsOut.length < 500) throw new Error(`bake: only ${buildingsOut.length
 const named = buildingsOut.filter((b) => b.name);
 const ksw = buildingsOut.filter((b) => b.zone === 'ksw');
 if (ksw.length === 0) throw new Error('bake: no buildings in the ksw zone');
+
+// scratch/geo/osm-nature.json is fetched Gemeinde-wide (fetch-winterthur.mjs,
+// #119) — this plate bake only covers the small KSW BBOX, so pre-clip
+// elements to it (same scope walls/roofs already get via ogr2ogr `-spat`).
+// Unlike roads.json, nature.json has no separate Gemeinde-wide re-bake step
+// (rebake-roads-gemeinde.mjs's own header: "buildings.json / nature.json
+// bleiben unangetastet"), so this plate stays the only source of trees/greens.
+function elementInBbox(el, bbox) {
+  const pts = el.type === 'node' ? [el] : el.geometry ?? [];
+  return pts.some((p) => p.lon >= bbox.lonMin && p.lon <= bbox.lonMax && p.lat >= bbox.latMin && p.lat <= bbox.latMax);
+}
+const osmNatureRaw = JSON.parse(readFileSync(`${SCRATCH}/osm-nature.json`, 'utf8'));
+const NATURE_PAD = 0.001; // ~100 m lon/lat pad so plate-edge greens/rivers keep their full ring
+const natureBbox = {
+  lonMin: BBOX.lonMin - NATURE_PAD, lonMax: BBOX.lonMax + NATURE_PAD,
+  latMin: BBOX.latMin - NATURE_PAD, latMax: BBOX.latMax + NATURE_PAD,
+};
+const osmNature = { elements: osmNatureRaw.elements.filter((el) => elementInBbox(el, natureBbox)) };
+console.log(`nature: ${osmNature.elements.length}/${osmNatureRaw.elements.length} OSM elements in plate bbox`);
+
+const nature = transformNature({
+  osmNature,
+  projector,
+  buildingFootprints: buildingsOut.map((b) => b.footprint),
+});
+if (nature.trees.length < 3000) throw new Error(`bake: only ${nature.trees.length} trees — nature fetch broken?`);
 
 // doors: bucket every road point into a 50 m grid once, then per building
 // query the 9 neighbor cells for nearby road points — O(n) instead of O(n²).

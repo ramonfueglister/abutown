@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { transformLanduse } from '../../scripts/geo/lib/landuse.mjs';
+import { transformNature } from '../../scripts/geo/lib/transform.mjs';
 import { ANCHOR, makeProjector } from '../../scripts/geo/lib/project.mjs';
 
 const way = { type: 'way', tags: { landuse: 'forest' }, geometry: [
@@ -26,5 +27,28 @@ describe('transformLanduse', () => {
     const elements = ['meadow', 'grass', 'wood', 'farmland', 'residential', 'commercial', 'basin'].map(mk);
     const out = transformLanduse({ osmLanduse: { elements }, projector: makeProjector(ANCHOR) });
     expect(out.map((o) => o.kind)).toEqual([1, 1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe('transformNature Slice-2', () => {
+  it('Baum im Gebäude-Footprint (+1 m) wird gedroppt', () => {
+    const osmNature = { elements: [
+      { type: 'node', lat: 0.00001, lon: 0.00001, tags: { natural: 'tree' } },
+    ]};
+    const projector = { toLocal: (lon: number, lat: number) => [lon * 111320, -lat * 111320] };
+    const fp = [[0, 0], [5, 0], [5, -5], [0, -5]]; // enthält den Baum (~1.1, -1.1)
+    const { trees } = transformNature({ osmNature, projector, buildingFootprints: [fp] });
+    expect(trees.length).toBe(0);
+  });
+  it('Baum im Park erhält family', () => {
+    const osmNature = { elements: [
+      { type: 'way', tags: { leisure: 'park' }, geometry: [
+        { lon: 0, lat: 0 }, { lon: 0.001, lat: 0 }, { lon: 0.001, lat: -0.001 }, { lon: 0, lat: -0.001 }, { lon: 0, lat: 0 } ] },
+      { type: 'node', lat: -0.0005, lon: 0.0005, tags: { natural: 'tree' } },
+    ]};
+    const projector = { toLocal: (lon: number, lat: number) => [lon * 111320, -lat * 111320] };
+    const { trees } = transformNature({ osmNature, projector });
+    expect(trees.length).toBe(1);
+    expect(['spreading', 'oval', 'tall']).toContain(trees[0].family);
   });
 });
