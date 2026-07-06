@@ -1,9 +1,9 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
 use axum::{
     Json, Router,
-    extract::{
-        State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
-    },
+    extract::State,
     http::{
         HeaderMap, StatusCode,
         header::{self, HeaderValue},
@@ -11,6 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
+use sqlx::PgPool;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::{
@@ -22,37 +23,83 @@ use crate::{
     db::connect_shared_pool,
 };
 
+/// Shared world liveness mirror for `/health` (Task 13): the tick loop stores
+/// the current world tick + audit state after every tick, and boot records
+/// whether the world resumed from a persisted snapshot. Atomics, not the ECS
+/// world — the HTTP task must never touch sim state.
+#[derive(Debug)]
+pub struct WorldHealth {
+    pub world_tick: AtomicU64,
+    pub audit_ok: AtomicBool,
+    pub resumed: AtomicBool,
+}
+
+impl Default for WorldHealth {
+    fn default() -> Self {
+        WorldHealth {
+            world_tick: AtomicU64::new(0),
+            // Fail-fast audit: the process being alive means no violation.
+            audit_ok: AtomicBool::new(true),
+            resumed: AtomicBool::new(false),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     card_hands: CardHandStore,
     auth: AuthVerifier,
+    health: Arc<WorldHealth>,
 }
 
 impl AppState {
-    pub fn new(card_hands: CardHandStore, auth: AuthVerifier) -> Self {
-        Self { card_hands, auth }
+    pub fn new(card_hands: CardHandStore, auth: AuthVerifier, health: Arc<WorldHealth>) -> Self {
+        Self {
+            card_hands,
+            auth,
+            health,
+        }
     }
 }
 
 /// Production wiring: Supabase JWT auth + Postgres-backed card hands.
 pub async fn build_app_from_config(config: &ServerConfig) -> anyhow::Result<Router> {
     let pool = connect_shared_pool(&config.database_url).await?;
+    build_app_with_shared_pool(config, pool, Arc::new(WorldHealth::default())).await
+}
+
+/// Production wiring over an ALREADY-connected shared pool (the sim-server
+/// boot connects once and hands the same pool to the card-hand store and the
+/// world snapshot store), plus the shared `/health` world mirror.
+pub async fn build_app_with_shared_pool(
+    config: &ServerConfig,
+    pool: PgPool,
+    health: Arc<WorldHealth>,
+) -> anyhow::Result<Router> {
     let card_hands = CardHandStore::with_pool(pool).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
     let cors = cors_layer(&config.cors_allowed_origins)?;
-    Ok(build_router(AppState::new(card_hands, auth), cors))
+    Ok(build_router(AppState::new(card_hands, auth, health), cors))
 }
 
 /// Test/dev wiring: in-memory card hands + local bearer-as-UUID auth.
-pub fn build_app_with_card_hands(card_hands: CardHandStore, auth: AuthVerifier) -> Router {
+pub fn build_app_with_card_hands(
+    card_hands: CardHandStore,
+    auth: AuthVerifier,
+    health: Arc<WorldHealth>,
+) -> Router {
     // infallible: hardcoded empty origin slice can never contain a malformed origin
     let cors = cors_layer(&[]).expect("empty origin list is always valid");
-    build_router(AppState::new(card_hands, auth), cors)
+    build_router(AppState::new(card_hands, auth, health), cors)
 }
 
 /// Convenience default used by the integration tests.
 pub fn build_app() -> Router {
-    build_app_with_card_hands(CardHandStore::memory(), AuthVerifier::local_bearer_uuid())
+    build_app_with_card_hands(
+        CardHandStore::memory(),
+        AuthVerifier::local_bearer_uuid(),
+        Arc::new(WorldHealth::default()),
+    )
 }
 
 /// Fail-closed CORS from an explicit allow-list. Empty list allows no
@@ -80,13 +127,18 @@ fn build_router(state: AppState, cors: CorsLayer) -> Router {
         .route("/health", get(health))
         .route("/cards", get(cards))
         .route("/card-hand", get(card_hand).put(save_card_hand))
-        .route("/ws", get(websocket))
         .with_state(state)
         .layer(cors)
 }
 
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "service": "abutown-cards", "ok": true }))
+async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "service": "abutown-sim",
+        "ok": true,
+        "world_tick": state.health.world_tick.load(Ordering::Relaxed),
+        "audit_ok": state.health.audit_ok.load(Ordering::Relaxed),
+        "resumed": state.health.resumed.load(Ordering::Relaxed),
+    }))
 }
 
 async fn cards() -> Json<Vec<crate::card_hand::CardDefinition>> {
@@ -138,13 +190,4 @@ fn card_hand_error(error: CardHandError) -> Response {
         Json(serde_json::json!({ "error": error.to_string() })),
     )
         .into_response()
-}
-
-/// WebSocket stub — accepts the upgrade and closes immediately. Extension
-/// point for the next simulation's live channel; intentionally carries no
-/// simulation logic today.
-async fn websocket(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(|mut socket: WebSocket| async move {
-        let _ = socket.send(Message::Close(None)).await;
-    })
 }

@@ -48,10 +48,13 @@ export function buildSegmentGrid(graph) {
       arc += Math.hypot(graph.edgePtX[i + 1] - graph.edgePtX[i], graph.edgePtZ[i + 1] - graph.edgePtZ[i]);
     return arc + t * Math.hypot(graph.edgePtX[segIdx + 1] - graph.edgePtX[segIdx], graph.edgePtZ[segIdx + 1] - graph.edgePtZ[segIdx]);
   };
-  const candidatesAt = (px, pz) => {
+  // cellRadius (optional, default 2 = the historical ±2×50m window): callers
+  // needing a wider search — bake-sim-world.mjs binds far-from-road buildings
+  // in a second pass — can widen the scanned cell ring without a second grid.
+  const candidatesAt = (px, pz, cellRadius = 2) => {
     const gx = Math.floor(px / CELL), gz = Math.floor(pz / CELL);
     const out = [];
-    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++)
+    for (let dx = -cellRadius; dx <= cellRadius; dx++) for (let dz = -cellRadius; dz <= cellRadius; dz++)
       for (const c of grid.get(`${gx + dx},${gz + dz}`) ?? []) out.push(c);
     return out;
   };

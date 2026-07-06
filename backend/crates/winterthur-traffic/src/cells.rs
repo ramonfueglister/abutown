@@ -137,6 +137,18 @@ impl CellGrid {
         (self.min_x, self.min_z)
     }
 
+    /// The cell containing world position `(x, z)` in metres, clamped onto
+    /// the plate (a building slightly outside the lane bbox maps to the
+    /// nearest border cell). Used by the `/live` citizen publisher, which
+    /// shares this exact grid with `/traffic` (same ids on the wire).
+    pub fn cell_of_xz(&self, x: f32, z: f32) -> u32 {
+        let col =
+            (((x - self.min_x) / CELL_SIZE_M).floor() as i64).clamp(0, self.cols as i64 - 1) as u32;
+        let row =
+            (((z - self.min_z) / CELL_SIZE_M).floor() as i64).clamp(0, self.rows as i64 - 1) as u32;
+        row * self.cols + col
+    }
+
     /// The cell a vehicle at arc position `s` on `lane` occupies. `lane` is a
     /// lane **id**. Returns `None` for an unknown lane id (never happens for
     /// live vehicles, whose lane came from this same net). Hot path: one array

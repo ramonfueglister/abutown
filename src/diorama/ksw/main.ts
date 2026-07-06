@@ -64,10 +64,15 @@ import { allArchetypes } from './geo/treeArchetypes';
 import { windAmpU } from './windUniform';
 import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
-import { TrafficClient, DEFAULT_TRAFFIC_WS } from '../traffic/trafficClient';
+import { TrafficClient, DEFAULT_TRAFFIC_WS, buildDefaultCellGrid } from '../traffic/trafficClient';
 import { createCarLayer } from '../traffic/carLayer';
 import { createFlowLayer } from '../traffic/flowLayer';
 import { poseAt } from '../traffic/deadReckon';
+import { createLiveClient, DEFAULT_LIVE_WS, type LiveVitals } from '../live/liveClient';
+import { createCitizensLayer } from '../live/citizensLayer';
+import { createVitalsHud } from '../live/vitalsHud';
+import { createAttributionFooter } from '../live/attribution';
+import { ensureWebGpu } from '../webgpuGate';
 
 declare global {
   interface Window {
@@ -110,6 +115,22 @@ declare global {
       // top-down pitch (~1.5 rad) gives the capture harness a clear read on which
       // side of the road each car is on.
       lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => void;
+    };
+    // Dev-only live-channel debug surface, present ONLY under ?live=1 /
+    // VITE_LIVE_WS (Task 15 browser smoke): tracked/drawn citizen counts and
+    // the latest vitals as plain JSON-safe data.
+    __live?: {
+      citizenCount: () => number;
+      instanceCount: () => number;
+      vitals: () => {
+        worldTick: number;
+        sOfWorldDay: number;
+        population: number;
+        totalMoney: number;
+        auditOk: boolean;
+        tripsActive: number;
+        prices: Array<{ marketId: number; goodId: number; ewmaPrice: number; marketName: string }>;
+      } | null;
     };
     // Dev tree-layer debug surface (unconditional): the archetype count, the
     // live full-detail instance count (post-compaction), and the current
@@ -158,6 +179,9 @@ const WX_OVERRIDES: Record<string, WeatherState> = {
 };
 
 async function boot(): Promise<void> {
+  // WebGPU gate (Task 15): everything below assumes THREE.WebGPURenderer —
+  // without navigator.gpu the app used to die into an opaque black screen.
+  if (!ensureWebGpu()) return;
   const params = new URLSearchParams(window.location.search);
   // ?at= freezes the clock: full ISO instant, or HH:MM = today local time.
   const frozenAt = parseAtParam(params.get('at'));
@@ -173,6 +197,11 @@ async function boot(): Promise<void> {
   // gateway). ?trafficWs=… overrides the endpoint (default ws://localhost:8790/traffic).
   const trafficEnabled = params.get('traffic') === '1';
   const trafficWsUrl = params.get('trafficWs') ?? DEFAULT_TRAFFIC_WS;
+  // ?live=1 (or a configured VITE_LIVE_WS) enables the live world channel
+  // (citizens AOI + vitals HUD, Task 15). URL override > env > default.
+  const envLiveWs = (import.meta.env.VITE_LIVE_WS as string | undefined) || undefined;
+  const liveEnabled = params.get('live') === '1' || envLiveWs !== undefined;
+  const liveWsUrl = params.get('liveWs') ?? envLiveWs ?? DEFAULT_LIVE_WS;
   // Realtime environment: physical sun/moon/stars for now() steered by live (or
   // ?wx-pinned) weather. Re-evaluated every frame; this is the boot seed.
   let lastEnv: EnvironmentState = computeEnvironment(now(), WX_OVERRIDES[wxParam ?? ''] ?? CLEAR_SKY);
@@ -711,6 +740,64 @@ async function boot(): Promise<void> {
         // eslint-disable-next-line no-console
         console.error('[traffic] connect failed:', err);
       });
+  }
+
+  // ── data attribution (Task 15): fixed bottom-right footer, authoritative
+  // strings from the baked world manifest (bake-world.mjs), static fallback.
+  document.body.appendChild(createAttributionFooter(world.manifest.attribution));
+
+  // ── live world channel (Task 15, ?live=1 / VITE_LIVE_WS): instanced citizen
+  // capsules dead-reckoned from 1 Hz CitizenCellFrames + the vitals HUD card.
+  // AOI cells derive from the SAME CellGrid as the traffic channel (shared
+  // trafficnet.json derivation — cellGrid.ts) and follow the camera target on
+  // the same ~2 Hz throttle as the traffic subscription.
+  const citizensLayer = liveEnabled ? createCitizensLayer(groundYAt) : null;
+  let liveAoiFollow: ((x: number, z: number) => void) | null = null;
+  let lastLiveCamUpdate = 0; // wall-clock seconds, throttled to ~2 Hz
+  if (liveEnabled && citizensLayer) {
+    cityRoot.add(citizensLayer.object3d);
+    const hud = createVitalsHud();
+    document.body.appendChild(hud.element);
+    // Same 128 m grid derivation as the traffic channel (shared cellGrid.ts).
+    const liveGrid = buildDefaultCellGrid();
+    const client = createLiveClient({
+      url: liveWsUrl,
+      onVitals: (v: LiveVitals) => hud.update(v),
+      onCitizens: (cell, citizens, departed, keyframe) =>
+        citizensLayer.applyFrame(cell, citizens, departed, keyframe),
+    });
+    // Throttled AOI follow (called from animate): 3×3 cells around the camera
+    // target — same footprint the traffic client subscribes. Cells that leave
+    // the set are dropped from BOTH the client's and the layer's tables (their
+    // departed frames stop after unsubscribe).
+    let prevCells = new Set<number>();
+    liveAoiFollow = (x: number, z: number): void => {
+      const want = liveGrid.cellsAround(x, z, 1);
+      client.updateAoi([...want]);
+      const removed: number[] = [];
+      for (const c of prevCells) if (!want.has(c)) removed.push(c);
+      if (removed.length > 0) citizensLayer.dropCells(removed);
+      prevCells = want;
+    };
+    // Debug/smoke surface (browser smoke, CLAUDE.md rule): live counts + the
+    // last vitals as plain data.
+    window.__live = {
+      citizenCount: () => client.core.citizenCount,
+      instanceCount: () => citizensLayer.count(),
+      vitals: () => {
+        const v = hud.lastVitals;
+        if (!v) return null;
+        return {
+          worldTick: Number(v.worldTick),
+          sOfWorldDay: v.sOfWorldDay,
+          population: Number(v.population),
+          totalMoney: Number(v.totalMoney),
+          auditOk: v.auditOk,
+          tripsActive: Number(v.tripsActive),
+          prices: v.prices.map((p) => ({ marketId: p.marketId, goodId: p.goodId, ewmaPrice: Number(p.ewmaPrice), marketName: p.marketName })),
+        };
+      },
+    };
   }
 
   // 3-ring semantic LOD (Task 10, spec §2c): detail follows the camera radius.
@@ -1303,6 +1390,15 @@ async function boot(): Promise<void> {
       if (flowLayer) {
         flowLayer.update(trafficClient.flow, trafficClient.subscribedCells, t);
       }
+    }
+    // ── live citizens (Task 15): AOI follows the camera on the same ~2 Hz
+    // throttle as the traffic subscription; dead-reckon + draw every frame.
+    if (citizensLayer) {
+      if (liveAoiFollow && t - lastLiveCamUpdate > 0.5) {
+        lastLiveCamUpdate = t;
+        liveAoiFollow(rig.target[0], rig.target[2]);
+      }
+      citizensLayer.update(t);
     }
     // ── tree near-set compaction: recompact when the camera moved > 5 m
     // (planar) since the last compaction, or ≥ 500 ms passed and it moved.

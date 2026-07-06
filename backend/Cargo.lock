@@ -2441,23 +2441,34 @@ dependencies = [
 name = "sim-server"
 version = "0.1.0"
 dependencies = [
+ "abutown-protocol",
  "anyhow",
  "arc-swap",
  "axum",
+ "bevy_ecs",
+ "blake3",
+ "chrono",
+ "demand-gen",
  "dotenvy",
+ "futures-util",
  "http-body-util",
  "jsonwebtoken",
+ "prost",
  "reqwest",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "traffic-net",
  "uuid",
+ "winterthur-traffic",
+ "world-core",
 ]
 
 [[package]]
@@ -3767,6 +3778,7 @@ dependencies = [
  "tracing-subscriber",
  "traffic-core",
  "traffic-net",
+ "world-core",
 ]
 
 [[package]]
@@ -3861,6 +3873,19 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "world-core"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "traffic-core",
+ "traffic-net",
 ]
 
 [[package]]

@@ -1,0 +1,16 @@
+{
+  "capita_baseline": 1000000,
+  "markets": [
+    { "id": 1, "name": "Marktgasse",  "lon": 8.7296, "lat": 47.4996 },
+    { "id": 2, "name": "Neumarkt",    "lon": 8.7280, "lat": 47.4989 },
+    { "id": 3, "name": "Grüze Industrie", "lon": 8.7594, "lat": 47.4923 },
+    { "id": 4, "name": "Töss",        "lon": 8.7075, "lat": 47.4886 }
+  ],
+  "goods": { "food": 1, "wood": 2, "tools": 4 },
+  "firms": [
+    { "actor": 9001, "market": 3, "recipe": {"in": [["wood", 2]], "out": [["tools", 1]]}, "interval_ticks": 600 },
+    { "actor": 9002, "market": 4, "raw": ["wood", 5], "interval_ticks": 600 },
+    { "actor": 9003, "market": 1, "raw": ["food", 8], "interval_ticks": 600 }
+  ],
+  "initial_cash": { "9001": 500000, "9002": 200000, "9003": 200000, "household": 2000000 }
+}

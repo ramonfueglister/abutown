@@ -1,19 +1,28 @@
-//! Wall-clock census trip spawner (Plan 2, spec §5).
+//! World-clock census trip spawner (Plan 2, spec §5; re-clocked in Task 9).
 //!
 //! Replaces the v1 synthetic attractor spawner: trips are no longer sampled
 //! from a two-peak curve over building clusters — they come from the offline
-//! `demand-gen` census bake ([`TripSchedule`], `trips.bin`) and are released
-//! against the real Europe/Zurich time-of-day via [`WallClock`].
+//! `demand-gen` census bake ([`TripSchedule`], `trips.bin`).
+//!
+//! # Clock binding (Task 9)
+//!
+//! The **second-of-day** driving trip release comes from the world clock
+//! ([`WorldClock::s_of_world_day`], anchored at the boot wall time and
+//! running 6× real time) — census demand lives on the same 4 h world day as
+//! the citizens, so both traffic sources breathe together. The **day kind**
+//! (workday/weekend block) stays on the real Europe/Zurich calendar via
+//! [`WallClock::day_kind`] (spec: date/season stay real) — a *world*
+//! midnight wrap therefore does NOT flip the block; only the real calendar
+//! does.
 //!
 //! # Release windows
 //!
-//! Per tick `t` the release window is `[s_of_day(t), s_of_day(t+1))` in local
-//! seconds-of-day. Since `DT = 0.1 s`, `s_of_day` only advances every 10th
-//! tick, so 9 of 10 ticks carry an empty window and release nothing. A window
-//! that wraps midnight (`s_of_day(t+1) < s_of_day(t)`) is split into the old
-//! day's tail `[s, 86400)` and the new day's head `[0, e)` with the
-//! [`DayKind`] re-evaluated for each half, so the weekday/weekend block flips
-//! exactly at the wrap.
+//! Per tick the release window is `[last_world_s, s_of_world_day(now))` in
+//! world seconds-of-day (the spawner tracks the last released second, so no
+//! second is skipped or double-released). A window that wraps world midnight
+//! is split into the old day's tail `[s, 86400)` and the new day's head
+//! `[0, e)`; both halves use the real-calendar [`DayKind`] of the current
+//! tick.
 //!
 //! # Thinning (`demand_scale`)
 //!
@@ -74,6 +83,7 @@ use crate::clock::WallClock;
 use crate::demand::{DayKind, Trip, TripSchedule};
 use traffic_core::{Core, u01};
 use traffic_net::TrafficNet;
+use world_core::WorldClock;
 
 /// Hard cap on the concurrent fleet; spawns are suppressed at or above it.
 /// Also the natural pre-size for the kernel's slot capacity. Raised from
@@ -170,14 +180,18 @@ pub struct SpawnCounters {
     pub blocked_entry: u64,
 }
 
-/// The wall-clock census trip spawner. Owns the loaded [`TripSchedule`] and
-/// the boot-anchored [`WallClock`]; driven once per tick by the shell's
-/// `spawn_trips` system.
+/// The census trip spawner. Owns the loaded [`TripSchedule`] and the
+/// boot-anchored [`WallClock`] (real-calendar `day_kind` only — release
+/// seconds come from the [`WorldClock`] passed into [`TripSpawner::step`]);
+/// driven once per tick by the shell's `spawn_trips` system.
 pub struct TripSpawner {
     schedule: TripSchedule,
     clock: WallClock,
     cfg: SpawnerCfg,
     seed: u64,
+    /// The world second-of-day up to which trips have been released
+    /// (exclusive). Initialized at the boot world second.
+    last_world_s: u32,
     /// Warm-start queue: `(release_tick, trip)`, sorted by release tick then
     /// trip index; `warm_next` is the cursor of the next unreleased entry.
     warm: Vec<(u64, Trip)>,
@@ -192,9 +206,17 @@ pub struct TripSpawner {
 impl TripSpawner {
     /// Build the spawner and queue the warm start (see module docs). `seed`
     /// is the sim seed; the thinning stream is salted so it is disjoint from
-    /// every other `u01` consumer.
-    pub fn new(schedule: TripSchedule, clock: WallClock, cfg: SpawnerCfg, seed: u64) -> Self {
-        let boot_s = clock.s_of_day(0);
+    /// every other `u01` consumer. `world` is the boot-time [`WorldClock`]
+    /// the release seconds are sourced from (warm-start lookback is 900
+    /// *world* seconds before the boot world second).
+    pub fn new(
+        schedule: TripSchedule,
+        clock: WallClock,
+        cfg: SpawnerCfg,
+        seed: u64,
+        world: &WorldClock,
+    ) -> Self {
+        let boot_s = world.s_of_world_day();
         let boot_day = clock.day_kind(0);
         let lo = boot_s.saturating_sub(WARM_LOOKBACK_S);
         let mut warm: Vec<(u64, Trip)> = schedule
@@ -210,6 +232,7 @@ impl TripSpawner {
             clock,
             cfg,
             seed,
+            last_world_s: boot_s,
             warm,
             warm_next: 0,
             counters: SpawnCounters::default(),
@@ -234,15 +257,17 @@ impl TripSpawner {
     }
 
     /// Advance one tick: release the warm-start slot for `t` (first 600
-    /// ticks only) plus every scheduled trip in this tick's second-of-day
-    /// window, thinned by `demand_scale`. Successful spawns are appended to
-    /// `spawned`; returns the count placed this tick.
+    /// ticks only) plus every scheduled trip in the world-second window
+    /// `[last_world_s, world.s_of_world_day())`, thinned by `demand_scale`.
+    /// Successful spawns are appended to `spawned`; returns the count placed
+    /// this tick.
     pub fn step(
         &mut self,
         core: &mut Core,
         net: &TrafficNet,
         router: &Router,
         t: u64,
+        world: &WorldClock,
         spawned: &mut Vec<SpawnRecord>,
     ) -> usize {
         let mut n = 0;
@@ -259,38 +284,21 @@ impl TripSpawner {
             }
         }
 
-        // Live window: [s_of_day(t), s_of_day(t+1)), split at a midnight wrap
-        // with the day kind re-evaluated per half.
-        let start = self.clock.s_of_day(t);
-        let end = self.clock.s_of_day(t + 1);
+        // Live window: [last released world second, current world second),
+        // split at a world-midnight wrap. Both halves use the REAL-calendar
+        // day kind of this tick (see module docs: only the real calendar
+        // flips the demand block, never a world wrap).
+        let start = self.last_world_s;
+        let end = world.s_of_world_day();
         if start != end {
+            let day = self.clock.day_kind(t);
             if end > start {
-                n += self.release_window(
-                    core,
-                    net,
-                    router,
-                    self.clock.day_kind(t),
-                    start..end,
-                    spawned,
-                );
+                n += self.release_window(core, net, router, day, start..end, spawned);
             } else {
-                n += self.release_window(
-                    core,
-                    net,
-                    router,
-                    self.clock.day_kind(t),
-                    start..DAY_S,
-                    spawned,
-                );
-                n += self.release_window(
-                    core,
-                    net,
-                    router,
-                    self.clock.day_kind(t + 1),
-                    0..end,
-                    spawned,
-                );
+                n += self.release_window(core, net, router, day, start..DAY_S, spawned);
+                n += self.release_window(core, net, router, day, 0..end, spawned);
             }
+            self.last_world_s = end;
             // The window closed with this tick: flush the suppression log
             // (at most one line per window — the v1 valve-log semantics).
             if self.window_suppressed > 0 {
@@ -548,8 +556,18 @@ mod tests {
         WallClock::new(now, Some(NaiveTime::from_hms_opt(hh, mm, 0).unwrap()))
     }
 
-    /// Drive spawner + kernel for `ticks` in the shell's order (spawn, then
-    /// tick). Returns `(core, spawner, spawned trip indices in order)`.
+    /// The boot [`WorldClock`] anchored at the wall clock's boot second (the
+    /// shell's `world_clock_anchored`): world time = wall time-of-day at
+    /// boot, then 6× real time.
+    fn world_clock_for(clock: &WallClock) -> WorldClock {
+        WorldClock {
+            world_tick: u64::from(clock.s_of_day(0)) * 10 / 6,
+        }
+    }
+
+    /// Drive spawner + kernel for `ticks` in the shell's order (advance the
+    /// world clock, spawn, then tick). Returns `(core, spawner, spawned trip
+    /// indices in order)`.
     fn run(
         json: &str,
         weekday: &[TripRecord],
@@ -563,27 +581,31 @@ mod tests {
         let router = Router::new(&net);
         let mut core = Core::new(&net, MAX_CONCURRENT + 64, seed);
         let schedule = make_schedule(name, json, weekday, &[]);
-        let mut spawner = TripSpawner::new(schedule, clock, cfg, seed);
+        let mut wc = world_clock_for(&clock);
+        let mut spawner = TripSpawner::new(schedule, clock, cfg, seed, &wc);
         let mut indices = Vec::new();
         let mut recs = Vec::new();
         for t in 0..ticks {
+            wc.advance();
             recs.clear();
-            spawner.step(&mut core, &net, &router, t, &mut recs);
+            spawner.step(&mut core, &net, &router, t, &wc, &mut recs);
             indices.extend(recs.iter().map(|r| r.trip_index));
             core.tick(t);
         }
         (core, spawner, indices)
     }
 
-    /// Morning-peak trips file: 30 trips every 2 s in [27000, 27060) and two
-    /// stragglers at 03:00 — the ratio fixture for the peak test.
+    /// Morning-peak trips file: 30 trips every 10 s in [27000, 27300) and two
+    /// stragglers at 03:00 — the ratio fixture for the peak test. (10 s world
+    /// spacing ≈ 1.7 real seconds at the 6× world clock, comfortably past the
+    /// spawn-clearance window on the single origin lane.)
     fn peak_trips() -> Vec<TripRecord> {
         let mut trips: Vec<TripRecord> = vec![
             rec(10_800, 0, 5, output::SEGMENT_INBOUND),
             rec(10_830, 0, 5, output::SEGMENT_INBOUND),
         ];
         for k in 0..30 {
-            trips.push(rec(27_000 + 2 * k, 0, 5, output::SEGMENT_INBOUND));
+            trips.push(rec(27_000 + 10 * k, 0, 5, output::SEGMENT_INBOUND));
         }
         trips
     }
@@ -708,35 +730,46 @@ mod tests {
         );
     }
 
-    /// Midnight wrap: the window splits into the old day's tail and the new
-    /// day's head, and the day kind (weekday→weekend block) flips with it.
+    /// World-midnight wrap: the release window splits into the old world
+    /// day's tail and the new world day's head — but the demand block stays
+    /// on the REAL calendar (Task 9: a world wrap mid-real-Friday keeps
+    /// workday demand; only real midnight flips the block).
     #[test]
-    fn midnight_wrap_flips_day_block() {
+    fn world_midnight_wrap_splits_window_but_keeps_real_day_block() {
         let json = fixture_json();
         let net = fixture_net(&json);
         let router = Router::new(&net);
         let seed = 3u64;
         let mut core = Core::new(&net, MAX_CONCURRENT + 64, seed);
 
-        // Friday 23:59:30 boot; 60 s later it is Saturday (weekend block).
+        // Friday 23:59:30 wall boot ⇒ world clock anchored at 86 370 s; the
+        // WORLD midnight wraps 30 world seconds (= 50 ticks) later, while the
+        // real calendar is still Friday for another 30 real seconds.
         let now = Utc.with_ymd_and_hms(2026, 7, 3, 12, 0, 0).unwrap();
         let clock = WallClock::new(now, Some(NaiveTime::from_hms_opt(23, 59, 30).unwrap()));
-        // Weekday trip in the Friday tail, weekend trip just after midnight.
-        let weekday = vec![rec(86_395, 0, 5, output::SEGMENT_INBOUND)];
-        let weekend = vec![rec(2, 3, 5, output::SEGMENT_INTERNAL)];
+        // Two weekday-block trips straddling the world wrap — both must
+        // spawn; a weekend-block trip after the wrap must NOT (real calendar
+        // still Friday).
+        let weekday = vec![
+            rec(86_395, 0, 5, output::SEGMENT_INBOUND),
+            rec(2, 3, 5, output::SEGMENT_INTERNAL),
+        ];
+        let weekend = vec![rec(2, 0, 5, output::SEGMENT_INBOUND)];
         let schedule = make_schedule("midnight", &json, &weekday, &weekend);
-        let mut spawner = TripSpawner::new(schedule, clock, SpawnerCfg::default(), seed);
+        let mut wc = world_clock_for(&clock);
+        let mut spawner = TripSpawner::new(schedule, clock, SpawnerCfg::default(), seed, &wc);
 
         let mut recs = Vec::new();
         for t in 0..600 {
-            spawner.step(&mut core, &net, &router, t, &mut recs);
+            wc.advance();
+            spawner.step(&mut core, &net, &router, t, &wc, &mut recs);
             core.tick(t);
         }
         let indices: Vec<u32> = recs.iter().map(|r| r.trip_index).collect();
         assert_eq!(
             recs.len(),
             2,
-            "both the weekday tail trip and the weekend head trip must spawn, got {indices:?}"
+            "both weekday trips (tail + post-wrap head) must spawn, got {indices:?}"
         );
         assert_eq!(spawner.counters().spawned, 2);
     }
@@ -755,11 +788,14 @@ mod tests {
         let trips = vec![rec(27_001, 0, 5, output::SEGMENT_INBOUND)];
         let spawn_one = |core: &mut Core, name: &str| -> u32 {
             let schedule = make_schedule(name, &json, &trips, &[]);
-            let mut sp = TripSpawner::new(schedule, clock_at(7, 30), SpawnerCfg::default(), seed);
+            let clock = clock_at(7, 30);
+            let mut wc = world_clock_for(&clock);
+            let mut sp = TripSpawner::new(schedule, clock, SpawnerCfg::default(), seed, &wc);
             let mut recs = Vec::new();
             for t in 0..20 {
+                wc.advance();
                 // No core.tick: the pre-placed leader must stay put.
-                sp.step(core, &net, &router, t, &mut recs);
+                sp.step(core, &net, &router, t, &wc, &mut recs);
             }
             assert_eq!(recs.len(), 1, "the single trip must spawn");
             recs[0].veh
