@@ -1,7 +1,9 @@
 // src/diorama/ksw/geo/tileStreamer.ts
-// M3: pure Ring-Policy + Hysterese + LRU fürs Tile-Streaming. KEIN three,
-// KEIN fetch — alles hier ist deterministisch unit-testbar. Die Queue/IO
-// lebt in Task 2 (streamWorld), die Materialisierung in tileContent.ts.
+// M3: deterministische Ring-Policy + Hysterese + LRU fürs Tile-Streaming.
+// KEIN three, KEIN fetch — alles hier ist deterministisch unit-testbar, aber
+// NICHT pure: planStep() mutiert das übergebene StreamerState (tick/lastNear).
+// Die Queue/IO lebt in Task 2 (streamWorld), die Materialisierung in
+// tileContent.ts.
 
 export type TileKey = string;
 export type TileMeta = { key: TileKey; level: number; cx: number; cz: number };
@@ -12,6 +14,17 @@ export const DEFAULT_RINGS: RingConfig = { r2: 800, r1: 2500, hysteresis: 1.1, m
 
 function radiusFor(level: number, cfg: RingConfig): number {
   return level === 2 ? cfg.r2 : level === 1 ? cfg.r1 : Infinity;
+}
+
+/** Zentrum eines Tiles in Weltkoordinaten aus der Manifest-Quadtree-Wurzel
+ * (minX/minZ/size) und einer Tile-Referenz (level/x/y). Pure Funktion —
+ * Task 6 baut damit die TileMeta-Liste aus dem WorldManifest auf. */
+export function tileCenter(
+  manifest: { minX: number; minZ: number; size: number },
+  ref: { level: number; x: number; y: number },
+): [number, number] {
+  const cell = manifest.size / 2 ** ref.level;
+  return [manifest.minX + (ref.x + 0.5) * cell, manifest.minZ + (ref.y + 0.5) * cell];
 }
 
 export function desiredLevel(
@@ -51,6 +64,9 @@ export function planStep(
   load.sort((a, b) => dist(a) - dist(b));
 
   // LRU-Kappe: Über-Budget → älteste nicht-nahe, nicht-gewünschte, nicht-L0.
+  // Bewusster Kontrakt: maxLive kann dennoch überschritten bleiben, wenn alle
+  // verbleibenden Live-Tiles zur Soll-Menge (desired) gehören oder L0 sind —
+  // beide Kategorien sind unantastbar, auch wenn das Budget dadurch reisst.
   const projected = state.live.size - unload.length + load.length;
   let excess = projected - cfg.maxLive;
   if (excess > 0) {

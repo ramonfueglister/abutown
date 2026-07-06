@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RINGS, desiredLevel, planStep, type StreamerState, type TileMeta } from '../../src/diorama/ksw/geo/tileStreamer';
+import { DEFAULT_RINGS, desiredLevel, planStep, tileCenter, type StreamerState, type TileMeta } from '../../src/diorama/ksw/geo/tileStreamer';
 
 const t = (level: number, cx: number, cz: number): TileMeta => ({ key: `L${level}/${cx}_${cz}`, level, cx, cz });
 const fresh = (): StreamerState => ({ live: new Map(), tick: 0 });
+
+describe('tileCenter', () => {
+  const manifest = { minX: -100, minZ: -100, size: 200 };
+
+  it('L0-Tile {0,0,0} liegt auf der Weltmitte', () => {
+    expect(tileCenter(manifest, { level: 0, x: 0, y: 0 })).toEqual([0, 0]);
+  });
+
+  it('L2-Tile {2,0,0} liegt im Zentrum der ersten Viertel-Zelle (cell=50)', () => {
+    expect(tileCenter(manifest, { level: 2, x: 0, y: 0 })).toEqual([-75, -75]);
+  });
+
+  it('L1-Tile {1,1,0} liegt im Zentrum der zweiten Halb-Zelle entlang x (cell=100)', () => {
+    expect(tileCenter(manifest, { level: 1, x: 1, y: 0 })).toEqual([50, -50]);
+  });
+});
 
 describe('desiredLevel', () => {
   it('L2 nur im Nahring, L1 im Mittelring, L0 immer', () => {
@@ -54,5 +70,19 @@ describe('planStep', () => {
     expect(p.load.map((m) => m.cx)).toEqual([100, 200]);
     expect(p.unload).toContain('L2/9000_0');
     expect(p.unload).not.toContain('L0/0_0');
+  });
+
+  it('LRU-Kappe greift auch INNERHALB des Hysterese-Bands (kein Hysterese-Unload maskiert die Eviction)', () => {
+    // dist(850,0) = 850: > r2=800 (nicht desired) aber <= r2*1.1=880
+    // (kein Hysterese-Unload). Ohne LRU-Kappe bliebe das Tile also live —
+    // dieser Test beweist, dass die LRU-Schleife selbst greift, nicht die
+    // Hysterese-Logik (die im bestehenden Test bereits das Entladen erledigt).
+    const cfg = { ...DEFAULT_RINGS, maxLive: 2 };
+    const s = fresh();
+    s.live.set('L2/850_0', { lastNear: 1 }); // live, im Hysterese-Band, alt
+    const all = [t(2, 100, 0), t(2, 200, 0), t(2, 850, 0)];
+    const p = planStep(s, 0, 0, all, cfg);
+    expect(p.load.map((m) => m.cx)).toEqual([100, 200]);
+    expect(p.unload).toContain('L2/850_0');
   });
 });
