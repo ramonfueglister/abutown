@@ -114,6 +114,7 @@ export class TileStreamer {
   private readonly queue: TileMeta[] = [];
   private readonly queuedKeys = new Set<TileKey>();
   private readonly failedSet = new Set<TileKey>();
+  private readonly retryAttempt = new Map<TileKey, number>();
   private lastCam: [number, number] | null = null;
 
   constructor(opts: TileStreamerOptions) {
@@ -132,6 +133,14 @@ export class TileStreamer {
 
   get failed(): ReadonlySet<TileKey> {
     return this.failedSet;
+  }
+
+  /** Test-Sonde: FIFO-Reihenfolge der aktuell gequeuten (noch nicht gestarteten)
+   * Tile-Keys. Kein Produktionscode liest dies — dient ausschliesslich dazu, den
+   * Queue-Vertrag (Retry via unshift(), kein direkter startFetch()-Bypass) von
+   * aussen zu verifizieren. */
+  get queuedOrder(): readonly TileKey[] {
+    return this.queue.map((m) => m.key);
   }
 
   update(camX: number, camZ: number): void {
@@ -159,7 +168,9 @@ export class TileStreamer {
     while (this.inflight.size < MAX_PARALLEL_FETCHES && this.queue.length > 0) {
       const meta = this.queue.shift()!;
       this.queuedKeys.delete(meta.key);
-      this.startFetch(meta, 1);
+      const attempt = this.retryAttempt.get(meta.key) ?? 1;
+      this.retryAttempt.delete(meta.key);
+      this.startFetch(meta, attempt);
     }
   }
 
@@ -189,7 +200,13 @@ export class TileStreamer {
   private onFetchRejected(meta: TileMeta, attempt: number, err: unknown): void {
     this.inflight.delete(meta.key);
     if (attempt < MAX_ATTEMPTS) {
-      this.startFetch(meta, attempt + 1);
+      // Retry läuft über die normale Queue/pump()-Fairness statt die 4-Slot-
+      // Kappe per direktem startFetch()-Aufruf zu umgehen — sonst verhungern
+      // entferntere, bereits gequeute Tiles hinter einem flackernden Tile.
+      this.retryAttempt.set(meta.key, attempt + 1);
+      this.queue.unshift(meta);
+      this.queuedKeys.add(meta.key);
+      this.pump();
     } else {
       this.failedSet.add(meta.key);
       this.onErrorCb?.(meta, err);
