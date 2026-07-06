@@ -27,7 +27,9 @@ export const SIM_DT = 0.1;
  * are needed to resolve the per-EDGE FlowFrame channel (see the flow layer):
  * FlowState is keyed by edge id, but all client geometry is keyed by lane id,
  * and the two are INDEPENDENT 0-based id spaces (18340 edges vs 18957 lanes),
- * so an edge id must be mapped through `lane.edge` to reach geometry. */
+ * so an edge id must be mapped through `lane.edge` to reach geometry. `edge`
+ * also lets the client classify a lane change as a parallel (same-edge) shift
+ * vs a junction hop (different edge). */
 export interface RawLane {
   id: number;
   edge: number;
@@ -52,15 +54,39 @@ export interface TrafficNetGeom {
    * count across all its lanes) is acceptable at far-LOD distances, where the
    * per-lane offset within an edge is sub-pixel. */
   edgeToLane: Map<number, number>;
+  /** lane id -> parent edge id (for parallel-vs-junction lane-change classification). */
+  edgeOf: Map<number, number>;
 }
 
 /** A dead-reckoned vehicle's last-known kinematic state (units already decoded
- * from the wire: s in metres, v in m/s, tickAt in sim ticks). */
+ * from the wire: s in metres, v in m/s, tickAt in sim ticks). `blend`, when
+ * present, is a transient client-only motion-continuity state (see
+ * laneBlend.ts) that smooths a lane change or junction hop over a fraction of a
+ * second; it never affects the authoritative s/lane/v/tickAt the wire sets. */
 export interface VehKinematics {
   lane: number;
   s: number;
   v: number;
   tickAt: number;
+  blend?: LaneBlend;
+}
+
+/** Transient client-side blend state for lane-change / junction-hop smoothing.
+ * `kind` selects the interpolation; `startTick`/`durTicks` bound it in sim
+ * ticks. Fields are populated by `beginLaneChange` (laneBlend.ts). */
+export interface LaneBlend {
+  kind: 'lateral' | 'sweep';
+  startTick: number;
+  durTicks: number;
+  /** lateral: the pre-change kinematics on the OLD lane, dead-reckoned in
+   * parallel so both endpoints keep moving forward during the blend. */
+  prev?: { lane: number; s: number; v: number; tickAt: number };
+  /** sweep: quadratic-bezier control points [x,z] and end tangents for yaw. */
+  p0?: [number, number];
+  ctrl?: [number, number];
+  p1?: [number, number];
+  t0?: [number, number];
+  t1?: [number, number];
 }
 
 /** World pose: ground position (x, z) and yaw about +y. */
@@ -79,8 +105,10 @@ export function buildLaneNet(lanes: RawLane[]): TrafficNetGeom {
   // edge -> lowest lane `index` seen so far, so edgeToLane always resolves to
   // the edge's representative lane (index 0) regardless of doc order.
   const edgeBestIndex = new Map<number, number>();
+  const edgeOf = new Map<number, number>();
   for (const lane of lanes) {
     pts.set(lane.id, lane.pts);
+    if (lane.edge !== undefined) edgeOf.set(lane.id, lane.edge);
     const acc: number[] = [0];
     let running = 0;
     for (let i = 1; i < lane.pts.length; i++) {
@@ -101,7 +129,7 @@ export function buildLaneNet(lanes: RawLane[]): TrafficNetGeom {
       edgeToLane.set(lane.edge, lane.id);
     }
   }
-  return { pts, arcLut, edgeToLane };
+  return { pts, arcLut, edgeToLane, edgeOf };
 }
 
 /** Position + unit tangent at arc length `s` on `lane`. `s` is clamped to

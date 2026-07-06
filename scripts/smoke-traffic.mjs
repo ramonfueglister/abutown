@@ -58,8 +58,8 @@ import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { startTrafficStack, HOST } from './lib/traffic-stack.mjs';
 
-const TRAFFIC_PORT = 8790;
-const VITE_PORT = 5187;
+const TRAFFIC_PORT = Number(process.env.SMOKE_TRAFFIC_PORT ?? 8790);
+const VITE_PORT = Number(process.env.SMOKE_VITE_PORT ?? 5187);
 const SEED = 42;
 
 // ── trafficnet geometry: lane → edge → (from,to) node centreline ────────────

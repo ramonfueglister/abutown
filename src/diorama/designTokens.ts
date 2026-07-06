@@ -379,7 +379,19 @@ export const kswCity = {
   // roads v2: per-class colors + heights (carriage/footway/rail on distinct
   // levels so junctions never z-fight; footways read thinner+lighter)
   roadColors: { carriage: 0xcfc4b2, footway: 0xe5dcc8, rail: 0x8d949c, railBed: 0xb9b2a4 },
-  roadYs: { carriage: 0.04, footway: 0.045, railBed: 0.035, rail: 0.05 },
+  // Deliberate lift LADDER (metres above the draped DEM surface), bottom→top:
+  //   railBed 0.06  <  carriage 0.10  ≈  footway 0.11  <  rail 0.16
+  // Rationale: post-#119 the ribbons drape onto per-vertex DEM samples. Even
+  // after subdividing each segment to terrain resolution (roads.ts SUBDIVIDE_M)
+  // two layers that drape onto their OWN centrelines (rail vs carriage at a
+  // crossing) sample the DEM at slightly different points, so the old 10 mm
+  // rail-over-carriage gap was smaller than that inter-sample noise → z-fight
+  // flicker. This ladder opens the gaps to ≥40 mm (carriage→rail = 60 mm) so
+  // the height alone resolves the ordering even with sample jitter; the ribbon
+  // materials additionally carry polygonOffset (roads.ts) as belt-and-braces.
+  // The base carriage lift is 0.10 m (was 0.04) so a convex terrain bump
+  // between subdivided vertices can no longer poke up through the ribbon.
+  roadYs: { carriage: 0.1, footway: 0.11, railBed: 0.06, rail: 0.16 },
 } as const;
 
 // S3c Dollhouse-Cutaway (T18): additive token block. `cutHeight` = the y (m)

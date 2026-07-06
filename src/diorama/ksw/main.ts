@@ -68,6 +68,7 @@ import { TrafficClient, DEFAULT_TRAFFIC_WS, buildDefaultCellGrid } from '../traf
 import { createCarLayer } from '../traffic/carLayer';
 import { createFlowLayer } from '../traffic/flowLayer';
 import { poseAt } from '../traffic/deadReckon';
+import { poseAtBlended } from '../traffic/laneBlend';
 import { createLiveClient, DEFAULT_LIVE_WS, type LiveVitals } from '../live/liveClient';
 import { createCitizensLayer } from '../live/citizensLayer';
 import { createVitalsHud } from '../live/vitalsHud';
@@ -713,7 +714,7 @@ async function boot(): Promise<void> {
           sample: () => {
             const out: Array<{ id: number; lane: number; x: number; z: number; yaw: number }> = [];
             for (const [id, veh] of client.vehicles) {
-              const pose = poseAt(client.net, veh, client.serverTick);
+              const pose = poseAtBlended(client.net, veh, client.serverTick);
               out.push({ id, lane: veh.lane, x: pose.x, z: pose.z, yaw: pose.yaw });
             }
             return out;

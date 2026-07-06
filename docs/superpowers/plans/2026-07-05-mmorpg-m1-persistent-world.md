@@ -652,8 +652,8 @@ export function createLiveClient(opts: {
 
 - [x] **Step 1:** `progress.md`-Eintrag (Konvention: neue Einträge oben ab Zeile 19). `deploy/README.md` aktualisieren: sim-server ersetzt traffic-Binary auf Fly; Secrets `DATABASE_URL` (Supabase :5432!), `SUPABASE_URL`, `CORS_ALLOWED_ORIGINS`, `ABUTOWN_WORLD_ID`; Vercel braucht neu `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_LIVE_WS`, `VITE_TRAFFIC_WS`.
 - [x] **Step 2:** Volles lokales Gate (Global Constraints) + `scripts/smoke-world.mjs` + `scripts/smoke-traffic.mjs` (Regressionsschutz) + `scripts/smoke-cardhand.mjs`.
-- [ ] **Step 3:** PR gegen `main` öffnen (Titel „MMORPG M1: persistenter Welt-Server"), CI ABWARTEN bis alle Checks PASS (Memory-Regel: nie auf UNSTABLE mergen), mergen, Branch aufräumen.
-- [ ] **Step 4:** Deploy NICHT automatisch — dem User melden: bereit für `fly deploy` + Vercel-Env-Setup (Netzwerk-Fragilität + Single-Writer-Kollisionsgefahr sind dokumentierte Betriebsrisiken; User entscheidet Zeitpunkt).
+- [x] **Step 3:** PR gegen `main` öffnen (Titel „MMORPG M1: persistenter Welt-Server"), CI ABWARTEN bis alle Checks PASS (Memory-Regel: nie auf UNSTABLE mergen), mergen, Branch aufräumen.
+- [x] **Step 4:** Deploy NICHT automatisch — dem User melden: bereit für `fly deploy` + Vercel-Env-Setup (Netzwerk-Fragilität + Single-Writer-Kollisionsgefahr sind dokumentierte Betriebsrisiken; User entscheidet Zeitpunkt).
 
 ---
 

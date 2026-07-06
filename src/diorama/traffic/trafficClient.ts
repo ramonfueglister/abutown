@@ -43,6 +43,7 @@ import {
 import trafficNetJson from '../../../data/winterthur/trafficnet.json';
 import { buildLaneNet, type RawLane, type TrafficNetGeom, type VehKinematics } from './deadReckon';
 import { CellGrid } from './cellGrid';
+import { beginLaneChange } from './laneBlend';
 
 // The AOI cell grid lives in cellGrid.ts (shared with the live/citizens
 // channel — Task 14 extraction); re-exported here so existing importers
@@ -191,12 +192,19 @@ export class TrafficClientCore {
   }
 
   private upsert(v: WireVehicle, tick: number): void {
-    this.vehicles.set(v.id, {
+    const next: VehKinematics = {
       lane: v.lane,
       s: v.sQ / 10, // decimetres -> metres
       v: v.vQ / 4, // 0.25 m/s units -> m/s
       tickAt: tick,
-    });
+    };
+    // Motion-continuity blend (FIX-C2): when a KNOWN vehicle (same wire id, so
+    // NOT a recycled-slot generation change) is re-seated onto a different
+    // lane, attach a lateral (parallel) or bezier-sweep (junction) blend so the
+    // rendered pose eases across instead of teleporting. A brand-new id has no
+    // prior entry → snaps, which is the correct teleport-heal behaviour.
+    const prev = this.vehicles.get(v.id);
+    this.vehicles.set(v.id, prev ? beginLaneChange(this.net, next, prev, tick) : next);
   }
 
   /** One-time dev sanity check (CLAUDE.md Phase-7a: coordinate mismatch is this

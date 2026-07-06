@@ -7,6 +7,7 @@ import * as THREE from 'three/webgpu';
 import { kswCity } from '../../designTokens';
 import { clayMat } from '../props';
 import type { RoadPath } from './geoData';
+import { correctRoadWidths } from '../../traffic/roadWidths';
 
 /** Optional per-vertex ground draping. `groundYAt(x,z)` returns the visible
  * (shifted) terrain height at a world point; the ribbon vertex y becomes that
@@ -14,6 +15,57 @@ import type { RoadPath } from './geoData';
  * reproducing the pre-#119 single-plate look (still used near the anchor, where
  * the drape is ~0, and by any caller without a world). */
 export type GroundYAt = (x: number, z: number) => number;
+
+// Terrain-follow subdivision (Fix 1). The DEM/terrain mesh tessellates at
+// ~1.25 m (finest pyramid level) while raw road polyline segments span up to
+// ~200 m. A straight 3-D chord between two draped vertices dives under any
+// convex terrain bump between them → the road is buried. We resample each
+// segment to ≤ SUBDIVIDE_M so every ribbon vertex sits on the DEM and the
+// ribbon follows the surface within one terrain-cell error. ADAPTIVE_DEV keeps
+// the vertex/tri count sane: a subdivided point is only inserted where the
+// terrain deviates from the segment's straight chord by more than this (so flat
+// stretches stay coarse; only humps get densified).
+const SUBDIVIDE_M = 2.5;
+const ADAPTIVE_DEV = 0.05; // m of chord-vs-terrain error that triggers a split
+
+/** Resample a centreline so no draped segment hides the terrain under its
+ * chord. Recursively bisects a segment while the terrain at its midpoint
+ * departs from the straight chord midpoint by > ADAPTIVE_DEV, down to a
+ * SUBDIVIDE_M floor. Returns the original pts untouched when no sampler is
+ * given (flat pre-#119 look, and the unit-tested geometry). */
+export function subdivideForDrape(pts: number[][], groundYAt: GroundYAt): number[][] {
+  if (pts.length < 2) return pts;
+  const out: number[][] = [pts[0]];
+  const emit = (
+    ax: number,
+    az: number,
+    ay: number,
+    bx: number,
+    bz: number,
+    by: number,
+    depth: number,
+  ): void => {
+    const len = Math.hypot(bx - ax, bz - az);
+    const mx = (ax + bx) / 2;
+    const mz = (az + bz) / 2;
+    const chordMidY = (ay + by) / 2;
+    const terrainMidY = groundYAt(mx, mz);
+    const needsSplit =
+      depth < 12 && len > SUBDIVIDE_M && Math.abs(terrainMidY - chordMidY) > ADAPTIVE_DEV;
+    if (needsSplit) {
+      emit(ax, az, ay, mx, mz, terrainMidY, depth + 1);
+      emit(mx, mz, terrainMidY, bx, bz, by, depth + 1);
+    } else {
+      out.push([bx, bz]);
+    }
+  };
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1];
+    const [bx, bz] = pts[i];
+    emit(ax, az, groundYAt(ax, az), bx, bz, groundYAt(bx, bz), 0);
+  }
+  return out;
+}
 
 export function miterStrip(
   pts: number[][],
@@ -24,6 +76,10 @@ export function miterStrip(
   const positions: number[] = [];
   const indices: number[] = [];
   const half = width / 2;
+  // Fix 1: when draping, resample the centreline to terrain resolution so the
+  // ribbon follows the DEM instead of chording under convex bumps. No sampler
+  // → untouched pts (flat ribbon, matches the pre-#119 look and the unit tests).
+  if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
   const n = pts.length;
   if (n < 2) return { positions, indices };
   for (let i = 0; i < n; i++) {
@@ -64,18 +120,38 @@ export function miterStrip(
   return { positions, indices };
 }
 
+/** Dedicated ribbon material = the shared clay look PLUS a depth-bias
+ * (polygonOffset). Fix 2 belt-and-braces: the layer height ladder
+ * (designTokens.roadYs) already separates the coplanar ribbons, but at a
+ * rail/road crossing the two layers drape onto independent DEM samples, so we
+ * also bias depth per layer (more-negative `units` = wins the depth test /
+ * drawn "closer"). Ladder units bottom→top: railBed 0 < carriage −1 <
+ * footway −1 < rail −3 so rails always resolve on top of the carriage. We
+ * clone rather than mutate `clayMat` because that cache is shared with props. */
+function ribbonMat(color: number, polygonOffsetUnits: number): THREE.MeshPhysicalMaterial {
+  const m = clayMat(color).clone();
+  if (polygonOffsetUnits !== 0) {
+    m.polygonOffset = true;
+    m.polygonOffsetFactor = -1;
+    m.polygonOffsetUnits = polygonOffsetUnits;
+  }
+  return m;
+}
+
 function stripsMesh(
   name: string,
   paths: RoadPath[],
-  widthOf: (p: RoadPath) => number,
+  widthOf: (p: RoadPath, i: number) => number,
   color: number,
   y: number,
+  polygonOffsetUnits: number,
   groundYAt?: GroundYAt,
 ): THREE.Mesh {
   const positions: number[] = [];
   const indices: number[] = [];
-  for (const p of paths) {
-    const s = miterStrip(p.pts, widthOf(p), y, groundYAt);
+  for (let idx = 0; idx < paths.length; idx++) {
+    const p = paths[idx];
+    const s = miterStrip(p.pts, widthOf(p, idx), y, groundYAt);
     const base = positions.length / 3;
     positions.push(...s.positions);
     for (const i of s.indices) indices.push(base + i);
@@ -84,7 +160,7 @@ function stripsMesh(
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geo.setIndex(positions.length / 3 > 65535 ? new THREE.BufferAttribute(new Uint32Array(indices), 1) : new THREE.BufferAttribute(new Uint16Array(indices), 1));
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, clayMat(color));
+  const mesh = new THREE.Mesh(geo, ribbonMat(color, polygonOffsetUnits));
   mesh.name = name;
   mesh.receiveShadow = true;
   mesh.castShadow = false;
@@ -98,9 +174,18 @@ export function buildRoads(roads: RoadPath[], rails: RoadPath[], groundYAt?: Gro
   group.name = 'cityRoads';
   const carriage = roads.filter((r) => !FOOT.has(r.class));
   const foot = roads.filter((r) => FOOT.has(r.class));
-  group.add(stripsMesh('carriageRibbons', carriage, (p) => p.width, kswCity.roadColors.carriage, kswCity.roadYs.carriage, groundYAt));
-  group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway, groundYAt));
-  group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed, groundYAt));
-  group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail, groundYAt));
+  // FIX D1: floor each carriage ribbon's render width to the traffic lane pairs
+  // it carries (lanes_both_directions × 3.0 m + 0.8 m shoulders) so a two-way
+  // 3.0 m×2 lane pair is fully covered by the drawn tarmac and cars no longer
+  // overhang onto the grass. Deterministic geometric match against the baked
+  // trafficnet edges; roads with no nearby traffic edge keep their OSM width.
+  const carriageWidths = correctRoadWidths(carriage);
+  const carriageWidthOf = (p: RoadPath, i: number): number => carriageWidths[i] ?? p.width;
+  // polygonOffset ladder (units) matches the roadYs height ladder bottom→top:
+  // railBed 0 < carriage/footway −1 < rail −3 (more negative = drawn on top).
+  group.add(stripsMesh('carriageRibbons', carriage, carriageWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, -1, groundYAt));
+  group.add(stripsMesh('footwayRibbons', foot, (p) => p.width, kswCity.roadColors.footway, kswCity.roadYs.footway, -1, groundYAt));
+  group.add(stripsMesh('railBeds', rails, (p) => p.width + 2.2, kswCity.roadColors.railBed, kswCity.roadYs.railBed, 0, groundYAt));
+  group.add(stripsMesh('railRibbons', rails, (p) => p.width, kswCity.roadColors.rail, kswCity.roadYs.rail, -3, groundYAt));
   return group;
 }
