@@ -65,6 +65,7 @@ export function buildBuildingInterior(bp: BuildingPlan, frame: { angle: number }
   group.rotation.y = frame.angle;
 
   const storeyMats: THREE.Material[][] = [];
+  const storeyGroups: THREE.Group[] = [];
   bp.storeys.forEach((plan, level) => {
     const storey = buildInterior(plan);
     storey.name = `storey-${level}`;
@@ -88,12 +89,13 @@ export function buildBuildingInterior(bp: BuildingPlan, frame: { angle: number }
       mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
     });
     storeyMats.push([...clones.values()]);
+    storeyGroups.push(storey);
     group.add(storey);
   });
 
   const setStoreyFades = (fades: number[]): void => {
     bp.storeys.forEach((_, level) => {
-      const storey = group.getObjectByName(`storey-${level}`);
+      const storey = storeyGroups[level];
       if (!storey) return;
       const fade = fades[level] ?? 0;
       storey.visible = fade > 0.02;
