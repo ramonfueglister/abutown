@@ -32,11 +32,11 @@ const tileSpecs: TreeSpec[] = Array.from({ length: 25 }, (_, i) => ({
 
 const KEY = 'L2/12_7';
 
-function makeLayer(): TreeLayer {
+function makeLayer(atlas: THREE.Texture = new THREE.Texture()): TreeLayer {
   const layer = buildTreeLayer(bootSpecs);
   // Per-tile impostor meshes share the boot-baked atlas texture; under vitest
   // (no GPU) a bare Texture object suffices — mesh construction is pure JS.
-  layer.setImpostorContext(new THREE.Texture(), allArchetypes().length);
+  layer.setImpostorContext(atlas, allArchetypes().length);
   return layer;
 }
 
@@ -110,6 +110,31 @@ describe('TreeLayer tile pools', () => {
     // …while the boot stand still compacts as before.
     layer.compactNear(0, 0);
     expect(fullCount(layer)).toBe(bootSpecs.length);
+  });
+
+  it('#142 removeTileTrees disposed das per-Tile-Material, aber NIE die geteilte Atlas-Textur', () => {
+    const atlas = new THREE.Texture();
+    const atlasDispose = vi.spyOn(atlas, 'dispose');
+    const layer = makeLayer(atlas);
+
+    layer.addTileTrees(KEY, tileSpecs);
+    const imp = tileImpostor(layer, KEY)!;
+    const matDispose = vi.spyOn(imp.material as THREE.Material, 'dispose');
+
+    layer.removeTileTrees(KEY);
+    expect(matDispose).toHaveBeenCalledTimes(1);
+    expect(atlasDispose).not.toHaveBeenCalled();
+
+    // Der geteilte Atlas lebt weiter: ein ANDERES Tile baut danach noch ein
+    // funktionierendes Impostor-Feld auf derselben Textur.
+    const OTHER = 'L2/5_9';
+    layer.addTileTrees(OTHER, tileSpecs);
+    const other = tileImpostor(layer, OTHER)!;
+    expect(other.count).toBe(tileSpecs.length);
+    expect(atlasDispose).not.toHaveBeenCalled();
+    // …und dessen Remove disposed wieder nur SEIN Material, nicht den Atlas.
+    layer.removeTileTrees(OTHER);
+    expect(atlasDispose).not.toHaveBeenCalled();
   });
 
   it('throws on duplicate add for the same key', () => {
