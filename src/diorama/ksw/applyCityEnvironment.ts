@@ -105,13 +105,15 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   // the 150 m LOD handoff (see treeImpostors.ts). Follow the same sun/hemi
   // state that just fed the real lights, weighted so midday-clear settles
   // near white (matching the unlit bake, i.e. today's look is unchanged at
-  // the reference condition). Startup weighting picked by eye — sun 0.6 +
-  // sky 0.4 — Task 6's screenshot pass is the intended place to retune this.
-  const sunW = 0.6 * Math.min(1, t.sun.intensity);
+  // the reference condition). Retuned in the Task 6 screenshot pass
+  // (2026-07-06): sun 0.7 + sky 0.45 — at the previous 0.6/0.4 the far field
+  // read a touch darker than the sun-lit full trees at the 150 m handoff
+  // (scratch/tree-polish/handoff-fix8.png vs -fix9.png).
+  const sunW = 0.7 * Math.min(1, t.sun.intensity);
   impostorLightU.value.setRGB(
-    t.sun.color.r * sunW + t.hemi.color.r * 0.4,
-    t.sun.color.g * sunW + t.hemi.color.g * 0.4,
-    t.sun.color.b * sunW + t.hemi.color.b * 0.4,
+    t.sun.color.r * sunW + t.hemi.color.r * 0.45,
+    t.sun.color.g * sunW + t.hemi.color.g * 0.45,
+    t.sun.color.b * sunW + t.hemi.color.b * 0.45,
   );
 
   // Clouds

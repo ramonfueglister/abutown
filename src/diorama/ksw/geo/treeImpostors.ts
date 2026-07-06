@@ -17,7 +17,7 @@
 //    (aCenterArch/aSizeTint) already carry the full transform, so
 //    instanceMatrix has nothing left to contribute — same identity-matrix
 //    pattern as agentMeshes.ts): `aCenter` = world
-//    (x,0,z), `aSize` = world (2·r, h·squash). Those are exactly the full
+//    (x, groundY, z), `aSize` = world (2·r, h·squash). Those are exactly the full
 //    mesh's world extents under treeLayer's compose (geometry reach
 //    ±crownRadius × y∈[0,1], scale (r/crownRadius, h·squash)), and the bake
 //    frames precisely that envelope edge-to-edge — silhouettes line up across
@@ -40,6 +40,7 @@ import {
   floor,
   instancedBufferAttribute,
   mix,
+  positionGeometry,
   positionLocal,
   select,
   sin,
@@ -171,16 +172,16 @@ export async function bakeImpostorAtlas(
     magFilter: THREE.LinearFilter,
   });
 
-  // Save renderer state we touch.
+  // Save renderer state we touch. Viewport/scissor for RENDER-TARGET renders
+  // live on the RT OBJECT itself (rt.viewport/rt.scissor/rt.scissorTest) in
+  // this three build — renderer.setViewport/setScissor only steer the CANVAS
+  // target and are IGNORED for RT renders (2026-07-06 giant-tree-atlas root
+  // cause: every cell render covered the full atlas and overwrote the rest).
   const prevRT = renderer.getRenderTarget();
   const prevClear = new THREE.Color();
   renderer.getClearColor(prevClear);
   const prevClearAlpha = renderer.getClearAlpha();
-  const prevScissorTest = renderer.getScissorTest();
-  const prevViewport = new THREE.Vector4();
-  renderer.getViewport(prevViewport);
-  const prevScissor = new THREE.Vector4();
-  renderer.getScissor(prevScissor);
+  const prevAutoClear = renderer.autoClear;
 
   const scene = new THREE.Scene();
   const cam = new THREE.OrthographicCamera();
@@ -189,11 +190,19 @@ export async function bakeImpostorAtlas(
 
   renderer.setRenderTarget(rt);
   renderer.setClearColor(0x000000, 0); // transparent — crown alpha carves the silhouette
-  renderer.setScissorTest(true);
+  rt.scissorTest = true;
   // Clear the whole target once (transparent).
-  renderer.setViewport(0, 0, layout.width, layout.height);
-  renderer.setScissor(0, 0, layout.width, layout.height);
+  rt.viewport.set(0, 0, layout.width, layout.height);
+  rt.scissor.set(0, 0, layout.width, layout.height);
   renderer.clear(true, true, true);
+  // CRITICAL (2026-07-06 empty-atlas root cause): with autoClear on, the
+  // WebGPU backend clears the ENTIRE attachment on every render — the clear
+  // is a render-pass loadOp and ignores the scissor rect. Each per-cell
+  // render below then wipes all previously baked cells, leaving the atlas
+  // empty except for the very last cell (=> every impostor sampled a fully
+  // transparent cell and alphaTest discarded the whole far field). Bake with
+  // autoClear OFF; the explicit clear above provided the blank canvas.
+  renderer.autoClear = false;
 
   const target = new THREE.Vector3(0, 0.5, 0); // unit tree spans y 0..1
   const blockPx = OCT_GRID * CELL_PX;
@@ -238,8 +247,8 @@ export async function bakeImpostorAtlas(
         const cellYpxTop = blockRow * blockPx + iy * CELL_PX;
         // WebGPU RT is bottom-up: flip Y so layout row 0 lands at the top.
         const vpY = layout.height - (cellYpxTop + CELL_PX);
-        renderer.setViewport(cellXpx, vpY, CELL_PX, CELL_PX);
-        renderer.setScissor(cellXpx, vpY, CELL_PX, CELL_PX);
+        rt.viewport.set(cellXpx, vpY, CELL_PX, CELL_PX);
+        rt.scissor.set(cellXpx, vpY, CELL_PX, CELL_PX);
         // eslint-disable-next-line no-await-in-loop
         await renderer.renderAsync(scene, cam);
       }
@@ -247,12 +256,10 @@ export async function bakeImpostorAtlas(
     (mesh.material as THREE.Material).dispose();
   }
 
-  // Restore renderer state.
+  // Restore renderer state (viewport/scissor were only touched on the rt).
+  renderer.autoClear = prevAutoClear;
   renderer.setRenderTarget(prevRT);
   renderer.setClearColor(prevClear, prevClearAlpha);
-  renderer.setScissorTest(prevScissorTest);
-  renderer.setViewport(prevViewport);
-  renderer.setScissor(prevScissor);
 
   return rt.texture;
 }
@@ -302,10 +309,13 @@ export function buildImpostorMesh(
   quad.translate(0, 0.5, 0); // y 0..1
 
   // Per-instance attributes, packed into two vec4s.
-  //   aCenterArch = (x, 0, z, archIndex)
-  //   aSizeTint   = (width, height, packedTint, unused)
-  // packedTint encodes RGB as three 8-bit channels in one float (0..2^24), a
-  // lossless-enough clay tint (the far field is imperceptibly graded).
+  //   aCenterArch = (x, groundY, z, archIndex)
+  //   aSizeTint   = (width, height, packedTintRatio, unused)
+  // packedTintRatio encodes the per-instance tint RATIO (tint / kind base
+  // colour, 1.0 → 100) as three 8-bit channels in one float (0..2^24). The
+  // atlas already bakes the kind's base colour, so multiplying the raw tint
+  // in would apply the green twice (dark muddy far field — 2026-07-06); the
+  // ratio only carries the per-instance hue/lightness variation.
   const centerArchArr = new Float32Array(cap * 4);
   const sizeTintArr = new Float32Array(cap * 4);
   const centerArchAttr = new THREE.InstancedBufferAttribute(centerArchArr, 4);
@@ -317,17 +327,22 @@ export function buildImpostorMesh(
   const aCenter: Node = aCenterArch.xyz;
   const aArch: Node = aCenterArch.w;
   const aSize: Node = aSizeTint.xy;
-  // unpack packedTint (channel-major, 8 bits each) back to a vec3 in [0,1].
+  // unpack packedTintRatio (channel-major, 8 bits each): byte 100 = ratio 1.0.
   const packed: Node = aSizeTint.z;
   const rByte = floor(packed.div(float(65536)));
   const gByte = floor(packed.div(float(256))).mod(float(256));
   const bByte = packed.mod(float(256));
-  const aTint: Node = vec3(rByte, gByte, bByte).div(float(255));
+  const aTint: Node = vec3(rByte, gByte, bByte).div(float(100));
   const camPos: Node = cameraPosition;
   const posLocal: Node = positionLocal;
-  // Derive quad uv from the unit plane's local position (x∈[−½,½] → [0,1];
-  // y already ∈[0,1] after the translate above).
-  const quadUvN: Node = vec2(posLocal.x.add(float(0.5)), posLocal.y);
+  // Derive quad uv from the unit plane's RAW geometry position (x∈[−½,½] →
+  // [0,1]; y already ∈[0,1] after the translate above). MUST be
+  // positionGeometry, not positionLocal: NodeMaterial assigns the evaluated
+  // positionNode (the WORLD-space billboard position, hundreds of meters)
+  // back into positionLocal before the varyings are written, so a
+  // positionLocal-based uv samples far outside the atlas — every cell read
+  // empty texels and alphaTest discarded the whole far field (2026-07-06).
+  const quadUvN: Node = vec2(positionGeometry.x.add(float(0.5)), positionGeometry.y);
 
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, alphaTest: 0.5 });
   const atlasTex: Node = texture(atlas);
@@ -358,7 +373,11 @@ export function buildImpostorMesh(
   const dist = length2Node(camPos, aCenter);
   const vis = step(float(NEAR_COLLAPSE), dist);
 
-  material.positionNode = vec3(rx.mul(vis).add(aCenter.x), wy.mul(vis), rz.mul(vis).add(aCenter.z));
+  material.positionNode = vec3(
+    rx.mul(vis).add(aCenter.x),
+    wy.mul(vis).add(aCenter.y), // aCenter.y = terrain height (buried-forest fix)
+    rz.mul(vis).add(aCenter.z),
+  );
 
   // ── UV: pick the hemi-oct cell for this view dir, offset into the atlas ──
   // View dir = camera − instance center (normalized), upper hemisphere.
@@ -409,16 +428,19 @@ export function buildImpostorMesh(
   for (let i = 0; i < cap; i++) mesh.setMatrixAt(i, identity);
   for (let i = 0; i < instances.length; i++) {
     const inst = instances[i];
-    // aCenterArch = (x, 0, z, archIndex)
+    // aCenterArch = (x, groundY, z, archIndex)
     centerArchArr[i * 4] = inst.spec.x;
-    centerArchArr[i * 4 + 1] = 0;
+    centerArchArr[i * 4 + 1] = inst.y;
     centerArchArr[i * 4 + 2] = inst.spec.z;
     centerArchArr[i * 4 + 3] = inst.archetype;
-    // aSizeTint = (width, height, packedTint, 0). width = 2·r (half-width = r),
-    // height = h·squash — exactly the full mesh's world extents.
-    const r8 = Math.round(Math.min(1, Math.max(0, inst.tint.r)) * 255);
-    const g8 = Math.round(Math.min(1, Math.max(0, inst.tint.g)) * 255);
-    const b8 = Math.round(Math.min(1, Math.max(0, inst.tint.b)) * 255);
+    // aSizeTint = (width, height, packedTintRatio, 0). width = 2·r (half-width
+    // = r), height = h·squash — exactly the full mesh's world extents. The
+    // tint ratio divides out the kind's base colour (baked into the atlas).
+    const base = inst.spec.kind === 'conifer' ? baseWood : baseGreen;
+    const q = (t: number, b: number) => Math.min(255, Math.max(0, Math.round((t / b) * 100)));
+    const r8 = q(inst.tint.r, base.r);
+    const g8 = q(inst.tint.g, base.g);
+    const b8 = q(inst.tint.b, base.b);
     sizeTintArr[i * 4] = inst.spec.r * 2;
     sizeTintArr[i * 4 + 1] = inst.spec.h * inst.squash;
     sizeTintArr[i * 4 + 2] = r8 * 65536 + g8 * 256 + b8;

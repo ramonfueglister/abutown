@@ -648,7 +648,7 @@ async function boot(): Promise<void> {
   // impostor field). Same excludeRect as nature so the hero plate keeps its own
   // authored trees. The impostor mesh is added after the renderer bakes its
   // atlas (below); full trees + compaction are ready immediately.
-  const treeLayer = buildTreeLayer(cityNature.trees, { excludeRect: heroRect });
+  const treeLayer = buildTreeLayer(cityNature.trees, { excludeRect: heroRect, groundYAt });
   cityRoot.add(treeLayer.group);
   // Bake the octahedral impostor atlas now that the renderer exists (it
   // restores renderer state), then attach the far-field impostor mesh.
