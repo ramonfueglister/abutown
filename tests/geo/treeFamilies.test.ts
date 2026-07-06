@@ -82,3 +82,12 @@ describe('treeSpec', () => {
     }
   });
 });
+
+describe('tiny-crown guard', () => {
+  it('ein OSM diameter_crown=0.5 erzeugt kein trunk-only-Skelett (r floored auf 30% der Familien-Erwartung)', () => {
+    const s = treeSpec({ diameter_crown: '0.5' }, 12.5, -44.25, { green: 'park' });
+    // Roher Tag-Wert wäre r=0.25; der Guard hebt auf mindestens 0.3 × sized.r.
+    expect(s.r).toBeGreaterThan(0.25);
+    expect(s.r).toBeGreaterThanOrEqual(0.3 * 1); // sized.r ist je Familie > 1 (siehe sizeFor-Bounds-Test)
+  });
+});

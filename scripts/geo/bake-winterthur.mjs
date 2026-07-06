@@ -4,7 +4,7 @@
 // clipped to the bbox, then hands everything to the pure transform libs.
 // Hard-fails on empty extractions or a bloated output — no silent skips.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { ANCHOR, BBOX, makeProjector } from './lib/project.mjs';
 import { transformBuildings, transformNature, transformRoads } from './lib/transform.mjs';
 import { doorForBuilding } from './lib/style.mjs';
@@ -12,7 +12,10 @@ import { doorForBuilding } from './lib/style.mjs';
 const SCRATCH = 'scratch/geo';
 const GDB = `${SCRATCH}/swissBUILDINGS3D_3-0_1072-14.gdb`;
 const OUT = 'data/winterthur';
-const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+// Raised 8 -> 16 MB 2026-07-06: the legitimate committed payload grew to
+// ~11.2 MB with the Gemeinde-wide roads.json (#133) and the family-attributed
+// nature.json (#136); 8 MB predates both. Still a guard against runaway blobs.
+const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 
 if (!existsSync(GDB)) throw new Error('GDB tile missing — run `npm run geo:fetch` first');
 
@@ -201,13 +204,20 @@ const meta = {
   sourceTile: 'swissbuildings3d_3_0_2019_1072-14',
 };
 
+// Gate BEFORE writing: a busted budget must not leave half-updated committed
+// data on disk (previously the throw came after writeFileSync, so every
+// over-budget run still rewrote all four files).
+const payloads = {
+  meta: JSON.stringify(meta, null, 1),
+  buildings: JSON.stringify({ buildings: buildingsOut }),
+  roads: JSON.stringify({ roads, rails }),
+  nature: JSON.stringify(nature),
+};
+const total = Object.values(payloads).reduce((n, s) => n + Buffer.byteLength(s), 0);
+if (total > MAX_TOTAL_BYTES) {
+  throw new Error(`bake: output ${(total / 1e6).toFixed(1)} MB > ${(MAX_TOTAL_BYTES / 1e6).toFixed(0)} MB budget — nothing written`);
+}
 mkdirSync(OUT, { recursive: true });
-writeFileSync(`${OUT}/meta.json`, JSON.stringify(meta, null, 1));
-writeFileSync(`${OUT}/buildings.json`, JSON.stringify({ buildings: buildingsOut }));
-writeFileSync(`${OUT}/roads.json`, JSON.stringify({ roads, rails }));
-writeFileSync(`${OUT}/nature.json`, JSON.stringify(nature));
-
-const total = ['meta', 'buildings', 'roads', 'nature'].reduce((n, f) => n + statSync(`${OUT}/${f}.json`).size, 0);
-if (total > MAX_TOTAL_BYTES) throw new Error(`bake: output ${(total / 1e6).toFixed(1)} MB > 8 MB budget`);
+for (const [name, payload] of Object.entries(payloads)) writeFileSync(`${OUT}/${name}.json`, payload);
 console.log(`bake OK: ${buildingsOut.length} buildings (${ksw.length} ksw, ${named.length} named), ` +
   `${roads.length} roads, ${rails.length} rails, ${triangles} tris, ${(total / 1e6).toFixed(1)} MB`);

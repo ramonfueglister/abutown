@@ -7,6 +7,7 @@ import buildingsJson from '../../../../data/winterthur/buildings.json';
 import metaJson from '../../../../data/winterthur/meta.json';
 import natureJson from '../../../../data/winterthur/nature.json';
 import roadsJson from '../../../../data/winterthur/roads.json';
+import type { TreeFamily } from './treeArchetypes';
 
 export type BakedMesh = { pos: number[]; idx: number[] };
 // Wall mesh carries a facade-UV attribute (Task 13): fuv = 2 dm-ints per vertex
@@ -44,7 +45,9 @@ export type CityMeta = {
 export type GreenArea = { kind: string; ring: number[][] };
 export type WaterArea = { ring: number[][] };
 export type RiverPath = { width: number; pts: number[][] };
-export type TreeFamily = 'spreading' | 'oval' | 'tall' | 'conic' | 'slender';
+// Canonical family union lives beside the archetype tables; re-exported here
+// so data-shape consumers keep importing everything tree-spec from geoData.
+export type { TreeFamily } from './treeArchetypes';
 export type TreeSpec = { x: number; z: number; h: number; r: number; kind: 'broad' | 'conifer'; family?: TreeFamily };
 export type CityNature = { greens: GreenArea[]; waterAreas: WaterArea[]; rivers: RiverPath[]; trees: TreeSpec[] };
 
