@@ -24,8 +24,43 @@
 //  - conflictsWith: turns whose straight paths through the node cross.
 //  - yieldsTo: minor→major, entry→circulating, left-turner→oncoming straight.
 
+import { roadStyle } from './join.mjs';
+import { roadWidthFromTags } from './style.mjs';
+
 export const LANE_WIDTH = 3.0;
 export const CELL_SIZE = 128;
+
+/** Narrowest lane the kernel will bake: below this, opposing cars must share
+ * tarmac anyway (real Swiss service alleys), and a smaller offset would put
+ * the lane pair inside each other's body width. */
+export const MIN_LANE_WIDTH = 1.8;
+
+/**
+ * Width-aware lateral lane offsets (m, positive = driver's right of the way
+ * centreline) for one directed edge. Root-cause fix for the FIX-D1 symptom
+ * chain: lanes must fit the REAL OSM carriage width — never assume 3.0 m and
+ * widen the rendered world afterwards.
+ *
+ * Two-way (reverseLaneCount > 0): this direction owns the right half; lanes
+ * stack outward from the centreline at (idx + 0.5)·laneW.
+ * One-way: the lane block is centred on the way (single lane drives ON the
+ * centreline), matching how one-way streets are actually used.
+ * laneW = clamp(widthM / totalLanes, MIN_LANE_WIDTH, LANE_WIDTH); a missing
+ * width keeps the classic full-width behaviour.
+ */
+export function laneOffsets({ laneCount, reverseLaneCount, widthM }) {
+  const totalLanes = laneCount + reverseLaneCount;
+  const laneW =
+    widthM > 0
+      ? Math.min(LANE_WIDTH, Math.max(MIN_LANE_WIDTH, widthM / totalLanes))
+      : LANE_WIDTH;
+  const centerShift = reverseLaneCount > 0 ? 0 : (laneCount * laneW) / 2;
+  const offs = [];
+  for (let idx = 0; idx < laneCount; idx++) {
+    offs.push(Math.round(((idx + 0.5) * laneW - centerShift) * 1000) / 1000);
+  }
+  return offs;
+}
 
 // Drivable highway classes, ranked (higher = more important road). Used for
 // priority-road detection and the class filter.
@@ -84,7 +119,7 @@ function rightNormal(dx, dz) {
 
 // Offset a polyline to the right by `dist` metres, mitering at interior joints
 // so parallel-offset segments stay connected. pts are [x,z] in local metres.
-function offsetRight(pts, dist) {
+export function offsetRight(pts, dist) {
   const n = pts.length;
   if (n < 2) return pts.map(([x, z]) => [x, z]);
   // per-segment right normals
@@ -449,7 +484,7 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor, 
     map.get(node).push(edgeId);
   };
 
-  const addEdge = (fromKey, toKey, ptsLonLat, tags, cls, laneCount) => {
+  const addEdge = (fromKey, toKey, ptsLonLat, tags, cls, laneCount, reverseLaneCount) => {
     const from = nodeIdOf.get(fromKey);
     const to = nodeIdOf.get(toKey);
     // projected centreline
@@ -460,8 +495,12 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor, 
     const speedMs = CLASS_SPEED_MS[cls] ?? 13.89;
     const edgeId = edges.length;
     const laneIds = [];
+    // Width-aware lane placement (see laneOffsets): the OSM width tag (or the
+    // class default) bounds the whole lane block so cars stay on real tarmac.
+    const widthM = roadWidthFromTags(tags ?? {}, roadStyle(tags ?? {})?.width);
+    const offs = laneOffsets({ laneCount, reverseLaneCount, widthM });
     for (let idx = 0; idx < laneCount; idx++) {
-      const off = (idx + 0.5) * LANE_WIDTH;
+      const off = offs[idx];
       const raw = offsetRight(center, off);
       const pts = raw.map(([x, z]) => [r2(x), r2(z)]);
       const laneId = lanes.length;
@@ -496,13 +535,13 @@ export function buildTrafficNet({ osmRoads, osmTrafficNodes, projector, anchor, 
     const reversed = seg.tags.oneway === '-1';
     if (oneway) {
       if (reversed) {
-        addEdge(seg.toKey, seg.fromKey, [...seg.pts].reverse(), seg.tags, seg.cls, forward);
+        addEdge(seg.toKey, seg.fromKey, [...seg.pts].reverse(), seg.tags, seg.cls, forward, 0);
       } else {
-        addEdge(seg.fromKey, seg.toKey, seg.pts, seg.tags, seg.cls, forward);
+        addEdge(seg.fromKey, seg.toKey, seg.pts, seg.tags, seg.cls, forward, 0);
       }
     } else {
-      addEdge(seg.fromKey, seg.toKey, seg.pts, seg.tags, seg.cls, forward);
-      addEdge(seg.toKey, seg.fromKey, [...seg.pts].reverse(), seg.tags, seg.cls, backward);
+      addEdge(seg.fromKey, seg.toKey, seg.pts, seg.tags, seg.cls, forward, backward);
+      addEdge(seg.toKey, seg.fromKey, [...seg.pts].reverse(), seg.tags, seg.cls, backward, forward);
     }
   }
 
