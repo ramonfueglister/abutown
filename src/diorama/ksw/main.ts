@@ -54,6 +54,7 @@ import { buildInterior } from './interior/buildInterior';
 import { buildPlaza, buildHelipad } from './interior/plaza';
 import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
+import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { loadWorld, anchorGroundHeight, makeHeightSampler } from './geo/worldData';
 import { buildTerrainTiles } from './geo/terrain';
@@ -618,7 +619,16 @@ async function boot(): Promise<void> {
   // heightAt(x,z) - anchorGround. Roads drape onto it (else the flat ribbons
   // bury under / float over the undulating plate) and cars ride it per-vehicle.
   const worldHeightAt = makeHeightSampler(world);
-  const groundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
+  const tileGroundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
+  // Task 5c (spec §5 amendment): roads own their surface height. The tile
+  // heightfield samples ~12.5 m and cannot represent a ~6 m carriageway
+  // bench, so wrap it with a corridor-aware sampler that returns the baked
+  // per-way longitudinal profile height inside every road/rail corridor
+  // (blended to tileGroundYAt at the corridor edge). Every existing
+  // consumer below (buildRoads, carLayer, flowLayer, citizensLayer, lamp
+  // placement) picks this up automatically since they all take the same
+  // `groundYAt` function — see task-5c-report.md for the consumer list.
+  const groundYAt = makeCorridorGround(cityRoads, cityRails, tileGroundYAt);
   // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
   // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
   // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so

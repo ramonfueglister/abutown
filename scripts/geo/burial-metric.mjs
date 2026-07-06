@@ -168,12 +168,113 @@ export function burialStats(roads, widths, heightAt, stepM = 10) {
   return { maxM, p99M, pctOver30cm, offenders, sampleCount: n };
 }
 
+/** Interpolate a Task-5b baked profile ({stepM, ys}) at an arbitrary
+ * arc-length station. Mirrors src/diorama/ksw/geo/groundSampler.ts's
+ * `interpolateProfile` (kept in sync by hand — plain .mjs cannot import the
+ * TS module during the bake/CLI). Clamps outside the covered range to the
+ * nearest end station. */
+function interpolateProfile(profile, arc) {
+  const { stepM, ys } = profile;
+  if (!Array.isArray(ys) || ys.length === 0) {
+    throw new Error('interpolateProfile: profile.ys must be a non-empty array');
+  }
+  if (ys.length === 1) return ys[0];
+  if (arc <= 0) return ys[0];
+  const maxIdx = ys.length - 1;
+  const rawIdx = arc / stepM;
+  if (rawIdx >= maxIdx) return ys[maxIdx];
+  const i0 = Math.floor(rawIdx);
+  const i1 = Math.min(i0 + 1, maxIdx);
+  const frac = rawIdx - i0;
+  return ys[i0] + (ys[i1] - ys[i0]) * frac;
+}
+
+/**
+ * §9 metric v2 (spec amendment): terrain poke-through. For every road/rail,
+ * walk 10 m stations along the centreline; at each station compare the tile
+ * heightfield (`heightAt`, absolute or already-shifted — caller's choice, as
+ * long as it's consistent with the profile's frame) against the baked
+ * longitudinal profile height at that arc-length station. Poke-through =
+ * `max(0, tileY - profileY)` — only terrain sitting ABOVE the road surface
+ * counts as piercing it; terrain sitting below (normal embankment/cut) is not
+ * a defect and is excluded from the max/p99 (clamped to 0 so it never drags
+ * the metric down artificially, and never counts as an offender).
+ *
+ * Budgets (spec §5 amendment): p99 ≤ 0.05 m, max < 0.10 m.
+ *
+ * @param {{class: string, pts: number[][], profile?: {stepM:number, ys:number[]}}[]} roads
+ * @param {(x:number, z:number) => number} heightAt
+ * @param {number} [stepM]
+ * @returns {{maxM:number, p99M:number, offenders: {x:number,z:number,devM:number,class:string}[], sampleCount:number}}
+ */
+export function burialStatsV2(roads, heightAt, stepM = 10) {
+  if (!Array.isArray(roads)) throw new Error('burialStatsV2: roads must be an array');
+  if (typeof heightAt !== 'function') throw new Error('burialStatsV2: heightAt must be a function');
+  if (!(stepM > 0)) throw new Error('burialStatsV2: stepM must be > 0');
+
+  const missing = [];
+  for (let i = 0; i < roads.length; i++) {
+    if (!roads[i].profile) missing.push(i);
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `burialStatsV2: ${missing.length} road(s) missing a baked profile (indices: ${missing.slice(0, 20).join(', ')}) — run geo:bake-world → geo:attach-profiles first`,
+    );
+  }
+
+  const deviations = [];
+
+  for (const road of roads) {
+    if (!Array.isArray(road.pts) || road.pts.length < 2) continue;
+    const dense = densify(road.pts, 2);
+    const stations = stationsAlong(dense, stepM);
+    const arc = arcLengths(dense);
+    const total = arc[arc.length - 1];
+
+    // stationsAlong resamples densified pts at fixed stepM arc targets; we
+    // need the SAME arc-length values to index into the profile, so recompute
+    // them the same way stationsAlong does (0, stepM, 2*stepM, ..., total).
+    const targets = [];
+    for (let d = 0; d <= total; d += stepM) targets.push(d);
+    if (targets[targets.length - 1] < total) targets.push(total);
+
+    for (let i = 0; i < stations.length; i++) {
+      const st = stations[i];
+      const stationArc = targets[i];
+      const tileY = heightAt(st.x, st.z);
+      const profileY = interpolateProfile(road.profile, stationArc);
+      const devM = Math.max(0, tileY - profileY);
+      deviations.push({ x: st.x, z: st.z, devM, class: road.class });
+    }
+  }
+
+  if (deviations.length === 0) {
+    return { maxM: 0, p99M: 0, offenders: [], sampleCount: 0 };
+  }
+
+  const sorted = deviations.slice().sort((a, b) => a.devM - b.devM);
+  const n = sorted.length;
+  const maxM = sorted[n - 1].devM;
+  const p99Idx = Math.min(n - 1, Math.ceil(0.99 * n) - 1);
+  const p99M = sorted[p99Idx].devM;
+
+  const BUDGET_MAX = 0.10;
+  const offenders = sorted
+    .slice(n - 10)
+    .reverse()
+    .filter((d) => d.devM >= BUDGET_MAX)
+    .map(({ x, z, devM, class: cls }) => ({ x, z, devM, class: cls }));
+
+  return { maxM, p99M, offenders, sampleCount: n };
+}
+
 // ---- CLI mode: decode the real bake and print the stats table ----------
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
   const WORLD_DIR = 'data/winterthur/world';
   const ROADS_PATH = 'data/winterthur/roads.json';
   const TRAFFICNET_PATH = 'data/winterthur/trafficnet.json';
+  const useV1 = process.argv.includes('--v1');
 
   function fail(msg) {
     console.error(`burial-metric: ${msg}`);
@@ -192,7 +293,7 @@ if (isMain) {
   const tileRefs = [...manifest.tiles].sort((a, b) => b.level - a.level);
   const tiles = tileRefs.map((ref) => fromBinary(WorldTileSchema, readFileSync(`${WORLD_DIR}/${ref.path}`)));
 
-  function heightAt(x, z) {
+  function heightAtAbs(x, z) {
     for (const t of tiles) {
       const { gridN, cellSize, originX, originZ, height } = t;
       const fx = (x - originX) / cellSize;
@@ -216,34 +317,74 @@ if (isMain) {
   }
 
   const roadsDoc = JSON.parse(readFileSync(ROADS_PATH, 'utf8'));
-  const trafficNetDoc = JSON.parse(readFileSync(TRAFFICNET_PATH, 'utf8'));
   const roads = roadsDoc.roads;
-  const floors = laneFloorWidths(roads, trafficNetDoc);
-  // Mirror bake-world.mjs's grading corridor width exactly (max(render
-  // width, lane floor) + 1.5 m shoulder each side, §4.1) so the metric
-  // measures the SAME ribbon the grading pass actually levelled.
-  const widths = roads.map((r, i) => Math.max(r.width, floors[i]) + 3.0);
+  const rails = roadsDoc.rails ?? [];
 
-  console.log(`burial-metric: ${roads.length} roads, ${tiles.length} tiles (finest level ${tileRefs[0]?.level ?? 'n/a'})`);
-  const stats = burialStats(roads, widths, heightAt, 10);
+  console.log(`burial-metric: ${roads.length} roads, ${rails.length} rails, ${tiles.length} tiles (finest level ${tileRefs[0]?.level ?? 'n/a'})`);
 
-  console.log('');
-  console.log('Burial metric (spec §9) — acceptance: max < 0.3 m, p99 < 0.15 m');
-  console.log('-------------------------------------------------------------');
-  console.log(`sampleCount   : ${stats.sampleCount}`);
-  console.log(`maxM          : ${stats.maxM.toFixed(3)} m`);
-  console.log(`p99M          : ${stats.p99M.toFixed(3)} m`);
-  console.log(`pctOver30cm   : ${stats.pctOver30cm.toFixed(2)} %`);
-  console.log('');
-  console.log('Top offenders:');
-  console.log('  x          z          devM     class');
-  for (const o of stats.offenders) {
-    console.log(
-      `  ${o.x.toFixed(1).padStart(9)}  ${o.z.toFixed(1).padStart(9)}  ${o.devM.toFixed(3).padStart(6)}   ${o.class}`,
-    );
+  if (useV1) {
+    const trafficNetDoc = JSON.parse(readFileSync(TRAFFICNET_PATH, 'utf8'));
+    const floors = laneFloorWidths(roads, trafficNetDoc);
+    // Mirror bake-world.mjs's grading corridor width exactly (max(render
+    // width, lane floor) + 1.5 m shoulder each side, §4.1) so the metric
+    // measures the SAME ribbon the grading pass actually levelled.
+    const widths = roads.map((r, i) => Math.max(r.width, floors[i]) + 3.0);
+
+    const stats = burialStats(roads, widths, heightAtAbs, 10);
+
+    console.log('');
+    console.log('Burial metric v1 (spec §9, pre-amendment) — acceptance: max < 0.3 m, p99 < 0.15 m');
+    console.log('---------------------------------------------------------------------------------');
+    console.log(`sampleCount   : ${stats.sampleCount}`);
+    console.log(`maxM          : ${stats.maxM.toFixed(3)} m`);
+    console.log(`p99M          : ${stats.p99M.toFixed(3)} m`);
+    console.log(`pctOver30cm   : ${stats.pctOver30cm.toFixed(2)} %`);
+    console.log('');
+    console.log('Top offenders:');
+    console.log('  x          z          devM     class');
+    for (const o of stats.offenders) {
+      console.log(
+        `  ${o.x.toFixed(1).padStart(9)}  ${o.z.toFixed(1).padStart(9)}  ${o.devM.toFixed(3).padStart(6)}   ${o.class}`,
+      );
+    }
+    const pass = stats.maxM < 0.3 && stats.p99M < 0.15;
+    console.log('');
+    console.log(pass ? 'PASS: within §9 v1 budget' : 'FAIL: exceeds §9 v1 budget');
+  } else {
+    // v2 (spec §5 amendment, Task 5c default): terrain poke-through against
+    // the baked per-way longitudinal profile. Profile ys are stored RELATIVE
+    // to the shared anchor (Task 5b: profileAbsoluteMetres − anchorGroundHeight,
+    // see .superpowers/sdd/task-5b-report.md), so shift the tile heightfield
+    // by the same anchor before comparing — apples to apples.
+    const GRADING_PROFILES_PATH = 'scratch/geo/grading-profiles.json';
+    if (!existsSync(GRADING_PROFILES_PATH)) {
+      fail(`missing ${GRADING_PROFILES_PATH} — run geo:bake-world (writes anchorGroundHeight) first`);
+    }
+    const { anchorGroundHeight } = JSON.parse(readFileSync(GRADING_PROFILES_PATH, 'utf8'));
+    if (typeof anchorGroundHeight !== 'number') {
+      fail(`${GRADING_PROFILES_PATH} missing numeric anchorGroundHeight`);
+    }
+    const heightAtRel = (x, z) => heightAtAbs(x, z) - anchorGroundHeight;
+
+    const allWays = [...roads, ...rails];
+    const stats = burialStatsV2(allWays, heightAtRel, 10);
+
+    console.log('');
+    console.log('Burial metric v2 (spec §5 amendment) — acceptance: p99 ≤ 0.05 m, max < 0.10 m');
+    console.log('-------------------------------------------------------------------------------');
+    console.log(`sampleCount   : ${stats.sampleCount}`);
+    console.log(`maxM          : ${stats.maxM.toFixed(3)} m`);
+    console.log(`p99M          : ${stats.p99M.toFixed(3)} m`);
+    console.log('');
+    console.log('Top offenders (tileY pierces profileY):');
+    console.log('  x          z          devM     class');
+    for (const o of stats.offenders) {
+      console.log(
+        `  ${o.x.toFixed(1).padStart(9)}  ${o.z.toFixed(1).padStart(9)}  ${o.devM.toFixed(3).padStart(6)}   ${o.class}`,
+      );
+    }
+    const pass = stats.maxM < 0.10 && stats.p99M <= 0.05;
+    console.log('');
+    console.log(pass ? 'PASS: within §9 v2 budget' : 'FAIL: exceeds §9 v2 budget');
   }
-
-  const pass = stats.maxM < 0.3 && stats.p99M < 0.15;
-  console.log('');
-  console.log(pass ? 'PASS: within §9 budget' : 'FAIL: exceeds §9 budget');
 }

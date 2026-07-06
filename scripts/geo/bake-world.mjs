@@ -131,6 +131,22 @@ const riverRings = riverCenterlineRings(nature.rivers, 3);
 const waterRings = [...polygonWaterRings, ...riverRings];
 console.log(`water rings: ${polygonWaterRings.length} polygon + ${riverRings.length} buffered river centrelines`);
 
+// §4.1 authored per-class grading overrides (one constants table). Foot
+// infrastructure that legitimately climbs steeply must HUG the terrain, not
+// get a carriageway-grade bench carved for it: with the default
+// windowM 40 / maxGrade 0.12, a hillside staircase's profile was clamped
+// far below the slope and grading dug a deep narrow trench the ~12.5 m L2
+// tiles cannot represent — measured §9-v2 poke-through up to 5.27 m on
+// `steps` and 2.82 m on `path` (the two worst classes in the 2026-07-06
+// metric run; no other class is overridden — carriageways keep the
+// engineering-real 12 % clamp).
+//   steps: stairs climb up to ~70 % — short window, steep grade allowed.
+//   path:  hiking paths climb up to ~35 % — same short window.
+const CLASS_GRADE_OVERRIDES = {
+  steps: { maxGrade: 0.7, windowM: 10 },
+  path: { maxGrade: 0.35, windowM: 10 },
+};
+
 const ways = [
   ...roads.map((r, i) => ({
     pts: r.pts,
@@ -140,6 +156,7 @@ const ways = [
     windowM: 40,
     maxGrade: 0.12,
     bridge: r.bridge === true,
+    ...(CLASS_GRADE_OVERRIDES[r.class] ?? {}),
   })),
   ...rails.map((r) => ({
     pts: r.pts,

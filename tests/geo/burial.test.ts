@@ -7,7 +7,7 @@
 // heightAt(centre)| at both ±width/2 offsets; the ribbon is planar across
 // its width (§5), so any real cross-slope under it reads as burial.
 import { describe, expect, it } from 'vitest';
-import { burialStats } from '../../scripts/geo/burial-metric.mjs';
+import { burialStats, burialStatsV2 } from '../../scripts/geo/burial-metric.mjs';
 import { gradeDem } from '../../scripts/geo/lib/grading.mjs';
 
 /** Bilinear sampler over a flat local-metre grid, same convention as grading.mjs. */
@@ -123,5 +123,65 @@ describe('burialStats', () => {
     for (let i = 1; i < stats.offenders.length; i++) {
       expect(stats.offenders[i - 1].devM).toBeGreaterThanOrEqual(stats.offenders[i].devM);
     }
+  });
+});
+
+describe('burialStatsV2 (spec §9 metric v2 — terrain poke-through)', () => {
+  it('reports zero poke-through when tile ground matches the profile exactly', () => {
+    const { heightAt } = makeSampler(60, 1, (x) => x * 0.1); // tile ground rises with x
+    const road = {
+      class: 'residential',
+      pts: [[0, 30], [50, 30]],
+      profile: { stepM: 10, ys: [0, 1, 2, 3, 4, 5, 5] }, // matches x*0.1 at each 10 m station
+    };
+    const stats = burialStatsV2([road], heightAt, 10);
+    expect(stats.maxM).toBeCloseTo(0, 6);
+    expect(stats.p99M).toBeCloseTo(0, 6);
+    expect(stats.offenders.length).toBe(0);
+  });
+
+  it('reports positive poke-through when tile ground sits above the profile (terrain pierces the road)', () => {
+    const { heightAt } = makeSampler(60, 1, (x) => x * 0.1 + 0.2); // tile 0.2 m higher everywhere
+    const road = {
+      class: 'residential',
+      pts: [[0, 30], [50, 30]],
+      profile: { stepM: 10, ys: [0, 1, 2, 3, 4, 5, 5] },
+    };
+    const stats = burialStatsV2([road], heightAt, 10);
+    expect(stats.maxM).toBeCloseTo(0.2, 6);
+    expect(stats.p99M).toBeCloseTo(0.2, 6);
+    expect(stats.offenders.length).toBeGreaterThan(0);
+  });
+
+  it('clamps negative poke-through (terrain below road, no piercing) toward the report but not the pass/fail max', () => {
+    // tileY below profileY everywhere -> the terrain does not pierce the road.
+    // maxM/p99M should reflect max(0, tileY - profileY) style poke-through only.
+    const { heightAt } = makeSampler(60, 1, (x) => x * 0.1 - 5); // tile far below profile
+    const road = {
+      class: 'residential',
+      pts: [[0, 30], [50, 30]],
+      profile: { stepM: 10, ys: [0, 1, 2, 3, 4, 5, 5] },
+    };
+    const stats = burialStatsV2([road], heightAt, 10);
+    expect(stats.maxM).toBeCloseTo(0, 6);
+    expect(stats.p99M).toBeCloseTo(0, 6);
+  });
+
+  it('throws when a road lacks a baked profile', () => {
+    const { heightAt } = makeSampler(60, 1, () => 0);
+    const road = { class: 'residential', pts: [[0, 30], [50, 30]] };
+    expect(() => burialStatsV2([road], heightAt, 10)).toThrow();
+  });
+
+  it('is deterministic across repeated calls', () => {
+    const { heightAt } = makeSampler(60, 1, (x, z) => Math.sin(x / 5) + z * 0.1);
+    const road = {
+      class: 'residential',
+      pts: [[5, 8], [55, 45]],
+      profile: { stepM: 10, ys: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3] },
+    };
+    const a = burialStatsV2([road], heightAt, 10);
+    const b = burialStatsV2([road], heightAt, 10);
+    expect(a).toEqual(b);
   });
 });
