@@ -46,6 +46,7 @@ import {
   smoothstep,
   step,
   texture,
+  uniform,
   vec2,
   vec3,
   vec4,
@@ -56,6 +57,14 @@ import type { TreeInstance } from './treeLayer';
 
 export const OCT_GRID = 4; // 4×4 hemi-octahedral views per archetype
 export const CELL_PX = 128;
+
+// Light calibration for the impostor atlas: the atlas bake is unlit (a flat
+// snapshot), so without this the far-LOD quads read paler/flatter than the
+// fully-shaded near trees at the 150 m LOD handoff. main.ts writes this from
+// the same sun/hemi state that feeds the scene lights (see
+// applyCityEnvironment), so impostor brightness tracks day/night/weather
+// instead of staying fixed. Default white = unchanged look until wired up.
+export const impostorLightU = uniform(new THREE.Color(1, 1, 1));
 
 // The impostor collapses to full-detail geometry inside this radius. The full
 // mesh already appears at NEAR_TREE_DIST = nearR × 1.1 (treeLayer), so the two
@@ -383,7 +392,7 @@ export function buildImpostorMesh(
   const sampleV = float(1).sub(baseVtop.add(float(1).sub(quadUvN.y).mul(cellV)));
 
   const sampled: Node = atlasTex.sample(vec2(sampleU, sampleV));
-  material.colorNode = sampled.rgb.mul(aTint);
+  material.colorNode = sampled.rgb.mul(aTint).mul(impostorLightU);
   material.opacityNode = sampled.a;
 
   const mesh = new THREE.InstancedMesh(quad, material, cap);
