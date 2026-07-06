@@ -133,10 +133,6 @@ const h01 = (x, z) => {
   const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
   return s - Math.floor(s);
 };
-const vary = (v, x, z) => v * (0.85 + 0.3 * h01(x, z));
-
-const TREE_DEFAULTS = { broad: { h: 9, r: 3 }, conifer: { h: 14, r: 2 } };
-
 // Slice 2 (Fallback-Variante): Familien + Grössen aus Landuse-Heuristik.
 // Wachstumskurven h(age) = h∞ · age/(age + t½) (saturierend, Spec §1) mit
 // deterministischem Pseudo-Alter, da ohne Kataster kein Pflanzjahr existiert.
