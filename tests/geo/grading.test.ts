@@ -125,6 +125,53 @@ describe('gradeDem', () => {
     const bad = { pts: [[1, 1], [8, 8]], halfWidthM: 2, blendM: 4, windowM: 10, maxGrade: 0.1, kind: 'path' as unknown as 'road' };
     expect(() => gradeDem(dem, [bad], { waterRings: [] })).toThrow();
   });
+
+  it('junction aprons are order-independent: two overlapping same-kind roads accumulate into one shared layer', () => {
+    // Per spec §4.3: overlapping road corridors take the average of the
+    // overlapping profiles weighted by corridor-distance falloff, computed
+    // over ONE shared (sumW, sumWH) layer for all roads — not a per-way
+    // accumulator blended into the DEM after each way (which makes the
+    // junction apron height depend on array order).
+    const mkDem = () => flatDem(60, 1, (x, z) => (x + z) * 0.05);
+    const roadA = { pts: [[10, 30], [50, 30]], halfWidthM: 4, blendM: 8, windowM: 40, maxGrade: 0.12, kind: 'road' as const };
+    const roadB = { pts: [[30, 10], [30, 50]], halfWidthM: 4, blendM: 8, windowM: 40, maxGrade: 0.12, kind: 'road' as const };
+
+    const demForward = mkDem();
+    gradeDem(demForward, [roadA, roadB], { waterRings: [] });
+
+    const demReversed = mkDem();
+    gradeDem(demReversed, [roadB, roadA], { waterRings: [] });
+
+    expect(demReversed.data).toEqual(demForward.data);
+  });
+
+  it('bridge detection is orientation-independent: a wide road crossing a narrow vertical water strip is flagged', () => {
+    // Reviewer counter-example: the ≥3-consecutive-skipped-water-cells scan
+    // resets per raster ROW, so a road running along x crossed by a
+    // 1-cell-wide vertical (z-oriented) river never accumulates 3
+    // consecutive skipped cells within any single row — even though the
+    // road's centreline genuinely crosses the water. Detection must be
+    // per-way total, not per-row-run.
+    const dem = flatDem(60, 1, () => 7);
+    const road = { pts: [[5, 30], [55, 30]], halfWidthM: 6, blendM: 8, windowM: 40, maxGrade: 0.12, kind: 'road' as const };
+    // 1-cell-wide strip along z at x=[29,30], spanning the whole corridor in z.
+    const water = [[[29, 20], [30, 20], [30, 40], [29, 40]]];
+    const report = gradeDem(dem, [road], { waterRings: water });
+    expect(report.waterSkippedCells).toBeGreaterThan(0);
+    expect(report.bridgeSites.length).toBe(1);
+  });
+
+  it('does not flag a bridge site when only the blend zone brushes a lake corner (centreline never crosses water)', () => {
+    const dem = flatDem(60, 1, () => 7);
+    // Road runs along z=10, well clear of the lake's body; only the
+    // blend zone (halfWidthM+blendM = 4+8=12) may brush the lake's corner
+    // near (20,20), but the densified centreline itself (z=10) never
+    // crosses the lake polygon.
+    const road = { pts: [[5, 10], [55, 10]], halfWidthM: 4, blendM: 8, windowM: 40, maxGrade: 0.12, kind: 'road' as const };
+    const lake = [[[15, 18], [35, 18], [35, 38], [15, 38]]]; // corner near (15-20,18)
+    const report = gradeDem(dem, [road], { waterRings: lake });
+    expect(report.bridgeSites.length).toBe(0);
+  });
 });
 
 describe('makeCorridorMask', () => {

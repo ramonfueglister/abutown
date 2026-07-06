@@ -215,11 +215,129 @@ function weightAt(d, halfWidthM, blendM) {
 }
 
 /**
+ * Accumulate one kind-group's ways (all 'road', or all 'rail') into a single
+ * shared (sumW, sumWH) layer covering the union of their bboxes, then blend
+ * that shared layer into dem.data once. This makes overlapping same-kind
+ * corridors (junction aprons, §4.3) order-independent: two ways contributing
+ * to the same cell sum their weights/weighted-heights before either is
+ * divided out, rather than each way blending into the DEM (and thus into
+ * the next way's `orig` read) separately.
+ *
+ * Also tracks, per way, the world-space centres of skipped water cells so
+ * the caller can decide bridge sites by total corridor crossing rather than
+ * a per-raster-row consecutive-run heuristic (see FINDING 2).
+ */
+function accumulateKindGroup(dem, wayGroup, waterRings, sharedWaterSkipped) {
+  const { ncols, nrows } = dem;
+  if (wayGroup.length === 0) {
+    return { cellsChanged: 0, waterSkippedByWay: [] };
+  }
+
+  const prepared = wayGroup.map((way) => ({ way, ...prepareWay(dem, way) }));
+
+  // Union bbox across the whole kind-group's ways.
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const { bbox } of prepared) {
+    if (bbox.minX < minX) minX = bbox.minX;
+    if (bbox.maxX > maxX) maxX = bbox.maxX;
+    if (bbox.minZ < minZ) minZ = bbox.minZ;
+    if (bbox.maxZ > maxZ) maxZ = bbox.maxZ;
+  }
+  const c0 = Math.max(0, Math.floor(colAt(dem, minX)));
+  const c1 = Math.min(ncols - 1, Math.ceil(colAt(dem, maxX)));
+  const r0 = Math.max(0, Math.floor(rowAt(dem, minZ)));
+  const r1 = Math.min(nrows - 1, Math.ceil(rowAt(dem, maxZ)));
+  const boxCols = Math.max(0, c1 - c0 + 1);
+  const boxRows = Math.max(0, r1 - r0 + 1);
+
+  const sumW = new Float64Array(boxCols * boxRows);
+  const sumWH = new Float64Array(boxCols * boxRows);
+  const waterCell = new Uint8Array(boxCols * boxRows);
+
+  // Per-way water-skip tracking for orientation-independent bridge detection.
+  const waterSkippedByWay = prepared.map(() => []);
+
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const x = worldXAt(dem, c);
+      const z = worldZAt(dem, r);
+      const boxIdx = (r - r0) * boxCols + (c - c0);
+      const inWater = pointInAnyRing(x, z, waterRings);
+
+      for (let wi = 0; wi < prepared.length; wi++) {
+        const { way, dense, profile } = prepared[wi];
+        const { d, h } = nearestOnCenterline(dense, profile, x, z);
+        const corridorR = way.halfWidthM + way.blendM;
+        if (d > corridorR) continue;
+
+        if (inWater) {
+          waterCell[boxIdx] = 1;
+          sharedWaterSkipped.count++;
+          waterSkippedByWay[wi].push({ x, z, d });
+          continue;
+        }
+
+        const w = weightAt(d, way.halfWidthM, way.blendM);
+        if (w > 0) {
+          sumW[boxIdx] += w;
+          sumWH[boxIdx] += w * h;
+        }
+      }
+    }
+  }
+
+  let cellsChanged = 0;
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const boxIdx = (r - r0) * boxCols + (c - c0);
+      if (waterCell[boxIdx]) continue;
+      const w = sumW[boxIdx];
+      if (w <= 0) continue;
+      const gridIdx = r * ncols + c;
+      const orig = dem.data[gridIdx];
+      const t = Math.min(w, 1);
+      const graded = t * (sumWH[boxIdx] / w) + (1 - t) * orig;
+      if (graded !== dem.data[gridIdx]) cellsChanged++;
+      dem.data[gridIdx] = graded;
+    }
+  }
+
+  return { cellsChanged, waterSkippedByWay };
+}
+
+/**
+ * Decide bridge sites for one kind-group from its per-way skipped-water-cell
+ * lists: a way is flagged when it has >= 3 skipped water cells whose centres
+ * lie within 2*cellsize of its densified centreline (i.e. the way's own
+ * line actually crosses the water, not merely its blend zone brushing a
+ * lake edge). Orientation-independent — unlike a per-raster-row consecutive
+ * run, this counts total qualifying cells across the whole way regardless
+ * of whether the water crossing is aligned with rows or columns.
+ */
+function bridgeSitesForGroup(wayGroup, waterSkippedByWay, cellsize) {
+  const sites = [];
+  const nearThreshold = 2 * cellsize;
+  for (let wi = 0; wi < wayGroup.length; wi++) {
+    const way = wayGroup[wi];
+    const cells = waterSkippedByWay[wi];
+    const near = cells.filter((cell) => cell.d <= nearThreshold);
+    if (near.length >= 3) {
+      const first = near[0];
+      sites.push({ x: first.x, z: first.z, kind: way.kind });
+    }
+  }
+  return sites;
+}
+
+/**
  * Grade a local-meter DEM grid in place for a set of road/rail ways.
  * Returns the report object { cellsChanged, waterSkippedCells, bridgeSites, originDeltaM }.
- * Ways are processed in input order: roads accumulate into one layer; each
- * subsequent way blends against whatever the grid currently holds, so
- * passing roads first then rails makes rails override roads at crossings.
+ *
+ * Per spec §4.3: ALL roads accumulate into one shared (sumW, sumWH) layer
+ * and are blended into the DEM together (so overlapping same-kind
+ * corridors — junction aprons — come out order-independent), THEN all
+ * rails accumulate into a second shared layer and blend on top, overriding
+ * the road-graded value at crossings.
  */
 export function gradeDem(dem, ways, opts) {
   if (!dem || !(dem.data instanceof Float64Array || dem.data instanceof Float32Array)) {
@@ -232,83 +350,31 @@ export function gradeDem(dem, ways, opts) {
   for (const way of ways) validateWay(way);
 
   const waterRings = opts.waterRings;
-  const { ncols, nrows } = dem;
   const origin00Before = sampleGrid(dem, 0, 0);
 
+  const roads = ways.filter((w) => w.kind === 'road');
+  const rails = ways.filter((w) => w.kind === 'rail');
+
   let cellsChanged = 0;
-  let waterSkippedCells = 0;
+  const sharedWaterSkipped = { count: 0 };
   const bridgeSites = [];
 
-  for (const way of ways) {
-    const { dense, profile, bbox } = prepareWay(dem, way);
-    const c0 = Math.max(0, Math.floor(colAt(dem, bbox.minX)));
-    const c1 = Math.min(ncols - 1, Math.ceil(colAt(dem, bbox.maxX)));
-    const r0 = Math.max(0, Math.floor(rowAt(dem, bbox.minZ)));
-    const r1 = Math.min(nrows - 1, Math.ceil(rowAt(dem, bbox.maxZ)));
-
-    // sumW/sumWH accumulate this way's contribution per cell in the box.
-    const boxCols = Math.max(0, c1 - c0 + 1);
-    const boxRows = Math.max(0, r1 - r0 + 1);
-    const sumW = new Float64Array(boxCols * boxRows);
-    const sumWH = new Float64Array(boxCols * boxRows);
-    const waterCell = new Uint8Array(boxCols * boxRows);
-
-    let bridgeLogged = false;
-
-    for (let r = r0; r <= r1; r++) {
-      let consecutiveWater = 0;
-      let runStart = null;
-      for (let c = c0; c <= c1; c++) {
-        const x = worldXAt(dem, c);
-        const z = worldZAt(dem, r);
-        const boxIdx = (r - r0) * boxCols + (c - c0);
-
-        if (pointInAnyRing(x, z, waterRings)) {
-          const { d } = nearestOnCenterline(dense, profile, x, z);
-          if (d <= way.halfWidthM + way.blendM) {
-            waterCell[boxIdx] = 1;
-            waterSkippedCells++;
-            if (consecutiveWater === 0) runStart = { x, z };
-            consecutiveWater++;
-            if (consecutiveWater === 3 && !bridgeLogged) {
-              bridgeSites.push({ x: runStart.x, z: runStart.z, kind: way.kind });
-              bridgeLogged = true;
-            }
-            continue;
-          }
-        }
-        consecutiveWater = 0;
-        runStart = null;
-
-        const { d, h } = nearestOnCenterline(dense, profile, x, z);
-        const w = weightAt(d, way.halfWidthM, way.blendM);
-        if (w > 0) {
-          sumW[boxIdx] += w;
-          sumWH[boxIdx] += w * h;
-        }
-      }
-    }
-
-    for (let r = r0; r <= r1; r++) {
-      for (let c = c0; c <= c1; c++) {
-        const boxIdx = (r - r0) * boxCols + (c - c0);
-        if (waterCell[boxIdx]) continue;
-        const w = sumW[boxIdx];
-        if (w <= 0) continue;
-        const gridIdx = r * ncols + c;
-        const orig = dem.data[gridIdx];
-        const t = Math.min(w, 1);
-        const graded = t * (sumWH[boxIdx] / w) + (1 - t) * orig;
-        if (graded !== dem.data[gridIdx]) cellsChanged++;
-        dem.data[gridIdx] = graded;
-      }
-    }
+  for (const group of [roads, rails]) {
+    if (group.length === 0) continue;
+    const { cellsChanged: groupChanged, waterSkippedByWay } = accumulateKindGroup(
+      dem,
+      group,
+      waterRings,
+      sharedWaterSkipped,
+    );
+    cellsChanged += groupChanged;
+    bridgeSites.push(...bridgeSitesForGroup(group, waterSkippedByWay, dem.cellsize));
   }
 
   const origin00After = sampleGrid(dem, 0, 0);
   const originDeltaM = Math.abs(origin00After - origin00Before);
 
-  return { cellsChanged, waterSkippedCells, bridgeSites, originDeltaM };
+  return { cellsChanged, waterSkippedCells: sharedWaterSkipped.count, bridgeSites, originDeltaM };
 }
 
 /**
