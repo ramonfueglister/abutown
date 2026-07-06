@@ -11,12 +11,18 @@ describe('tileCenter', () => {
     expect(tileCenter(manifest, { level: 0, x: 0, y: 0 })).toEqual([0, 0]);
   });
 
-  it('L2-Tile {2,0,0} liegt im Zentrum der ersten Viertel-Zelle (cell=50)', () => {
-    expect(tileCenter(manifest, { level: 2, x: 0, y: 0 })).toEqual([-75, -75]);
+  // Bake-Konvention (scripts/geo/lib/tiles.mjs LEVEL_CELLS = [1, 4, 16]):
+  // 4x4-Teilung PRO Stufe, also cell = size / 4**level.
+  it('L2-Tile {2,0,0} liegt im Zentrum der ersten 1/16-Zelle (cell=12.5)', () => {
+    expect(tileCenter(manifest, { level: 2, x: 0, y: 0 })).toEqual([-93.75, -93.75]);
   });
 
-  it('L1-Tile {1,1,0} liegt im Zentrum der zweiten Halb-Zelle entlang x (cell=100)', () => {
-    expect(tileCenter(manifest, { level: 1, x: 1, y: 0 })).toEqual([50, -50]);
+  it('L1-Tile {1,1,0} liegt im Zentrum der zweiten Viertel-Zelle entlang x (cell=50)', () => {
+    expect(tileCenter(manifest, { level: 1, x: 1, y: 0 })).toEqual([-25, -75]);
+  });
+
+  it('L2-Tile {2,15,15} liegt im Zentrum der letzten Zelle', () => {
+    expect(tileCenter(manifest, { level: 2, x: 15, y: 15 })).toEqual([93.75, 93.75]);
   });
 });
 

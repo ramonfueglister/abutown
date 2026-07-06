@@ -18,12 +18,18 @@ function radiusFor(level: number, cfg: RingConfig): number {
 
 /** Zentrum eines Tiles in Weltkoordinaten aus der Manifest-Quadtree-Wurzel
  * (minX/minZ/size) und einer Tile-Referenz (level/x/y). Pure Funktion —
- * Task 6 baut damit die TileMeta-Liste aus dem WorldManifest auf. */
+ * Task 6 baut damit die TileMeta-Liste aus dem WorldManifest auf.
+ *
+ * Teilungsfaktor: der Bake (scripts/geo/lib/tiles.mjs, LEVEL_CELLS = [1, 4,
+ * 16]) teilt JEDE Stufe in 4x4 — also 4**level Zellen pro Seite, NICHT
+ * 2**level. Gegen den echten Bake verifiziert: L2/5_7 (origin -3391/-356,
+ * Kantenlänge 1250 m = 20000/16) zentriert exakt auf
+ * minX + (5 + 0.5) * size/16. */
 export function tileCenter(
   manifest: { minX: number; minZ: number; size: number },
   ref: { level: number; x: number; y: number },
 ): [number, number] {
-  const cell = manifest.size / 2 ** ref.level;
+  const cell = manifest.size / 4 ** ref.level;
   return [manifest.minX + (ref.x + 0.5) * cell, manifest.minZ + (ref.y + 0.5) * cell];
 }
 
@@ -133,6 +139,14 @@ export class TileStreamer {
 
   get failed(): ReadonlySet<TileKey> {
     return this.failedSet;
+  }
+
+  /** Anzahl noch nicht abgeschlossener Ladevorgänge (gequeued + in flight).
+   * 0 nach einem update() heisst: der aktuelle Soll-Ring ist fertig
+   * materialisiert (oder endgültig gescheitert) — main.ts gated darauf
+   * `__LOOK_READY`. */
+  get pendingCount(): number {
+    return this.queue.length + this.inflight.size;
   }
 
   /** Test-Sonde: FIFO-Reihenfolge der aktuell gequeuten (noch nicht gestarteten)

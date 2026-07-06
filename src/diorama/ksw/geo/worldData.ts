@@ -229,20 +229,22 @@ export function tileTreeSpecs(tile: WorldTile): TreeSpec[] {
  * Fetches manifest.pb, graph.pb, and every tile the manifest lists (Slice 1)
  * from `baseUrl`, then decodes via `decodeWorld`.
  *
- * `keep` is the Slice-2 streaming hook: pass a predicate to fetch only a
- * subset of `manifest.tiles` (e.g. tiles near the camera). Defaults to
- * keep-all, matching Slice-1 behavior.
+ * `keep` is the M3 streaming hook: pass a predicate to fetch only a subset
+ * of `manifest.tiles` (e.g. L0 plus the fine tiles under the hero plate).
+ * It receives the decoded manifest as second argument so callers can compute
+ * tile bounds (minX/minZ/size quadtree root) without a separate manifest
+ * fetch. Defaults to keep-all, matching Slice-1 behavior.
  */
 export async function loadWorld(
   baseUrl = '/winterthur-world/',
-  keep: (ref: TileRef) => boolean = () => true,
+  keep: (ref: TileRef, manifest: WorldManifest) => boolean = () => true,
 ): Promise<World> {
   const manifestBin = await fetchBinary(`${baseUrl}manifest.pb`);
   const manifest = fromBinary(WorldManifestSchema, manifestBin);
 
   const graphBin = await fetchBinary(`${baseUrl}graph.pb`);
 
-  const refs = manifest.tiles.filter(keep);
+  const refs = manifest.tiles.filter((ref) => keep(ref, manifest));
   const tileBins = await Promise.all(
     refs.map(async (ref) => ({ path: ref.path, bin: await fetchBinary(`${baseUrl}${ref.path}`) })),
   );
