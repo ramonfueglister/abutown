@@ -386,10 +386,15 @@ impl PublisherState {
             };
             let (s_q, v_q) = quantise(view.s, view.v);
             let wire_id = compose_wire_id(veh, core.fleet.generation(veh as usize));
-            self.scratch_members
-                .entry(cell)
-                .or_default()
-                .insert(wire_id, (view.lane, s_q, v_q, u32::from(core.fleet.class[veh as usize])));
+            self.scratch_members.entry(cell).or_default().insert(
+                wire_id,
+                (
+                    view.lane,
+                    s_q,
+                    v_q,
+                    u32::from(core.fleet.class[veh as usize]),
+                ),
+            );
         }
 
         // 2) Determine which cells changed vs last publish. A cell is "dirty"
