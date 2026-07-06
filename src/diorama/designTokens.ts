@@ -231,8 +231,12 @@ export const nightGlow = {
   // where lamps cluster instead of clipping.
   // radius 5 + lift 0.3: a 13 m disc at 0.13 m lift clipped into terrain
   // undulation and read as torn half-moons; smaller + higher floats clean.
-  pool: { color: 0xffb869, radius: 5, peak: 0.65, lift: 0.5 },
+  pool: { color: 0xffb869, radius: 5, peak: 0.9, lift: 0.5 },
   bulbHdr: 3.0, // night bulb luminance (× warm tint) — past bloomThreshold 1.05
+  // Night road dimming: the light clay ribbons (0xcfc4b2) glowed pale blue
+  // under the skyglow hemi — real asphalt swallows light. Ribbons/aprons/
+  // skirts mix toward dayColor×roadDim as lampGlowU rises.
+  roadDim: 0.62,
 } as const;
 
 // Moonlight (the night preset's key light). Only color/intensity are read

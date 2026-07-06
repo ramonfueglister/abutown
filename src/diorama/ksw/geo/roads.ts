@@ -4,8 +4,10 @@
 // footpaths, rail on its ballast band — each on its own height so junctions
 // never flicker.
 import * as THREE from 'three/webgpu';
-import { kswCity } from '../../designTokens';
+import { float, mix, vec3 } from 'three/tsl';
+import { kswCity, nightGlow } from '../../designTokens';
 import { clayMat } from '../props';
+import { lampGlowU } from '../glowUniform';
 import type { RoadPath } from './geoData';
 import { corridorWidths, type TrafficNetDoc } from '../../traffic/corridorWidths';
 import trafficNetJson from '../../../../data/winterthur/trafficnet.json';
@@ -280,12 +282,22 @@ export function skirtStrip(
  * clone rather than mutate `clayMat` because that cache is shared with props. */
 function ribbonMat(color: number, polygonOffsetUnits: number): THREE.MeshPhysicalMaterial {
   const m = clayMat(color).clone();
+  m.colorNode = nightDimNode(color);
   if (polygonOffsetUnits !== 0) {
     m.polygonOffset = true;
     m.polygonOffsetFactor = -1;
     m.polygonOffsetUnits = polygonOffsetUnits;
   }
   return m;
+}
+
+/** Night asphalt: the pale clay ribbons glowed light blue under the skyglow
+ * hemi — real road surfaces swallow light after dark. Mix the day colour
+ * toward dayColor×nightGlow.roadDim as lampGlowU rises (day look unchanged). */
+function nightDimNode(color: number): THREE.MeshPhysicalMaterial['colorNode'] {
+  const c = new THREE.Color(color);
+  const day = vec3(c.r, c.g, c.b);
+  return mix(day, day.mul(float(nightGlow.roadDim)), lampGlowU) as THREE.MeshPhysicalMaterial['colorNode'];
 }
 
 function stripsMesh(
@@ -343,6 +355,7 @@ function apronMat(color: number, polygonOffsetUnits: number): THREE.MeshPhysical
  * — the skirt is genuinely vertical, not coplanar with any ribbon. */
 function skirtMat(color: number): THREE.MeshPhysicalMaterial {
   const m = clayMat(darken(color, 0.8)).clone();
+  m.colorNode = nightDimNode(darken(color, 0.8));
   m.side = THREE.DoubleSide;
   return m;
 }
