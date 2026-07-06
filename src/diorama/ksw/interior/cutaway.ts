@@ -1,27 +1,78 @@
-// Dollhouse-cutaway state (T18, S3c). Pure, deterministic mapping from the
-// camera orbit radius to the two uniforms that drive the main-building cutaway
-// material: `cutH` (the world-y slice height — fragments above it are discarded)
-// and `upperFade` (opacity of the upper storeys + roof, 1 = closed, 0 = open).
-//
-// Ablauf (plan §Task 18): zooming IN past fadeStartR fades the upper storeys +
-// roof out first (upperFade 1→0 across [fadeStartR, fadeEndR]); only once that
-// fade is nearly complete (< 0.15) does the hard height-slice engage
-// (cutH 1e6 → cutHeight), so the building opens like a dollhouse rather than
-// popping. Zooming out reverses it. No slice while the upper mass is still
-// visible avoids a hard edge cutting through a still-opaque wall.
-import { kswS3 } from '../../designTokens';
+// Storey-peel dollhouse state (Phase A). Pure, deterministic mapping from the
+// camera orbit radius to the per-storey peel of the main building: L peel
+// units over the [startR, endR] radius window. Unit 0 fades the roof + eave
+// out while the TOP storey's interior fades in; unit j (1 ≤ j ≤ L−1)
+// dissolves the shell band of storey L−j (screen-door dissolve between
+// bandLo and discardAbove, progress bandFade) while that storey's interior
+// fades out and the storey below fades in — the SAME ramp drives both sides,
+// so there is never a boolean pop. The EG (level 0) never fades out.
+import { kswPeel } from '../../designTokens';
 
-export type CutawayState = { cutH: number; upperFade: number };
+export type PeelCfg = {
+  storeyCount: number;
+  storeyH: number;
+  baseY: number;
+  startR: number;
+  endR: number;
+};
 
-// upperFade < this → the height slice is engaged (else cutH stays "off" = 1e6).
-const SLICE_ON_BELOW = 0.15;
+export type PeelState = {
+  p: number;
+  roofFade: number;
+  discardAbove: number;
+  bandLo: number;
+  bandFade: number;
+  storeyFades: number[];
+};
+
 const OFF = 1e6;
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
-export function cutawayState(radius: number): CutawayState {
-  const { fadeStartR, fadeEndR, cutHeight } = kswS3;
-  // linear ramp: fade = 1 at/above fadeStartR, 0 at/below fadeEndR
-  const t = (radius - fadeEndR) / (fadeStartR - fadeEndR);
-  const upperFade = Math.min(1, Math.max(0, t));
-  const cutH = upperFade < SLICE_ON_BELOW ? cutHeight : OFF;
-  return { cutH, upperFade };
+export function peelState(radius: number, cfg: PeelCfg): PeelState {
+  const L = cfg.storeyCount;
+  const t = clamp01((cfg.startR - radius) / (cfg.startR - cfg.endR));
+  const p = t * L;
+
+  const roofFade = 1 - clamp01(p);
+
+  // Shell dissolve band: only during units j ≥ 1. q = p clamped a hair below
+  // L so floor() lands on the last unit at p = L exactly.
+  let discardAbove = OFF;
+  let bandLo = OFF;
+  let bandFade = 0;
+  if (p > 1 && L > 1) {
+    const q = Math.min(p, L);
+    const j = q >= L ? L - 1 : Math.floor(q);
+    bandFade = q >= L ? 1 : q - j;
+    bandLo = cfg.baseY + (L - j) * cfg.storeyH;
+    discardAbove = cfg.baseY + (L - j + 1) * cfg.storeyH;
+  }
+
+  const storeyFades: number[] = new Array(L);
+  for (let k = 0; k < L; k++) {
+    const fadeIn = clamp01(p - (L - 1 - k));
+    const fadeOut = k > 0 ? clamp01(p - (L - k)) : 0;
+    storeyFades[k] = fadeIn - fadeOut;
+  }
+
+  return { p, roofFade, discardAbove, bandLo, bandFade, storeyFades };
+}
+
+export function closedPeel(cfg: PeelCfg): PeelState {
+  return peelState(cfg.startR, cfg);
+}
+
+// Storey count + slab pitch from the baked eave height: round to the nominal
+// 3.4 m pitch, clamp the count to [1, maxStoreys]; the resulting pitch is
+// eaveH / count (a 1-storey shed keeps its real low eave as its pitch).
+export function storeyLayout(eaveH: number): { storeyCount: number; storeyH: number } {
+  const nominal = Math.round(eaveH / kswPeel.nominalStoreyH);
+  const storeyCount = Math.min(kswPeel.maxStoreys, Math.max(1, nominal));
+  return { storeyCount, storeyH: eaveH / storeyCount };
+}
+
+// TEMPORARY (removed in Task 6): legacy single-slice adapter for main.ts.
+export function cutawayState(radius: number): { cutH: number; upperFade: number } {
+  const s = peelState(radius, { storeyCount: 1, storeyH: 3.2, baseY: 0, startR: 90, endR: 55 });
+  return { cutH: s.roofFade < 0.15 ? 3.2 : 1e6, upperFade: s.roofFade };
 }
