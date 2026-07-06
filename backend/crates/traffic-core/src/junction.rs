@@ -56,6 +56,13 @@ pub const APPROACHING_MIN_V: f32 = 0.5;
 /// Beyond this it is treated as free road (its next turn is irrelevant yet).
 pub const APPROACH_ZONE_M: f32 = 40.0;
 
+/// Within this distance (m) of a lane end, a vehicle whose current lane cannot
+/// serve its route's next edge treats a corrective lane change as MANDATORY
+/// (SUMO-style strategic change): incentive threshold waived, only the safety
+/// veto applies, random suppression bypassed. Sized to give a ~14 m/s vehicle
+/// several change attempts before the wall.
+pub const URGENT_ZONE_M: f32 = 150.0;
+
 /// Within this distance (m) of a lane end, MOBIL lane changes are restricted to
 /// target lanes that can still serve the route ("mandatory-lane-light"; see
 /// [`crate::tick`]). Keeps a turn-unaware MOBIL from stranding a vehicle in a

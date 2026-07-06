@@ -75,6 +75,13 @@ struct Intent {
     stop_s: f32,
     /// The route cursor before any crossing, restored on a hold.
     from_cursor: u32,
+    /// Phase 1 found this vehicle WALLED at a lane end whose lane has no turn
+    /// onto the route's next lane (a `Boundary::NoTurn` at the stop line).
+    /// Phase 2 reports these via [`Core::stranded_last_tick`] so the shell can
+    /// rescue them (re-route from the current lane) instead of letting them
+    /// wait forever — the missed-turn stranding class the S2 calibration
+    /// exposed as the dominant gridlock seed.
+    stranded: bool,
 }
 
 /// Sentinel in [`Intent::cross_turn`]: this vehicle is not crossing a node this
@@ -104,6 +111,7 @@ impl Default for Intent {
             from_lane: 0,
             stop_s: 0.0,
             from_cursor: 0,
+            stranded: false,
         }
     }
 }
@@ -160,6 +168,11 @@ pub struct Core {
     /// Slots that finished their route this tick, collected in phase-2 and freed
     /// after the occupancy pass. Pre-sized to `cap`; reused each tick.
     despawn: Vec<VehId>,
+
+    /// Slots reported walled at a no-turn lane end this tick (see
+    /// [`Intent::stranded`]). Rebuilt each tick; consumers read it between
+    /// ticks via [`Core::stranded_last_tick`].
+    stranded: Vec<VehId>,
 }
 
 impl Core {
@@ -264,6 +277,7 @@ impl Core {
             intents: vec![Intent::default(); cap],
             active_lanes: Vec::with_capacity(lane_count),
             despawn: Vec::with_capacity(cap),
+            stranded: Vec::with_capacity(64),
         }
     }
 
@@ -391,6 +405,39 @@ impl Core {
     /// ending on a boundary stub's in-lane is a normal route end). Read-only
     /// observation seam for the shell's conservation audit; the buffer is
     /// cleared at the start of the next tick.
+    /// Force a stationary sideways re-seat onto an adjacent same-edge lane —
+    /// the shell's stranded-vehicle rescue for TURNLESS lanes (a lane with no
+    /// outgoing turn at all cannot be left longitudinally; the only physical
+    /// exit is sideways). Applies the same live safety re-check as a phase-2
+    /// MOBIL apply and rebuilds the occupancy index. Returns `false` (no
+    /// mutation) if `target_lane` is not adjacent, the vehicle is gone, or the
+    /// gap is unsafe.
+    pub fn try_side_reseat(&mut self, veh: VehId, target_lane: u32) -> bool {
+        let slot = veh as usize;
+        if !self.fleet.alive.get(slot).copied().unwrap_or(false) {
+            return false;
+        }
+        let lane = self.fleet.lane[slot];
+        let (left, right) = self.lane_adj[lane as usize];
+        if target_lane != left && target_lane != right {
+            return false;
+        }
+        if !self.apply_lane_change_ok(slot, LaneChange { target_lane }) {
+            return false;
+        }
+        self.fleet.lane[slot] = target_lane;
+        self.index.rebuild(&self.fleet);
+        true
+    }
+
+    /// Slots walled at a no-turn lane end during the last [`Core::tick`] —
+    /// alive, stopped, and permanently stuck unless a consumer re-routes them
+    /// from their CURRENT lane (or despawns them if the lane is a true dead
+    /// end). Sorted ascending by slot (phase-2 iteration order).
+    pub fn stranded_last_tick(&self) -> &[VehId] {
+        &self.stranded
+    }
+
     pub fn despawned_last_tick(&self) -> &[VehId] {
         &self.despawn
     }
@@ -471,6 +518,7 @@ impl Core {
 
                 let mut blocked = false;
                 let mut route_end = false;
+                let mut no_turn_wall = false;
                 let next_turn = match boundary {
                     Boundary::Turn(turn) => {
                         if !junction_allows(fleet, index, lane_len, junction, net, turn, t) {
@@ -493,6 +541,7 @@ impl Core {
                     }
                     Boundary::NoTurn => {
                         blocked = true;
+                        no_turn_wall = true;
                         let stop_gap = dist_to_end;
                         if stop_gap < gap {
                             gap = stop_gap;
@@ -572,6 +621,10 @@ impl Core {
                         from_lane: lane,
                         stop_s: this_lane_len - STOP_LINE_EPS,
                         from_cursor: fleet.route[i].cursor,
+                        // Only a vehicle actually pressed against the wall is
+                        // stranded — one still rolling toward it may yet be
+                        // rescued by a MOBIL change of its own.
+                        stranded: no_turn_wall && new_v < 0.5 && (this_lane_len - new_s) < 2.0,
                     };
                 }
             }
@@ -586,11 +639,15 @@ impl Core {
         // lives entirely here in the sequential apply.
         self.occupancy.begin_tick(t);
         self.despawn.clear();
+        self.stranded.clear();
         for i in 0..self.fleet.slots() {
             if !self.fleet.alive[i] {
                 continue;
             }
             let it = self.intents[i];
+            if it.stranded {
+                self.stranded.push(i as VehId);
+            }
 
             if it.cross_turn != NO_CROSS {
                 // This vehicle would cross a node this tick. Two gates remain:
@@ -883,24 +940,37 @@ fn evaluate_lane_change(
         return None; // single-lane edge: nothing to change to
     }
 
-    // Randomized acceptance: on ~10% of ticks, suppress any change entirely.
-    if crate::u01(seed, t, veh as u64) >= 0.9 {
-        return None;
-    }
-
-    // Mandatory-lane-light (carry-forward a): within `MANDATORY_ZONE_M` of the
-    // lane end, MOBIL is turn-unaware and would happily rewrite the route cursor
-    // onto a lane with no turn for the vehicle's next edge — stranding it. So
-    // near the node we only permit changes onto a lane that can still serve the
-    // route: one with a turn whose `toLane` lies on the same edge as the route's
-    // planned next lane. Away from the node (dist_to_end > zone) MOBIL is
-    // unrestricted, as before.
-    let restrict = dist_to_end <= MANDATORY_ZONE_M;
-    let next_edge = if restrict {
+    // Strategic urgency (SUMO-style): within `URGENT_ZONE_M` of the lane end,
+    // a vehicle whose CURRENT lane cannot serve the route's next edge must get
+    // out — its change is MANDATORY: the incentive threshold no longer applies
+    // (only the hard safety criterion does), the 10% random suppression is
+    // bypassed, and non-serving targets are barred. This is the missed-turn
+    // stranding fix: without merge-back pressure, an overtake onto a turnless
+    // secondary lane walled 9.4k vehicles per world day in the S2 calibration.
+    let next_edge = if dist_to_end <= junction::URGENT_ZONE_M {
         route_next_edge(fleet, net, veh as usize)
     } else {
         None
     };
+    let cur_serves = match next_edge {
+        Some(edge) => lane_serves_edge(net, lane, edge),
+        None => true,
+    };
+    let mandatory = !cur_serves;
+
+    // Randomized acceptance: on ~10% of ticks, suppress any DISCRETIONARY
+    // change entirely (desynchronizes threshold-crossing neighbours). A
+    // mandatory correction must not dither.
+    if !mandatory && crate::u01(seed, t, veh as u64) >= 0.9 {
+        return None;
+    }
+
+    // Mandatory-lane-light (carry-forward a): within `MANDATORY_ZONE_M` of the
+    // lane end, changes onto a lane that cannot serve the route are barred even
+    // for a correctly-placed vehicle. When the vehicle is on a WRONG lane the
+    // bar applies throughout the urgent zone — a corrective move must never
+    // land on another non-serving lane.
+    let restrict_all = dist_to_end <= MANDATORY_ZONE_M;
 
     // Current-lane neighbourhood, excluding self (self occupies this lane).
     let cur = lane_neighbourhood(fleet, index, lane, s, v, veh);
@@ -912,9 +982,9 @@ fn evaluate_lane_change(
         if target == u32::MAX {
             continue;
         }
-        // Turn-awareness gate: if restricted and the target lane can't serve the
-        // route's next edge, skip it.
+        // Turn-awareness gate.
         if let Some(edge) = next_edge
+            && (mandatory || restrict_all)
             && !lane_serves_edge(net, target, edge)
         {
             continue;
@@ -931,7 +1001,14 @@ fn evaluate_lane_change(
             &tgt,
             to_right,
         );
-        if d.change {
+        // Mandatory correction: only the safety veto (new follower not forced
+        // beyond b_safe) gates the move; the comfort threshold is waived.
+        let accept = if mandatory {
+            d.new_follower_accel > -mobil_params.b_safe
+        } else {
+            d.change
+        };
+        if accept {
             match best {
                 Some((_, best_inc)) if best_inc >= d.incentive => {}
                 _ => best = Some((target, d.incentive)),

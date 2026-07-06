@@ -282,6 +282,8 @@ fn main() -> anyhow::Result<()> {
     // ambiguous between "demand too low" and "trips failed to spawn".
     {
         use winterthur_traffic::shell::SpawnerRes;
+        let stranded = *world.resource::<winterthur_traffic::shell::StrandedLedger>();
+        eprintln!("calibrate: stranded ledger {stranded:?}");
         let counters = world.resource::<SpawnerRes>().0.counters();
         let alive = world
             .resource::<winterthur_traffic::shell::CoreRes>()

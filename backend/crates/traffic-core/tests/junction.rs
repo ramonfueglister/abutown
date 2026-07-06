@@ -571,3 +571,72 @@ fn mutual_yield_arrivals_do_not_deadlock() {
         core.fleet.alive_count()
     );
 }
+
+/// Missed-turn stranding seam: a route whose next lane is NOT reachable from
+/// the current lane (no turn 0 -> 3 exists in the mutual-yield cross) drives
+/// the vehicle into the no-turn wall, and the kernel reports it via
+/// `stranded_last_tick` — alive, stopped, waiting for a shell rescue.
+#[test]
+fn no_turn_wall_reports_stranded() {
+    let net = mutual_yield_cross();
+    let mut core = Core::new(&net, 4, 0x57A);
+    core.spawn(0, 50.0, 0, &[0u32, 3])
+        .expect("spawn walled route");
+    core.reindex();
+
+    let mut reported = false;
+    for t in 0..600 {
+        core.tick(t);
+        if core.stranded_last_tick().contains(&0) {
+            reported = true;
+            break;
+        }
+    }
+    assert!(reported, "walled vehicle never reported stranded");
+    assert_eq!(
+        core.fleet.alive_count(),
+        1,
+        "kernel must NOT despawn it itself"
+    );
+}
+
+/// Strategic mandatory merge (missed-turn fix): on a two-lane feeder where
+/// only lane 0 has a turn onto the exit, a vehicle routed on lane 1 must
+/// merge to lane 0 inside the urgent zone and complete — before the fix it
+/// drove into the no-turn wall and waited forever.
+#[test]
+fn wrong_lane_merges_before_the_wall_and_completes() {
+    let json = r#"{
+      "meta": {"anchor":{"lon":0.0,"lat":0.0},"laneWidth":3.5,"cellSize":1.0},
+      "nodes": [
+        {"id":0,"x":0,"z":0,"kind":"dead_end","signal":null},
+        {"id":1,"x":200,"z":0,"kind":"uncontrolled","signal":null},
+        {"id":2,"x":300,"z":0,"kind":"dead_end","signal":null}
+      ],
+      "edges": [
+        {"id":0,"from":0,"to":1,"speedMs":13.9,"laneCount":2,"priorityRoad":false,"lanes":[0,1]},
+        {"id":1,"from":1,"to":2,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[2]}
+      ],
+      "lanes": [
+        {"id":0,"edge":0,"index":0,"lengthM":200,"pts":[[0,0],[200,0]]},
+        {"id":1,"edge":0,"index":1,"lengthM":200,"pts":[[0,-3.5],[200,-3.5]]},
+        {"id":2,"edge":1,"index":0,"lengthM":100,"pts":[[200,0],[300,0]]}
+      ],
+      "turns": [
+        {"id":0,"fromLane":0,"toLane":2,"node":1,"conflictsWith":[],"yieldsTo":[]}
+      ]
+    }"#;
+    let net = traffic_net::load(json).expect("two-lane merge fixture must validate");
+    let mut core = Core::new(&net, 4, 0x3E);
+    core.spawn(1, 20.0, 0, &[1u32, 2])
+        .expect("spawn on wrong lane");
+    core.reindex();
+
+    for t in 0..800 {
+        core.tick(t);
+        if core.fleet.alive_count() == 0 {
+            return; // merged, crossed, completed
+        }
+    }
+    panic!("vehicle never completed: stuck on the turnless lane");
+}
