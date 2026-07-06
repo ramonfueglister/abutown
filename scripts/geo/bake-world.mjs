@@ -19,6 +19,7 @@ import { gradeDem, makeCorridorMask } from './lib/grading.mjs';
 import { laneFloorWidths } from './lib/gradewidths.mjs';
 import { riverCenterlineRings } from './lib/riverrings.mjs';
 import { wayKey, quantizeProfile, shiftProfile } from './lib/roadprofiles.mjs';
+import { makeCorridorSnapSampler } from './lib/corridorsnap.mjs';
 import { pointInRing } from './lib/join.mjs';
 import { tileGridFor, assignToTiles, encodeTile, encodeManifest, encodeGraph } from './lib/tiles.mjs';
 import { create, toBinary } from '@bufbuild/protobuf';
@@ -485,6 +486,23 @@ console.log(`tile grid: ${root.size}m square, origin (${root.minX.toFixed(0)}, $
 const treesNum = nature.trees.map((t) => ({ x: t.x, z: t.z, h: t.h, r: t.r, kind: t.kind === 'conifer' ? 1 : 0 }));
 const tiles = assignToTiles(root, { buildings: allBuildings, trees: treesNum, landuse, graph });
 
+// ---- Corridor-snap the tile height field (spec §5 part B, Task 5d) --------
+// extractPatch resamples the graded 2.5 m grid at ~12.5 m tile steps; on steep
+// hillsides that resampling loses the flattened road bench and the tile height
+// lands metres ABOVE the road profile (metric v2 max 4.035 m — the RENDERED
+// terrain pierces the road surface). Wrap the graded sampler so that at every
+// tile height vertex inside a road/rail corridor the height is clamped DOWN to
+// profileY − CLEARANCE (0.05 m; the runtime ribbon adds its own +0.10 m lift).
+// Applied to ALL pyramid levels via encodeTile below so LOD switches never pop
+// piercing in/out. `report.profiles` is index-aligned with `ways` (absolute
+// graded metres, pre-shift) and `ways` carries the SAME halfWidthM grading
+// flattened — the geometric definition is mirrored in src/diorama/ksw/geo/
+// groundSampler.ts (runtime twin). Clamp-down only: embankment fills stay.
+// maxSnapMarginM = the L2 cell diagonal (√2 · 12.5 m) — the largest per-tile
+// snap margin encodeTile requests (it caps every level there). The sampler pads
+// its spatial hash by this so the widened hard-clamp region is never missed.
+const snapDem = makeCorridorSnapSampler(dem, ways, report.profiles, Math.SQRT2 * 12.5);
+
 mkdirSync(`${OUT}/tiles/L0`, { recursive: true });
 mkdirSync(`${OUT}/tiles/L1`, { recursive: true });
 mkdirSync(`${OUT}/tiles/L2`, { recursive: true });
@@ -493,7 +511,7 @@ const tileRefs = [];
 let l0Bytes = 0;
 let totalTileBytes = 0;
 for (const [id, bucket] of [...tiles.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-  const bin = encodeTile(bucket, dem);
+  const bin = encodeTile(bucket, snapDem);
   const relPath = `tiles/${id}.pb`;
   const fullPath = `${OUT}/${relPath}`;
   writeFileSync(fullPath, bin);
@@ -507,8 +525,8 @@ if (l0Bytes >= 1 * 1024 * 1024) fail(`L0 tile bytes ${l0Bytes} >= 1MB budget`);
 // in-script per-tile determinism proof: re-encode one tile twice in-memory.
 {
   const [sampleId, sampleBucket] = [...tiles.entries()][0];
-  const a = encodeTile(sampleBucket, dem);
-  const b = encodeTile(sampleBucket, dem);
+  const a = encodeTile(sampleBucket, snapDem);
+  const b = encodeTile(sampleBucket, snapDem);
   if (!Buffer.from(a).equals(Buffer.from(b))) fail(`tile ${sampleId} is not deterministic — re-encode produced different bytes`);
   console.log(`in-script determinism check OK (sample tile ${sampleId}, ${a.length} bytes)`);
 }

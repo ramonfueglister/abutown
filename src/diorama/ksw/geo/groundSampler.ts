@@ -19,6 +19,15 @@
 // Determinism: pure functions over the baked, already-deterministic profile
 // data; construction is O(n) (one spatial-hash insert per corridor segment),
 // query is O(1) expected (one cell bucket + its 3x3 neighborhood).
+//
+// ── MIRROR: scripts/geo/lib/corridorsnap.mjs ───────────────────────────────
+// A bake-time twin (Task 5d) uses the SAME corridor geometry — spatial hash,
+// projectToSegment, interpolateProfile, BLEND_M, CELL — to CLAMP the tile
+// height field down to profileY − 0.05 m inside corridors so the rendered
+// terrain never pierces the road profile this sampler serves. The two MUST
+// stay geometrically identical (half-width, blend band, arc convention) or
+// terrain piercing reappears where they disagree. If the corridor definition
+// (half-width source, BLEND_M) changes here, change corridorsnap.mjs too.
 import { corridorWidths, type TrafficNetDoc } from '../../traffic/corridorWidths';
 import trafficNetJson from '../../../data/winterthur/trafficnet.json';
 import type { RoadPath, RoadProfile } from './geoData';

@@ -104,10 +104,16 @@ export function makeLocalGrid(geoSampler, { minX, minZ, maxX, maxZ }, cellsize =
   return { grid, sampler };
 }
 
-export function extractPatch(sampler, { originX, originZ, gridN, cellSize }) {
+// `snapMarginM` (default 0) is forwarded as a third arg to sampler.heightAt.
+// The corridor-snap sampler (scripts/geo/lib/corridorsnap.mjs) uses it to widen
+// its hard-clamp region to this tile's cell-diagonal, so a road bench is
+// clamped across the whole tile cell it crosses, not just the vertices
+// physically inside the corridor (the coarse lattice otherwise interpolates the
+// bench away — see corridorsnap.mjs). Plain samplers ignore the extra arg.
+export function extractPatch(sampler, { originX, originZ, gridN, cellSize }, snapMarginM = 0) {
   const out = new Float32Array(gridN * gridN);
   for (let j = 0; j < gridN; j++)
     for (let i = 0; i < gridN; i++)
-      out[j * gridN + i] = sampler.heightAt(originX + i * cellSize, originZ + j * cellSize);
+      out[j * gridN + i] = sampler.heightAt(originX + i * cellSize, originZ + j * cellSize, snapMarginM);
   return out;
 }
