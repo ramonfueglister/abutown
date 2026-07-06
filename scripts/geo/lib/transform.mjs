@@ -557,13 +557,14 @@ const FOOTPRINT_MARGIN = 1;
 // per-tree linear scan over every footprint, recomputing its bbox each time,
 // made the exclusion pass O(trees × footprints × footprint_len) — measurable
 // at municipality scale (hundreds of buildings × thousands of trees). Mirrors
-// existingTreeGrid's design (style.mjs): a fixed 8 m cell, each segment
-// registered in the cells of both endpoints AND its midpoint (so a segment
-// longer than one cell — the exclusion test's 1 m margin is small relative to
-// most building edges, but a very short cell/very long edge could otherwise
-// span more than 3 cells and be missed by a single 3×3 lookup) is still found
-// by a query cell adjacent to any of the three registration points. Semantics
-// are unchanged: inside the ring OR within FOOTPRINT_MARGIN of an edge.
+// existingTreeGrid's design (style.mjs): a fixed 8 m cell. A segment is
+// registered at every point along its length spaced ≤ FOOTPRINT_CELL apart
+// (re-review Finding, task-2-report.md: registering only the two endpoints +
+// midpoint left segments longer than ~3×FOOTPRINT_CELL with stretches whose
+// cell was never within one cell of any registered point, so a tree in the 1 m
+// margin over such a stretch was missed by every 3×3 query — 101 edges >42.7 m
+// in the committed Winterthur data, longest 199 m). Semantics are unchanged:
+// inside the ring OR within FOOTPRINT_MARGIN of an edge.
 const FOOTPRINT_CELL = 8; // m
 
 function footprintSegmentGrid(footprints) {
@@ -578,10 +579,12 @@ function footprintSegmentGrid(footprints) {
       const [ax, az] = fp[j];
       const [bx, bz] = fp[i];
       const seg = { fp, ax, az, bx, bz };
-      const mx = (ax + bx) / 2, mz = (az + bz) / 2;
-      const cellsOf = [[ax, az], [bx, bz], [mx, mz]];
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.ceil(len / FOOTPRINT_CELL));
       const seen = new Set();
-      for (const [px, pz] of cellsOf) {
+      for (let s = 0; s <= n; s++) {
+        const t = s / n;
+        const px = ax + (bx - ax) * t, pz = az + (bz - az) * t;
         const gx = Math.floor(px / FOOTPRINT_CELL), gz = Math.floor(pz / FOOTPRINT_CELL);
         const k = `${gx},${gz}`;
         if (seen.has(k)) continue;

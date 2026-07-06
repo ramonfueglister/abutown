@@ -75,4 +75,25 @@ describe('transformNature Slice-2', () => {
     const { trees } = transformNature({ osmNature, projector, buildingFootprints: [fp] });
     expect(trees.length).toBe(1);
   });
+
+  // Re-review Finding (Important): footprintSegmentGrid only registered each
+  // edge segment at 3 points (both endpoints + midpoint), queried via a 3x3
+  // cell lookup (FOOTPRINT_CELL = 8 m). A segment longer than ~43 m therefore
+  // has stretches whose 8 m grid cell is never within one cell of any of the
+  // 3 registered points, so a tree sitting in the 1 m margin over such a
+  // stretch is missed by every 3x3 query and wrongly kept. Regression: 60 m x
+  // 10 m footprint, tree 0.5 m outside the 60 m edge at x=40 — registered
+  // points are the two corners (gx=0, gx=7) and the midpoint (gx=3); x=40
+  // falls in gx=5, which is not adjacent (within 1) to any of {0, 3, 7}, so a
+  // 3x3 query there finds nothing under the old registration scheme.
+  it('Baum 0.5 m ausserhalb einer langen (>43 m) Kante, fern von Ecken/Mitte, wird gedroppt', () => {
+    const osmNature = { elements: [
+      // fp: x in [0,60], z in [-10,0]; Baum bei x=40, z=0.5 (0.5 m ausserhalb der Kante z=0)
+      { type: 'node', lat: -0.5 / 111320, lon: 40 / 111320, tags: { natural: 'tree' } },
+    ]};
+    const projector = { toLocal: (lon: number, lat: number) => [lon * 111320, -lat * 111320] };
+    const fp = [[0, 0], [60, 0], [60, -10], [0, -10]];
+    const { trees } = transformNature({ osmNature, projector, buildingFootprints: [fp] });
+    expect(trees.length).toBe(0);
+  });
 });
