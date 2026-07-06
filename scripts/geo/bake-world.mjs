@@ -9,12 +9,15 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { ANCHOR, makeProjector } from './lib/project.mjs';
-import { parseAAIGrid, makeDemSampler } from './lib/dem.mjs';
+import { parseAAIGrid, makeDemSampler, makeLocalGrid } from './lib/dem.mjs';
 import { buildRoadGraph } from './lib/graph.mjs';
 import { accessPoints } from './lib/access.mjs';
-import { transformLanduse } from './lib/landuse.mjs';
+import { transformLanduse, waterRingsFrom } from './lib/landuse.mjs';
 import { transformTransit } from './lib/transit.mjs';
-import { transformBuildings, transformNature } from './lib/transform.mjs';
+import { transformBuildings, transformNature, transformRoads } from './lib/transform.mjs';
+import { gradeDem, makeCorridorMask } from './lib/grading.mjs';
+import { laneFloorWidths } from './lib/gradewidths.mjs';
+import { riverCenterlineRings } from './lib/riverrings.mjs';
 import { pointInRing } from './lib/join.mjs';
 import { tileGridFor, assignToTiles, encodeTile, encodeManifest, encodeGraph } from './lib/tiles.mjs';
 import { create, toBinary } from '@bufbuild/protobuf';
@@ -64,21 +67,8 @@ const projector = makeProjector(ANCHOR);
 const boundaryRing = outerLonLat.map(([lon, lat]) => projector.toLocal(lon, lat));
 console.log(`boundary: ${boundaryRing.length} ring points`);
 
-// ---- Step 2: DEM -------------------------------------------------------
-console.log('parsing DEM (210 MB AAIGrid)...');
-const demText = readFileSync(`${SCRATCH}/dem/dem.asc`, 'utf8');
-const grid = parseAAIGrid(demText);
-const dem = makeDemSampler(grid, projector);
-const originH = dem.heightAt(0, 0);
-console.log(`DEM: ${grid.ncols}x${grid.nrows} cells, heightAt(0,0)=${originH.toFixed(1)}m`);
-if (!(originH >= 430 && originH <= 470))
-  fail(`heightAt(0,0)=${originH} outside [430,470] — DEM/projection mismatch (expected ~450m KSW area)`);
-
-// ---- Step 3: buildings from 30 GDBs ------------------------------------
-const gdbList = loadJson(`${SCRATCH}/gdb-list.json`);
-if (!Array.isArray(gdbList) || gdbList.length === 0) fail('gdb-list.json is empty');
-
-// Clip bbox: boundary ring bbox padded by CLIP_PAD_M, back to lon/lat for -spat.
+// boundary bbox — reused for the building clip pad AND the grading local-grid
+// extent (both cover boundary + CLIP_PAD_M, the same span the tile root spans).
 function bboxOfRing(ring) {
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const [x, z] of ring) {
@@ -89,13 +79,93 @@ function bboxOfRing(ring) {
   }
   return { minX, minZ, maxX, maxZ };
 }
+const bb = bboxOfRing(boundaryRing);
+
+// ---- Step 2: DEM -------------------------------------------------------
+console.log('parsing DEM (210 MB AAIGrid)...');
+const demText = readFileSync(`${SCRATCH}/dem/dem.asc`, 'utf8');
+const grid = parseAAIGrid(demText);
+const geoDem = makeDemSampler(grid, projector);
+const originH = geoDem.heightAt(0, 0);
+console.log(`DEM: ${grid.ncols}x${grid.nrows} cells, heightAt(0,0)=${originH.toFixed(1)}m`);
+if (!(originH >= 430 && originH <= 470))
+  fail(`heightAt(0,0)=${originH} outside [430,470] — DEM/projection mismatch (expected ~450m KSW area)`);
+
+// ---- Step 2b: terrain grading (spec 2026-07-06 §4) --------------------------
+// Order matters: buildings (baseY, Step 3), the road graph's DEM profile
+// sampling (Step 4), trees and every tile height patch (Step 7) all sample the
+// GRADED terrain. The geographic AAIGrid can't be graded in place (wrong grid
+// convention — lon/lat degrees, row 0 = north, non-square cells), so resample
+// it onto a regular local-metre grid over the boundary+pad extent, grade THAT,
+// and hand every later stage the sampler that reads the mutated local grid.
+// 10 m cellsize is finer than the finest tile step (L2 ≈ 15 m); at this
+// municipality extent the grid + kernel accumulators are ~60 MB total (dense
+// Float64 is fine, no sparse refactor needed — see task-4-report.md).
+console.log('grading road/rail corridors into the DEM...');
+const { grid: localGrid, sampler: dem } = makeLocalGrid(
+  geoDem,
+  { minX: bb.minX - CLIP_PAD_M, minZ: bb.minZ - CLIP_PAD_M, maxX: bb.maxX + CLIP_PAD_M, maxZ: bb.maxZ + CLIP_PAD_M },
+  10,
+);
+console.log(`grading grid: ${localGrid.ncols}x${localGrid.nrows} local-metre cells @ ${localGrid.cellsize}m`);
+
+const osmRoads = loadJson(`${SCRATCH}/osm-roads.json`);
+const { roads, rails } = transformRoads({ osmRoads, projector });
+const trafficNetDoc = loadJson('data/winterthur/trafficnet.json');
+const floors = laneFloorWidths(roads, trafficNetDoc);
+// Water rings: OSM water POLYGONS (Töss, Eulach where mapped as area) PLUS
+// buffered river CENTRELINES (spec §4.4 — the Eulach also runs as bare
+// waterway=river lines with no polygon; grading must never cross those either).
+const osmLanduse = loadJson(`${SCRATCH}/osm-landuse.json`);
+const landuse = transformLanduse({ osmLanduse, projector });
+const osmNature = loadJson(`${SCRATCH}/osm-nature.json`);
+const nature = transformNature({ osmNature, projector });
+const polygonWaterRings = waterRingsFrom(landuse);
+const riverRings = riverCenterlineRings(nature.rivers, 3);
+const waterRings = [...polygonWaterRings, ...riverRings];
+console.log(`water rings: ${polygonWaterRings.length} polygon + ${riverRings.length} buffered river centrelines`);
+
+const ways = [
+  ...roads.map((r, i) => ({
+    pts: r.pts,
+    kind: 'road',
+    halfWidthM: Math.max(r.width, floors[i]) / 2 + 1.5, // lane/render width + 1.5 m shoulder (§4.1, §4.4)
+    blendM: 8,
+    windowM: 40,
+    maxGrade: 0.12,
+    bridge: r.bridge === true,
+  })),
+  ...rails.map((r) => ({
+    pts: r.pts,
+    kind: 'rail',
+    halfWidthM: (r.width + 2.2) / 2 + 2.0, // ballast bed + 2 m shoulder (§4.2)
+    blendM: 8,
+    windowM: 200,
+    maxGrade: 0.025,
+  })),
+];
+const originBefore = dem.heightAt(0, 0);
+const report = gradeDem(localGrid, ways, { waterRings });
+const originDelta = Math.abs(dem.heightAt(0, 0) - originBefore);
+if (originDelta > 2) fail(`grading moved the anchor by ${originDelta.toFixed(2)} m (> 2 m gate)`);
+console.log(
+  `grading: ${report.cellsChanged} cells, ${report.waterSkippedCells} water cells skipped, `
+  + `${report.bridgeSites.length} bridge sites (untagged water/rail crossings), anchor Δ ${originDelta.toFixed(2)} m`,
+);
+const inCorridor = makeCorridorMask(ways);
+
+// ---- Step 3: buildings from 30 GDBs ------------------------------------
+const gdbList = loadJson(`${SCRATCH}/gdb-list.json`);
+if (!Array.isArray(gdbList) || gdbList.length === 0) fail('gdb-list.json is empty');
+
+// Clip bbox: boundary ring bbox (bb, from Step 2) padded by CLIP_PAD_M, back to
+// lon/lat for -spat.
 const R = 6371008.8, rad = Math.PI / 180;
 function localToLonLat(x, z) {
   const lat = projector.anchorLat - z / (R * rad);
   const lon = projector.anchorLon + x / (R * rad * Math.cos(projector.anchorLat * rad));
   return [lon, lat];
 }
-const bb = bboxOfRing(boundaryRing);
 const [lonMin, latMax] = localToLonLat(bb.minX - CLIP_PAD_M, bb.minZ - CLIP_PAD_M);
 const [lonMax, latMin] = localToLonLat(bb.maxX + CLIP_PAD_M, bb.maxZ + CLIP_PAD_M);
 const spat = ['-spat', String(Math.min(lonMin, lonMax)), String(Math.min(latMin, latMax)),
@@ -260,8 +330,9 @@ if (allBuildings.length < MIN_BUILDINGS)
   fail(`only ${allBuildings.length} buildings — expected >= ${MIN_BUILDINGS} (bbox/clip broken?)`);
 
 // ---- Step 4: road graph -------------------------------------------------
+// osmRoads was loaded at Step 2b (for grading corridors); reuse it. `dem` here
+// is the graded local-metre sampler, so edge Y profiles sit on graded terrain.
 console.log('building road graph...');
-const osmRoads = loadJson(`${SCRATCH}/osm-roads.json`);
 const graph = buildRoadGraph({ osmRoads, projector, dem });
 console.log(`graph: ${graph.nodeOsmId.length} nodes, ${graph.edgeA.length} edges`);
 if (graph.edgeA.length < 20000) fail(`only ${graph.edgeA.length} edges — expected >= 20000`);
@@ -315,9 +386,9 @@ console.log(`access: ${bound}/${allBuildings.length} buildings bound (${(boundRa
 if (boundRate < 0.8) fail(`only ${(boundRate * 100).toFixed(1)}% of buildings bound to the road graph — expected >= 80%`);
 
 // ---- Step 6: landuse / transit / nature ----------------------------------
-console.log('transforming landuse/transit/nature...');
-const osmLanduse = loadJson(`${SCRATCH}/osm-landuse.json`);
-const landuse = transformLanduse({ osmLanduse, projector });
+// landuse and nature were transformed at Step 2b (they feed grading's water
+// rings); reuse those objects, only transit is new here.
+console.log('transforming transit; landuse/nature reused from grading stage...');
 console.log(`landuse: ${landuse.length} rings`);
 if (landuse.length < 50) fail(`only ${landuse.length} landuse rings — expected >= 50`);
 
@@ -326,10 +397,16 @@ const transit = transformTransit({ osmTransit, graph, projector });
 console.log(`transit: ${transit.lineRef.length} lines, ${transit.stopEdge.length} stops`);
 if (transit.lineRef.length < 5) fail(`only ${transit.lineRef.length} bus/transit lines — expected >= 5`);
 
-const osmNature = loadJson(`${SCRATCH}/osm-nature.json`);
-const nature = transformNature({ osmNature, projector });
 console.log(`nature: ${nature.greens.length} greens, ${nature.waterAreas.length} water areas, ${nature.rivers.length} rivers, ${nature.trees.length} trees`);
 if (nature.trees.length < 3000) fail(`only ${nature.trees.length} trees — expected >= 3000`);
+
+// Corridor clearing (spec §4): drop trees that fall inside a graded road/rail
+// carriageway — a tree in the levelled tarmac reads as a bug. Uses the same
+// distance math as gradeDem (hard halfWidthM boundary, no blend falloff).
+const treesBefore = nature.trees.length;
+nature.trees = nature.trees.filter((t) => !inCorridor(t.x, t.z));
+console.log(`corridor clearing: ${treesBefore - nature.trees.length} trees removed from carriageways (${nature.trees.length} kept)`);
+if (nature.trees.length < 3000) fail(`only ${nature.trees.length} trees after corridor clearing — expected >= 3000`);
 
 // ---- Step 7: tile grid, assign, encode, write ----------------------------
 console.log('building tile grid...');

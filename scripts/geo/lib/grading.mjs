@@ -116,37 +116,6 @@ function polylineArcLengths(pts) {
   return arc;
 }
 
-/**
- * Nearest point on the densified centreline to (x,z). Returns
- * { d, h, index } — perpendicular-ish distance (nearest-vertex distance),
- * the graded profile height at that vertex, and its index.
- */
-function nearestOnCenterline(pts, profile, x, z) {
-  let bestD2 = Infinity;
-  let bestIdx = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const dx = pts[i][0] - x;
-    const dz = pts[i][1] - z;
-    const d2 = dx * dx + dz * dz;
-    if (d2 < bestD2) {
-      bestD2 = d2;
-      bestIdx = i;
-    }
-  }
-  return { d: Math.sqrt(bestD2), h: profile[bestIdx], index: bestIdx };
-}
-
-function bboxOfWay(pts, pad) {
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const [x, z] of pts) {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (z < minZ) minZ = z;
-    if (z > maxZ) maxZ = z;
-  }
-  return { minX: minX - pad, maxX: maxX + pad, minZ: minZ - pad, maxZ: maxZ + pad };
-}
-
 /** Ray-cast point-in-polygon (even-odd rule), ring = [[x,z], ...]. */
 function pointInRing(x, z, ring) {
   let inside = false;
@@ -160,9 +129,31 @@ function pointInRing(x, z, ring) {
   return inside;
 }
 
-function pointInAnyRing(x, z, rings) {
-  for (const ring of rings) if (pointInRing(x, z, ring)) return true;
-  return false;
+/**
+ * Bbox-prefiltered water tester over a ring set. At municipality scale the
+ * bake passes ~3.4k rings (515 polygons + ~2.9k buffered river centrelines);
+ * the naive for-all-rings pointInRing per corridor cell was the second-biggest
+ * hot spot after the accumulator itself. A per-ring bbox check rejects almost
+ * every ring in O(1) before the raycast runs.
+ */
+function makeWaterTest(rings) {
+  const items = rings.map((ring) => {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const [x, z] of ring) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
+    return { ring, minX, maxX, minZ, maxZ };
+  });
+  return (x, z) => {
+    for (const it of items) {
+      if (x < it.minX || x > it.maxX || z < it.minZ || z > it.maxZ) continue;
+      if (pointInRing(x, z, it.ring)) return true;
+    }
+    return false;
+  };
 }
 
 function validateWay(way) {
@@ -179,7 +170,7 @@ function validateWay(way) {
 }
 
 /**
- * Precompute a way's densified centreline + graded profile + bbox, sampling
+ * Precompute a way's densified centreline + graded profile, sampling
  * pre-grading heights straight from the (unmutated-so-far) dem grid.
  */
 function prepareWay(dem, way) {
@@ -189,8 +180,7 @@ function prepareWay(dem, way) {
   const stepM = totalLen / Math.max(1, dense.length - 1);
   const rawHeights = dense.map(([x, z]) => sampleGrid(dem, x, z));
   const profile = smoothProfile(rawHeights, stepM > 0 ? stepM : 1, way.windowM, way.maxGrade);
-  const bbox = bboxOfWay(dense, way.halfWidthM + way.blendM);
-  return { dense, profile, bbox };
+  return { dense, profile };
 }
 
 /** Bilinear sample of the (possibly already-graded) grid at world (x,z). */
@@ -227,79 +217,112 @@ function weightAt(d, halfWidthM, blendM) {
  * the caller can decide bridge sites by total corridor crossing rather than
  * a per-raster-row consecutive-run heuristic (see FINDING 2).
  */
-function accumulateKindGroup(dem, wayGroup, waterRings, sharedWaterSkipped) {
-  const { ncols, nrows } = dem;
+function accumulateKindGroup(dem, wayGroup, waterTest, sharedWaterSkipped) {
+  const { ncols, nrows, cellsize } = dem;
   if (wayGroup.length === 0) {
     return { cellsChanged: 0, waterSkippedByWay: [] };
   }
 
   const prepared = wayGroup.map((way) => ({ way, ...prepareWay(dem, way) }));
 
-  // Union bbox across the whole kind-group's ways.
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const { bbox } of prepared) {
-    if (bbox.minX < minX) minX = bbox.minX;
-    if (bbox.maxX > maxX) maxX = bbox.maxX;
-    if (bbox.minZ < minZ) minZ = bbox.minZ;
-    if (bbox.maxZ > maxZ) maxZ = bbox.maxZ;
-  }
-  const c0 = Math.max(0, Math.floor(colAt(dem, minX)));
-  const c1 = Math.min(ncols - 1, Math.ceil(colAt(dem, maxX)));
-  const r0 = Math.max(0, Math.floor(rowAt(dem, minZ)));
-  const r1 = Math.min(nrows - 1, Math.ceil(rowAt(dem, maxZ)));
-  const boxCols = Math.max(0, c1 - c0 + 1);
-  const boxRows = Math.max(0, r1 - r0 + 1);
-
-  const sumW = new Float64Array(boxCols * boxRows);
-  const sumWH = new Float64Array(boxCols * boxRows);
-  const waterCell = new Uint8Array(boxCols * boxRows);
+  // Sparse accumulators keyed by grid cell index. The first version of this
+  // kernel allocated dense (sumW, sumWH) arrays over the UNION bbox of the
+  // whole kind-group and, per cell, scanned EVERY way's full densified
+  // centreline — O(unionCells × ways × densePoints). Fine on the 60×60 test
+  // grids; at municipality scale (3.7M cells × ~20k roads × ~10² points each)
+  // that is >1e11 inner scans and never finishes. The stamping formulation
+  // below computes the exact same quantities: for each way, walk its dense
+  // points and visit only the cells within corridorR of that point; per
+  // (way, cell), keep the minimum point distance (first argmin wins on exact
+  // ties, matching the old ascending nearest-vertex scan). Cells farther than
+  // corridorR from every dense point never mattered before either (`d >
+  // corridorR` skipped them), so the visited set — and every d/h/weight — is
+  // identical; only the representation is sparse. Work drops to
+  // O(densePoints × (corridorR/cellsize)²) ≈ a few 1e7 at city scale.
+  const sumW = new Map(); // gridIdx -> Σ weight
+  const sumWH = new Map(); // gridIdx -> Σ weight·height
+  const waterCells = new Set(); // gridIdx marked water inside some corridor
 
   // Per-way water-skip tracking for orientation-independent bridge detection.
   const waterSkippedByWay = prepared.map(() => []);
+  const waterCache = new Map(); // gridIdx -> boolean (waterTest is per-cell)
 
-  for (let r = r0; r <= r1; r++) {
-    for (let c = c0; c <= c1; c++) {
+  for (let wi = 0; wi < prepared.length; wi++) {
+    const { way, dense, profile } = prepared[wi];
+    const corridorR = way.halfWidthM + way.blendM;
+    const corridorR2 = corridorR * corridorR;
+    const reach = Math.ceil(corridorR / cellsize);
+
+    // Stamp: gridIdx -> { d2, h } for this way's nearest dense point.
+    const best = new Map();
+    for (let pi = 0; pi < dense.length; pi++) {
+      const px = dense[pi][0];
+      const pz = dense[pi][1];
+      const h = profile[pi];
+      const pc = Math.round(colAt(dem, px));
+      const pr = Math.round(rowAt(dem, pz));
+      const rLo = Math.max(0, pr - reach);
+      const rHi = Math.min(nrows - 1, pr + reach);
+      const cLo = Math.max(0, pc - reach);
+      const cHi = Math.min(ncols - 1, pc + reach);
+      for (let r = rLo; r <= rHi; r++) {
+        const dz = worldZAt(dem, r) - pz;
+        for (let c = cLo; c <= cHi; c++) {
+          const dx = worldXAt(dem, c) - px;
+          const d2 = dx * dx + dz * dz;
+          if (d2 > corridorR2) continue;
+          const idx = r * ncols + c;
+          const cur = best.get(idx);
+          if (cur === undefined) best.set(idx, { d2, h });
+          else if (d2 < cur.d2) {
+            cur.d2 = d2;
+            cur.h = h;
+          }
+        }
+      }
+    }
+
+    // Fold this way into the shared kind-group layer in row-major cell order
+    // (sorted numeric grid index), so water-skip lists and float accumulation
+    // order are deterministic and independent of Map insertion order.
+    const cellIdxs = [...best.keys()].sort((a, b) => a - b);
+    for (const idx of cellIdxs) {
+      const { d2, h } = best.get(idx);
+      const r = (idx / ncols) | 0;
+      const c = idx % ncols;
       const x = worldXAt(dem, c);
       const z = worldZAt(dem, r);
-      const boxIdx = (r - r0) * boxCols + (c - c0);
-      const inWater = pointInAnyRing(x, z, waterRings);
-
-      for (let wi = 0; wi < prepared.length; wi++) {
-        const { way, dense, profile } = prepared[wi];
-        const { d, h } = nearestOnCenterline(dense, profile, x, z);
-        const corridorR = way.halfWidthM + way.blendM;
-        if (d > corridorR) continue;
-
-        if (inWater) {
-          waterCell[boxIdx] = 1;
-          sharedWaterSkipped.count++;
-          waterSkippedByWay[wi].push({ x, z, d });
-          continue;
-        }
-
-        const w = weightAt(d, way.halfWidthM, way.blendM);
-        if (w > 0) {
-          sumW[boxIdx] += w;
-          sumWH[boxIdx] += w * h;
-        }
+      let inWater = waterCache.get(idx);
+      if (inWater === undefined) {
+        inWater = waterTest(x, z);
+        waterCache.set(idx, inWater);
+      }
+      if (inWater) {
+        waterCells.add(idx);
+        sharedWaterSkipped.count++;
+        waterSkippedByWay[wi].push({ x, z, d: Math.sqrt(d2) });
+        continue;
+      }
+      const w = weightAt(Math.sqrt(d2), way.halfWidthM, way.blendM);
+      if (w > 0) {
+        sumW.set(idx, (sumW.get(idx) ?? 0) + w);
+        sumWH.set(idx, (sumWH.get(idx) ?? 0) + w * h);
       }
     }
   }
 
+  // Blend the shared layer into dem.data once, in row-major cell order.
   let cellsChanged = 0;
-  for (let r = r0; r <= r1; r++) {
-    for (let c = c0; c <= c1; c++) {
-      const boxIdx = (r - r0) * boxCols + (c - c0);
-      if (waterCell[boxIdx]) continue;
-      const w = sumW[boxIdx];
-      if (w <= 0) continue;
-      const gridIdx = r * ncols + c;
-      const orig = dem.data[gridIdx];
-      const t = Math.min(w, 1);
-      const graded = t * (sumWH[boxIdx] / w) + (1 - t) * orig;
-      if (graded !== dem.data[gridIdx]) cellsChanged++;
-      dem.data[gridIdx] = graded;
-    }
+  const idxs = [...sumW.keys()].sort((a, b) => a - b);
+  for (const idx of idxs) {
+    if (waterCells.has(idx)) continue;
+    const w = sumW.get(idx);
+    if (w <= 0) continue;
+    const orig = dem.data[idx];
+    const t = Math.min(w, 1);
+    const graded = t * (sumWH.get(idx) / w) + (1 - t) * orig;
+    if (graded !== dem.data[idx]) cellsChanged++;
+    dem.data[idx] = graded;
   }
 
   return { cellsChanged, waterSkippedByWay };
@@ -349,7 +372,7 @@ export function gradeDem(dem, ways, opts) {
   }
   for (const way of ways) validateWay(way);
 
-  const waterRings = opts.waterRings;
+  const waterTest = makeWaterTest(opts.waterRings);
   const origin00Before = sampleGrid(dem, 0, 0);
 
   const roads = ways.filter((w) => w.kind === 'road');
@@ -364,7 +387,7 @@ export function gradeDem(dem, ways, opts) {
     const { cellsChanged: groupChanged, waterSkippedByWay } = accumulateKindGroup(
       dem,
       group,
-      waterRings,
+      waterTest,
       sharedWaterSkipped,
     );
     cellsChanged += groupChanged;
@@ -384,23 +407,45 @@ export function gradeDem(dem, ways, opts) {
  */
 export function makeCorridorMask(ways) {
   if (!Array.isArray(ways)) throw new Error('makeCorridorMask: ways must be an array');
-  const prepared = ways.map((way) => {
+  // Spatial hash over every way's densified points, each point carrying its
+  // own way's halfWidthM². The predicate "the nearest dense point of some way
+  // is within that way's halfWidthM" is exactly "∃ dense point p of way w with
+  // dist(q,p) ≤ halfWidth_w", so a lookup over the 3×3 hash neighbourhood
+  // (cell size ≥ max halfWidth) is exhaustive. The previous linear scan was
+  // O(total dense points) per query — ~1e5 points × ~4e5 trees at municipality
+  // scale; this is O(bucket occupancy).
+  let maxHW = 0;
+  for (const way of ways) {
     if (!way || !Array.isArray(way.pts) || way.pts.length < 2) {
       throw new Error('makeCorridorMask: way.pts must have at least 2 points');
     }
     if (!(way.halfWidthM > 0)) throw new Error('makeCorridorMask: way.halfWidthM must be > 0');
-    return { dense: densify(way.pts, 2), halfWidthM: way.halfWidthM };
-  });
+    if (way.halfWidthM > maxHW) maxHW = way.halfWidthM;
+  }
+  const CELL = Math.max(maxHW, 1);
+  const buckets = new Map(); // "cx_cz" -> [{x, z, hw2}]
+  for (const way of ways) {
+    const hw2 = way.halfWidthM * way.halfWidthM;
+    for (const [px, pz] of densify(way.pts, 2)) {
+      const key = `${Math.floor(px / CELL)}_${Math.floor(pz / CELL)}`;
+      let arr = buckets.get(key);
+      if (!arr) buckets.set(key, (arr = []));
+      arr.push({ x: px, z: pz, hw2 });
+    }
+  }
   return function corridorMask(x, z) {
-    for (const { dense, halfWidthM } of prepared) {
-      let bestD2 = Infinity;
-      for (const [px, pz] of dense) {
-        const dx = px - x;
-        const dz = pz - z;
-        const d2 = dx * dx + dz * dz;
-        if (d2 < bestD2) bestD2 = d2;
+    const cx = Math.floor(x / CELL);
+    const cz = Math.floor(z / CELL);
+    for (let gz = cz - 1; gz <= cz + 1; gz++) {
+      for (let gx = cx - 1; gx <= cx + 1; gx++) {
+        const arr = buckets.get(`${gx}_${gz}`);
+        if (!arr) continue;
+        for (const p of arr) {
+          const dx = p.x - x;
+          const dz = p.z - z;
+          if (dx * dx + dz * dz <= p.hw2) return true;
+        }
       }
-      if (Math.sqrt(bestD2) <= halfWidthM) return true;
     }
     return false;
   };

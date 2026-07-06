@@ -60,6 +60,50 @@ export function makeDemSampler(grid, projector) {
   };
 }
 
+// Resample the geographic AAIGrid sampler onto a regular LOCAL-METRE grid so
+// the terrain-grading kernel (grading.mjs) can mutate it in place. That kernel
+// speaks a different grid convention than parseAAIGrid: row-major
+// `data[j*ncols+i]` with i↔world-x (east), j↔world-z (south), cell (0,0)'s
+// centre at (xll,yll) in local metres, isotropic `cellsize`, and NO north/south
+// flip (row index grows with z). parseAAIGrid is the opposite (lon/lat degrees,
+// row 0 = north, non-square dx/dy). So we sample the geographic `sampler` at
+// each local-grid cell centre and hand the resulting flat grid to gradeDem.
+//
+// `cellsize` (default 10 m) is finer than the finest tile sample step (L2 ≈
+// 15 m), so nothing the tiles read is lost to resampling. Returns
+// { grid, sampler } where the returned sampler's heightAt(x,z) bilinearly
+// reads grid.data — call gradeDem on `grid`, then pass this sampler to every
+// later stage so they see the graded heights (the grid is mutated in place, and
+// heightAt reads it lazily, so the same sampler object reflects the mutation).
+export function makeLocalGrid(geoSampler, { minX, minZ, maxX, maxZ }, cellsize = 10) {
+  if (!(cellsize > 0)) throw new Error('makeLocalGrid: cellsize must be > 0');
+  const ncols = Math.max(2, Math.ceil((maxX - minX) / cellsize) + 1);
+  const nrows = Math.max(2, Math.ceil((maxZ - minZ) / cellsize) + 1);
+  const data = new Float64Array(ncols * nrows);
+  for (let j = 0; j < nrows; j++) {
+    const z = minZ + j * cellsize;
+    for (let i = 0; i < ncols; i++) {
+      const x = minX + i * cellsize;
+      data[j * ncols + i] = geoSampler.heightAt(x, z);
+    }
+  }
+  const grid = { ncols, nrows, xll: minX, yll: minZ, cellsize, data };
+  const sampler = {
+    heightAt(x, z) {
+      const col = (x - grid.xll) / grid.cellsize;
+      const row = (z - grid.yll) / grid.cellsize;
+      const c0 = Math.max(0, Math.min(grid.ncols - 2, Math.floor(col)));
+      const r0 = Math.max(0, Math.min(grid.nrows - 2, Math.floor(row)));
+      const fc = Math.max(0, Math.min(1, col - c0));
+      const fr = Math.max(0, Math.min(1, row - r0));
+      const at = (r, c) => grid.data[r * grid.ncols + c];
+      return at(r0, c0) * (1 - fc) * (1 - fr) + at(r0, c0 + 1) * fc * (1 - fr)
+        + at(r0 + 1, c0) * (1 - fc) * fr + at(r0 + 1, c0 + 1) * fc * fr;
+    },
+  };
+  return { grid, sampler };
+}
+
 export function extractPatch(sampler, { originX, originZ, gridN, cellSize }) {
   const out = new Float32Array(gridN * gridN);
   for (let j = 0; j < gridN; j++)
