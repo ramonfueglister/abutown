@@ -620,6 +620,30 @@ async function boot(): Promise<void> {
   // bury under / float over the undulating plate) and cars ride it per-vehicle.
   const worldHeightAt = makeHeightSampler(world);
   const groundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
+
+  // ── hospital ground elevation (bugfix, task 7) ───────────────────────────
+  // The KSW shell (kswCampus), its generated interior, and the plaza are all
+  // authored with a FLAT base at y=0 (the bake anchors buildings at the world
+  // origin). But the terrain under the footprint is real DEM: after the
+  // -anchorGround shift the surface here sits at ~+3.4 m (mean ~+5 m over the
+  // footprint), so a y=0 building is BURIED — the EG storey (y 0..3) and the
+  // shell base vanish under the grass, and only the upper storeys poke out.
+  // Lift the whole hospital island onto its local ground so the EG sits on the
+  // surface. One flat base can't follow the sloped DEM exactly, so use the
+  // mean over the footprint vertices: it clears the terrain across the framed
+  // (centre) region while keeping the float on the high edge minimal. The peel
+  // cut bands (positionWorld.y in the shell shader) key off this same baseY, so
+  // interior slabs and shell slice heights stay in lockstep.
+  const hospitalBaseY = (() => {
+    let sum = 0;
+    for (const [vx, vz] of mainBuildingFp.footprint) sum += groundYAt(vx, vz);
+    return sum / mainBuildingFp.footprint.length;
+  })();
+  kswCampus.position.y = hospitalBaseY;
+  interior.position.y = hospitalBaseY;
+  plaza.position.y = hospitalBaseY;
+  helipad.position.y = hospitalBaseY;
+
   // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
   // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
   // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so
@@ -1264,7 +1288,7 @@ async function boot(): Promise<void> {
   const peelCfg: PeelCfg = {
     storeyCount: buildingPlan.storeyCount,
     storeyH: buildingPlan.storeyH,
-    baseY: 0, // KSW sits at the world anchor; B-phases feed real ground elevations here
+    baseY: hospitalBaseY, // real local ground elevation (see hospitalBaseY above): the shell/interior island is lifted onto the DEM, so the cut bands (positionWorld.y) must start here too
     startR: kswPeel.startR,
     endR: kswPeel.endR,
   };
