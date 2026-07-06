@@ -223,11 +223,11 @@ Worktree `feat/building-zone-gwr` off `origin/main` → PR. Never touches local
 
 ## Open risks
 
-1. **GWR data acquisition endpoint/licensing** — the exact ZH/BFS GWR export URL
-   + fields must be pinned in the plan (federal GWR is large; fetch only the
-   Gemeinde bbox subset). If a clean bbox-filtered GWR pull isn't available, the
-   fallback is the GeoAdmin identify API per centroid (the "Hybrid" option from
-   brainstorming) — a plan-time decision, not a redesign.
+1. **GWR data acquisition endpoint** — the exact BFS/ZH GWR export URL + fields
+   are pinned in the implementation plan (federal GWR is large; the fetch
+   filters to the Gemeinde bbox). **No fallback path**: if the pinned source
+   fails, the fetch fails loudly — same contract as every other `geo:fetch`
+   step. One source of truth, no heal-guards.
 2. **swissBUILDINGS3D 3D volumes** — one real building can be several UUID
    volumes; the GWR spatial join may attach the same EGID to sibling volumes.
    Acceptable (they share the real building); `raw.egids` records the overlap.
