@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS building_attributes (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (world_id, building_id)
 );
--- Open data, safe to read publicly; writes only via the direct Postgres
+-- Open data, safe to read publicly. Writes only via the direct Postgres
 -- connection (sqlx), never via PostgREST/anon.
 ALTER TABLE building_attributes ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS building_attributes_public_read ON building_attributes;

@@ -18,7 +18,8 @@
     "geo:bake-traffic": "node scripts/geo/bake-traffic-net.mjs",
     "geo:fetch-demand": "node scripts/geo/fetch-demand-data.mjs",
     "geo:fetch-attributes": "node scripts/geo/fetch-attributes.mjs",
-    "geo:bake-attributes": "node scripts/geo/bake-attributes.mjs"
+    "geo:bake-attributes": "node scripts/geo/bake-attributes.mjs",
+    "geo:load-attributes": "scripts/cargo-serial.sh run --manifest-path backend/Cargo.toml -p sim-server -- load-building-attributes data/winterthur/building-attributes.json"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.0",

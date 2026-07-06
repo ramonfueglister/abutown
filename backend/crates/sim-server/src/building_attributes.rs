@@ -170,6 +170,32 @@ impl BuildingAttributesStore {
     }
 }
 
+/// One-shot ingest: parse the bake artifact and upsert it into Postgres.
+/// Explicitly invoked (never on boot) so the load stays auditable.
+/// Requires DATABASE_URL — this is a persistence command, no in-memory mode.
+pub async fn load_from_file(path: &str) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let url = std::env::var("DATABASE_URL")
+        .context("DATABASE_URL is required for load-building-attributes")?;
+    let text = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
+    let file: BuildingAttributesFile = serde_json::from_str(&text).context("parse artifact")?;
+    let pool = crate::db::connect_shared_pool(&url)
+        .await
+        .context("connect")?;
+    let store = BuildingAttributesStore::with_pool(pool)
+        .await
+        .context("migrate")?;
+    let n = store
+        .upsert_all(&file.world_id, &file.buildings)
+        .await
+        .context("upsert")?;
+    println!(
+        "building_attributes: upserted {n} rows for world '{}' from {path}",
+        file.world_id
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +249,24 @@ mod tests {
         let rows = store.list(&world).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1].bauzone_code.as_deref(), Some("W3"));
+    }
+
+    #[test]
+    fn parses_real_artifact() {
+        // Guards the serde contract the ingest depends on (camelCase, id rename,
+        // raw always present). Path is relative to the sim-server crate dir.
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../data/winterthur/building-attributes.json"
+        ))
+        .expect("artifact present");
+        let file: BuildingAttributesFile = serde_json::from_str(&text).expect("artifact parses");
+        assert_eq!(file.world_id, "winterthur");
+        assert_eq!(file.buildings.len(), 846);
+        assert!(
+            file.buildings
+                .iter()
+                .all(|b| b.building_id.starts_with('{'))
+        );
     }
 }

@@ -59,6 +59,20 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
     let _ = dotenvy::dotenv();
 
+    // One-shot admin subcommands (no daemon boot). Unknown commands fail loudly.
+    let mut cli_args = std::env::args().skip(1);
+    if let Some(cmd) = cli_args.next() {
+        return match cmd.as_str() {
+            "load-building-attributes" => {
+                let path = cli_args
+                    .next()
+                    .context("usage: sim-server load-building-attributes <path>")?;
+                sim_server::building_attributes::load_from_file(&path).await
+            }
+            other => anyhow::bail!("unknown subcommand {other:?}"),
+        };
+    }
+
     let port: u16 = match std::env::var("LISTEN_PORT") {
         Err(_) => 8080,
         Ok(v) => v.parse().context("LISTEN_PORT must be a valid u16")?,
