@@ -16,7 +16,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 
 const HOST = '127.0.0.1';
-const PORT = 5187;
+const PORT = 5189; // distinct from other worktrees' dev servers (5186-5188 seen in use)
 const SCRATCH_DIR = new URL('../scratch/', import.meta.url).pathname;
 
 function portOpen(host, port) {
