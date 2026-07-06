@@ -61,7 +61,7 @@ export { CAR_PALETTE };
  * Delegates to variant 0 (the plain sedan) — at flow-LOD distances the
  * variant differences are sub-pixel, so one shape stands in for the fleet. */
 export function buildCarGeometry(): THREE.BufferGeometry {
-  return CAR_VARIANTS[0].build(boxGeo);
+  return CAR_VARIANTS[0].buildBody(boxGeo);
 }
 
 /** Ground-surface height (in the car layer's local frame) at a world (x, z) —
@@ -105,7 +105,7 @@ export function createCarLayer(groundYAt?: GroundYAt): CarLayer {
   // per-vertex colours (baked into each geometry) differ, and the per-instance
   // body tint is written via setColorAt.
   const meshes: THREE.InstancedMesh[] = CAR_VARIANTS.map((variant) => {
-    const geometry = variant.build(boxGeo);
+    const geometry = variant.buildBody(boxGeo);
     const mesh = new THREE.InstancedMesh(geometry, material, PER_VARIANT_CAPACITY);
     mesh.name = `trafficCars_${variant.name}`;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

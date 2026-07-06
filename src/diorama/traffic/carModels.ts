@@ -22,26 +22,26 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
  * 4.5 m within visual tolerance; width 1.9 m sits in a 3.0 m lane). */
 const BODY_W = 1.9;
 
-/** CS-like car body palette: saturated-but-clay distinct colours. Whites and
- * silvers dominate a real car park; then reds/blues/greens/a yellow/black for
- * variety. Tuned to pop against the tarmac under soft GI without going neon
- * (mid-value, not fully-saturated primaries). setColorAt multiplies the white
- * body vertex colour by one of these. */
+/** CS-like car body palette, tuned against screenshot references: whites and
+ * silvers dominate a real car park; then greys/black, a couple of reds, an
+ * ochre/brown wagon tone, taxi yellow, blues, green, purple and beige for
+ * variety. setColorAt multiplies the white body vertex colour by one of
+ * these. */
 export const CAR_PALETTE: readonly number[] = [
-  0xe8e6e0, // pearl white
   0xf2f0ea, // bright white
+  0xd9d6cd, // pearl beige-white
   0xb9c0c6, // silver
-  0x8b939b, // gunmetal
-  0x2f3338, // near-black
-  0xc0402f, // clay red
-  0xd97b34, // amber/orange
-  0xe4be3f, // muted yellow
-  0x3f6db0, // royal blue
-  0x5f97c4, // sky blue
-  0x2f7d5b, // racing green
-  0x7ba05a, // olive/lime
-  0x8a5a9c, // muted purple
-  0xc25f86, // rose
+  0x6f767d, // gunmetal
+  0x24272b, // black
+  0x8f2432, // maroon (screenshot dark red)
+  0xc03a2b, // red
+  0xb06a2c, // ochre/brown-orange (screenshot brown wagon)
+  0xe0a91f, // taxi yellow (screenshot yellow hatch)
+  0x2c4f8a, // dark blue (screenshot sedans)
+  0x4a7ec2, // mid blue
+  0x3f7d46, // green (screenshot compact)
+  0x6b4a86, // purple (screenshot van)
+  0xa8a08c, // beige (screenshot SUV)
 ] as const;
 
 /** Dark glass colour baked into the window band (multiplied by the body tint —
@@ -191,10 +191,51 @@ function buildVan(boxGeo: BoxGeo): THREE.BufferGeometry {
   return mergeParts(parts, boxGeo, 'van');
 }
 
-/** The variant table: name (for mesh naming) + geometry builder. Order is
- * stable — carVariantForId indexes into it. */
-export const CAR_VARIANTS: readonly { name: string; build: (boxGeo: BoxGeo) => THREE.BufferGeometry }[] = [
-  { name: 'sedan', build: buildSedan },
-  { name: 'hatchback', build: buildHatchback },
-  { name: 'van', build: buildVan },
+/** Per-axle geometry for a variant, in the same local space as the body
+ * (origin at the wheel line, y=0, forward = +z). */
+export interface WheelLayout {
+  wheelbase: number; // m, distance between axle centres
+  track: number;     // m, distance between left/right wheel centres
+  radius: number;    // m, wheel radius
+  width: number;     // m, wheel width across the car
+}
+
+/** Four wheel local offsets `[x, y, z]` for a wheel layout, y = radius.
+ * FRONT pair (positive z) is listed first — carLayer applies steer to
+ * indices 0 and 1. */
+export function wheelOffsets(l: WheelLayout): [number, number, number][] {
+  const x = l.track / 2;
+  const z = l.wheelbase / 2;
+  return [
+    [x, l.radius, z], [-x, l.radius, z],
+    [x, l.radius, -z], [-x, l.radius, -z],
+  ];
+}
+
+/** A CS-style car variant: silhouette name, overall length, wheel layout, and
+ * body/glass geometry builders. Order in CAR_VARIANTS is stable —
+ * carVariantForId indexes into it. */
+export interface CarVariant {
+  name: string;
+  length: number; // m, overall
+  wheels: WheelLayout;
+  buildBody: (boxGeo: BoxGeo) => THREE.BufferGeometry;
+  buildGlass: () => THREE.BufferGeometry;
+}
+
+/** Placeholder glass geometry — replaced by the real cabin glass in Task 2. */
+function stubGlass(): THREE.BufferGeometry {
+  return new THREE.BoxGeometry(1, 0.3, 1.5);
+}
+
+// NOTE: wagon/suv/pickup temporarily alias the sedan/van box builders as
+// stand-ins for this task; Task 2 replaces buildBody with real per-variant
+// geometry (this table's shape — name/length/wheels — is the stable part).
+export const CAR_VARIANTS: readonly CarVariant[] = [
+  { name: 'sedan',     length: 4.5, wheels: { wheelbase: 2.7, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildSedan,     buildGlass: stubGlass },
+  { name: 'hatchback', length: 3.9, wheels: { wheelbase: 2.5, track: 1.52, radius: 0.30, width: 0.22 }, buildBody: buildHatchback, buildGlass: stubGlass },
+  { name: 'wagon',     length: 4.6, wheels: { wheelbase: 2.8, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildSedan,     buildGlass: stubGlass },
+  { name: 'suv',       length: 4.6, wheels: { wheelbase: 2.8, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildVan,       buildGlass: stubGlass },
+  { name: 'van',       length: 5.2, wheels: { wheelbase: 3.3, track: 1.66, radius: 0.36, width: 0.26 }, buildBody: buildVan,       buildGlass: stubGlass },
+  { name: 'pickup',    length: 5.0, wheels: { wheelbase: 3.1, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildVan,       buildGlass: stubGlass },
 ] as const;

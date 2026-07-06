@@ -13,6 +13,7 @@ import {
   CAR_PALETTE,
   CAR_VARIANTS,
   hashId,
+  wheelOffsets,
 } from '../../src/diorama/traffic/carModels';
 
 describe('carModels selection', () => {
@@ -73,5 +74,46 @@ describe('carModels selection', () => {
     const buckets = new Set<number>();
     for (let id = 0; id < 14; id++) buckets.add(hashId(id) % CAR_PALETTE.length);
     expect(buckets.size).toBeGreaterThan(5);
+  });
+});
+
+describe('CS variant table', () => {
+  it('has the 6 spec variants in stable order', () => {
+    expect(CAR_VARIANTS.map((v) => v.name)).toEqual([
+      'sedan', 'hatchback', 'wagon', 'suv', 'van', 'pickup',
+    ]);
+  });
+
+  it('variant lengths match the spec table', () => {
+    const byName = Object.fromEntries(CAR_VARIANTS.map((v) => [v.name, v.length]));
+    expect(byName).toEqual({
+      sedan: 4.5, hatchback: 3.9, wagon: 4.6, suv: 4.6, van: 5.2, pickup: 5.0,
+    });
+  });
+
+  it('every wheel layout is physically sane', () => {
+    for (const v of CAR_VARIANTS) {
+      expect(v.wheels.wheelbase).toBeGreaterThan(1.5);
+      expect(v.wheels.wheelbase).toBeLessThan(v.length); // axles inside the body
+      expect(v.wheels.track).toBeGreaterThan(1.0);
+      expect(v.wheels.radius).toBeGreaterThanOrEqual(0.28);
+      expect(v.wheels.radius).toBeLessThanOrEqual(0.42);
+    }
+  });
+
+  it('wheelOffsets puts 4 wheels at ±track/2, ±wheelbase/2, y=radius', () => {
+    const l = CAR_VARIANTS[0].wheels;
+    const offs = wheelOffsets(l);
+    expect(offs).toHaveLength(4);
+    const xs = offs.map((o) => o[0]).sort((a, b) => a - b);
+    const zs = offs.map((o) => o[2]).sort((a, b) => a - b);
+    expect(xs[0]).toBeCloseTo(-l.track / 2);
+    expect(xs[3]).toBeCloseTo(l.track / 2);
+    expect(zs[0]).toBeCloseTo(-l.wheelbase / 2);
+    expect(zs[3]).toBeCloseTo(l.wheelbase / 2);
+    for (const o of offs) expect(o[1]).toBeCloseTo(l.radius);
+    // front pair (+z) must be listed FIRST (indices 0,1) — carLayer steers them
+    expect(offs[0][2]).toBeGreaterThan(0);
+    expect(offs[1][2]).toBeGreaterThan(0);
   });
 });
