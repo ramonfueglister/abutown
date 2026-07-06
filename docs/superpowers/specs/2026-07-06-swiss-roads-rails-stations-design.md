@@ -30,7 +30,7 @@ geometry from public geodata.
 ## 3. Non-goals
 
 - Bridges/underpasses as structures (decks, portals, abutments) — follow-up
-  slice; noted where the grading pass must leave gaps (§4.4).
+  slice; noted where the grading pass must leave gaps (§4.3).
 - Moving trains (transit.pb exists; separate slice).
 - Switch/turnout geometry in the HB throat — tracks may overlap simplified.
 - Catenary **wires** (masts yes; wires are sub-pixel at city distance).
@@ -95,13 +95,13 @@ what carves the classic embankment/cut silhouette of the Winterthur corridor.
 Pure function of (DEM, osm-roads, constants): double-bake must be
 byte-identical (golden test, same as #119/#123 discipline). Artifacts stay
 gitignored (world/*.pb); the bake logs corridor cell counts and the
-burial metric (§8) before/after.
+burial metric (§9) before/after.
 
 ## 5. Runtime road mesh
 
 Unchanged in principle: `miterStrip` + #132's `subdivideForDrape` now land
 on graded, cross-level corridors, so the planar-across-width ribbon becomes
-**correct** instead of approximate. The 0.3 m burial budget (§8) is the
+**correct** instead of approximate. The 0.3 m burial budget (§9) is the
 acceptance criterion, not new mesh code.
 
 ## 6. Swiss markings & surfaces (render layer)
