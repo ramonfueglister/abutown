@@ -623,10 +623,10 @@ export function createLiveClient(opts: {
 - Modify: `index.html`/App-Boot: WebGPU-Check — `if (!navigator.gpu) { zeige zentriertes Overlay „Abutown braucht WebGPU (Chrome/Edge 121+, Safari 26+)…" und stoppe Boot }`
 - Modify: Attribution-Footer (`© swisstopo, © OpenStreetMap contributors` aus manifest.attribution) als fixes DOM-Element unten rechts.
 
-- [ ] **Step 1:** Implementieren (kein sinnvoller Unit-Test für GPU-Layer; HUD-Formatierung als vitest: `formatWorldClock(sOfWorldDay)` → „07:30", Money-Formatierung ÷1000 mit Tausender-Trennung).
-- [ ] **Step 2:** `npm run typecheck && npm test && npm run build` grün.
-- [ ] **Step 3: Browser-Verifikation (Pflicht):** Stack lokal starten (sim-server + vite), `?live=1`, prüfen: Bürger-Kapseln sichtbar in Strassennähe tagsüber, HUD zählt Weltzeit 6× schneller als real, Attribution sichtbar.
-- [ ] **Step 4: Commit** — `git commit -m "feat(frontend): citizens layer, vitals HUD, attribution, WebGPU gate"`.
+- [x] **Step 1:** Implementieren (kein sinnvoller Unit-Test für GPU-Layer; HUD-Formatierung als vitest: `formatWorldClock(sOfWorldDay)` → „07:30", Money-Formatierung ÷1000 mit Tausender-Trennung).
+- [x] **Step 2:** `npm run typecheck && npm test && npm run build` grün.
+- [x] **Step 3: Browser-Verifikation (Pflicht):** Stack lokal starten (sim-server + vite), `?live=1`, prüfen: Bürger-Kapseln sichtbar in Strassennähe tagsüber, HUD zählt Weltzeit 6× schneller als real, Attribution sichtbar. (Smoke 13/13: WS /live 18 Frames, population=139647, Weltzeit-Rate 6.00×, 414 Kapseln instanziert, Attribution aus manifest, 0 Console-Errors.)
+- [x] **Step 4: Commit** — `git commit -m "feat(frontend): citizens layer, vitals HUD, attribution, WebGPU gate"`.
 
 ---
 

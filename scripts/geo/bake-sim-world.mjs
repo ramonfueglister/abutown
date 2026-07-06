@@ -275,9 +275,19 @@ for (let i = 0; i < allBuildings.length; i++) allBuildings[i].access = access[i]
 // Sort by id; dedupe (a building straddling a GDB tile border can appear in
 // two GDBs) keeping the larger-area instance so BuildingId (dense index by
 // UUID sort, world-core Task 2) stays unambiguous.
-const rows = allBuildings.map((b) => {
+let degenerate = 0;
+const rows = allBuildings.flatMap((b) => {
   const { x, z, area } = centroidAndArea(b.footprint);
-  return {
+  // Degenerate footprint (zero shoelace area — collinear/duplicate vertices):
+  // the centroid divides by zero -> NaN, and JSON.stringify(NaN) emits null,
+  // which SimWorld::load rejects ("expected f32"). Such a building has no
+  // area to house anyone anyway — drop it (Task 15 smoke finding: 21 of
+  // 29450 buildings in the first committed bake were null).
+  if (!Number.isFinite(x) || !Number.isFinite(z)) {
+    degenerate++;
+    return [];
+  }
+  return [{
     id: b.id,
     usage: b.usage,
     x: r2(x),
@@ -286,8 +296,9 @@ const rows = allBuildings.map((b) => {
     height_m: r2(b.height),
     access_edge: b.access.edge === ACCESS_NONE ? -1 : b.access.edge,
     access_offset: r2(b.access.offsetM),
-  };
+  }];
 });
+if (degenerate > 0) console.log(`dropped ${degenerate} degenerate (zero-area) footprints`);
 rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.area_m2 > b.area_m2 ? -1 : a.area_m2 < b.area_m2 ? 1 : 0));
 const buildings = [];
 let deduped = 0;
