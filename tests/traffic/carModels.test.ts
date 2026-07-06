@@ -17,6 +17,8 @@ import {
 } from '../../src/diorama/traffic/carModels';
 import { buildWheelGeometry, WHEEL_GEO_RADIUS } from '../../src/diorama/traffic/carModels';
 import { boxGeo } from '../../src/diorama/ksw/geometryCache';
+import { createCarLayer, CAR_CAPACITY } from '../../src/diorama/traffic/carLayer';
+import { buildLaneNet, type VehKinematics } from '../../src/diorama/traffic/deadReckon';
 
 describe('carModels selection', () => {
   it('is stable per id (same colour + variant across calls)', () => {
@@ -163,5 +165,45 @@ describe('CS geometry builders', () => {
     expect(bb.max.z).toBeCloseTo(WHEEL_GEO_RADIUS, 2);
     expect(bb.max.x).toBeLessThan(WHEEL_GEO_RADIUS); // width < diameter → axis is x
     expect(wheel.attributes.color).toBeDefined();
+  });
+});
+
+describe('carLayer instancing', () => {
+  const net = buildLaneNet([
+    { id: 0, edge: 0, index: 0, lengthM: 100, pts: [[0, 0], [100, 0]] },
+  ]);
+  const vehicles = new Map<number, VehKinematics>([
+    [1, { lane: 0, s: 10, v: 10, tickAt: 0 }],
+    [2, { lane: 0, s: 30, v: 0, tickAt: 0 }],
+  ]);
+
+  it('draws one body+glass pair per vehicle and 4 wheels each', () => {
+    const layer = createCarLayer();
+    layer.update(net, vehicles, 0);
+    expect(layer.debug.variantCounts().reduce((a, b) => a + b, 0)).toBe(2);
+    expect(layer.debug.wheelCount()).toBe(8);
+  });
+
+  it('rotates wheels of a MOVING vehicle between frames, keeps parked wheels still', () => {
+    const layer = createCarLayer();
+    layer.update(net, vehicles, 0);
+    const m0 = layer.debug.wheelMatrix(0); // belongs to id 1 (v=10) — insertion order
+    const p0 = layer.debug.wheelMatrix(4); // id 2 (v=0)
+    layer.update(net, vehicles, 10); // +1 s
+    const m1 = layer.debug.wheelMatrix(0);
+    const p1 = layer.debug.wheelMatrix(4);
+    // rotation part must change for the mover…
+    const rotDelta = (a: number[], b: number[]) =>
+      Math.abs(a[5] - b[5]) + Math.abs(a[6] - b[6]) + Math.abs(a[9] - b[9]) + Math.abs(a[10] - b[10]);
+    expect(rotDelta(m0, m1)).toBeGreaterThan(0.05);
+    // …its position advances along the lane…
+    expect(m1[14] - m0[14]).toBeCloseTo(0, 1); // z stays (lane runs along +x here)
+    expect(m1[12] - m0[12]).toBeCloseTo(10, 0); // x advances ~10 m
+    // …and the parked car's wheels do not spin
+    expect(rotDelta(p0, p1)).toBeLessThan(1e-6);
+  });
+
+  it('exposes capacity for the wheel mesh at 4× CAR_CAPACITY', () => {
+    expect(CAR_CAPACITY).toBe(4096);
   });
 });

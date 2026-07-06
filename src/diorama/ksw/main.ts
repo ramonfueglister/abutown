@@ -116,6 +116,13 @@ declare global {
       // top-down pitch (~1.5 rad) gives the capture harness a clear read on which
       // side of the road each car is on.
       lookAt: (x: number, z: number, opts?: { radius?: number; yaw?: number; pitch?: number }) => void;
+      // Instanced car-layer debug (Task 4 smoke): per-variant body counts, the
+      // total drawn wheel count, and one wheel instance matrix as 16 JSON-safe
+      // numbers (column-major) — lets the smoke assert bodies/glass/wheels draw
+      // and that wheels roll+steer between frames.
+      cars: () => number[];
+      wheels: () => number;
+      wheelMatrix: (i: number) => number[] | null;
     };
     // Dev-only live-channel debug surface, present ONLY under ?live=1 /
     // VITE_LIVE_WS (Task 15 browser smoke): tracked/drawn citizen counts and
@@ -735,6 +742,9 @@ async function boot(): Promise<void> {
             applyRig();
             client.updateCamera(x, z);
           },
+          cars: () => carLayer?.debug.variantCounts() ?? [],
+          wheels: () => carLayer?.debug.wheelCount() ?? 0,
+          wheelMatrix: (i: number) => carLayer?.debug.wheelMatrix(i) ?? null,
         };
       })
       .catch((err) => {
