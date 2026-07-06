@@ -15,6 +15,7 @@ use sqlx::PgPool;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::{
+    building_attributes::BuildingAttributesStore,
     card_hand::{
         AuthVerifier, CardHandError, CardHandResponse, CardHandStore, SaveCardHandRequest,
         card_definitions,
@@ -50,14 +51,21 @@ pub struct AppState {
     card_hands: CardHandStore,
     auth: AuthVerifier,
     health: Arc<WorldHealth>,
+    building_attributes: BuildingAttributesStore,
 }
 
 impl AppState {
-    pub fn new(card_hands: CardHandStore, auth: AuthVerifier, health: Arc<WorldHealth>) -> Self {
+    pub fn new(
+        card_hands: CardHandStore,
+        auth: AuthVerifier,
+        health: Arc<WorldHealth>,
+        building_attributes: BuildingAttributesStore,
+    ) -> Self {
         Self {
             card_hands,
             auth,
             health,
+            building_attributes,
         }
     }
 }
@@ -76,10 +84,14 @@ pub async fn build_app_with_shared_pool(
     pool: PgPool,
     health: Arc<WorldHealth>,
 ) -> anyhow::Result<Router> {
+    let building_attributes = BuildingAttributesStore::with_pool(pool.clone()).await?;
     let card_hands = CardHandStore::with_pool(pool).await?;
     let auth = AuthVerifier::supabase(&config.supabase_url).await;
     let cors = cors_layer(&config.cors_allowed_origins)?;
-    Ok(build_router(AppState::new(card_hands, auth, health), cors))
+    Ok(build_router(
+        AppState::new(card_hands, auth, health, building_attributes),
+        cors,
+    ))
 }
 
 /// Test/dev wiring: in-memory card hands + local bearer-as-UUID auth.
@@ -90,7 +102,10 @@ pub fn build_app_with_card_hands(
 ) -> Router {
     // infallible: hardcoded empty origin slice can never contain a malformed origin
     let cors = cors_layer(&[]).expect("empty origin list is always valid");
-    build_router(AppState::new(card_hands, auth, health), cors)
+    build_router(
+        AppState::new(card_hands, auth, health, BuildingAttributesStore::memory()),
+        cors,
+    )
 }
 
 /// Convenience default used by the integration tests.
@@ -99,6 +114,22 @@ pub fn build_app() -> Router {
         CardHandStore::memory(),
         AuthVerifier::local_bearer_uuid(),
         Arc::new(WorldHealth::default()),
+    )
+}
+
+/// Test-only wiring that allows seeding the building-attributes store
+/// (e.g. via `BuildingAttributesStore::memory()` + `upsert_all`) while
+/// keeping everything else identical to `build_app()`.
+pub fn build_app_with_building_attributes(building_attributes: BuildingAttributesStore) -> Router {
+    let cors = cors_layer(&[]).expect("empty origin list is always valid");
+    build_router(
+        AppState::new(
+            CardHandStore::memory(),
+            AuthVerifier::local_bearer_uuid(),
+            Arc::new(WorldHealth::default()),
+            building_attributes,
+        ),
+        cors,
     )
 }
 
@@ -127,6 +158,7 @@ fn build_router(state: AppState, cors: CorsLayer) -> Router {
         .route("/health", get(health))
         .route("/cards", get(cards))
         .route("/card-hand", get(card_hand).put(save_card_hand))
+        .route("/building-attributes", get(building_attributes))
         .with_state(state)
         .layer(cors)
 }
@@ -177,6 +209,26 @@ async fn save_card_hand(
         .into_response(),
         Err(error) => card_hand_error(error),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct BuildingAttributesQuery {
+    world_id: String,
+}
+
+async fn building_attributes(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<BuildingAttributesQuery>,
+) -> Result<Json<Vec<crate::building_attributes::BuildingAttributes>>, axum::http::StatusCode> {
+    state
+        .building_attributes
+        .list(&q.world_id)
+        .await
+        .map(Json)
+        .map_err(|err| {
+            tracing::error!("building_attributes list failed: {err}");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
 fn card_hand_error(error: CardHandError) -> Response {

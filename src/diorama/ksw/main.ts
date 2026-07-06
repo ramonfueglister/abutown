@@ -44,6 +44,9 @@ import { ANIMATED_TAGS } from './staticBatch';
 import { advancePlanCursor, createAgent, updateAgent, type Agent } from './agents';
 import { GiProbeScheduler, renderProbeFace } from './giProbe';
 import { buildCityMassing } from './geo/cityMassing';
+import { createHoverPicker } from './hoverPick';
+import { createHoverCard } from './hoverCard';
+import { getBuildingHoverInfo } from './geo/buildingAttributes';
 import { buildKswCampus } from './geo/kswCampus';
 import { decomposeToZones, type Zone } from './interior/zones';
 import { generateInteriorPlan, departmentCenter } from './interior/generatePlan';
@@ -813,6 +816,27 @@ async function boot(): Promise<void> {
     footways: cityRoot.getObjectByName('footwayRibbons') ?? null,
     setTreeShadows: (on: boolean) => treeLayer.setTreeShadows(on),
   };
+
+  // Building hover (Task 9): pick against the merged city walls+roofs meshes
+  // (both carry the buildingIdx attribute from cityMassing's merge — see
+  // hoverPick.ts). cityBuildings is the SAME array buildCityMassing merged
+  // above, so buildingIdx lines up. KSW campus buildings aren't part of this
+  // merge — hover only covers the city massing, by design (campus picking is
+  // out of scope here).
+  const cityRoofs = cityRoot.getObjectByName('cityRoofs');
+  const hoverPicker =
+    cityWalls instanceof THREE.Mesh && cityRoofs instanceof THREE.Mesh
+      ? createHoverPicker({ camera, meshes: [cityWalls, cityRoofs], buildings: cityBuildings })
+      : null;
+  const hoverCard = createHoverCard();
+  let hoverEvent: PointerEvent | null = null;
+  renderer.domElement.addEventListener('pointermove', (e: PointerEvent) => {
+    hoverEvent = e;
+  });
+  renderer.domElement.addEventListener('pointerleave', () => {
+    hoverEvent = null;
+    hoverCard.hide();
+  });
   let cityRing = cityLodState(rig.radius, 'far');
   applyCityLod(cityRing, lodRefs);
 
@@ -1460,6 +1484,20 @@ async function boot(): Promise<void> {
       }
       if (probe.cubeComplete) cubeRT.texture.needsPMREMUpdate = true;
     }
+    // building hover: throttled to once per rendered frame (pointermove only
+    // records the event above; consumed here, not per-event) — reuses the
+    // right-drag `dragging` flag so hover doesn't fight the camera drag.
+    if (hoverEvent) {
+      const r = renderer.domElement.getBoundingClientRect();
+      const ndcX = ((hoverEvent.clientX - r.left) / r.width) * 2 - 1;
+      const ndcY = -(((hoverEvent.clientY - r.top) / r.height) * 2 - 1);
+      const hit = dragging || !hoverPicker ? null : hoverPicker.pick(ndcX, ndcY);
+      const info = hit ? getBuildingHoverInfo(hit.id) : undefined;
+      if (info) hoverCard.show(info, hoverEvent.clientX, hoverEvent.clientY);
+      else hoverCard.hide();
+      hoverEvent = null;
+    }
+
     const cpuRender0 = performance.now();
     postProcessing.render();
     const cpuEnd = performance.now();

@@ -16,7 +16,10 @@
     "geo:bake-world": "node --max-old-space-size=6144 scripts/geo/bake-world.mjs",
     "geo:bake-sim": "node --max-old-space-size=6144 scripts/geo/bake-sim-world.mjs",
     "geo:bake-traffic": "node scripts/geo/bake-traffic-net.mjs",
-    "geo:fetch-demand": "node scripts/geo/fetch-demand-data.mjs"
+    "geo:fetch-demand": "node scripts/geo/fetch-demand-data.mjs",
+    "geo:fetch-attributes": "node scripts/geo/fetch-attributes.mjs",
+    "geo:bake-attributes": "node scripts/geo/bake-attributes.mjs",
+    "geo:load-attributes": "scripts/cargo-serial.sh run --manifest-path backend/Cargo.toml -p sim-server -- load-building-attributes data/winterthur/building-attributes.json"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.0",
@@ -24,6 +27,7 @@
     "@vitejs/plugin-basic-ssl": "^2.1.0",
     "suncalc": "^2.0.0",
     "three": "^0.185.1",
+    "three-mesh-bvh": "^0.9.10",
     "vite": "^8.0.12"
   },
   "devDependencies": {

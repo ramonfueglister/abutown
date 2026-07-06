@@ -18,6 +18,13 @@ export type BakedBuilding = {
   name?: string;
   usage?: string;
   zone: 'ksw' | 'city';
+  // Enrichment (geo:bake-attributes): ÖREB Grundnutzung + GWR. Null = no join
+  // hit (e.g. shed without EGID, footprint outside a Bauzone) — shown as such,
+  // never guessed.
+  egid?: number | null;
+  gwrCategory?: string | null;
+  bauzone?: string | null;
+  bauzoneCode?: string | null;
   footprint: number[][];
   height: number;
   // Real eave height (m, 1 decimal) — the facade shader clamps windows below it.
