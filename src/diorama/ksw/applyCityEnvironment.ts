@@ -109,11 +109,22 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   // (2026-07-06): sun 0.7 + sky 0.45 — at the previous 0.6/0.4 the far field
   // read a touch darker than the sun-lit full trees at the 150 m handoff
   // (scratch/tree-polish/handoff-fix8.png vs -fix9.png).
-  const sunW = 0.7 * Math.min(1, t.sun.intensity);
+  // Night retune (2026-07-06): the fixed 0.45 hemi weight ignored the actual
+  // hemi intensity (0.28 day vs 0.166 night) and the moon key fed the same
+  // 0.7 weight as the sun — impostor trees glowed mint-green over the dark
+  // city. Scale the hemi term by the live intensity (1.6·0.28 ≈ the tuned
+  // 0.45 at the day reference, so the day handoff is unchanged), damp the
+  // key weight at night, and clamp so a >1 midday sum can no longer blow the
+  // pre-lit atlas to white.
+  const sunW = 0.7 * Math.min(1, t.sun.intensity) * (isDay ? 1 : 0.3);
+  // Night factor 0.22: the night hemi runs hot (1.3) to keep the CITY readable
+  // under AgX; feeding that raw into the unlit impostor atlas made every far
+  // tree glow teal brighter than the lamps.
+  const hemiW = 1.6 * t.hemi.intensity * (isDay ? 1 : 0.22);
   impostorLightU.value.setRGB(
-    t.sun.color.r * sunW + t.hemi.color.r * 0.45,
-    t.sun.color.g * sunW + t.hemi.color.g * 0.45,
-    t.sun.color.b * sunW + t.hemi.color.b * 0.45,
+    Math.min(1, t.sun.color.r * sunW + t.hemi.color.r * hemiW),
+    Math.min(1, t.sun.color.g * sunW + t.hemi.color.g * hemiW),
+    Math.min(1, t.sun.color.b * sunW + t.hemi.color.b * hemiW),
   );
 
   // Clouds

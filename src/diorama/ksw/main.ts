@@ -801,6 +801,8 @@ async function boot(): Promise<void> {
   // Task 5 (M3): per-tile pools build their own impostor meshes off the same
   // atlas — hand the layer the shared texture once, right after the bake.
   treeLayer.setImpostorContext(treeAtlas, allArchetypes().length);
+  // Dev scene handle — visual-polish smokes toggle layers through it.
+  (window as unknown as { __SCENE?: THREE.Scene }).__SCENE = scene;
   // Dev tree-layer debug surface (unconditional) — the browser smoke reads it.
   window.__trees = {
     archetypes: allArchetypes().length,
@@ -825,7 +827,7 @@ async function boot(): Promise<void> {
     },
   };
   cityRoot.add(buildWindows(cityBuildings));
-  cityRoot.add(buildLamps(cityRoads));
+  cityRoot.add(buildLamps(cityRoads, groundYAt));
   scene.add(cityRoot);
 
   // ── live traffic (Task 9, ?traffic=1): instanced cars dead-reckoned from the

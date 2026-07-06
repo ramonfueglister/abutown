@@ -97,7 +97,9 @@ export function computeEnvironment(utcNow: Date, weather: WeatherState): Environ
   const night01 = smooth((-sun.elevDeg - 2) / 4); // 0 above -2°, 1 below -6°
   const starVisibility = night01 * (1 - cloud) * (weather.fog ? 0.2 : 1);
   const moonUp = clamp01(moon.dir[1] / 0.3);
-  const moonIntensity = 1.4 * moon.illumination * moonUp * night01 * (1 - 0.8 * cloud);
+  // Moon key stays a subtle rim: the old 1.4 peak lit the city like a blue day
+  // and drowned every lamp/window glow (SOTA-night pass 2026-07-06).
+  const moonIntensity = 0.5 * moon.illumination * moonUp * night01 * (1 - 0.8 * cloud);
 
   // East-window light shafts: sun up, low, easterly, and not overcast.
   const easterly = clamp01((sun.dir[0] - 0.25) / 0.35);

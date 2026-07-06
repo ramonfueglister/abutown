@@ -300,9 +300,12 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   const insetY = tslMin(localY.sub(winY0), winY1.sub(localY));
   const inset = tslMin(insetX, insetY); // >0 inside the window opening
 
-  // eave clamp: the TOP of this storey must sit below eaveH−0.2, else no window
-  const storeyTop = storeyIdx.add(1).mul(storeyH);
-  const underEave = storeyTop.lessThan(eaveH.sub(float(0.2)));
+  // eave clamp: the WINDOW top (not the full storey top) must sit below
+  // eaveH−0.15. The old full-storey test (storeyTop < eaveH−0.2) silently
+  // dropped the top row on every building — a 2-storey house (eave ≈ 6 m,
+  // storeyH 3) rendered exactly one row of windows ("nur im ersten Stock").
+  const winTopAbs = storeyIdx.mul(storeyH).add(sill).add(winH);
+  const underEave = winTopAbs.lessThan(eaveH.sub(float(0.15)));
 
   // masks (soft edges for a clean AA look, still essentially binary)
   const glassMask = smoothstep(float(0), float(0.03), inset.sub(frame)); // 1 in the pane
@@ -362,8 +365,11 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   const cellHash = colIdx.mul(float(12.9898)).add(storeyIdx.mul(float(78.233))).sin().mul(float(43758.5453));
   const hash = cellHash.sub(cellHash.floor()); // 0..1 fract via sin, like nightWindowHash
   const lit = hash.lessThan(float(NIGHT_WINDOW_SHARE)).select(float(1), float(0));
+  // 2.4 pushes lit panes past the bloom threshold (kswPost.bloomThreshold
+  // 1.05) so night windows read as light sources, not painted-on decals —
+  // the old 0.9 peak stayed under the threshold and never bloomed.
   const glow = glassMask.mul(gate).mul(lit);
-  m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(0.9)).mul(lampGlowU));
+  m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(2.4)).mul(lampGlowU));
 
   return Object.assign(m, { facadeDetail, discardAbove, bandLo, bandFade }) as CutawayFacadeMaterial;
 }

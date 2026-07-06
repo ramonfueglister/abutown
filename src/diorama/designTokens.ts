@@ -72,10 +72,20 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // Recurated: was reading as a warm-lit evening, not night. Dropped exposure
   // and GI so the room goes dark enough for stars + the moon terminator to
   // register; cooler mist/hemi keeps the night blue rather than amber.
+  // SOTA-night rebalance (2026-07-06): the readable-city share moved from the
+  // moon key (now a 0.5-peak rim, environment.ts) onto a stronger cool hemi —
+  // silhouettes stay legible ("never true black") while warm windows + lamps
+  // carry the scene.
   night: {
-    hemiSky: 0x3d5270, hemiGround: 0x323b48, hemiIntensity: 0.16,
-    fogColor: 0x263248, fogNear: 18, fogFar: 46,
-    exposure: 0.78, mistColor: 0x3c4d62, mistOpacity: 0.2,
+    // Urban skyglow: a real city is never black — cool sky dome + a warm
+    // ground bounce from thousands of lamps. The hemi COLORS are the ambient
+    // ceiling (intensity alone can't lift a 0x3a-dark tint), so they carry
+    // the readable-silhouette level.
+    // Intensity 1.3: calibrated live against AgX — 0.44 rendered pitch black,
+    // 6 read as blue daylight; 1.3–1.4 is the readable-but-nocturnal band.
+    hemiSky: 0x6e87b8, hemiGround: 0x5c5040, hemiIntensity: 1.3,
+    fogColor: 0x1c2536, fogNear: 30, fogFar: 85,
+    exposure: 1.0, mistColor: 0x3c4d62, mistOpacity: 0.12,
     giScale: 0.68, saturation: 1.08, contrast: 1.08,
     godraysMix: 0, lampOn01: 1,
     turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8,
@@ -95,7 +105,7 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
     hemiSky: 0x4f7d84, hemiGround: 0x5c5348, hemiIntensity: 0.21,
     fogColor: 0x486e74, fogNear: 18, fogFar: 46,
     exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.22,
-    giScale: 0.55, saturation: 1.12, contrast: 1.06,
+    giScale: 0.55, saturation: 1.16, contrast: 1.06,
     godraysMix: 0.6, lampOn01: 1,
     turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9,
     sunBoost: 2.3,
@@ -103,19 +113,26 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // NEW curation: bright, neutral midday — flat contrast, no drama, lamp off.
   // Recurated: exposure/hemi/sunBoost were blowing the scene to near-white;
   // pulled back so surfaces read their clay tint and keep gentle contrast.
+  // SOTA-2026 de-milk (2026-07-06): the city framing read as a washed-out
+  // white veil — mist + near fog + godrays stacked over the whole frame.
+  // Push fog out, halve the mist, drop the godrays veil, and let saturation
+  // carry the cozy palette instead of haze.
   day: {
     hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.28,
-    fogColor: 0xe8eef2, fogNear: 22, fogFar: 52,
-    exposure: 0.98, mistColor: 0xf2f3ee, mistOpacity: 0.1,
-    giScale: 0.7, saturation: 1.08, contrast: 1.04,
-    godraysMix: 0.15, lampOn01: 0,
+    fogColor: 0xe8eef2, fogNear: 34, fogFar: 90,
+    exposure: 0.98, mistColor: 0xf2f3ee, mistOpacity: 0.04,
+    giScale: 0.7, saturation: 1.1, contrast: 1.05,
+    godraysMix: 0.07, lampOn01: 0,
     turbidity: 3, rayleigh: 2.2, mieCoefficient: 0.005, mieG: 0.8,
     sunBoost: 0.66,
   },
 };
 
 // Sun-elevation anchors (degrees) for keyframe interpolation.
-export const envAnchors = { nightBelowDeg: -6, goldenPeakDeg: 4, dayAboveDeg: 25 } as const;
+// nightBelowDeg −10 (was −6): full night only past nautical-twilight depth —
+// the −6 cut snapped a 17:35 winter evening straight to pitch black, skipping
+// the blue hour entirely (SOTA-night pass 2026-07-06).
+export const envAnchors = { nightBelowDeg: -10, goldenPeakDeg: 4, dayAboveDeg: 25 } as const;
 
 // How real weather modulates the look. All weather→look constants live here.
 export const weatherLook = {
@@ -203,6 +220,15 @@ export const nightGlow = {
   boost: 1.2, // applyEnvironment multiplies lampIntensity by this at full lampOn01
   cityPool: 14, // base intensity of the two forecourt PointLight pools
   emergency: 20, // base intensity of the emergency-zone PointLight
+  // SOTA-night street lamps (2026-07-06): every lamp gets an instanced
+  // additive light-pool disc on the ground plus an HDR bulb that clears the
+  // bloom threshold — the shipped stylized-city recipe (pools + glow, no
+  // per-lamp real lights). 2700K-ish warm; peak tuned so pools layer softly
+  // where lamps cluster instead of clipping.
+  // radius 5 + lift 0.3: a 13 m disc at 0.13 m lift clipped into terrain
+  // undulation and read as torn half-moons; smaller + higher floats clean.
+  pool: { color: 0xffb869, radius: 5, peak: 0.65, lift: 0.5 },
+  bulbHdr: 3.0, // night bulb luminance (× warm tint) — past bloomThreshold 1.05
 } as const;
 
 // Moonlight (the night preset's key light). Only color/intensity are read
@@ -297,7 +323,9 @@ export const kswScene = {
 // dead (Task 5) — superseded by the scalar/derived fields below, which the
 // realtime environment drives per-frame instead.
 export const kswPost = {
-  dof: { focalLength: 1.4, bokehScale: 1.6 },
+  // bokehScale 1.6 blurred most of every establishing frame into mush —
+  // the tilt-shift only earns its keep as a whisper (SOTA pass 2026-07-06).
+  dof: { focalLength: 1.4, bokehScale: 0.7 },
   // Task 4: the realtime environment supplies a per-frame giScale; the city
   // damps the GI-probe white-wash by this fixed scalar on top (= the former
   // envScale.morning, the value the overview framing was tuned at).
@@ -454,6 +482,10 @@ export const kswCityStyle = {
   windowW: 1.3, windowH: 1.4, windowSpacing: 2.4, storeyH: 3.0, sillFrac: 0.32,
   doorW: 1.5, doorH: 2.2,
   lamp: { spacing: { primary: 25, secondary: 28, tertiary: 30, residential: 35, unclassified: 35, living_street: 35, service: 45, pedestrian: 30 } as Record<string, number>, sideOffset: 1.2 },
-  lod: { nearR: 150, midR: 600, hysteresis: 0.1 },
+  // midR 1200 (was 600): the facade window raster is a shader branch, not
+  // geometry — hiding it at the city establishing framing (radius ~820) left
+  // every building a naked clay block. Lamps/footways ride the same ring;
+  // both are single instanced/merged draws, so keeping them on is free.
+  lod: { nearR: 150, midR: 1200, hysteresis: 0.1 },
   cloudSwap: { start: 300, end: 600 },
 } as const;

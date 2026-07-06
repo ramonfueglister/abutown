@@ -2,7 +2,7 @@
 // Street lamps along the REAL road polylines: class-based spacing, alternating
 // sides — deterministic, no scattering. Night: warm bulbs like the original.
 import * as THREE from 'three/webgpu';
-import { mix, vec3 } from 'three/tsl';
+import { float, mix, uv, vec3 } from 'three/tsl';
 import { kswCityStyle, nightGlow, palette } from '../../designTokens';
 import { clayMat } from '../props';
 import { lampGlowU } from '../glowUniform';
@@ -44,7 +44,7 @@ export function lampSpots(roads: RoadPath[]): Array<{ x: number; z: number }> {
   return out;
 }
 
-export function buildLamps(roads: RoadPath[]): THREE.Group {
+export function buildLamps(roads: RoadPath[], groundYAt?: (x: number, z: number) => number): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityLamps';
   const spots = lampSpots(roads);
@@ -66,21 +66,48 @@ export function buildLamps(roads: RoadPath[]): THREE.Group {
   heads.count = spots.length;
   const bulbGeo = new THREE.SphereGeometry(0.15, 8, 6);
   bulbGeo.translate(0, 2.86, 0);
-  // The bulb is always built with an unlit node material; its colour mixes from
-  // white (day look) toward the warm nightGlow.lampHead tint as lampGlowU rises.
+  // The bulb is always built with an unlit node material; by day it reads as a
+  // dim glass housing (a fullbright white sphere × 17 938 lamps painted the
+  // whole city with white dot rows), and mixes toward an HDR warm tint as
+  // lampGlowU rises — bright enough (nightGlow.bulbHdr) to clear the bloom
+  // threshold, so night lamps read as glowing light sources.
   const bulbMat = new THREE.MeshBasicNodeMaterial();
-  bulbMat.colorNode = mix(vec3(...rgb01(palette.white)), vec3(...rgb01(nightGlow.lampHead)), lampGlowU);
+  const dayGlass = vec3(...rgb01(palette.metalMatt)).mul(float(0.85));
+  const warmHdr = vec3(...rgb01(nightGlow.lampHead)).mul(float(nightGlow.bulbHdr));
+  bulbMat.colorNode = mix(dayGlass, warmHdr, lampGlowU);
   const bulbs = new THREE.InstancedMesh(bulbGeo, bulbMat, n);
   bulbs.name = 'lampBulbs';
   bulbs.count = spots.length;
+  // Light pool: an instanced additive disc under each lamp — the stylized-city
+  // stand-in for per-lamp point lights. Radial (1−d)² falloff, warm 2700K-ish
+  // tint, scaled by lampGlowU (black by day → additive no-op). fog=false: fog
+  // on an ADDITIVE material would add the fog colour itself at distance.
+  const poolGeo = new THREE.CircleGeometry(nightGlow.pool.radius, 24);
+  poolGeo.rotateX(-Math.PI / 2);
+  poolGeo.translate(0, nightGlow.pool.lift, 0);
+  const poolMat = new THREE.MeshBasicNodeMaterial();
+  poolMat.transparent = true;
+  poolMat.depthWrite = false;
+  poolMat.blending = THREE.AdditiveBlending;
+  poolMat.fog = false;
+  const poolDist = uv().sub(0.5).length().mul(2); // 0 centre → 1 rim
+  const poolFall = float(1).sub(poolDist).clamp(0, 1);
+  poolMat.colorNode = vec3(...rgb01(nightGlow.pool.color))
+    .mul(poolFall.mul(poolFall))
+    .mul(float(nightGlow.pool.peak))
+    .mul(lampGlowU);
+  const pools = new THREE.InstancedMesh(poolGeo, poolMat, n);
+  pools.name = 'lampPools';
+  pools.count = spots.length;
   const m = new THREE.Matrix4();
   spots.forEach((s, i) => {
-    m.makeTranslation(s.x, 0, s.z);
+    m.makeTranslation(s.x, groundYAt ? groundYAt(s.x, s.z) : 0, s.z);
     posts.setMatrixAt(i, m);
     heads.setMatrixAt(i, m);
     bulbs.setMatrixAt(i, m);
+    pools.setMatrixAt(i, m);
   });
-  for (const mesh of [posts, heads, bulbs]) {
+  for (const mesh of [posts, heads, bulbs, pools]) {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     group.add(mesh);

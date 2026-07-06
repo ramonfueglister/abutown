@@ -5,7 +5,10 @@ describe('cityLodState', () => {
   it('classifies rings', () => {
     expect(cityLodState(100, 'near')).toBe('near');
     expect(cityLodState(300, 'near')).toBe('mid');
-    expect(cityLodState(900, 'mid')).toBe('far');
+    // midR is 1200 since the SOTA-2026 pass (facade raster stays on at the
+    // city establishing framing, radius ~820).
+    expect(cityLodState(900, 'mid')).toBe('mid');
+    expect(cityLodState(1400, 'mid')).toBe('far');
   });
   it('hysteresis: no flip inside the band', () => {
     expect(cityLodState(155, 'near')).toBe('near'); // 150×1.1=165 upper band
