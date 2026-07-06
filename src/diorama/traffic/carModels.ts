@@ -1,15 +1,17 @@
 // src/diorama/traffic/carModels.ts
 //
-// FIX D2 — Cities-Skylines-school clay car models: pure variant/colour
-// selection (unit-tested) + the merged vertex-coloured geometry builders.
+// Cities-Skylines-style car models: pure variant/colour selection
+// (unit-tested) + the loft-based vertex-coloured geometry builders.
 //
-// Three silhouette VARIANTS — sedan, hatchback, van — each a small set of
-// merged boxes in the clay vocabulary, with baked per-vertex colours:
+// Six silhouette VARIANTS — sedan, hatchback, wagon, suv, van, pickup — each
+// a loft of trapezoid cross-sections swept along z (flat-shaded low-poly
+// panels, the CS look) plus merged detail boxes, with baked per-vertex colours:
 //   * BODY faces are WHITE (1,1,1) so the per-instance body tint (setColorAt)
 //     shows through unmodified;
-//   * the WINDOW band and the WHEELS are baked DARK, so under the instanced
-//     tint they stay dark glass / dark rubber (they pick up only a faint body
-//     tint — the MeshPhysicalMaterial multiplies instanceColor × vertexColor).
+//   * grille/lights/plates are baked in their own colours so they read at
+//     distance under any tint;
+//   * GLASS is a separate bright loft shell (own material, see carLayer);
+//   * WHEELS are a separate instanced cylinder (buildWheelGeometry).
 // No textures — geometry + vertex colours only, matching agentMeshes.ts.
 //
 // Selection is a stable per-id hash so a vehicle keeps its silhouette AND its
@@ -18,41 +20,42 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-/** Metres. Realistic small-car proportions (matches the kernel VEHICLE_LEN
- * 4.5 m within visual tolerance; width 1.9 m sits in a 3.0 m lane). */
-const BODY_W = 1.9;
+/** Body half-width baseline (m). SUV widens by +0.06, van by +0.10. */
+const W = 1.82;
 
-/** CS-like car body palette: saturated-but-clay distinct colours. Whites and
- * silvers dominate a real car park; then reds/blues/greens/a yellow/black for
- * variety. Tuned to pop against the tarmac under soft GI without going neon
- * (mid-value, not fully-saturated primaries). setColorAt multiplies the white
- * body vertex colour by one of these. */
+/** CS-like car body palette, tuned against screenshot references: whites and
+ * silvers dominate a real car park; then greys/black, a couple of reds, an
+ * ochre/brown wagon tone, taxi yellow, blues, green, purple and beige for
+ * variety. setColorAt multiplies the white body vertex colour by one of
+ * these. */
 export const CAR_PALETTE: readonly number[] = [
-  0xe8e6e0, // pearl white
   0xf2f0ea, // bright white
+  0xd9d6cd, // pearl beige-white
   0xb9c0c6, // silver
-  0x8b939b, // gunmetal
-  0x2f3338, // near-black
-  0xc0402f, // clay red
-  0xd97b34, // amber/orange
-  0xe4be3f, // muted yellow
-  0x3f6db0, // royal blue
-  0x5f97c4, // sky blue
-  0x2f7d5b, // racing green
-  0x7ba05a, // olive/lime
-  0x8a5a9c, // muted purple
-  0xc25f86, // rose
+  0x6f767d, // gunmetal
+  0x24272b, // black
+  0x8f2432, // maroon (screenshot dark red)
+  0xc03a2b, // red
+  0xb06a2c, // ochre/brown-orange (screenshot brown wagon)
+  0xe0a91f, // taxi yellow (screenshot yellow hatch)
+  0x2c4f8a, // dark blue (screenshot sedans)
+  0x4a7ec2, // mid blue
+  0x3f7d46, // green (screenshot compact)
+  0x6b4a86, // purple (screenshot van)
+  0xa8a08c, // beige (screenshot SUV)
 ] as const;
 
-/** Dark glass colour baked into the window band (multiplied by the body tint —
- * stays dark, picks up a hint of the body colour). */
-const GLASS = new THREE.Color(0x2a2f36);
-/** Near-black rubber baked into the wheels. */
-const RUBBER = new THREE.Color(0x181a1d);
+/** CS glass: bright reflective sky-blue (baked into the glass geometry AND
+ * multiplied by the glass material colour — see carLayer). */
+const GLASS = new THREE.Color(0xbfe0f2);
+const RUBBER = new THREE.Color(0x17191c);
+const RIM = new THREE.Color(0xb7bcc2);
+const GRILLE = new THREE.Color(0x1d2126);
+const HEADLIGHT = new THREE.Color(0xfff4d0);
+const TAILLIGHT = new THREE.Color(0xb01a1a);
+const PLATE = new THREE.Color(0xf5f5f0);
 /** White = fully tintable body. */
 const BODY = new THREE.Color(0xffffff);
-/** Slightly warm off-white roof highlight (subtle; still mostly tintable). */
-const ROOF = new THREE.Color(0xf4f0ea);
 
 /** Cheap integer hash so a vehicle's variant + colour are stable and well
  * spread across ids. */
@@ -114,87 +117,318 @@ function mergeParts(parts: Part[], boxGeo: BoxGeo, label: string): THREE.BufferG
   return merged;
 }
 
-/** Four wheel stubs at the corners of a body of length `len`, inset from the
- * sides. Wheels are dark boxes poking just below the body (their bottom sits at
- * y≈0, the wheel line). */
-function wheels(len: number): Part[] {
-  const ww = 0.5; // wheel width (across car)
-  const wr = 0.62; // wheel diameter (box height)
-  const wd = 0.9; // wheel footprint along the car
-  const xo = BODY_W / 2 - ww / 2 + 0.02; // just outside the flush body sides
-  const zo = len / 2 - wd / 2 - 0.35; // inset from the bumpers
-  const yo = wr / 2 - 0.02; // bottom at the wheel line
-  const mk = (x: number, z: number): Part => ({ w: ww, h: wr, d: wd, pos: [x, yo, z], color: RUBBER });
-  return [mk(xo, zo), mk(-xo, zo), mk(xo, -zo), mk(-xo, -zo)];
+// ── loft geometry kernel ────────────────────────────────────────────────────
+
+interface Section { z: number; yBot: number; yTop: number; wBot: number; wTop: number }
+
+/** Sweep trapezoid cross-sections along z into a flat-shaded, non-indexed,
+ * uniformly vertex-coloured hull (left/right/top/bottom strips + end caps). */
+function loft(sections: Section[], color: THREE.Color): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const quad = (a: number[], b: number[], c: number[], d: number[]) =>
+    pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  const corners = (s: Section) => ({
+    bl: [-s.wBot / 2, s.yBot, s.z], br: [s.wBot / 2, s.yBot, s.z],
+    tl: [-s.wTop / 2, s.yTop, s.z], tr: [s.wTop / 2, s.yTop, s.z],
+  });
+  for (let i = 0; i < sections.length - 1; i++) {
+    const a = corners(sections[i]);
+    const b = corners(sections[i + 1]);
+    quad(a.br, b.br, b.tr, a.tr); // right (+x)
+    quad(b.bl, a.bl, a.tl, b.tl); // left (−x)
+    quad(a.tr, b.tr, b.tl, a.tl); // top
+    quad(a.bl, b.bl, b.br, a.br); // bottom
+  }
+  const first = corners(sections[0]);
+  const last = corners(sections[sections.length - 1]);
+  quad(first.bl, first.br, first.tr, first.tl); // front cap (−z end listed first)
+  quad(last.br, last.bl, last.tl, last.tr);     // rear cap
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  const n = g.attributes.position.count;
+  const colors = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) colors.set([color.r, color.g, color.b], i * 3);
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
 }
 
-// ── the three silhouette builders ──────────────────────────────────────────
-// Each returns the merged geometry. Proportions differ so the silhouettes read
-// distinct from a typical city-camera distance: sedan has a hood+trunk step and
-// a short greenhouse; hatchback is shorter with a sloped rear cabin; van is
-// taller with a long boxy cabin.
+/** Merge loft hulls and `mergeParts` outputs into one non-indexed geometry.
+ * (`mergeGeometries` requires all-indexed or all-non-indexed inputs; the loft
+ * is non-indexed, `mergeParts` output is indexed — normalise here.) */
+function finishMerged(...parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const prepared = parts.map((p) => {
+    const g = p.index ? p.toNonIndexed() : p;
+    // the loft has no uv channel (untextured); drop uv from box/cylinder parts
+    // so all inputs carry the same attribute set — mergeGeometries requires it
+    g.deleteAttribute('uv');
+    return g;
+  });
+  const merged = mergeGeometries(prepared, false);
+  if (!merged) throw new Error('carModels: hull merge failed');
+  merged.computeVertexNormals();
+  merged.computeBoundingSphere();
+  return merged;
+}
 
-const WHEEL_LINE = 0.60; // body underside sits here, wheels straddle it
+// ── the six silhouette builders ─────────────────────────────────────────────
+// Each body is a loft of trapezoid sections (+z = FORWARD) plus merged detail
+// boxes (grille, lights, plates). The body underside floats at UNDERBODY —
+// instanced wheels (carLayer) fill the gap below.
+
+/** Body underside height (m). SUV/pickup ride higher, van slightly higher —
+ * those builders use a local override. */
+const UNDERBODY = 0.30;
+
+/** Grille + head/taillights + number plates as merged boxes at the ±length/2
+ * cap faces, protruding 0.03 so they read at distance. */
+function detailBoxes(
+  boxGeo: BoxGeo,
+  length: number,
+  width = W,
+  underbody = UNDERBODY,
+  belt = 0.95,
+): THREE.BufferGeometry {
+  const half = length / 2;
+  const lightX = width / 2 - 0.34; // lights near the body corners
+  const lightY = belt - 0.18;
+  const lowY = underbody + 0.28; // plates + grille height
+  const parts: Part[] = [
+    // grille across the nose (box depth 0.06 centred ON the cap → 0.03 proud)
+    { w: width * 0.55, h: 0.16, d: 0.06, pos: [0, lowY, half], color: GRILLE },
+    // headlights / taillights at the four corners
+    { w: 0.28, h: 0.12, d: 0.06, pos: [lightX, lightY, half], color: HEADLIGHT },
+    { w: 0.28, h: 0.12, d: 0.06, pos: [-lightX, lightY, half], color: HEADLIGHT },
+    { w: 0.28, h: 0.12, d: 0.06, pos: [lightX, lightY, -half], color: TAILLIGHT },
+    { w: 0.28, h: 0.12, d: 0.06, pos: [-lightX, lightY, -half], color: TAILLIGHT },
+    // number plates, 0.005 in front of the grille face so they never z-fight
+    { w: 0.5, h: 0.13, d: 0.04, pos: [0, lowY, half + 0.015], color: PLATE },
+    { w: 0.5, h: 0.13, d: 0.04, pos: [0, lowY, -half - 0.015], color: PLATE },
+  ];
+  return mergeParts(parts, boxGeo, 'details');
+}
 
 function buildSedan(boxGeo: BoxGeo): THREE.BufferGeometry {
-  const len = 4.3;
-  const bodyH = 0.55;
-  const bodyY = WHEEL_LINE + bodyH / 2;
-  const cabinH = 0.5;
-  const cabinY = WHEEL_LINE + bodyH + cabinH / 2;
-  const parts: Part[] = [
-    // lower body (hood → trunk), full length
-    { w: BODY_W, h: bodyH, d: len, pos: [0, bodyY, 0], color: BODY },
-    // cabin, centred, shorter than the body (leaves a hood in front, trunk behind)
-    { w: BODY_W - 0.14, h: cabinH, d: 2.0, pos: [0, cabinY, -0.1], color: BODY },
-    // window band: a slightly smaller, slightly lower dark box inside the cabin
-    { w: BODY_W - 0.02, h: cabinH - 0.16, d: 1.7, pos: [0, cabinY - 0.02, -0.1], color: GLASS },
-    // roof highlight cap
-    { w: BODY_W - 0.2, h: 0.06, d: 1.7, pos: [0, cabinY + cabinH / 2 - 0.02, -0.1], color: ROOF },
-    ...wheels(len),
-  ];
-  return mergeParts(parts, boxGeo, 'sedan');
+  const L = 4.5, half = L / 2, belt = 0.95, roof = 1.38;
+  const hull = loft([
+    { z:  half,        yBot: UNDERBODY + 0.10, yTop: UNDERBODY + 0.42, wBot: W - 0.30, wTop: W - 0.34 }, // bumper lip
+    { z:  half - 0.28, yBot: UNDERBODY,        yTop: belt - 0.12,      wBot: W - 0.06, wTop: W - 0.10 }, // nose
+    { z:  half - 0.80, yBot: UNDERBODY,        yTop: belt - 0.06,      wBot: W - 0.03, wTop: W - 0.08 }, // hood mid
+    { z:  half - 1.30, yBot: UNDERBODY,        yTop: belt,             wBot: W,        wTop: W - 0.06 }, // hood end / windshield base
+    { z:  half - 2.05, yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // windshield top / roof front
+    { z:  0.0,         yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // roof mid (front doors)
+    { z: -0.35,        yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // roof mid (rear doors)
+    { z: -half + 1.55, yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // roof rear
+    { z: -half + 1.25, yBot: UNDERBODY,        yTop: (roof + belt) / 2 + 0.05, wBot: W, wTop: W - 0.22 }, // rear glass mid
+    { z: -half + 0.95, yBot: UNDERBODY,        yTop: belt + 0.06,      wBot: W,        wTop: W - 0.10 }, // trunk lid
+    { z: -half + 0.60, yBot: UNDERBODY,        yTop: belt - 0.02,      wBot: W - 0.03, wTop: W - 0.11 }, // trunk mid
+    { z: -half + 0.26, yBot: UNDERBODY,        yTop: belt - 0.10,      wBot: W - 0.06, wTop: W - 0.12 }, // tail
+    { z: -half,        yBot: UNDERBODY + 0.10, yTop: UNDERBODY + 0.40, wBot: W - 0.30, wTop: W - 0.36 }, // rear bumper lip
+  ], BODY);
+  return finishMerged(hull, detailBoxes(boxGeo, L));
+}
+
+function sedanGlass(): THREE.BufferGeometry {
+  const half = 4.5 / 2, belt = 0.95, roof = 1.38;
+  return loft([
+    { z:  half - 1.32, yBot: belt, yTop: belt + 0.02,  wBot: W - 0.10, wTop: W - 0.36 }, // windshield base
+    { z:  half - 2.03, yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // windshield top
+    { z: -half + 1.57, yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // rear roof
+    { z: -half + 0.97, yBot: belt, yTop: belt + 0.02,  wBot: W - 0.10, wTop: W - 0.38 }, // rear glass base
+  ], GLASS);
 }
 
 function buildHatchback(boxGeo: BoxGeo): THREE.BufferGeometry {
-  const len = 3.8;
-  const bodyH = 0.55;
-  const bodyY = WHEEL_LINE + bodyH / 2;
-  const cabinH = 0.52;
-  const cabinY = WHEEL_LINE + bodyH + cabinH / 2;
-  const parts: Part[] = [
-    { w: BODY_W, h: bodyH, d: len, pos: [0, bodyY, 0], color: BODY },
-    // cabin pushed rearward (short hood, long glasshouse to the tail — hatch)
-    { w: BODY_W - 0.14, h: cabinH, d: 2.2, pos: [0, cabinY, -0.4], color: BODY },
-    { w: BODY_W - 0.02, h: cabinH - 0.16, d: 1.95, pos: [0, cabinY - 0.02, -0.4], color: GLASS },
-    { w: BODY_W - 0.2, h: 0.06, d: 1.9, pos: [0, cabinY + cabinH / 2 - 0.02, -0.4], color: ROOF },
-    ...wheels(len),
-  ];
-  return mergeParts(parts, boxGeo, 'hatchback');
+  const L = 3.9, half = L / 2, belt = 0.95, roof = 1.42;
+  const hull = loft([
+    { z:  half,        yBot: UNDERBODY + 0.10, yTop: UNDERBODY + 0.42, wBot: W - 0.30, wTop: W - 0.34 }, // bumper lip
+    { z:  half - 0.28, yBot: UNDERBODY,        yTop: belt - 0.12,      wBot: W - 0.06, wTop: W - 0.10 }, // nose
+    { z:  half - 1.10, yBot: UNDERBODY,        yTop: belt,             wBot: W,        wTop: W - 0.06 }, // hood end / windshield base
+    { z:  half - 1.75, yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // windshield top / roof front
+    { z: -half + 1.30, yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // roof rear
+    { z: -half + 0.26, yBot: UNDERBODY,        yTop: 1.05,             wBot: W - 0.06, wTop: W - 0.12 }, // tail (rear glass runs to it)
+    { z: -half,        yBot: UNDERBODY + 0.10, yTop: UNDERBODY + 0.40, wBot: W - 0.30, wTop: W - 0.36 }, // rear bumper lip
+  ], BODY);
+  return finishMerged(hull, detailBoxes(boxGeo, L));
+}
+
+function hatchbackGlass(): THREE.BufferGeometry {
+  const half = 3.9 / 2, belt = 0.95, roof = 1.42;
+  return loft([
+    { z:  half - 1.12, yBot: belt, yTop: belt + 0.02,  wBot: W - 0.10, wTop: W - 0.36 }, // windshield base
+    { z:  half - 1.77, yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // windshield top
+    { z: -half + 1.32, yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // roof rear
+    { z: -half + 0.40, yBot: belt, yTop: belt + 0.03,  wBot: W - 0.10, wTop: W - 0.38 }, // hatch glass base
+  ], GLASS);
+}
+
+function buildWagon(boxGeo: BoxGeo): THREE.BufferGeometry {
+  const L = 4.6, half = L / 2, belt = 0.95, roof = 1.42;
+  const hull = loft([
+    { z:  half,        yBot: UNDERBODY + 0.10, yTop: UNDERBODY + 0.42, wBot: W - 0.30, wTop: W - 0.34 }, // bumper lip
+    { z:  half - 0.28, yBot: UNDERBODY,        yTop: belt - 0.12,      wBot: W - 0.06, wTop: W - 0.10 }, // nose
+    { z:  half - 1.30, yBot: UNDERBODY,        yTop: belt,             wBot: W,        wTop: W - 0.06 }, // hood end / windshield base
+    { z:  half - 1.95, yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // windshield top / roof front
+    { z: -half + 0.55, yBot: UNDERBODY,        yTop: roof,             wBot: W,        wTop: W - 0.34 }, // roof rear (long roof)
+    { z: -half + 0.26, yBot: UNDERBODY,        yTop: 1.00,             wBot: W - 0.06, wTop: W - 0.12 }, // steep tailgate
+    { z: -half,        yBot: UNDERBODY + 0.10, yTop: UNDERBODY + 0.40, wBot: W - 0.30, wTop: W - 0.36 }, // rear bumper lip
+  ], BODY);
+  return finishMerged(hull, detailBoxes(boxGeo, L));
+}
+
+function wagonGlass(): THREE.BufferGeometry {
+  const half = 4.6 / 2, belt = 0.95, roof = 1.42;
+  return loft([
+    { z:  half - 1.32, yBot: belt, yTop: belt + 0.02,  wBot: W - 0.10, wTop: W - 0.36 }, // windshield base
+    { z:  half - 1.97, yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // windshield top
+    { z: -half + 0.57, yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // roof rear
+    { z: -half + 0.33, yBot: belt, yTop: belt + 0.03,  wBot: W - 0.10, wTop: W - 0.38 }, // tailgate glass base
+  ], GLASS);
+}
+
+function buildSuv(boxGeo: BoxGeo): THREE.BufferGeometry {
+  const L = 4.6, half = L / 2, belt = 1.10, roof = 1.68;
+  const Wv = W + 0.06, u = 0.42;
+  const hull = loft([
+    { z:  half,        yBot: u + 0.10, yTop: u + 0.42,    wBot: Wv - 0.30, wTop: Wv - 0.34 }, // bumper lip
+    { z:  half - 0.28, yBot: u,        yTop: belt - 0.12, wBot: Wv - 0.06, wTop: Wv - 0.10 }, // upright nose
+    { z:  half - 1.05, yBot: u,        yTop: belt,        wBot: Wv,        wTop: Wv - 0.06 }, // hood end / windshield base
+    { z:  half - 1.55, yBot: u,        yTop: roof,        wBot: Wv,        wTop: Wv - 0.34 }, // windshield top / roof front
+    { z: -half + 0.45, yBot: u,        yTop: roof,        wBot: Wv,        wTop: Wv - 0.34 }, // roof rear
+    { z: -half + 0.26, yBot: u,        yTop: belt + 0.10, wBot: Wv - 0.04, wTop: Wv - 0.12 }, // near-vertical tailgate
+    { z: -half,        yBot: u + 0.10, yTop: u + 0.42,    wBot: Wv - 0.30, wTop: Wv - 0.36 }, // rear bumper lip
+  ], BODY);
+  return finishMerged(hull, detailBoxes(boxGeo, L, Wv, u, belt));
+}
+
+function suvGlass(): THREE.BufferGeometry {
+  const half = 4.6 / 2, belt = 1.10, roof = 1.68;
+  const Wv = W + 0.06;
+  return loft([
+    { z:  half - 1.07, yBot: belt, yTop: belt + 0.02,  wBot: Wv - 0.10, wTop: Wv - 0.36 }, // windshield base
+    { z:  half - 1.57, yBot: belt, yTop: roof + 0.015, wBot: Wv - 0.08, wTop: Wv - 0.36 }, // windshield top
+    { z: -half + 0.47, yBot: belt, yTop: roof + 0.015, wBot: Wv - 0.08, wTop: Wv - 0.36 }, // roof rear
+    { z: -half + 0.33, yBot: belt, yTop: belt + 0.03,  wBot: Wv - 0.10, wTop: Wv - 0.38 }, // tailgate glass base
+  ], GLASS);
 }
 
 function buildVan(boxGeo: BoxGeo): THREE.BufferGeometry {
-  const len = 4.7;
-  const bodyH = 0.6;
-  const bodyY = WHEEL_LINE + bodyH / 2;
-  const cabinH = 0.82; // taller box cabin
-  const cabinY = WHEEL_LINE + bodyH + cabinH / 2;
-  const parts: Part[] = [
-    { w: BODY_W, h: bodyH, d: len, pos: [0, bodyY, 0], color: BODY },
-    // tall long cabin (short bonnet, boxy body)
-    { w: BODY_W - 0.08, h: cabinH, d: 3.3, pos: [0, cabinY, -0.55], color: BODY },
-    // window band only over the front portion (a cargo van has a cab up front)
-    { w: BODY_W - 0.0, h: cabinH - 0.4, d: 1.3, pos: [0, cabinY + 0.1, 0.9], color: GLASS },
-    { w: BODY_W - 0.16, h: 0.06, d: 3.1, pos: [0, cabinY + cabinH / 2 - 0.02, -0.55], color: ROOF },
-    ...wheels(len),
-  ];
-  return mergeParts(parts, boxGeo, 'van');
+  const L = 5.2, half = L / 2, belt = 1.15, roof = 2.05;
+  const Wv = W + 0.10, u = 0.34;
+  const hull = loft([
+    { z:  half,        yBot: u + 0.10, yTop: u + 0.42,    wBot: Wv - 0.30, wTop: Wv - 0.34 }, // bumper lip
+    { z:  half - 0.25, yBot: u,        yTop: belt - 0.12, wBot: Wv - 0.06, wTop: Wv - 0.10 }, // stubby nose
+    { z:  half - 0.85, yBot: u,        yTop: belt,        wBot: Wv,        wTop: Wv - 0.06 }, // short hood / windshield base
+    { z:  half - 1.45, yBot: u,        yTop: roof,        wBot: Wv,        wTop: Wv - 0.30 }, // steep windshield top
+    { z: -half + 0.30, yBot: u,        yTop: roof,        wBot: Wv,        wTop: Wv - 0.30 }, // long box roof
+    { z: -half + 0.15, yBot: u,        yTop: roof - 0.10, wBot: Wv - 0.04, wTop: Wv - 0.30 }, // near-vertical tail
+    { z: -half,        yBot: u + 0.10, yTop: u + 0.45,    wBot: Wv - 0.30, wTop: Wv - 0.36 }, // rear bumper lip
+  ], BODY);
+  return finishMerged(hull, detailBoxes(boxGeo, L, Wv, u, belt));
 }
 
-/** The variant table: name (for mesh naming) + geometry builder. Order is
- * stable — carVariantForId indexes into it. */
-export const CAR_VARIANTS: readonly { name: string; build: (boxGeo: BoxGeo) => THREE.BufferGeometry }[] = [
-  { name: 'sedan', build: buildSedan },
-  { name: 'hatchback', build: buildHatchback },
-  { name: 'van', build: buildVan },
+function vanGlass(): THREE.BufferGeometry {
+  // Windshield + front-door band only — a cargo van has a cab up front.
+  const half = 5.2 / 2, belt = 1.15;
+  const Wv = W + 0.10;
+  return loft([
+    { z:  half - 0.87, yBot: belt, yTop: belt + 0.02, wBot: Wv - 0.10, wTop: Wv - 0.32 }, // windshield base
+    { z:  half - 1.40, yBot: belt, yTop: 1.92,        wBot: Wv - 0.08, wTop: Wv - 0.32 }, // windshield top (below roofline)
+    { z:  half - 2.60, yBot: belt, yTop: 1.92,        wBot: Wv - 0.08, wTop: Wv - 0.32 }, // front-door band end
+  ], GLASS);
+}
+
+function buildPickup(boxGeo: BoxGeo): THREE.BufferGeometry {
+  const L = 5.0, half = L / 2, belt = 1.05, roof = 1.62;
+  const u = 0.42;
+  const hull = loft([
+    { z:  half,        yBot: u + 0.10, yTop: u + 0.42,    wBot: W - 0.30, wTop: W - 0.34 }, // bumper lip
+    { z:  half - 0.28, yBot: u,        yTop: belt - 0.12, wBot: W - 0.06, wTop: W - 0.10 }, // nose
+    { z:  half - 1.05, yBot: u,        yTop: belt,        wBot: W,        wTop: W - 0.06 }, // hood end / windshield base
+    { z:  half - 1.55, yBot: u,        yTop: roof,        wBot: W,        wTop: W - 0.34 }, // windshield top / cab roof
+    { z:  0.20,        yBot: u,        yTop: roof,        wBot: W,        wTop: W - 0.34 }, // cab roof rear
+    { z:  0.05,        yBot: u,        yTop: belt + 0.02, wBot: W,        wTop: W - 0.06 }, // cab back → bed rail
+    { z: -half + 0.20, yBot: u,        yTop: belt + 0.02, wBot: W,        wTop: W - 0.06 }, // bed side end
+    { z: -half,        yBot: u + 0.10, yTop: belt - 0.02, wBot: W - 0.20, wTop: W - 0.24 }, // tailgate
+  ], BODY);
+  // Open-bed cavity look: a dark inner loft recessed below the bed rails.
+  const bed = loft([
+    { z:  0.0,         yBot: u + 0.10, yTop: belt - 0.06, wBot: W - 0.30, wTop: W - 0.30 },
+    { z: -half + 0.18, yBot: u + 0.10, yTop: belt - 0.06, wBot: W - 0.30, wTop: W - 0.30 },
+  ], RUBBER);
+  return finishMerged(hull, bed, detailBoxes(boxGeo, L, W, u, belt));
+}
+
+function pickupGlass(): THREE.BufferGeometry {
+  const half = 5.0 / 2, belt = 1.05, roof = 1.62;
+  return loft([
+    { z:  half - 1.07, yBot: belt, yTop: belt + 0.02,  wBot: W - 0.10, wTop: W - 0.36 }, // windshield base
+    { z:  half - 1.57, yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // windshield top
+    { z:  0.24,        yBot: belt, yTop: roof + 0.015, wBot: W - 0.08, wTop: W - 0.36 }, // cab roof rear
+    { z:  0.10,        yBot: belt, yTop: belt + 0.02,  wBot: W - 0.10, wTop: W - 0.38 }, // rear cab glass base
+  ], GLASS);
+}
+
+// ── wheel geometry (shared by all variants; carLayer scales instances) ──────
+
+export const WHEEL_GEO_RADIUS = 0.3;
+
+/** Unit-ish wheel: dark tire + lighter rim, cylinder axis along x (the axle).
+ * Instances are scaled by `layout.radius / WHEEL_GEO_RADIUS`. */
+export function buildWheelGeometry(): THREE.BufferGeometry {
+  const r = WHEEL_GEO_RADIUS;
+  const tire = new THREE.CylinderGeometry(r, r, 0.22, 12);
+  tire.rotateZ(Math.PI / 2); // cylinder axis y → x (axle across the car)
+  const rim = new THREE.CylinderGeometry(r * 0.55, r * 0.55, 0.235, 8);
+  rim.rotateZ(Math.PI / 2);
+  const paint = (g: THREE.BufferGeometry, c: THREE.Color) => {
+    const n = g.attributes.position.count;
+    const colors = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) colors.set([c.r, c.g, c.b], i * 3);
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    return g;
+  };
+  return finishMerged(paint(tire, RUBBER), paint(rim, RIM));
+}
+
+/** Per-axle geometry for a variant, in the same local space as the body
+ * (origin at the wheel line, y=0, forward = +z). */
+export interface WheelLayout {
+  wheelbase: number; // m, distance between axle centres
+  track: number;     // m, distance between left/right wheel centres
+  radius: number;    // m, wheel radius
+  width: number;     // m, wheel width across the car
+}
+
+/** Four wheel local offsets `[x, y, z]` for a wheel layout, y = radius.
+ * FRONT pair (positive z) is listed first — carLayer applies steer to
+ * indices 0 and 1. */
+export function wheelOffsets(l: WheelLayout): [number, number, number][] {
+  const x = l.track / 2;
+  const z = l.wheelbase / 2;
+  return [
+    [x, l.radius, z], [-x, l.radius, z],
+    [x, l.radius, -z], [-x, l.radius, -z],
+  ];
+}
+
+/** A CS-style car variant: silhouette name, overall length, wheel layout, and
+ * body/glass geometry builders. Order in CAR_VARIANTS is stable —
+ * carVariantForId indexes into it. */
+export interface CarVariant {
+  name: string;
+  length: number; // m, overall
+  wheels: WheelLayout;
+  buildBody: (boxGeo: BoxGeo) => THREE.BufferGeometry;
+  buildGlass: () => THREE.BufferGeometry;
+}
+
+export const CAR_VARIANTS: readonly CarVariant[] = [
+  { name: 'sedan',     length: 4.5, wheels: { wheelbase: 2.7, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildSedan,     buildGlass: sedanGlass },
+  { name: 'hatchback', length: 3.9, wheels: { wheelbase: 2.5, track: 1.52, radius: 0.30, width: 0.22 }, buildBody: buildHatchback, buildGlass: hatchbackGlass },
+  { name: 'wagon',     length: 4.6, wheels: { wheelbase: 2.8, track: 1.56, radius: 0.31, width: 0.24 }, buildBody: buildWagon,     buildGlass: wagonGlass },
+  { name: 'suv',       length: 4.6, wheels: { wheelbase: 2.8, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildSuv,       buildGlass: suvGlass },
+  { name: 'van',       length: 5.2, wheels: { wheelbase: 3.3, track: 1.66, radius: 0.36, width: 0.26 }, buildBody: buildVan,       buildGlass: vanGlass },
+  { name: 'pickup',    length: 5.0, wheels: { wheelbase: 3.1, track: 1.62, radius: 0.38, width: 0.28 }, buildBody: buildPickup,    buildGlass: pickupGlass },
 ] as const;
