@@ -51,4 +51,28 @@ describe('transformNature Slice-2', () => {
     expect(trees.length).toBe(1);
     expect(['spreading', 'oval', 'tall']).toContain(trees[0].family);
   });
+
+  // Finding 3 (Minor, task-2-brief.md): Margen-Band um den Footprint (Fund 2's
+  // nearFootprint / FOOTPRINT_MARGIN = 1 m) war bisher untestet.
+  it('Baum 0.5 m ausserhalb des Footprints wird gedroppt (innerhalb der Marge)', () => {
+    const osmNature = { elements: [
+      // fp: x in [0,5], z in [-5,0]; Baum bei x=5.5 (0.5 m rechts der Kante x=5)
+      { type: 'node', lat: 0.00001 /* z ~ -1.11 */, lon: 5.5 / 111320, tags: { natural: 'tree' } },
+    ]};
+    const projector = { toLocal: (lon: number, lat: number) => [lon * 111320, -lat * 111320] };
+    const fp = [[0, 0], [5, 0], [5, -5], [0, -5]];
+    const { trees } = transformNature({ osmNature, projector, buildingFootprints: [fp] });
+    expect(trees.length).toBe(0);
+  });
+
+  it('Baum 2.5 m ausserhalb des Footprints bleibt (ausserhalb der Marge)', () => {
+    const osmNature = { elements: [
+      // Baum bei x=7.5 (2.5 m rechts der Kante x=5)
+      { type: 'node', lat: 0.00001, lon: 7.5 / 111320, tags: { natural: 'tree' } },
+    ]};
+    const projector = { toLocal: (lon: number, lat: number) => [lon * 111320, -lat * 111320] };
+    const fp = [[0, 0], [5, 0], [5, -5], [0, -5]];
+    const { trees } = transformNature({ osmNature, projector, buildingFootprints: [fp] });
+    expect(trees.length).toBe(1);
+  });
 });

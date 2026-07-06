@@ -156,6 +156,12 @@ const FAMILY_MIX = {
   street:      [['spreading', 0.5], ['oval', 1.0]],
 };
 
+// kind: 'conifer'|'broad'|null. Only pass a non-null kind when it is real OSM
+// ground truth (an explicit leaf_type tag on the individual node/way) — that
+// vetoes the mix down to the matching families. Otherwise (the common case:
+// no leaf_type tag at all) pass null so the context mix decides unconstrained
+// — a needlewood/mixedwood context can then actually produce conifers, which
+// a kind veto derived from the same missing tag would otherwise always block.
 export function familyFor(x, z, kind, context = {}) {
   const inWood = context.green === 'wood' || context.green === 'forest';
   let mix;
@@ -168,10 +174,12 @@ export function familyFor(x, z, kind, context = {}) {
   } else {
     mix = FAMILY_MIX.street;
   }
-  // kind ist OSM-Ground-Truth: conifer erzwingt Nadel-Familien, broad Laub.
-  const allowed = kind === 'conifer' ? ['conic', 'slender'] : ['spreading', 'oval', 'tall'];
-  const filtered = mix.filter(([f]) => allowed.includes(f));
-  const pool = filtered.length ? filtered : allowed.map((f, i) => [f, (i + 1) / allowed.length]);
+  // kind is OSM ground truth ONLY when explicitly provided: conifer forces
+  // needle families, broad forces broadleaf families. null (no tag) leaves
+  // the context mix unconstrained.
+  const allowed = kind === 'conifer' ? ['conic', 'slender'] : kind === 'broad' ? ['spreading', 'oval', 'tall'] : null;
+  const filtered = allowed ? mix.filter(([f]) => allowed.includes(f)) : mix;
+  const pool = filtered.length ? filtered : (allowed ?? ['spreading', 'oval', 'tall']).map((f, i, arr) => [f, (i + 1) / arr.length]);
   const hv = h01(x * 12.9898 + 4.1414, z * 78.233);
   const top = pool[pool.length - 1][1];
   for (const [f, cum] of pool) if (hv <= cum / top) return f;
@@ -197,8 +205,17 @@ export function sizeFor(family, x, z) {
 // hashing on position (never on a real tag value) so repeat bakes are
 // byte-identical.
 export function treeSpec(tags, x, z, context = {}) {
-  const kind = tags.leaf_type === 'needleleaved' ? 'conifer' : 'broad';
-  const family = familyFor(x, z, kind, context);
+  // Family first, kind follows (Finding 1, task-2-brief.md): an explicit
+  // leaf_type tag is real OSM ground truth and vetoes the family mix down to
+  // matching families; without it (the common case), the context mix decides
+  // unconstrained and kind is DERIVED from whichever family it picked — a
+  // kind guessed from the (absent) tag would otherwise always veto conifers
+  // out of context mixes that should be producing them.
+  const explicitKind = tags.leaf_type === 'needleleaved' ? 'conifer'
+    : tags.leaf_type === 'broadleaved' ? 'broad'
+    : null;
+  const family = familyFor(x, z, explicitKind, context);
+  const kind = explicitKind ?? (['conic', 'slender'].includes(family) ? 'conifer' : 'broad');
   const sized = sizeFor(family, x, z);
   const tagH = Number.parseFloat(tags.height ?? '');
   const tagCrown = Number.parseFloat(tags.diameter_crown ?? '');
@@ -264,8 +281,15 @@ export function forestFill(ring, existingTrees, density = 1 / 60, context = { gr
       const z = (gz + 0.5) * cell + jz;
       if (!pointInRing(x, z, ring)) continue;
       if (tooClose(x, z)) continue;
-      const family = familyFor(x, z, context.leafType === 'needleleaved' ? 'conifer' : 'broad', context);
-      const kind = ['conic', 'slender'].includes(family) ? 'conifer' : 'broad';
+      // Family first, kind follows (Finding 1): only an explicit leaf_type on
+      // the forest itself is ground truth; without it the mixedwood mix picks
+      // unconstrained, and forests are the majority case (189/289 baked
+      // forests carry no leaf_type tag) — they must still get conifers.
+      const explicitKind = context.leafType === 'needleleaved' ? 'conifer'
+        : context.leafType === 'broadleaved' ? 'broad'
+        : null;
+      const family = familyFor(x, z, explicitKind, context);
+      const kind = explicitKind ?? (['conic', 'slender'].includes(family) ? 'conifer' : 'broad');
       const sized = sizeFor(family, x, z);
       out.push({ x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, kind, family, h: sized.h, r: sized.r });
     }

@@ -49,4 +49,36 @@ describe('treeSpec', () => {
   it('trägt family', () => {
     expect(treeSpec({}, 5, 5, { green: 'park' }).family).toBeDefined();
   });
+
+  // Finding 1 (Critical, task-2-brief.md): kind darf nicht ALLEIN aus dem
+  // fehlenden Node-Tag folgen — sonst vetot familyFor jede Konifere, sobald
+  // kein explizites leaf_type am Baum selbst hängt (der Normalfall: 8/7271
+  // im vorherigen Bake). Familie zuerst (aus dem Kontext-Mix), kind folgt.
+  it('ohne explizites leaf_type: Nadelwald-Kontext liefert überwiegend kind=conifer', () => {
+    let conifer = 0;
+    for (let i = 0; i < 200; i++) {
+      const s = treeSpec({}, i * 13.7, i * 7.1, { green: 'wood', leafType: 'needleleaved' });
+      if (s.kind === 'conifer') conifer++;
+    }
+    expect(conifer).toBeGreaterThan(100); // Mehrheit
+  });
+
+  it('ohne explizites leaf_type: mixedwood-Kontext liefert 15-45% Koniferen-Anteil', () => {
+    let conifer = 0;
+    const N = 400;
+    for (let i = 0; i < N; i++) {
+      const s = treeSpec({}, i * 11.3, i * 5.9, { green: 'wood' }); // kein leafType → mixedwood
+      if (s.kind === 'conifer') conifer++;
+    }
+    const ratio = conifer / N;
+    expect(ratio).toBeGreaterThan(0.15);
+    expect(ratio).toBeLessThan(0.45);
+  });
+
+  it('explizites tags.leaf_type=broadleaved bleibt broad, auch im Nadelwald-Kontext', () => {
+    for (let i = 0; i < 100; i++) {
+      const s = treeSpec({ leaf_type: 'broadleaved' }, i * 9.1, i * 4.3, { green: 'wood', leafType: 'needleleaved' });
+      expect(s.kind).toBe('broad');
+    }
+  });
 });
