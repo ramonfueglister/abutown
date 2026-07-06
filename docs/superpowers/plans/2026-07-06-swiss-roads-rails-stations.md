@@ -231,6 +231,29 @@ console.log(`corridor clearing: ${nature.trees.length - keptTrees.length} trees 
 - [ ] **Step 3:** Run the CLI against the Task-4 bake: `node scripts/geo/burial-metric.mjs`. Record output. **Acceptance (spec §9): max < 0.3 m, p99 < 0.15 m.** If violated: offenders list tells you where; expected causes are corridor width vs. lane extents (raise the floor wiring) or blend width. Fix wiring constants (NOT the metric) and re-bake until green; document final numbers for the PR body.
 - [ ] **Step 4:** Commit `test(geo): burial metric — cross-slope + longitudinal budgets enforced`.
 
+### Task 5b: Profile asset + 2.5 m grading grid (spec §5 amendment, user-approved "A+B")
+
+**Files:**
+- Modify: `scripts/geo/bake-world.mjs` (grading grid 10 → 2.5 m; write per-way profiles), `scripts/geo/lib/grading.mjs` (export the per-way smoothed profiles from gradeDem: `report.profiles: Array<{stations: number[], ys: number[]}>` index-aligned with the input ways — stations every 10 m along the densified centreline, ys relative heights AFTER grade clamping)
+- Modify: the roads.json bake step — each road/rail gains `profile: {stepM: 10, ys: number[]}` (quantized 0.01 m), additive field.
+- Test: extend `tests/geo/grading.test.ts` (profiles returned, length = ceil(pathLen/10)+1, grade-clamped) and the roads.json bake test if one exists.
+
+**Interfaces:**
+- Produces: `RoadPath` gains `profile?: {stepM: number, ys: number[]}`; consumed by Task 5c's sampler. Determinism: double-bake byte-identical roads.json.
+- NOTE: memory at 2.5 m — the kernel is sparse (Task 4 rewrite); the LOCAL GRID itself becomes 7812×7576 Float64 ≈ 470 MB — verify against the 6 GB bake heap, and if tight, grade in 4 quadrant windows (deterministic tile order) instead of one grid.
+
+- [ ] Steps: failing tests → implement → real bake (grid 2.5 m) → double-bake determinism (world tiles AND roads.json) → commit `feat(geo): road-owned longitudinal profiles + 2.5 m grading grid`.
+
+### Task 5c: Corridor-aware ground sampler (runtime) + §9 metric v2
+
+**Files:**
+- Create: `src/diorama/ksw/geo/groundSampler.ts` — `makeCorridorGround(roads: RoadPath[], rails: RoadPath[], tileGround: GroundYAt): GroundYAt`: spatial hash of corridor segments (halfWidth = render width/2 + 1.5, rails bed/2 + 2); inside corridor → interpolated `profile.ys` height; edge blend band 3 m to tileGround; outside → tileGround. Pure, unit-tested.
+- Modify: `src/diorama/ksw/main.ts` — wrap: `const groundYAt = makeCorridorGround(cityRoads, cityRails, (x,z) => worldHeightAt(x,z) - anchorGround)`; ALL existing consumers (buildRoads, carLayer, flowLayer, lamps if ground-sampled) automatically agree.
+- Modify: `scripts/geo/burial-metric.mjs` — metric v2: per corridor station, `tileY − profileY`; budgets p99 ≤ 0.05 m, max < 0.10 m; CLI prints v2 table.
+- Test: `tests/diorama/groundSampler.test.ts` (inside/outside/blend, profile interpolation, deterministic) + metric v2 unit test.
+
+- [ ] Steps: failing tests → implement → run metric v2 CLI on the real bake → **budgets must pass** (if not: the 2.5 m grading wiring is the knob, not the metric) → tsc + vitest → commit `feat(diorama): corridor-aware ground sampler — roads own their surface height`.
+
 ### Task 6: PR 1 — visual proof, gate, ship
 
 - [ ] **Step 1:** Frontend gate: `npx tsc -p tsconfig.typecheck.json`, `npx vitest run`, `npm run build`. (No Rust in this PR — skip cargo entirely.)

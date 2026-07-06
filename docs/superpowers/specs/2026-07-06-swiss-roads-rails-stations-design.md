@@ -97,12 +97,34 @@ byte-identical (golden test, same as #119/#123 discipline). Artifacts stay
 gitignored (world/*.pb); the bake logs corridor cell counts and the
 burial metric (§9) before/after.
 
-## 5. Runtime road mesh
+## 5. Runtime road mesh — road-owned profiles (AMENDED 2026-07-06)
 
-Unchanged in principle: `miterStrip` + #132's `subdivideForDrape` now land
-on graded, cross-level corridors, so the planar-across-width ribbon becomes
-**correct** instead of approximate. The 0.3 m burial budget (§9) is the
-acceptance criterion, not new mesh code.
+**Amendment (user decision "A+B", after the §9 measurement failed):** the
+L2 tile heightfield samples every ~12.5 m and cannot represent a ~6 m
+carriageway bench, regardless of bake-side grading resolution (measured:
+max 2.55 m / p99 0.95 m / 8.07 % ≥ 0.3 m on the 10 m grading grid — worse
+than baseline). Therefore, like every current city builder, roads own
+their surface height AND the terrain conforms toward it:
+
+- **A (terrain):** the grading grid drops to **2.5 m** (sparse
+  accumulators); tiles keep their resolution — grading now removes the
+  bulk of the conflict (embankments/cuts remain visible).
+- **B (profile):** the bake writes each road/rail way's **smoothed
+  longitudinal profile** (the §4.1/§4.2 `smoothProfile` output, stations
+  every 10 m, heights relative to the shared anchor) additively into
+  `data/winterthur/roads.json`. The runtime builds ONE corridor-aware
+  ground sampler: inside a road/rail corridor it returns the interpolated
+  profile height, outside it falls through to the tile field, with a blend
+  band at the corridor edge (this is data routing — the single sampler IS
+  the honest source of truth for "ground under infrastructure"; it is not
+  a fallback). Ribbons, markings, cars, rail look, and platforms all
+  sample this one sampler, so every consumer agrees.
+- **§9 metric v2:** the burial criterion becomes terrain-poke-through:
+  within every corridor, `p99(tileY − profileY) ≤ 0.05 m` and
+  `max(tileY − profileY) < 0.10 m` (the ribbon's own lift covers the
+  rest) — i.e. graded terrain never pierces the road surface; plus the
+  ribbon itself is level across its width by construction (it drapes on
+  the profile).
 
 ## 6. Swiss markings & surfaces (render layer)
 
