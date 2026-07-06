@@ -34,7 +34,12 @@ export type BakedBuilding = {
   roof: BakedMesh;
   door?: BakedDoor;
 };
-export type RoadPath = { class: string; width: number; pts: number[][] };
+/** Road-owned longitudinal profile (spec §5): grade-clamped heights at fixed
+ * `stepM` (10 m) arc-length stations from the way start, plus the exact
+ * endpoint, RELATIVE to the shared anchor (add directly in y≈0 groundYAt
+ * space). Optional: present only after a `geo:bake-world`→`geo:bake` run. */
+export type RoadProfile = { stepM: number; ys: number[] };
+export type RoadPath = { class: string; width: number; pts: number[][]; profile?: RoadProfile };
 export type CityMeta = {
   plate: { cx: number; cz: number; w: number; d: number };
   landmarks: Record<string, number[]>;

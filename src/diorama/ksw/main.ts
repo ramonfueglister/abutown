@@ -54,9 +54,11 @@ import { buildInterior } from './interior/buildInterior';
 import { buildPlaza, buildHelipad } from './interior/plaza';
 import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
+import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { loadWorld, anchorGroundHeight, makeHeightSampler } from './geo/worldData';
 import { buildTerrainTiles } from './geo/terrain';
+import { loadCorridorMask } from './geo/corridorMask';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
 import { lampGlowU } from './glowUniform';
@@ -603,9 +605,15 @@ async function boot(): Promise<void> {
   // worldData.ts) or a deploy problem, and should surface loudly rather than
   // quietly reverting to the old flat look.
   const world = await loadWorld();
+  // Corridor mask (Task 5e, spec §5 terrain-discard): the terrain shader
+  // discards fragments inside road/rail corridors so rendered terrain can never
+  // pierce a road surface; ribbon skirts close the hole. Hard boot error if
+  // mask.bin is missing (no silent skip — a mask that fails to load must
+  // surface loudly, same discipline as the world load above).
+  const corridorMask = await loadCorridorMask();
   const terrainRoot = new THREE.Group();
   terrainRoot.name = 'terrainRoot';
-  terrainRoot.add(buildTerrainTiles(world.tiles, { level: 2 }));
+  terrainRoot.add(buildTerrainTiles(world.tiles, { level: 2, corridorMask }));
   // Tile heights are absolute DEM metres (~400-590 m); the hero city + KSW
   // sit at y≈0 (the anchor). Shift the whole terrain group down by the
   // anchor's ground height so the anchor point lines up with real y≈0 and
@@ -618,7 +626,16 @@ async function boot(): Promise<void> {
   // heightAt(x,z) - anchorGround. Roads drape onto it (else the flat ribbons
   // bury under / float over the undulating plate) and cars ride it per-vehicle.
   const worldHeightAt = makeHeightSampler(world);
-  const groundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
+  const tileGroundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
+  // Task 5c (spec §5 amendment): roads own their surface height. The tile
+  // heightfield samples ~12.5 m and cannot represent a ~6 m carriageway
+  // bench, so wrap it with a corridor-aware sampler that returns the baked
+  // per-way longitudinal profile height inside every road/rail corridor
+  // (blended to tileGroundYAt at the corridor edge). Every existing
+  // consumer below (buildRoads, carLayer, flowLayer, citizensLayer, lamp
+  // placement) picks this up automatically since they all take the same
+  // `groundYAt` function — see task-5c-report.md for the consumer list.
+  const groundYAt = makeCorridorGround(cityRoads, cityRails, tileGroundYAt);
   // GI-probe exclusion: terrain is backdrop, not part of the hero-grade GI
   // capture. CubeCamera's 6 face cameras render with `cubeCam.layers`
   // (CubeCamera.js: `cameraPX.layers = this.layers`, shared across faces), so
@@ -638,7 +655,7 @@ async function boot(): Promise<void> {
   const cityRoot = new THREE.Group();
   cityRoot.name = 'cityRoot';
   cityRoot.add(buildCityMassing(cityBuildings));
-  cityRoot.add(buildRoads(cityRoads, cityRails, groundYAt));
+  cityRoot.add(buildRoads(cityRoads, cityRails, groundYAt, tileGroundYAt));
   // real OSM nature: parks/woods, the Eulach, and ~4k mapped trees (instanced).
   // The hero plate keeps its authored trees — city trees skip that rect.
   // Tree canopies default to no cast-shadow (nature.ts) — cheap far-field

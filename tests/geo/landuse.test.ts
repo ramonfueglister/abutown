@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { transformLanduse } from '../../scripts/geo/lib/landuse.mjs';
+import { stitchOuterRings, transformLanduse, waterRingsFrom } from '../../scripts/geo/lib/landuse.mjs';
 import { transformNature } from '../../scripts/geo/lib/transform.mjs';
 import { ANCHOR, makeProjector } from '../../scripts/geo/lib/project.mjs';
 
@@ -95,5 +95,108 @@ describe('transformNature Slice-2', () => {
     const fp = [[0, 0], [60, 0], [60, -10], [0, -10]];
     const { trees } = transformNature({ osmNature, projector, buildingFootprints: [fp] });
     expect(trees.length).toBe(0);
+  });
+});
+
+describe('transformLanduse river water', () => {
+  it('maps natural=water to Landcover 6 (WATER)', () => {
+    const naturalWater = { type: 'way', tags: { natural: 'water' }, geometry: way.geometry };
+    const out = transformLanduse({ osmLanduse: { elements: [naturalWater] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+  });
+
+  it('maps waterway=riverbank to Landcover 6 (WATER)', () => {
+    const riverbank = { type: 'way', tags: { waterway: 'riverbank' }, geometry: way.geometry };
+    const out = transformLanduse({ osmLanduse: { elements: [riverbank] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+  });
+
+  it('emits a kind-6 ring for a water multipolygon relation with one closed outer', () => {
+    const rel = {
+      type: 'relation',
+      tags: { natural: 'water', water: 'river' },
+      members: [{ type: 'way', role: 'outer', geometry: way.geometry }],
+    };
+    const out = transformLanduse({ osmLanduse: { elements: [rel] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+    expect(out[0].ring.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('stitches split outer ways of a water relation into one ring', () => {
+    const a = { lon: ANCHOR.lon, lat: ANCHOR.lat };
+    const b = { lon: ANCHOR.lon + 0.002, lat: ANCHOR.lat };
+    const c = { lon: ANCHOR.lon + 0.002, lat: ANCHOR.lat + 0.002 };
+    const d = { lon: ANCHOR.lon, lat: ANCHOR.lat + 0.002 };
+    const rel = {
+      type: 'relation',
+      tags: { natural: 'water', water: 'river' },
+      members: [
+        { type: 'way', role: 'outer', geometry: [a, b, c] },
+        // second half shares both endpoints but runs a→d→c (reversed orientation)
+        { type: 'way', role: 'outer', geometry: [a, d, c] },
+        // inner (island) must be ignored
+        { type: 'way', role: 'inner', geometry: [a, b, c, a] },
+      ],
+    };
+    const out = transformLanduse({ osmLanduse: { elements: [rel] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe(6);
+    // 4 distinct corners stitched into one closed ring
+    expect(out[0].ring.length).toBeGreaterThanOrEqual(4);
+    expect(out[0].ring[0]).toEqual(out[0].ring[out[0].ring.length - 1]);
+  });
+
+  it('ignores non-water relations (landuse relations stay way-only for now)', () => {
+    const rel = {
+      type: 'relation',
+      tags: { landuse: 'forest' },
+      members: [{ type: 'way', role: 'outer', geometry: way.geometry }],
+    };
+    const out = transformLanduse({ osmLanduse: { elements: [rel] }, projector: makeProjector(ANCHOR) });
+    expect(out).toHaveLength(0);
+  });
+});
+
+describe('stitchOuterRings unclosed-chain accounting', () => {
+  it('reports unclosedCount 0 for a properly closed relation', () => {
+    const members = [{ type: 'way', role: 'outer', geometry: way.geometry }];
+    const { rings, unclosedCount } = stitchOuterRings(members);
+    expect(rings).toHaveLength(1);
+    expect(unclosedCount).toBe(0);
+  });
+
+  it('still yields a ring for an open chain but reports unclosedCount 1', () => {
+    // endpoints never coincide: a straight open chain, not closed
+    const a = { lon: ANCHOR.lon, lat: ANCHOR.lat };
+    const b = { lon: ANCHOR.lon + 0.001, lat: ANCHOR.lat };
+    const c = { lon: ANCHOR.lon + 0.002, lat: ANCHOR.lat + 0.001 };
+    const members = [{ type: 'way', role: 'outer', geometry: [a, b, c] }];
+    const { rings, unclosedCount } = stitchOuterRings(members);
+    expect(rings).toHaveLength(1);
+    expect(unclosedCount).toBe(1);
+  });
+});
+
+describe('waterRingsFrom', () => {
+  it('returns only kind-6 (basin/reservoir → WATER) rings', () => {
+    const items = [
+      { kind: 1, ring: [[0, 0], [1, 0], [1, 1]] },
+      { kind: 6, ring: [[10, 10], [11, 10], [11, 11]] },
+      { kind: 2, ring: [[5, 5], [6, 5], [6, 6]] },
+      { kind: 6, ring: [[20, 20], [21, 20], [21, 21]] },
+    ];
+    const rings = waterRingsFrom(items);
+    expect(rings).toEqual([
+      [[10, 10], [11, 10], [11, 11]],
+      [[20, 20], [21, 20], [21, 21]],
+    ]);
+  });
+
+  it('returns an empty array when there are no water items', () => {
+    const items = [{ kind: 1, ring: [[0, 0], [1, 0], [1, 1]] }];
+    expect(waterRingsFrom(items)).toEqual([]);
   });
 });
