@@ -27,7 +27,8 @@
 - Test: `tests/geo/tileStreamer.test.ts`
 
 **Interfaces:**
-- Consumes: `TileRef` aus `../../../proto/world_pb` (Felder: `path: string`, `level: number`, `x: number`, `y: number`, plus Bounds — exakte Feldnamen in `src/proto/world_pb.ts` nachschlagen; falls TileRef keine Welt-Bounds trägt, Tile-Bounds aus Manifest-Projektion ableiten: `WorldManifest` in world.proto prüfen; wenn nötig `originX/originZ/sizeM` pro Ref aus dem zugehörigen Tile-Grid — dann stattdessen eine `TileBounds = {key, level, cx, cz}`-Liste als Input nehmen, die Task 6 aus dem Manifest baut).
+- Consumes: nichts Externes — die Policy arbeitet auf `TileMeta = {key, level, cx, cz}`. GEKLÄRT (Controller, world.proto): `TileRef` trägt KEINE Bounds, aber `WorldManifest` hat die Quadtree-Wurzel `minX/minZ/size` (Quadrat). Ergänze deshalb hier den puren Helper:
+  `tileCenter(manifest: {minX: number; minZ: number; size: number}, ref: {level: number; x: number; y: number}): [number, number]` = `[minX + (x + 0.5) * size / 2**level, minZ + (y + 0.5) * size / 2**level]` — mit eigenem Mini-Test (L0-Tile 0/0 → Weltmitte; L2-Tile x=0,y=0 → Zentrum der ersten 1/4^2-Zelle). Task 6 baut die TileMeta-Liste damit aus dem Manifest.
 - Produces (Task 2/6 verlassen sich exakt hierauf):
   - `type TileKey = string` (`` `L${level}/${x}_${y}` ``)
   - `type RingConfig = { r2: number; r1: number; hysteresis: number; maxLive: number }`
@@ -347,7 +348,7 @@ it('buildings:false lässt Gebäude weg (L1-Modus)', () => { /* … */ });
 ### Task 6: Boot-Integration in main.ts
 
 **Files:**
-- Modify: `src/diorama/ksw/main.ts` (~Zeile 596-660: statt `loadWorld()` alles-laden → L0 via `loadWorld(base, ref => ref.path.startsWith('tiles/L0'))`; TileMeta-Liste aus `manifest.tiles` (Center aus Tile-Grid: `originX + gridN·cellSize/2` — beim Fetch des Manifests sind die Tiles noch nicht da → Bounds müssen aus TileRef kommen; TileRef-Felder prüfen und ggf. Task-1-Anmerkung nutzen: die Bounds-Liste wird hier aus einem einmaligen leichten HEAD-Load…; PRAGMATISCH: `manifest`-Proto prüfen — wenn TileRef keine Bounds hat, erweitere das Manifest-Proto in Task 3 gleich mit `repeated double tile_cx/tile_cz` (bake-world schreibt sie) statt zur Laufzeit zu raten); `TileStreamer` mit `fetchTile = fetchTileBin+decodeTileBin`, `onReady = materializeTile + addTileTrees + terrainRoot.add`, `onUnload = dispose + removeTileTrees`; `streamer.update(camera.position.x, camera.position.z)` throttled ~2 Hz im bestehenden compactNear-Rhythmus (Anker: treeLayer.compactNear-Aufruf in animate); `__LOOK_READY` erst wenn L0 steht UND der initiale Nahring leer-gefetcht ist (`liveCount` stabil ODER Queue leer))
+- Modify: `src/diorama/ksw/main.ts` (~Zeile 596-660: statt `loadWorld()` alles-laden → L0 via `loadWorld(base, ref => ref.path.startsWith('tiles/L0'))`; TileMeta-Liste aus `manifest.tiles` via `tileCenter(manifest, ref)` (Task 1; manifest.minX/minZ/size — Feldnamen in src/proto/world_pb.ts sind camelCase); `TileStreamer` mit `fetchTile = fetchTileBin+decodeTileBin`, `onReady = materializeTile + addTileTrees + terrainRoot.add`, `onUnload = dispose + removeTileTrees`; `streamer.update(camera.position.x, camera.position.z)` throttled ~2 Hz im bestehenden compactNear-Rhythmus (Anker: treeLayer.compactNear-Aufruf in animate); `__LOOK_READY` erst wenn L0 steht UND der initiale Nahring leer-gefetcht ist (`liveCount` stabil ODER Queue leer))
 - Modify: `src/diorama/ksw/geo/lod.ts`/Aufrufer nur falls `getObjectByName('terrainL2/…')`-Kopplungen existieren (grep!) — Namen bleiben stabil via buildTerrainTileMesh.
 - Test: kein neuer Unit-Test (Integration) — Gate ist Task 7.
 
