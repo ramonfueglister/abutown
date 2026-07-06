@@ -206,6 +206,27 @@ describe('carLayer instancing', () => {
   it('exposes capacity for the wheel mesh at 4× CAR_CAPACITY', () => {
     expect(CAR_CAPACITY).toBe(4096);
   });
+
+  it('bounds the wheel cursor at WHEEL_CAPACITY when bodies exceed CAR_CAPACITY in aggregate', () => {
+    // Per-variant body caps (6 × 2048 = 12288) can exceed CAR_CAPACITY (4096)
+    // in aggregate, but the shared wheel mesh is sized 4 × CAR_CAPACITY. Feed
+    // more than CAR_CAPACITY vehicles (all one variant-spanning fleet) and
+    // confirm the wheel writes stop at capacity instead of overflowing.
+    const bigNet = buildLaneNet([
+      { id: 0, edge: 0, index: 0, lengthM: 100, pts: [[0, 0], [100, 0]] },
+    ]);
+    const manyVehicles = new Map<number, VehKinematics>();
+    for (let id = 1; id <= 4097; id++) {
+      manyVehicles.set(id, { lane: 0, s: id % 100, v: 5, tickAt: 0 });
+    }
+    const layer = createCarLayer();
+    layer.update(bigNet, manyVehicles, 0);
+    expect(layer.debug.wheelCount()).toBeLessThanOrEqual(4 * CAR_CAPACITY);
+    const counts = layer.debug.variantCounts();
+    for (const c of counts) expect(c).toBeLessThanOrEqual(2048);
+    const totalBodies = counts.reduce((a, b) => a + b, 0);
+    expect(layer.debug.wheelCount()).toBe(totalBodies * 4 <= 4 * CAR_CAPACITY ? totalBodies * 4 : 4 * CAR_CAPACITY);
+  });
 });
 
 describe('far-LOD impostor geometry', () => {

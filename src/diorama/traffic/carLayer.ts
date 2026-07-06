@@ -68,9 +68,10 @@ const CAR_LIFT = 0.04;
 export { CAR_PALETTE };
 
 /** A representative single car geometry for flowLayer.ts's far-LOD impostor
- * mesh (Task 12 brief: "second InstancedMesh reusing the clay-car geometry").
- * Delegates to variant 0 (the plain sedan) — at flow-LOD distances the
- * variant differences are sub-pixel, so one shape stands in for the fleet.
+ * mesh (Task 12 brief, flowLayer.ts): a single merged sedan body+glass+wheels
+ * shape standing in for the whole fleet. Delegates to variant 0 (the plain
+ * sedan) — at flow-LOD distances the variant differences are sub-pixel, so
+ * one shape stands in for the fleet.
  * Returns a merged static geometry: sedan body + glass + 4 wheels. */
 export function buildCarGeometry(): THREE.BufferGeometry {
   const sedan = CAR_VARIANTS[0];
@@ -270,15 +271,22 @@ export function createCarLayer(groundYAt?: GroundYAt): CarLayer {
       let spin = spinOfId.get(id);
       if (spin === undefined) { spin = initSpin(nowTick, pose.yaw); spinOfId.set(id, spin); }
       advanceSpin(spin, veh.v, pose.yaw, nowTick, layout.radius);
-      const s = layout.radius / WHEEL_GEO_RADIUS;
-      for (let w = 0; w < 4; w++) {
-        const off = offsets[variant][w];
-        wpos.set(off[0], off[1], off[2]);
-        weuler.set(spin.theta, w < 2 ? spin.steer : 0, 0, 'YXZ'); // steer about y THEN roll about x
-        wquat.setFromEuler(weuler);
-        wscl.setScalar(s);
-        wheelMat.compose(wpos, wquat, wscl).premultiply(bodyMat);
-        wheelMesh.setMatrixAt(wheelCursor++, wheelMat);
+      // Per-variant body caps (6 × PER_VARIANT_CAPACITY) can exceed CAR_CAPACITY
+      // in aggregate, but the shared wheel mesh is sized 4 × CAR_CAPACITY — so
+      // wheel writes must stop at WHEEL_CAPACITY even though a body/glass pair
+      // just got drawn for this vehicle. A car missing its wheels beats an
+      // out-of-bounds instance write.
+      if (wheelCursor + 4 <= WHEEL_CAPACITY) {
+        const s = layout.radius / WHEEL_GEO_RADIUS;
+        for (let w = 0; w < 4; w++) {
+          const off = offsets[variant][w];
+          wpos.set(off[0], off[1], off[2]);
+          weuler.set(spin.theta, w < 2 ? spin.steer : 0, 0, 'YXZ'); // steer about y THEN roll about x
+          wquat.setFromEuler(weuler);
+          wscl.setScalar(s);
+          wheelMat.compose(wpos, wquat, wscl).premultiply(bodyMat);
+          wheelMesh.setMatrixAt(wheelCursor++, wheelMat);
+        }
       }
     }
 
