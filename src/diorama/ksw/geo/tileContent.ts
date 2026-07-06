@@ -175,15 +175,22 @@ export function materializeTile(dec: DecodedTile, ctx: MaterializeCtx): TileCont
   ];
 
   // --- Terrain (always) -----------------------------------------------------
+  // #144: the corridor discard applies ONLY to the finest (L2) terrain. The
+  // road platform (ribbon/apron/skirt/lid) is built against the FINE heights;
+  // coarser levels (L1 sub-cells here, the L0 backdrop in main.ts) deviate
+  // metres from them, so discarding their fragments opens corridor slots the
+  // platform cannot close from any angle — the far-field white-dash storm of
+  // #144. Coarse terrain simply renders over the corridors instead (a briefly
+  // buried road while an L2 tile streams in is invisible next to that).
   if (subCells) {
     // 16 resampled sub-meshes, seam-exact on the source bilinear surface.
-    const { group: cellsGroup, meshes } = buildTileSubCellTerrain(dec, SUB_CELLS_PER_SIDE, {
-      corridorMask: ctx.corridorMask,
-    });
+    const { group: cellsGroup, meshes } = buildTileSubCellTerrain(dec, SUB_CELLS_PER_SIDE, {});
     group.add(cellsGroup);
     for (const [k, mesh] of meshes) subCells.get(k)!.meshes.push(mesh);
   } else {
-    const terrain = buildTerrainTileMesh(dec, { corridorMask: ctx.corridorMask });
+    const terrain = buildTerrainTileMesh(dec, {
+      corridorMask: dec.level === 2 ? ctx.corridorMask : undefined,
+    });
     terrain.name = `tileTerrain/${key}`;
     group.add(terrain);
   }

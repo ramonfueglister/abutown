@@ -6,7 +6,7 @@
 // nature.ts already uses for the flat green/water areas, imported rather
 // than duplicated.
 import * as THREE from 'three/webgpu';
-import { Fn, attribute, float, positionWorld, texture, vec2 } from 'three/tsl';
+import { Fn, attribute, float, positionWorld, texture, uniform, vec2 } from 'three/tsl';
 import { terrainLook } from '../../designTokens';
 import { vertexTintMat } from './nature';
 import type { DecodedTile } from './worldData';
@@ -71,6 +71,28 @@ function buildTileGeometry(tile: DecodedTile['tile']): THREE.BufferGeometry {
 }
 
 /**
+ * Camera anchor + radius for the distance-limited corridor discard (#144).
+ * Level-gating (only L2 tiles get the discard material) removes the coarse-LOD
+ * divergence, but at the fine ring's OUTER rim the discard holes of edge L2
+ * tiles look through to the offset L1 surfaces behind them — a dashed bright
+ * seam along the ring boundary. Keeping the discard radius comfortably INSIDE
+ * the guaranteed-fine region (main.ts passes 0.8 × the streamer's r2) means
+ * the discard→no-discard transition happens over pure L2 terrain, where the
+ * corridor-snapped surface matches the platform within centimetres — no gap
+ * for a ray to slip through. Beyond it, terrain simply covers the corridors.
+ */
+const discardCamU = uniform(new THREE.Vector2(0, 0));
+const discardRadiusU = uniform(1e9);
+
+/** Per-frame update of the discard anchor/radius — call from the render loop
+ * with the SAME position the tile streamer uses and a radius safely inside
+ * its fine (L2) ring. */
+export function updateTerrainDiscardAnchor(x: number, z: number, radiusM: number): void {
+  (discardCamU.value as THREE.Vector2).set(x, z);
+  discardRadiusU.value = radiusM;
+}
+
+/**
  * Terrain material with the corridor-discard (Task 5e, spec §5). Starts from
  * the shared vertexTintMat, then attaches a colorNode that DISCARDS the
  * fragment when the corridor mask reads "inside a road/rail corridor" at the
@@ -83,14 +105,22 @@ function buildTileGeometry(tile: DecodedTile['tile']): THREE.BufferGeometry {
  * trap; cityMassing.ts uses the same Fn-wrapped guard). We threshold the
  * NEAREST-sampled mask at 0.5 — texels are 0 or 1 so the band edge is crisp.
  *
- * The mask is world-space and level-independent, so every pyramid level shares
- * this one material and discards the same footprint — no LOD popping.
+ * The mask is world-space, but the discard applies ONLY to the finest (L2)
+ * terrain (#144): the road platform is built against fine heights; coarser
+ * levels deviate metres from them, and discarding those fragments opens
+ * corridor slots the platform cannot close (far-field white-dash storm).
+ * Callers gate the mask by level (tileContent.ts, main.ts L0 backdrop).
  */
 function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
   const m = vertexTintMat(terrainLook.meadow);
   const tex = corridorMaskDataTexture(mask);
-  // uv from world (x,z): (worldX − originX) / (cols · cellSize), same for z.
-  // The texture has flipY=false so texel (i,j) = cell (i,j); v uses z directly.
+  // uv from world (x,z): (worldX − originX + cell/2) / (cols · cellSize), same
+  // for z. The +cell/2 makes the NEAREST texel floor(u·cols) equal the bake's
+  // round-to-nearest cell — without it the discard footprint shifts +half a
+  // cell in +x/+z beyond the platform coverage (#144 see-through strips).
+  // MIRROR: corridorMask.ts `maskShaderUv` is the unit-tested JS twin of this
+  // formula; change both together. flipY=false so texel (i,j) = cell (i,j).
+  const halfCell = float(mask.cellSizeM / 2);
   const spanX = float(mask.cols * mask.cellSizeM);
   const spanZ = float(mask.rows * mask.cellSizeM);
   // vertexTintMat sets vertexColors=true + white base; the per-vertex landcover
@@ -98,10 +128,13 @@ function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
   // the discard material keeps the exact terrain look outside the corridor.
   const tint = attribute<'vec3'>('color', 'vec3');
   m.colorNode = Fn(() => {
-    const u = positionWorld.x.sub(float(mask.originX)).div(spanX);
-    const v = positionWorld.z.sub(float(mask.originZ)).div(spanZ);
+    const u = positionWorld.x.sub(float(mask.originX)).add(halfCell).div(spanX);
+    const v = positionWorld.z.sub(float(mask.originZ)).add(halfCell).div(spanZ);
     const inside = texture(tex, vec2(u, v)).r.greaterThan(float(0.5));
-    inside.discard();
+    // Distance limit (#144): only discard well inside the fine ring — see
+    // updateTerrainDiscardAnchor above.
+    const near = positionWorld.xz.sub(discardCamU).length().lessThan(discardRadiusU);
+    inside.and(near).discard();
     return tint;
   })() as unknown as THREE.MeshPhysicalMaterial['colorNode'];
   return m;
@@ -132,8 +165,9 @@ function terrainMaterialFor(mask?: CorridorMask): THREE.MeshPhysicalMaterial {
  * materialization can reuse the exact same geometry-building logic.
  *
  * With a corridor mask (spec §5 terrain-discard), fragments inside road/rail
- * corridors are discarded — streamed tiles MUST pass the same mask the boot
- * path uses, or roads would sink into un-discarded streamed terrain.
+ * corridors are discarded. Streamed FINE (L2) tiles MUST pass the same mask
+ * the boot path uses, or roads would sink into un-discarded streamed terrain;
+ * coarser levels must NOT pass one (#144, see terrainDiscardMat).
  *
  * Mesh naming is load-bearing: LOD code elsewhere resolves terrain meshes by
  * `terrainL${level}/${x}_${y}` via `getObjectByName`. Do not change this
