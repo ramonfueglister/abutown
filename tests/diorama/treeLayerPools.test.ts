@@ -136,6 +136,35 @@ describe('TreeLayer tile pools', () => {
     expect(fullCount(layer)).toBe(tileSpecs.length);
   });
 
+  it('#141 Subzellen-Keys (L1/x_y#i_j): add/remove/restore wirkt pro Subzelle unabhängig', () => {
+    const layer = makeLayer();
+    const bootN = layer.instances.length;
+    const keyA = 'L1/2_2#1_3';
+    const keyB = 'L1/2_2#2_0';
+    const specsA = tileSpecs.slice(0, 10);
+    const specsB = tileSpecs.slice(10);
+
+    layer.addTileTrees(keyA, specsA);
+    layer.addTileTrees(keyB, specsB);
+    expect(layer.tileKeys()).toEqual([keyA, keyB]);
+    expect(layer.instances.length).toBe(bootN + tileSpecs.length);
+    expect(tileImpostor(layer, keyA)?.count).toBe(specsA.length);
+    expect(tileImpostor(layer, keyB)?.count).toBe(specsB.length);
+
+    // L2 wird live: nur Subzelle A verschwindet, B bleibt vollständig.
+    layer.removeTileTrees(keyA);
+    expect(layer.tileKeys()).toEqual([keyB]);
+    expect(layer.instances.length).toBe(bootN + specsB.length);
+    expect(tileImpostor(layer, keyA)).toBeUndefined();
+    expect(tileImpostor(layer, keyB)?.count).toBe(specsB.length);
+
+    // L2 entlädt: Restore der Subzelle A mit den gehaltenen Specs.
+    layer.addTileTrees(keyA, specsA);
+    expect(layer.tileKeys()).toEqual([keyB, keyA]);
+    expect(layer.instances.length).toBe(bootN + tileSpecs.length);
+    expect(tileImpostor(layer, keyA)?.count).toBe(specsA.length);
+  });
+
   it('addTileTrees without impostor context throws (no silent impostor-less pool)', () => {
     const layer = buildTreeLayer(bootSpecs);
     expect(() => layer.addTileTrees(KEY, tileSpecs)).toThrow(/setImpostorContext/);

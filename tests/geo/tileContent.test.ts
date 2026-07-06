@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three/webgpu';
 import { create } from '@bufbuild/protobuf';
 import { WorldTileSchema } from '../../src/proto/world_pb.js';
-import { materializeTile } from '../../src/diorama/ksw/geo/tileContent';
+import { l1SubCellOfL2, materializeTile, subCellKey } from '../../src/diorama/ksw/geo/tileContent';
 import type { DecodedTile } from '../../src/diorama/ksw/geo/worldData';
 
 // Fixture: 2×2 heightfield tile with 2 buildings and 3 trees.
@@ -194,6 +194,17 @@ describe('materializeTile', () => {
     expect(content.trees.map((t) => t.x)).toEqual([60, 0]);
   });
 
+  it('L2-Tiles bleiben un-subzelliert (subCells null, ein Massing-Mesh)', () => {
+    const content = materializeTile(makeDec(), {
+      plateRect: null,
+      groundShiftY: 0,
+      buildings: true,
+      trees: true,
+    });
+    expect(content.subCells).toBeNull();
+    expect(meshNames(content.group).filter((n) => n.startsWith('tileBuildings'))).toEqual(['tileBuildings/L2/3_4']);
+  });
+
   it('Gebäude-Prisma steht auf bBaseY und reicht bis bBaseY+bHeight', () => {
     const content = materializeTile(makeDec(), {
       plateRect,
@@ -211,5 +222,115 @@ describe('materializeTile', () => {
     expect(bb.max.y).toBeCloseTo(414);
     expect(bb.min.x).toBeCloseTo(195);
     expect(bb.max.x).toBeCloseTo(205);
+  });
+});
+
+describe('#141 L2 ↔ L1-Subzellen-Mapping', () => {
+  it('L2 (x,y) liegt in L1 (x>>2, y>>2), Subzelle (x&3, y&3)', () => {
+    expect(l1SubCellOfL2(0, 0)).toEqual({ l1x: 0, l1y: 0, i: 0, j: 0 });
+    expect(l1SubCellOfL2(9, 14)).toEqual({ l1x: 2, l1y: 3, i: 1, j: 2 });
+    expect(l1SubCellOfL2(15, 15)).toEqual({ l1x: 3, l1y: 3, i: 3, j: 3 });
+    // Rückrichtung: Subzelle (i,j) von L1 (l1x,l1y) deckt genau L2 (l1x*4+i, l1y*4+j).
+    for (let x = 0; x < 16; x++) {
+      for (let y = 0; y < 16; y++) {
+        const { l1x, l1y, i, j } = l1SubCellOfL2(x, y);
+        expect(l1x * 4 + i).toBe(x);
+        expect(l1y * 4 + j).toBe(y);
+      }
+    }
+    expect(subCellKey(1, 2)).toBe('1_2');
+  });
+});
+
+describe('materializeTile L1-Subzellen (#141)', () => {
+  // L1 fixture: gridN=5, cellSize=100 → extent 400 m, 4×4 Subzellen à 100 m.
+  // Gebäude A Schwerpunkt (50,50) → Subzelle 0_0; B (350,150) → 3_1.
+  // Bäume: (50,50) → 0_0; (250,350) → 2_3; (399,399) → 3_3.
+  function makeL1(): DecodedTile {
+    const gridN = 5;
+    const tile = create(WorldTileSchema, {
+      level: 1,
+      x: 2,
+      y: 2,
+      gridN,
+      cellSize: 100,
+      originX: 0,
+      originZ: 0,
+      height: new Array(gridN * gridN).fill(400),
+      landcover: new Array(gridN * gridN).fill(1),
+      bId: ['a', 'b'],
+      bUsage: [0, 0],
+      bHeight: [10, 12],
+      bBaseY: [400, 400],
+      bFpOffset: [0, 4],
+      bFpX: [45, 55, 55, 45, 345, 355, 355, 345],
+      bFpZ: [45, 45, 55, 55, 145, 145, 155, 155],
+      tX: [50, 250, 399],
+      tZ: [50, 350, 399],
+      tH: [10, 12, 8],
+      tR: [3, 4, 2],
+      tKind: [0, 1, 0],
+      tFamily: [0, 3, 1],
+    });
+    return { level: 1, x: 2, y: 2, tile };
+  }
+
+  const content = materializeTile(makeL1(), {
+    plateRect: null,
+    groundShiftY: 0,
+    buildings: true,
+    trees: true,
+  });
+
+  it('liefert 16 Subzellen mit je einem Terrain-Sub-Mesh', () => {
+    expect(content.subCells).not.toBeNull();
+    expect(content.subCells!.size).toBe(16);
+    const terrainNames = meshNames(content.group).filter((n) => n.startsWith('tileTerrain/'));
+    expect(terrainNames).toHaveLength(16);
+    expect(terrainNames).toContain('tileTerrain/L1/2_2#0_0');
+    expect(terrainNames).toContain('tileTerrain/L1/2_2#3_3');
+    for (const sc of content.subCells!.values()) {
+      expect(sc.meshes.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('partitioniert Gebäude per Footprint-Schwerpunkt in Subzellen-Meshes', () => {
+    const bNames = meshNames(content.group).filter((n) => n.startsWith('tileBuildings'));
+    expect(bNames.sort()).toEqual(['tileBuildings/L1/2_2#0_0', 'tileBuildings/L1/2_2#3_1']);
+    expect(content.group.userData.buildingCount).toBe(2);
+    // Die Massing-Meshes hängen in den Subzellen-Handles (für visible-Toggle).
+    expect(content.subCells!.get('0_0')!.meshes.some((m) => m.name === 'tileBuildings/L1/2_2#0_0')).toBe(true);
+    expect(content.subCells!.get('3_1')!.meshes.some((m) => m.name === 'tileBuildings/L1/2_2#3_1')).toBe(true);
+    expect(content.subCells!.get('1_1')!.meshes).toHaveLength(1); // nur Terrain
+  });
+
+  it('partitioniert Bäume in Subzellen-Pools mit Keys L1/x_y#i_j; treeKey des Tiles ist null', () => {
+    expect(content.treeKey).toBeNull(); // per-Subzelle registriert, nie ganzes Tile
+    expect(content.trees).toHaveLength(3);
+    const sc00 = content.subCells!.get('0_0')!;
+    const sc23 = content.subCells!.get('2_3')!;
+    const sc33 = content.subCells!.get('3_3')!;
+    expect(sc00.treeKey).toBe('L1/2_2#0_0');
+    expect(sc00.trees.map((t) => t.x)).toEqual([50]);
+    expect(sc23.treeKey).toBe('L1/2_2#2_3');
+    expect(sc33.treeKey).toBe('L1/2_2#3_3');
+    // leere Subzelle: kein Pool-Key
+    expect(content.subCells!.get('1_1')!.treeKey).toBeNull();
+    // Summe der Subzellen-Bäume = alle Tile-Bäume (nichts doppelt/verloren)
+    const total = [...content.subCells!.values()].reduce((s, sc) => s + sc.trees.length, 0);
+    expect(total).toBe(3);
+  });
+
+  it('plateRect filtert auch im Subzellen-Pfad (Gebäude + Bäume)', () => {
+    const filtered = materializeTile(makeL1(), {
+      plateRect: { x: 50, z: 50, w: 100, d: 100 },
+      groundShiftY: 0,
+      buildings: true,
+      trees: true,
+    });
+    // Gebäude A (50,50) + Baum (50,50) fallen weg.
+    expect(filtered.group.userData.buildingCount).toBe(1);
+    expect(filtered.subCells!.get('0_0')!.treeKey).toBeNull();
+    expect(filtered.trees).toHaveLength(2);
   });
 });

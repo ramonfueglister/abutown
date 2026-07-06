@@ -150,33 +150,24 @@ export function buildTerrainTileMesh(dec: DecodedTile, opts?: { corridorMask?: C
 }
 
 /**
- * M3 backdrop (Task 6): the L0 overview tile split into a `cellsPerSide`
- * grid of independent sub-meshes aligned to the L2 tile regions (the bake
- * subdivides 4x4 per level → 16 L2 tiles per side of the world square), so
- * the streamer can hide exactly the backdrop cells whose region is covered
- * by a live fine tile. The coarse L0 surface deviates from the fine terrain
- * by up to ~±20 m — where it sits ABOVE it, an always-on L0 would veil whole
- * districts, so covered cells must disappear per-region rather than z-fight.
- *
- * Geometry per cell: a small vertex grid bilinearly resampled from the L0
- * height field. The resample lies exactly ON L0's bilinear surface, so seams
- * between adjacent cells are watertight; landcover tint is nearest-vertex.
- *
- * Returns the group plus a `"x_y"`-keyed mesh map in L2-tile index space —
- * main.ts flips `mesh.visible` from the streamer's onReady/onUnload.
+ * Shared resample core for the per-cell terrain splits (L0 backdrop and the
+ * #141 L1 sub-cells): one tile's height field cut into a `cellsPerSide` grid
+ * of independent sub-meshes, each an `nSub`×`nSub` vertex grid bilinearly
+ * resampled from the source height field. Every resampled vertex lies exactly
+ * ON the source's bilinear surface, so seams between adjacent cells — and
+ * between adjacent tiles that are resampled with the same scheme — are
+ * watertight; landcover tint is nearest-vertex.
  */
-export function buildL0Backdrop(
+function buildResampledCellMeshes(
   dec: DecodedTile,
   cellsPerSide: number,
-  opts?: { corridorMask?: CorridorMask },
+  nSub: number,
+  mat: THREE.Material,
+  nameFor: (cx: number, cy: number) => string,
 ): { group: THREE.Group; meshes: Map<string, THREE.Mesh> } {
-  const mat = terrainMaterialFor(opts?.corridorMask);
   const { gridN, cellSize, originX, originZ, height, landcover } = dec.tile;
   const extent = (gridN - 1) * cellSize;
   const cellExtent = extent / cellsPerSide;
-  // ~4 segments per 1000 m source cell keeps the resample visually identical
-  // to the source surface; +1 for the closing vertex row.
-  const nSub = Math.max(2, Math.round(cellExtent / 250) + 1);
 
   const heightAt = (x: number, z: number): number => {
     const fx = Math.min(gridN - 1, Math.max(0, (x - originX) / cellSize));
@@ -198,7 +189,6 @@ export function buildL0Backdrop(
   };
 
   const group = new THREE.Group();
-  group.name = 'terrainL0Backdrop';
   const meshes = new Map<string, THREE.Mesh>();
   const color = new THREE.Color();
 
@@ -236,10 +226,14 @@ export function buildL0Backdrop(
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      geo.setIndex(new THREE.BufferAttribute(new Uint16Array(indices), 1));
+      geo.setIndex(
+        nSub * nSub > 65535
+          ? new THREE.BufferAttribute(new Uint32Array(indices), 1)
+          : new THREE.BufferAttribute(new Uint16Array(indices), 1),
+      );
       geo.computeVertexNormals();
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.name = `terrainL0Backdrop/${cx}_${cy}`;
+      mesh.name = nameFor(cx, cy);
       mesh.receiveShadow = true;
       mesh.castShadow = false;
       group.add(mesh);
@@ -248,4 +242,77 @@ export function buildL0Backdrop(
   }
 
   return { group, meshes };
+}
+
+/**
+ * M3 backdrop (Task 6): the L0 overview tile split into a `cellsPerSide`
+ * grid of independent sub-meshes aligned to the L2 tile regions (the bake
+ * subdivides 4x4 per level → 16 L2 tiles per side of the world square), so
+ * the streamer can hide exactly the backdrop cells whose region is covered
+ * by a live fine tile. The coarse L0 surface deviates from the fine terrain
+ * by up to ~±20 m — where it sits ABOVE it, an always-on L0 would veil whole
+ * districts, so covered cells must disappear per-region rather than z-fight.
+ *
+ * Geometry per cell: see buildResampledCellMeshes (bilinear, watertight).
+ *
+ * Returns the group plus a `"x_y"`-keyed mesh map in L2-tile index space —
+ * main.ts flips `mesh.visible` from the streamer's onReady/onUnload.
+ */
+export function buildL0Backdrop(
+  dec: DecodedTile,
+  cellsPerSide: number,
+  opts?: { corridorMask?: CorridorMask },
+): { group: THREE.Group; meshes: Map<string, THREE.Mesh> } {
+  const { gridN, cellSize } = dec.tile;
+  const cellExtent = ((gridN - 1) * cellSize) / cellsPerSide;
+  // ~4 segments per 1000 m source cell keeps the resample visually identical
+  // to the source surface; +1 for the closing vertex row.
+  const nSub = Math.max(2, Math.round(cellExtent / 250) + 1);
+  const out = buildResampledCellMeshes(
+    dec,
+    cellsPerSide,
+    nSub,
+    terrainMaterialFor(opts?.corridorMask),
+    (cx, cy) => `terrainL0Backdrop/${cx}_${cy}`,
+  );
+  out.group.name = 'terrainL0Backdrop';
+  return out;
+}
+
+/**
+ * #141 per-sub-cell L1 hide: one streamed tile's terrain split into a 4×4
+ * grid of sub-meshes exactly congruent with its L2 children, so main.ts can
+ * hide precisely the sub-cell a live L2 tile replaces instead of the whole
+ * 5-km tile. An index-split is NOT possible here (L1 gridN=51 → 50 source
+ * cells per side, not divisible by 4: the sub-cell border falls mid-cell), so
+ * the cells are bilinearly resampled at HALF the source cell size — every
+ * resampled vertex (borders included) lies exactly on the source's bilinear
+ * surface, keeping seams watertight between sub-cells AND between adjacent
+ * tiles resampled with the same scheme (no new seams vs. the pre-split mesh).
+ *
+ * Returned map is keyed `"i_j"` (i, j ∈ 0..cellsPerSide-1) in sub-cell index
+ * space; L2 child (x, y) maps to sub-cell (x & 3, y & 3) of L1 (x>>2, y>>2).
+ */
+export function buildTileSubCellTerrain(
+  dec: DecodedTile,
+  cellsPerSide: number,
+  opts?: { corridorMask?: CorridorMask },
+): { group: THREE.Group; meshes: Map<string, THREE.Mesh> } {
+  const { gridN, cellSize } = dec.tile;
+  const cellExtent = ((gridN - 1) * cellSize) / cellsPerSide;
+  // Half the source cell size: the resample lands on every source vertex AND
+  // every mid-cell point, so the surface tracks the source bilinear patches
+  // closely while the sub-cell borders (multiples of cellSize/2 when
+  // (gridN-1) % (cellsPerSide/2) aligns, mid-patch otherwise) stay exactly on
+  // the bilinear surface either way.
+  const nSub = Math.max(2, Math.round(cellExtent / (cellSize / 2)) + 1);
+  const out = buildResampledCellMeshes(
+    dec,
+    cellsPerSide,
+    nSub,
+    terrainMaterialFor(opts?.corridorMask),
+    (cx, cy) => `tileTerrain/L${dec.level}/${dec.x}_${dec.y}#${cx}_${cy}`,
+  );
+  out.group.name = `tileTerrainCells/L${dec.level}/${dec.x}_${dec.y}`;
+  return out;
 }
