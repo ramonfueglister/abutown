@@ -133,8 +133,11 @@ Real geodata, Winterthur's stations rendered with true platform geometry:
   shared projection via the existing `lv95ToWgs84` + projector). Fetched by
   a new `geo:fetch-stations` script into `scratch/geo/` (gitignored, same
   pattern as demand data).
-- **Platform bodies**: extruded from SBB edge polylines (fallback: OSM
-  `railway=platform` polygons where SBB data is missing), top at **P55 =
+- **Platform bodies**: extruded from SBB edge polylines — the single source
+  of truth, **no fallback source**. Stations inside the Gemeinde without SBB
+  Perronkante coverage get NO platform geometry, and the bake fails loudly
+  with the list of uncovered stations (honest absence over silently wrong
+  OSM shapes; project rule: no fallbacks, honest errors). Top at **P55 =
   0.55 m above rail top** on the graded rail profile, access ramp ends where
   the data indicates.
 - Platform surface tone + yellow safety line (0.10 m, inset 0.8 m from the
@@ -172,7 +175,7 @@ committed-asset churn beyond scripts/src/tests.
 ## 11. Data sources
 
 - swisstopo swissALTI3D (DEM, in repo pipeline), swissBUILDINGS3D 3.0.
-- OpenStreetMap (roads, crossings, platforms fallback) via Overpass.
+- OpenStreetMap (roads, crossings) via Overpass.
 - SBB Open Data: Perronkante (opendata.swiss), station Dienststellen (DiDok)
   for naming if needed.
 - VSS/ASTRA marking conventions (dimensions authored as constants; visual
