@@ -697,7 +697,9 @@ export function transformRoads({ osmRoads, projector }) {
       return [Math.round(x * 100) / 100, Math.round(z * 100) / 100];
     });
     const width = roadWidthFromTags(el.tags ?? {}, style.width);
-    (style.class === 'rail' ? rails : roads).push({ class: style.class, width, pts });
+    const path = { class: style.class, width, pts };
+    if (el.tags?.bridge && el.tags.bridge !== 'no') path.bridge = true;
+    (style.class === 'rail' ? rails : roads).push(path);
   }
   return { roads, rails };
 }

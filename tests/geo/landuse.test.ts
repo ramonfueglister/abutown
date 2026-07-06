@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { transformLanduse } from '../../scripts/geo/lib/landuse.mjs';
+import { transformLanduse, waterRingsFrom } from '../../scripts/geo/lib/landuse.mjs';
 import { transformNature } from '../../scripts/geo/lib/transform.mjs';
 import { ANCHOR, makeProjector } from '../../scripts/geo/lib/project.mjs';
 
@@ -95,5 +95,26 @@ describe('transformNature Slice-2', () => {
     const fp = [[0, 0], [60, 0], [60, -10], [0, -10]];
     const { trees } = transformNature({ osmNature, projector, buildingFootprints: [fp] });
     expect(trees.length).toBe(0);
+  });
+});
+
+describe('waterRingsFrom', () => {
+  it('returns only kind-6 (basin/reservoir → WATER) rings', () => {
+    const items = [
+      { kind: 1, ring: [[0, 0], [1, 0], [1, 1]] },
+      { kind: 6, ring: [[10, 10], [11, 10], [11, 11]] },
+      { kind: 2, ring: [[5, 5], [6, 5], [6, 6]] },
+      { kind: 6, ring: [[20, 20], [21, 20], [21, 21]] },
+    ];
+    const rings = waterRingsFrom(items);
+    expect(rings).toEqual([
+      [[10, 10], [11, 10], [11, 11]],
+      [[20, 20], [21, 20], [21, 21]],
+    ]);
+  });
+
+  it('returns an empty array when there are no water items', () => {
+    const items = [{ kind: 1, ring: [[0, 0], [1, 0], [1, 1]] }];
+    expect(waterRingsFrom(items)).toEqual([]);
   });
 });

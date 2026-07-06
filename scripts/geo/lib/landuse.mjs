@@ -25,3 +25,7 @@ export function transformLanduse({ osmLanduse, projector }) {
   }
   return out;
 }
+
+// Water rings for terrain grading: all kind-6 (basin/reservoir → WATER)
+// items from transformLanduse output. Grading must never touch water cells.
+export const waterRingsFrom = (items) => items.filter((l) => l.kind === 6).map((l) => l.ring);
