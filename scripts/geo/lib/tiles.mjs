@@ -360,15 +360,21 @@ export function encodeTile(bucket, demSampler) {
 
   // Trees, sorted by (x, z) for determinism.
   const trees = [...bucket.trees].sort((a, b) => (a.x !== b.x ? a.x - b.x : a.z - b.z));
-  const tX = [], tZ = [], tH = [], tR = [], tKind = [];
+  const tX = [], tZ = [], tH = [], tR = [], tKind = [], tFamily = [];
   for (const t of trees) {
     tX.push(t.x);
     tZ.push(t.z);
     tH.push(t.h ?? t.height ?? 0);
     tR.push(t.r ?? t.radius ?? 0);
     tKind.push(t.kind ?? 0);
+    // family is optional (older callers/tests may omit it); an entirely
+    // absent family across all trees keeps t_family empty (proto3-additive:
+    // "leer = Alt-Bake" per world.proto), which tileTreeSpecs treats as
+    // family undefined rather than 0/spreading.
+    if (t.family !== undefined) tFamily.push(t.family);
   }
   Object.assign(msg, { tX, tZ, tH, tR, tKind });
+  if (tFamily.length === trees.length && trees.length > 0) Object.assign(msg, { tFamily });
 
   return toBinary(WorldTileSchema, create(WorldTileSchema, msg));
 }

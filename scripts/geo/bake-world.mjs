@@ -24,6 +24,7 @@ import { makeCorridorSnapSampler } from './lib/corridorsnap.mjs';
 import { buildCorridorMask, encodeCorridorMask, maskCovers } from './lib/corridormask.mjs';
 import { pointInRing } from './lib/join.mjs';
 import { tileGridFor, assignToTiles, encodeTile, encodeManifest, encodeGraph } from './lib/tiles.mjs';
+import { FAMILY_CODES } from './lib/style.mjs';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { TransitLayerSchema } from './proto/world_pb.js';
 
@@ -507,7 +508,18 @@ console.log(`tile grid: ${root.size}m square, origin (${root.minX.toFixed(0)}, $
 // — a deliberate slice-1 tradeoff, not a bug.
 // transformNature emits tree kind as a string ('broad' | 'conifer'); the tile
 // schema's t_kind is uint32 (0 = broad, 1 = conifer). Map before encoding.
-const treesNum = nature.trees.map((t) => ({ x: t.x, z: t.z, h: t.h, r: t.r, kind: t.kind === 'conifer' ? 1 : 0 }));
+// It also emits family as a string (treeSpec, task-2); the tile schema's
+// t_family is uint32 indexing FAMILY_CODES (== [...BROAD_FAMILIES,
+// ...CONIFER_FAMILIES] from treeArchetypes.ts, order-anchored by
+// tests/geo/worldProto.test.ts). Fail fast on any unknown family — a silent
+// -1/undefined would corrupt the tile rather than surface the bad bake input.
+const treesNum = nature.trees.map((t) => {
+  const family = FAMILY_CODES.indexOf(t.family);
+  if (family === -1) {
+    throw new Error(`bake-world: unknown tree family "${t.family}" at (${t.x}, ${t.z})`);
+  }
+  return { x: t.x, z: t.z, h: t.h, r: t.r, kind: t.kind === 'conifer' ? 1 : 0, family };
+});
 const tiles = assignToTiles(root, { buildings: allBuildings, trees: treesNum, landuse, graph });
 
 // ---- Corridor-snap the tile height field (spec §5 part B, Task 5d) --------
