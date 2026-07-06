@@ -2,7 +2,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
-use sim_server::app::build_app;
+use sim_server::app::{build_app, build_app_with_building_attributes};
+use sim_server::building_attributes::{BuildingAttributes, BuildingAttributesStore};
 use tower::ServiceExt;
 
 const TEST_USER_A: &str = "00000000-0000-0000-0000-000000000001";
@@ -140,4 +141,79 @@ async fn saved_card_hand_is_scoped_to_authenticated_user() {
     let user_b_json: Value = serde_json::from_slice(&user_b_body).unwrap();
     assert_eq!(user_b_json["cards"].as_array().unwrap().len(), 5);
     assert_ne!(user_b_json["cards"][0]["card_id"], "focus");
+}
+
+#[tokio::test]
+async fn building_attributes_endpoint_lists_world_rows() {
+    let app = build_app(); // in-memory wiring
+    // Seeding: build_app's memory store starts empty -> expect 200 + []
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/building-attributes?world_id=winterthur")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], b"[]");
+}
+
+#[tokio::test]
+async fn building_attributes_endpoint_round_trips_seeded_row_as_camel_case() {
+    let store = BuildingAttributesStore::memory();
+    store
+        .upsert_all(
+            "winterthur",
+            &[BuildingAttributes {
+                building_id: "{ABC}".to_string(),
+                egid: Some(150404),
+                gwr_category: Some("Wohngebäude".to_string()),
+                gwr_class: Some("1110".to_string()),
+                bauzone: Some("Wohnzone W3".to_string()),
+                bauzone_code: Some("W3".to_string()),
+                raw: json!({"egids": [150404]}),
+            }],
+        )
+        .await
+        .unwrap();
+    let app = build_app_with_building_attributes(store);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/building-attributes?world_id=winterthur")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let rows = json.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "{ABC}");
+    assert_eq!(rows[0]["egid"], 150404);
+    assert_eq!(rows[0]["gwrCategory"], "Wohngebäude");
+    assert_eq!(rows[0]["gwrClass"], "1110");
+    assert_eq!(rows[0]["bauzone"], "Wohnzone W3");
+    assert_eq!(rows[0]["bauzoneCode"], "W3");
+    assert_eq!(rows[0]["raw"]["egids"][0], 150404);
+
+    // A different world_id sees no rows.
+    let res_other = app
+        .oneshot(
+            Request::builder()
+                .uri("/building-attributes?world_id=other")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let other_body = res_other.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&other_body[..], b"[]");
 }
