@@ -74,9 +74,3 @@ export function storeyLayout(eaveH: number): { storeyCount: number; storeyH: num
   while (count > 1 && eaveH / count < kswPeel.minStoreyH) count--;
   return { storeyCount: count, storeyH: eaveH / count };
 }
-
-// TEMPORARY (removed in Task 6): legacy single-slice adapter for main.ts.
-export function cutawayState(radius: number): { cutH: number; upperFade: number } {
-  const s = peelState(radius, { storeyCount: 1, storeyH: 3.2, baseY: 0, startR: 90, endR: 55 });
-  return { cutH: s.roofFade < 0.15 ? 3.2 : 1e6, upperFade: s.roofFade };
-}
