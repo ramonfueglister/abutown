@@ -10,10 +10,10 @@ import * as THREE from 'three/webgpu';
 import {
   Fn, attribute, float, max as tslMax, min as tslMin, mix, positionWorld, smoothstep, uniform, vec3,
 } from 'three/tsl';
-import { clay, facadeLook, kswCityStyle, kswPalette, kswS3, palette } from '../../designTokens';
+import { clay, facadeLook, kswCityStyle, kswPalette, kswS3, palette, terrainLook } from '../../designTokens';
 import { NIGHT_WINDOW_SHARE } from '../staticBatch';
 import { clayMat } from '../props';
-import { lampGlowU } from '../glowUniform';
+import { lampGlowU, snowU } from '../glowUniform';
 import type { BakedBuilding, BakedMesh, BakedWallMesh } from './geoData';
 
 // Baked facade-UV quantization factor: 1 unit = 0.2 m. MUST match
@@ -220,7 +220,7 @@ export function ringBandParts(fp: number[][], y0: number, y1: number, out: numbe
 // so vertexColors passes the baked colour straight through). Cloned from the
 // shared clayMat so the sheen/roughness recipe matches the hero, without
 // mutating the cached hero material.
-export function tintedClay(base: number): THREE.MeshPhysicalMaterial {
+export function tintedClay(base: number, opts: { snow?: boolean } = {}): THREE.MeshPhysicalMaterial {
   const m = clayMat(base).clone();
   m.vertexColors = true;
   m.color = new THREE.Color(palette.trueWhite);
@@ -230,6 +230,21 @@ export function tintedClay(base: number): THREE.MeshPhysicalMaterial {
   // ridges/eaves would lose the crisp clay facets. Flat shading restores
   // per-face faceted normals at draw time without unwelding the JSON.
   m.flatShading = true;
+  // Roof snow (snowU, 2026-07-07): whiten with snow cover so a snowing city
+  // reads winter from the dominant aerial view.
+  if (opts.snow) {
+    const snow = new THREE.Color(terrainLook.snow);
+    // vertexColors MUST be off here: with it on, the engine multiplies the
+    // vertex tint onto the colorNode output AGAIN — snow-white × terracotta
+    // = terracotta, i.e. the whitening silently no-ops (2026-07-07 finding).
+    // The colorNode consumes the tint attribute itself instead.
+    m.vertexColors = false;
+    m.colorNode = mix(
+      attribute<'vec3'>('color', 'vec3'),
+      vec3(snow.r, snow.g, snow.b),
+      snowU.mul(float(0.85)),
+    ) as THREE.MeshPhysicalMaterial['colorNode'];
+  }
   return m;
 }
 
@@ -460,8 +475,8 @@ export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityMassing';
 
-  const make = (name: string, pick: (b: BakedBuilding) => BakedMesh, base: number): void => {
-    const mesh = new THREE.Mesh(mergeTinted(buildings, pick, base), tintedClay(base));
+  const make = (name: string, pick: (b: BakedBuilding) => BakedMesh, base: number, opts: { snow?: boolean } = {}): void => {
+    const mesh = new THREE.Mesh(mergeTinted(buildings, pick, base), tintedClay(base, opts));
     mesh.name = name;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -480,7 +495,7 @@ export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {
   };
   group.add(wallMesh);
 
-  make('cityRoofs', (b) => b.roof, kswPalette.roofClay);
+  make('cityRoofs', (b) => b.roof, kswPalette.roofClay, { snow: true });
 
   const plinths = buildings.map((b) => ringBand(b.footprint, -kswCityStyle.plinthSink, kswCityStyle.plinthH, kswCityStyle.plinthOut));
   const eaves = buildings.map((b) => {

@@ -65,7 +65,7 @@ import { materializeTile, subCellKey, type TileContent } from './geo/tileContent
 import type { TileRef, WorldTile } from '../../proto/world_pb.js';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
-import { lampGlowU } from './glowUniform';
+import { lampGlowU, snowU } from './glowUniform';
 import { buildNature } from './geo/nature';
 import { buildTreeLayer } from './geo/treeLayer';
 import { bakeImpostorAtlas, buildImpostorMesh } from './geo/treeImpostors';
@@ -801,10 +801,11 @@ async function boot(): Promise<void> {
   // Task 5 (M3): per-tile pools build their own impostor meshes off the same
   // atlas — hand the layer the shared texture once, right after the bake.
   treeLayer.setImpostorContext(treeAtlas, allArchetypes().length);
-  // Dev scene + camera handles — visual-polish smokes toggle layers and
-  // raycast-identify objects through them.
+  // Dev scene + camera + uniform handles — visual-polish smokes toggle layers
+  // and inspect shared uniforms through them.
   (window as unknown as { __SCENE?: THREE.Scene }).__SCENE = scene;
   (window as unknown as { __CAM?: THREE.Camera }).__CAM = camera;
+  (window as unknown as { __UNIFORMS?: object }).__UNIFORMS = { lampGlowU, snowU };
   // Dev tree-layer debug surface (unconditional) — the browser smoke reads it.
   window.__trees = {
     archetypes: allArchetypes().length,

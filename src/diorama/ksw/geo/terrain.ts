@@ -88,6 +88,9 @@ function buildTileGeometry(tile: DecodedTile['tile']): THREE.BufferGeometry {
  */
 function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
   const m = vertexTintMat(terrainLook.meadow);
+  // colorNode reads the tint attribute itself — vertexColors on would
+  // multiply it in twice (tint², subtly darkened terrain). 2026-07-07.
+  m.vertexColors = false;
   const tex = corridorMaskDataTexture(mask);
   // uv from world (x,z): (worldX − originX) / (cols · cellSize), same for z.
   // The texture has flipY=false so texel (i,j) = cell (i,j); v uses z directly.
@@ -102,7 +105,9 @@ function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
     const v = positionWorld.z.sub(float(mask.originZ)).div(spanZ);
     const inside = texture(tex, vec2(u, v)).r.greaterThan(float(0.5));
     inside.discard();
-    return terrainDetailTint(tint);
+    // tint² on purpose — see groundTintMat (nature.ts): the approved ground
+    // look was curated under the accidental double-multiply.
+    return terrainDetailTint(tint.mul(tint));
   })() as unknown as THREE.MeshPhysicalMaterial['colorNode'];
   return m;
 }

@@ -7,6 +7,7 @@ import * as THREE from 'three/webgpu';
 import { attribute, float, mix, mx_noise_float, normalWorld, positionWorld, vec3 } from 'three/tsl';
 import { kswCity, terrainLook } from '../../designTokens';
 import { clayMat } from '../props';
+import { snowU } from '../glowUniform';
 import type { CityNature, GreenArea } from './geoData';
 
 // Runtime-typed TSL node (same convention as treeLayer/cityMassing — the
@@ -28,13 +29,28 @@ export function terrainDetailTint(tint: TSLNode): TSLNode {
   const slopeMix = slope.mul(float(1.4)).clamp(float(0), float(0.45));
   const base = tint.mul(lum);
   const dryTone = vec3(dry.r, dry.g, dry.b).mul(lum);
-  return mix(base, dryTone, dryPatch.add(slopeMix).clamp(float(0), float(0.55)));
+  const detail = mix(base, dryTone, dryPatch.add(slopeMix).clamp(float(0), float(0.55)));
+  // Snow cover: flat-ish ground whitens with snowU (steep faces shed snow);
+  // the noise lum keeps the blanket from reading as a flat white fill.
+  const snow = new THREE.Color(terrainLook.snow);
+  const snowMask = snowU
+    .mul(float(1).sub(slope.mul(float(2.5))).clamp(float(0), float(1)))
+    .mul(float(0.9));
+  return mix(detail, vec3(snow.r, snow.g, snow.b).mul(lum), snowMask);
 }
 
 // vertexTintMat + the detail tint above — the standard ground material.
 export function groundTintMat(base: number): THREE.MeshPhysicalMaterial {
   const m = vertexTintMat(base);
-  m.colorNode = terrainDetailTint(attribute('color')) as THREE.MeshPhysicalMaterial['colorNode'];
+  // vertexColors off: the colorNode consumes the tint attribute itself — with
+  // vertexColors on, the engine multiplies the tint on AGAIN after the node
+  // (snow-white × park-green = green; the whitening no-ops). 2026-07-07.
+  m.vertexColors = false;
+  // tint² on purpose: the approved ground look was curated while the engine
+  // multiplied the vertex tint in a second time (vertexColors + colorNode).
+  // The double-multiply is now explicit — same pixels, honest math.
+  const t = attribute('color') as TSLNode;
+  m.colorNode = terrainDetailTint(t.mul(t)) as THREE.MeshPhysicalMaterial['colorNode'];
   return m;
 }
 

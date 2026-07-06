@@ -94,10 +94,10 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // Golden keyframes de-milked with the same recipe as `day` (2026-07-06):
   // the short fog range + thick mist veiled the whole city framing grey.
   goldenMorning: {
-    // hemi 0.85 (was 0.3): at grazing sun the hemi IS the scene light — the
+    // hemi 0.82 (was 0.3): at grazing sun the hemi IS the scene light — the
     // dawn framing rendered as a flat grey veil under AgX; the AgX ambient
     // calibration band (night pass) needs ~1.0 for a bright-morning read.
-    hemiSky: 0xa9c6e8, hemiGround: 0xeacfa4, hemiIntensity: 0.85,
+    hemiSky: 0xa9c6e8, hemiGround: 0xeacfa4, hemiIntensity: 0.82,
     fogColor: 0xeee2cf, fogNear: 30, fogFar: 85,
     exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.08,
     giScale: 0.7, saturation: 1.18, contrast: 1.03,
@@ -125,7 +125,7 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // Push fog out, halve the mist, drop the godrays veil, and let saturation
   // carry the cozy palette instead of haze.
   day: {
-    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.35,
+    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.3,
     fogColor: 0xe8eef2, fogNear: 34, fogFar: 90,
     exposure: 0.98, mistColor: 0xf2f3ee, mistOpacity: 0.04,
     giScale: 0.7, saturation: 1.1, contrast: 1.05,
@@ -144,8 +144,11 @@ export const envAnchors = { nightBelowDeg: -10, goldenPeakDeg: 4, dayAboveDeg: 2
 // How real weather modulates the look. All weather→look constants live here.
 export const weatherLook = {
   coverageMin: 0.15, coverageMax: 0.85, // cloud_cover 0..1 → raymarcher coverage window
-  sunDampMax: 0.75, // full overcast removes 75% of direct sun
-  hemiBoostMax: 0.35, // ...and adds up to 35% diffuse hemi
+  // 0.92/0.55 (was 0.75/0.35, SOTA weather pass 2026-07-07): rain/snow still
+  // cast hard summer shadows — full overcast now kills nearly all direct sun
+  // and compensates with diffuse hemi, the soft shadowless bad-weather read.
+  sunDampMax: 0.92, // full overcast removes 92% of direct sun
+  hemiBoostMax: 0.55, // ...and adds up to 55% diffuse hemi
   fogVisFullM: 200, fogVisClearM: 4000, // visibility → fog factor ramp
   fogNearMin: 4, fogFarMin: 22, // fully fogged near/far
   precipFullMmPerH: 5, // 5 mm/h = full-intensity particles
@@ -516,6 +519,9 @@ export const terrainLook = {
   // octaves of world-space MaterialX noise mottle the luminance, and slopes
   // dry toward this tone (terrainDetailTint in nature.ts).
   dry: 0xb3a982,
+  // Snow blanket tone (snowU whitening, 2026-07-07) — slightly blue-grey so
+  // AgX keeps it luminous without clipping.
+  snow: 0xe6ebf2,
 } as const;
 
 // Diorama-style layer for the geodetic city (style slice). Additive only.

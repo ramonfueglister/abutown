@@ -16,6 +16,7 @@ import { moonPhaseLightDir, type EnvironmentState } from '../environment/environ
 import { POLE_AXIS } from '../environment/applyEnvironment';
 import type { PrecipitationSystem } from '../environment/precipitation';
 import { windAmpU, windDirU, windAmplitude } from './windUniform';
+import { snowU } from './glowUniform';
 import { impostorLightU } from './geo/treeImpostors';
 
 export type CityEnvironmentTargets = {
@@ -170,6 +171,9 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   t.stars.object3d.visible = env.starVisibility > 0.01;
   t.stars.object3d.rotation.set(0, 0, 0);
   t.stars.object3d.rotateOnWorldAxis(POLE_AXIS, env.siderealAngleRad);
+
+  // Snow cover: ground/roof whitening follows the (pinned or live) snowfall.
+  snowU.value = env.precipType === 'snow' ? Math.min(1, env.precipIntensity * 2) : 0;
 
   // Night glow: shared uniform (batched windows/bulbs) + the pooled point lights.
   t.lampGlow.value = env.lampOn01;

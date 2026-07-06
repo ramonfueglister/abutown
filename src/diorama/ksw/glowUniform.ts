@@ -8,3 +8,9 @@
 import { uniform } from 'three/tsl';
 
 export const lampGlowU = uniform(0);
+
+// Snow cover 0..1 (SOTA weather pass 2026-07-07): applyCityEnvironment drives
+// it from the live/pinned precip state; terrain, plate greens and roofs mix
+// toward a snow tone so a snowing city actually reads WINTER instead of a
+// green summer scene under white particles.
+export const snowU = uniform(0);
