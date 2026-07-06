@@ -107,6 +107,48 @@ function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
   return m;
 }
 
+// Shared terrain material across all LOD levels/tiles — vertex colours carry
+// per-vertex landcover tint, so one material suffices.
+const terrainMat = vertexTintMat(terrainLook.meadow);
+
+// Memoized discard material per corridor mask: streamed tiles materialize one
+// at a time over many frames, so the material must be shared/cached rather
+// than rebuilt per tile (one DataTexture + one shader program per mask). The
+// WeakMap keys on the decoded mask object the boot path loads exactly once.
+const discardMatCache = new WeakMap<CorridorMask, THREE.MeshPhysicalMaterial>();
+function terrainMaterialFor(mask?: CorridorMask): THREE.MeshPhysicalMaterial {
+  if (!mask) return terrainMat;
+  let m = discardMatCache.get(mask);
+  if (!m) {
+    m = terrainDiscardMat(mask);
+    discardMatCache.set(mask, m);
+  }
+  return m;
+}
+
+/**
+ * Builds the terrain grid mesh for a single decoded tile. Extracted from
+ * `buildTerrainTiles`'s loop (Task 4) so `tileContent.ts`'s per-tile
+ * materialization can reuse the exact same geometry-building logic.
+ *
+ * With a corridor mask (spec §5 terrain-discard), fragments inside road/rail
+ * corridors are discarded — streamed tiles MUST pass the same mask the boot
+ * path uses, or roads would sink into un-discarded streamed terrain.
+ *
+ * Mesh naming is load-bearing: LOD code elsewhere resolves terrain meshes by
+ * `terrainL${level}/${x}_${y}` via `getObjectByName`. Do not change this
+ * convention without updating those call sites.
+ */
+export function buildTerrainTileMesh(dec: DecodedTile, opts?: { corridorMask?: CorridorMask }): THREE.Mesh {
+  const { level, x, y, tile } = dec;
+  const geo = buildTileGeometry(tile);
+  const mesh = new THREE.Mesh(geo, terrainMaterialFor(opts?.corridorMask));
+  mesh.name = `terrainL${level}/${x}_${y}`;
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  return mesh;
+}
+
 export function buildTerrainTiles(
   tiles: DecodedTile[],
   opts: { level: number; corridorMask?: CorridorMask },
@@ -114,20 +156,9 @@ export function buildTerrainTiles(
   const group = new THREE.Group();
   group.name = 'terrainTiles';
 
-  // With a corridor mask, terrain fragments inside road/rail corridors are
-  // discarded (spec §5 terrain-discard). Without one (tests, callers pre-Task
-  // 5e), the plain shared tint material renders every fragment.
-  const mat = opts.corridorMask ? terrainDiscardMat(opts.corridorMask) : vertexTintMat(terrainLook.meadow);
-
-  for (const { level, x, y, tile } of tiles) {
-    if (level !== opts.level) continue;
-
-    const geo = buildTileGeometry(tile);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.name = `terrainL${level}/${x}_${y}`;
-    mesh.receiveShadow = true;
-    mesh.castShadow = false;
-    group.add(mesh);
+  for (const dec of tiles) {
+    if (dec.level !== opts.level) continue;
+    group.add(buildTerrainTileMesh(dec, opts));
   }
 
   return group;
