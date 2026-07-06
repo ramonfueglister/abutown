@@ -172,7 +172,10 @@ function mergeBakedParts(parts: { pos: number[]; idx: number[] }[]): THREE.Buffe
 
 // horizontal band following a footprint ring: a short extruded wall strip,
 // outset from the facade — the original's plinth/eave-trim language.
-function ringBand(fp: number[][], y0: number, y1: number, out: number): { pos: number[]; idx: number[] } {
+// Exported for tileContent.ts (Task 4/M3): with out=0 the two side strips
+// coincide into a double-sided extruded wall — the cheap massing-prism wall.
+// Returns cm-int positions (BakedMesh convention), composable via mergeTinted.
+export function ringBand(fp: number[][], y0: number, y1: number, out: number): { pos: number[]; idx: number[] } {
   const pos: number[] = [];
   const idx: number[] = [];
   const n = fp.length;

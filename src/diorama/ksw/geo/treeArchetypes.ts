@@ -12,6 +12,13 @@ export const BROAD_FAMILIES = ['spreading', 'oval', 'tall'] as const satisfies r
 export const CONIFER_FAMILIES = ['conic', 'slender'] as const satisfies readonly TreeFamily[];
 export const SEEDS_PER_FAMILY = 4;
 
+// Canonical family→t_family code mapping (world.proto WorldTile.t_family:
+// 0 spreading,1 oval,2 tall,3 conic,4 slender). MUST stay in
+// [...BROAD_FAMILIES, ...CONIFER_FAMILIES] order — order-anchored by
+// tests/geo/worldProto.test.ts against the plain-ESM twin in
+// scripts/geo/lib/style.mjs (bake-world.mjs cannot import this .ts module).
+export const FAMILY_CODES = [...BROAD_FAMILIES, ...CONIFER_FAMILIES] as const satisfies readonly TreeFamily[];
+
 // splitmix32-style avalanche so nearby inputs decorrelate (stationary-age-seed
 // lesson: naive hashes cluster in high bits)
 export function hash01(n: number): number {

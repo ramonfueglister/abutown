@@ -9,14 +9,22 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { ANCHOR, makeProjector } from './lib/project.mjs';
-import { parseAAIGrid, makeDemSampler } from './lib/dem.mjs';
+import { parseAAIGrid, makeDemSampler, makeLocalGrid } from './lib/dem.mjs';
 import { buildRoadGraph } from './lib/graph.mjs';
+import { clipWayAtBoundary, normalizeBoundary } from './lib/trafficnet.mjs';
 import { accessPoints } from './lib/access.mjs';
-import { transformLanduse } from './lib/landuse.mjs';
+import { transformLanduse, waterRingsFrom } from './lib/landuse.mjs';
 import { transformTransit } from './lib/transit.mjs';
-import { transformBuildings, transformNature } from './lib/transform.mjs';
+import { transformBuildings, transformNature, transformRoads } from './lib/transform.mjs';
+import { gradeDem, makeCorridorMask } from './lib/grading.mjs';
+import { laneFloorWidths } from './lib/gradewidths.mjs';
+import { riverCenterlineRings } from './lib/riverrings.mjs';
+import { wayKey, quantizeProfile, shiftProfile } from './lib/roadprofiles.mjs';
+import { makeCorridorSnapSampler } from './lib/corridorsnap.mjs';
+import { buildCorridorMask, encodeCorridorMask, maskCovers } from './lib/corridormask.mjs';
 import { pointInRing } from './lib/join.mjs';
 import { tileGridFor, assignToTiles, encodeTile, encodeManifest, encodeGraph } from './lib/tiles.mjs';
+import { FAMILY_CODES } from './lib/style.mjs';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { TransitLayerSchema } from './proto/world_pb.js';
 
@@ -64,21 +72,8 @@ const projector = makeProjector(ANCHOR);
 const boundaryRing = outerLonLat.map(([lon, lat]) => projector.toLocal(lon, lat));
 console.log(`boundary: ${boundaryRing.length} ring points`);
 
-// ---- Step 2: DEM -------------------------------------------------------
-console.log('parsing DEM (210 MB AAIGrid)...');
-const demText = readFileSync(`${SCRATCH}/dem/dem.asc`, 'utf8');
-const grid = parseAAIGrid(demText);
-const dem = makeDemSampler(grid, projector);
-const originH = dem.heightAt(0, 0);
-console.log(`DEM: ${grid.ncols}x${grid.nrows} cells, heightAt(0,0)=${originH.toFixed(1)}m`);
-if (!(originH >= 430 && originH <= 470))
-  fail(`heightAt(0,0)=${originH} outside [430,470] — DEM/projection mismatch (expected ~450m KSW area)`);
-
-// ---- Step 3: buildings from 30 GDBs ------------------------------------
-const gdbList = loadJson(`${SCRATCH}/gdb-list.json`);
-if (!Array.isArray(gdbList) || gdbList.length === 0) fail('gdb-list.json is empty');
-
-// Clip bbox: boundary ring bbox padded by CLIP_PAD_M, back to lon/lat for -spat.
+// boundary bbox — reused for the building clip pad AND the grading local-grid
+// extent (both cover boundary + CLIP_PAD_M, the same span the tile root spans).
 function bboxOfRing(ring) {
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const [x, z] of ring) {
@@ -89,13 +84,173 @@ function bboxOfRing(ring) {
   }
   return { minX, minZ, maxX, maxZ };
 }
+const bb = bboxOfRing(boundaryRing);
+
+// ---- Step 2: DEM -------------------------------------------------------
+console.log('parsing DEM (210 MB AAIGrid)...');
+const demText = readFileSync(`${SCRATCH}/dem/dem.asc`, 'utf8');
+const grid = parseAAIGrid(demText);
+const geoDem = makeDemSampler(grid, projector);
+const originH = geoDem.heightAt(0, 0);
+console.log(`DEM: ${grid.ncols}x${grid.nrows} cells, heightAt(0,0)=${originH.toFixed(1)}m`);
+if (!(originH >= 430 && originH <= 470))
+  fail(`heightAt(0,0)=${originH} outside [430,470] — DEM/projection mismatch (expected ~450m KSW area)`);
+
+// ---- Step 2b: terrain grading (spec 2026-07-06 §4) --------------------------
+// Order matters: buildings (baseY, Step 3), the road graph's DEM profile
+// sampling (Step 4), trees and every tile height patch (Step 7) all sample the
+// GRADED terrain. The geographic AAIGrid can't be graded in place (wrong grid
+// convention — lon/lat degrees, row 0 = north, non-square cells), so resample
+// it onto a regular local-metre grid over the boundary+pad extent, grade THAT,
+// and hand every later stage the sampler that reads the mutated local grid.
+// Grid cellsize is 2.5 m (spec §5 "A+B" amendment): most Winterthur streets
+// are ~5 m wide, narrower than the old 10 m grid could represent, so the §9
+// burial budget failed on the coarse grid (max 2.55 m poke-through). At 2.5 m
+// a median carriageway spans multiple graded vertices. The dense Float64 grid
+// is ≈ 7800×7600 ≈ 470 MB; the sparse-stamping kernel (task-4-report) keeps
+// accumulator memory bounded to touched corridor cells only. Runs under the
+// 6 GB heap (npm script sets --max-old-space-size=6144).
+console.log('grading road/rail corridors into the DEM...');
+const GRADE_CELL_M = 2.5;
+const { grid: localGrid, sampler: dem } = makeLocalGrid(
+  geoDem,
+  { minX: bb.minX - CLIP_PAD_M, minZ: bb.minZ - CLIP_PAD_M, maxX: bb.maxX + CLIP_PAD_M, maxZ: bb.maxZ + CLIP_PAD_M },
+  GRADE_CELL_M,
+);
+console.log(`grading grid: ${localGrid.ncols}x${localGrid.nrows} local-metre cells @ ${localGrid.cellsize}m`);
+
+const osmRoads = loadJson(`${SCRATCH}/osm-roads.json`);
+// ONE corridor truth (#133 reconcile): grade the SAME boundary-clipped way set
+// that the committed roads.json renders (rebake-roads-gemeinde.mjs) and the
+// traffic net drives (bake-traffic-net.mjs) — all three use trafficnet.mjs's
+// clipWayAtBoundary. Profiles are geometry-keyed (wayKey over the clipped
+// polyline), so clipping must happen BEFORE grading or every boundary-crossing
+// way would hard-fail the profile attach with an unmatched key.
+const boundaryPolys = normalizeBoundary(boundaryFc);
+const clippedRoadElements = [];
+for (const el of osmRoads.elements ?? []) {
+  if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
+  for (const seg of clipWayAtBoundary(el.geometry, boundaryPolys)) {
+    clippedRoadElements.push({ ...el, geometry: seg.pts });
+  }
+}
+const { roads, rails } = transformRoads({ osmRoads: { elements: clippedRoadElements }, projector });
+const trafficNetDoc = loadJson('data/winterthur/trafficnet.json');
+const floors = laneFloorWidths(roads, trafficNetDoc);
+// Water rings: OSM water POLYGONS (Töss, Eulach where mapped as area) PLUS
+// buffered river CENTRELINES (spec §4.4 — the Eulach also runs as bare
+// waterway=river lines with no polygon; grading must never cross those either).
+const osmLanduse = loadJson(`${SCRATCH}/osm-landuse.json`);
+const landuse = transformLanduse({ osmLanduse, projector });
+const osmNature = loadJson(`${SCRATCH}/osm-nature.json`);
+const nature = transformNature({ osmNature, projector });
+const polygonWaterRings = waterRingsFrom(landuse);
+const riverRings = riverCenterlineRings(nature.rivers, 3);
+const waterRings = [...polygonWaterRings, ...riverRings];
+console.log(`water rings: ${polygonWaterRings.length} polygon + ${riverRings.length} buffered river centrelines`);
+
+// §4.1 authored per-class grading overrides (one constants table). Foot
+// infrastructure that legitimately climbs steeply must HUG the terrain, not
+// get a carriageway-grade bench carved for it: with the default
+// windowM 40 / maxGrade 0.12, a hillside staircase's profile was clamped
+// far below the slope and grading dug a deep narrow trench the ~12.5 m L2
+// tiles cannot represent — measured §9-v2 poke-through up to 5.27 m on
+// `steps` and 2.82 m on `path` (the two worst classes in the 2026-07-06
+// metric run; no other class is overridden — carriageways keep the
+// engineering-real 12 % clamp).
+//   steps: stairs climb up to ~70 % — short window, steep grade allowed.
+//   path:  hiking paths climb up to ~35 % — same short window.
+const CLASS_GRADE_OVERRIDES = {
+  steps: { maxGrade: 0.7, windowM: 10 },
+  path: { maxGrade: 0.35, windowM: 10 },
+};
+
+const ways = [
+  ...roads.map((r, i) => ({
+    pts: r.pts,
+    kind: 'road',
+    halfWidthM: Math.max(r.width, floors[i]) / 2 + 1.5, // GRADING width: lane/render width + 1.5 m shoulder (§4.1, §4.4)
+    // RENDER (ribbon) half-width — what buildRoads actually draws: renderWidth/2
+    // where renderWidth = max(OSM width, lane-floor width). NO shoulder. This is
+    // what the discard mask stamps (Finding 1a): stamping the grading width would
+    // discard a ~1.5 m annulus of terrain the skirt never reaches, opening a
+    // see-through hole; stamping the ribbon width lets the graded shoulder keep
+    // RENDERED terrain (corridor-snap already clamps it ≤ profile − 0.05).
+    renderHalfWidthM: Math.max(r.width, floors[i]) / 2,
+    blendM: 8,
+    windowM: 40,
+    maxGrade: 0.12,
+    bridge: r.bridge === true,
+    ...(CLASS_GRADE_OVERRIDES[r.class] ?? {}),
+  })),
+  ...rails.map((r) => ({
+    pts: r.pts,
+    kind: 'rail',
+    halfWidthM: (r.width + 2.2) / 2 + 2.0, // GRADING width: ballast bed + 2 m shoulder (§4.2)
+    renderHalfWidthM: (r.width + 2.2) / 2, // RENDER: ballast bed half-width (railBed layer, buildRoads) — NO shoulder
+    blendM: 8,
+    windowM: 200,
+    maxGrade: 0.025,
+  })),
+];
+const originBefore = dem.heightAt(0, 0);
+const report = gradeDem(localGrid, ways, { waterRings });
+const originDelta = Math.abs(dem.heightAt(0, 0) - originBefore);
+if (originDelta > 2) fail(`grading moved the anchor by ${originDelta.toFixed(2)} m (> 2 m gate)`);
+console.log(
+  `grading: ${report.cellsChanged} cells, ${report.waterSkippedCells} water cells skipped, `
+  + `${report.bridgeSites.length} bridge sites (untagged water/rail crossings), anchor Δ ${originDelta.toFixed(2)} m`,
+);
+const inCorridor = makeCorridorMask(ways);
+
+// ---- Step 2c: road-owned longitudinal profiles (spec §5 "A+B") --------------
+// The L2 tile heightfield samples ~12.5 m and can't represent a ~6 m
+// carriageway bench regardless of grading resolution. So the bake also hands
+// the runtime each road/rail way's smoothed 10 m-station profile; the runtime
+// builds a corridor-aware ground sampler that returns the profile inside a
+// corridor and the tile field outside. `report.profiles` is index-aligned with
+// `ways` (roads first, then rails — the order this array was built). Heights
+// are stored RELATIVE to the shared anchor (graded ground at origin), matching
+// the runtime's groundYAt = worldHeight − anchorGroundHeight; quantized 0.01 m.
+//
+// roads.json itself is written by rebake-roads-gemeinde.mjs / bake-winterthur
+// .mjs over the SAME boundary-clipped way set graded above. We still key each
+// profile by its way geometry (wayKey) rather than array index — the attach
+// step (attachProfilesByKey) looks up each of its roads/rails by key and
+// hard-fails if any is missing (no fallback), guaranteeing both artifacts come
+// from THIS one grading run.
+const anchorGround = dem.heightAt(0, 0);
+const byKey = {};
+for (let i = 0; i < roads.length; i++) {
+  byKey[wayKey('road', roads[i])] = quantizeProfile(shiftProfile(report.profiles[i], anchorGround));
+}
+for (let j = 0; j < rails.length; j++) {
+  byKey[wayKey('rail', rails[j])] = quantizeProfile(shiftProfile(report.profiles[roads.length + j], anchorGround));
+}
+const profilesDoc = {
+  stepM: 10,
+  anchorGroundHeight: Math.round(anchorGround * 1000) / 1000,
+  byKey,
+};
+mkdirSync(SCRATCH, { recursive: true });
+writeFileSync(`${SCRATCH}/grading-profiles.json`, JSON.stringify(profilesDoc));
+console.log(
+  `road profiles: ${roads.length} roads + ${rails.length} rails keyed by geometry, `
+  + `anchor ${anchorGround.toFixed(2)} m → scratch/geo/grading-profiles.json`,
+);
+
+// ---- Step 3: buildings from 30 GDBs ------------------------------------
+const gdbList = loadJson(`${SCRATCH}/gdb-list.json`);
+if (!Array.isArray(gdbList) || gdbList.length === 0) fail('gdb-list.json is empty');
+
+// Clip bbox: boundary ring bbox (bb, from Step 2) padded by CLIP_PAD_M, back to
+// lon/lat for -spat.
 const R = 6371008.8, rad = Math.PI / 180;
 function localToLonLat(x, z) {
   const lat = projector.anchorLat - z / (R * rad);
   const lon = projector.anchorLon + x / (R * rad * Math.cos(projector.anchorLat * rad));
   return [lon, lat];
 }
-const bb = bboxOfRing(boundaryRing);
 const [lonMin, latMax] = localToLonLat(bb.minX - CLIP_PAD_M, bb.minZ - CLIP_PAD_M);
 const [lonMax, latMin] = localToLonLat(bb.maxX + CLIP_PAD_M, bb.maxZ + CLIP_PAD_M);
 const spat = ['-spat', String(Math.min(lonMin, lonMax)), String(Math.min(latMin, latMax)),
@@ -260,8 +415,9 @@ if (allBuildings.length < MIN_BUILDINGS)
   fail(`only ${allBuildings.length} buildings — expected >= ${MIN_BUILDINGS} (bbox/clip broken?)`);
 
 // ---- Step 4: road graph -------------------------------------------------
+// osmRoads was loaded at Step 2b (for grading corridors); reuse it. `dem` here
+// is the graded local-metre sampler, so edge Y profiles sit on graded terrain.
 console.log('building road graph...');
-const osmRoads = loadJson(`${SCRATCH}/osm-roads.json`);
 const graph = buildRoadGraph({ osmRoads, projector, dem });
 console.log(`graph: ${graph.nodeOsmId.length} nodes, ${graph.edgeA.length} edges`);
 if (graph.edgeA.length < 20000) fail(`only ${graph.edgeA.length} edges — expected >= 20000`);
@@ -315,9 +471,9 @@ console.log(`access: ${bound}/${allBuildings.length} buildings bound (${(boundRa
 if (boundRate < 0.8) fail(`only ${(boundRate * 100).toFixed(1)}% of buildings bound to the road graph — expected >= 80%`);
 
 // ---- Step 6: landuse / transit / nature ----------------------------------
-console.log('transforming landuse/transit/nature...');
-const osmLanduse = loadJson(`${SCRATCH}/osm-landuse.json`);
-const landuse = transformLanduse({ osmLanduse, projector });
+// landuse and nature were transformed at Step 2b (they feed grading's water
+// rings); reuse those objects, only transit is new here.
+console.log('transforming transit; landuse/nature reused from grading stage...');
 console.log(`landuse: ${landuse.length} rings`);
 if (landuse.length < 50) fail(`only ${landuse.length} landuse rings — expected >= 50`);
 
@@ -326,10 +482,16 @@ const transit = transformTransit({ osmTransit, graph, projector });
 console.log(`transit: ${transit.lineRef.length} lines, ${transit.stopEdge.length} stops`);
 if (transit.lineRef.length < 5) fail(`only ${transit.lineRef.length} bus/transit lines — expected >= 5`);
 
-const osmNature = loadJson(`${SCRATCH}/osm-nature.json`);
-const nature = transformNature({ osmNature, projector });
 console.log(`nature: ${nature.greens.length} greens, ${nature.waterAreas.length} water areas, ${nature.rivers.length} rivers, ${nature.trees.length} trees`);
 if (nature.trees.length < 3000) fail(`only ${nature.trees.length} trees — expected >= 3000`);
+
+// Corridor clearing (spec §4): drop trees that fall inside a graded road/rail
+// carriageway — a tree in the levelled tarmac reads as a bug. Uses the same
+// distance math as gradeDem (hard halfWidthM boundary, no blend falloff).
+const treesBefore = nature.trees.length;
+nature.trees = nature.trees.filter((t) => !inCorridor(t.x, t.z));
+console.log(`corridor clearing: ${treesBefore - nature.trees.length} trees removed from carriageways (${nature.trees.length} kept)`);
+if (nature.trees.length < 3000) fail(`only ${nature.trees.length} trees after corridor clearing — expected >= 3000`);
 
 // ---- Step 7: tile grid, assign, encode, write ----------------------------
 console.log('building tile grid...');
@@ -346,8 +508,36 @@ console.log(`tile grid: ${root.size}m square, origin (${root.minX.toFixed(0)}, $
 // — a deliberate slice-1 tradeoff, not a bug.
 // transformNature emits tree kind as a string ('broad' | 'conifer'); the tile
 // schema's t_kind is uint32 (0 = broad, 1 = conifer). Map before encoding.
-const treesNum = nature.trees.map((t) => ({ x: t.x, z: t.z, h: t.h, r: t.r, kind: t.kind === 'conifer' ? 1 : 0 }));
+// It also emits family as a string (treeSpec, task-2); the tile schema's
+// t_family is uint32 indexing FAMILY_CODES (== [...BROAD_FAMILIES,
+// ...CONIFER_FAMILIES] from treeArchetypes.ts, order-anchored by
+// tests/geo/worldProto.test.ts). Fail fast on any unknown family — a silent
+// -1/undefined would corrupt the tile rather than surface the bad bake input.
+const treesNum = nature.trees.map((t) => {
+  const family = FAMILY_CODES.indexOf(t.family);
+  if (family === -1) {
+    throw new Error(`bake-world: unknown tree family "${t.family}" at (${t.x}, ${t.z})`);
+  }
+  return { x: t.x, z: t.z, h: t.h, r: t.r, kind: t.kind === 'conifer' ? 1 : 0, family };
+});
 const tiles = assignToTiles(root, { buildings: allBuildings, trees: treesNum, landuse, graph });
+
+// ---- Corridor-snap the tile height field (spec §5 part B, Task 5d) --------
+// extractPatch resamples the graded 2.5 m grid at ~12.5 m tile steps; on steep
+// hillsides that resampling loses the flattened road bench and the tile height
+// lands metres ABOVE the road profile (metric v2 max 4.035 m — the RENDERED
+// terrain pierces the road surface). Wrap the graded sampler so that at every
+// tile height vertex inside a road/rail corridor the height is clamped DOWN to
+// profileY − CLEARANCE (0.05 m; the runtime ribbon adds its own +0.10 m lift).
+// Applied to ALL pyramid levels via encodeTile below so LOD switches never pop
+// piercing in/out. `report.profiles` is index-aligned with `ways` (absolute
+// graded metres, pre-shift) and `ways` carries the SAME halfWidthM grading
+// flattened — the geometric definition is mirrored in src/diorama/ksw/geo/
+// groundSampler.ts (runtime twin). Clamp-down only: embankment fills stay.
+// maxSnapMarginM = the L2 cell diagonal (√2 · 12.5 m) — the largest per-tile
+// snap margin encodeTile requests (it caps every level there). The sampler pads
+// its spatial hash by this so the widened hard-clamp region is never missed.
+const snapDem = makeCorridorSnapSampler(dem, ways, report.profiles, Math.SQRT2 * 12.5);
 
 mkdirSync(`${OUT}/tiles/L0`, { recursive: true });
 mkdirSync(`${OUT}/tiles/L1`, { recursive: true });
@@ -357,7 +547,7 @@ const tileRefs = [];
 let l0Bytes = 0;
 let totalTileBytes = 0;
 for (const [id, bucket] of [...tiles.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-  const bin = encodeTile(bucket, dem);
+  const bin = encodeTile(bucket, snapDem);
   const relPath = `tiles/${id}.pb`;
   const fullPath = `${OUT}/${relPath}`;
   writeFileSync(fullPath, bin);
@@ -371,11 +561,67 @@ if (l0Bytes >= 1 * 1024 * 1024) fail(`L0 tile bytes ${l0Bytes} >= 1MB budget`);
 // in-script per-tile determinism proof: re-encode one tile twice in-memory.
 {
   const [sampleId, sampleBucket] = [...tiles.entries()][0];
-  const a = encodeTile(sampleBucket, dem);
-  const b = encodeTile(sampleBucket, dem);
+  const a = encodeTile(sampleBucket, snapDem);
+  const b = encodeTile(sampleBucket, snapDem);
   if (!Buffer.from(a).equals(Buffer.from(b))) fail(`tile ${sampleId} is not deterministic — re-encode produced different bytes`);
   console.log(`in-script determinism check OK (sample tile ${sampleId}, ${a.length} bytes)`);
 }
+
+// ---- Corridor discard mask (spec §5 "Terrain-discard", Task 5e) -----------
+// The definitive "terrain never pierces a road" mechanism. Rasterize every
+// road/rail corridor (the SAME halfWidthM grading flattened — ONE geometric
+// truth, mirrored in src/diorama/ksw/geo/corridorMask.ts + groundSampler.ts)
+// into a packed 1-bit-per-cell world-space raster at 2.5 m, covering the tile
+// root span (the exact extent the terrain tiles render). The runtime terrain
+// shader discards fragments where the mask reads 1; ribbon skirts close the
+// hole. Adjacent parallel ways at conflicting profile heights (Task 5d's
+// unrepresentable-in-a-heightfield case) simply have no rendered terrain
+// between them — piercing is impossible by construction.
+const MASK_CELL_M = 2.5;
+const maskBounds = { minX: root.minX, minZ: root.minZ, maxX: root.minX + root.size, maxZ: root.minZ + root.size };
+// Finding 1a: the mask stamps the RIBBON footprint (renderHalfWidthM), NOT the
+// grading half-width. The grading half-width includes a 1.5/2 m shoulder that
+// the skirts (which sit at the ribbon edge) never reach — stamping it would
+// discard terrain no geometry covers → a see-through annulus. Stamping the
+// ribbon width discards only what the ribbon+skirt cover; the graded shoulder
+// keeps RENDERED terrain (already clamped ≤ profile − 0.05 by corridor-snap).
+const maskWays = ways.map((w) => ({ pts: w.pts, kind: w.kind, halfWidthM: w.renderHalfWidthM }));
+const corridorMask = buildCorridorMask(maskWays, maskBounds, MASK_CELL_M);
+// Hard coverage gate: EVERY way's densified centreline stations must fall in a
+// set mask cell, or terrain could pierce through an uncovered corridor. Loud
+// hard-error listing any offending way (no silent partial mask).
+{
+  const missing = [];
+  for (let wi = 0; wi < ways.length; wi++) {
+    const pts = ways[wi].pts;
+    let uncovered = 0;
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s];
+      const [bx, bz] = pts[s + 1];
+      const segLen = Math.hypot(bx - ax, bz - az);
+      const steps = Math.max(1, Math.ceil(segLen / MASK_CELL_M));
+      for (let k = 0; k <= steps; k++) {
+        const t = k / steps;
+        if (!maskCovers(corridorMask, ax + (bx - ax) * t, az + (bz - az) * t)) uncovered++;
+      }
+    }
+    if (uncovered > 0) missing.push(`way[${wi}] kind=${ways[wi].kind} uncovered=${uncovered}`);
+  }
+  if (missing.length > 0) {
+    fail(`corridor mask misses ${missing.length} way(s) — mask bounds/resolution bug (no silent partial mask). Offenders (first 20): ${missing.slice(0, 20).join(', ')}`);
+  }
+}
+const maskBin = encodeCorridorMask(corridorMask);
+writeFileSync(`${OUT}/mask.bin`, maskBin);
+// Determinism proof: a second build encodes to identical bytes.
+{
+  const again = encodeCorridorMask(buildCorridorMask(maskWays, maskBounds, MASK_CELL_M));
+  if (!Buffer.from(maskBin).equals(Buffer.from(again))) fail('corridor mask is not deterministic — re-build produced different bytes');
+}
+console.log(
+  `corridor mask: ${corridorMask.cols}×${corridorMask.rows} cells @ ${MASK_CELL_M}m, `
+  + `${(maskBin.length / 1e6).toFixed(2)} MB → ${OUT}/mask.bin (100% way-station coverage)`,
+);
 
 const manifest = {
   bakeVersion: BAKE_VERSION,

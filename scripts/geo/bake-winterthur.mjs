@@ -8,14 +8,18 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { ANCHOR, BBOX, makeProjector } from './lib/project.mjs';
 import { transformBuildings, transformNature, transformRoads } from './lib/transform.mjs';
 import { doorForBuilding } from './lib/style.mjs';
+import { attachProfilesByKey } from './lib/roadprofiles.mjs';
+import { clipWayAtBoundary, normalizeBoundary } from './lib/trafficnet.mjs';
 
 const SCRATCH = 'scratch/geo';
 const GDB = `${SCRATCH}/swissBUILDINGS3D_3-0_1072-14.gdb`;
 const OUT = 'data/winterthur';
-// Raised 8 -> 16 MB 2026-07-06: the legitimate committed payload grew to
-// ~11.2 MB with the Gemeinde-wide roads.json (#133) and the family-attributed
-// nature.json (#136); 8 MB predates both. Still a guard against runaway blobs.
-const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+// Output budget as a regression canary. The original 8 MB predated the
+// Gemeinde-wide inputs (#133 grew the committed payload to ~11.2 MB — raised
+// to 16 MB there); the §5 road profiles add ~3.6 MB to roads.json on top.
+// 32 MB keeps this a real canary (a duplication/blow-up bug would clear it)
+// without false-failing the legitimate profiled municipality-scale output.
+const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 
 if (!existsSync(GDB)) throw new Error('GDB tile missing — run `npm run geo:fetch` first');
 
@@ -89,8 +93,23 @@ console.log(
 );
 if (wallRoofQuote < 0.9)
   throw new Error(`bake: wall/roof coverage only ${(wallRoofQuote * 100).toFixed(1)}% — floating-roof regression`);
+// ONE corridor truth (#133 reconcile): clip ways at the municipality boundary
+// exactly like rebake-roads-gemeinde.mjs / bake-traffic-net.mjs / bake-world
+// .mjs. The §5 profiles are geometry-keyed against bake-world's CLIPPED graded
+// set, so an unclipped way here would hard-fail the profile attach below.
+const osmRoadsRaw = JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8'));
+const boundaryPolys = normalizeBoundary(
+  JSON.parse(readFileSync(`${SCRATCH}/boundary-winterthur.geojson`, 'utf8')),
+);
+const clippedRoadElements = [];
+for (const el of osmRoadsRaw.elements ?? []) {
+  if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
+  for (const seg of clipWayAtBoundary(el.geometry, boundaryPolys)) {
+    clippedRoadElements.push({ ...el, geometry: seg.pts });
+  }
+}
 const { roads, rails } = transformRoads({
-  osmRoads: JSON.parse(readFileSync(`${SCRATCH}/osm-roads.json`, 'utf8')),
+  osmRoads: { elements: clippedRoadElements },
   projector,
 });
 
@@ -203,6 +222,22 @@ const meta = {
   attribution: ['Gebäude: © swisstopo (swissBUILDINGS3D 3.0)', 'Karte: © OpenStreetMap-Mitwirkende (ODbL)'],
   sourceTile: 'swissbuildings3d_3_0_2019_1072-14',
 };
+
+// Road-owned longitudinal profiles (spec §5 "A+B"): attach the smoothed 10 m
+// -station profiles bake-world.mjs produced from its grading run, matched BY
+// WAY GEOMETRY (wayKey). bake-world grades the whole Gemeinde and keys every
+// profile by class+width+quantized-centreline; each road/rail here looks up its
+// own key. HARD GATE — every way must have a matching profile (no fallback): a
+// miss means the profiles were graded against different geometry, so we fail
+// loudly and demand a fresh `npm run geo:bake-world`.
+{
+  const profPath = `${SCRATCH}/grading-profiles.json`;
+  if (!existsSync(profPath))
+    throw new Error(`bake: ${profPath} missing — run \`npm run geo:bake-world\` first (it grades the DEM and emits the road profiles this bake attaches)`);
+  const prof = JSON.parse(readFileSync(profPath, 'utf8'));
+  attachProfilesByKey(prof.byKey, roads, rails);
+  console.log(`road profiles: attached ${roads.length} road + ${rails.length} rail profiles by geometry (anchor ${prof.anchorGroundHeight} m, ${Object.keys(prof.byKey).length} keyed)`);
+}
 
 // Gate BEFORE writing: a busted budget must not leave half-updated committed
 // data on disk (previously the throw came after writeFileSync, so every

@@ -281,7 +281,24 @@ const hemiOctUvNode = (dir: Node): Node => {
   return vec2(uSquare.mul(float(OCT_GRID - 1)), vSquare.mul(float(OCT_GRID - 1)));
 };
 
+// Boot-stand entry point: the whole city's initial instances in one mesh.
+// Kept as a thin caller so main.ts's boot wiring is unchanged; Task 5's
+// per-tile pools call buildImpostorMeshFor directly with each tile's slice.
 export function buildImpostorMesh(
+  instances: readonly TreeInstance[],
+  atlas: THREE.Texture,
+  archCount: number,
+): THREE.InstancedMesh {
+  return buildImpostorMeshFor(instances, atlas, archCount);
+}
+
+// Build ONE impostor InstancedMesh for an arbitrary instance set (boot stand
+// or a single streamed tile). The atlas texture and its layout are shared
+// across all meshes — only the quad geometry, the per-instance attributes and
+// the node material wrapping them are per-mesh. No bake/TSL changes here:
+// this is the exact mesh construction that used to live in buildImpostorMesh,
+// parameterized over `instances`.
+export function buildImpostorMeshFor(
   instances: readonly TreeInstance[],
   atlas: THREE.Texture,
   archCount: number,

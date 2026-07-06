@@ -688,6 +688,7 @@ export function transformNature({ osmNature, projector, buildingFootprints = /**
 export function transformRoads({ osmRoads, projector }) {
   const roads = [];
   const rails = [];
+  let degenerate = 0;
   for (const el of osmRoads.elements ?? []) {
     if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
     const style = roadStyle(el.tags ?? {});
@@ -696,8 +697,19 @@ export function transformRoads({ osmRoads, projector }) {
       const [x, z] = projector.toLocal(lon, lat);
       return [Math.round(x * 100) / 100, Math.round(z * 100) / 100];
     });
+    // Degenerate-way guard: boundary clipping can leave a sliver shorter than
+    // the 0.01 m coordinate quantization, collapsing every point onto one spot.
+    // A zero-length way has no direction, no ribbon and no profile arc — drop
+    // it with a logged count (data validation, not a fallback).
+    if (!pts.some(([x, z]) => x !== pts[0][0] || z !== pts[0][1])) {
+      degenerate += 1;
+      continue;
+    }
     const width = roadWidthFromTags(el.tags ?? {}, style.width);
-    (style.class === 'rail' ? rails : roads).push({ class: style.class, width, pts });
+    const path = { class: style.class, width, pts };
+    if (el.tags?.bridge && el.tags.bridge !== 'no') path.bridge = true;
+    (style.class === 'rail' ? rails : roads).push(path);
   }
+  if (degenerate > 0) console.log(`roads: dropped ${degenerate} zero-length (sub-quantization) ways`);
   return { roads, rails };
 }

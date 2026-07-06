@@ -11,6 +11,19 @@ import { extractPatch } from './dem.mjs';
 const LEVEL_CELLS = [1, 4, 16]; // L0, L1, L2 subdivisions per side
 const LEVEL_GRID_N = [21, 51, 101];
 
+// Corridor-snap margin cap (Task 5d): the finest (L2) tile vertex step is
+// ~12.5 m, so its cell diagonal is ~17.7 m. The corridor-snap sampler widens
+// its hard-clamp region by the tile's cell diagonal so a road bench is clamped
+// across the whole cell it crosses (a narrow corridor otherwise slips between
+// the 12.5 m vertices and the bilinear mesh interpolates the bench away). At
+// coarse levels the raw cell diagonal would be huge (L1 ~141 m, L0 ~1414 m) and
+// gouge terrain far from any road, so the per-tile margin is CAPPED at the L2
+// diagonal — every level clamps the same road footprint, so LOD switches don't
+// pop piercing in/out, and no level lowers terrain more than one L2 cell beyond
+// the corridor. The metric reads the finest (L2) tiles (worldData.ts), where
+// the margin is exactly the cell diagonal and the clamp is tight.
+const SNAP_MARGIN_CAP_M = Math.SQRT2 * (1250 / 100); // √2 · L2 vertex step (12.5 m)
+
 // ---- geometry helpers -----------------------------------------------
 
 function ringBBox(ring) {
@@ -255,19 +268,23 @@ function resolveLandcover(px, pz, sortedRings) {
 
 export function encodeTile(bucket, demSampler) {
   const gridN = LEVEL_GRID_N[bucket.level];
+  const cellStep = bucket.cellSize / (gridN - 1);
+  // Widen the corridor-snap hard-clamp region by this tile's cell diagonal
+  // (capped at the L2 diagonal) so a road bench is clamped across the whole
+  // cell it crosses. Plain samplers ignore the extra arg (see extractPatch).
+  const snapMarginM = Math.min(Math.SQRT2 * cellStep, SNAP_MARGIN_CAP_M);
   const height = extractPatch(demSampler, {
     originX: bucket.originX,
     originZ: bucket.originZ,
     gridN,
-    cellSize: bucket.cellSize / (gridN - 1),
-  });
+    cellSize: cellStep,
+  }, snapMarginM);
 
   const sortedRings = [...bucket.landuse].sort((a, b) => {
     if (a.kind !== b.kind) return a.kind - b.kind;
     return ringArea(b.ring) - ringArea(a.ring);
   });
 
-  const cellStep = bucket.cellSize / (gridN - 1);
   const landcover = new Array(gridN * gridN);
   for (let j = 0; j < gridN; j++) {
     for (let i = 0; i < gridN; i++) {
@@ -343,15 +360,21 @@ export function encodeTile(bucket, demSampler) {
 
   // Trees, sorted by (x, z) for determinism.
   const trees = [...bucket.trees].sort((a, b) => (a.x !== b.x ? a.x - b.x : a.z - b.z));
-  const tX = [], tZ = [], tH = [], tR = [], tKind = [];
+  const tX = [], tZ = [], tH = [], tR = [], tKind = [], tFamily = [];
   for (const t of trees) {
     tX.push(t.x);
     tZ.push(t.z);
     tH.push(t.h ?? t.height ?? 0);
     tR.push(t.r ?? t.radius ?? 0);
     tKind.push(t.kind ?? 0);
+    // family is optional (older callers/tests may omit it); an entirely
+    // absent family across all trees keeps t_family empty (proto3-additive:
+    // "leer = Alt-Bake" per world.proto), which tileTreeSpecs treats as
+    // family undefined rather than 0/spreading.
+    if (t.family !== undefined) tFamily.push(t.family);
   }
   Object.assign(msg, { tX, tZ, tH, tR, tKind });
+  if (tFamily.length === trees.length && trees.length > 0) Object.assign(msg, { tFamily });
 
   return toBinary(WorldTileSchema, create(WorldTileSchema, msg));
 }

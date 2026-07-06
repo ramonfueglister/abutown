@@ -296,6 +296,57 @@ describe('transformRoads', () => {
     const { roads } = transformRoads({ osmRoads, projector: makeProjector(ANCHOR) });
     expect(roads[0].width).toBe(7.5);
   });
+
+  it('marks a way with a real bridge tag as bridge:true', () => {
+    const osmRoads = {
+      elements: [{ type: 'way', tags: { highway: 'primary', bridge: 'yes' }, geometry: [
+        { lon: lonAt(0), lat: latAt(0) }, { lon: lonAt(100), lat: latAt(0) },
+      ] }],
+    };
+    const { roads } = transformRoads({ osmRoads, projector: makeProjector(ANCHOR) });
+    expect(roads[0].bridge).toBe(true);
+  });
+
+  it('does not set bridge when the tag is absent', () => {
+    const osmRoads = {
+      elements: [{ type: 'way', tags: { highway: 'residential' }, geometry: [
+        { lon: lonAt(0), lat: latAt(0) }, { lon: lonAt(100), lat: latAt(0) },
+      ] }],
+    };
+    const { roads } = transformRoads({ osmRoads, projector: makeProjector(ANCHOR) });
+    expect(roads[0].bridge).toBeUndefined();
+  });
+
+  it('does not set bridge when tags.bridge === "no"', () => {
+    const osmRoads = {
+      elements: [{ type: 'way', tags: { highway: 'residential', bridge: 'no' }, geometry: [
+        { lon: lonAt(0), lat: latAt(0) }, { lon: lonAt(100), lat: latAt(0) },
+      ] }],
+    };
+    const { roads } = transformRoads({ osmRoads, projector: makeProjector(ANCHOR) });
+    expect(roads[0].bridge).toBeUndefined();
+  });
+
+  it('drops zero-length ways whose points collapse under the 0.01 m quantization', () => {
+    // Boundary clipping can leave a sliver shorter than the coordinate
+    // quantization: every projected point rounds onto the same spot. Such a way
+    // has no direction/arc — burial-metric hard-errors on it — so the transform
+    // must drop it (with a logged count), not emit it.
+    const eps = 1e-8; // degrees — far below 0.01 m
+    const osmRoads = {
+      elements: [
+        { type: 'way', tags: { highway: 'primary' }, geometry: [
+          { lon: lonAt(0), lat: latAt(0) }, { lon: lonAt(0) + eps, lat: latAt(0) },
+        ] },
+        { type: 'way', tags: { highway: 'residential' }, geometry: [
+          { lon: lonAt(0), lat: latAt(0) }, { lon: lonAt(100), lat: latAt(0) },
+        ] },
+      ],
+    };
+    const { roads } = transformRoads({ osmRoads, projector: makeProjector(ANCHOR) });
+    expect(roads.length).toBe(1);
+    expect(roads[0].class).toBe('residential');
+  });
 });
 
 describe('wallBasePointsMeters — coverage gate must read the BAKED wall mesh (Task 12)', () => {
