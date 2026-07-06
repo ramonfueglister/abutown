@@ -565,7 +565,7 @@ async function boot(): Promise<void> {
   const plaza = buildPlaza(mainDoorWorld, erZone, cityRoads);
   scene.add(plaza);
   // Helipad on the main building's largest high flat roof face; fades with the
-  // cutaway upperFade (same as the roof) so it vanishes when the house opens.
+  // cutaway roofFade (same as the roof) so it vanishes when the house opens.
   const { group: helipad, setFade: setHelipadFade } = buildHelipad(mainBuilding);
   scene.add(helipad);
 

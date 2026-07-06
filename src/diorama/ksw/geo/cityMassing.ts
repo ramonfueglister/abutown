@@ -238,15 +238,14 @@ type FacadeMaterial = THREE.MeshPhysicalNodeMaterial & {
 };
 
 // Cutaway-enabled facade material (Phase A): additionally carries
-// `discardAbove` + `bandLo` + `bandFade` + `upperFade` uniforms so the MAIN
+// `discardAbove` + `bandLo` + `bandFade` uniforms so the MAIN
 // KSW building can be peeled open storey by storey. At rest (discardAbove =
-// bandLo = 1e6, bandFade = 0, upperFade = 1) every node is a no-op →
+// bandLo = 1e6, bandFade = 0) every node is a no-op →
 // byte-identical to the plain facade material.
 export type CutawayFacadeMaterial = FacadeMaterial & {
   discardAbove: ReturnType<typeof uniform>;
   bandLo: ReturnType<typeof uniform>;
   bandFade: ReturnType<typeof uniform>;
-  upperFade: ReturnType<typeof uniform>;
 };
 
 export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): FacadeMaterial {
@@ -333,7 +332,6 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   const discardAbove = uniform(1e6);
   const bandLo = uniform(1e6);
   const bandFade = uniform(0);
-  const upperFade = uniform(1); // kept: roof/eave opacity driver (roofFade)
   if (opts.cutaway) {
     const seam = new THREE.Color(kswS3.seamColor);
     const seamTone = vec3(seam.r, seam.g, seam.b);
@@ -364,7 +362,7 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   const glow = glassMask.mul(gate).mul(lit);
   m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(0.9)).mul(lampGlowU));
 
-  return Object.assign(m, { facadeDetail, discardAbove, bandLo, bandFade, upperFade }) as CutawayFacadeMaterial;
+  return Object.assign(m, { facadeDetail, discardAbove, bandLo, bandFade }) as CutawayFacadeMaterial;
 }
 
 export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {

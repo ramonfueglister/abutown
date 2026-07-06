@@ -15,7 +15,7 @@
 //   • buildHelipad(mainBuilding): the helicopter pad on the main building's
 //     largest high flat roof face (normalY > 0.95, y > 20 m, from the baked
 //     roof geometry). The rotor group carries userData.rotor so main.ts idles
-//     it, and the whole group fades with the cutaway upperFade (returned as a
+//     it, and the whole group fades with the cutaway roofFade (returned as a
 //     setter) exactly like the main roof.
 
 import * as THREE from 'three/webgpu';
@@ -149,7 +149,7 @@ export function buildPlaza(mainDoor: MainDoor, erZone: Zone, roads: RoadPath[]):
 // Largest flat (|normalY| > 0.95) roof face above 20 m, computed from the baked
 // roof geometry (cm → m like cityMassing.mergeTinted). Area-weighted centroid
 // of the highest-area 1 m y-band is the pad center. Returns the group plus a
-// fade setter so main.ts drives it with the cutaway upperFade (like the roof).
+// fade setter so main.ts drives it with the cutaway roofFade (like the roof).
 export function buildHelipad(mainBuilding: BakedBuilding): { group: THREE.Group; setFade: (o: number) => void } {
   const p = mainBuilding.roof.pos;
   const idx = mainBuilding.roof.idx;

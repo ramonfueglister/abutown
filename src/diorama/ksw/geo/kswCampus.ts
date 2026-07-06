@@ -91,7 +91,7 @@ export function buildKswCampus(
   mainWalls.receiveShadow = true;
   group.add(mainWalls);
 
-  // Roof: fades out (opacity = upperFade) BEFORE the slice engages so the top
+  // Roof: fades out (opacity = roofFade) BEFORE the slice engages so the top
   // is gone by the time the wall is cut open.
   const mainRoofMat = clayMat(kswPalette.roofClay).clone();
   mainRoofMat.transparent = true;
