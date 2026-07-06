@@ -48,6 +48,12 @@ describe('transformNature', () => {
   it('fills the wood polygon with declared forest trees', () => {
     const filled = out.trees.filter((t: { x: number }) => t.x >= 90);
     expect(filled.length).toBeGreaterThan(20); // 4800 m² @ 1/60 ≈ 80
-    for (const t of filled) expect(t.kind).toBe('broad');
+    // This wood carries no leaf_type tag — the common OSM case (Finding 1,
+    // task-2-brief.md) — so it falls into the mixedwood mix and MUST be able
+    // to produce conifers, not exclusively 'broad' (the pre-fix bug: kind was
+    // derived from the absent tag alone and vetoed every conifer family).
+    for (const t of filled) expect(['broad', 'conifer']).toContain(t.kind);
+    const conifer = filled.filter((t: { kind: string }) => t.kind === 'conifer').length;
+    expect(conifer).toBeGreaterThan(0);
   });
 });

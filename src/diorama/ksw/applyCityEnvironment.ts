@@ -16,6 +16,7 @@ import { moonPhaseLightDir, type EnvironmentState } from '../environment/environ
 import { POLE_AXIS } from '../environment/applyEnvironment';
 import type { PrecipitationSystem } from '../environment/precipitation';
 import { windAmpU, windDirU, windAmplitude } from './windUniform';
+import { impostorLightU } from './geo/treeImpostors';
 
 export type CityEnvironmentTargets = {
   renderer: THREE.WebGPURenderer;
@@ -98,6 +99,22 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   t.hemi.color.set(env.hemiSky);
   t.hemi.groundColor.set(env.hemiGround);
   t.hemi.intensity = env.hemiIntensity;
+
+  // Impostor light calibration: the far-LOD tree atlas is baked unlit, so
+  // without this it reads paler/flatter than the fully-shaded near trees at
+  // the 150 m LOD handoff (see treeImpostors.ts). Follow the same sun/hemi
+  // state that just fed the real lights, weighted so midday-clear settles
+  // near white (matching the unlit bake, i.e. today's look is unchanged at
+  // the reference condition). Retuned in the Task 6 screenshot pass
+  // (2026-07-06): sun 0.7 + sky 0.45 — at the previous 0.6/0.4 the far field
+  // read a touch darker than the sun-lit full trees at the 150 m handoff
+  // (scratch/tree-polish/handoff-fix8.png vs -fix9.png).
+  const sunW = 0.7 * Math.min(1, t.sun.intensity);
+  impostorLightU.value.setRGB(
+    t.sun.color.r * sunW + t.hemi.color.r * 0.45,
+    t.sun.color.g * sunW + t.hemi.color.g * 0.45,
+    t.sun.color.b * sunW + t.hemi.color.b * 0.45,
+  );
 
   // Clouds
   t.cloud.coverageU.value = env.cloudCoverage;

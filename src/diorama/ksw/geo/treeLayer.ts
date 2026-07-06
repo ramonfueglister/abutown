@@ -19,11 +19,13 @@
 import * as THREE from 'three/webgpu';
 import {
   attribute,
+  floor,
   fract,
   float,
   instanceIndex,
   instancedBufferAttribute,
   mix,
+  positionGeometry,
   positionLocal,
   select,
   sin,
@@ -59,7 +61,13 @@ function squashFor(x: number, z: number): number {
   return SQUASH_MIN + SQUASH_SPAN * hv;
 }
 
-export type TreeInstance = { spec: TreeSpec; archetype: number; tint: THREE.Color; squash: number };
+export type TreeInstance = {
+  spec: TreeSpec;
+  archetype: number;
+  tint: THREE.Color;
+  squash: number;
+  y: number; // ground height at (x, z) — trees plant ON the DEM, not at y=0
+};
 
 // Task 4: near-set compaction. Full-detail trees are drawn out to 10% beyond
 // the impostor-collapse radius (kswCityStyle.lod.nearR) — the overlap band
@@ -133,6 +141,7 @@ function insideRect(x: number, z: number, ex: { x: number; z: number; w: number;
 export function assignTrees(
   trees: readonly TreeSpec[],
   excludeRect?: { x: number; z: number; w: number; d: number },
+  groundYAt?: (x: number, z: number) => number,
 ): TreeInstance[] {
   const out: TreeInstance[] = [];
   for (const spec of trees) {
@@ -140,9 +149,13 @@ export function assignTrees(
     const kind = spec.kind === 'conifer' ? 'conifer' : 'broad';
     out.push({
       spec,
-      archetype: archetypeIndexFor(spec.x, spec.z, kind),
+      archetype: archetypeIndexFor(spec.x, spec.z, kind, spec.family),
       tint: tintFor(spec.x, spec.z, kind),
       squash: squashFor(spec.x, spec.z),
+      // Plant on the real terrain. Without this, every tree outside the flat
+      // city plate is buried under the DEM (2026-07-06 waldrand finding: the
+      // whole forest belt rendered as empty meadow — full meshes AND impostors).
+      y: groundYAt ? groundYAt(spec.x, spec.z) : 0,
     });
   }
   return out;
@@ -179,6 +192,21 @@ const TRUNK_B = (kswCity.treeTrunk & 0xff) / 255;
 // its own aTint attribute node. clayMat is cached — clone before assigning
 // nodes (nature.ts convention). Constructing the nodes is pure JS and safe
 // under vitest (no GPU) — same as agentMeshes' node materials.
+// SPACE CONTRACT (the 2026-07-06 "naked skeleton" root cause): three's
+// NodeMaterial applies the instancedMesh() transform to `positionLocal`
+// BEFORE evaluating a user positionNode (NodeMaterial.setupPosition). Inside
+// this material `positionLocal` is therefore already in WORLD-scale city
+// coordinates (meters, translated to the tree's spot), while geometry
+// attributes like aPuff.xyz stay in the normalized archetype space (y 0..1).
+// Mixing the two spaces — e.g. `aPuff.xyz + (positionLocal − aPuff.xyz)·j` —
+// displaces crown vertices by (1−j)·(distance to origin) ≈ tens of meters,
+// which scattered crowns off their trunks (fully naked skeletons for
+// instances whose hash landed far from j=1). All displacement is now computed
+// in GEOMETRY space (positionGeometry) and lifted to world scale with the
+// per-instance scale carried in aTint.w — valid because the instance matrices
+// are compose(pos, IDENTITY quaternion, scale): axis-aligned scale + translation
+// only (see compactNear). If instance rotation is ever introduced, this lift
+// needs the rotation applied to the delta as well.
 function treeMaterial(arch: TreeArchetype, aTintNode: TSLNode): THREE.MeshPhysicalMaterial {
   const mat = clayMat(kswCity.treeGreen).clone();
 
@@ -188,47 +216,70 @@ function treeMaterial(arch: TreeArchetype, aTintNode: TSLNode): THREE.MeshPhysic
   const idxF: TSLNode = float(instanceIndex);
   const isWood = aPuff.w.lessThan(float(0));
 
+  // Per-instance world scale, unpacked from aTint.w (packScales in compactNear):
+  // sx = horizontal scale (r/crownRadius), sy = vertical scale (h·squash).
+  const sx = floor(aTintNode.w.div(float(4096))).div(float(100));
+  const sy = aTintNode.w.mod(float(4096)).div(float(100));
+
   // ── colorNode: two-tone crown, trunk keeps clay wood colour ─────────────
   // gradient lightens the crown top; the per-instance tint modulates the base.
-  // positionLocal.y is normalized 0..1 by the archetype contract.
-  const gradient = mix(float(0.82), float(1.12), smoothstep(float(arch.crownBaseY), float(1), positionLocal.y));
+  // positionGeometry.y is the RAW attribute — normalized 0..1 by the archetype
+  // contract (positionLocal is already instance-transformed here, see above).
+  // This matches the impostor bake exactly (bakeMaterial renders the archetype
+  // un-instanced, where local y IS 0..1) — same gradient across the LOD handoff.
+  const gradient = mix(float(0.82), float(1.12), smoothstep(float(arch.crownBaseY), float(1), positionGeometry.y));
   const trunkColor = vec3(float(TRUNK_R), float(TRUNK_G), float(TRUNK_B));
-  mat.colorNode = select(isWood, trunkColor, aTintNode.mul(gradient));
+  mat.colorNode = select(isWood, trunkColor, aTintNode.xyz.mul(gradient));
 
   // ── positionNode: puff jitter (crown only) then wind sway ───────────────
   // Puff jitter: scale each crown vertex around its puff center by a per-puff,
-  // per-instance factor in [0.94, 1.06]. Wood vertices skip jitter.
+  // per-instance factor in [0.94, 1.06]. Computed as a GEOMETRY-space delta
+  // (p − c)·(j − 1), lifted to world scale with (sx, sy, sx), then added to the
+  // instanced positionLocal. Wood vertices skip jitter.
   const jitterSeed = idxF.mul(float(13)).add(aPuff.w);
   // Gentle per-puff scale variety, centred on 1.0 so it never SHRINKS a puff
   // enough to open a gap and expose the branch skeleton (the puffs are tuned to
   // just-overlap; a 0.85× shrink was enough to break marginal crowns). Kept
   // small — the crown must always read as one solid mass.
   const jitter = float(0.94).add(fractHash(jitterSeed).mul(float(0.12)));
-  const fromCenter: TSLNode = positionLocal.sub(aPuff.xyz);
-  const jittered = aPuff.xyz.add(fromCenter.mul(jitter));
-  const crownP = select(isWood, positionLocal, jittered);
+  const dLocal: TSLNode = positionGeometry.sub(aPuff.xyz).mul(jitter.sub(float(1)));
+  const dWorld = vec3(dLocal.x.mul(sx), dLocal.y.mul(sy), dLocal.z.mul(sx));
+  const crownOffset = select(isWood, vec3(float(0), float(0), float(0)), dWorld);
 
-  // Wind sway: horizontal offset in windDir, growing with height² so the crown
-  // top leans most; two detuned sines for a natural gust, phase per instance.
-  // Trunk vertices get a damped 0.15× share so the base barely moves.
-  const swayY = positionLocal.y; // normalized 0..1
+  // Wind sway: horizontal WORLD-space offset in windDir, growing with height²
+  // so the crown top leans most; two detuned sines for a natural gust, phase
+  // per instance. Amplitude scales with sx (≈ crown radius in meters) so big
+  // trees displace proportionally — the original local-space intent. Trunk
+  // vertices get a damped 0.15× share so the base barely moves.
+  const swayY = positionGeometry.y; // normalized 0..1
   const phase = fractHash(idxF.mul(float(0.7))).mul(float(6.2831853));
   const wave = sin(time.mul(float(1.3)).add(phase)).mul(float(0.6)).add(sin(time.mul(float(0.31)).add(phase.mul(float(0.7)))).mul(float(0.4)));
-  const swayMag = windAmpU.mul(swayY).mul(swayY).mul(wave).mul(float(0.05));
+  const swayMag = windAmpU.mul(swayY).mul(swayY).mul(wave).mul(float(0.05)).mul(sx);
   const windXZ = windDirU.mul(swayMag);
   const damp = select(isWood, float(0.15), float(1));
   const swayOffset = vec3(windXZ.x.mul(damp), float(0), windXZ.y.mul(damp));
 
-  mat.positionNode = crownP.add(swayOffset);
+  mat.positionNode = positionLocal.add(crownOffset).add(swayOffset);
   return mat;
+}
+
+// Pack the per-instance world scales into one float32: floor(sx·100)·4096 +
+// floor(sy·100). Exact in f32 up to 2^24; sx/sy are clamped to < 40.95 m
+// (well above any real tree). The shader unpacks with floor/mod (see above).
+export function packScales(sx: number, sy: number): number {
+  const q = (v: number) => Math.min(4095, Math.max(0, Math.round(v * 100)));
+  return q(sx) * 4096 + q(sy);
 }
 
 export function buildTreeLayer(
   trees: readonly TreeSpec[],
-  opts: { excludeRect?: { x: number; z: number; w: number; d: number } } = {},
+  opts: {
+    excludeRect?: { x: number; z: number; w: number; d: number };
+    groundYAt?: (x: number, z: number) => number;
+  } = {},
 ): TreeLayer {
   const archetypes = allArchetypes();
-  const instances = assignTrees(trees, opts.excludeRect);
+  const instances = assignTrees(trees, opts.excludeRect, opts.groundYAt);
 
   const group = new THREE.Group();
   group.name = 'cityTrees';
@@ -251,11 +302,12 @@ export function buildTreeLayer(
     // WebGPU zero-buffer rule: allocate at least one instance, set count after.
     const cap = Math.max(1, n);
 
-    // Per-instance tint attribute (vec3) — the node colorNode reads this.
-    const tintArray = new Float32Array(cap * 3);
-    const tintAttr = new THREE.InstancedBufferAttribute(tintArray, 3);
+    // Per-instance tint+scale attribute (vec4: rgb + packScales(sx, sy)) — the
+    // node colorNode reads .xyz, the positionNode's space lift reads .w.
+    const tintArray = new Float32Array(cap * 4);
+    const tintAttr = new THREE.InstancedBufferAttribute(tintArray, 4);
     tintAttr.setUsage(THREE.DynamicDrawUsage);
-    const aTintNode = instancedBufferAttribute(tintAttr, 'vec3');
+    const aTintNode = instancedBufferAttribute(tintAttr, 'vec4');
 
     // arch.geometry is shared across the app; clone it so the per-mesh aTint
     // instanced attribute doesn't mutate the shared geometry. (position/normal/
@@ -304,15 +356,18 @@ export function buildTreeLayer(
         const list = nearByArch[i];
         const tintArray = tintAttrs[i].array as Float32Array;
         for (let k = 0; k < list.length; k++) {
-          const { spec, tint, squash } = list[k];
+          const { spec, tint, squash, y } = list[k];
           const s = spec.r / arch.crownRadius;
-          pos.set(spec.x, 0, spec.z);
+          pos.set(spec.x, y, spec.z);
           scl.set(s, spec.h * squash, s);
+          // NOTE: identity quaternion — treeMaterial's geometry-space→world
+          // displacement lift relies on the matrices staying rotation-free.
           m.compose(pos, q, scl);
           mesh.setMatrixAt(k, m);
-          tintArray[k * 3] = tint.r;
-          tintArray[k * 3 + 1] = tint.g;
-          tintArray[k * 3 + 2] = tint.b;
+          tintArray[k * 4] = tint.r;
+          tintArray[k * 4 + 1] = tint.g;
+          tintArray[k * 4 + 2] = tint.b;
+          tintArray[k * 4 + 3] = packScales(s, spec.h * squash);
         }
         // 0-hit archetypes get count = 0; capacity (cap = Math.max(1, n))
         // stays >= 1 — buffers are never shrunk, only the visible count.

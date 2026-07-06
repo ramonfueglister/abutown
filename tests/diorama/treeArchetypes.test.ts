@@ -78,4 +78,17 @@ describe('treeArchetypes', () => {
     expect(cIdx).toBeLessThan(all);
     expect(archetypeIndexFor(5, 5, 'conifer')).toBe(cIdx);
   });
+
+  it('family-pick landet im Familien-Block', () => {
+    for (let i = 0; i < 50; i++) {
+      const idx = archetypeIndexFor(i * 3.1, i * 7.7, 'broad', 'oval');
+      const ovalStart = BROAD_FAMILIES.indexOf('oval') * SEEDS_PER_FAMILY;
+      expect(idx).toBeGreaterThanOrEqual(ovalStart);
+      expect(idx).toBeLessThan(ovalStart + SEEDS_PER_FAMILY);
+    }
+  });
+
+  it('ohne family: bisheriges Verhalten (Bereichs-Check)', () => {
+    expect(archetypeIndexFor(10, 10, 'conifer')).toBeGreaterThanOrEqual(BROAD_FAMILIES.length * SEEDS_PER_FAMILY);
+  });
 });
