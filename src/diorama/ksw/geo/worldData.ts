@@ -28,6 +28,8 @@ import {
   type WorldManifest,
   type WorldTile,
 } from '../../../proto/world_pb.js';
+import { FAMILY_CODES } from './treeArchetypes';
+import type { TreeSpec } from './geoData';
 
 export type DecodedTile = { level: number; x: number; y: number; tile: WorldTile };
 export type World = { manifest: WorldManifest; graph: RoadGraph; tiles: DecodedTile[] };
@@ -152,23 +154,97 @@ async function fetchBinary(url: string): Promise<Uint8Array> {
 }
 
 /**
+ * Thin wrapper around the internal `fetchBinary`, exposed for the M3
+ * per-tile streaming layer (`tileStreamer.ts`'s `TileStreamer.fetchTile`
+ * callback), which fetches one tile at a time instead of `loadWorld`'s
+ * fetch-everything-up-front behavior.
+ */
+export async function fetchTileBin(baseUrl: string, path: string): Promise<Uint8Array> {
+  return fetchBinary(`${baseUrl}${path}`);
+}
+
+/** Decodes a single tile binary. Pure — no I/O. */
+export function decodeTileBin(bin: Uint8Array): WorldTile {
+  return fromBinary(WorldTileSchema, bin);
+}
+
+// Cross-tile-call warning counter for tileTreeSpecs' family/kind consistency
+// check (see below) — logged once via console.warn rather than per-tree, so
+// a whole-world decode doesn't spam thousands of lines.
+let familyKindMismatchCount = 0;
+
+/**
+ * Decodes a WorldTile's tree SoA fields (t_x/t_z/t_h/t_r/t_kind/t_family)
+ * into TreeSpec[] (Task 5's consumption format).
+ *
+ * `family` is left `undefined` when `t_family` is empty (older bakes, or
+ * bakes predating this task — "leer = Alt-Bake" per world.proto's comment).
+ * When present, family is mapped via FAMILY_CODES.
+ *
+ * Consistency guard: `kind` (t_kind: 0 broad, 1 conifer) is the authoritative
+ * field for rendering — but family and kind are baked from the same source
+ * (treeSpec in style.mjs) and should never disagree. If a family implies a
+ * different kind than t_kind says (conic/slender ⇒ conifer, others ⇒ broad),
+ * this derives kind FROM family (family is the more specific signal) and
+ * counts the mismatch, logging a single summarized console.warn — so a
+ * decode of many tiles doesn't spam one line per tree, but the anomaly is
+ * still visible.
+ */
+export function tileTreeSpecs(tile: WorldTile): TreeSpec[] {
+  const { tX, tZ, tH, tR, tKind, tFamily } = tile;
+  const hasFamily = tFamily.length > 0;
+  const specs: TreeSpec[] = [];
+  let mismatches = 0;
+
+  for (let i = 0; i < tX.length; i++) {
+    let kind: TreeSpec['kind'] = tKind[i] === 1 ? 'conifer' : 'broad';
+    let family: TreeSpec['family'] | undefined;
+
+    if (hasFamily) {
+      const code = tFamily[i];
+      family = FAMILY_CODES[code];
+      const familyImpliesConifer = family === 'conic' || family === 'slender';
+      const kindSaysConifer = kind === 'conifer';
+      if (familyImpliesConifer !== kindSaysConifer) {
+        kind = familyImpliesConifer ? 'conifer' : 'broad';
+        mismatches += 1;
+      }
+    }
+
+    specs.push({ x: tX[i], z: tZ[i], h: tH[i], r: tR[i], kind, family });
+  }
+
+  if (mismatches > 0) {
+    familyKindMismatchCount += mismatches;
+    console.warn(
+      `tileTreeSpecs: ${mismatches} tree(s) in this tile had t_family/t_kind mismatches; ` +
+        `kind derived from family. Running total across this session: ${familyKindMismatchCount}.`,
+    );
+  }
+
+  return specs;
+}
+
+/**
  * Fetches manifest.pb, graph.pb, and every tile the manifest lists (Slice 1)
  * from `baseUrl`, then decodes via `decodeWorld`.
  *
- * `keep` is the Slice-2 streaming hook: pass a predicate to fetch only a
- * subset of `manifest.tiles` (e.g. tiles near the camera). Defaults to
- * keep-all, matching Slice-1 behavior.
+ * `keep` is the M3 streaming hook: pass a predicate to fetch only a subset
+ * of `manifest.tiles` (e.g. L0 plus the fine tiles under the hero plate).
+ * It receives the decoded manifest as second argument so callers can compute
+ * tile bounds (minX/minZ/size quadtree root) without a separate manifest
+ * fetch. Defaults to keep-all, matching Slice-1 behavior.
  */
 export async function loadWorld(
   baseUrl = '/winterthur-world/',
-  keep: (ref: TileRef) => boolean = () => true,
+  keep: (ref: TileRef, manifest: WorldManifest) => boolean = () => true,
 ): Promise<World> {
   const manifestBin = await fetchBinary(`${baseUrl}manifest.pb`);
   const manifest = fromBinary(WorldManifestSchema, manifestBin);
 
   const graphBin = await fetchBinary(`${baseUrl}graph.pb`);
 
-  const refs = manifest.tiles.filter(keep);
+  const refs = manifest.tiles.filter((ref) => keep(ref, manifest));
   const tileBins = await Promise.all(
     refs.map(async (ref) => ({ path: ref.path, bin: await fetchBinary(`${baseUrl}${ref.path}`) })),
   );

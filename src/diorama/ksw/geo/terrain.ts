@@ -107,28 +107,145 @@ function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
   return m;
 }
 
-export function buildTerrainTiles(
-  tiles: DecodedTile[],
-  opts: { level: number; corridorMask?: CorridorMask },
-): THREE.Group {
+// Shared terrain material across all LOD levels/tiles — vertex colours carry
+// per-vertex landcover tint, so one material suffices.
+const terrainMat = vertexTintMat(terrainLook.meadow);
+
+// Memoized discard material per corridor mask: streamed tiles materialize one
+// at a time over many frames, so the material must be shared/cached rather
+// than rebuilt per tile (one DataTexture + one shader program per mask). The
+// WeakMap keys on the decoded mask object the boot path loads exactly once.
+const discardMatCache = new WeakMap<CorridorMask, THREE.MeshPhysicalMaterial>();
+function terrainMaterialFor(mask?: CorridorMask): THREE.MeshPhysicalMaterial {
+  if (!mask) return terrainMat;
+  let m = discardMatCache.get(mask);
+  if (!m) {
+    m = terrainDiscardMat(mask);
+    discardMatCache.set(mask, m);
+  }
+  return m;
+}
+
+/**
+ * Builds the terrain grid mesh for a single decoded tile. Extracted from
+ * the pre-M3 all-tiles boot loop (Task 4) so `tileContent.ts`'s per-tile
+ * materialization can reuse the exact same geometry-building logic.
+ *
+ * With a corridor mask (spec §5 terrain-discard), fragments inside road/rail
+ * corridors are discarded — streamed tiles MUST pass the same mask the boot
+ * path uses, or roads would sink into un-discarded streamed terrain.
+ *
+ * Mesh naming is load-bearing: LOD code elsewhere resolves terrain meshes by
+ * `terrainL${level}/${x}_${y}` via `getObjectByName`. Do not change this
+ * convention without updating those call sites.
+ */
+export function buildTerrainTileMesh(dec: DecodedTile, opts?: { corridorMask?: CorridorMask }): THREE.Mesh {
+  const { level, x, y, tile } = dec;
+  const geo = buildTileGeometry(tile);
+  const mesh = new THREE.Mesh(geo, terrainMaterialFor(opts?.corridorMask));
+  mesh.name = `terrainL${level}/${x}_${y}`;
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  return mesh;
+}
+
+/**
+ * M3 backdrop (Task 6): the L0 overview tile split into a `cellsPerSide`
+ * grid of independent sub-meshes aligned to the L2 tile regions (the bake
+ * subdivides 4x4 per level → 16 L2 tiles per side of the world square), so
+ * the streamer can hide exactly the backdrop cells whose region is covered
+ * by a live fine tile. The coarse L0 surface deviates from the fine terrain
+ * by up to ~±20 m — where it sits ABOVE it, an always-on L0 would veil whole
+ * districts, so covered cells must disappear per-region rather than z-fight.
+ *
+ * Geometry per cell: a small vertex grid bilinearly resampled from the L0
+ * height field. The resample lies exactly ON L0's bilinear surface, so seams
+ * between adjacent cells are watertight; landcover tint is nearest-vertex.
+ *
+ * Returns the group plus a `"x_y"`-keyed mesh map in L2-tile index space —
+ * main.ts flips `mesh.visible` from the streamer's onReady/onUnload.
+ */
+export function buildL0Backdrop(
+  dec: DecodedTile,
+  cellsPerSide: number,
+  opts?: { corridorMask?: CorridorMask },
+): { group: THREE.Group; meshes: Map<string, THREE.Mesh> } {
+  const mat = terrainMaterialFor(opts?.corridorMask);
+  const { gridN, cellSize, originX, originZ, height, landcover } = dec.tile;
+  const extent = (gridN - 1) * cellSize;
+  const cellExtent = extent / cellsPerSide;
+  // ~4 segments per 1000 m source cell keeps the resample visually identical
+  // to the source surface; +1 for the closing vertex row.
+  const nSub = Math.max(2, Math.round(cellExtent / 250) + 1);
+
+  const heightAt = (x: number, z: number): number => {
+    const fx = Math.min(gridN - 1, Math.max(0, (x - originX) / cellSize));
+    const fz = Math.min(gridN - 1, Math.max(0, (z - originZ) / cellSize));
+    const i0 = Math.min(Math.floor(fx), gridN - 2);
+    const j0 = Math.min(Math.floor(fz), gridN - 2);
+    const tx = fx - i0;
+    const tz = fz - j0;
+    const h00 = height[j0 * gridN + i0];
+    const h10 = height[j0 * gridN + i0 + 1];
+    const h01 = height[(j0 + 1) * gridN + i0];
+    const h11 = height[(j0 + 1) * gridN + i0 + 1];
+    return (h00 + (h10 - h00) * tx) * (1 - tz) + (h01 + (h11 - h01) * tx) * tz;
+  };
+  const landcoverAt = (x: number, z: number): number => {
+    const i = Math.min(gridN - 1, Math.max(0, Math.round((x - originX) / cellSize)));
+    const j = Math.min(gridN - 1, Math.max(0, Math.round((z - originZ) / cellSize)));
+    return landcover[j * gridN + i];
+  };
+
   const group = new THREE.Group();
-  group.name = 'terrainTiles';
+  group.name = 'terrainL0Backdrop';
+  const meshes = new Map<string, THREE.Mesh>();
+  const color = new THREE.Color();
 
-  // With a corridor mask, terrain fragments inside road/rail corridors are
-  // discarded (spec §5 terrain-discard). Without one (tests, callers pre-Task
-  // 5e), the plain shared tint material renders every fragment.
-  const mat = opts.corridorMask ? terrainDiscardMat(opts.corridorMask) : vertexTintMat(terrainLook.meadow);
-
-  for (const { level, x, y, tile } of tiles) {
-    if (level !== opts.level) continue;
-
-    const geo = buildTileGeometry(tile);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.name = `terrainL${level}/${x}_${y}`;
-    mesh.receiveShadow = true;
-    mesh.castShadow = false;
-    group.add(mesh);
+  for (let cy = 0; cy < cellsPerSide; cy++) {
+    for (let cx = 0; cx < cellsPerSide; cx++) {
+      const x0 = originX + cx * cellExtent;
+      const z0 = originZ + cy * cellExtent;
+      const step = cellExtent / (nSub - 1);
+      const positions = new Float32Array(nSub * nSub * 3);
+      const colors = new Float32Array(nSub * nSub * 3);
+      for (let j = 0; j < nSub; j++) {
+        for (let i = 0; i < nSub; i++) {
+          const n = j * nSub + i;
+          const x = x0 + i * step;
+          const z = z0 + j * step;
+          positions[n * 3 + 0] = x;
+          positions[n * 3 + 1] = heightAt(x, z);
+          positions[n * 3 + 2] = z;
+          color.set(landcoverColor[landcoverAt(x, z)] ?? terrainLook.meadow);
+          colors[n * 3 + 0] = color.r;
+          colors[n * 3 + 1] = color.g;
+          colors[n * 3 + 2] = color.b;
+        }
+      }
+      const indices: number[] = [];
+      for (let j = 0; j < nSub - 1; j++) {
+        for (let i = 0; i < nSub - 1; i++) {
+          const a = j * nSub + i;
+          const b = a + 1;
+          const c = a + nSub;
+          const d = c + 1;
+          indices.push(a, c, b, b, c, d);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geo.setIndex(new THREE.BufferAttribute(new Uint16Array(indices), 1));
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = `terrainL0Backdrop/${cx}_${cy}`;
+      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      group.add(mesh);
+      meshes.set(`${cx}_${cy}`, mesh);
+    }
   }
 
-  return group;
+  return { group, meshes };
 }

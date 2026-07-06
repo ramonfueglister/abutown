@@ -147,6 +147,14 @@ export const GROWTH = {
   slender:   { hInf: 20, rInf: 3.0, tHalf: 30 },
 };
 
+// Canonical family→code mapping for the t_family proto field (world.proto,
+// WorldTile.t_family). MUST stay identical in order to
+// [...BROAD_FAMILIES, ...CONIFER_FAMILIES] from treeArchetypes.ts — verified
+// by an order-anchor test in tests/geo/worldProto.test.ts. Duplicated here
+// (rather than imported) because this is a plain-ESM .mjs bake script and
+// cannot import the .ts module.
+export const FAMILY_CODES = ['spreading', 'oval', 'tall', 'conic', 'slender'];
+
 // Gewichtete Familienwahl je Kontext. Reihenfolge/Schwellen deterministisch.
 const FAMILY_MIX = {
   needlewood:  [['conic', 0.7], ['slender', 1.0]],

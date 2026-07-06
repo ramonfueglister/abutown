@@ -105,6 +105,7 @@ message WorldTile {
   repeated double t_x = 50; repeated double t_z = 51;
   repeated double t_h = 52; repeated double t_r = 53;
   repeated uint32 t_kind = 54; // 0 broad, 1 conifer
+  repeated uint32 t_family = 55; // 0 spreading,1 oval,2 tall,3 conic,4 slender; leer = Alt-Bake
 }
 
 enum Landcover {

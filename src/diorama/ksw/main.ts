@@ -56,9 +56,12 @@ import { cutawayState } from './interior/cutaway';
 import { buildRoads } from './geo/roads';
 import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
-import { loadWorld, anchorGroundHeight, makeHeightSampler } from './geo/worldData';
-import { buildTerrainTiles } from './geo/terrain';
+import { loadWorld, anchorGroundHeight, makeHeightSampler, fetchTileBin, decodeTileBin, type DecodedTile } from './geo/worldData';
+import { buildL0Backdrop } from './geo/terrain';
 import { loadCorridorMask } from './geo/corridorMask';
+import { TileStreamer, tileCenter, type TileKey, type TileMeta } from './geo/tileStreamer';
+import { materializeTile, type TileContent } from './geo/tileContent';
+import type { TileRef, WorldTile } from '../../proto/world_pb.js';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
 import { lampGlowU } from './glowUniform';
@@ -158,6 +161,18 @@ declare global {
       // establishing framing) without synthetic mouse input, mirroring
       // __traffic.lookAt above.
       lookAt: (x: number, z: number, radius?: number) => void;
+    };
+    // Dev tile-streaming debug surface (unconditional, Task 6/M3): live
+    // streamed-tile count (L1+L2, excludes the boot-resident L0), the number
+    // of tiles disposed since boot, and the permanently-failed fetch count.
+    // liveKeys lists the materialized tile keys — the Task 7 fly-through
+    // smoke asserts the live SET changes per leg (the raw count can stay
+    // equal across regions with similar coverage while tiles churn).
+    __stream?: {
+      live: () => number;
+      liveKeys: () => string[];
+      disposed: () => number;
+      failed: () => number;
     };
   }
 }
@@ -592,32 +607,78 @@ async function boot(): Promise<void> {
     rig.target[2] >= mbBounds.minZ &&
     rig.target[2] <= mbBounds.maxZ;
 
-  // ── real terrain under the whole diorama (Task 12, Slice 1) ─────────────
-  // Replaces the flat cityPlate slab: the baked municipality tile pyramid
-  // (scripts/geo/bake-world.mjs) gives real DEM heights + landcover. Only the
-  // terrain surface renders here — the wider municipality's buildings/roads
-  // are deferred to Slice 3; the existing hero city (below, from geoData)
-  // keeps rendering exactly as before, unchanged.
+  // ── real terrain under the whole diorama (Task 12 Slice 1 → M3 Task 6) ──
+  // M3: boot no longer fetches the whole 77 MB pyramid. It loads the L0
+  // overview tile (whole-municipality backdrop terrain) PLUS, synchronously,
+  // the L2 tiles under the hero plate & the static city-nature footprint —
+  // those fine tiles feed `groundYAt`, which the plate layers (roads, lamps,
+  // tree layer, traffic) sample AT BUILD TIME. Without them the plate drape
+  // would silently degrade to L0's 1000 m grid. Everything else streams in
+  // camera-driven via TileStreamer below. Outside the sampler rect,
+  // `groundYAt` falls back to L0 bilinear (far roads only — the streamed
+  // terrain out there is L0/L1 anyway).
   //
   // Failure here is a hard boot error (no silent fallback to a flat plate):
   // if `/winterthur-world/` 404s, that's a dev-setup problem (missing the
   // `public/winterthur-world` symlink to `data/winterthur/world/`, see
   // worldData.ts) or a deploy problem, and should surface loudly rather than
   // quietly reverting to the old flat look.
-  const world = await loadWorld();
+  const samplerRect = (() => {
+    const p = cityMeta.plate;
+    let minX = p.cx - p.w / 2;
+    let maxX = p.cx + p.w / 2;
+    let minZ = p.cz - p.d / 2;
+    let maxZ = p.cz + p.d / 2;
+    // city nature (OSM trees/greens) extends past the plate; its trees are
+    // y-positioned via groundYAt at build time, so cover them too.
+    for (const t of cityNature.trees) {
+      minX = Math.min(minX, t.x);
+      maxX = Math.max(maxX, t.x);
+      minZ = Math.min(minZ, t.z);
+      maxZ = Math.max(maxZ, t.z);
+    }
+    const pad = 100;
+    return { minX: minX - pad, maxX: maxX + pad, minZ: minZ - pad, maxZ: maxZ + pad };
+  })();
+  const world = await loadWorld(undefined, (ref, m) => {
+    if (ref.level === 0) return true;
+    if (ref.level !== 2) return false;
+    // bake convention: 4x4 subdivision per level → L2 cell = size/16
+    const cell = m.size / 16;
+    const x0 = m.minX + ref.x * cell;
+    const z0 = m.minZ + ref.y * cell;
+    return (
+      x0 < samplerRect.maxX && x0 + cell > samplerRect.minX && z0 < samplerRect.maxZ && z0 + cell > samplerRect.minZ
+    );
+  });
   // Corridor mask (Task 5e, spec §5 terrain-discard): the terrain shader
   // discards fragments inside road/rail corridors so rendered terrain can never
   // pierce a road surface; ribbon skirts close the hole. Hard boot error if
   // mask.bin is missing (no silent skip — a mask that fails to load must
-  // surface loudly, same discipline as the world load above).
+  // surface loudly, same discipline as the world load above). The mask is
+  // world-space and level-independent, so the L0 backdrop AND every streamed
+  // tile (materializeTile ctx below) apply the exact same discard footprint.
   const corridorMask = await loadCorridorMask();
   const terrainRoot = new THREE.Group();
   terrainRoot.name = 'terrainRoot';
-  terrainRoot.add(buildTerrainTiles(world.tiles, { level: 2, corridorMask }));
+  // Only the L0 backdrop terrain is scene-resident from boot; the fine boot
+  // L2 tiles above exist for the height sampler only — their region is
+  // materialized (terrain + massing + trees) by the streamer right below.
+  // The backdrop is split into 16x16 sub-meshes aligned to L2 tile regions:
+  // the coarse L0 surface sits up to ~20 m ABOVE the fine terrain in parts of
+  // the city (1000 m grid vs 12.5 m), so wherever a fine tile is live the
+  // covering backdrop cell must be hidden or it veils the whole district.
+  const l0Tile = world.tiles.find((t) => t.level === 0);
+  if (!l0Tile) throw new Error('boot: manifest has no L0 tile');
+  const backdrop = buildL0Backdrop(l0Tile, 16, { corridorMask });
+  terrainRoot.add(backdrop.group);
   // Tile heights are absolute DEM metres (~400-590 m); the hero city + KSW
   // sit at y≈0 (the anchor). Shift the whole terrain group down by the
   // anchor's ground height so the anchor point lines up with real y≈0 and
-  // hills rise/fall around it from there.
+  // hills rise/fall around it from there. anchorGroundHeight prefers the
+  // finest covering tile, and the boot L2 set covers the origin (the plate
+  // rect contains it) — so the anchor value is identical to the pre-M3
+  // load-everything boot.
   const anchorGround = anchorGroundHeight(world);
   terrainRoot.position.y = -anchorGround;
   // Ground-height sampler shared by the draped road ribbons AND the traffic
@@ -625,7 +686,16 @@ async function boot(): Promise<void> {
   // -anchorGround, so the visible surface y (in the y=0 cityRoot frame) is
   // heightAt(x,z) - anchorGround. Roads drape onto it (else the flat ribbons
   // bury under / float over the undulating plate) and cars ride it per-vehicle.
-  const worldHeightAt = makeHeightSampler(world);
+  // Finest-first inside makeHeightSampler: L2 where the boot set covers,
+  // L0 bilinear beyond it. `worldHeightAt` is a mutable binding: the streamer
+  // below rebuilds it whenever fine tiles arrive/leave, so late consumers
+  // (streamed tile trees, far traffic/flow drape) sample the SAME surface the
+  // streamed terrain renders — the plate layers built right here still see
+  // exact fine heights via the synchronous boot L2 set above.
+  let worldHeightAt = makeHeightSampler(world);
+  // `tileGroundYAt` closes over the MUTABLE `worldHeightAt` binding — the
+  // corridor sampler below calls it per-query, so streamer rebuilds propagate
+  // through automatically without re-running makeCorridorGround.
   const tileGroundYAt = (x: number, z: number): number => worldHeightAt(x, z) - anchorGround;
   // Task 5c (spec §5 amendment): roads own their surface height. The tile
   // heightfield samples ~12.5 m and cannot represent a ~6 m carriageway
@@ -644,6 +714,12 @@ async function boot(): Promise<void> {
   // the city's own (unchanged, still-included) GI behavior below.
   terrainRoot.traverse((o) => o.layers.set(1));
   scene.add(terrainRoot);
+  // Streamed tiles carry their own -anchorGround shift (materializeTile bakes
+  // it into group.position.y), so they live under a separate unshifted root —
+  // adding them to terrainRoot would double-shift them.
+  const streamRoot = new THREE.Group();
+  streamRoot.name = 'streamRoot';
+  scene.add(streamRoot);
 
   // ── the real Winterthur city around it (swisstopo LoD2 + OSM, clay) ──────
   // The whole city lives under one named group — later tasks (LOD rings,
@@ -678,6 +754,9 @@ async function boot(): Promise<void> {
   // restores renderer state), then attach the far-field impostor mesh.
   const treeAtlas = await bakeImpostorAtlas(renderer, allArchetypes());
   treeLayer.group.add(buildImpostorMesh(treeLayer.instances, treeAtlas, allArchetypes().length));
+  // Task 5 (M3): per-tile pools build their own impostor meshes off the same
+  // atlas — hand the layer the shared texture once, right after the bake.
+  treeLayer.setImpostorContext(treeAtlas, allArchetypes().length);
   // Dev tree-layer debug surface (unconditional) — the browser smoke reads it.
   window.__trees = {
     archetypes: allArchetypes().length,
@@ -722,6 +801,171 @@ async function boot(): Promise<void> {
   let lastTreeCompaction = 0; // wall-clock seconds
   let lastTreeCamX = camera.position.x;
   let lastTreeCamZ = camera.position.z;
+
+  // ── M3 tile streaming (Task 6): camera-driven L1/L2 pyramid ─────────────
+  // Constructed only HERE — after bakeImpostorAtlas + setImpostorContext +
+  // the first compactNear above (Task-5 finding, binding): addTileTrees
+  // throws without the impostor context, so no tile fetch may even start
+  // before this point. L0 is deliberately NOT in the streamer's tile list —
+  // it is boot-resident in terrainRoot and must never be fetched again or
+  // unloaded.
+  //
+  // L1/L2 overlap rule ("pro Region gewinnt L2"): L1 and L2 tiles carry the
+  // SAME buildings/trees (each feature is assigned once per level by the
+  // bake), so an L1 tile whose region has any live L2 tile would double-render
+  // them. The bake subdivides 4x4 per level (LEVEL_CELLS = [1, 4, 16] in
+  // scripts/geo/lib/tiles.mjs — 16 L1 vs 256 L2 tiles), so L2/x_y lies under
+  // L1/(x>>2)_(y>>2). We count live L2 tiles per L1 parent; a covered L1 tile
+  // hides its whole group (terrain + massing) and unregisters its tree pool,
+  // and reappears when the last covering L2 tile unloads.
+  const plateRect = { x: cityMeta.plate.cx, z: cityMeta.plate.cz, w: cityMeta.plate.w, d: cityMeta.plate.d };
+  // Tree-only exclusion, wider than plateRect: converts `samplerRect` (the
+  // min/max rect already covering the boot nature-tree bbox, see its
+  // definition above) into materializeTile's center/size rect shape. Fixes
+  // the M3 Task-6 double-tree bug — nature.json trees extend past the plate,
+  // and without this the streamed tile trees out there duplicated them.
+  const treeExcludeRect = {
+    x: (samplerRect.minX + samplerRect.maxX) / 2,
+    z: (samplerRect.minZ + samplerRect.maxZ) / 2,
+    w: samplerRect.maxX - samplerRect.minX,
+    d: samplerRect.maxZ - samplerRect.minZ,
+  };
+  const worldBase = '/winterthur-world/';
+  const refByKey = new Map<TileKey, TileRef>();
+  const tileMetas: TileMeta[] = [];
+  for (const ref of world.manifest.tiles) {
+    if (ref.level === 0) continue;
+    const key: TileKey = `L${ref.level}/${ref.x}_${ref.y}`;
+    refByKey.set(key, ref);
+    const [cx, cz] = tileCenter(world.manifest, ref);
+    tileMetas.push({ key, level: ref.level, cx, cz });
+  }
+  const liveTileContent = new Map<TileKey, TileContent>();
+  const l2CoverCount = new Map<TileKey, number>(); // L1 key → live L2 children
+  const registeredTreeKeys = new Set<string>();
+  let disposedTileCount = 0;
+  // Live streamed tiles (decoded) feed the mutable height sampler: rebuilt on
+  // every arrival/departure so tile trees planted in onReady (and far
+  // traffic/flow drape) ride the streamed fine terrain instead of the L0
+  // fallback. Rebuild is a sort + closure over <100 tiles — trivial next to
+  // the materialization it accompanies.
+  const streamedDecoded = new Map<TileKey, DecodedTile>();
+  const rebuildHeightSampler = (): void => {
+    worldHeightAt = makeHeightSampler({ ...world, tiles: [...world.tiles, ...streamedDecoded.values()] });
+  };
+  const setTileTrees = (content: TileContent, on: boolean): void => {
+    if (!content.treeKey) return;
+    if (on && !registeredTreeKeys.has(content.treeKey)) {
+      treeLayer.addTileTrees(content.treeKey, content.trees);
+      registeredTreeKeys.add(content.treeKey);
+    } else if (!on && registeredTreeKeys.has(content.treeKey)) {
+      treeLayer.removeTileTrees(content.treeKey);
+      registeredTreeKeys.delete(content.treeKey);
+    }
+  };
+  const l1KeyFor = (ref: TileRef): TileKey => `L1/${ref.x >> 2}_${ref.y >> 2}`;
+  const applyL1Visibility = (l1Key: TileKey): void => {
+    const content = liveTileContent.get(l1Key);
+    if (!content) return;
+    const covered = (l2CoverCount.get(l1Key) ?? 0) > 0;
+    content.group.visible = !covered;
+    setTileTrees(content, !covered);
+  };
+  // Backdrop cell (L2-index space) hides when fine terrain renders above it:
+  // its own L2 tile is live, or its L1 parent is live AND visible (a covered
+  // L1 group is invisible — its cells without a live L2 fall back to the
+  // backdrop instead of leaving a hole).
+  const updateBackdropCell = (x: number, y: number): void => {
+    const mesh = backdrop.meshes.get(`${x}_${y}`);
+    if (!mesh) return;
+    const l1 = liveTileContent.get(`L1/${x >> 2}_${y >> 2}`);
+    mesh.visible = !(liveTileContent.has(`L2/${x}_${y}`) || (l1 !== undefined && l1.group.visible));
+  };
+  // Any ready/unload in an L1 region can flip that L1's visibility, which
+  // affects all 16 backdrop cells under it — refresh the whole region.
+  const refreshBackdropRegion = (l1x: number, l1y: number): void => {
+    for (let dy = 0; dy < 4; dy++) {
+      for (let dx = 0; dx < 4; dx++) updateBackdropCell(l1x * 4 + dx, l1y * 4 + dy);
+    }
+  };
+  const streamer = new TileStreamer({
+    all: tileMetas,
+    fetchTile: async (meta) => decodeTileBin(await fetchTileBin(worldBase, refByKey.get(meta.key)!.path)),
+    onReady: (meta, tile) => {
+      const ref = refByKey.get(meta.key)!;
+      const dec: DecodedTile = { level: ref.level, x: ref.x, y: ref.y, tile: tile as WorldTile };
+      // Sampler first: the tile trees registered below plant via groundYAt
+      // and must see THIS tile's fine heights.
+      streamedDecoded.set(meta.key, dec);
+      rebuildHeightSampler();
+      const content = materializeTile(
+        dec,
+        // L2: full massing + trees; L1: same — its trees render as impostors
+        // in practice (the compaction near-set rarely reaches the mid ring)
+        // and its massing fills the r1 ring. groundShiftY mirrors terrainRoot.
+        // Buildings still exclude via plateRect only — buildings.json covers
+        // just the plate, so widening the exclusion here would drop massing
+        // the mid ring needs. Trees exclude via `samplerRect` instead: the
+        // boot nature.json trees extend ~100 m+ past the plate (Task 6
+        // finding — 2501/7350 outside plateRect, most coinciding with
+        // streamed tile trees), and `samplerRect` is the exact rect that
+        // already covers that boot nature-tree bbox (+100 m pad).
+        // corridorMask: streamed terrain applies the SAME road/rail fragment
+        // discard as the boot terrain (spec §5) — else roads sink into it.
+        { plateRect, treeExcludeRect, groundShiftY: -anchorGround, buildings: true, trees: true, corridorMask },
+      );
+      // Same GI-probe exclusion as terrainRoot: streamed content is backdrop.
+      content.group.traverse((o) => o.layers.set(1));
+      streamRoot.add(content.group);
+      liveTileContent.set(meta.key, content);
+      if (ref.level === 2) {
+        setTileTrees(content, true);
+        const l1Key = l1KeyFor(ref);
+        l2CoverCount.set(l1Key, (l2CoverCount.get(l1Key) ?? 0) + 1);
+        applyL1Visibility(l1Key);
+        refreshBackdropRegion(ref.x >> 2, ref.y >> 2);
+      } else {
+        // L1: visibility + tree registration depend on current L2 cover.
+        applyL1Visibility(meta.key);
+        refreshBackdropRegion(ref.x, ref.y);
+      }
+    },
+    onUnload: (key) => {
+      const content = liveTileContent.get(key);
+      if (!content) return;
+      liveTileContent.delete(key);
+      streamedDecoded.delete(key);
+      rebuildHeightSampler();
+      setTileTrees(content, false);
+      streamRoot.remove(content.group);
+      content.dispose();
+      disposedTileCount++;
+      const ref = refByKey.get(key)!;
+      if (ref.level === 2) {
+        const l1Key = l1KeyFor(ref);
+        const n = (l2CoverCount.get(l1Key) ?? 1) - 1;
+        if (n <= 0) l2CoverCount.delete(l1Key);
+        else l2CoverCount.set(l1Key, n);
+        applyL1Visibility(l1Key);
+        refreshBackdropRegion(ref.x >> 2, ref.y >> 2);
+      } else {
+        refreshBackdropRegion(ref.x, ref.y);
+      }
+    },
+    onError: (meta, err) => {
+      // eslint-disable-next-line no-console
+      console.error(`[stream] tile ${meta.key} failed permanently:`, err);
+    },
+  });
+  // Prime the initial near ring from the boot camera; animate re-runs this on
+  // the compactNear throttle (~2 Hz) as the camera moves.
+  streamer.update(camera.position.x, camera.position.z);
+  window.__stream = {
+    live: () => streamer.liveCount,
+    liveKeys: () => [...liveTileContent.keys()],
+    disposed: () => disposedTileCount,
+    failed: () => streamer.failed.size,
+  };
   if (trafficEnabled) {
     void TrafficClient.connect({ url: trafficWsUrl })
       .then((client) => {
@@ -1465,6 +1709,9 @@ async function boot(): Promise<void> {
         lastTreeCamX = cx;
         lastTreeCamZ = cz;
         treeLayer.compactNear(cx, cz);
+        // M3 tile streaming rides the same camera-movement throttle (~2 Hz):
+        // load/unload decisions only matter when the camera actually moved.
+        streamer.update(cx, cz);
       }
     }
     frameCount++;
@@ -1530,7 +1777,12 @@ async function boot(): Promise<void> {
     const cpuEnd = performance.now();
     cpu.render = ema(cpu.render, cpuEnd - cpuRender0);
     cpu.frame = ema(cpu.frame, cpuEnd - cpu0);
-    if (!window.__LOOK_READY) window.__LOOK_READY = true;
+    // READY once the first frame rendered AND the initial streaming near-ring
+    // is fully materialized (streamer.update ran at boot; pendingCount === 0
+    // means nothing is queued or in flight — permanently failed tiles leave
+    // the queue too, so this always terminates). L0 terrain is boot-resident
+    // before the first frame by construction.
+    if (!window.__LOOK_READY && streamer.pendingCount === 0) window.__LOOK_READY = true;
   }
   renderer.setAnimationLoop(animate);
 

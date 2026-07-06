@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { RoadGraphSchema, WorldTileSchema } from '../../src/proto/world_pb.js';
+import { BROAD_FAMILIES, CONIFER_FAMILIES } from '../../src/diorama/ksw/geo/treeArchetypes';
+import { FAMILY_CODES } from '../../scripts/geo/lib/style.mjs';
 
 describe('world.proto roundtrip', () => {
   it('RoadGraph SoA survives encode/decode', () => {
@@ -23,5 +25,18 @@ describe('world.proto roundtrip', () => {
     const back = fromBinary(WorldTileSchema, toBinary(WorldTileSchema, t));
     expect(back.height.length).toBe(4);
     expect(back.landcover[2]).toBe(2);
+  });
+
+  it('WorldTile t_family roundtrips', () => {
+    const t = create(WorldTileSchema, {
+      level: 2, x: 1, y: 1, gridN: 1,
+      tX: [0, 1], tZ: [0, 1], tH: [10, 20], tR: [3, 4], tKind: [0, 1], tFamily: [0, 3],
+    });
+    const back = fromBinary(WorldTileSchema, toBinary(WorldTileSchema, t));
+    expect(back.tFamily).toEqual([0, 3]);
+  });
+
+  it('FAMILY_CODES matches [...BROAD_FAMILIES, ...CONIFER_FAMILIES] order', () => {
+    expect(FAMILY_CODES).toEqual([...BROAD_FAMILIES, ...CONIFER_FAMILIES]);
   });
 });
