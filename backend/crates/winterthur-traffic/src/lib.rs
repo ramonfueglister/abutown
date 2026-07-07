@@ -14,6 +14,7 @@ pub mod demand;
 pub mod flow;
 pub mod gateway;
 pub mod measure;
+pub mod replanning;
 pub mod router;
 pub mod shell;
 pub mod spawner;
