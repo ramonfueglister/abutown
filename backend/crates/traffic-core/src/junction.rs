@@ -75,26 +75,11 @@ pub const MANDATORY_ZONE_M: f32 = 50.0;
 /// signal green window (if the turn's node is signalised) and the gap-acceptance
 /// critical headway for the turn's node kind.
 pub struct JunctionModel {
-    /// Per turn id: signal gating window, or `None` if the node is unsignalised.
-    signal: Vec<Option<GreenWindow>>,
     /// Per turn id: gap-acceptance critical headway (s). `0.0` means "no yield
     /// required" (the turn has an empty `yieldsTo`).
     t_gap: Vec<f32>,
     /// Per turn id: the node it crosses (for conflict-point occupancy).
     node: Vec<u32>,
-}
-
-/// A signalised turn's green interval within its cycle, in seconds.
-///
-/// The turn is green iff `cycle_pos ∈ [start, start+green)` where
-/// `cycle_pos = (t·dt) mod cycle_s`. Cycle positions covered by no phase's
-/// green are all-red (every turn at the node reads red), which is exactly the
-/// bake's all-red time between phases.
-#[derive(Clone, Copy)]
-struct GreenWindow {
-    cycle_s: f32,
-    start: f32,
-    green: f32,
 }
 
 impl JunctionModel {
@@ -107,7 +92,6 @@ impl JunctionModel {
     pub fn build(net: &TrafficNet) -> JunctionModel {
         let turn_count = net.turns.len();
         // Turn ids in the bake are dense 0..n (validated upstream); index by id.
-        let mut signal = vec![None; turn_count];
         let mut t_gap = vec![0.0f32; turn_count];
         let mut node = vec![0u32; turn_count];
 
@@ -131,50 +115,13 @@ impl JunctionModel {
             }
         }
 
-        // Signal windows from each signal node's phase table.
-        for n in &net.nodes {
-            let Some(sig) = &n.signal else { continue };
-            let mut start = 0.0f32;
-            for phase in &sig.phases {
-                for &turn in &phase.turns {
-                    signal[turn as usize] = Some(GreenWindow {
-                        cycle_s: sig.cycle_s,
-                        start,
-                        green: phase.green_s,
-                    });
-                }
-                start += phase.green_s;
-            }
-        }
-
-        JunctionModel {
-            signal,
-            t_gap,
-            node,
-        }
+        JunctionModel { t_gap, node }
     }
 
     /// The node this turn crosses.
     #[inline]
     pub fn node_of(&self, turn: u32) -> u32 {
         self.node[turn as usize]
-    }
-
-    /// Whether this turn's signal is green at tick `t`. Turns at unsignalised
-    /// nodes are always "green" (their safety comes from gap acceptance).
-    ///
-    /// Stateless: derived purely from `t` and the precomputed window.
-    #[inline]
-    pub fn signal_green(&self, turn: u32, t: u64, dt: f32) -> bool {
-        match self.signal[turn as usize] {
-            None => true,
-            Some(w) => {
-                // Cycle position in [0, cycle_s). f64 for phase-stable modulo.
-                let elapsed = t as f64 * dt as f64;
-                let pos = elapsed.rem_euclid(w.cycle_s as f64) as f32;
-                pos >= w.start && pos < w.start + w.green
-            }
-        }
     }
 
     /// The gap-acceptance critical headway (s) for this turn; `0.0` if the turn
@@ -197,6 +144,186 @@ impl JunctionModel {
             return true;
         }
         dist_to_conflict > tg * v_conflict + GAP_MARGIN_M
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle-actuated signal control (S3)
+// ---------------------------------------------------------------------------
+
+/// Minimum green per phase (ticks): 5 s.
+pub const MIN_GREEN_TICKS: u64 = 50;
+/// Maximum green per phase while other phases have demand (ticks): 40 s.
+pub const MAX_GREEN_TICKS: u64 = 400;
+/// Gap-out: switch once no vehicle has been inside the detector for 3 s.
+pub const GAP_OUT_TICKS: u64 = 30;
+/// All-red interphase between two phases (ticks): 2 s.
+pub const ALL_RED_TICKS: u64 = 20;
+/// Detector reach upstream of the stop line (m).
+pub const DETECTOR_M: f32 = 40.0;
+
+/// Vehicle-actuated signal timing (S3). The bake's phase tables remain the
+/// COMPATIBILITY structure (which turns may run together); the TIMING is
+/// demand-driven per node — the standard Swiss practice (vehicle-actuated
+/// control per VSS 40 836-1 ff. / RiLSA):
+///
+///  * a phase holds green for at least [`MIN_GREEN_TICKS`],
+///  * extends while vehicles keep occupying the phase approaches within
+///    [`DETECTOR_M`] of the stop line, gapping out after [`GAP_OUT_TICKS`]
+///    without demand, bounded by [`MAX_GREEN_TICKS`] when others wait,
+///  * switches through an [`ALL_RED_TICKS`] interphase to the next phase
+///    WITH demand (round-robin; empty phases are skipped),
+///  * and idles green on the current phase when nobody demands anything.
+///
+/// Replaces the fixed-time `GreenWindow` timing: the bake's splits were
+/// demand-blind (Webster needs flows the bake cannot know) and starved main
+/// movements to ~420 veh/h — the S2 calibration's city-wide-spillback root
+/// cause.
+///
+/// # Determinism
+/// Updated ONCE per tick at the top of [`crate::Core::tick`], sequentially
+/// in ascending node order, purely from the previous tick's fleet snapshot.
+/// Phase 1 reads the state immutably, so the result is independent of the
+/// rayon thread count.
+pub struct SignalControl {
+    nodes: Vec<SignalNodeCtl>,
+    /// Per turn id: `(controller index, phase bitmask)`; `u32::MAX` index for
+    /// turns at unsignalised nodes.
+    turn_ctl: Vec<(u32, u32)>,
+}
+
+struct SignalNodeCtl {
+    /// Per phase: the turns it greens and the unique approach lanes those
+    /// turns come from (the "detector" lanes).
+    phases: Vec<PhaseCtl>,
+    /// Active phase index.
+    cur: usize,
+    /// Tick the active phase's green began (end of the all-red interphase).
+    since: u64,
+    /// All movements are red until this tick (interphase; equal or below the
+    /// current tick means green is running).
+    all_red_until: u64,
+    /// Last tick the ACTIVE phase's detector saw a vehicle.
+    last_demand: u64,
+}
+
+struct PhaseCtl {
+    turns: Vec<u32>,
+    approach_lanes: Vec<u32>,
+}
+
+impl SignalControl {
+    /// Build controllers from the bake's signal phase tables.
+    pub fn build(net: &TrafficNet) -> SignalControl {
+        let mut turn_ctl = vec![(u32::MAX, 0u32); net.turns.len()];
+        let mut nodes = Vec::new();
+        for n in &net.nodes {
+            let Some(sig) = &n.signal else { continue };
+            let ctl_idx = nodes.len() as u32;
+            // Authored empty phases (the fixed-time bake's all-red filler)
+            // carry no turns and can never be demanded — drop them so the
+            // round-robin never parks on a phase nobody can use.
+            let mut phases: Vec<PhaseCtl> = sig
+                .phases
+                .iter()
+                .filter(|phase| !phase.turns.is_empty())
+                .map(|phase| {
+                    let mut approach: Vec<u32> = phase
+                        .turns
+                        .iter()
+                        .map(|&tid| net.turns[tid as usize].from_lane)
+                        .collect();
+                    approach.sort_unstable();
+                    approach.dedup();
+                    PhaseCtl {
+                        turns: phase.turns.clone(),
+                        approach_lanes: approach,
+                    }
+                })
+                .collect();
+            if phases.is_empty() {
+                continue;
+            }
+            phases.shrink_to_fit();
+            for (pi, phase) in phases.iter().enumerate() {
+                for &tid in &phase.turns {
+                    let e = &mut turn_ctl[tid as usize];
+                    e.0 = ctl_idx;
+                    e.1 |= 1 << pi;
+                }
+            }
+            nodes.push(SignalNodeCtl {
+                phases,
+                cur: 0,
+                since: 0,
+                all_red_until: 0,
+                last_demand: 0,
+            });
+        }
+        SignalControl { nodes, turn_ctl }
+    }
+
+    /// Whether `turn` is green at tick `now`. Turns at unsignalised nodes are
+    /// always green (gap acceptance governs them).
+    #[inline]
+    pub fn green(&self, turn: u32, now: u64) -> bool {
+        let (ctl, mask) = self.turn_ctl[turn as usize];
+        if ctl == u32::MAX {
+            return true;
+        }
+        let n = &self.nodes[ctl as usize];
+        now >= n.all_red_until && (mask >> n.cur) & 1 == 1
+    }
+
+    /// Advance every controller one tick from the current fleet snapshot.
+    /// Sequential, ascending node order — deterministic.
+    pub fn update(
+        &mut self,
+        fleet: &crate::fleet::Fleet,
+        index: &crate::fleet::LaneIndex,
+        lane_len: &[f32],
+        now: u64,
+    ) {
+        let demand_on = |lanes: &[u32]| -> bool {
+            lanes.iter().any(|&lane| {
+                index
+                    .on_lane(lane)
+                    .iter()
+                    .any(|&veh| lane_len[lane as usize] - fleet.s[veh as usize] <= DETECTOR_M)
+            })
+        };
+        for n in &mut self.nodes {
+            if now < n.all_red_until {
+                continue; // interphase running; the target phase is set
+            }
+            if demand_on(&n.phases[n.cur].approach_lanes) {
+                n.last_demand = now;
+            }
+            let elapsed = now.saturating_sub(n.since);
+            if elapsed < MIN_GREEN_TICKS {
+                continue;
+            }
+            let gapped_out = now.saturating_sub(n.last_demand) >= GAP_OUT_TICKS;
+            if !(gapped_out || elapsed >= MAX_GREEN_TICKS) {
+                continue;
+            }
+            // Next phase with demand, round-robin; none → idle green here.
+            let len = n.phases.len();
+            let next = (1..len)
+                .map(|k| (n.cur + k) % len)
+                .find(|&p| demand_on(&n.phases[p].approach_lanes));
+            if let Some(next) = next {
+                n.cur = next;
+                n.all_red_until = now + ALL_RED_TICKS;
+                n.since = now + ALL_RED_TICKS;
+                n.last_demand = now + ALL_RED_TICKS;
+            } else if elapsed >= MAX_GREEN_TICKS {
+                // Idle green: restart the clock so a later arrival elsewhere
+                // still gets served within MIN+MAX bounds.
+                n.since = now;
+                n.last_demand = now;
+            }
+        }
     }
 }
 

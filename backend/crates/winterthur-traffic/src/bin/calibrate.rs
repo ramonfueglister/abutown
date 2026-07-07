@@ -198,9 +198,8 @@ fn main() -> anyhow::Result<()> {
         schedule.run(&mut world);
 
         if watch_node.is_some() && (48_000..54_000).contains(&t) && t % 100 == 0 {
-            use traffic_core::junction::{JunctionModel, turn_between};
+            use traffic_core::junction::turn_between;
             let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
-            let jm = JunctionModel::build(&net);
             let mut line = format!("watch t={t}");
             for &lane in &watch_lanes {
                 let occ = core.index.on_lane(lane);
@@ -218,7 +217,7 @@ fn main() -> anyhow::Result<()> {
                         let (sig, next_space) =
                             match nxt.and_then(|nl| turn_between(&net, lane, nl)) {
                                 Some(turn) => {
-                                    let g = jm.signal_green(turn, t, traffic_core::DT);
+                                    let g = core.signal_green(turn, t);
                                     let nl = nxt.unwrap();
                                     // Space before the rear-most vehicle on next lane.
                                     let space = core
@@ -309,9 +308,8 @@ fn main() -> anyhow::Result<()> {
     // green/no signal (gap or conflict-point hold, or a NoTurn wall), or
     // (d) stopped mid-lane with clear road (anomaly)?
     {
-        use traffic_core::junction::{JunctionModel, turn_between};
+        use traffic_core::junction::turn_between;
         let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
-        let jm = JunctionModel::build(&net);
         let (mut queued, mut red, mut hold, mut anomaly, mut route_end) =
             (0u32, 0u32, 0u32, 0u32, 0u32);
         let mut hold_samples: Vec<String> = Vec::new();
@@ -361,7 +359,7 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                     Some(turn) => {
-                        if !jm.signal_green(turn, TICKS_PER_WORLD_DAY, traffic_core::DT) {
+                        if !core.signal_green(turn, TICKS_PER_WORLD_DAY) {
                             red += 1;
                         } else {
                             hold += 1;

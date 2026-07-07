@@ -18,7 +18,9 @@
 
 use crate::fleet::{Fleet, LaneIndex, VehId};
 use crate::idm::{IdmParams, N_CLASSES, class_len_m, idm_accel};
-use crate::junction::{self, APPROACH_ZONE_M, JunctionModel, MANDATORY_ZONE_M, NodeOccupancy};
+use crate::junction::{
+    self, APPROACH_ZONE_M, JunctionModel, MANDATORY_ZONE_M, NodeOccupancy, SignalControl,
+};
 use crate::mobil::{self, Follower, LaneNeighbourhood, MobilParams};
 use rayon::prelude::*;
 use traffic_net::TrafficNet;
@@ -151,8 +153,13 @@ pub struct Core {
     /// through the immutable [`JunctionModel`].
     net: TrafficNet,
 
-    /// Precomputed per-turn signal windows + gap headways (Task 5).
+    /// Precomputed per-turn gap headways (Task 5).
     junction: JunctionModel,
+
+    /// Vehicle-actuated signal controllers (S3): timing state per signal
+    /// node, updated sequentially at the top of every tick; phase 1 reads it
+    /// immutably.
+    signals: SignalControl,
 
     /// Phase-2 conflict-point occupancy scratch, pre-sized in [`Core::new`].
     occupancy: NodeOccupancy,
@@ -260,6 +267,7 @@ impl Core {
         }
 
         let junction = JunctionModel::build(net);
+        let signals = SignalControl::build(net);
         let occupancy = NodeOccupancy::new(net);
 
         Core {
@@ -273,6 +281,7 @@ impl Core {
             seed,
             net: net.clone(),
             junction,
+            signals,
             occupancy,
             intents: vec![Intent::default(); cap],
             active_lanes: Vec::with_capacity(lane_count),
@@ -405,6 +414,13 @@ impl Core {
     /// ending on a boundary stub's in-lane is a normal route end). Read-only
     /// observation seam for the shell's conservation audit; the buffer is
     /// cleared at the start of the next tick.
+    /// Whether `turn`'s signal is green at tick `t` (always true at
+    /// unsignalised nodes). Read-only view of the actuated controllers, for
+    /// diagnostics/telemetry consumers.
+    pub fn signal_green(&self, turn: u32, t: u64) -> bool {
+        self.signals.green(turn, t)
+    }
+
     /// Force a stationary sideways re-seat onto an adjacent same-edge lane —
     /// the shell's stranded-vehicle rescue for TURNLESS lanes (a lane with no
     /// outgoing turn at all cannot be left longitudinally; the only physical
@@ -445,6 +461,11 @@ impl Core {
     /// Advance the simulation one timestep. `t` is the tick number, folded into
     /// deterministic per-vehicle noise.
     pub fn tick(&mut self, t: u64) {
+        // Advance the actuated signal controllers from the previous tick's
+        // snapshot BEFORE phase 1 reads them (sequential → deterministic).
+        self.signals
+            .update(&self.fleet, &self.index, &self.lane_len, t);
+
         debug_assert!(
             self.intents.len() >= self.fleet.slots(),
             "intent buffer too small: {} < {}",
@@ -472,6 +493,7 @@ impl Core {
         let seed = self.seed;
         let net = &self.net;
         let junction = &self.junction;
+        let signals = &self.signals;
 
         // Raw pointer into the intent buffer for disjoint parallel writes: each
         // vehicle slot is written by exactly one lane task, so the writes never
@@ -521,7 +543,8 @@ impl Core {
                 let mut no_turn_wall = false;
                 let next_turn = match boundary {
                     Boundary::Turn(turn) => {
-                        if !junction_allows(fleet, index, lane_len, junction, net, turn, t) {
+                        if !junction_allows(fleet, index, lane_len, junction, signals, net, turn, t)
+                        {
                             blocked = true;
                             let stop_gap = dist_to_end;
                             if stop_gap < gap {
@@ -1313,12 +1336,13 @@ fn junction_allows(
     index: &LaneIndex,
     lane_len: &[f32],
     junction: &JunctionModel,
+    signals: &SignalControl,
     net: &TrafficNet,
     turn: u32,
     t: u64,
 ) -> bool {
-    // Signal gating first (cheap, stateless).
-    if !junction.signal_green(turn, t, DT) {
+    // Signal gating first (cheap, read-only actuated state).
+    if !signals.green(turn, t) {
         return false;
     }
     // Gap acceptance: only if this turn yields to something.
