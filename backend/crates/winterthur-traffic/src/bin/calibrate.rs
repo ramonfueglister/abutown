@@ -53,6 +53,18 @@ struct Station {
 /// Per-station hourly entering counts, one bucket per kernel class.
 type Counts = Vec<[[u64; 3]; 24]>;
 
+fn kind_str(n: &traffic_net::Node) -> &'static str {
+    use traffic_net::NodeKind::*;
+    match n.kind {
+        Signal => "signal",
+        Roundabout => "roundabout",
+        Priority => "priority",
+        Uncontrolled => "uncontrolled",
+        Gateway => "gateway",
+        DeadEnd => "dead_end",
+    }
+}
+
 fn env_or(key: &str, dflt: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| dflt.to_string())
 }
@@ -110,15 +122,24 @@ fn main() -> anyhow::Result<()> {
     // edge of its current lane differs from its previous tick's edge and the
     // new edge is monitored (slot-reuse safe: freed slots reset to NONE).
     const NONE: u32 = u32::MAX;
+    let max_node = net.nodes.iter().map(|n| n.id).max().unwrap_or(0) as usize;
+    let edge_from: Arc<Vec<u32>> = {
+        let mut v = vec![0u32; max_edge + 1];
+        for e in &net.edges {
+            v[e.id as usize] = e.from;
+        }
+        Arc::new(v)
+    };
     let state = Arc::new(Mutex::new((
         vec![NONE; 0] as Vec<u32>, // prev edge per slot
         vec![[[0u64; 3]; 24]; stations.len()] as Counts,
+        vec![0u64; max_node + 1], // node crossings (vehicle entered an edge FROM this node)
     )));
     let hook_state = Arc::clone(&state);
     let watchers = Arc::new(watchers);
     world.insert_resource(SnapshotHook::new(move |snap| {
         let mut guard = hook_state.lock().expect("hook state poisoned");
-        let (prev, counts) = &mut *guard;
+        let (prev, counts, node_cross) = &mut *guard;
         let slots = snap.core.fleet.slots();
         prev.resize(slots, NONE);
         let hour = world_hour(snap.tick);
@@ -131,6 +152,9 @@ fn main() -> anyhow::Result<()> {
                 }
             };
             if cur != prev[slot] {
+                if prev[slot] != NONE {
+                    node_cross[edge_from[cur as usize] as usize] += 1;
+                }
                 if let Some(watching) = watchers.get(cur as usize) {
                     let class = snap.core.fleet.class[slot].min(2) as usize;
                     for &si in watching {
@@ -148,6 +172,8 @@ fn main() -> anyhow::Result<()> {
         stations.len()
     );
     let started = std::time::Instant::now();
+    let max_node_id = net.nodes.iter().map(|n| n.id).max().unwrap_or(0) as usize;
+    let mut hold_heads_by_node = vec![0u32; max_node_id + 1];
     for t in 0..TICKS_PER_WORLD_DAY {
         schedule.run(&mut world);
         if t % (TICKS_PER_WORLD_DAY / 24) == 0 {
@@ -170,6 +196,44 @@ fn main() -> anyhow::Result<()> {
                 if alive > 0 { v_sum / alive as f32 } else { 0.0 },
                 started.elapsed().as_secs_f32()
             );
+            // Chokepoint sampling (daytime hours): queue HEADS — stopped, road
+            // clear ahead, pressed against a lane end — attributed to the node
+            // of their next turn. Accumulated across hourly snapshots.
+            let h = world_hour(t);
+            if (7..=20).contains(&h) {
+                use traffic_core::junction::turn_between;
+                for slot in 0..core.fleet.slots() {
+                    let Some(view) = core.vehicle_view(slot as u32) else {
+                        continue;
+                    };
+                    if view.v >= 0.5 {
+                        continue;
+                    }
+                    let lane_len = net.lanes[view.lane as usize].length_m;
+                    if lane_len - view.s > 5.0 {
+                        continue;
+                    }
+                    let mut clear = true;
+                    for &other in core.index.on_lane(view.lane) {
+                        if other != slot as u32 {
+                            let so = core.fleet.s[other as usize];
+                            if so > view.s && so - view.s < 15.0 {
+                                clear = false;
+                                break;
+                            }
+                        }
+                    }
+                    if !clear {
+                        continue;
+                    }
+                    let cursor = core.fleet.route[slot].cursor as usize;
+                    if let Some(&next_lane) = core.fleet.route_slice(slot).get(cursor + 1)
+                        && let Some(turn) = turn_between(&net, view.lane, next_lane)
+                    {
+                        hold_heads_by_node[net.turns[turn as usize].node as usize] += 1;
+                    }
+                }
+            }
         }
     }
 
@@ -259,6 +323,30 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Chokepoint ranking: nodes by queue-head holds (hourly 07-20 samples),
+    // with their kind and total crossings/day for capacity context.
+    {
+        let guard = state.lock().expect("hook state poisoned");
+        let node_cross = &guard.2;
+        let kind_of: std::collections::BTreeMap<u32, &str> =
+            net.nodes.iter().map(|n| (n.id, kind_str(n))).collect();
+        let mut ranked: Vec<(u32, u32)> = hold_heads_by_node
+            .iter()
+            .enumerate()
+            .filter(|&(_, &c)| c > 0)
+            .map(|(n, &c)| (n as u32, c))
+            .collect();
+        ranked.sort_by_key(|&(n, c)| (std::cmp::Reverse(c), n));
+        eprintln!("calibrate: top chokepoint nodes (queue-head holds across 14 hourly samples):");
+        for &(node, holds) in ranked.iter().take(15) {
+            eprintln!(
+                "  node {node} [{}]: holds={holds} crossings/day={}",
+                kind_of.get(&node).unwrap_or(&"?"),
+                node_cross[node as usize]
+            );
+        }
+    }
+
     // Gridlock forensics: where do stuck vehicles sit at world midnight?
     {
         let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
@@ -301,7 +389,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let guard = state.lock().expect("hook state poisoned");
-    let (_, counts) = &*guard;
+    let (_, counts, _) = &*guard;
     let out = serde_json::json!({
         "seed": seed,
         "demandScale": demand_scale,
