@@ -65,13 +65,13 @@ import { materializeTile, subCellKey, type TileContent } from './geo/tileContent
 import type { TileRef, WorldTile } from '../../proto/world_pb.js';
 import { buildWindows } from './geo/windows';
 import { buildLamps } from './geo/lamps';
-import { lampGlowU } from './glowUniform';
+import { lampGlowU, snowU } from './glowUniform';
 import { buildNature } from './geo/nature';
 import { buildTreeLayer } from './geo/treeLayer';
 import { bakeImpostorAtlas, buildImpostorMesh } from './geo/treeImpostors';
 import { allArchetypes } from './geo/treeArchetypes';
 import { windAmpU } from './windUniform';
-import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
+import { applyCityLod, cityLodState, lampLodVisibility, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
 import {
   TrafficClient,
@@ -827,6 +827,11 @@ async function boot(): Promise<void> {
   // Task 5 (M3): per-tile pools build their own impostor meshes off the same
   // atlas — hand the layer the shared texture once, right after the bake.
   treeLayer.setImpostorContext(treeAtlas, allArchetypes().length);
+  // Dev scene + camera + uniform handles — visual-polish smokes toggle layers
+  // and inspect shared uniforms through them.
+  (window as unknown as { __SCENE?: THREE.Scene }).__SCENE = scene;
+  (window as unknown as { __CAM?: THREE.Camera }).__CAM = camera;
+  (window as unknown as { __UNIFORMS?: object }).__UNIFORMS = { lampGlowU, snowU };
   // Dev tree-layer debug surface (unconditional) — the browser smoke reads it.
   window.__trees = {
     archetypes: allArchetypes().length,
@@ -851,7 +856,7 @@ async function boot(): Promise<void> {
     },
   };
   cityRoot.add(buildWindows(cityBuildings));
-  cityRoot.add(buildLamps(cityRoads));
+  cityRoot.add(buildLamps(cityRoads, groundYAt));
   scene.add(cityRoot);
 
   // ── live traffic (Task 9, ?traffic=1): instanced cars dead-reckoned from the
@@ -1195,10 +1200,21 @@ async function boot(): Promise<void> {
     setFacadeDetail: (on: boolean): void => {
       (cityWalls?.userData.setFacadeDetail as ((v: boolean) => void) | undefined)?.(on);
     },
-    lamps: cityRoot.getObjectByName('cityLamps') ?? null,
     footways: cityRoot.getObjectByName('footwayRibbons') ?? null,
     setTreeShadows: (on: boolean) => treeLayer.setTreeShadows(on),
   };
+  // Lamp LOD (2026-07-07 flicker/clutter fix): the opaque hardware and the
+  // additive glow cull at their own distances (lampLodVisibility), NOT the
+  // facade ring — otherwise the far-visible window raster drags 17.9k
+  // sub-pixel posts/bulbs into the establishing view.
+  const lampHardware = cityRoot.getObjectByName('lampHardware') ?? null;
+  const lampGlow = cityRoot.getObjectByName('lampGlow') ?? null;
+  let lampVis = lampLodVisibility(rig.radius, { hardware: true, glow: true });
+  const applyLampVis = (): void => {
+    if (lampHardware) lampHardware.visible = lampVis.hardware;
+    if (lampGlow) lampGlow.visible = lampVis.glow;
+  };
+  applyLampVis();
 
   // Building hover (Task 9): pick against the merged city walls+roofs meshes
   // (both carry the buildingIdx attribute from cityMassing's merge — see
@@ -1697,6 +1713,13 @@ async function boot(): Promise<void> {
       cityRing = nextRing;
       applyCityLod(cityRing, lodRefs);
       if (shadowCached) sun.shadow.needsUpdate = true;
+    }
+    // Lamp LOD rides the continuous radius (own hysteresis), not the 3-ring
+    // boundaries — a plain boolean-set when a role's visibility actually flips.
+    const nextLampVis = lampLodVisibility(rig.radius, lampVis);
+    if (nextLampVis.hardware !== lampVis.hardware || nextLampVis.glow !== lampVis.glow) {
+      lampVis = nextLampVis;
+      applyLampVis();
     }
     const fogZoom = Math.max(1, rig.radius / 110);
     (scene.fog as THREE.Fog).near = fogBase.near * fogZoom;

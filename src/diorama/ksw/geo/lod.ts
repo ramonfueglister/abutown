@@ -26,7 +26,9 @@ export type CityLodRefs = {
   // Windows are now a wall-shader raster (Task 13), not a separate object — the
   // far ring flips a uniform via setFacadeDetail instead of hiding a group.
   setFacadeDetail: (on: boolean) => void;
-  lamps: THREE.Object3D | null;
+  // Lamps are NOT here — they have their own distance LOD (lampLodVisibility),
+  // decoupled from the facade ring so the far-visible facade raster can't drag
+  // 17.9k opaque lamp posts/bulbs into the establishing view (2026-07-07 fix).
   footways: THREE.Object3D | null;
   // Trees handle their own distance LOD (near-set compaction + the impostor's
   // vertex-stage near-collapse), so the ring never toggles tree visibility —
@@ -37,7 +39,30 @@ export type CityLodRefs = {
 export function applyCityLod(ring: CityLodRing, r: CityLodRefs): void {
   const far = ring === 'far';
   r.setFacadeDetail(!far);
-  if (r.lamps) r.lamps.visible = !far;
   if (r.footways) r.footways.visible = !far;
   r.setTreeShadows(ring === 'near');
+}
+
+// ── Lamp LOD (2026-07-07 flicker/clutter fix) ───────────────────────────────
+// Street lamps split into two roles with independent cull distances (tokens
+// kswCityStyle.lampLod). The camera radius drives a hysteresis threshold per
+// role so orbiting a boundary never flickers the toggle itself.
+//  - hardware (posts/heads/bulbs): opaque + sub-pixel far away. These are the
+//    day clutter and the scintillation; cull them past hardwareR (~300 m).
+//  - glow (pools/halos): additive, invisible by day; the night atmosphere at
+//    the establishing framing. Keep them out to glowR (~1500 m).
+export type LampVis = { hardware: boolean; glow: boolean };
+
+function bandVisible(radius: number, R: number, h: number, prev: boolean): boolean {
+  if (radius < R * (1 - h)) return true;
+  if (radius > R * (1 + h)) return false;
+  return prev; // inside the hysteresis band → hold the current state
+}
+
+export function lampLodVisibility(radius: number, prev: LampVis): LampVis {
+  const { hardwareR, glowR, hysteresis } = kswCityStyle.lampLod;
+  return {
+    hardware: bandVisible(radius, hardwareR, hysteresis, prev.hardware),
+    glow: bandVisible(radius, glowR, hysteresis, prev.glow),
+  };
 }

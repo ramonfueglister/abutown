@@ -10,10 +10,10 @@ import * as THREE from 'three/webgpu';
 import {
   Fn, attribute, float, max as tslMax, min as tslMin, mix, positionWorld, smoothstep, uniform, vec3,
 } from 'three/tsl';
-import { clay, kswCityStyle, kswPalette, kswS3, palette } from '../../designTokens';
+import { clay, facadeLook, kswCityStyle, kswPalette, kswS3, palette, terrainLook } from '../../designTokens';
 import { NIGHT_WINDOW_SHARE } from '../staticBatch';
 import { clayMat } from '../props';
-import { lampGlowU } from '../glowUniform';
+import { lampGlowU, snowU } from '../glowUniform';
 import type { BakedBuilding, BakedMesh, BakedWallMesh } from './geoData';
 
 // Baked facade-UV quantization factor: 1 unit = 0.2 m. MUST match
@@ -121,10 +121,17 @@ export function mergeWalls(buildings: BakedBuilding[], base: number): THREE.Buff
       colors[vo + i + 2] = tint.b;
       buildingIdx[base3 + i / 3] = bi;
     }
+    // Window-clamp height: the raw eaveH is right for pitched-roof houses
+    // (no windows in the roof), but on flat-roofed/stacked complexes the
+    // baked eave sits at the LOWEST roof junction — the KSW tower (eaveH
+    // 13.2, ridge 69.9) rendered 57 m of blank clay. When the roof delta is
+    // bigger than a real attic, raster windows up to just below the wall top
+    // instead.
+    const winClampH = b.height - b.eaveH > 4.5 ? b.height - 1.2 : b.eaveH;
     for (let v = 0; v < nVerts; v++) {
       fuv[uo + v * 2] = p.fuv[v * 2] / FUV_PER_M; // 2-dm units → m
       fuv[uo + v * 2 + 1] = p.fuv[v * 2 + 1] / FUV_PER_M;
-      eave[uo / 2 + v] = b.eaveH;
+      eave[uo / 2 + v] = winClampH;
     }
     for (let i = 0; i < p.idx.length; i++) indices[io + i] = base3 + p.idx[i];
     vo += p.pos.length;
@@ -213,7 +220,7 @@ export function ringBandParts(fp: number[][], y0: number, y1: number, out: numbe
 // so vertexColors passes the baked colour straight through). Cloned from the
 // shared clayMat so the sheen/roughness recipe matches the hero, without
 // mutating the cached hero material.
-export function tintedClay(base: number): THREE.MeshPhysicalMaterial {
+export function tintedClay(base: number, opts: { snow?: boolean } = {}): THREE.MeshPhysicalMaterial {
   const m = clayMat(base).clone();
   m.vertexColors = true;
   m.color = new THREE.Color(palette.trueWhite);
@@ -223,6 +230,21 @@ export function tintedClay(base: number): THREE.MeshPhysicalMaterial {
   // ridges/eaves would lose the crisp clay facets. Flat shading restores
   // per-face faceted normals at draw time without unwelding the JSON.
   m.flatShading = true;
+  // Roof snow (snowU, 2026-07-07): whiten with snow cover so a snowing city
+  // reads winter from the dominant aerial view.
+  if (opts.snow) {
+    const snow = new THREE.Color(terrainLook.snow);
+    // vertexColors MUST be off here: with it on, the engine multiplies the
+    // vertex tint onto the colorNode output AGAIN — snow-white × terracotta
+    // = terracotta, i.e. the whitening silently no-ops (2026-07-07 finding).
+    // The colorNode consumes the tint attribute itself instead.
+    m.vertexColors = false;
+    m.colorNode = mix(
+      attribute<'vec3'>('color', 'vec3'),
+      vec3(snow.r, snow.g, snow.b),
+      snowU.mul(float(0.85)),
+    ) as THREE.MeshPhysicalMaterial['colorNode'];
+  }
   return m;
 }
 
@@ -289,20 +311,41 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   const localX = u.sub(colIdx.mul(spacing)); // 0..spacing along the wall
   const localY = v.sub(storeyIdx.mul(storeyH)); // 0..storeyH up the storey
 
-  // window rect centred in the cell horizontally, sill-offset vertically
-  const winX0 = spacing.sub(winW).mul(0.5);
-  const winX1 = winX0.add(winW);
-  const winY0 = sill;
-  const winY1 = sill.add(winH);
+  // Per-building hashes (split-grammar seeds): buildingIdx is constant across
+  // a building's vertices, so these gate whole-building rules.
+  const bIdxN = attribute<'float'>('buildingIdx', 'float');
+  const bSin = bIdxN.mul(float(91.17)).sin().mul(float(43758.5453));
+  const bHash = bSin.sub(bSin.floor()); // night lit share (below)
+  const bSin2 = bIdxN.mul(float(57.31)).sin().mul(float(43758.5453));
+  const bHash2 = bSin2.sub(bSin2.floor()); // shopfront gate
+  const bSin3 = bIdxN.mul(float(23.77)).sin().mul(float(43758.5453));
+  const bHash3 = bSin3.sub(bSin3.floor()); // balcony gate
+
+  // Ground-floor shopfront rule: storey 0 of `shopShare` of the buildings
+  // becomes a near-full-width glazed front (taller, wider pane) — the
+  // "ground floor is a different grammar rule" split that makes streets read
+  // inhabited.
+  const isGF = storeyIdx.lessThan(float(0.5));
+  const shopM = isGF.and(bHash2.lessThan(float(facadeLook.shopShare))).select(float(1), float(0));
+
+  // window rect centred in the cell horizontally, sill-offset vertically;
+  // shopfronts override toward full-cell glazing.
+  const winX0 = mix(spacing.sub(winW).mul(0.5), spacing.mul(float(0.08)), shopM);
+  const winX1 = mix(spacing.sub(winW).mul(0.5).add(winW), spacing.mul(float(0.92)), shopM);
+  const winY0 = mix(sill, float(0.45), shopM);
+  const winY1 = mix(sill.add(winH), float(2.7), shopM);
 
   // signed inset from the window rect edges (>0 inside)
   const insetX = tslMin(localX.sub(winX0), winX1.sub(localX));
   const insetY = tslMin(localY.sub(winY0), winY1.sub(localY));
   const inset = tslMin(insetX, insetY); // >0 inside the window opening
 
-  // eave clamp: the TOP of this storey must sit below eaveH−0.2, else no window
-  const storeyTop = storeyIdx.add(1).mul(storeyH);
-  const underEave = storeyTop.lessThan(eaveH.sub(float(0.2)));
+  // eave clamp: the WINDOW top (not the full storey top) must sit below
+  // eaveH−0.15. The old full-storey test (storeyTop < eaveH−0.2) silently
+  // dropped the top row on every building — a 2-storey house (eave ≈ 6 m,
+  // storeyH 3) rendered exactly one row of windows ("nur im ersten Stock").
+  const winTopAbs = storeyIdx.mul(storeyH).add(sill).add(winH);
+  const underEave = winTopAbs.lessThan(eaveH.sub(float(0.15)));
 
   // masks (soft edges for a clean AA look, still essentially binary)
   const glassMask = smoothstep(float(0), float(0.03), inset.sub(frame)); // 1 in the pane
@@ -318,11 +361,56 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   // further toward the pane edges for inset depth. The white frame ring stays
   // bright — the original white-jamb language.
   const edgeDark = mix(float(0.5), float(0.72), smoothstep(float(0), float(0.35), inset));
-  const glassTone = vec3(glass.r, glass.g, glass.b).mul(edgeDark);
+  // Lintel AO: the top reveal shadows the pane — the classic inset depth cue.
+  const topShade = mix(float(0.62), float(1), smoothstep(float(0.02), float(0.4), winY1.sub(localY)));
+  // Curtain variety: a share of panes soften toward a warm interior tone so
+  // the glass grid doesn't read as one dead material.
+  const curtSin = colIdx.mul(float(29.7)).add(storeyIdx.mul(float(13.3))).add(bIdxN.mul(float(7.1))).sin().mul(float(43758.5453));
+  const curtHash = curtSin.sub(curtSin.floor());
+  const curtM = curtHash.lessThan(float(facadeLook.curtainShare)).select(float(0.55), float(0));
+  const curtain = new THREE.Color(facadeLook.curtain);
+  const glassTone = mix(
+    vec3(glass.r, glass.g, glass.b),
+    vec3(curtain.r, curtain.g, curtain.b),
+    curtM,
+  ).mul(edgeDark).mul(topShade);
   const frameTone = vec3(frameCol.r, frameCol.g, frameCol.b);
   const windowTone = mix(glassTone, frameTone, frameMask);
 
-  const facadeColor = mix(clayBase, windowTone, windowMask.mul(gate));
+  // Balcony relief (shader-drawn): on balconyShare of buildings, balconyCol-
+  // Share of window columns get a parapet balcony on every upper storey —
+  // slab band + solid balustrade under the window, with a contact shadow at
+  // the storey floor. Stacked per column, like real balcony risers.
+  const isUpper = storeyIdx.greaterThan(float(0.5));
+  const colSin = colIdx.mul(float(3.77)).add(bIdxN.mul(float(11.13))).sin().mul(float(43758.5453));
+  const colHash = colSin.sub(colSin.floor());
+  const balcGate = isUpper
+    .and(bHash3.lessThan(float(facadeLook.balconyShare)))
+    .and(colHash.lessThan(float(facadeLook.balconyColShare)))
+    .select(float(1), float(0))
+    .mul(gate)
+    .mul(float(1).sub(shopM));
+  const bx0 = winX0.sub(float(0.35));
+  const bx1 = winX1.add(float(0.35));
+  const inBalcX = smoothstep(float(0), float(0.04), localX.sub(bx0)).mul(smoothstep(float(0), float(0.04), bx1.sub(localX)));
+  const slabM = inBalcX.mul(smoothstep(float(0.04), float(0.1), localY)).mul(smoothstep(float(0), float(0.06), float(0.34).sub(localY)));
+  const parapetM = inBalcX
+    .mul(smoothstep(float(0), float(0.05), localY.sub(float(0.34))))
+    .mul(smoothstep(float(0), float(0.05), winY0.sub(float(0.1)).sub(localY)));
+  const shadowM = inBalcX.mul(smoothstep(float(0.1), float(0.02), localY)); // contact shadow at storey floor
+  const slabC = new THREE.Color(facadeLook.slab);
+  const parapetC = new THREE.Color(facadeLook.parapet);
+  const withBalcony = mix(
+    mix(
+      mix(clayBase, clayBase.mul(float(0.72)), shadowM.mul(balcGate)),
+      vec3(slabC.r, slabC.g, slabC.b),
+      slabM.mul(balcGate),
+    ),
+    vec3(parapetC.r, parapetC.g, parapetC.b),
+    parapetM.mul(balcGate),
+  );
+
+  const facadeColor = mix(withBalcony, windowTone, windowMask.mul(gate));
 
   // Storey-peel cutaway (Phase A): three uniforms. Fragments above
   // `discardAbove` are gone (hard cut — everything above the currently
@@ -359,11 +447,26 @@ export function facadeMaterial(base: number, opts: { cutaway?: boolean } = {}): 
   // on the facade grid cell (u-cell + storey), mirroring nightWindowHash's
   // sin-fract formula but on cell indices so the choice is stable per window,
   // decides which panes glow. Only the glass area glows.
+  //
+  // Variance pass (SOTA 2026-07-06): a uniform 55% lit share read as one flat
+  // speckle carpet over the whole city. Real night cities live from variance —
+  // each BUILDING gets its own lit share (hash(buildingIdx) → ~10%..75%, mean
+  // ≈ NIGHT_WINDOW_SHARE) and each lit pane its own brightness (0.55..1.0),
+  // so some houses glow, some sleep, and no two windows bloom identically.
   const cellHash = colIdx.mul(float(12.9898)).add(storeyIdx.mul(float(78.233))).sin().mul(float(43758.5453));
   const hash = cellHash.sub(cellHash.floor()); // 0..1 fract via sin, like nightWindowHash
-  const lit = hash.lessThan(float(NIGHT_WINDOW_SHARE)).select(float(1), float(0));
-  const glow = glassMask.mul(gate).mul(lit);
-  m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(0.9)).mul(lampGlowU));
+  // per-building share 0.2×..1.8× the base; shopfronts glow more reliably
+  const share = float(NIGHT_WINDOW_SHARE)
+    .mul(float(0.2).add(bHash.mul(float(1.6))))
+    .mul(mix(float(1), float(1.5), shopM));
+  const lit = hash.lessThan(share).select(float(1), float(0));
+  const paneSin = hash.mul(float(7.13)).add(bHash.mul(float(3.7))).sin().mul(float(43758.5453));
+  const paneBright = float(0.55).add(paneSin.sub(paneSin.floor()).mul(float(0.45)));
+  // 2.6 peak pushes lit panes past the bloom threshold (kswPost.bloomThreshold
+  // 1.05) so night windows read as light sources, not painted-on decals —
+  // the old 0.9 peak stayed under the threshold and never bloomed.
+  const glow = glassMask.mul(gate).mul(lit).mul(paneBright);
+  m.emissiveNode = vec3(warm.r, warm.g, warm.b).mul(glow.mul(float(2.6)).mul(lampGlowU));
 
   return Object.assign(m, { facadeDetail, discardAbove, bandLo, bandFade }) as CutawayFacadeMaterial;
 }
@@ -372,8 +475,8 @@ export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {
   const group = new THREE.Group();
   group.name = 'cityMassing';
 
-  const make = (name: string, pick: (b: BakedBuilding) => BakedMesh, base: number): void => {
-    const mesh = new THREE.Mesh(mergeTinted(buildings, pick, base), tintedClay(base));
+  const make = (name: string, pick: (b: BakedBuilding) => BakedMesh, base: number, opts: { snow?: boolean } = {}): void => {
+    const mesh = new THREE.Mesh(mergeTinted(buildings, pick, base), tintedClay(base, opts));
     mesh.name = name;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -392,7 +495,7 @@ export function buildCityMassing(buildings: BakedBuilding[]): THREE.Group {
   };
   group.add(wallMesh);
 
-  make('cityRoofs', (b) => b.roof, kswPalette.roofClay);
+  make('cityRoofs', (b) => b.roof, kswPalette.roofClay, { snow: true });
 
   const plinths = buildings.map((b) => ringBand(b.footprint, -kswCityStyle.plinthSink, kswCityStyle.plinthH, kswCityStyle.plinthOut));
   const eaves = buildings.map((b) => {

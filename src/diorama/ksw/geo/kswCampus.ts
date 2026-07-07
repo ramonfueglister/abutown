@@ -18,8 +18,10 @@
 // `group.userData.setCutaway({ discardAbove, bandLo, bandFade, roofFade })`
 // drives it every frame.
 import * as THREE from 'three/webgpu';
-import { kswCityStyle, kswPalette, palette } from '../../designTokens';
+import { kswCityStyle, kswPalette, palette, terrainLook } from '../../designTokens';
+import { float, mix, vec3 } from 'three/tsl';
 import { clayMat } from '../props';
+import { snowU } from '../glowUniform';
 import {
   buildCityMassing,
   facadeMaterial,
@@ -96,6 +98,17 @@ export function buildKswCampus(
   const mainRoofMat = clayMat(kswPalette.roofClay).clone();
   mainRoofMat.transparent = true;
   mainRoofMat.depthWrite = true; // opaque at rest; opacity ramps to 0 on open
+  // Snow cover like the city roofs (tintedClay snow variant) — without this
+  // the hero roof stayed terracotta in a snowed-in city (2026-07-07).
+  {
+    const roofC = new THREE.Color(kswPalette.roofClay);
+    const snowC = new THREE.Color(terrainLook.snow);
+    mainRoofMat.colorNode = mix(
+      vec3(roofC.r, roofC.g, roofC.b),
+      vec3(snowC.r, snowC.g, snowC.b),
+      snowU.mul(float(0.85)),
+    ) as THREE.MeshPhysicalMaterial['colorNode'];
+  }
   const mainRoof = new THREE.Mesh(mergeTinted([mainBuilding], (b) => b.roof, kswPalette.roofClay), mainRoofMat);
   mainRoof.name = 'kswMainRoof';
   mainRoof.castShadow = true;

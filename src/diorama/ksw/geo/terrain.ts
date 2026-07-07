@@ -8,7 +8,7 @@
 import * as THREE from 'three/webgpu';
 import { Fn, attribute, float, positionWorld, texture, uniform, vec2 } from 'three/tsl';
 import { terrainLook } from '../../designTokens';
-import { vertexTintMat } from './nature';
+import { groundTintMat, terrainDetailTint, vertexTintMat } from './nature';
 import type { DecodedTile } from './worldData';
 import { Landcover } from '../../../proto/world_pb';
 import { corridorMaskDataTexture, type CorridorMask } from './corridorMask';
@@ -113,6 +113,9 @@ export function updateTerrainDiscardAnchor(x: number, z: number, radiusM: number
  */
 function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
   const m = vertexTintMat(terrainLook.meadow);
+  // colorNode reads the tint attribute itself — vertexColors on would
+  // multiply it in twice (tint², subtly darkened terrain). 2026-07-07.
+  m.vertexColors = false;
   const tex = corridorMaskDataTexture(mask);
   // uv from world (x,z): (worldX − originX + cell/2) / (cols · cellSize), same
   // for z. The +cell/2 makes the NEAREST texel floor(u·cols) equal the bake's
@@ -135,14 +138,17 @@ function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
     // updateTerrainDiscardAnchor above.
     const near = positionWorld.xz.sub(discardCamU).length().lessThan(discardRadiusU);
     inside.and(near).discard();
-    return tint;
+    // tint² on purpose — see groundTintMat (nature.ts): the approved ground
+    // look was curated under the accidental double-multiply.
+    return terrainDetailTint(tint.mul(tint));
   })() as unknown as THREE.MeshPhysicalMaterial['colorNode'];
   return m;
 }
 
 // Shared terrain material across all LOD levels/tiles — vertex colours carry
-// per-vertex landcover tint, so one material suffices.
-const terrainMat = vertexTintMat(terrainLook.meadow);
+// per-vertex landcover tint (plus the world-space detail mottling), so one
+// material suffices.
+const terrainMat = groundTintMat(terrainLook.meadow);
 
 // Memoized discard material per corridor mask: streamed tiles materialize one
 // at a time over many frames, so the material must be shared/cached rather

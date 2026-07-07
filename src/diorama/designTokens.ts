@@ -72,30 +72,47 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // Recurated: was reading as a warm-lit evening, not night. Dropped exposure
   // and GI so the room goes dark enough for stars + the moon terminator to
   // register; cooler mist/hemi keeps the night blue rather than amber.
+  // SOTA-night rebalance (2026-07-06): the readable-city share moved from the
+  // moon key (now a 0.5-peak rim, environment.ts) onto a stronger cool hemi —
+  // silhouettes stay legible ("never true black") while warm windows + lamps
+  // carry the scene.
   night: {
-    hemiSky: 0x3d5270, hemiGround: 0x323b48, hemiIntensity: 0.16,
-    fogColor: 0x263248, fogNear: 18, fogFar: 46,
-    exposure: 0.78, mistColor: 0x3c4d62, mistOpacity: 0.2,
+    // Urban skyglow: a real city is never black — cool sky dome + a warm
+    // ground bounce from thousands of lamps. The hemi COLORS are the ambient
+    // ceiling (intensity alone can't lift a 0x3a-dark tint), so they carry
+    // the readable-silhouette level.
+    // Intensity 1.3: calibrated live against AgX — 0.44 rendered pitch black,
+    // 6 read as blue daylight; 1.3–1.4 is the readable-but-nocturnal band.
+    hemiSky: 0x6e87b8, hemiGround: 0x5c5040, hemiIntensity: 1.3,
+    fogColor: 0x1c2536, fogNear: 30, fogFar: 85,
+    exposure: 1.0, mistColor: 0x3c4d62, mistOpacity: 0.12,
     giScale: 0.68, saturation: 1.08, contrast: 1.08,
     godraysMix: 0, lampOn01: 1,
     turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieG: 0.8,
     sunBoost: 0,
   },
+  // Golden keyframes de-milked with the same recipe as `day` (2026-07-06):
+  // the short fog range + thick mist veiled the whole city framing grey.
   goldenMorning: {
-    hemiSky: 0xc4dcda, hemiGround: 0xe4d3ba, hemiIntensity: 0.3,
-    fogColor: 0xeee2cf, fogNear: 20, fogFar: 48,
-    exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.16,
-    giScale: 0.7, saturation: 1.1, contrast: 1.0,
-    godraysMix: 0.35, lampOn01: 0,
+    // hemi 0.82 (was 0.3): at grazing sun the hemi IS the scene light — the
+    // dawn framing rendered as a flat grey veil under AgX; the AgX ambient
+    // calibration band (night pass) needs ~1.0 for a bright-morning read.
+    hemiSky: 0xa9c6e8, hemiGround: 0xeacfa4, hemiIntensity: 0.82,
+    fogColor: 0xeee2cf, fogNear: 30, fogFar: 85,
+    exposure: 1.18, mistColor: 0xf6e9d2, mistOpacity: 0.08,
+    giScale: 0.7, saturation: 1.18, contrast: 1.03,
+    godraysMix: 0.2, lampOn01: 0,
     turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.006, mieG: 0.8,
-    sunBoost: 1.3,
+    sunBoost: 2.0,
   },
   // The DREDGE moment — amber horizon under deep teal — now fires at the REAL dusk.
   goldenEvening: {
-    hemiSky: 0x4f7d84, hemiGround: 0x5c5348, hemiIntensity: 0.21,
-    fogColor: 0x486e74, fogNear: 18, fogFar: 46,
-    exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.22,
-    giScale: 0.55, saturation: 1.12, contrast: 1.06,
+    // warmer, stronger ground bounce — the DREDGE "Amber unter Teal" needs
+    // visible amber on the lit faces, not just a teal veil (2026-07-06).
+    hemiSky: 0x4f7d84, hemiGround: 0x8a7050, hemiIntensity: 0.5,
+    fogColor: 0x486e74, fogNear: 28, fogFar: 80,
+    exposure: 0.96, mistColor: 0x6f949a, mistOpacity: 0.1,
+    giScale: 0.55, saturation: 1.16, contrast: 1.06,
     godraysMix: 0.6, lampOn01: 1,
     turbidity: 6, rayleigh: 3.0, mieCoefficient: 0.02, mieG: 0.9,
     sunBoost: 2.3,
@@ -103,25 +120,35 @@ export const envKeyframes: { night: EnvKeyframe; goldenMorning: EnvKeyframe; gol
   // NEW curation: bright, neutral midday — flat contrast, no drama, lamp off.
   // Recurated: exposure/hemi/sunBoost were blowing the scene to near-white;
   // pulled back so surfaces read their clay tint and keep gentle contrast.
+  // SOTA-2026 de-milk (2026-07-06): the city framing read as a washed-out
+  // white veil — mist + near fog + godrays stacked over the whole frame.
+  // Push fog out, halve the mist, drop the godrays veil, and let saturation
+  // carry the cozy palette instead of haze.
   day: {
-    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.28,
-    fogColor: 0xe8eef2, fogNear: 22, fogFar: 52,
-    exposure: 0.98, mistColor: 0xf2f3ee, mistOpacity: 0.1,
-    giScale: 0.7, saturation: 1.08, contrast: 1.04,
-    godraysMix: 0.15, lampOn01: 0,
+    hemiSky: 0xbfd9e6, hemiGround: 0xe7dcc4, hemiIntensity: 0.3,
+    fogColor: 0xe8eef2, fogNear: 34, fogFar: 90,
+    exposure: 0.98, mistColor: 0xf2f3ee, mistOpacity: 0.04,
+    giScale: 0.7, saturation: 1.1, contrast: 1.05,
+    godraysMix: 0.07, lampOn01: 0,
     turbidity: 3, rayleigh: 2.2, mieCoefficient: 0.005, mieG: 0.8,
     sunBoost: 0.66,
   },
 };
 
 // Sun-elevation anchors (degrees) for keyframe interpolation.
-export const envAnchors = { nightBelowDeg: -6, goldenPeakDeg: 4, dayAboveDeg: 25 } as const;
+// nightBelowDeg −10 (was −6): full night only past nautical-twilight depth —
+// the −6 cut snapped a 17:35 winter evening straight to pitch black, skipping
+// the blue hour entirely (SOTA-night pass 2026-07-06).
+export const envAnchors = { nightBelowDeg: -10, goldenPeakDeg: 4, dayAboveDeg: 25 } as const;
 
 // How real weather modulates the look. All weather→look constants live here.
 export const weatherLook = {
   coverageMin: 0.15, coverageMax: 0.85, // cloud_cover 0..1 → raymarcher coverage window
-  sunDampMax: 0.75, // full overcast removes 75% of direct sun
-  hemiBoostMax: 0.35, // ...and adds up to 35% diffuse hemi
+  // 0.92/0.55 (was 0.75/0.35, SOTA weather pass 2026-07-07): rain/snow still
+  // cast hard summer shadows — full overcast now kills nearly all direct sun
+  // and compensates with diffuse hemi, the soft shadowless bad-weather read.
+  sunDampMax: 0.92, // full overcast removes 92% of direct sun
+  hemiBoostMax: 0.55, // ...and adds up to 55% diffuse hemi
   fogVisFullM: 200, fogVisClearM: 4000, // visibility → fog factor ramp
   fogNearMin: 4, fogFarMin: 22, // fully fogged near/far
   precipFullMmPerH: 5, // 5 mm/h = full-intensity particles
@@ -203,6 +230,23 @@ export const nightGlow = {
   boost: 1.2, // applyEnvironment multiplies lampIntensity by this at full lampOn01
   cityPool: 14, // base intensity of the two forecourt PointLight pools
   emergency: 20, // base intensity of the emergency-zone PointLight
+  // SOTA-night street lamps (2026-07-06): every lamp gets an instanced
+  // additive light-pool disc on the ground plus an HDR bulb that clears the
+  // bloom threshold — the shipped stylized-city recipe (pools + glow, no
+  // per-lamp real lights). 2700K-ish warm; peak tuned so pools layer softly
+  // where lamps cluster instead of clipping.
+  // radius 5 + lift 0.3: a 13 m disc at 0.13 m lift clipped into terrain
+  // undulation and read as torn half-moons; smaller + higher floats clean.
+  pool: { color: 0xffb869, radius: 5, peak: 0.9, lift: 0.5 },
+  bulbHdr: 3.0, // night bulb luminance (× warm tint) — past bloomThreshold 1.05
+  // Night road dimming: the light clay ribbons (0xcfc4b2) glowed pale blue
+  // under the skyglow hemi — real asphalt swallows light. Ribbons/aprons/
+  // skirts mix toward dayColor×roadDim as lampGlowU rises.
+  roadDim: 0.62,
+  // Volumetric-look halo: an additive sphere around each lamp head whose
+  // brightness follows normalView·z (center bright, silhouette soft) — the
+  // budget stand-in for a scattering volume, view-robust without billboards.
+  halo: { radius: 0.85, peak: 1.5 },
 } as const;
 
 // Moonlight (the night preset's key light). Only color/intensity are read
@@ -297,7 +341,9 @@ export const kswScene = {
 // dead (Task 5) — superseded by the scalar/derived fields below, which the
 // realtime environment drives per-frame instead.
 export const kswPost = {
-  dof: { focalLength: 1.4, bokehScale: 1.6 },
+  // bokehScale 1.6 blurred most of every establishing frame into mush —
+  // the tilt-shift only earns its keep as a whisper (SOTA pass 2026-07-06).
+  dof: { focalLength: 1.4, bokehScale: 0.7 },
   // Task 4: the realtime environment supplies a per-frame giScale; the city
   // damps the GI-probe white-wash by this fixed scalar on top (= the former
   // envScale.morning, the value the overview framing was tuned at).
@@ -374,7 +420,10 @@ export const kswCity = {
   parkGreen: 0xa9cf92, // parks, grass, pitches — a step livelier than the lawn
   woodGreen: 0x86b478, // forest/wood patches read deeper
   water: 0xa8cfdd, // Eulach + ponds, calm glass blue
-  treeGreen: 0x8fbf83, // canopy base; per-instance tint varies around it
+  // treeGreen deepened + saturated (was 0x8fbf83 pale sage — canopies read as
+  // washed-out eggs at every framing; SOTA pass 2026-07-06). Cozy refs (Tiny
+  // Glade) run saturated mid-greens and let hue variation do the talking.
+  treeGreen: 0x74ad5c, // canopy base; per-instance tint varies around it
   treeTrunk: 0xb08a62,
   // roads v2: per-class colors + heights (carriage/footway/rail on distinct
   // levels so junctions never z-fight; footways read thinner+lighter)
@@ -429,6 +478,28 @@ export const nightSkyLook = {
   city: { starRadius: kswCity.domeRadius * 0.85, starQuad: 5.5, starCount: 2200, moonRadius: 26, moonDistance: kswCity.domeRadius * 0.82, sunDistance: kswCity.domeRadius * 0.82 },
 } as const;
 
+// Facade depth pass (SOTA 2026-07-06): split-grammar-style differentiation
+// drawn IN the wall shader (cityMassing.facadeMaterial) — no extra geometry.
+// shopShare of buildings get a near-full-width glazed ground floor; balcony
+// buildings get parapet balconies on a subset of window COLUMNS (balconies
+// stack architecturally); curtains break up the dead-glass uniformity.
+export const facadeLook = {
+  shopShare: 0.42, // share of buildings with a shopfront ground floor
+  balconyShare: 0.5, // share of buildings that carry balconies at all
+  balconyColShare: 0.45, // share of window columns with a balcony stack
+  curtainShare: 0.3, // share of panes softened by a curtain tone
+  slab: 0xb9ac9c, // balcony floor slab
+  parapet: 0xd3c8b6, // solid balustrade (Swiss concrete parapet)
+  curtain: 0xdcc6a4, // warm interior curtain
+} as const;
+
+// Tree size policy (SOTA pass 2026-07-06): the baked OSM/estimate heights are
+// data-honest (median 12.5 m, q95 20 m) but park giants of 27 m dwarf the
+// 2–3-storey Winterthur stock and the crowns read as fat broccoli at the city
+// framing. Cap the outliers and slim every crown — height stays believable
+// (cozy games keep trees TALL relative to houses), the silhouette gets airier.
+export const treeLook = { maxH: 19, crownSlim: 0.8 } as const;
+
 // Terrain landcover tint table (geo terrain tiles, Task 11). Anchored to the
 // existing city-nature palette: meadow reuses kswCity.parkGreen exactly,
 // forest a touch deeper than kswCity.woodGreen (bare grid terrain reads
@@ -444,6 +515,13 @@ export const terrainLook = {
   industrialLu: 0xb9ac9a,
   water: kswCity.water,
   rock: 0x9a978d,
+  // Detail pass (SOTA 2026-07-06): flat vertex fills read as paper — two
+  // octaves of world-space MaterialX noise mottle the luminance, and slopes
+  // dry toward this tone (terrainDetailTint in nature.ts).
+  dry: 0xb3a982,
+  // Snow blanket tone (snowU whitening, 2026-07-07) — slightly blue-grey so
+  // AgX keeps it luminous without clipping.
+  snow: 0xe6ebf2,
 } as const;
 
 // Diorama-style layer for the geodetic city (style slice). Additive only.
@@ -454,6 +532,21 @@ export const kswCityStyle = {
   windowW: 1.3, windowH: 1.4, windowSpacing: 2.4, storeyH: 3.0, sillFrac: 0.32,
   doorW: 1.5, doorH: 2.2,
   lamp: { spacing: { primary: 25, secondary: 28, tertiary: 30, residential: 35, unclassified: 35, living_street: 35, service: 45, pedestrian: 30 } as Record<string, number>, sideOffset: 1.2 },
-  lod: { nearR: 150, midR: 600, hysteresis: 0.1 },
+  // midR 1200 (was 600): the facade window raster is a shader branch, not
+  // geometry — hiding it at the city establishing framing (radius ~820) left
+  // every building a naked clay block. Footways ride this ring; lamps do NOT
+  // (they have their own lampLod below — see the flicker fix note).
+  lod: { nearR: 150, midR: 1200, hysteresis: 0.1 },
+  // Lamps get their OWN LOD, decoupled from the facade ring (2026-07-07
+  // flicker/clutter fix). Raising midR to 1200 for the facade windows also
+  // un-culled 17.9k opaque lamp posts/bulbs (+ pool/halo glow) at radius 820,
+  // which lined every distant street as a scintillating white-dotted mess.
+  // Split by role:
+  //  - hardware (posts/heads/bulbs): opaque, sub-pixel far away → the clutter
+  //    AND the flicker. Cull past hardwareR (they read only up close anyway).
+  //  - glow (pools/halos): additive, INVISIBLE by day (lampGlowU=0), the cozy
+  //    night street atmosphere at the establishing framing. Keep to glowR so
+  //    the night city stays lit, drop past it so the deep horizon stays clean.
+  lampLod: { hardwareR: 300, glowR: 1500, hysteresis: 0.12 },
   cloudSwap: { start: 300, end: 600 },
 } as const;

@@ -16,6 +16,7 @@ import { moonPhaseLightDir, type EnvironmentState } from '../environment/environ
 import { POLE_AXIS } from '../environment/applyEnvironment';
 import type { PrecipitationSystem } from '../environment/precipitation';
 import { windAmpU, windDirU, windAmplitude } from './windUniform';
+import { snowU } from './glowUniform';
 import { impostorLightU } from './geo/treeImpostors';
 
 export type CityEnvironmentTargets = {
@@ -109,11 +110,29 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   // (2026-07-06): sun 0.7 + sky 0.45 — at the previous 0.6/0.4 the far field
   // read a touch darker than the sun-lit full trees at the 150 m handoff
   // (scratch/tree-polish/handoff-fix8.png vs -fix9.png).
-  const sunW = 0.7 * Math.min(1, t.sun.intensity);
+  // Night retune (2026-07-06): the fixed 0.45 hemi weight ignored the actual
+  // hemi intensity (0.28 day vs 0.166 night) and the moon key fed the same
+  // 0.7 weight as the sun — impostor trees glowed mint-green over the dark
+  // city. Scale the hemi term by the live intensity (1.6·0.28 ≈ the tuned
+  // 0.45 at the day reference, so the day handoff is unchanged), damp the
+  // key weight at night, and clamp so a >1 midday sum can no longer blow the
+  // pre-lit atlas to white.
+  // Elevation-aware sun weight: the unlit atlas can't self-shadow, so at low
+  // sun (golden hour) full sun colour painted EVERY tree a glowing amber blob
+  // over the dark city — real crowns are mostly shadowed then. Fade the sun
+  // term in with elevation (full above ~20°).
+  const sunElevW = isDay ? Math.min(1, Math.max(0, env.sunDir[1] / 0.35)) : 1;
+  const sunW = 0.7 * Math.min(1, t.sun.intensity) * (isDay ? sunElevW : 0.3);
+  // Night factor 0.22: the night hemi runs hot (1.3) to keep the CITY readable
+  // under AgX; feeding that raw into the unlit impostor atlas made every far
+  // tree glow teal brighter than the lamps. The hemi term ALSO ramps with sun
+  // elevation by day — at dawn/dusk the physically-lit scene sits in the AgX
+  // toe while a flat 0.48 hemi painted the far trees as pastel confetti.
+  const hemiW = 1.6 * t.hemi.intensity * (isDay ? 0.35 + 0.65 * sunElevW : 0.22);
   impostorLightU.value.setRGB(
-    t.sun.color.r * sunW + t.hemi.color.r * 0.45,
-    t.sun.color.g * sunW + t.hemi.color.g * 0.45,
-    t.sun.color.b * sunW + t.hemi.color.b * 0.45,
+    Math.min(1, t.sun.color.r * sunW + t.hemi.color.r * hemiW),
+    Math.min(1, t.sun.color.g * sunW + t.hemi.color.g * hemiW),
+    Math.min(1, t.sun.color.b * sunW + t.hemi.color.b * hemiW),
   );
 
   // Clouds
@@ -152,6 +171,9 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   t.stars.object3d.visible = env.starVisibility > 0.01;
   t.stars.object3d.rotation.set(0, 0, 0);
   t.stars.object3d.rotateOnWorldAxis(POLE_AXIS, env.siderealAngleRad);
+
+  // Snow cover: ground/roof whitening follows the (pinned or live) snowfall.
+  snowU.value = env.precipType === 'snow' ? Math.min(1, env.precipIntensity * 2) : 0;
 
   // Night glow: shared uniform (batched windows/bulbs) + the pooled point lights.
   t.lampGlow.value = env.lampOn01;
