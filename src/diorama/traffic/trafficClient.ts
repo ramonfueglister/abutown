@@ -50,8 +50,14 @@ import { beginLaneChange } from './laneBlend';
 // (tests, flowLayer) keep working unchanged.
 export { CellGrid, CELL_SIZE_M } from './cellGrid';
 
-/** Default gateway endpoint; overridable via ?trafficWs=… */
+/** Dev-default gateway endpoint (localhost); overridable via ?trafficWs=… */
 export const DEFAULT_TRAFFIC_WS = 'ws://localhost:8790/traffic';
+
+/** Production gateway: the deployed sim-server `/traffic` WS on Fly (fly.toml
+ * app `abutown-abutopia`). Used as the default on any non-localhost host so a
+ * static/Vercel deploy shows cars with zero config; override via
+ * VITE_TRAFFIC_WS or ?trafficWs=… if the backend moves. */
+export const PROD_TRAFFIC_WS = 'wss://abutown-abutopia.fly.dev/traffic';
 
 /** The raw trafficnet.json document shape (fields we consume). */
 interface TrafficNetDoc {
