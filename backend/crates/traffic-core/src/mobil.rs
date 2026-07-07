@@ -77,6 +77,10 @@ pub struct LaneNeighbourhood {
 pub struct Follower {
     /// Follower speed (m/s).
     pub v: f32,
+    /// The follower's vehicle class (see [`crate::idm::N_CLASSES`]): its
+    /// projected accelerations are computed with *its own* IDM calibration —
+    /// a truck pressed by a lane change brakes on truck parameters.
+    pub class: u8,
     /// Bumper-to-bumper gap from the follower to the deciding vehicle (m) — the
     /// gap the follower currently keeps to *its* leader, which is the decider on
     /// the target lane, or the decider's old leader on the current lane.
@@ -108,7 +112,8 @@ pub struct MobilDecision {
 /// Evaluate MOBIL for the deciding vehicle changing from its current lane to one
 /// adjacent target lane.
 ///
-/// * `p` / `idm`: IDM class of the vehicle and its neighbours (single class).
+/// * `params`: the per-class IDM table (indexed by vehicle class); `class_self`
+///   selects the decider's own calibration, each [`Follower`] carries its own.
 /// * `v_self`: decider speed (m/s).
 /// * `cur`: neighbourhood on the **current** lane (its old leader + old
 ///   follower).
@@ -121,23 +126,28 @@ pub struct MobilDecision {
 /// safety criterion on the new follower's deceleration.
 pub fn evaluate(
     m: &MobilParams,
-    idm: &IdmParams,
+    params: &[IdmParams],
+    class_self: u8,
     v_self: f32,
     cur: &LaneNeighbourhood,
     tgt: &LaneNeighbourhood,
     to_right: bool,
 ) -> MobilDecision {
+    let idm = &params[class_self as usize];
+
     // Decider's own accel now (on the current lane) and after the move (on the
     // target lane, following the target lane's leader).
     let a_old_self = idm_accel(idm, v_self, cur.lead_dv, cur.lead_gap);
     let a_new_self = idm_accel(idm, v_self, tgt.lead_dv, tgt.lead_gap);
 
     // New follower (on the target lane): accel before the decider arrives
-    // (following its current leader) vs after (following the decider).
+    // (following its current leader) vs after (following the decider). Both on
+    // the follower's OWN class calibration.
     let (a_new_follower_before, a_new_follower_after) = match tgt.follower {
         Some(f) => {
-            let before = idm_accel(idm, f.v, f.dv_without_decider, f.gap_without_decider);
-            let after = idm_accel(idm, f.v, f.dv_to_decider, f.gap_to_decider);
+            let fp = &params[f.class as usize];
+            let before = idm_accel(fp, f.v, f.dv_without_decider, f.gap_without_decider);
+            let after = idm_accel(fp, f.v, f.dv_to_decider, f.gap_to_decider);
             (before, after)
         }
         None => (0.0, 0.0),
@@ -147,8 +157,9 @@ pub fn evaluate(
     // vs after the decider leaves (it inherits the decider's old leader).
     let (a_old_follower_before, a_old_follower_after) = match cur.follower {
         Some(f) => {
-            let before = idm_accel(idm, f.v, f.dv_to_decider, f.gap_to_decider);
-            let after = idm_accel(idm, f.v, f.dv_without_decider, f.gap_without_decider);
+            let fp = &params[f.class as usize];
+            let before = idm_accel(fp, f.v, f.dv_to_decider, f.gap_to_decider);
+            let after = idm_accel(fp, f.v, f.dv_without_decider, f.gap_without_decider);
             (before, after)
         }
         None => (0.0, 0.0),
@@ -201,7 +212,7 @@ mod tests {
             lead_dv: 0.0,
             follower: None,
         };
-        let d = evaluate(&m, &idm, 12.0, &cur, &tgt, false);
+        let d = evaluate(&m, &[idm], 0, 12.0, &cur, &tgt, false);
         assert!(
             d.change,
             "should overtake into a free lane, incentive {}",
@@ -227,13 +238,14 @@ mod tests {
             lead_dv: 0.0,
             follower: Some(Follower {
                 v: 20.0,
+                class: 0,
                 gap_to_decider: 0.3,
                 gap_without_decider: f32::INFINITY,
                 dv_to_decider: 12.0,
                 dv_without_decider: 0.0,
             }),
         };
-        let d = evaluate(&m, &idm, 8.0, &cur, &tgt, false);
+        let d = evaluate(&m, &[idm], 0, 8.0, &cur, &tgt, false);
         assert!(
             !d.change,
             "unsafe cut-in must be vetoed; new_follower_accel {}",
@@ -253,7 +265,7 @@ mod tests {
             lead_dv: 0.0,
             follower: None,
         };
-        let d = evaluate(&m, &idm, 10.0, &free, &free, false);
+        let d = evaluate(&m, &[idm], 0, 10.0, &free, &free, false);
         assert!(
             !d.change,
             "no advantage, no change; incentive {}",
@@ -279,8 +291,8 @@ mod tests {
             lead_dv: 0.0,
             follower: None,
         };
-        let right = evaluate(&m, &idm, 10.0, &free, &free, true);
-        let left = evaluate(&m, &idm, 10.0, &free, &free, false);
+        let right = evaluate(&m, &[idm], 0, 10.0, &free, &free, true);
+        let left = evaluate(&m, &[idm], 0, 10.0, &free, &free, false);
         assert!(
             right.change,
             "keep-right should tip the move, incentive {}",

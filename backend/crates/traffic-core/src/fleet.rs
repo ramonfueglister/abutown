@@ -39,6 +39,10 @@ pub struct Fleet {
     pub route: Vec<RouteHandle>,
     /// Vehicle length (m), used for bumper-to-bumper gaps.
     pub len_m: Vec<f32>,
+    /// Vehicle class (see [`crate::idm::N_CLASSES`]): indexes the kernel's
+    /// per-class IDM parameter table and rides the wire for silhouette
+    /// selection. Immutable for a slot's occupant lifetime.
+    pub class: Vec<u8>,
     /// Slot liveness.
     pub alive: Vec<bool>,
 
@@ -75,6 +79,7 @@ impl Fleet {
             v: Vec::with_capacity(cap),
             route: Vec::with_capacity(cap),
             len_m: Vec::with_capacity(cap),
+            class: Vec::with_capacity(cap),
             alive: Vec::with_capacity(cap),
             route_lanes: Vec::with_capacity(cap),
             free: Vec::new(),
@@ -117,7 +122,15 @@ impl Fleet {
     /// route buffer is `clear()`ed and re-filled from `route` (capacity retained
     /// on reuse → no per-spawn allocation after warm-up); the cursor resets to
     /// 0. Returns the slot id. Internal: [`crate::Core::spawn`] wraps this.
-    pub(crate) fn alloc(&mut self, lane: u32, s: f32, v: f32, len_m: f32, route: &[u32]) -> VehId {
+    pub(crate) fn alloc(
+        &mut self,
+        lane: u32,
+        s: f32,
+        v: f32,
+        len_m: f32,
+        class: u8,
+        route: &[u32],
+    ) -> VehId {
         let handle = RouteHandle { cursor: 0 };
         if let Some(id) = self.free.pop() {
             let i = id as usize;
@@ -125,6 +138,7 @@ impl Fleet {
             self.s[i] = s;
             self.v[i] = v;
             self.len_m[i] = len_m;
+            self.class[i] = class;
             self.route[i] = handle;
             // Reuse the slot's existing buffer: clear() keeps its capacity.
             let buf = &mut self.route_lanes[i];
@@ -138,6 +152,7 @@ impl Fleet {
             self.s.push(s);
             self.v.push(v);
             self.len_m.push(len_m);
+            self.class.push(class);
             self.route.push(handle);
             self.route_lanes.push(route.to_vec());
             self.alive.push(true);
@@ -293,12 +308,12 @@ mod tests {
     #[test]
     fn reused_slot_bumps_generation() {
         let mut fleet = Fleet::with_capacity(4);
-        let a = fleet.alloc(0, 0.0, 0.0, 4.0, &[0]);
+        let a = fleet.alloc(0, 0.0, 0.0, 4.0, 0, &[0]);
         assert_eq!(fleet.generation(a as usize), 0);
 
         fleet.free(a);
         // LIFO free-list: the next alloc reuses slot `a`.
-        let b = fleet.alloc(0, 0.0, 0.0, 4.0, &[0]);
+        let b = fleet.alloc(0, 0.0, 0.0, 4.0, 0, &[0]);
         assert_eq!(b, a, "LIFO free-list must reuse the just-freed slot");
         assert_eq!(
             fleet.generation(b as usize),

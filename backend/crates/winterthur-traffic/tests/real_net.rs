@@ -59,7 +59,7 @@ fn route_on_real_net_is_drivable_and_ticks_without_panicking() {
     let start_lane = route[0];
     let s0 = (net.lane_len(start_lane) * 0.2).clamp(1.0, 5.0);
     let veh = core
-        .spawn(start_lane, s0, &route)
+        .spawn(start_lane, s0, 0, &route)
         .expect("spawn on the computed route must succeed");
     let _ = veh;
 

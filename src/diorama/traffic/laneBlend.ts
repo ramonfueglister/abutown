@@ -124,8 +124,16 @@ export function poseAtBlended(net: TrafficNetGeom, veh: VehKinematics, nowTick: 
 
   if (b.kind === 'lateral' && b.prev) {
     // Old-lane pose (dead-reckoned in parallel) and new-lane pose at `nowTick`.
-    const oldPose = poseAt(net, { lane: b.prev.lane, s: b.prev.s, v: b.prev.v, tickAt: b.prev.tickAt }, nowTick);
-    const newPose = poseAt(net, { lane: veh.lane, s: veh.s, v: veh.v, tickAt: veh.tickAt }, nowTick);
+    const oldPose = poseAt(
+      net,
+      { lane: b.prev.lane, s: b.prev.s, v: b.prev.v, tickAt: b.prev.tickAt, cls: veh.cls },
+      nowTick,
+    );
+    const newPose = poseAt(
+      net,
+      { lane: veh.lane, s: veh.s, v: veh.v, tickAt: veh.tickAt, cls: veh.cls },
+      nowTick,
+    );
     return {
       x: lerp(oldPose.x, newPose.x, alpha),
       z: lerp(oldPose.z, newPose.z, alpha),

@@ -29,6 +29,10 @@ message VehicleState {
   uint32 lane = 2;  // Lane id the vehicle occupies.
   uint32 s_q = 3;   // Arc position along the lane, quantised: round(s * 10) dm.
   uint32 v_q = 4;   // Speed, quantised: round(v * 4) in 0.25 m/s units.
+  // Vehicle class: 0 car, 1 delivery van, 2 HGV (trips.bin byte 13 → kernel
+  // IDM table → silhouette selection client-side). Additive field — absent on
+  // old frames decodes as 0 (car), which matches the previously uniform fleet.
+  uint32 class = 5;
 }
 
 // The state of a single AOI cell at a given tick.

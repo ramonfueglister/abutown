@@ -44,8 +44,8 @@ describe('parallel lane-change lateral blend', () => {
   // Vehicle was on lane A at s=50 (world (50,0)) and hard-swaps to lane B at
   // s=50 (world (50,3)) at tick 100. v=0 so s does not advance — the ONLY
   // motion is the lateral blend from z=0 to z=3.
-  const prev: VehKinematics = { lane: 10, s: 50, v: 0, tickAt: 90 };
-  const next: VehKinematics = { lane: 11, s: 50, v: 0, tickAt: 100 };
+  const prev: VehKinematics = { lane: 10, s: 50, v: 0, tickAt: 90, cls: 0 };
+  const next: VehKinematics = { lane: 11, s: 50, v: 0, tickAt: 100, cls: 0 };
 
   it('at t=0 renders the OLD lane pose (no teleport at the swap instant)', () => {
     const veh = beginLaneChange(net, next, prev, 100);
@@ -76,8 +76,8 @@ describe('parallel lane-change lateral blend', () => {
   });
 
   it('keeps advancing longitudinally during the blend (v>0)', () => {
-    const movingPrev: VehKinematics = { lane: 10, s: 50, v: 10, tickAt: 100 };
-    const movingNext: VehKinematics = { lane: 11, s: 50, v: 10, tickAt: 100 };
+    const movingPrev: VehKinematics = { lane: 10, s: 50, v: 10, tickAt: 100, cls: 0 };
+    const movingNext: VehKinematics = { lane: 11, s: 50, v: 10, tickAt: 100, cls: 0 };
     const veh = beginLaneChange(net, movingNext, movingPrev, 100);
     const halfTicks = 100 + (LATERAL_BLEND_S / SIM_DT) / 2;
     const p = poseAtBlended(net, veh, halfTicks);
@@ -92,8 +92,8 @@ describe('junction hop bezier sweep', () => {
   // Vehicle finishes lane A at s≈100 (world (100,0), heading +x) and crosses to
   // lane C which starts at (100,0) heading −z (a left/right turn through the
   // node). Speed 10 m/s.
-  const prev: VehKinematics = { lane: 10, s: 100, v: 10, tickAt: 100 };
-  const next: VehKinematics = { lane: 20, s: 0, v: 10, tickAt: 100 };
+  const prev: VehKinematics = { lane: 10, s: 100, v: 10, tickAt: 100, cls: 0 };
+  const next: VehKinematics = { lane: 20, s: 0, v: 10, tickAt: 100, cls: 0 };
 
   it('classifies as a junction sweep', () => {
     expect(classifyLaneChange(net, 10, 20)).toBe('junction');
@@ -128,8 +128,8 @@ describe('junction hop bezier sweep', () => {
 
 describe('degenerate cases', () => {
   it('same lane reappearing → no blend (plain poseAt)', () => {
-    const prev: VehKinematics = { lane: 10, s: 40, v: 5, tickAt: 100 };
-    const next: VehKinematics = { lane: 10, s: 50, v: 5, tickAt: 100 };
+    const prev: VehKinematics = { lane: 10, s: 40, v: 5, tickAt: 100, cls: 0 };
+    const next: VehKinematics = { lane: 10, s: 50, v: 5, tickAt: 100, cls: 0 };
     const veh = beginLaneChange(net, next, prev, 100);
     expect(veh.blend).toBeUndefined();
     const p = poseAtBlended(net, veh, 100);
@@ -139,7 +139,7 @@ describe('degenerate cases', () => {
   });
 
   it('a vehicle with no blend state renders exactly poseAt', () => {
-    const veh: VehKinematics = { lane: 11, s: 20, v: 3, tickAt: 100 };
+    const veh: VehKinematics = { lane: 11, s: 20, v: 3, tickAt: 100, cls: 0 };
     const p = poseAtBlended(net, veh, 130);
     const plain = poseAt(net, veh, 130);
     expect(p.x).toBeCloseTo(plain.x, 6);

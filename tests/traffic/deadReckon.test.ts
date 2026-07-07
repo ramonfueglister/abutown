@@ -85,7 +85,7 @@ describe('poseAt — dead-reckoning advance + yaw', () => {
   it('advances s by v·(now - tickAt)·SIM_DT and yaws from the tangent', () => {
     // veh at s=10, v=5 m/s (quarter-m/s already decoded), tickAt=100.
     // 4 ticks elapsed → dt total = 4 * 0.1 s = 0.4 s → +2 m → s=12.
-    const veh = { lane: 3, s: 10, v: 5, tickAt: 100 };
+    const veh = { lane: 3, s: 10, v: 5, tickAt: 100, cls: 0 };
     const pose = poseAt(STRAIGHT, veh, 104);
     expect(close(pose.x, 12)).toBe(true);
     expect(close(pose.z, 0)).toBe(true);
@@ -95,14 +95,14 @@ describe('poseAt — dead-reckoning advance + yaw', () => {
 
   it('does not overshoot the lane end — waits clamped at the terminal vertex', () => {
     // s=95, v=50 m/s, 10 ticks → +50 m → 145, clamped to 100.
-    const veh = { lane: 3, s: 95, v: 50, tickAt: 0 };
+    const veh = { lane: 3, s: 95, v: 50, tickAt: 0, cls: 0 };
     const pose = poseAt(STRAIGHT, veh, 10);
     expect(close(pose.x, 100)).toBe(true);
     expect(close(pose.z, 0)).toBe(true);
   });
 
   it('never rewinds when nowTick is behind tickAt (clock skew guard)', () => {
-    const veh = { lane: 3, s: 40, v: 10, tickAt: 200 };
+    const veh = { lane: 3, s: 40, v: 10, tickAt: 200, cls: 0 };
     const pose = poseAt(STRAIGHT, veh, 190); // 10 ticks in the past
     expect(close(pose.x, 40)).toBe(true); // no negative advance
   });

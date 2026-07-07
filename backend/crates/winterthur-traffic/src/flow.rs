@@ -96,9 +96,9 @@ mod tests {
     /// no vehicles and must be omitted from the frame.
     fn toy_core(net: &TrafficNet) -> Core {
         let mut core = Core::new(net, 16, 0);
-        let v0 = core.spawn(0, 5.0, &[0, 1]).expect("spawn v0 on lane 0");
-        let v1 = core.spawn(0, 20.0, &[0, 1]).expect("spawn v1 on lane 0");
-        let v2 = core.spawn(1, 10.0, &[1]).expect("spawn v2 on lane 1");
+        let v0 = core.spawn(0, 5.0, 0, &[0, 1]).expect("spawn v0 on lane 0");
+        let v1 = core.spawn(0, 20.0, 0, &[0, 1]).expect("spawn v1 on lane 0");
+        let v2 = core.spawn(1, 10.0, 0, &[1]).expect("spawn v2 on lane 1");
         // Directly set post-spawn speeds (spawn() always starts a vehicle at
         // v=0) so the sampler has non-trivial per-vehicle speeds to average.
         core.fleet.v[v0 as usize] = 8.0;
@@ -147,7 +147,7 @@ mod tests {
         let mut core = Core::new(&net, 300, 0);
         for i in 0..260 {
             let s = 1.0 + (i as f32) * 0.2;
-            core.spawn(0, s, &[0, 1]).expect("spawn within capacity");
+            core.spawn(0, s, 0, &[0, 1]).expect("spawn within capacity");
         }
         let frame = sample_flow_frame(&core, &net, 0);
         let edge0 = frame

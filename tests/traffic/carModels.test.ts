@@ -9,9 +9,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   carColorForId,
+  carColorForClass,
   carVariantForId,
+  carVariantForClass,
   CAR_PALETTE,
   CAR_VARIANTS,
+  COMMERCIAL_PALETTE,
+  TRUCK_VARIANT,
   hashId,
   wheelOffsets,
 } from '../../src/diorama/traffic/carModels';
@@ -81,17 +85,51 @@ describe('carModels selection', () => {
   });
 });
 
+describe('class → silhouette family (S1 heterogene Flotte)', () => {
+  const VAN = CAR_VARIANTS.findIndex((v) => v.name === 'van');
+  const PICKUP = CAR_VARIANTS.findIndex((v) => v.name === 'pickup');
+
+  it('class 2 always renders the truck', () => {
+    for (let id = 0; id < 500; id++) expect(carVariantForClass(2, id)).toBe(TRUCK_VARIANT);
+  });
+
+  it('class 1 renders van or pickup only, van-dominated', () => {
+    const counts = new Map<number, number>();
+    for (let id = 0; id < 2000; id++) {
+      const v = carVariantForClass(1, id);
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+      expect([VAN, PICKUP]).toContain(v);
+    }
+    expect(counts.get(VAN)! > counts.get(PICKUP)!).toBe(true);
+  });
+
+  it('class 0 never renders a commercial silhouette', () => {
+    for (let id = 0; id < 2000; id++) {
+      const v = carVariantForClass(0, id);
+      expect([VAN, PICKUP, TRUCK_VARIANT]).not.toContain(v);
+    }
+  });
+
+  it('selection is stable per id and commercial colours come from the commercial palette', () => {
+    for (let id = 0; id < 200; id++) {
+      expect(carVariantForClass(1, id)).toBe(carVariantForClass(1, id));
+      expect(COMMERCIAL_PALETTE).toContain(carColorForClass(2, id));
+      expect(carColorForClass(0, id)).toBe(carColorForId(id));
+    }
+  });
+});
+
 describe('CS variant table', () => {
-  it('has the 6 spec variants in stable order', () => {
+  it('has the 7 spec variants in stable order', () => {
     expect(CAR_VARIANTS.map((v) => v.name)).toEqual([
-      'sedan', 'hatchback', 'wagon', 'suv', 'van', 'pickup',
+      'sedan', 'hatchback', 'wagon', 'suv', 'van', 'pickup', 'truck',
     ]);
   });
 
   it('variant lengths match the spec table', () => {
     const byName = Object.fromEntries(CAR_VARIANTS.map((v) => [v.name, v.length]));
     expect(byName).toEqual({
-      sedan: 4.5, hatchback: 3.9, wagon: 4.6, suv: 4.6, van: 5.2, pickup: 5.0,
+      sedan: 4.5, hatchback: 3.9, wagon: 4.6, suv: 4.6, van: 5.2, pickup: 5.0, truck: 10.4,
     });
   });
 
@@ -101,7 +139,8 @@ describe('CS variant table', () => {
       expect(v.wheels.wheelbase).toBeLessThan(v.length); // axles inside the body
       expect(v.wheels.track).toBeGreaterThan(1.0);
       expect(v.wheels.radius).toBeGreaterThanOrEqual(0.28);
-      expect(v.wheels.radius).toBeLessThanOrEqual(0.42);
+      // HGV wheels run larger than the passenger fleet's 0.42 m ceiling.
+      expect(v.wheels.radius).toBeLessThanOrEqual(v.name === 'truck' ? 0.55 : 0.42);
     }
   });
 
@@ -173,8 +212,8 @@ describe('carLayer instancing', () => {
     { id: 0, edge: 0, index: 0, lengthM: 100, pts: [[0, 0], [100, 0]] },
   ]);
   const vehicles = new Map<number, VehKinematics>([
-    [1, { lane: 0, s: 10, v: 10, tickAt: 0 }],
-    [2, { lane: 0, s: 30, v: 0, tickAt: 0 }],
+    [1, { lane: 0, s: 10, v: 10, tickAt: 0, cls: 0 }],
+    [2, { lane: 0, s: 30, v: 0, tickAt: 0, cls: 0 }],
   ]);
 
   it('draws one body+glass pair per vehicle and 4 wheels each', () => {
@@ -217,7 +256,7 @@ describe('carLayer instancing', () => {
     ]);
     const manyVehicles = new Map<number, VehKinematics>();
     for (let id = 1; id <= 4097; id++) {
-      manyVehicles.set(id, { lane: 0, s: id % 100, v: 5, tickAt: 0 });
+      manyVehicles.set(id, { lane: 0, s: id % 100, v: 5, tickAt: 0, cls: 0 });
     }
     const layer = createCarLayer();
     layer.update(bigNet, manyVehicles, 0);

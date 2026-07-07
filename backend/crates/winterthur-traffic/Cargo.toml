@@ -9,6 +9,10 @@ license.workspace = true
 name = "winterthur-traffic"
 path = "src/main.rs"
 
+[[bin]]
+name = "calibrate"
+path = "src/bin/calibrate.rs"
+
 [dependencies]
 traffic-net = { path = "../traffic-net" }
 traffic-core = { path = "../traffic-core" }

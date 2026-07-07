@@ -197,6 +197,7 @@ export class TrafficClientCore {
       s: v.sQ / 10, // decimetres -> metres
       v: v.vQ / 4, // 0.25 m/s units -> m/s
       tickAt: tick,
+      cls: v.class ?? 0, // additive wire field: absent on old frames = car
     };
     // Motion-continuity blend (FIX-C2): when a KNOWN vehicle (same wire id, so
     // NOT a recycled-slot generation change) is re-seated onto a different
@@ -344,6 +345,7 @@ interface WireVehicle {
   lane: number;
   sQ: number;
   vQ: number;
+  class: number;
 }
 
 /** Minimal structural view of a decoded FlowState (Task 11/12). */

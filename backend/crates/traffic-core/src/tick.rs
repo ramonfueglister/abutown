@@ -17,8 +17,10 @@
 //! where a gap straddles a lane end.
 
 use crate::fleet::{Fleet, LaneIndex, VehId};
-use crate::idm::{IdmParams, idm_accel};
-use crate::junction::{self, APPROACH_ZONE_M, JunctionModel, MANDATORY_ZONE_M, NodeOccupancy};
+use crate::idm::{IdmParams, N_CLASSES, class_len_m, idm_accel};
+use crate::junction::{
+    self, APPROACH_ZONE_M, JunctionModel, MANDATORY_ZONE_M, NodeOccupancy, SignalControl,
+};
 use crate::mobil::{self, Follower, LaneNeighbourhood, MobilParams};
 use rayon::prelude::*;
 use traffic_net::TrafficNet;
@@ -40,13 +42,16 @@ pub struct VehicleView {
     pub v: f32,
 }
 
-/// Default vehicle length (m) used for bumper-to-bumper gaps.
-const VEHICLE_LEN: f32 = 4.5;
-
 /// Small setback (m) from a lane end where a held vehicle waits — the "stop
 /// line". Keeps a blocked vehicle strictly short of the boundary so
 /// [`advance_route`] never advances its cursor while it waits.
 const STOP_LINE_EPS: f32 = 0.05;
+
+/// Minimum bumper gap (m) a lane change / side-reseat must leave to the nearest
+/// vehicle ahead and behind on the target lane. Strictly positive so a change
+/// never places two bodies overlapping; small so a mandatory correction still
+/// has room to squeeze into a real gap.
+const MIN_CHANGE_GAP_M: f32 = 1.0;
 
 /// Per-vehicle intent produced by phase 1 and consumed by phase 2.
 ///
@@ -78,6 +83,13 @@ struct Intent {
     stop_s: f32,
     /// The route cursor before any crossing, restored on a hold.
     from_cursor: u32,
+    /// Phase 1 found this vehicle WALLED at a lane end whose lane has no turn
+    /// onto the route's next lane (a `Boundary::NoTurn` at the stop line).
+    /// Phase 2 reports these via [`Core::stranded_last_tick`] so the shell can
+    /// rescue them (re-route from the current lane) instead of letting them
+    /// wait forever — the missed-turn stranding class the S2 calibration
+    /// exposed as the dominant gridlock seed.
+    stranded: bool,
 }
 
 /// Sentinel in [`Intent::cross_turn`]: this vehicle is not crossing a node this
@@ -107,6 +119,7 @@ impl Default for Intent {
             from_lane: 0,
             stop_s: 0.0,
             from_cursor: 0,
+            stranded: false,
         }
     }
 }
@@ -124,8 +137,9 @@ pub struct Core {
     /// CSR lane occupancy, leader-first per lane.
     pub index: LaneIndex,
 
-    /// IDM parameters (single vehicle class for now).
-    params: IdmParams,
+    /// Per-class IDM parameter table, indexed by [`Fleet::class`] (see
+    /// [`crate::idm::N_CLASSES`]).
+    params: [IdmParams; N_CLASSES],
 
     /// MOBIL lane-change parameters (single vehicle class for now).
     mobil: MobilParams,
@@ -145,8 +159,13 @@ pub struct Core {
     /// through the immutable [`JunctionModel`].
     net: TrafficNet,
 
-    /// Precomputed per-turn signal windows + gap headways (Task 5).
+    /// Precomputed per-turn gap headways (Task 5).
     junction: JunctionModel,
+
+    /// Vehicle-actuated signal controllers (S3): timing state per signal
+    /// node, updated sequentially at the top of every tick; phase 1 reads it
+    /// immutably.
+    signals: SignalControl,
 
     /// Phase-2 conflict-point occupancy scratch, pre-sized in [`Core::new`].
     occupancy: NodeOccupancy,
@@ -162,6 +181,11 @@ pub struct Core {
     /// Slots that finished their route this tick, collected in phase-2 and freed
     /// after the occupancy pass. Pre-sized to `cap`; reused each tick.
     despawn: Vec<VehId>,
+
+    /// Slots reported walled at a no-turn lane end this tick (see
+    /// [`Intent::stranded`]). Rebuilt each tick; consumers read it between
+    /// ticks via [`Core::stranded_last_tick`].
+    stranded: Vec<VehId>,
 }
 
 impl Core {
@@ -249,6 +273,7 @@ impl Core {
         }
 
         let junction = JunctionModel::build(net);
+        let signals = SignalControl::build(net);
         let occupancy = NodeOccupancy::new(net);
 
         Core {
@@ -256,22 +281,30 @@ impl Core {
             lane_count,
             fleet: Fleet::with_capacity(cap),
             index: LaneIndex::new(lane_count, cap),
-            params: IdmParams::default(),
+            params: core::array::from_fn(|c| IdmParams::for_class(c as u8)),
             mobil: MobilParams::default(),
             lane_adj,
             seed,
             net: net.clone(),
             junction,
+            signals,
             occupancy,
             intents: vec![Intent::default(); cap],
             active_lanes: Vec::with_capacity(lane_count),
             despawn: Vec::with_capacity(cap),
+            stranded: Vec::with_capacity(64),
         }
     }
 
-    /// Override the IDM parameters (single vehicle class). Mainly for tests.
+    /// Override the IDM parameters for EVERY class (uniform fleet). Mainly for
+    /// tests that want a single-class fleet with bespoke calibration.
     pub fn set_params(&mut self, p: IdmParams) {
-        self.params = p;
+        self.params = [p; N_CLASSES];
+    }
+
+    /// Override the IDM parameters of one vehicle class.
+    pub fn set_class_params(&mut self, class: u8, p: IdmParams) {
+        self.params[class as usize] = p;
     }
 
     /// Override the MOBIL lane-change parameters. Mainly for tests.
@@ -279,23 +312,27 @@ impl Core {
         self.mobil = m;
     }
 
-    /// The desired free-road speed `v0`.
+    /// The desired free-road speed `v0` of the passenger-car class.
     pub fn v0(&self) -> f32 {
-        self.params.v0
+        self.params[0].v0
     }
 
-    /// Spawn a vehicle at arc position `s` on `lane`, following `route` (a
-    /// sequence of lane ids the vehicle traverses in order; `route[0]` must be
-    /// `lane`). Returns `None` if the fleet is at capacity or the route is
-    /// empty / inconsistent.
-    pub fn spawn(&mut self, lane: u32, s: f32, route: &[u32]) -> Option<VehId> {
-        if route.is_empty() || route[0] != lane {
+    /// Spawn a vehicle of `class` (see [`crate::idm::N_CLASSES`]) at arc
+    /// position `s` on `lane`, following `route` (a sequence of lane ids the
+    /// vehicle traverses in order; `route[0]` must be `lane`). Returns `None`
+    /// if the fleet is at capacity, the route is empty / inconsistent, or the
+    /// class is out of range (a corrupt trip table is a caller error, not a
+    /// silently-healed car).
+    pub fn spawn(&mut self, lane: u32, s: f32, class: u8, route: &[u32]) -> Option<VehId> {
+        if route.is_empty() || route[0] != lane || class as usize >= N_CLASSES {
             return None;
         }
         if self.fleet.alive_count() >= self.intents.len() {
             return None; // would exceed cap and force a realloc
         }
-        let id = self.fleet.alloc(lane, s, 0.0, VEHICLE_LEN, route);
+        let id = self
+            .fleet
+            .alloc(lane, s, 0.0, class_len_m(class), class, route);
         // Seed the lane index so the very first tick sees correct occupancy.
         self.index.rebuild(&self.fleet);
         Some(id)
@@ -383,6 +420,46 @@ impl Core {
     /// ending on a boundary stub's in-lane is a normal route end). Read-only
     /// observation seam for the shell's conservation audit; the buffer is
     /// cleared at the start of the next tick.
+    /// Whether `turn`'s signal is green at tick `t` (always true at
+    /// unsignalised nodes). Read-only view of the actuated controllers, for
+    /// diagnostics/telemetry consumers.
+    pub fn signal_green(&self, turn: u32, t: u64) -> bool {
+        self.signals.green(turn, t)
+    }
+
+    /// Force a stationary sideways re-seat onto an adjacent same-edge lane —
+    /// the shell's stranded-vehicle rescue for TURNLESS lanes (a lane with no
+    /// outgoing turn at all cannot be left longitudinally; the only physical
+    /// exit is sideways). Applies the same live safety re-check as a phase-2
+    /// MOBIL apply and rebuilds the occupancy index. Returns `false` (no
+    /// mutation) if `target_lane` is not adjacent, the vehicle is gone, or the
+    /// gap is unsafe.
+    pub fn try_side_reseat(&mut self, veh: VehId, target_lane: u32) -> bool {
+        let slot = veh as usize;
+        if !self.fleet.alive.get(slot).copied().unwrap_or(false) {
+            return false;
+        }
+        let lane = self.fleet.lane[slot];
+        let (left, right) = self.lane_adj[lane as usize];
+        if target_lane != left && target_lane != right {
+            return false;
+        }
+        if !self.apply_lane_change_ok(slot, LaneChange { target_lane }) {
+            return false;
+        }
+        self.fleet.lane[slot] = target_lane;
+        self.index.rebuild(&self.fleet);
+        true
+    }
+
+    /// Slots walled at a no-turn lane end during the last [`Core::tick`] —
+    /// alive, stopped, and permanently stuck unless a consumer re-routes them
+    /// from their CURRENT lane (or despawns them if the lane is a true dead
+    /// end). Sorted ascending by slot (phase-2 iteration order).
+    pub fn stranded_last_tick(&self) -> &[VehId] {
+        &self.stranded
+    }
+
     pub fn despawned_last_tick(&self) -> &[VehId] {
         &self.despawn
     }
@@ -390,6 +467,11 @@ impl Core {
     /// Advance the simulation one timestep. `t` is the tick number, folded into
     /// deterministic per-vehicle noise.
     pub fn tick(&mut self, t: u64) {
+        // Advance the actuated signal controllers from the previous tick's
+        // snapshot BEFORE phase 1 reads them (sequential → deterministic).
+        self.signals
+            .update(&self.fleet, &self.index, &self.lane_len, t);
+
         debug_assert!(
             self.intents.len() >= self.fleet.slots(),
             "intent buffer too small: {} < {}",
@@ -417,6 +499,7 @@ impl Core {
         let seed = self.seed;
         let net = &self.net;
         let junction = &self.junction;
+        let signals = &self.signals;
 
         // Raw pointer into the intent buffer for disjoint parallel writes: each
         // vehicle slot is written by exactly one lane task, so the writes never
@@ -463,9 +546,11 @@ impl Core {
 
                 let mut blocked = false;
                 let mut route_end = false;
+                let mut no_turn_wall = false;
                 let next_turn = match boundary {
                     Boundary::Turn(turn) => {
-                        if !junction_allows(fleet, index, lane_len, junction, net, turn, t) {
+                        if !junction_allows(fleet, index, lane_len, junction, signals, net, turn, t)
+                        {
                             blocked = true;
                             let stop_gap = dist_to_end;
                             if stop_gap < gap {
@@ -485,6 +570,7 @@ impl Core {
                     }
                     Boundary::NoTurn => {
                         blocked = true;
+                        no_turn_wall = true;
                         let stop_gap = dist_to_end;
                         if stop_gap < gap {
                             gap = stop_gap;
@@ -495,7 +581,7 @@ impl Core {
                     Boundary::NotYet => NO_CROSS,
                 };
 
-                let acc = idm_accel(params, v, dv, gap);
+                let acc = idm_accel(&params[fleet.class[i] as usize], v, dv, gap);
 
                 // Ballistic-safe integration.
                 let mut new_v = (v + acc * DT).max(0.0);
@@ -564,6 +650,10 @@ impl Core {
                         from_lane: lane,
                         stop_s: this_lane_len - STOP_LINE_EPS,
                         from_cursor: fleet.route[i].cursor,
+                        // Only a vehicle actually pressed against the wall is
+                        // stranded — one still rolling toward it may yet be
+                        // rescued by a MOBIL change of its own.
+                        stranded: no_turn_wall && new_v < 0.5 && (this_lane_len - new_s) < 2.0,
                     };
                 }
             }
@@ -578,11 +668,15 @@ impl Core {
         // lives entirely here in the sequential apply.
         self.occupancy.begin_tick(t);
         self.despawn.clear();
+        self.stranded.clear();
         for i in 0..self.fleet.slots() {
             if !self.fleet.alive[i] {
                 continue;
             }
             let it = self.intents[i];
+            if it.stranded {
+                self.stranded.push(i as VehId);
+            }
 
             if it.cross_turn != NO_CROSS {
                 // This vehicle would cross a node this tick. Two gates remain:
@@ -799,13 +893,42 @@ impl Core {
             return false;
         }
 
+        // PHYSICAL FIT: the decider must not land overlapping a vehicle on the
+        // target lane. `lane_neighbourhood` zero-clamps its gaps, so an overlap
+        // hides as gap 0 and the follower's IDM-accel test alone can pass while
+        // the bodies interpenetrate (a discretionary MOBIL change is pre-vetted
+        // by its incentive eval, but a MANDATORY change and a forced
+        // side-reseat are not — they surfaced a real collision on the Gemeinde
+        // net). Require a strictly positive bumper gap to BOTH the nearest
+        // leader ahead and the nearest follower behind before anything else.
+        let my_len = self.fleet.len_m[slot];
+        for &other in self.index.on_lane(target) {
+            let j = other as usize;
+            let sj = self.fleet.s[j];
+            let gap = if sj >= s {
+                // Leader ahead: its rear minus the decider's front.
+                sj - self.fleet.len_m[j] - s
+            } else {
+                // Follower behind: the decider's rear minus the follower's front.
+                s - my_len - sj
+            };
+            if gap < MIN_CHANGE_GAP_M {
+                return false;
+            }
+        }
+
         // Re-find leader and follower on the target lane from live state.
         let nb = lane_neighbourhood(&self.fleet, &self.index, target, s, v, VehId::MAX);
 
         if let Some(f) = nb.follower {
-            // Gaps are zero-clamped by lane_neighbourhood; a would-be overlap yields
-            // gap 0 → IDM projects braking beyond b_safe → rejected by safety check below.
-            let a = crate::idm::idm_accel(&self.params, f.v, f.dv_to_decider, f.gap_to_decider);
+            // Dynamic safety: the new follower must not be forced to brake
+            // harder than `b_safe` (on top of the physical-fit gate above).
+            let a = crate::idm::idm_accel(
+                &self.params[f.class as usize],
+                f.v,
+                f.dv_to_decider,
+                f.gap_to_decider,
+            );
             if a <= -self.mobil.b_safe {
                 return false;
             }
@@ -854,7 +977,7 @@ fn evaluate_lane_change(
     fleet: &Fleet,
     index: &LaneIndex,
     mobil_params: &MobilParams,
-    idm: &IdmParams,
+    params: &[IdmParams; N_CLASSES],
     lane_adj: &[(u32, u32)],
     net: &TrafficNet,
     lane: u32,
@@ -870,24 +993,37 @@ fn evaluate_lane_change(
         return None; // single-lane edge: nothing to change to
     }
 
-    // Randomized acceptance: on ~10% of ticks, suppress any change entirely.
-    if crate::u01(seed, t, veh as u64) >= 0.9 {
-        return None;
-    }
-
-    // Mandatory-lane-light (carry-forward a): within `MANDATORY_ZONE_M` of the
-    // lane end, MOBIL is turn-unaware and would happily rewrite the route cursor
-    // onto a lane with no turn for the vehicle's next edge — stranding it. So
-    // near the node we only permit changes onto a lane that can still serve the
-    // route: one with a turn whose `toLane` lies on the same edge as the route's
-    // planned next lane. Away from the node (dist_to_end > zone) MOBIL is
-    // unrestricted, as before.
-    let restrict = dist_to_end <= MANDATORY_ZONE_M;
-    let next_edge = if restrict {
+    // Strategic urgency (SUMO-style): within `URGENT_ZONE_M` of the lane end,
+    // a vehicle whose CURRENT lane cannot serve the route's next edge must get
+    // out — its change is MANDATORY: the incentive threshold no longer applies
+    // (only the hard safety criterion does), the 10% random suppression is
+    // bypassed, and non-serving targets are barred. This is the missed-turn
+    // stranding fix: without merge-back pressure, an overtake onto a turnless
+    // secondary lane walled 9.4k vehicles per world day in the S2 calibration.
+    let next_edge = if dist_to_end <= junction::URGENT_ZONE_M {
         route_next_edge(fleet, net, veh as usize)
     } else {
         None
     };
+    let cur_serves = match next_edge {
+        Some(edge) => lane_serves_edge(net, lane, edge),
+        None => true,
+    };
+    let mandatory = !cur_serves;
+
+    // Randomized acceptance: on ~10% of ticks, suppress any DISCRETIONARY
+    // change entirely (desynchronizes threshold-crossing neighbours). A
+    // mandatory correction must not dither.
+    if !mandatory && crate::u01(seed, t, veh as u64) >= 0.9 {
+        return None;
+    }
+
+    // Mandatory-lane-light (carry-forward a): within `MANDATORY_ZONE_M` of the
+    // lane end, changes onto a lane that cannot serve the route are barred even
+    // for a correctly-placed vehicle. When the vehicle is on a WRONG lane the
+    // bar applies throughout the urgent zone — a corrective move must never
+    // land on another non-serving lane.
+    let restrict_all = dist_to_end <= MANDATORY_ZONE_M;
 
     // Current-lane neighbourhood, excluding self (self occupies this lane).
     let cur = lane_neighbourhood(fleet, index, lane, s, v, veh);
@@ -899,9 +1035,9 @@ fn evaluate_lane_change(
         if target == u32::MAX {
             continue;
         }
-        // Turn-awareness gate: if restricted and the target lane can't serve the
-        // route's next edge, skip it.
+        // Turn-awareness gate.
         if let Some(edge) = next_edge
+            && (mandatory || restrict_all)
             && !lane_serves_edge(net, target, edge)
         {
             continue;
@@ -909,8 +1045,23 @@ fn evaluate_lane_change(
         // On the target lane the decider is absent, so exclude nothing real;
         // pass an impossible slot id.
         let tgt = lane_neighbourhood(fleet, index, target, s, v, VehId::MAX);
-        let d = mobil::evaluate(mobil_params, idm, v, &cur, &tgt, to_right);
-        if d.change {
+        let d = mobil::evaluate(
+            mobil_params,
+            params,
+            fleet.class[veh as usize],
+            v,
+            &cur,
+            &tgt,
+            to_right,
+        );
+        // Mandatory correction: only the safety veto (new follower not forced
+        // beyond b_safe) gates the move; the comfort threshold is waived.
+        let accept = if mandatory {
+            d.new_follower_accel > -mobil_params.b_safe
+        } else {
+            d.change
+        };
+        if accept {
             match best {
                 Some((_, best_inc)) if best_inc >= d.incentive => {}
                 _ => best = Some((target, d.incentive)),
@@ -1007,6 +1158,7 @@ fn lane_neighbourhood(
         };
         Follower {
             v: vf,
+            class: fleet.class[j],
             gap_to_decider,
             gap_without_decider,
             dv_to_decider,
@@ -1209,17 +1361,19 @@ fn route_completed(fleet: &Fleet, net: &TrafficNet, lane_len: &[f32], veh: usize
 /// turn's `fromLane` (the conflicting approach) and rejects if any is closer
 /// than the critical time-gap distance to the shared node. Read-only over the
 /// phase-1 snapshot; the final crossing authority is phase-2 occupancy.
+#[allow(clippy::too_many_arguments)]
 fn junction_allows(
     fleet: &Fleet,
     index: &LaneIndex,
     lane_len: &[f32],
     junction: &JunctionModel,
+    signals: &SignalControl,
     net: &TrafficNet,
     turn: u32,
     t: u64,
 ) -> bool {
-    // Signal gating first (cheap, stateless).
-    if !junction.signal_green(turn, t, DT) {
+    // Signal gating first (cheap, read-only actuated state).
+    if !signals.green(turn, t) {
         return false;
     }
     // Gap acceptance: only if this turn yields to something.
@@ -1238,7 +1392,13 @@ fn junction_allows(
             let j = lead as usize;
             let dist_to_conflict = (llen - fleet.s[j]).max(0.0);
             let v_conflict = fleet.v[j];
-            if !junction.gap_ok(turn, dist_to_conflict, v_conflict) {
+            // Standing/crawling priority vehicles are not an approaching
+            // stream — skipping them breaks the mutual-yield deadlock; the
+            // phase-2 conflict-point occupancy remains the physical gate
+            // (see junction::APPROACHING_MIN_V).
+            if v_conflict >= junction::APPROACHING_MIN_V
+                && !junction.gap_ok(turn, dist_to_conflict, v_conflict)
+            {
                 return false;
             }
         }
