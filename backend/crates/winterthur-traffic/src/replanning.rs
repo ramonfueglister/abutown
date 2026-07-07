@@ -273,9 +273,163 @@ impl PlanMemory {
     }
 }
 
+/// Stateful day-to-day replanning manager for the shell: owns one
+/// [`PlanMemory`] per recurring census trip (keyed by `(day_kind, trip_index)`
+/// — the same trip runs every world day, so that pair is the stable agent
+/// identity), tracks in-flight vehicles so an arriving trip can be scored by
+/// its realized travel time, and runs the between-day step at world midnight.
+///
+/// Route-choice only in v1 (the dominant equilibrating effect; see the
+/// convergence proof) — departure-time mutation is deferred so the spawner's
+/// release schedule stays untouched. Deterministic: all draws go through the
+/// pure [`decide_action`] / [`PlanMemory::select`] on `(seed, world_day,
+/// trip_index)`, and the between-day pass iterates memories in sorted key
+/// order.
+///
+/// This type deliberately does NOT depend on the kernel, the `Router`, or the
+/// net: the shell passes a routing closure and a lane→edge map into
+/// [`ReplanningState::between_day`], keeping the learning logic unit-testable
+/// in isolation (as the convergence test already exercises the algorithm).
+#[derive(Debug, Default)]
+pub struct ReplanningState {
+    /// `(day_kind, trip_index)` → the trip's evolving plan memory.
+    memories: std::collections::BTreeMap<(u8, u32), PlanMemory>,
+    /// Live vehicles: kernel slot → the trip it carries + its spawn tick, so a
+    /// despawn can be scored against the right memory. Removed on despawn.
+    in_flight: std::collections::HashMap<u32, InFlight>,
+    params: ReplanParams,
+    score: ScoreParams,
+    seed: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InFlight {
+    key: (u8, u32),
+    spawn_tick: u64,
+}
+
+impl ReplanningState {
+    pub fn new(seed: u64, params: ReplanParams, score: ScoreParams) -> Self {
+        ReplanningState {
+            memories: std::collections::BTreeMap::new(),
+            in_flight: std::collections::HashMap::new(),
+            params,
+            score,
+            seed,
+        }
+    }
+
+    /// The route this trip should execute today, if it has a learned plan
+    /// selected — the spawner uses it instead of routing fresh. `None` means
+    /// "no memory yet": the spawner routes from the census OD and calls
+    /// [`note_spawn`](Self::note_spawn) to seed the memory.
+    pub fn planned_route(&self, day_kind: u8, trip_index: u32) -> Option<Vec<u32>> {
+        self.memories
+            .get(&(day_kind, trip_index))
+            .and_then(|m| m.selected_plan())
+            .map(|p| p.route.clone())
+    }
+
+    /// Register a freshly spawned vehicle. Seeds the trip's memory with the
+    /// census route on first sight (the day-0 plan), and records the vehicle
+    /// as in-flight for later scoring. `census_route` is the route the spawner
+    /// actually placed the vehicle on.
+    pub fn note_spawn(
+        &mut self,
+        veh: u32,
+        day_kind: u8,
+        trip_index: u32,
+        spawn_tick: u64,
+        census_route: &[u32],
+    ) {
+        let key = (day_kind, trip_index);
+        self.memories
+            .entry(key)
+            .or_insert_with(|| PlanMemory::seed(census_route.to_vec()));
+        self.in_flight.insert(veh, InFlight { key, spawn_tick });
+    }
+
+    /// Register a vehicle's arrival (despawn). Scores the trip's currently
+    /// selected plan by its realized travel time (`(despawn − spawn)·dt`), so
+    /// the next between-day pass can prefer faster plans. A despawn with no
+    /// in-flight record (e.g. a non-census citizen car) is ignored.
+    pub fn note_despawn(&mut self, veh: u32, despawn_tick: u64, dt: f32) {
+        let Some(f) = self.in_flight.remove(&veh) else {
+            return;
+        };
+        let travel_s = despawn_tick.saturating_sub(f.spawn_tick) as f32 * dt;
+        // Score on travel time alone in v1 (preferred arrival far in the
+        // future ⇒ no late penalty); the module supports the late term when a
+        // preferred arrival is wired in.
+        let s = charypar_nagel_score(&self.score, travel_s, 0.0, f32::INFINITY);
+        if let Some(m) = self.memories.get_mut(&f.key) {
+            m.score_executed(s, self.score.learning_rate);
+        }
+    }
+
+    /// The between-day step, run once at the world-midnight wrap. For every
+    /// trip memory, in deterministic key order: decide the replan action and
+    /// apply it. ReRoute recomputes the route on the CURRENT (previous day's
+    /// realized) edge weights via `reroute(origin_edge, dest_edge)`; the
+    /// origin/dest edges are derived from the selected plan's route ends via
+    /// `edge_of_lane`. Select re-picks by logit; TimeMutate collapses to Select
+    /// in the route-only v1.
+    pub fn between_day(
+        &mut self,
+        world_day: u64,
+        edge_of_lane: impl Fn(u32) -> u32,
+        mut reroute: impl FnMut(u32, u32) -> Option<Vec<u32>>,
+    ) {
+        let keys: Vec<(u8, u32)> = self.memories.keys().copied().collect();
+        for key in keys {
+            let agent = u64::from(key.1) ^ (u64::from(key.0) << 32);
+            let action = decide_action(self.seed, world_day, agent, &self.params);
+            let mem = self.memories.get_mut(&key).expect("key from own map");
+            match action {
+                ReplanAction::Select | ReplanAction::TimeMutate => {
+                    mem.select(self.seed, world_day, agent, self.params.logit_theta);
+                }
+                ReplanAction::ReRoute => {
+                    // Derive OD from the current plan's route ends.
+                    let od = mem.selected_plan().and_then(|p| {
+                        let o = *p.route.first()?;
+                        let d = *p.route.last()?;
+                        Some((edge_of_lane(o), edge_of_lane(d)))
+                    });
+                    if let Some((oe, de)) = od
+                        && let Some(new_route) = reroute(oe, de)
+                        && !new_route.is_empty()
+                    {
+                        let idx = mem.insert_plan(Plan::new(new_route, 0), self.params.memory_size);
+                        mem.selected = Some(idx);
+                    } else {
+                        mem.select(self.seed, world_day, agent, self.params.logit_theta);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Number of trips with a plan memory (for telemetry / tests).
+    pub fn tracked_trips(&self) -> usize {
+        self.memories.len()
+    }
+
+    /// Number of vehicles currently in flight (for telemetry / tests).
+    pub fn in_flight_count(&self) -> usize {
+        self.in_flight.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A kernel slot id as a wire vehicle id (identity here; the state keys on
+    /// the raw slot).
+    fn veh(slot: u32) -> u32 {
+        slot
+    }
 
     #[test]
     fn score_penalises_travel_and_lateness_one_sided() {
@@ -399,5 +553,66 @@ mod tests {
             }
         }
         assert!(chosen_new > 100, "unscored plan starved: {chosen_new}/1000");
+    }
+    // ── ReplanningState (shell manager) ────────────────────────────────────
+
+    #[test]
+    fn state_seeds_memory_on_first_spawn_and_scores_on_arrival() {
+        let mut st = ReplanningState::new(0x5, ReplanParams::default(), ScoreParams::default());
+        // No memory yet → spawner must route fresh.
+        assert!(st.planned_route(0, 7).is_none());
+        st.note_spawn(veh(1), 0, 7, 100, &[3, 4, 5]);
+        assert_eq!(st.tracked_trips(), 1);
+        assert_eq!(st.in_flight_count(), 1);
+        // Next day the same trip has a selected (census) plan to execute.
+        assert_eq!(st.planned_route(0, 7), Some(vec![3, 4, 5]));
+        // Arrival after 600 ticks → the selected plan gets scored, vehicle
+        // leaves the in-flight set.
+        st.note_despawn(veh(1), 700, 0.1);
+        assert_eq!(st.in_flight_count(), 0);
+        let mem = st.memories.get(&(0u8, 7u32)).unwrap();
+        assert!(mem.plans[0].score.is_some(), "arrival must score the plan");
+        // An unknown despawn (non-census car) is a no-op.
+        st.note_despawn(veh(999), 800, 0.1);
+    }
+
+    #[test]
+    fn state_reroute_adds_and_selects_new_route_on_realized_weights() {
+        let mut rp = ReplanParams::default();
+        rp.replan_share = 1.0; // force everyone to replan this test
+        rp.reroute_share = 1.0; // force ReRoute
+        let mut st = ReplanningState::new(0x9, rp, ScoreParams::default());
+        st.note_spawn(veh(1), 0, 1, 0, &[10, 11]); // route ends on lanes 10..11
+        // edge_of_lane: lane/10 (so lane 10→edge 1, lane 11→edge 1, dest via last).
+        let edge_of = |l: u32| l / 10;
+        // reroute returns a DIFFERENT route for the same OD (a faster path today).
+        let rr = |_o: u32, _d: u32| Some(vec![10, 99, 11]);
+        st.between_day(1, edge_of, rr);
+        let mem = st.memories.get(&(0u8, 1u32)).unwrap();
+        // The new route was added and selected for execution.
+        assert_eq!(st.planned_route(0, 1), Some(vec![10, 99, 11]));
+        assert!(
+            mem.plans.len() >= 2,
+            "rerouted plan must be added to memory"
+        );
+    }
+
+    #[test]
+    fn state_between_day_is_deterministic() {
+        let build = || {
+            let mut st =
+                ReplanningState::new(0xABCD, ReplanParams::default(), ScoreParams::default());
+            for i in 0..50u32 {
+                st.note_spawn(veh(i), 0, i, 0, &[i * 2, i * 2 + 1]);
+                st.note_despawn(veh(i), 100 + i as u64, 0.1);
+            }
+            st
+        };
+        let run = |mut st: ReplanningState| -> Vec<Option<Vec<u32>>> {
+            let edge_of = |l: u32| l / 2;
+            st.between_day(1, edge_of, |_o, _d| Some(vec![0, 1]));
+            (0..50u32).map(|i| st.planned_route(0, i)).collect()
+        };
+        assert_eq!(run(build()), run(build()), "same seed/day → same plans");
     }
 }
