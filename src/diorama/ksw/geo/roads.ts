@@ -9,7 +9,7 @@ import { clayMat } from '../props';
 import type { RoadPath } from './geoData';
 import { corridorWidths, type TrafficNetDoc } from '../../traffic/corridorWidths';
 import trafficNetJson from '../../../../data/winterthur/trafficnet.json';
-import { roadMaskHalfWidth, railMaskHalfWidth } from './groundSampler';
+import { MASK_CELL_M, roadMaskHalfWidth, railMaskHalfWidth } from './groundSampler';
 
 /** Optional per-vertex ground draping. `groundYAt(x,z)` returns the visible
  * (shifted) terrain height at a world point; the ribbon vertex y becomes that
@@ -223,7 +223,15 @@ export function apronStrip(
  * edge coincides byte-identically with the apron outer edge (no seam). Merged
  * into one geometry per layer in buildRoads — no per-frame cost. With no
  * groundYAt/tileGround (near the anchor, drape ≈ 0) the skirt drops a nominal
- * 0.5 m, still a valid apron foot. */
+ * 0.5 m, still a valid apron foot.
+ *
+ * #144 cut cap: the top edge additionally rises per-vertex to the tile ground
+ * at the edge AND one mask cell further out (+ a small cap) wherever that
+ * terrain sits ABOVE the profile. A top pinned at profile height leaves an
+ * open vertical window on cut sides (skirts only ever dropped DOWN) — camera
+ * rays escape through it under the neighbouring terrain to the bright sky
+ * dome and bloom into the #144 white blob chains. On embankments and flat
+ * ground max() keeps the flush profile top (no parapet). */
 export function skirtStrip(
   pts: number[][],
   maskWidth: number,
@@ -243,20 +251,32 @@ export function skirtStrip(
   // apron (mask) outer edge and the three can never drift.
   const offs = miterOffsets(pts);
   // Two skirts: side = +1 (left edge) and −1 (right edge). Each is a vertical
-  // quad strip: top at the mask edge (profile height), bottom PER-VERTEX at the
-  // tile ground − footM so it always reaches terrain (fill slope on embankments,
-  // cut bank on cuts).
+  // quad strip: top at the mask edge (profile height, raised to the cut bank
+  // where the terrain is higher), bottom PER-VERTEX at the tile ground − footM
+  // so it always reaches terrain (fill slope on embankments, cut bank on cuts).
   for (const side of [1, -1]) {
     const base0 = positions.length / 3;
     for (let i = 0; i < n; i++) {
       const [cx, cz] = pts[i];
       const { mx, mz, scale } = offs[i];
-      const topY = (groundYAt ? groundYAt(cx, cz) : 0) + y;
+      const profileTop = (groundYAt ? groundYAt(cx, cz) : 0) + y;
       const ex = cx + side * mx * half * scale;
       const ez = cz + side * mz * half * scale;
+      // Cut cap (#144): sample the tile ground at the edge and one mask cell
+      // outward — a ray clearing a profile-height top would otherwise slip
+      // UNDER the rising outside terrain and reach the sky. SKIRT_CUT_CAP_M
+      // keeps the wall a hair proud of the terrain so grazing rays cannot
+      // slice between wall top and ground surface.
+      const gEdge = tileGround ? tileGround(ex, ez) : 0;
+      const gOut = tileGround
+        ? tileGround(ex + side * mx * MASK_CELL_M * scale, ez + side * mz * MASK_CELL_M * scale)
+        : 0;
+      const topY = tileGround
+        ? Math.max(profileTop, Math.max(gEdge, gOut) + SKIRT_CUT_CAP_M)
+        : profileTop;
       // Bottom per-vertex from the TILE ground at the skirt-foot position (not
       // the centreline, not the profile): the terrain the skirt must reach.
-      const botY = (tileGround ? tileGround(ex, ez) : 0) - footM;
+      const botY = gEdge - footM;
       positions.push(ex, topY, ez, ex, botY, ez); // top then bottom
       if (i > 0) {
         const a = base0 + (i - 1) * 2;
@@ -265,6 +285,73 @@ export function skirtStrip(
         // the discarded terrain used to be — no doubled geometry needed.
         indices.push(a, a + 1, a + 2, a + 2, a + 1, a + 3);
       }
+    }
+  }
+  return { positions, indices };
+}
+
+/** Cap above the local terrain for the skirt's cut-side top edge (#144): high
+ * enough that grazing rays cannot slice between wall top and the terrain
+ * surface it meets, low enough to read as a kerb-height cut edge, not a wall. */
+export const SKIRT_CUT_CAP_M = 0.05;
+
+/** Corridor under-lid (#144 "Bodendeckel"). One dark opaque strip per way,
+ * spanning the FULL lid width, sunk `dropM` below min(profile, local tile
+ * ground) per vertex. The discard opens the terrain over the whole corridor
+ * footprint; ribbon + apron close it from above and the skirts close the
+ * perimeter — but any residual epsilon crack (raster staircase corners at
+ * curves, junction miters, way endpoints) lets a ray straight through to the
+ * BRIGHT sky/mist dome behind the world, and bloom + depth-of-field inflate
+ * every such pinhole into a fat glowing blob. The lid guarantees whatever
+ * slips past the platform hits dark ground-tone instead of sky. min() keeps
+ * it under the fill slope on embankments (never a floating shelf) and under
+ * the cut bank on cuts. */
+export function lidStrip(
+  pts: number[][],
+  width: number,
+  groundYAt?: GroundYAt,
+  tileGround?: GroundYAt,
+  dropM = 0.4,
+): { positions: number[]; indices: number[] } {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const half = width / 2;
+  if (pts.length >= 2) {
+    // End-cap extension (#144): the mask stamps a half-disc of radius ≈ half
+    // beyond each endpoint (its densified points include the endpoints), but
+    // every platform strip stops AT the endpoint — a bright pinhole at each
+    // dead-end. Extend the lid lengthwise by its half-width on both ends so
+    // the end-cap discard shows dark lid, not sky. Ribbon/apron stay put (the
+    // visible road must still end where the way ends).
+    const [x0, z0] = pts[0];
+    const [x1, z1] = pts[1];
+    const [xa, za] = pts[pts.length - 2];
+    const [xb, zb] = pts[pts.length - 1];
+    const l0 = Math.hypot(x1 - x0, z1 - z0) || 1;
+    const l1 = Math.hypot(xb - xa, zb - za) || 1;
+    pts = [
+      [x0 - ((x1 - x0) / l0) * half, z0 - ((z1 - z0) / l0) * half],
+      ...pts,
+      [xb + ((xb - xa) / l1) * half, zb + ((zb - za) / l1) * half],
+    ];
+  }
+  if (groundYAt) pts = subdivideForDrape(pts, groundYAt);
+  const n = pts.length;
+  if (n < 2) return { positions, indices };
+  const offs = miterOffsets(pts);
+  for (let i = 0; i < n; i++) {
+    const [cx, cz] = pts[i];
+    const { mx, mz, scale } = offs[i];
+    const profY = groundYAt ? groundYAt(cx, cz) : 0;
+    for (const side of [1, -1]) {
+      const ex = cx + side * mx * half * scale;
+      const ez = cz + side * mz * half * scale;
+      const gY = tileGround ? tileGround(ex, ez) : 0;
+      positions.push(ex, Math.min(profY, gY) - dropM, ez);
+    }
+    if (i > 0) {
+      const a = (i - 1) * 2;
+      indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
     }
   }
   return { positions, indices };
@@ -347,6 +434,13 @@ function skirtMat(color: number): THREE.MeshPhysicalMaterial {
   return m;
 }
 
+/** Lid material (#144 Bodendeckel): the ribbon clay heavily darkened — a
+ * shadowed-soil tone. It only ever shows through residual platform cracks, so
+ * it must read as dark ground, never as a lit surface that bloom picks up. */
+function lidMat(color: number): THREE.MeshPhysicalMaterial {
+  return clayMat(darken(color, 0.4)).clone();
+}
+
 /** Build the merged APRON mesh for a layer (spec §5 platform): each way
  * contributes two flat verge strips from the ribbon edge to the mask edge at
  * profile height, so the road platform (not void) fills every cell the discard
@@ -409,6 +503,38 @@ function skirtsMesh(
   geo.setIndex(positions.length / 3 > 65535 ? new THREE.BufferAttribute(new Uint32Array(indices), 1) : new THREE.BufferAttribute(new Uint16Array(indices), 1));
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, skirtMat(color));
+  mesh.name = name;
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  return mesh;
+}
+
+/** Build the merged under-lid mesh for a layer (#144 Bodendeckel): one dark
+ * full-width strip per way, sunk below profile and terrain, catching every
+ * ray that slips through a residual crack in the platform. `lidWidthOf`
+ * returns the FULL lid width (mask width + one cell slack per side). */
+function lidsMesh(
+  name: string,
+  paths: RoadPath[],
+  lidWidthOf: (p: RoadPath, i: number) => number,
+  color: number,
+  groundYAt: GroundYAt,
+  tileGround: GroundYAt,
+): THREE.Mesh {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let idx = 0; idx < paths.length; idx++) {
+    const p = paths[idx];
+    const s = lidStrip(p.pts, lidWidthOf(p, idx), groundYAt, tileGround);
+    const base = positions.length / 3;
+    positions.push(...s.positions);
+    for (const i of s.indices) indices.push(base + i);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setIndex(positions.length / 3 > 65535 ? new THREE.BufferAttribute(new Uint32Array(indices), 1) : new THREE.BufferAttribute(new Uint16Array(indices), 1));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, lidMat(color));
   mesh.name = name;
   mesh.receiveShadow = true;
   mesh.castShadow = false;
@@ -479,6 +605,14 @@ export function buildRoads(
     group.add(skirtsMesh('carriageSkirts', carriage, carriageMaskWidthOf, kswCity.roadColors.carriage, kswCity.roadYs.carriage, groundYAt, tileGround));
     group.add(skirtsMesh('footwaySkirts', foot, footMaskWidthOf, kswCity.roadColors.footway, kswCity.roadYs.footway, groundYAt, tileGround));
     group.add(skirtsMesh('railBedSkirts', rails, railBedMaskWidthOf, kswCity.roadColors.railBed, kswCity.roadYs.railBed, groundYAt, tileGround));
+    // #144 Bodendeckel: dark under-lids one cell wider than the mask footprint
+    // per side, so every residual crack in the platform shows dark ground
+    // instead of the bright sky dome (which bloom inflates into white blobs).
+    const lidWidthOf = (maskWidthOf: (p: RoadPath, i: number) => number) =>
+      (p: RoadPath, i: number): number => maskWidthOf(p, i) + 2 * MASK_CELL_M;
+    group.add(lidsMesh('carriageLids', carriage, lidWidthOf(carriageMaskWidthOf), kswCity.roadColors.carriage, groundYAt, tileGround));
+    group.add(lidsMesh('footwayLids', foot, lidWidthOf(footMaskWidthOf), kswCity.roadColors.footway, groundYAt, tileGround));
+    group.add(lidsMesh('railBedLids', rails, lidWidthOf(railBedMaskWidthOf), kswCity.roadColors.railBed, groundYAt, tileGround));
   }
   return group;
 }

@@ -58,9 +58,9 @@ import { buildRoads } from './geo/roads';
 import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { loadWorld, anchorGroundHeight, makeHeightSampler, fetchTileBin, decodeTileBin, type DecodedTile } from './geo/worldData';
-import { buildL0Backdrop } from './geo/terrain';
+import { buildL0Backdrop, updateTerrainDiscardAnchor } from './geo/terrain';
 import { loadCorridorMask } from './geo/corridorMask';
-import { TileStreamer, tileCenter, type TileKey, type TileMeta } from './geo/tileStreamer';
+import { DEFAULT_RINGS, TileStreamer, tileCenter, type TileKey, type TileMeta } from './geo/tileStreamer';
 import { materializeTile, subCellKey, type TileContent } from './geo/tileContent';
 import type { TileRef, WorldTile } from '../../proto/world_pb.js';
 import { buildWindows } from './geo/windows';
@@ -676,7 +676,10 @@ async function boot(): Promise<void> {
   // covering backdrop cell must be hidden or it veils the whole district.
   const l0Tile = world.tiles.find((t) => t.level === 0);
   if (!l0Tile) throw new Error('boot: manifest has no L0 tile');
-  const backdrop = buildL0Backdrop(l0Tile, 16, { corridorMask });
+  // #144: NO corridor discard on the coarse L0 backdrop — its surface deviates
+  // up to ~20 m from the fine heights the road platform was built against, so
+  // discarding it opens uncloseable corridor slots (see tileContent.ts).
+  const backdrop = buildL0Backdrop(l0Tile, 16, {});
   terrainRoot.add(backdrop.group);
   // Tile heights are absolute DEM metres (~400-590 m); the hero city + KSW
   // sit at y≈0 (the anchor). Shift the whole terrain group down by the
@@ -1789,6 +1792,10 @@ async function boot(): Promise<void> {
     {
       const cx = camera.position.x;
       const cz = camera.position.z;
+      // #144 distance-limited corridor discard: anchored to the SAME camera
+      // position the streamer rings use, radius safely INSIDE the fine (L2)
+      // ring so the discard never reaches the L2/L1 seam (see terrain.ts).
+      updateTerrainDiscardAnchor(cx, cz, DEFAULT_RINGS.r2 * 0.8);
       const dx = cx - lastTreeCamX;
       const dz = cz - lastTreeCamZ;
       const moved2 = dx * dx + dz * dz;
