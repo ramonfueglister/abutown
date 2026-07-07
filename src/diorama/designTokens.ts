@@ -534,8 +534,19 @@ export const kswCityStyle = {
   lamp: { spacing: { primary: 25, secondary: 28, tertiary: 30, residential: 35, unclassified: 35, living_street: 35, service: 45, pedestrian: 30 } as Record<string, number>, sideOffset: 1.2 },
   // midR 1200 (was 600): the facade window raster is a shader branch, not
   // geometry — hiding it at the city establishing framing (radius ~820) left
-  // every building a naked clay block. Lamps/footways ride the same ring;
-  // both are single instanced/merged draws, so keeping them on is free.
+  // every building a naked clay block. Footways ride this ring; lamps do NOT
+  // (they have their own lampLod below — see the flicker fix note).
   lod: { nearR: 150, midR: 1200, hysteresis: 0.1 },
+  // Lamps get their OWN LOD, decoupled from the facade ring (2026-07-07
+  // flicker/clutter fix). Raising midR to 1200 for the facade windows also
+  // un-culled 17.9k opaque lamp posts/bulbs (+ pool/halo glow) at radius 820,
+  // which lined every distant street as a scintillating white-dotted mess.
+  // Split by role:
+  //  - hardware (posts/heads/bulbs): opaque, sub-pixel far away → the clutter
+  //    AND the flicker. Cull past hardwareR (they read only up close anyway).
+  //  - glow (pools/halos): additive, INVISIBLE by day (lampGlowU=0), the cozy
+  //    night street atmosphere at the establishing framing. Keep to glowR so
+  //    the night city stays lit, drop past it so the deep horizon stays clean.
+  lampLod: { hardwareR: 300, glowR: 1500, hysteresis: 0.12 },
   cloudSwap: { start: 300, end: 600 },
 } as const;

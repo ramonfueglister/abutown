@@ -129,7 +129,16 @@ export function buildLamps(roads: RoadPath[], groundYAt?: (x: number, z: number)
   for (const mesh of [posts, heads, bulbs, pools, halos]) {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
-    group.add(mesh);
   }
+  // Two LOD sub-groups (lod.ts lampLodVisibility): the opaque hardware culls
+  // close (day clutter + far-field scintillation), the additive glow reaches
+  // far (night atmosphere, invisible by day). main.ts toggles their .visible.
+  const hardware = new THREE.Group();
+  hardware.name = 'lampHardware';
+  hardware.add(posts, heads, bulbs);
+  const glow = new THREE.Group();
+  glow.name = 'lampGlow';
+  glow.add(pools, halos);
+  group.add(hardware, glow);
   return group;
 }
