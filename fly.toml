@@ -21,6 +21,12 @@ primary_region = "lhr"  # EU, near Supabase eu-west-1 (cuts persist write latenc
     timeout = "5s"
     grace_period = "30s"
 
+# shared-cpu-2x (not 1x): under peak sim load (morning/evening commute, ~21k
+# active trips) the single-vCPU machine starved the async ~1 MB snapshot write,
+# pushing world_core_snapshots upserts from <1 s to 20–43 s (persist lagged
+# ~40 s behind, self-recovering off-peak). A second vCPU gives the serialize+
+# write headroom to run without contending the tick loop. Still ONE machine —
+# single-writer invariant holds; only scale vertically, never count > 1.
 [[vm]]
-  size = "shared-cpu-1x"
+  size = "shared-cpu-2x"
   memory = "1gb"
