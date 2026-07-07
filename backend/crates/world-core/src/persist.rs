@@ -1,4 +1,4 @@
-//! `WorldCoreSnapshot` v1 + Migrationskette (Task 10): das EINE persistierte
+//! `WorldCoreSnapshot` v2 + Migrationskette (Task 10): das EINE persistierte
 //! Abbild der Welt — Uhr, Bürger, Gebäude-Lebenszyklen, Wirtschaft. Spiegel
 //! des geernteten `EconomyPersistSnapshot` (bbd0159, sim-core), aber auf dem
 //! M1-Weltmodell: Maps als sortierte `Vec<(K, V)>` (serde_json lehnt
@@ -56,7 +56,7 @@ use crate::systems::SharedSimWorld;
 /// Aktuelle Snapshot-Schema-Version. Jede Änderung am Snapshot-Schema nach
 /// dem ersten Deploy erhöht sie UND fügt in [`migrate_snapshot`] einen
 /// Migrations-Arm hinzu (No-Wipe-Prinzip).
-pub const WORLD_SNAPSHOT_VERSION: u32 = 1;
+pub const WORLD_SNAPSHOT_VERSION: u32 = 2;
 
 /// Ein persistierter Fussweg-Rest — die EINZIGE Trip-Form im Snapshot.
 ///
@@ -131,6 +131,15 @@ pub struct WorldCoreSnapshot {
     /// leer, das Datenmodell steht).
     pub building_states: Vec<(u32, BuildingLifecycle)>,
     pub econ: EconSnap,
+    /// v2: die S4-Plan-Memories der Verkehrs-Sim, OPAK durchgereicht.
+    /// world-core kennt `ReplanningState` nicht (er lebt in `winterthur-
+    /// traffic`), also trägt der Snapshot nur den serialisierten Wert; der
+    /// sim-server-Orchestrator füllt ihn nach [`extract`] via
+    /// `winterthur_traffic::shell::harvest_replanning` und die Traffic-Shell
+    /// restauriert ihn beim Boot. `#[serde(default)]` ⇒ v1-Zeilen (ohne Feld)
+    /// laden als `None` (No-Wipe), leere/frische Welten lassen es weg.
+    #[serde(default)]
+    pub replanning: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Error)]
@@ -157,8 +166,10 @@ pub fn migrate_snapshot(raw: serde_json::Value) -> Result<WorldCoreSnapshot, Mig
         .and_then(serde_json::Value::as_u64)
         .ok_or(MigrateError::MissingVersion)?;
     match version {
-        1 => Ok(serde_json::from_value(raw)?),
-        // Künftig: 2 => migrate_v1_to_v2(raw), dann rekursiv weiter.
+        // v1→v2 fügte NUR das optionale `replanning`-Feld hinzu (serde default
+        // `None`), also deserialisiert eine v1-Zeile ohne Transformation direkt
+        // in die aktuelle Form — beide Versionen teilen denselben Arm.
+        1 | 2 => Ok(serde_json::from_value(raw)?),
         other => Err(MigrateError::UnknownVersion(other)),
     }
 }
@@ -206,6 +217,9 @@ pub fn extract(world: &World) -> WorldCoreSnapshot {
         citizens,
         building_states,
         econ: extract_econ(world),
+        // world-core sieht die Traffic-Resource nicht: der sim-server füllt
+        // dies nach dem extract (harvest_replanning). Frisch immer `None`.
+        replanning: None,
     }
 }
 
@@ -493,6 +507,22 @@ mod tests {
             "total_money conserved across extract/apply + 500 more ticks"
         );
         assert_eq!(b.resource::<CitizenRegistry>().count, count);
+    }
+
+    #[test]
+    fn migrate_lifts_v1_row_without_replanning_field() {
+        // A pre-v2 row: version 1, no `replanning` key. No-Wipe: it must load,
+        // with the optional field defaulting to None.
+        let v1 = serde_json::json!({
+            "version": 1,
+            "clock": { "world_tick": 42 },
+            "citizens": [],
+            "building_states": [],
+            "econ": EconSnap::default(),
+        });
+        let restored = migrate_snapshot(v1).expect("v1 row migrates to v2");
+        assert_eq!(restored.clock.world_tick, 42);
+        assert_eq!(restored.replanning, None, "absent field defaults to None");
     }
 
     #[test]

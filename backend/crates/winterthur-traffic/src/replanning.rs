@@ -28,6 +28,7 @@
 //!   plans with genetic algorithms. *Transportation, 32*(4), 369-397.
 //!   https://doi.org/10.1007/s11116-004-8287-y
 
+use serde::{Deserialize, Serialize};
 use traffic_core::u01;
 
 /// Salt streams for the per-agent draws (third `u01` argument), one per
@@ -81,7 +82,7 @@ pub fn charypar_nagel_score(
 /// One plan in an agent's choice set: the route (lane-id sequence, as the
 /// kernel spawns) and a departure offset (seconds relative to the census
 /// departure), plus its running EWMA score. `None` score = never executed.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Plan {
     pub route: Vec<u32>,
     pub departure_offset_s: i32,
@@ -172,7 +173,7 @@ pub fn time_mutation_offset(seed: u64, world_day: u64, agent: u64, range_s: i32)
 }
 
 /// The bounded per-agent plan memory. Snapshot-serialized by the shell.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanMemory {
     pub plans: Vec<Plan>,
     /// Index of the plan chosen for the LAST executed day (for scoring and as
@@ -438,6 +439,36 @@ impl ReplanningState {
     pub fn in_flight_count(&self) -> usize {
         self.in_flight.len()
     }
+
+    /// Serialise the learned plan memories for the world snapshot, or `None`
+    /// when nothing has been learned yet (so the snapshot omits the field
+    /// entirely on a fresh world). `in_flight` is deliberately excluded — the
+    /// kernel fleet is not persisted, so on resume every trip re-spawns and
+    /// re-registers; `params`/`score`/`seed` are authored config, reapplied at
+    /// each boot by [`ReplanningState::new`]. Sorted (`BTreeMap` iteration) ⇒
+    /// byte-stable JSON, the same discipline as the econ snapshot.
+    pub fn to_snapshot_value(&self) -> Option<serde_json::Value> {
+        if self.memories.is_empty() {
+            return None;
+        }
+        let sorted: Vec<(&(u8, u32), &PlanMemory)> = self.memories.iter().collect();
+        serde_json::to_value(sorted).ok()
+    }
+
+    /// Reinstate learned plan memories from a snapshot value (resume). Replaces
+    /// the freshly-constructed (empty) memory map; a decode mismatch on a
+    /// legacy/corrupt blob is swallowed so the world still boots and agents
+    /// simply re-learn — the same benign degradation as before persistence
+    /// existed. Returns how many memories were restored (0 on a miss).
+    pub fn restore_from_snapshot_value(&mut self, value: &serde_json::Value) -> usize {
+        match serde_json::from_value::<Vec<((u8, u32), PlanMemory)>>(value.clone()) {
+            Ok(entries) => {
+                self.memories = entries.into_iter().collect();
+                self.memories.len()
+            }
+            Err(_) => 0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -635,5 +666,41 @@ mod tests {
             (0..50u32).map(|i| st.planned_route(0, i)).collect()
         };
         assert_eq!(run(build()), run(build()), "same seed/day → same plans");
+    }
+
+    #[test]
+    fn snapshot_value_round_trips_plan_memories() {
+        // Build a state carrying learned + scored memories.
+        let mut src = ReplanningState::new(0x77, ReplanParams::default(), ScoreParams::default());
+        for i in 0..8u32 {
+            src.note_spawn(veh(i), 0, i, 0, &[i * 3, i * 3 + 1]);
+            src.note_despawn(veh(i), 200 + i as u64, 0.1);
+        }
+        src.note_spawn(veh(50), 1, 3, 0, &[9, 9, 9]); // a second day_kind
+        assert_eq!(src.tracked_trips(), 9);
+
+        // Serialise → restore into a fresh state (params/seed re-authored).
+        let value = src
+            .to_snapshot_value()
+            .expect("non-empty memory serialises");
+        let mut dst = ReplanningState::new(0x77, ReplanParams::default(), ScoreParams::default());
+        let restored = dst.restore_from_snapshot_value(&value);
+        assert_eq!(restored, 9, "all memories restored");
+        assert_eq!(dst.memories, src.memories, "memories byte-identical");
+        // in_flight is NOT carried — a resumed world re-spawns its fleet.
+        assert_eq!(dst.in_flight_count(), 0);
+
+        // A fresh (unlearned) state has nothing to persist.
+        let empty = ReplanningState::new(0x1, ReplanParams::default(), ScoreParams::default());
+        assert!(empty.to_snapshot_value().is_none());
+
+        // A corrupt/legacy blob degrades benignly to "no memories restored".
+        let mut victim = ReplanningState::new(0x1, ReplanParams::default(), ScoreParams::default());
+        assert_eq!(
+            victim.restore_from_snapshot_value(&serde_json::json!({"garbage": true})),
+            0,
+            "decode miss keeps the empty map, never panics"
+        );
+        assert_eq!(victim.tracked_trips(), 0);
     }
 }

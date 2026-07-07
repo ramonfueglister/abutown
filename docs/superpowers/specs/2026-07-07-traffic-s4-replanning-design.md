@@ -36,13 +36,25 @@ winterthur-traffic tests still green (incl. real-net collision test with
 replanning active); clippy `-D warnings` clean incl. sim-server. **S4 is now
 live in the sim-server.**
 
-**Only remaining — snapshot serialization (own PR, gated on delta-snapshots):**
-serialize `ReplanningRes` alongside citizens/economy so plan memory survives a
-server restart. Deferred because full-payload snapshots are the production OOM
-root cause (memory note); until delta-snapshots land, plan memory resets on
-resume and agents re-learn — a documented, benign degradation. At
-`WORLD_BG_DEMAND_SCALE = 0.2` the fleet is ~2-3 k so the added payload would be
-tolerable, but delta-snapshots are the clean path.
+**Snapshot serialization DONE** (branch `s4-persistence`, stacked on the
+snapshot write-cost PR): the learned plan memories now survive a server
+restart. `Plan`/`PlanMemory` derive serde; `ReplanningState::to_snapshot_value`
+/ `restore_from_snapshot_value` serialise ONLY the `(day_kind, trip_index) →
+PlanMemory` map (sorted, byte-stable) — `in_flight` is excluded (the kernel
+fleet is not persisted, so trips re-spawn on resume) and `params`/`seed` are
+re-authored by `ReplanningState::new`. Cross-crate seam: `WorldCoreSnapshot`
+gains an OPAQUE `replanning: Option<serde_json::Value>` field (world-core can't
+see the traffic crate), bumped to snapshot v2 with a No-Wipe `1 | 2` migrate arm
+(`#[serde(default)]` ⇒ old v1 rows load as `None`); the sim-server orchestrator
+fills it after `extract` via `winterthur_traffic::shell::harvest_replanning`,
+and the shell restores it in `build_sim`. Failure-isolated: a decode miss or
+absent field degrades benignly to empty memories (agents re-learn — the exact
+pre-persistence behaviour), never a boot failure. The earlier OOM concern is
+moot: the snapshot never held the fleet, and the write-cost PR's zstd
+compression makes the added ~2-3 k-trip memory payload negligible. Tests:
+`snapshot_value_round_trips_plan_memories` (lossless + benign-decode-miss),
+`migrate_lifts_v1_row_without_replanning_field` (No-Wipe), and the opt-in PG
+`world_store` round-trip carries a representative blob through zstd + Postgres.
 
 **Historical wiring checklist (now done):**
 1. `ReplanningState` as a `#[derive(Resource)]` wrapper.

@@ -25,6 +25,7 @@ chrono-tz.workspace = true
 thiserror.workspace = true
 fast_paths.workspace = true
 bevy_ecs.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 axum.workspace = true
 tokio.workspace = true
