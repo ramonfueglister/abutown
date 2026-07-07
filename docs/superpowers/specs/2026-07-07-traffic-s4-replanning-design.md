@@ -23,7 +23,28 @@ identity), in-flight `veh → (trip, spawn_tick)` tracking, and
 `between_day(world_day, edge_of_lane, reroute_closure)`. Route-choice-only
 v1 (TimeMutate collapses to Select). 3 unit tests. Unwired library API.
 
-**Remaining — ECS wiring (the deep, careful increment; own PR):**
+**ECS wiring DONE** (branch `s4-shell-integration`): spawner consults
+`planned_route` and runs the learned route (else fresh census routing);
+`SpawnRecord`/`QueuedEntry` carry `day_kind`; shell resources `ReplanningRes`
++ `LastWorldDay`; `spawn_trips` calls `note_spawn`; `replan_reap` scores
+arrivals over `in_flight` (all despawn paths); `replan_between_day` fires on
+the world-midnight wrap before spawns, re-routing on realized router weights;
+both schedule chains wired; θ=12. Integration test (`s4_replanning_shell.rs`,
+2000 ticks real net over midnight): between-day fires, memories accumulate, no
+collision / conservation break, seed-reproducible. All 43 existing
+winterthur-traffic tests still green (incl. real-net collision test with
+replanning active); clippy `-D warnings` clean incl. sim-server. **S4 is now
+live in the sim-server.**
+
+**Only remaining — snapshot serialization (own PR, gated on delta-snapshots):**
+serialize `ReplanningRes` alongside citizens/economy so plan memory survives a
+server restart. Deferred because full-payload snapshots are the production OOM
+root cause (memory note); until delta-snapshots land, plan memory resets on
+resume and agents re-learn — a documented, benign degradation. At
+`WORLD_BG_DEMAND_SCALE = 0.2` the fleet is ~2-3 k so the added payload would be
+tolerable, but delta-snapshots are the clean path.
+
+**Historical wiring checklist (now done):**
 1. `ReplanningState` as a `#[derive(Resource)]` wrapper.
 2. **Spawner** (`spawn_trip`): consult `planned_route(day_kind, index)` and
    spawn on the learned route when present, else route from the census OD
