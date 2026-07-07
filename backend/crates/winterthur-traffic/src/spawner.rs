@@ -380,6 +380,7 @@ impl TripSpawner {
 
     /// Release every trip of `day` departing within `window`, thinned by the
     /// per-trip draw. Returns the number actually spawned.
+    #[allow(clippy::too_many_arguments)]
     fn release_window(
         &mut self,
         core: &mut Core,

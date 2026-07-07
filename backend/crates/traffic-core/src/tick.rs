@@ -1331,6 +1331,7 @@ fn route_completed(fleet: &Fleet, net: &TrafficNet, lane_len: &[f32], veh: usize
 /// turn's `fromLane` (the conflicting approach) and rejects if any is closer
 /// than the critical time-gap distance to the shared node. Read-only over the
 /// phase-1 snapshot; the final crossing authority is phase-2 occupancy.
+#[allow(clippy::too_many_arguments)]
 fn junction_allows(
     fleet: &Fleet,
     index: &LaneIndex,

@@ -143,6 +143,7 @@ fn main() -> anyhow::Result<()> {
         let slots = snap.core.fleet.slots();
         prev.resize(slots, NONE);
         let hour = world_hour(snap.tick);
+        #[allow(clippy::needless_range_loop)] // slot indexes prev[] and the fleet
         for slot in 0..slots {
             let cur = match snap.core.vehicle_view(slot as u32) {
                 Some(view) => view.edge,

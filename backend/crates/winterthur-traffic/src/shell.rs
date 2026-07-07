@@ -703,6 +703,7 @@ fn publish_live(
 ///    starts at the CURRENT lane, so `Core::reroute`'s continuation guard
 ///    holds and no teleport is possible;
 ///  * no destination on record, or nothing routes → despawn, loudly counted.
+///
 /// Every despawn books a conservation arrival so the invariant stays exact.
 fn rescue_stranded(
     mut core: ResMut<CoreRes>,
