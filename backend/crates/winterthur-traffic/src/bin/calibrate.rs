@@ -174,8 +174,73 @@ fn main() -> anyhow::Result<()> {
     let started = std::time::Instant::now();
     let max_node_id = net.nodes.iter().map(|n| n.id).max().unwrap_or(0) as usize;
     let mut hold_heads_by_node = vec![0u32; max_node_id + 1];
+
+    // Optional single-node micro watch (CALIBRATE_WATCH_NODE): every 100
+    // ticks during world 08:00-09:00, log each approach lane's queue, its
+    // head's state, and the SPACE on the head's next route lane — separates
+    // signal, gap, occupancy and spillback at one junction.
+    let watch_node: Option<u32> = std::env::var("CALIBRATE_WATCH_NODE")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    let watch_lanes: Vec<u32> = watch_node
+        .map(|node| {
+            net.turns
+                .iter()
+                .filter(|tn| tn.node == node)
+                .map(|tn| tn.from_lane)
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
+
     for t in 0..TICKS_PER_WORLD_DAY {
         schedule.run(&mut world);
+
+        if watch_node.is_some() && (48_000..54_000).contains(&t) && t % 100 == 0 {
+            use traffic_core::junction::{JunctionModel, turn_between};
+            let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
+            let jm = JunctionModel::build(&net);
+            let mut line = format!("watch t={t}");
+            for &lane in &watch_lanes {
+                let occ = core.index.on_lane(lane);
+                let q = occ
+                    .iter()
+                    .filter(|&&v| core.fleet.v[v as usize] < 2.0)
+                    .count();
+                let head = occ.first().map(|&v| v as usize);
+                let head_info = match head {
+                    None => "-".to_string(),
+                    Some(h) => {
+                        let dist = net.lanes[lane as usize].length_m - core.fleet.s[h];
+                        let cursor = core.fleet.route[h].cursor as usize;
+                        let nxt = core.fleet.route_slice(h).get(cursor + 1).copied();
+                        let (sig, next_space) =
+                            match nxt.and_then(|nl| turn_between(&net, lane, nl)) {
+                                Some(turn) => {
+                                    let g = jm.signal_green(turn, t, traffic_core::DT);
+                                    let nl = nxt.unwrap();
+                                    // Space before the rear-most vehicle on next lane.
+                                    let space = core
+                                        .index
+                                        .on_lane(nl)
+                                        .last()
+                                        .map(|&r| core.fleet.s[r as usize])
+                                        .unwrap_or(f32::INFINITY);
+                                    (if g { "G" } else { "R" }, space)
+                                }
+                                None => ("?", f32::NAN),
+                            };
+                        format!(
+                            "d{dist:.1} v{:.1} {sig} nsp{next_space:.0}",
+                            core.fleet.v[h]
+                        )
+                    }
+                };
+                line.push_str(&format!(" | L{lane}: q{q} [{head_info}]"));
+            }
+            eprintln!("{line}");
+        }
         if t % (TICKS_PER_WORLD_DAY / 24) == 0 {
             let core = &world.resource::<winterthur_traffic::shell::CoreRes>().0;
             let mut alive = 0u32;
