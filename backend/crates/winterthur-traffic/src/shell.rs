@@ -270,11 +270,21 @@ pub struct WorldCoreExt {
     pub snapshot: Option<WorldCoreSnapshot>,
 }
 
-/// Background census demand scale when the world sim is active: citizens
-/// drive their own trips, so the anonymous census keeps only half its volume
-/// (plan Task 9). Applied by the caller that wires the world in (Task 13's
-/// sim-server), not silently here.
-pub const WORLD_BG_DEMAND_SCALE: f32 = 0.5;
+/// Background census demand scale when the world sim is active: citizens drive
+/// their own trips, so the anonymous census keeps a fraction of its volume.
+/// Applied by the caller that wires the world in (Task 13's sim-server), not
+/// silently here.
+///
+/// Lowered 0.5 → 0.2 after a production OOM incident (2026-07-07): the Fly
+/// deploy's `sim-server` grew to ~880 MB and OOM-crash-looped on the 1 GB
+/// machine. The S2 calibration
+/// (`docs/superpowers/specs/2026-07-07-traffic-calibration-conclusion.md`)
+/// showed why: the 6× world clock releases census demand ~6× faster than
+/// vehicles physically clear the network, so at 0.5 the fleet keeps
+/// accumulating (evening peak ~7–10 k alive) until memory blows. At ≈0.2 the
+/// network stays FLUID all world day (fleet ~2–3 k, mean speed healthy, empties
+/// overnight) — bounded memory AND cars that actually move rather than gridlock.
+pub const WORLD_BG_DEMAND_SCALE: f32 = 0.2;
 
 /// The [`WorldClock`] anchor at boot: world time starts aligned with the
 /// wall clock's local second-of-day (so demand curves stay meaningful at
