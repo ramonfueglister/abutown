@@ -41,8 +41,8 @@ import { type TrafficNetGeom, type VehKinematics } from './deadReckon';
 import { poseAtBlended } from './laneBlend';
 import {
   CAR_VARIANTS,
-  carColorForId,
-  carVariantForId,
+  carColorForClass,
+  carVariantForClass,
   CAR_PALETTE,
   wheelOffsets,
   buildWheelGeometry,
@@ -243,7 +243,7 @@ export function createCarLayer(groundYAt?: GroundYAt): CarLayer {
     for (const [id, veh] of vehicles) {
       let variant = variantOfId.get(id);
       if (variant === undefined) {
-        variant = carVariantForId(id);
+        variant = carVariantForClass(veh.cls, id);
         variantOfId.set(id, variant);
       }
       const i = counts[variant];
@@ -259,7 +259,7 @@ export function createCarLayer(groundYAt?: GroundYAt): CarLayer {
 
       let bodyColor = colorOfId.get(id);
       if (bodyColor === undefined) {
-        bodyColor = carColorForId(id);
+        bodyColor = carColorForClass(veh.cls, id);
         colorOfId.set(id, bodyColor);
       }
       col.set(bodyColor);

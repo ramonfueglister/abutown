@@ -39,6 +39,46 @@ describe('TileStreamer queue', () => {
     expect(fetchTile).toHaveBeenCalledTimes(2); // failed wird nicht erneut versucht
   });
 
+  it('#143 M3: ein endgültig gescheitertes Tile wird nach Cooldown-Ablauf erneut versucht (kein Session-Loch)', async () => {
+    const all = [t(2, 0, 0)];
+    const { fetchTile, pending } = deferredFetch();
+    // Kleiner Cooldown, damit der Test deterministisch ohne 120 update()-Ticks auskommt.
+    const s = new TileStreamer({ all, fetchTile, onReady: () => {}, onUnload: () => {}, failedCooldownTicks: 2 });
+    s.update(0, 0); // tick 1, attempt 1
+    pending.get('L2/0_0')!.reject(new Error('net'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    pending.get('L2/0_0')!.reject(new Error('net2')); // attempt 2 → failed, failedUntil = tick1 + 2 = 3
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(fetchTile).toHaveBeenCalledTimes(2);
+    expect(s.failed.has('L2/0_0')).toBe(true);
+    s.update(0, 0); // tick 2 < 3 → weiter im Cooldown, kein Refetch
+    expect(fetchTile).toHaveBeenCalledTimes(2);
+    s.update(0, 0); // tick 3 ≥ 3 → Cooldown abgelaufen → neu eingereiht + gefetcht
+    expect(fetchTile).toHaveBeenCalledTimes(3);
+    expect(s.failed.has('L2/0_0')).toBe(false); // nicht mehr als gescheitert geführt
+    pending.get('L2/0_0')!.resolve({}); // Neuversuch gelingt
+    await Promise.resolve(); await Promise.resolve();
+    expect(s.liveCount).toBe(1);
+    expect(s.failed.has('L2/0_0')).toBe(false);
+  });
+
+  it('#143 M3: ein gescheitertes Tile wird sofort zurückgesetzt, sobald es nicht mehr gewünscht ist (Reset bei Verlassen)', async () => {
+    const all = [t(2, 0, 0)];
+    const { fetchTile, pending } = deferredFetch();
+    // Grosser Cooldown: ohne den Un-desired-Reset gäbe es KEINEN Refetch im Testfenster.
+    const s = new TileStreamer({ all, fetchTile, onReady: () => {}, onUnload: () => {}, failedCooldownTicks: 10_000 });
+    s.update(0, 0);
+    pending.get('L2/0_0')!.reject(new Error('net'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    pending.get('L2/0_0')!.reject(new Error('net2'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(s.failed.has('L2/0_0')).toBe(true);
+    s.update(99999, 0); // Kamera weg → Tile nicht mehr gewünscht → Fail-Status verfällt
+    expect(s.failed.has('L2/0_0')).toBe(false);
+    s.update(0, 0); // Rückkehr → sofortiger Neuversuch trotz noch nicht abgelaufenem Cooldown
+    expect(fetchTile).toHaveBeenCalledTimes(3);
+  });
+
   it('verwirft Ankünfte, die nicht mehr gewünscht sind', async () => {
     const all = [t(2, 0, 0)];
     const { fetchTile, pending } = deferredFetch();

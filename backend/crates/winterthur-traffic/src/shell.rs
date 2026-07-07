@@ -114,6 +114,21 @@ impl TripRegistry {
     }
 }
 
+/// Ledger of stranded-vehicle rescues (S2 gridlock finding): vehicles walled
+/// at a no-turn lane end are re-routed from their CURRENT lane; true dead
+/// ends and unroutable trips are removed loudly instead of seeding gridlock.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StrandedLedger {
+    /// Successfully re-routed from the stranding lane.
+    pub rescued: u64,
+    /// Re-seated sideways off a TURNLESS lane onto a same-edge neighbour.
+    pub reseated: u64,
+    /// Removed: the stranding lane has no outgoing turn at all.
+    pub despawned_dead_end: u64,
+    /// Removed: no reachable next edge routes to the trip's destination.
+    pub despawned_unroutable: u64,
+}
+
 /// Base seed for all deterministic draws (spawner + re-route sampling).
 #[derive(Resource, Clone, Copy)]
 pub struct SimSeed(pub u64);
@@ -255,11 +270,21 @@ pub struct WorldCoreExt {
     pub snapshot: Option<WorldCoreSnapshot>,
 }
 
-/// Background census demand scale when the world sim is active: citizens
-/// drive their own trips, so the anonymous census keeps only half its volume
-/// (plan Task 9). Applied by the caller that wires the world in (Task 13's
-/// sim-server), not silently here.
-pub const WORLD_BG_DEMAND_SCALE: f32 = 0.5;
+/// Background census demand scale when the world sim is active: citizens drive
+/// their own trips, so the anonymous census keeps a fraction of its volume.
+/// Applied by the caller that wires the world in (Task 13's sim-server), not
+/// silently here.
+///
+/// Lowered 0.5 → 0.2 after a production OOM incident (2026-07-07): the Fly
+/// deploy's `sim-server` grew to ~880 MB and OOM-crash-looped on the 1 GB
+/// machine. The S2 calibration
+/// (`docs/superpowers/specs/2026-07-07-traffic-calibration-conclusion.md`)
+/// showed why: the 6× world clock releases census demand ~6× faster than
+/// vehicles physically clear the network, so at 0.5 the fleet keeps
+/// accumulating (evening peak ~7–10 k alive) until memory blows. At ≈0.2 the
+/// network stays FLUID all world day (fleet ~2–3 k, mean speed healthy, empties
+/// overnight) — bounded memory AND cars that actually move rather than gridlock.
+pub const WORLD_BG_DEMAND_SCALE: f32 = 0.2;
 
 /// The [`WorldClock`] anchor at boot: world time starts aligned with the
 /// wall clock's local second-of-day (so demand curves stay meaningful at
@@ -313,6 +338,7 @@ pub fn build_sim(
     world.insert_resource(SnapshotHook::default());
     world.insert_resource(LiveHook::default());
     world.insert_resource(Conservation::default());
+    world.insert_resource(StrandedLedger::default());
     // The trip-bridge counters exist in both modes so `book_citizen_cars`-
     // free traffic-only code never has to branch (they just stay 0).
     world.insert_resource(CitizenCarCounters::default());
@@ -328,6 +354,7 @@ pub fn build_sim(
                     drain_commands,
                     spawn_trips,
                     core_tick,
+                    rescue_stranded,
                     measure_edges,
                     publish_snapshot,
                 )
@@ -353,6 +380,7 @@ pub fn build_sim(
                         dispatch_trips_system::<CoreRes>,
                         book_citizen_cars,
                         core_tick,
+                        rescue_stranded,
                         arrivals_system::<CoreRes>,
                     )
                         .chain(),
@@ -672,6 +700,132 @@ fn publish_live(
         building_states: &buildings.0,
     };
     (hook.0)(&snap);
+}
+
+/// Rescue vehicles the kernel reported WALLED at a no-turn lane end this tick
+/// (missed-turn stranding, mostly after MOBIL lane changes with no mandatory
+/// merge-back pressure — the S2 calibration's dominant gridlock seed).
+///
+/// For each stranded slot, in ascending slot order (deterministic):
+///  * stranding lane has NO outgoing turn → despawn (true dead end);
+///  * otherwise try each outgoing turn in id order and take the first whose
+///    next edge routes to the trip's registered destination — the new route
+///    starts at the CURRENT lane, so `Core::reroute`'s continuation guard
+///    holds and no teleport is possible;
+///  * no destination on record, or nothing routes → despawn, loudly counted.
+///
+/// Every despawn books a conservation arrival so the invariant stays exact.
+fn rescue_stranded(
+    mut core: ResMut<CoreRes>,
+    net: Res<TrafficNetRes>,
+    router: Res<RouterRes>,
+    registry: Res<TripRegistry>,
+    mut ledger: ResMut<StrandedLedger>,
+    mut conservation: ResMut<Conservation>,
+) {
+    if core.0.stranded_last_tick().is_empty() {
+        return;
+    }
+    let stranded: Vec<u32> = core.0.stranded_last_tick().to_vec();
+    for veh in stranded {
+        let Some(view) = core.0.vehicle_view(veh) else {
+            continue;
+        };
+        let lane = view.lane;
+        let turns = net.0.turns_from(lane);
+        if turns.is_empty() {
+            // A turnless lane can only be left SIDEWAYS: try a same-edge
+            // neighbour that has outgoing turns (prefer one serving the
+            // route's next edge). Only if no safe re-seat exists is the
+            // vehicle removed — a physical dead end for this trip.
+            let edge = &net.0.edges[view.edge as usize];
+            let my_index = net.0.lanes[lane as usize].index;
+            let next_edge = {
+                let cursor = core.0.fleet.route[veh as usize].cursor as usize;
+                core.0
+                    .fleet
+                    .route_slice(veh as usize)
+                    .get(cursor + 1)
+                    .map(|&nl| net.0.lanes[nl as usize].edge)
+            };
+            let mut candidates: Vec<u32> = edge
+                .lanes
+                .iter()
+                .copied()
+                .filter(|&l| {
+                    let idx = net.0.lanes[l as usize].index;
+                    (idx == my_index + 1 || idx + 1 == my_index) && !net.0.turns_from(l).is_empty()
+                })
+                .collect();
+            // Serving lanes first, then lane id for determinism.
+            candidates.sort_by_key(|&l| {
+                let serves = next_edge.is_some_and(|e| {
+                    net.0.turns_from(l).iter().any(|&tid| {
+                        net.0.lanes[net.0.turns[tid as usize].to_lane as usize].edge == e
+                    })
+                });
+                (!serves, l)
+            });
+            let reseated = candidates
+                .into_iter()
+                .any(|cand| core.0.try_side_reseat(veh, cand));
+            if reseated {
+                ledger.reseated += 1;
+            } else if core.0.despawn(veh) {
+                conservation.arrived += 1;
+                ledger.despawned_dead_end += 1;
+            }
+            continue;
+        }
+        let dest = registry
+            .dest_edge
+            .get(veh as usize)
+            .copied()
+            .unwrap_or(u32::MAX);
+        let mut rescued = false;
+        if dest != u32::MAX {
+            for &tid in turns {
+                let to_lane = net.0.turns[tid as usize].to_lane;
+                let next_edge = net.0.lanes[to_lane as usize].edge;
+                let new_route: Option<Vec<u32>> = if next_edge == dest {
+                    Some(vec![lane, to_lane])
+                } else if let Some(rest) = router.0.route(&net.0, next_edge, dest) {
+                    // rest[0] is the router's lane pick on `next_edge`; we
+                    // enter via `to_lane` instead — the crossing-commit remap
+                    // reconciles the following hop if the lanes differ.
+                    let mut r = Vec::with_capacity(rest.len() + 1);
+                    r.push(lane);
+                    r.push(to_lane);
+                    r.extend(rest.iter().skip(1));
+                    Some(r)
+                } else {
+                    None
+                };
+                if let Some(r) = new_route
+                    && core.0.reroute(veh, &r)
+                {
+                    ledger.rescued += 1;
+                    rescued = true;
+                    break;
+                }
+            }
+        }
+        if !rescued {
+            if core.0.despawn(veh) {
+                conservation.arrived += 1;
+                ledger.despawned_unroutable += 1;
+            }
+            if (ledger.despawned_dead_end + ledger.despawned_unroutable).is_power_of_two() {
+                tracing::warn!(
+                    veh,
+                    lane,
+                    dest_edge = dest,
+                    ledger = ?*ledger,
+                    "stranded vehicle removed (rate-limited log)"
+                );
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -69,6 +69,34 @@ export function decodeCorridorMask(bin: Uint8Array | ArrayBuffer): CorridorMask 
 }
 
 /**
+ * Shader UV for sampling the corridor-mask DataTexture at world (x,z) so the
+ * NEAREST-filtered texel is the SAME cell `covers()` resolves (#144).
+ *
+ * The bake stamps cell (i,j) with its CENTRE at (origin + i·cell); covers()
+ * reads round-to-nearest. A NEAREST texture sample resolves texel
+ * floor(u·cols) — without correction that is floor((x−origin)/cell), i.e. the
+ * whole discard footprint shifts +cell/2 in +x/+z relative to what the bake
+ * stamped and what the road platform (apron/skirt extents) was sized to
+ * cover. The half-cell offset below makes floor(u·cols) == round((x−origin)/
+ * cell) exactly (Math.round is half-up, floor(v+0.5) is too, negatives
+ * included).
+ *
+ * ── MIRROR: terrain.ts `terrainDiscardMat` implements this same formula in
+ * TSL. The parity test (tests/diorama/corridorMask.test.ts) pins this JS twin
+ * against covers(); change both together or the discard region and the
+ * platform coverage drift apart again.
+ */
+export function maskShaderUv(
+  mask: Pick<CorridorMask, 'originX' | 'originZ' | 'cellSizeM' | 'cols' | 'rows'>,
+  x: number,
+  z: number,
+): [number, number] {
+  const u = (x - mask.originX + mask.cellSizeM / 2) / (mask.cols * mask.cellSizeM);
+  const v = (z - mask.originZ + mask.cellSizeM / 2) / (mask.rows * mask.cellSizeM);
+  return [u, v];
+}
+
+/**
  * Expand the packed mask into a single-channel (R8, red) DataTexture, one texel
  * per cell (255 = corridor, 0 = open terrain), with NEAREST filtering so the
  * shader reads the exact cell without interpolating a soft edge. `flipY` is

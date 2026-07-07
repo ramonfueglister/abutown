@@ -58,9 +58,9 @@ import { buildRoads } from './geo/roads';
 import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { loadWorld, anchorGroundHeight, makeHeightSampler, fetchTileBin, decodeTileBin, type DecodedTile } from './geo/worldData';
-import { buildL0Backdrop } from './geo/terrain';
+import { buildL0Backdrop, updateTerrainDiscardAnchor } from './geo/terrain';
 import { loadCorridorMask } from './geo/corridorMask';
-import { TileStreamer, tileCenter, type TileKey, type TileMeta } from './geo/tileStreamer';
+import { DEFAULT_RINGS, TileStreamer, tileCenter, type TileKey, type TileMeta } from './geo/tileStreamer';
 import { materializeTile, subCellKey, type TileContent } from './geo/tileContent';
 import type { TileRef, WorldTile } from '../../proto/world_pb.js';
 import { buildWindows } from './geo/windows';
@@ -73,7 +73,12 @@ import { allArchetypes } from './geo/treeArchetypes';
 import { windAmpU } from './windUniform';
 import { applyCityLod, cityLodState, lampLodVisibility, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
-import { TrafficClient, DEFAULT_TRAFFIC_WS, buildDefaultCellGrid } from '../traffic/trafficClient';
+import {
+  TrafficClient,
+  DEFAULT_TRAFFIC_WS,
+  PROD_TRAFFIC_WS,
+  buildDefaultCellGrid,
+} from '../traffic/trafficClient';
 import { createCarLayer } from '../traffic/carLayer';
 import { createFlowLayer } from '../traffic/flowLayer';
 import { poseAt } from '../traffic/deadReckon';
@@ -118,7 +123,14 @@ declare global {
       // smoke assertion (g)) — mirrors flowLayer's InstancedMesh.count after
       // its last update() call, i.e. exactly what's on screen this frame.
       flowCount: () => number;
-      sample: () => Array<{ id: number; lane: number; x: number; z: number; yaw: number }>;
+      sample: () => Array<{
+        id: number;
+        lane: number;
+        x: number;
+        z: number;
+        yaw: number;
+        cls: number;
+      }>;
       // Re-aim the CAMERA (and therefore the AOI subscription, which follows
       // rig.target) at a world (x, z) with an optional zoom radius + orbit
       // angles — lets the smoke/capture harness frame a dense corridor or a
@@ -228,10 +240,21 @@ async function boot(): Promise<void> {
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
-  // ?traffic=1 enables the live instanced car layer (WS to the winterthur-traffic
-  // gateway). ?trafficWs=… overrides the endpoint (default ws://localhost:8790/traffic).
-  const trafficEnabled = params.get('traffic') === '1';
-  const trafficWsUrl = params.get('trafficWs') ?? DEFAULT_TRAFFIC_WS;
+  // Live instanced car layer (WS to the sim-server /traffic gateway). Cars must
+  // ALWAYS appear on a deployed site, so on any non-localhost host traffic is
+  // ON by default and points at the production backend — no URL param, no env
+  // var required. On localhost it stays opt-in (?traffic=1 / VITE_TRAFFIC_WS)
+  // so the dev server does not spam WS connection errors when no local backend
+  // is running. Explicit ?traffic=0 force-disables; ?traffic=1 / VITE_TRAFFIC_WS
+  // force-enable. Endpoint resolution: ?trafficWs= > VITE_TRAFFIC_WS env >
+  // host-aware default (localhost gateway in dev, PROD_TRAFFIC_WS when deployed).
+  const isLocalDev = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
+  const envTrafficWs = (import.meta.env.VITE_TRAFFIC_WS as string | undefined) || undefined;
+  const trafficDefaultWs = isLocalDev ? DEFAULT_TRAFFIC_WS : PROD_TRAFFIC_WS;
+  const trafficEnabled =
+    params.get('traffic') !== '0' &&
+    (params.get('traffic') === '1' || envTrafficWs !== undefined || !isLocalDev);
+  const trafficWsUrl = params.get('trafficWs') ?? envTrafficWs ?? trafficDefaultWs;
   // ?live=1 (or a configured VITE_LIVE_WS) enables the live world channel
   // (citizens AOI + vitals HUD, Task 15). URL override > env > default.
   const envLiveWs = (import.meta.env.VITE_LIVE_WS as string | undefined) || undefined;
@@ -676,7 +699,10 @@ async function boot(): Promise<void> {
   // covering backdrop cell must be hidden or it veils the whole district.
   const l0Tile = world.tiles.find((t) => t.level === 0);
   if (!l0Tile) throw new Error('boot: manifest has no L0 tile');
-  const backdrop = buildL0Backdrop(l0Tile, 16, { corridorMask });
+  // #144: NO corridor discard on the coarse L0 backdrop — its surface deviates
+  // up to ~20 m from the fine heights the road platform was built against, so
+  // discarding it opens uncloseable corridor slots (see tileContent.ts).
+  const backdrop = buildL0Backdrop(l0Tile, 16, {});
   terrainRoot.add(backdrop.group);
   // Tile heights are absolute DEM metres (~400-590 m); the hero city + KSW
   // sit at y≈0 (the anchor). Shift the whole terrain group down by the
@@ -1067,10 +1093,17 @@ async function boot(): Promise<void> {
           serverTick: () => client.serverTick,
           flowCount: () => flowLayer?.count() ?? 0,
           sample: () => {
-            const out: Array<{ id: number; lane: number; x: number; z: number; yaw: number }> = [];
+            const out: Array<{
+              id: number;
+              lane: number;
+              x: number;
+              z: number;
+              yaw: number;
+              cls: number;
+            }> = [];
             for (const [id, veh] of client.vehicles) {
               const pose = poseAtBlended(client.net, veh, client.serverTick);
-              out.push({ id, lane: veh.lane, x: pose.x, z: pose.z, yaw: pose.yaw });
+              out.push({ id, lane: veh.lane, x: pose.x, z: pose.z, yaw: pose.yaw, cls: veh.cls });
             }
             return out;
           },
@@ -1812,6 +1845,10 @@ async function boot(): Promise<void> {
     {
       const cx = camera.position.x;
       const cz = camera.position.z;
+      // #144 distance-limited corridor discard: anchored to the SAME camera
+      // position the streamer rings use, radius safely INSIDE the fine (L2)
+      // ring so the discard never reaches the L2/L1 seam (see terrain.ts).
+      updateTerrainDiscardAnchor(cx, cz, DEFAULT_RINGS.r2 * 0.8);
       const dx = cx - lastTreeCamX;
       const dz = cz - lastTreeCamZ;
       const moved2 = dx * dx + dz * dz;

@@ -168,10 +168,15 @@ export function decodeTileBin(bin: Uint8Array): WorldTile {
   return fromBinary(WorldTileSchema, bin);
 }
 
-// Cross-tile-call warning counter for tileTreeSpecs' family/kind consistency
-// check (see below) — logged once via console.warn rather than per-tree, so
-// a whole-world decode doesn't spam thousands of lines.
+// Cross-tile-call warning counters for tileTreeSpecs' consistency checks (see
+// below) — logged once per tile via console.warn rather than per-tree, so a
+// whole-world decode doesn't spam thousands of lines.
 let familyKindMismatchCount = 0;
+// #143 M5: t_family codes outside FAMILY_CODES (a bake/proto version skew, or a
+// corrupt tile). Silently yielding family=undefined hid the anomaly AND let the
+// mismatch logic flip kind off garbage — so count + warn, analogous to the
+// mismatch counter, and leave t_kind authoritative (see below).
+let unknownFamilyCodeCount = 0;
 
 /**
  * Decodes a WorldTile's tree SoA fields (t_x/t_z/t_h/t_r/t_kind/t_family)
@@ -195,6 +200,7 @@ export function tileTreeSpecs(tile: WorldTile): TreeSpec[] {
   const hasFamily = tFamily.length > 0;
   const specs: TreeSpec[] = [];
   let mismatches = 0;
+  let unknownCodes = 0;
 
   for (let i = 0; i < tX.length; i++) {
     let kind: TreeSpec['kind'] = tKind[i] === 1 ? 'conifer' : 'broad';
@@ -203,11 +209,17 @@ export function tileTreeSpecs(tile: WorldTile): TreeSpec[] {
     if (hasFamily) {
       const code = tFamily[i];
       family = FAMILY_CODES[code];
-      const familyImpliesConifer = family === 'conic' || family === 'slender';
-      const kindSaysConifer = kind === 'conifer';
-      if (familyImpliesConifer !== kindSaysConifer) {
-        kind = familyImpliesConifer ? 'conifer' : 'broad';
-        mismatches += 1;
+      if (family === undefined) {
+        // #143 M5: unknown code — keep t_kind authoritative and DON'T run the
+        // mismatch flip off a garbage family. Count it for the summary warn.
+        unknownCodes += 1;
+      } else {
+        const familyImpliesConifer = family === 'conic' || family === 'slender';
+        const kindSaysConifer = kind === 'conifer';
+        if (familyImpliesConifer !== kindSaysConifer) {
+          kind = familyImpliesConifer ? 'conifer' : 'broad';
+          mismatches += 1;
+        }
       }
     }
 
@@ -219,6 +231,14 @@ export function tileTreeSpecs(tile: WorldTile): TreeSpec[] {
     console.warn(
       `tileTreeSpecs: ${mismatches} tree(s) in this tile had t_family/t_kind mismatches; ` +
         `kind derived from family. Running total across this session: ${familyKindMismatchCount}.`,
+    );
+  }
+  if (unknownCodes > 0) {
+    unknownFamilyCodeCount += unknownCodes;
+    console.warn(
+      `tileTreeSpecs: ${unknownCodes} tree(s) in this tile had an unknown t_family code ` +
+        `(outside 0..${FAMILY_CODES.length - 1}); family left undefined, t_kind kept. ` +
+        `Running total across this session: ${unknownFamilyCodeCount}.`,
     );
   }
 

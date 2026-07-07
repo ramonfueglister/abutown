@@ -1,7 +1,7 @@
 // tests/geo/roads.test.ts
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { apronStrip, buildRoads, miterOffsets, miterStrip, skirtStrip } from '../../src/diorama/ksw/geo/roads';
+import { apronStrip, buildRoads, lidStrip, miterOffsets, miterStrip, skirtStrip } from '../../src/diorama/ksw/geo/roads';
 
 describe('miterStrip', () => {
   it('builds a continuous strip: 2 verts per point, no seams', () => {
@@ -78,17 +78,34 @@ describe('skirtStrip (mask edge → tile ground − 0.5)', () => {
     expect(s.indices.length).toBe(4 * 3);
   });
 
-  it('top at profile+lift; bottom PER-VERTEX at tileGround(edge) − foot', () => {
-    // Walk vertices: top then bottom, for each point of each side.
+  it('top closes the CUT window: max(profile+lift, outside terrain + cap); bottom PER-VERTEX at tileGround(edge) − foot', () => {
+    // #144: a skirt that only drops DOWN from the profile leaves an open
+    // vertical window on cut sides (terrain at the mask edge ABOVE the
+    // profile) — camera rays escape through it to the bright sky dome and
+    // bloom into white blobs. The top edge must therefore rise per-vertex to
+    // the terrain surface at (and one mask cell beyond) the edge, plus a cap.
     for (let v = 0; v < s.positions.length / 3; v += 2) {
+      const topX = s.positions[v * 3 + 0];
+      const topZ = s.positions[v * 3 + 2];
       const topY = s.positions[v * 3 + 1];
       const botX = s.positions[(v + 1) * 3 + 0];
       const botZ = s.positions[(v + 1) * 3 + 2];
       const botY = s.positions[(v + 1) * 3 + 1];
-      expect(topY).toBeCloseTo(10 + Y, 5); // top = profile + lift
+      // Embankment side (tile below profile): top stays at profile + lift.
+      // Cut side (tile above profile): top ≥ tile(edge) — the window is shut.
+      expect(topY).toBeGreaterThanOrEqual(Math.max(10 + Y, tile(topX, topZ)) - 1e-6);
       // bottom reaches the TILE ground (not the profile) minus the foot: this is
       // the terrain-grounded contract — the skirt always reaches the terrain.
       expect(botY).toBeCloseTo(tile(botX, botZ) - FOOT, 5);
+    }
+  });
+
+  it('embankment side keeps the flush profile top (no parapet above the road)', () => {
+    // Flat-vs-profile case: tile ground everywhere BELOW the profile → the top
+    // must be exactly profile + lift on both sides (unchanged pre-#144 look).
+    const emb = skirtStrip([[0, 0], [10, 0]], 5, Y, () => 10, () => 6, FOOT);
+    for (let v = 0; v < emb.positions.length / 3; v += 2) {
+      expect(emb.positions[v * 3 + 1]).toBeCloseTo(10 + Y, 5);
     }
   });
 
@@ -100,6 +117,63 @@ describe('skirtStrip (mask edge → tile ground − 0.5)', () => {
     for (let i = 2; i < midStrip.positions.length; i += 3) zs.push(Math.abs(Math.round(midStrip.positions[i] * 100) / 100));
     expect(zs.every((z) => z === 2.5 || z === 5)).toBe(true);
     expect(zs.some((z) => z === 0)).toBe(false);
+  });
+});
+
+describe('lidStrip (corridor under-lid, #144 Bodendeckel)', () => {
+  // A dark opaque floor UNDER the whole discard footprint: any camera ray that
+  // slips through a residual crack between discard edge and platform must hit
+  // this lid instead of the bright sky dome behind the world. Per vertex it
+  // sits DROP below min(profile, tile ground at the edge), so it never juts
+  // out of an embankment fill slope and dives under cut banks.
+  const DROP = 0.4;
+  const profile = () => 10;
+  const tile = (_x: number, z: number) => 10 - z; // cut on −z, embankment on +z
+
+  it('spans the full width: one strip, edge vertices at ±half (endcap ×2 like the other strips)', () => {
+    const l = lidStrip([[0, 0], [10, 0], [20, 0]], 8, profile, tile, DROP);
+    expect(l.positions.length / 3).toBe(10); // (3 pts + 2 end extensions) × 2 edge verts
+    expect(l.indices.length).toBe(24);
+    const zs = [];
+    for (let i = 2; i < l.positions.length; i += 3) zs.push(Math.round(Math.abs(l.positions[i]) * 100) / 100);
+    // interior points at ±half (4); open ends carry the ×2 endcap miter (8),
+    // the same convention miterStrip/apronStrip/skirtStrip tests pin.
+    expect(zs.every((z) => z === 4 || z === 8)).toBe(true);
+    expect(zs.some((z) => z === 4)).toBe(true);
+    expect(zs.some((z) => z === 0)).toBe(false);
+  });
+
+  it('every vertex sits DROP below both the profile and the local tile ground', () => {
+    const l = lidStrip([[0, 0], [10, 0]], 8, profile, tile, DROP);
+    for (let v = 0; v < l.positions.length / 3; v++) {
+      const x = l.positions[v * 3 + 0];
+      const y = l.positions[v * 3 + 1];
+      const z = l.positions[v * 3 + 2];
+      expect(y).toBeCloseTo(Math.min(10, tile(x, z)) - DROP, 5);
+    }
+  });
+
+  it('is deterministic', () => {
+    const a = lidStrip([[0, 0], [7, 3], [20, 3]], 6, profile, tile, DROP);
+    const b = lidStrip([[0, 0], [7, 3], [20, 3]], 6, profile, tile, DROP);
+    expect(a).toEqual(b);
+  });
+
+  it('extends past both way ends by the lid half-width (end-cap pinholes, #144)', () => {
+    // The discard mask stamps a HALF-DISC of radius maskHW beyond every way
+    // endpoint (distance is measured to densified points, the last of which is
+    // the endpoint) — but ribbon/apron/skirt strips all STOP at the endpoint,
+    // leaving a bright end-cap pinhole at every dead-end (driveway stubs are
+    // everywhere). The lid alone extends lengthwise to cover it.
+    const l = lidStrip([[0, 0], [10, 0]], 8, profile, tile, DROP);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (let i = 0; i < l.positions.length; i += 3) {
+      minX = Math.min(minX, l.positions[i]);
+      maxX = Math.max(maxX, l.positions[i]);
+    }
+    expect(minX).toBeLessThanOrEqual(0 - 4 + 1e-9); // half-width 4 before the start
+    expect(maxX).toBeGreaterThanOrEqual(10 + 4 - 1e-9); // and past the end
   });
 });
 
@@ -182,5 +256,15 @@ describe('buildRoads', () => {
     let minY = Infinity;
     for (let i = 0; i < pos.count; i++) minY = Math.min(minY, pos.getY(i));
     expect(minY).toBeCloseTo(TILE - 0.5, 4);
+    // #144 Bodendeckel: a lid mesh per layer, sunk below profile AND terrain.
+    const lid = withFoot.getObjectByName('footwayLids') as THREE.Mesh;
+    expect(lid).toBeTruthy();
+    const lp = lid.geometry.getAttribute('position');
+    expect(lp.count).toBeGreaterThan(0);
+    for (let i = 0; i < lp.count; i++) {
+      expect(lp.getY(i)).toBeLessThan(Math.min(PROFILE, TILE));
+    }
+    // No samplers → no lids either.
+    expect(bare.getObjectByName('carriageLids')).toBeFalsy();
   });
 });

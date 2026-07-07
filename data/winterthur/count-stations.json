@@ -1,0 +1,110 @@
+{
+  "searchRadiusM": 40,
+  "minBearingCos": 0.5,
+  "stations": [
+    {
+      "anlageName": "K501 MIV Rudolf-Diesel-Strasse",
+      "richtung": "W",
+      "richtungName": "Richtung Grüze",
+      "edge": 883,
+      "lanes": [
+        890
+      ],
+      "distM": 0.8,
+      "bearingCos": 0.846,
+      "worldX": 2401.6,
+      "worldZ": 1503.2
+    },
+    {
+      "anlageName": "K501 MIV Seenerstrasse",
+      "richtung": "NO",
+      "richtungName": "Richtung Oberwinterthur",
+      "edge": 5470,
+      "lanes": [
+        5604
+      ],
+      "distM": 2,
+      "bearingCos": 0.848,
+      "worldX": 2401.6,
+      "worldZ": 1503.2
+    },
+    {
+      "anlageName": "K501 MIV Seenerstrasse",
+      "richtung": "SW",
+      "richtungName": "Richtung Seen",
+      "edge": 5471,
+      "lanes": [
+        5605
+      ],
+      "distM": 1,
+      "bearingCos": 0.939,
+      "worldX": 2401.6,
+      "worldZ": 1503.2
+    },
+    {
+      "anlageName": "K606 MIV Breitestrasse",
+      "richtung": "O",
+      "richtungName": "Richtung Seen",
+      "edge": 10124,
+      "lanes": [
+        10356
+      ],
+      "distM": 2.4,
+      "bearingCos": 0.978,
+      "worldX": -857.9,
+      "worldZ": 1850.1
+    },
+    {
+      "anlageName": "K606 MIV Untere Vogelsangstrasse",
+      "richtung": "N",
+      "richtungName": "Richtung Winterthur Zentrum",
+      "edge": 217,
+      "lanes": [
+        219
+      ],
+      "distM": 1.1,
+      "bearingCos": 0.962,
+      "worldX": -857.9,
+      "worldZ": 1850.1
+    },
+    {
+      "anlageName": "K606 MIV Untere Vogelsangstrasse",
+      "richtung": "S",
+      "richtungName": "Richtung Autobahnanschluss A1",
+      "edge": 9618,
+      "lanes": [
+        9840
+      ],
+      "distM": 0.6,
+      "bearingCos": 0.971,
+      "worldX": -857.9,
+      "worldZ": 1850.1
+    },
+    {
+      "anlageName": "K611 MIV Steigstrasse",
+      "richtung": "N",
+      "richtungName": "Richtung Winterthur Zentrum",
+      "edge": 6627,
+      "lanes": [
+        6790
+      ],
+      "distM": 2.3,
+      "bearingCos": 0.996,
+      "worldX": -1955.6,
+      "worldZ": 3413.6
+    },
+    {
+      "anlageName": "K611 MIV Steigstrasse",
+      "richtung": "S",
+      "richtungName": "Richtung Bassersdorf",
+      "edge": 6626,
+      "lanes": [
+        6789
+      ],
+      "distM": 0.7,
+      "bearingCos": 0.976,
+      "worldX": -1955.6,
+      "worldZ": 3413.6
+    }
+  ]
+}

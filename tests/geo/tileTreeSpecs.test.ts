@@ -25,6 +25,26 @@ describe('tileTreeSpecs', () => {
     expect(specs.map((s) => s.kind)).toEqual(['broad', 'broad', 'broad', 'conifer', 'conifer']);
   });
 
+  it('#143 M5: unbekannter t_family-Code → family undefined, kind bleibt t_kind, gewarnt + gezählt', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tile = create(WorldTileSchema, {
+      tX: [0, 1], tZ: [0, 0], tH: [1, 1], tR: [1, 1],
+      tKind: [1, 0], // conifer, broad
+      tFamily: [99, 42], // beides ausserhalb FAMILY_CODES (0..4)
+    });
+    const specs = tileTreeSpecs(tile);
+    expect(specs[0].family).toBeUndefined();
+    expect(specs[1].family).toBeUndefined();
+    // kind bleibt bei der t_kind-Angabe — kein stilles Umkippen auf broad durch
+    // die Mismatch-Logik (unbekannte family darf kind NICHT überschreiben).
+    expect(specs[0].kind).toBe('conifer');
+    expect(specs[1].kind).toBe('broad');
+    // Ein zusammengefasster Warn-Aufruf für die unbekannten Codes (analog kind-Mismatch).
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/unknown t_family/i);
+    warnSpy.mockRestore();
+  });
+
   it('contradiction: family says conifer but t_kind says broad → kind derived from family, warned + counted', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const tile = create(WorldTileSchema, {

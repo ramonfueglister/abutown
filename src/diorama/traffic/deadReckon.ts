@@ -68,6 +68,9 @@ export interface VehKinematics {
   s: number;
   v: number;
   tickAt: number;
+  /** Wire vehicle class (0 car, 1 delivery van, 2 HGV) — selects the
+   * silhouette family in carLayer. Constant for a wire id's lifetime. */
+  cls: number;
   blend?: LaneBlend;
 }
 

@@ -93,6 +93,14 @@ use world_core::WorldClock;
 /// the binding constraint it was during Tasks 6–7.
 pub const MAX_CONCURRENT: usize = 30_000;
 
+/// How long a released trip may wait in the entry queue before it is dropped
+/// (SUMO's max-depart-delay analogue): 15 world minutes. Bounds the queue and
+/// keeps hopeless entries (a driveway walled by a standing jam) from
+/// accumulating forever; every give-up is counted in
+/// [`SpawnCounters::dropped_after_wait`].
+pub const ENTRY_MAX_WAIT_TICKS: u64 =
+    (15 * 60) as u64 * world_core::TICKS_PER_SECOND / world_core::WORLD_TIME_SCALE;
+
 /// Salt XOR-folded into the seed for the thinning draw so it can never alias
 /// the kernel's per-vehicle noise stream or the shell's re-route stream.
 const THINNING_SALT: u64 = 0x5EED_DE44;
@@ -176,8 +184,12 @@ pub struct SpawnCounters {
     /// Trips dropped by the [`MAX_CONCURRENT`] valve (incl. kernel-cap
     /// refusals, which only occur at the same boundary).
     pub suppressed: u64,
-    /// Trips dropped because the entry point was physically occupied.
+    /// Trips dropped IMMEDIATELY because the start lane is a micro connector
+    /// shorter than [`MIN_SPAWN_LANE_M`] — waiting can never fix that.
     pub blocked_entry: u64,
+    /// Trips dropped after waiting [`ENTRY_MAX_WAIT_TICKS`] in the entry
+    /// queue without the entry ever clearing.
+    pub dropped_after_wait: u64,
 }
 
 /// The census trip spawner. Owns the loaded [`TripSchedule`] and the
@@ -201,6 +213,23 @@ pub struct TripSpawner {
     window_suppressed: u64,
     /// Reusable buffer of thinned trips for the current window.
     pending: Vec<Trip>,
+    /// SUMO-style insertion queue: trips whose entry was BLOCKED wait here
+    /// (route cached at release — the OD does not change while waiting) and
+    /// retry every tick until the entry clears or [`ENTRY_MAX_WAIT_TICKS`]
+    /// expires. Before this queue existed, a blocked entry silently DROPPED
+    /// the trip — 116k of 159k weekday trips (73%) never entered in the S2
+    /// calibration run, invalidating any demand-level comparison.
+    entry_queue: std::collections::VecDeque<QueuedEntry>,
+}
+
+/// A released trip waiting for its entry to clear (route precomputed).
+struct QueuedEntry {
+    trip: Trip,
+    route: Vec<u32>,
+    dest_edge: u32,
+    /// Tick the trip was first blocked; gives up after
+    /// [`ENTRY_MAX_WAIT_TICKS`].
+    since: u64,
 }
 
 impl TripSpawner {
@@ -236,6 +265,7 @@ impl TripSpawner {
             warm,
             warm_next: 0,
             counters: SpawnCounters::default(),
+            entry_queue: std::collections::VecDeque::new(),
             window_suppressed: 0,
             pending: Vec::new(),
         }
@@ -272,13 +302,46 @@ impl TripSpawner {
     ) -> usize {
         let mut n = 0;
 
+        // 0) Retry the entry queue FIRST (FIFO: the earliest blocked departure
+        //    has first claim on a clearing entry). Placement shares the exact
+        //    rules of a fresh release via `try_place`; entries older than
+        //    ENTRY_MAX_WAIT_TICKS give up, loudly counted.
+        if !self.entry_queue.is_empty() {
+            let before = spawned.len();
+            let mut queue = std::mem::take(&mut self.entry_queue);
+            let counters = &mut self.counters;
+            queue.retain_mut(|q| {
+                if t.saturating_sub(q.since) > ENTRY_MAX_WAIT_TICKS {
+                    counters.dropped_after_wait += 1;
+                    return false;
+                }
+                if core.fleet.alive_count() >= MAX_CONCURRENT {
+                    return true; // valve engaged: keep waiting, do not drop
+                }
+                match try_place(core, net, &q.route, q.trip.vehicle_class) {
+                    PlaceOutcome::Placed(veh) => {
+                        counters.spawned += 1;
+                        spawned.push(SpawnRecord {
+                            veh,
+                            dest_edge: q.dest_edge,
+                            trip_index: q.trip.index,
+                        });
+                        false
+                    }
+                    PlaceOutcome::Blocked | PlaceOutcome::CapRefused => true,
+                }
+            });
+            self.entry_queue = queue;
+            n += spawned.len() - before;
+        }
+
         // Warm start: release queued trips whose slot has come up. Already
         // thinned at construction — no second draw.
         if t < WARM_RELEASE_TICKS {
             while self.warm_next < self.warm.len() && self.warm[self.warm_next].0 <= t {
                 let trip = self.warm[self.warm_next].1;
                 self.warm_next += 1;
-                if self.spawn_trip(core, net, router, trip, spawned) {
+                if self.spawn_trip(core, net, router, trip, t, spawned) {
                     n += 1;
                 }
             }
@@ -293,10 +356,10 @@ impl TripSpawner {
         if start != end {
             let day = self.clock.day_kind(t);
             if end > start {
-                n += self.release_window(core, net, router, day, start..end, spawned);
+                n += self.release_window(core, net, router, day, start..end, t, spawned);
             } else {
-                n += self.release_window(core, net, router, day, start..DAY_S, spawned);
-                n += self.release_window(core, net, router, day, 0..end, spawned);
+                n += self.release_window(core, net, router, day, start..DAY_S, t, spawned);
+                n += self.release_window(core, net, router, day, 0..end, t, spawned);
             }
             self.last_world_s = end;
             // The window closed with this tick: flush the suppression log
@@ -317,6 +380,7 @@ impl TripSpawner {
 
     /// Release every trip of `day` departing within `window`, thinned by the
     /// per-trip draw. Returns the number actually spawned.
+    #[allow(clippy::too_many_arguments)]
     fn release_window(
         &mut self,
         core: &mut Core,
@@ -324,6 +388,7 @@ impl TripSpawner {
         router: &Router,
         day: DayKind,
         window: core::ops::Range<u32>,
+        t: u64,
         spawned: &mut Vec<SpawnRecord>,
     ) -> usize {
         // Copy the thinned window into a reusable buffer so the schedule
@@ -340,7 +405,7 @@ impl TripSpawner {
 
         let mut n = 0;
         for &trip in &pending {
-            if self.spawn_trip(core, net, router, trip, spawned) {
+            if self.spawn_trip(core, net, router, trip, t, spawned) {
                 n += 1;
             }
         }
@@ -356,6 +421,7 @@ impl TripSpawner {
         net: &TrafficNet,
         router: &Router,
         trip: Trip,
+        t: u64,
         spawned: &mut Vec<SpawnRecord>,
     ) -> bool {
         if core.fleet.alive_count() >= MAX_CONCURRENT {
@@ -380,45 +446,79 @@ impl TripSpawner {
             return false;
         };
 
-        // The router picks the concrete lane on the origin edge (lowest lane
-        // with a turn towards the next hop) — spawn on that lane at s = 0.
-        let start_lane = route[0];
-        let s0 = ENTRY_S;
-        if net.lanes[start_lane as usize].length_m < MIN_SPAWN_LANE_M
-            || !start_lane_clear(core, start_lane, s0)
-            || !upstream_clear(core, net, start_lane)
-        {
+        // A micro-connector start lane can never host a spawn — immediate,
+        // final drop (waiting cannot lengthen the lane).
+        if net.lanes[route[0] as usize].length_m < MIN_SPAWN_LANE_M {
             self.counters.blocked_entry += 1;
             return false;
         }
 
-        // Gateway origins enter the plate rolling (capped by the braking
-        // kinematics against the nearest downstream vehicle); internal
-        // origins start standing. Computed BEFORE the spawn so the scan
-        // never sees the entering vehicle itself.
-        let v0 = if net.gateway_lanes_out().binary_search(&start_lane).is_ok() {
-            let target = GATEWAY_ENTRY_SPEED_FRACTION * net.edges[origin_edge as usize].speed_ms;
-            entry_speed_cap(core, net, &route, s0, target)
-        } else {
-            0.0
-        };
-
-        let Some(veh) = core.spawn(start_lane, s0, &route) else {
-            // Kernel slot-cap refusal: same valve, same counter.
-            self.counters.suppressed += 1;
-            self.window_suppressed += 1;
-            return false;
-        };
-        core.fleet.v[veh as usize] = v0;
-
-        self.counters.spawned += 1;
-        spawned.push(SpawnRecord {
-            veh,
-            dest_edge,
-            trip_index: trip.index,
-        });
-        true
+        match try_place(core, net, &route, trip.vehicle_class) {
+            PlaceOutcome::Placed(veh) => {
+                self.counters.spawned += 1;
+                spawned.push(SpawnRecord {
+                    veh,
+                    dest_edge,
+                    trip_index: trip.index,
+                });
+                true
+            }
+            PlaceOutcome::CapRefused => {
+                self.counters.suppressed += 1;
+                self.window_suppressed += 1;
+                false
+            }
+            PlaceOutcome::Blocked => {
+                // Entry physically occupied RIGHT NOW: queue and retry every
+                // tick (SUMO's insertion queue) instead of dropping demand.
+                self.entry_queue.push_back(QueuedEntry {
+                    trip,
+                    route,
+                    dest_edge,
+                    since: t,
+                });
+                false
+            }
+        }
     }
+}
+
+/// Outcome of one placement attempt of a routed trip.
+enum PlaceOutcome {
+    Placed(traffic_core::VehId),
+    /// Entry occupied / upstream vehicle incoming — retryable.
+    Blocked,
+    /// Kernel slot cap refused the spawn — retry once load drops.
+    CapRefused,
+}
+
+/// Attempt to physically place a routed trip: entry clearance checks, entry
+/// speed, kernel spawn. Free function so both the fresh-release path and the
+/// entry-queue retry share EXACTLY the same placement rules.
+fn try_place(core: &mut Core, net: &TrafficNet, route: &[u32], vehicle_class: u8) -> PlaceOutcome {
+    let start_lane = route[0];
+    let s0 = ENTRY_S;
+    if !start_lane_clear(core, start_lane, s0) || !upstream_clear(core, net, start_lane) {
+        return PlaceOutcome::Blocked;
+    }
+
+    // Gateway origins enter the plate rolling (capped by the braking
+    // kinematics against the nearest downstream vehicle); internal origins
+    // start standing. Computed BEFORE the spawn so the scan never sees the
+    // entering vehicle itself.
+    let v0 = if net.gateway_lanes_out().binary_search(&start_lane).is_ok() {
+        let origin_edge = lane_edge(net, start_lane);
+        let target = GATEWAY_ENTRY_SPEED_FRACTION * net.edges[origin_edge as usize].speed_ms;
+        entry_speed_cap(core, net, route, s0, target)
+    } else {
+        0.0
+    };
+
+    let Some(veh) = core.spawn(start_lane, s0, vehicle_class, route) else {
+        return PlaceOutcome::CapRefused;
+    };
+    core.fleet.v[veh as usize] = v0;
+    PlaceOutcome::Placed(veh)
 }
 
 /// The deterministic thinning gate: pure in `(seed, day block, trip index)`,
@@ -813,7 +913,7 @@ mod tests {
         // A standing leader 30 m in: entry must slow to what the remaining
         // gap can absorb at ENTRY_BRAKE (strictly below the free-road 8).
         let mut jammed = Core::new(&net, 64, seed);
-        jammed.spawn(0, 30.0, &[0]).expect("leader spawn");
+        jammed.spawn(0, 30.0, 0, &[0]).expect("leader spawn");
         let veh = spawn_one(&mut jammed, "entry-jammed");
         let v = jammed.fleet.v[veh as usize];
         assert!(
@@ -839,5 +939,63 @@ mod tests {
                 != thinning_passes(seed, 0.5, DayKind::Weekend, i)
         });
         assert!(disagree, "weekday/weekend draws must be independent");
+    }
+
+    /// SUMO-style insertion queue (S2 fix): a trip whose entry is physically
+    /// occupied at release must WAIT and spawn once the entry clears — the
+    /// old behaviour dropped it permanently (73% of weekday demand never
+    /// entered in the calibration run).
+    #[test]
+    fn blocked_entry_waits_in_queue_and_spawns_when_clear() {
+        let json = fixture_json();
+        let net = fixture_net(&json);
+        // One trip departing at boot second; a parked blocker sits at the
+        // entry point of its start lane.
+        let dep = clock_at(8, 0).s_of_day(0) + 1;
+        let schedule = make_schedule(
+            "entry-queue",
+            &json,
+            &[rec(dep, 0, 5, output::SEGMENT_INTERNAL)],
+            &[],
+        );
+        let clock = clock_at(8, 0);
+        let world = world_clock_for(&clock);
+        let mut spawner =
+            TripSpawner::new(schedule, clock, SpawnerCfg { demand_scale: 1.0 }, 7, &world);
+        let router = Router::new(&net);
+        let mut core = Core::new(&net, 16, 7);
+        let blocker = core.spawn(0, ENTRY_S, 0, &[0]).expect("park blocker");
+        core.fleet.v[blocker as usize] = 0.0;
+
+        let mut world = world;
+        let mut out = Vec::new();
+        // Release happens while blocked: nothing spawns, nothing is dropped.
+        for t in 0..40 {
+            world.advance();
+            spawner.step(&mut core, &net, &router, t, &world, &mut out);
+        }
+        assert_eq!(spawner.counters().spawned, 0, "entry is blocked");
+        assert_eq!(
+            spawner.counters().blocked_entry + spawner.counters().dropped_after_wait,
+            0,
+            "a blocked entry must WAIT, not drop"
+        );
+
+        // Clear the blocker: the queued trip must spawn within a few ticks.
+        core.despawn(blocker);
+        let mut spawned_at = None;
+        for t in 40..200 {
+            world.advance();
+            spawner.step(&mut core, &net, &router, t, &world, &mut out);
+            if spawner.counters().spawned == 1 {
+                spawned_at = Some(t);
+                break;
+            }
+        }
+        assert!(
+            spawned_at.is_some(),
+            "queued trip never spawned after the entry cleared: {:?}",
+            spawner.counters()
+        );
     }
 }

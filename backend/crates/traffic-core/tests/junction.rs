@@ -8,7 +8,7 @@
 //!  * and the REAL baked Winterthur network for an end-to-end soak.
 
 use rayon::ThreadPoolBuilder;
-use traffic_core::junction::{JunctionModel, turn_between};
+use traffic_core::junction::turn_between;
 use traffic_core::{Core, IdmParams};
 use traffic_net::{NodeKind, TrafficNet};
 
@@ -55,20 +55,17 @@ fn signal_corridor(feeder_len: f32, green_s: f32, cycle_s: f32) -> TrafficNet {
     traffic_net::load(&json).expect("signal corridor must validate")
 }
 
-/// A single phase in `[greenS, turns]` form: the validate step requires the
-/// signal phases to *exactly* cover the node's incoming turns. Our second phase
-/// `turns:[]` is the all-red interval; the sole incoming turn `0` is gated once
-/// in phase 0. That satisfies coverage.
+/// Actuated semantics (S3): a lone approach's signal IDLES GREEN. The
+/// authored all-red filler phase is dropped at build, leaving one demanded
+/// phase; with no competing demand the controller never switches away, so
+/// the sole turn reads green at (essentially) every tick — the opposite of
+/// the fixed-time bake, which held it red for the off-phase share and
+/// starved the movement. We assert green >= 99% of ticks over 5 nominal
+/// cycles and that a saturated queue keeps discharging (crossings > 0 in
+/// every cycle-length window, i.e. never gated to zero).
 #[test]
-fn red_light_queues_and_green_discharges() {
-    // green_share = 0.5: Webster saturation flow target = 1800 * 0.5 * 1 lane
-    // = 900 vph. Assert within +/-20% (720..=1080), computed from the fixture's
-    // own greenS/cycleS so the band stays honest if the fixture changes.
-    let green_s = 30.0;
-    let cycle_s = 60.0;
-    let lanes = 1.0;
-    let green_share = green_s / cycle_s;
-    let net = signal_corridor(200.0, green_s, cycle_s);
+fn actuated_single_approach_idles_green() {
+    let net = signal_corridor(200.0, 30.0, 60.0);
     let mut core = Core::new(&net, 512, 0xA11CE);
     core.set_params(IdmParams {
         v0: 13.9,
@@ -77,138 +74,164 @@ fn red_light_queues_and_green_discharges() {
         b_comf: 2.0,
         s0: 2.0,
     });
-
-    // Seed an initial platoon on the feeder so a queue exists immediately.
     let route = [0u32, 1u32];
     for k in 0..8u32 {
-        let s = 5.0 + k as f32 * 7.0;
-        core.spawn(0, s, &route).expect("spawn feeder seed");
+        core.spawn(0, 5.0 + k as f32 * 7.0, 0, &route)
+            .expect("spawn feeder seed");
     }
     core.reindex();
 
-    let dt = 0.1f32;
-    let jm = JunctionModel::build(&net);
-
-    // Keep the approach CONTINUOUSLY saturated: every tick, if the queued
-    // count on the feeder lane is below a target depth and there's a safe gap
-    // at s=0, spawn another vehicle on the same route. Deterministic (no
-    // randomness) — always tries the same target depth.
-    const TARGET_QUEUE_DEPTH: usize = 20;
-    const MIN_SPAWN_GAP_M: f32 = 8.0;
-
-    let mut prev_on_exit: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut saw_queue_on_red = false;
-
-    // Measure crossings over cycles 1..=5 (skip cycle 0 as warm-up so the
-    // window reflects steady-state saturated discharge, not startup transients
-    // from the initial seed platoon).
-    const MEASURE_FROM_CYCLE: u32 = 1;
-    const MEASURE_CYCLES: u32 = 5;
-    let mut green_window_idx: i64 = -1;
-    let mut was_green = jm.signal_green(0, 0, dt);
+    const TICKS: u64 = 3000; // 5 * 60 s
+    const WINDOW: u64 = 600; // one nominal cycle
+    let mut green_ticks = 0u64;
+    let mut prev_exit: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut crossed_in_window = 0u64;
-    let mut measure_start_t: Option<u64> = None;
-    let mut measure_end_t: Option<u64> = None;
 
-    let total_cycles = (MEASURE_FROM_CYCLE + MEASURE_CYCLES + 1) as u64;
-    let total_ticks = (total_cycles as f32 * cycle_s / dt) as u64;
-
-    for t in 0..total_ticks {
-        // Top up the standing queue before ticking, so the approach never
-        // starves: keep spawning at s=0 while there's room and depth is low.
+    for t in 0..TICKS {
+        // Keep the approach saturated.
         loop {
             let queued = (0..core.fleet.slots())
                 .filter(|&i| core.fleet.alive[i] && core.fleet.lane[i] == 0)
                 .count();
-            if queued >= TARGET_QUEUE_DEPTH {
+            if queued >= 20 {
                 break;
             }
-            // Safe gap at s=0: no alive vehicle on lane 0 within MIN_SPAWN_GAP_M
-            // of the origin.
-            let blocked = (0..core.fleet.slots()).any(|i| {
-                core.fleet.alive[i] && core.fleet.lane[i] == 0 && core.fleet.s[i] < MIN_SPAWN_GAP_M
-            });
-            if blocked {
+            let clear = (0..core.fleet.slots())
+                .all(|i| !core.fleet.alive[i] || core.fleet.lane[i] != 0 || core.fleet.s[i] > 8.0);
+            if !clear || core.spawn(0, 0.0, 0, &route).is_none() {
                 break;
-            }
-            if core.spawn(0, 0.0, &route).is_none() {
-                break; // fleet full
             }
         }
-        core.reindex();
-
         core.tick(t);
-        let green = jm.signal_green(0, t, dt);
-
-        // Detect fresh crossings this tick (first appearance on lane 1).
-        let mut on_exit_now: std::collections::HashSet<u32> = std::collections::HashSet::new();
-        for i in 0..core.fleet.slots() {
-            if core.fleet.alive[i] && core.fleet.lane[i] == 1 {
-                on_exit_now.insert(i as u32);
-            }
+        if core.signal_green(0, t) {
+            green_ticks += 1;
         }
-        let fresh_count = on_exit_now.difference(&prev_on_exit).count() as u64;
-        for &id in &on_exit_now {
-            if !prev_on_exit.contains(&id) {
-                assert!(
-                    green,
-                    "vehicle {id} crossed the stop line on RED at tick {t}"
-                );
-            }
+        let exit: std::collections::HashSet<u32> = (0..core.fleet.slots() as u32)
+            .filter(|&v| core.fleet.alive[v as usize] && core.fleet.lane[v as usize] == 1)
+            .collect();
+        crossed_in_window += exit.difference(&prev_exit).count() as u64;
+        prev_exit = exit;
+        if (t + 1) % WINDOW == 0 {
+            assert!(
+                crossed_in_window > 0,
+                "discharge stalled in cycle window ending at t={t}"
+            );
+            crossed_in_window = 0;
         }
+    }
+    let green_share = green_ticks as f32 / TICKS as f32;
+    assert!(
+        green_share > 0.99,
+        "lone approach must idle green (>=99% of ticks), got {:.1}%",
+        green_share * 100.0
+    );
+}
 
-        if !green {
+/// Actuated cross demand (S3): a two-phase signal with the MAIN road kept
+/// continuously saturated must still serve a side-road platoon within the
+/// min-green + max-green bound once it arrives, then hand green back to the
+/// main road (which resumes discharging). Proves demand-adaptive switching
+/// in both directions.
+#[test]
+fn actuated_cross_demand_is_served_and_main_resumes() {
+    let json = r#"{
+      "meta": {"anchor":{"lon":0.0,"lat":0.0},"laneWidth":3.5,"cellSize":1.0},
+      "nodes": [
+        {"id":0,"x":0,"z":0,"kind":"dead_end","signal":null},
+        {"id":1,"x":400,"z":0,"kind":"dead_end","signal":null},
+        {"id":2,"x":200,"z":-200,"kind":"dead_end","signal":null},
+        {"id":3,"x":200,"z":200,"kind":"dead_end","signal":null},
+        {"id":4,"x":200,"z":0,"kind":"signal","signal":{
+            "cycleS":60,
+            "phases":[
+              {"greenS":30,"turns":[0]},
+              {"greenS":30,"turns":[1]}
+            ]
+        }}
+      ],
+      "edges": [
+        {"id":0,"from":0,"to":4,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[0]},
+        {"id":1,"from":4,"to":1,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[1]},
+        {"id":2,"from":2,"to":4,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[2]},
+        {"id":3,"from":4,"to":3,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[3]}
+      ],
+      "lanes": [
+        {"id":0,"edge":0,"index":0,"lengthM":200,"pts":[[0,0],[200,0]]},
+        {"id":1,"edge":1,"index":0,"lengthM":200,"pts":[[200,0],[400,0]]},
+        {"id":2,"edge":2,"index":0,"lengthM":200,"pts":[[200,-200],[200,0]]},
+        {"id":3,"edge":3,"index":0,"lengthM":200,"pts":[[200,0],[200,200]]}
+      ],
+      "turns": [
+        {"id":0,"fromLane":0,"toLane":1,"node":4,"conflictsWith":[1],"yieldsTo":[]},
+        {"id":1,"fromLane":2,"toLane":3,"node":4,"conflictsWith":[0],"yieldsTo":[]}
+      ]
+    }"#;
+    let net = traffic_net::load(json).expect("actuated X fixture must validate");
+    let mut core = Core::new(&net, 64, 0x516);
+    let main_route = [0u32, 1u32];
+    for k in 0..10u32 {
+        core.spawn(0, 190.0 - k as f32 * 8.0, 0, &main_route)
+            .expect("main seed");
+    }
+    core.reindex();
+
+    const ARRIVE: u64 = 200;
+    let mut side: Vec<u32> = Vec::new();
+    let mut side_served_at: Option<u64> = None;
+    let mut main_after_side = 0u64;
+    let mut prev_main_exit: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
+    for t in 0..4000 {
+        // Keep the MAIN road continuously fed so it always has demand.
+        loop {
             let queued = (0..core.fleet.slots())
                 .filter(|&i| core.fleet.alive[i] && core.fleet.lane[i] == 0)
                 .count();
-            if queued >= 5 {
-                saw_queue_on_red = true;
+            if queued >= 12 {
+                break;
+            }
+            let clear = (0..core.fleet.slots())
+                .all(|i| !core.fleet.alive[i] || core.fleet.lane[i] != 0 || core.fleet.s[i] > 8.0);
+            if !clear || core.spawn(0, 0.0, 0, &main_route).is_none() {
+                break;
             }
         }
-
-        if green && !was_green {
-            green_window_idx += 1;
-        }
-
-        let in_measure_window = green_window_idx >= MEASURE_FROM_CYCLE as i64
-            && green_window_idx < (MEASURE_FROM_CYCLE + MEASURE_CYCLES) as i64;
-        if green && in_measure_window {
-            if measure_start_t.is_none() {
-                measure_start_t = Some(t);
+        if t == ARRIVE {
+            for k in 0..3u32 {
+                side.push(
+                    core.spawn(2, 150.0 - k as f32 * 10.0, 0, &[2u32, 3])
+                        .expect("side spawn"),
+                );
             }
-            crossed_in_window += fresh_count;
-            measure_end_t = Some(t);
+            core.reindex();
         }
+        core.tick(t);
 
-        prev_on_exit = on_exit_now;
-        was_green = green;
+        if t > ARRIVE && side_served_at.is_none() {
+            let all_over = side
+                .iter()
+                .all(|&v| !core.fleet.alive[v as usize] || core.fleet.lane[v as usize] == 3);
+            if all_over {
+                side_served_at = Some(t);
+            }
+        }
+        let main_exit: std::collections::HashSet<u32> = (0..core.fleet.slots() as u32)
+            .filter(|&v| core.fleet.alive[v as usize] && core.fleet.lane[v as usize] == 1)
+            .collect();
+        if side_served_at.is_some_and(|served| t > served) {
+            main_after_side += main_exit.difference(&prev_main_exit).count() as u64;
+        }
+        prev_main_exit = main_exit;
     }
 
+    let served = side_served_at.expect("side road never got green");
     assert!(
-        saw_queue_on_red,
-        "no queue ever formed while the light was red"
+        served < ARRIVE + 900,
+        "side demand served too late: tick {served} (arrival {ARRIVE})"
     );
-
-    let (start_t, end_t) = (
-        measure_start_t.expect("measurement window never opened"),
-        measure_end_t.expect("measurement window never closed"),
-    );
-    // Webster capacity (`sat_flow * green_share`) is an hourly-average rate over
-    // the FULL cycle (red included), not a green-only rate — the green_share
-    // factor already discounts for red time. So the denominator here is the
-    // full wall-clock span of the measured cycles, not just their green slices.
-    let measured_wall_duration = MEASURE_CYCLES as f32 * cycle_s;
-    let vph = crossed_in_window as f32 / measured_wall_duration * 3600.0;
-
-    let target = 1800.0 * green_share * lanes;
-    let band_lo = 0.8 * target;
-    let band_hi = 1.2 * target;
     assert!(
-        vph >= band_lo && vph <= band_hi,
-        "saturated signal discharge {vph:.1} vph (crossed {crossed_in_window} over \
-         {measured_wall_duration:.1}s wall time [{start_t}..={end_t}]) outside the \
-         Webster +/-20% band [{band_lo:.1}, {band_hi:.1}] around target {target:.1} \
-         (1800 * green_share {green_share:.3} * {lanes} lane)"
+        main_after_side >= 3,
+        "main road never resumed after the side phase ({main_after_side} crossings)"
     );
 }
 
@@ -258,13 +281,13 @@ fn roundabout_entry_yields_and_no_cooccupancy() {
     // finds a gap early — they occupy the node region continuously.
     for k in 0..3u32 {
         let lane = k; // ring lanes 0,1,2
-        core.spawn(lane, 5.0, &rotate_route(&ring_route, lane))
+        core.spawn(lane, 5.0, 0, &rotate_route(&ring_route, lane))
             .expect("spawn circulating");
     }
     // One entering vehicle, near the entry lane end so it reaches the give-way
     // line quickly.
     let enter = core
-        .spawn(entry_lane, 30.0, &entry_route)
+        .spawn(entry_lane, 30.0, 0, &entry_route)
         .expect("spawn entering");
     core.fleet.v[enter as usize] = 6.0;
     for k in 0..3u32 {
@@ -387,10 +410,10 @@ fn right_before_left_yields_to_priority() {
     });
 
     // Priority vehicle on road A, approaching the node at speed.
-    let prio = core.spawn(0, 50.0, &[0u32, 1]).expect("prio");
+    let prio = core.spawn(0, 50.0, 0, &[0u32, 1]).expect("prio");
     core.fleet.v[prio as usize] = 13.0;
     // Yielding vehicle on road B, also approaching. It must wait until A clears.
-    let yielder = core.spawn(2, 55.0, &[2u32, 3]).expect("yielder");
+    let yielder = core.spawn(2, 55.0, 0, &[2u32, 3]).expect("yielder");
     core.fleet.v[yielder as usize] = 12.0;
     core.reindex();
 
@@ -460,10 +483,15 @@ fn junction_soak_core(seed: u64) -> Core {
     let ring_route: Vec<u32> = vec![0, 1, 2, 3];
     for k in 0..4u32 {
         let lane = k;
-        core.spawn(lane, 3.0 + k as f32 * 2.0, &rotate_route(&ring_route, lane))
-            .expect("spawn circ");
+        core.spawn(
+            lane,
+            3.0 + k as f32 * 2.0,
+            0,
+            &rotate_route(&ring_route, lane),
+        )
+        .expect("spawn circ");
     }
-    core.spawn(4, 20.0, &[4u32, 0, 1, 2, 3])
+    core.spawn(4, 20.0, 0, &[4u32, 0, 1, 2, 3])
         .expect("spawn entry");
     core.reindex();
     core
@@ -496,4 +524,142 @@ fn junctions_deterministic_same_seed() {
         b.tick(t);
     }
     assert_eq!(a.state_hash(), b.state_hash());
+}
+
+// ---------------------------------------------------------------------------
+// Mutual-yield deadlock regression (S2 calibration finding): at an
+// UNCONTROLLED crossing whose two turns yield to EACH OTHER (right-before-
+// left is inherently cyclic), two vehicles arriving together must not wait
+// on each other forever. Gap acceptance is defined against the APPROACHING
+// priority stream; a vehicle standing at its own stop line must not veto —
+// the physical conflict point is arbitrated by phase-2 occupancy (claims +
+// clearance). Before the fix this scenario gridlocked permanently and, on
+// the real net, snowballed into 26.6k of 26.7k vehicles stopped by world
+// midnight.
+// ---------------------------------------------------------------------------
+
+/// An uncontrolled X: west feeder (lane 0) -> east exit (lane 1), north
+/// feeder (lane 2) -> south exit (lane 3), crossing at node 4. The two turns
+/// mutually conflict AND mutually yield.
+fn mutual_yield_cross() -> TrafficNet {
+    let json = r#"{
+      "meta": {"anchor":{"lon":0.0,"lat":0.0},"laneWidth":3.5,"cellSize":1.0},
+      "nodes": [
+        {"id":0,"x":0,"z":0,"kind":"dead_end","signal":null},
+        {"id":1,"x":200,"z":0,"kind":"dead_end","signal":null},
+        {"id":2,"x":100,"z":-100,"kind":"dead_end","signal":null},
+        {"id":3,"x":100,"z":100,"kind":"dead_end","signal":null},
+        {"id":4,"x":100,"z":0,"kind":"uncontrolled","signal":null}
+      ],
+      "edges": [
+        {"id":0,"from":0,"to":4,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[0]},
+        {"id":1,"from":4,"to":1,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[1]},
+        {"id":2,"from":2,"to":4,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[2]},
+        {"id":3,"from":4,"to":3,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[3]}
+      ],
+      "lanes": [
+        {"id":0,"edge":0,"index":0,"lengthM":100,"pts":[[0,0],[100,0]]},
+        {"id":1,"edge":1,"index":0,"lengthM":100,"pts":[[100,0],[200,0]]},
+        {"id":2,"edge":2,"index":0,"lengthM":100,"pts":[[100,-100],[100,0]]},
+        {"id":3,"edge":3,"index":0,"lengthM":100,"pts":[[100,0],[100,100]]}
+      ],
+      "turns": [
+        {"id":0,"fromLane":0,"toLane":1,"node":4,"conflictsWith":[1],"yieldsTo":[1]},
+        {"id":1,"fromLane":2,"toLane":3,"node":4,"conflictsWith":[0],"yieldsTo":[0]}
+      ]
+    }"#;
+    traffic_net::load(json).expect("mutual-yield cross must validate")
+}
+
+#[test]
+fn mutual_yield_arrivals_do_not_deadlock() {
+    let net = mutual_yield_cross();
+    let mut core = Core::new(&net, 8, 0xDEAD);
+    // Same distance, same class: both hit the stop line on the same tick —
+    // the worst-case symmetric arrival.
+    core.spawn(0, 50.0, 0, &[0u32, 1]).expect("spawn west");
+    core.spawn(2, 50.0, 0, &[2u32, 3]).expect("spawn north");
+    core.reindex();
+
+    // 100 s of sim time is orders of magnitude beyond one crossing +
+    // clearance; both open routes must have completed (despawned).
+    for t in 0..1000 {
+        core.tick(t);
+        if core.fleet.alive_count() == 0 {
+            return;
+        }
+    }
+    panic!(
+        "mutual-yield crossing deadlocked: {} vehicle(s) still alive after 100 s",
+        core.fleet.alive_count()
+    );
+}
+
+/// Missed-turn stranding seam: a route whose next lane is NOT reachable from
+/// the current lane (no turn 0 -> 3 exists in the mutual-yield cross) drives
+/// the vehicle into the no-turn wall, and the kernel reports it via
+/// `stranded_last_tick` — alive, stopped, waiting for a shell rescue.
+#[test]
+fn no_turn_wall_reports_stranded() {
+    let net = mutual_yield_cross();
+    let mut core = Core::new(&net, 4, 0x57A);
+    core.spawn(0, 50.0, 0, &[0u32, 3])
+        .expect("spawn walled route");
+    core.reindex();
+
+    let mut reported = false;
+    for t in 0..600 {
+        core.tick(t);
+        if core.stranded_last_tick().contains(&0) {
+            reported = true;
+            break;
+        }
+    }
+    assert!(reported, "walled vehicle never reported stranded");
+    assert_eq!(
+        core.fleet.alive_count(),
+        1,
+        "kernel must NOT despawn it itself"
+    );
+}
+
+/// Strategic mandatory merge (missed-turn fix): on a two-lane feeder where
+/// only lane 0 has a turn onto the exit, a vehicle routed on lane 1 must
+/// merge to lane 0 inside the urgent zone and complete — before the fix it
+/// drove into the no-turn wall and waited forever.
+#[test]
+fn wrong_lane_merges_before_the_wall_and_completes() {
+    let json = r#"{
+      "meta": {"anchor":{"lon":0.0,"lat":0.0},"laneWidth":3.5,"cellSize":1.0},
+      "nodes": [
+        {"id":0,"x":0,"z":0,"kind":"dead_end","signal":null},
+        {"id":1,"x":200,"z":0,"kind":"uncontrolled","signal":null},
+        {"id":2,"x":300,"z":0,"kind":"dead_end","signal":null}
+      ],
+      "edges": [
+        {"id":0,"from":0,"to":1,"speedMs":13.9,"laneCount":2,"priorityRoad":false,"lanes":[0,1]},
+        {"id":1,"from":1,"to":2,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[2]}
+      ],
+      "lanes": [
+        {"id":0,"edge":0,"index":0,"lengthM":200,"pts":[[0,0],[200,0]]},
+        {"id":1,"edge":0,"index":1,"lengthM":200,"pts":[[0,-3.5],[200,-3.5]]},
+        {"id":2,"edge":1,"index":0,"lengthM":100,"pts":[[200,0],[300,0]]}
+      ],
+      "turns": [
+        {"id":0,"fromLane":0,"toLane":2,"node":1,"conflictsWith":[],"yieldsTo":[]}
+      ]
+    }"#;
+    let net = traffic_net::load(json).expect("two-lane merge fixture must validate");
+    let mut core = Core::new(&net, 4, 0x3E);
+    core.spawn(1, 20.0, 0, &[1u32, 2])
+        .expect("spawn on wrong lane");
+    core.reindex();
+
+    for t in 0..800 {
+        core.tick(t);
+        if core.fleet.alive_count() == 0 {
+            return; // merged, crossed, completed
+        }
+    }
+    panic!("vehicle never completed: stuck on the turnless lane");
 }

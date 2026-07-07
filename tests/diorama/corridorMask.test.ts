@@ -3,7 +3,7 @@
 // bytes the bake writes (scripts/geo/lib/corridormask.mjs) — this test encodes
 // with the bake lib and decodes with the runtime TS, proving the two agree.
 import { describe, expect, it } from 'vitest';
-import { decodeCorridorMask, corridorMaskDataTexture } from '../../src/diorama/ksw/geo/corridorMask';
+import { decodeCorridorMask, corridorMaskDataTexture, maskShaderUv } from '../../src/diorama/ksw/geo/corridorMask';
 import { buildCorridorMask, encodeCorridorMask } from '../../scripts/geo/lib/corridormask.mjs';
 
 const WAYS = [{ pts: [[0, 0], [40, 0]], halfWidthM: 3, kind: 'road' }];
@@ -47,5 +47,37 @@ describe('decodeCorridorMask (runtime ↔ bake parity)', () => {
     };
     expect(at(20, 0)).toBe(255);
     expect(at(20, 8)).toBe(0);
+  });
+});
+
+describe('maskShaderUv (shader ↔ covers() cell parity, #144)', () => {
+  const bin = encodeCorridorMask(buildCorridorMask(WAYS, BOUNDS, CELL));
+  const mask = decodeCorridorMask(bin);
+
+  it('NEAREST texel index from the shader UV equals the covers() round-to-nearest cell', () => {
+    // The bake stamps cell (i,j) with CENTRE at (origin + i·cell) and covers()
+    // reads round-to-nearest. A NEAREST texture sample resolves texel
+    // floor(u·cols) — so the UV must be offset by half a cell or the shader
+    // discards a footprint shifted +cell/2 in +x/+z (root cause of #144's
+    // one-sided see-through strips). Sweep points across cells, cell borders
+    // and half-cell offsets, including negative world coords.
+    for (let k = 0; k < 2000; k++) {
+      const x = mask.originX + (k * 0.37) % (mask.cols * mask.cellSizeM - 1);
+      const z = mask.originZ + (k * 0.53) % (mask.rows * mask.cellSizeM - 1);
+      const [u, v] = maskShaderUv(mask, x, z);
+      const texelI = Math.min(mask.cols - 1, Math.max(0, Math.floor(u * mask.cols)));
+      const texelJ = Math.min(mask.rows - 1, Math.max(0, Math.floor(v * mask.rows)));
+      const cellI = Math.min(mask.cols - 1, Math.max(0, Math.round((x - mask.originX) / mask.cellSizeM)));
+      const cellJ = Math.min(mask.rows - 1, Math.max(0, Math.round((z - mask.originZ) / mask.cellSizeM)));
+      expect(texelI).toBe(cellI);
+      expect(texelJ).toBe(cellJ);
+    }
+  });
+
+  it('exact cell borders resolve like Math.round (half-up), matching covers()', () => {
+    // x exactly between two cell centres: covers() rounds half-up.
+    const x = mask.originX + 1.25; // between cell 0 (centre 0) and cell 1 (centre 2.5)
+    const [u] = maskShaderUv(mask, x, mask.originZ);
+    expect(Math.floor(u * mask.cols)).toBe(Math.round(1.25 / 2.5));
   });
 });

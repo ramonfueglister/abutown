@@ -296,12 +296,15 @@ fn encode_flow_frame(frame: abutown_protocol::traffic::FlowFrame) -> Frame {
     Arc::from(bytes.as_ref())
 }
 
+/// One member vehicle's quantised wire state: `(lane, s_q, v_q, class)`.
+type MemberState = (u32, u32, u32, u32);
+
 /// Per-cell membership + the quantised state of each member vehicle, kept
 /// between publishes so the publisher can diff for deltas and departed lists.
 #[derive(Default, Clone)]
 struct CellState {
-    /// id → (lane, s_q, v_q) at the last publish for this cell.
-    members: HashMap<u32, (u32, u32, u32)>,
+    /// id → (lane, s_q, v_q, class) at the last publish for this cell.
+    members: HashMap<u32, MemberState>,
 }
 
 /// The publish-side state: the grid, the session registry, and the rolling
@@ -316,7 +319,7 @@ struct PublisherState {
     /// Publish counter (increments once per publish tick), for keyframe cadence.
     publish_seq: u64,
     /// Scratch: this-tick membership per touched cell (cell → members).
-    scratch_members: HashMap<u32, HashMap<u32, (u32, u32, u32)>>,
+    scratch_members: HashMap<u32, HashMap<u32, MemberState>>,
     /// Scratch: session snapshot, reused across publishes.
     scratch_sessions: Vec<Arc<Session>>,
 }
@@ -383,10 +386,15 @@ impl PublisherState {
             };
             let (s_q, v_q) = quantise(view.s, view.v);
             let wire_id = compose_wire_id(veh, core.fleet.generation(veh as usize));
-            self.scratch_members
-                .entry(cell)
-                .or_default()
-                .insert(wire_id, (view.lane, s_q, v_q));
+            self.scratch_members.entry(cell).or_default().insert(
+                wire_id,
+                (
+                    view.lane,
+                    s_q,
+                    v_q,
+                    u32::from(core.fleet.class[veh as usize]),
+                ),
+            );
         }
 
         // 2) Determine which cells changed vs last publish. A cell is "dirty"
@@ -518,10 +526,16 @@ impl PublisherState {
 }
 
 /// Build a keyframe: full membership, empty departed list.
-fn build_keyframe(cell: u32, tick: u64, members: &HashMap<u32, (u32, u32, u32)>) -> CellFrame {
+fn build_keyframe(cell: u32, tick: u64, members: &HashMap<u32, MemberState>) -> CellFrame {
     let mut vehicles: Vec<VehicleState> = members
         .iter()
-        .map(|(&id, &(lane, s_q, v_q))| VehicleState { id, lane, s_q, v_q })
+        .map(|(&id, &(lane, s_q, v_q, class))| VehicleState {
+            id,
+            lane,
+            s_q,
+            v_q,
+            class,
+        })
         .collect();
     // Deterministic ordering by id keeps frames stable for tests / debugging.
     vehicles.sort_unstable_by_key(|v| v.id);
@@ -538,13 +552,19 @@ fn build_keyframe(cell: u32, tick: u64, members: &HashMap<u32, (u32, u32, u32)>)
 fn build_delta(
     cell: u32,
     tick: u64,
-    prev: &HashMap<u32, (u32, u32, u32)>,
-    now: &HashMap<u32, (u32, u32, u32)>,
+    prev: &HashMap<u32, MemberState>,
+    now: &HashMap<u32, MemberState>,
 ) -> CellFrame {
     let mut vehicles = Vec::new();
-    for (&id, &(lane, s_q, v_q)) in now {
-        if prev.get(&id) != Some(&(lane, s_q, v_q)) {
-            vehicles.push(VehicleState { id, lane, s_q, v_q });
+    for (&id, &(lane, s_q, v_q, class)) in now {
+        if prev.get(&id) != Some(&(lane, s_q, v_q, class)) {
+            vehicles.push(VehicleState {
+                id,
+                lane,
+                s_q,
+                v_q,
+                class,
+            });
         }
     }
     vehicles.sort_unstable_by_key(|v| v.id);

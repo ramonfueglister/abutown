@@ -52,6 +52,45 @@ const SALT_THR_COUNT_WD: u64 = 11;
 const SALT_THR_DEP_WD: u64 = 12;
 const SALT_THR_COUNT_WE: u64 = 13;
 const SALT_THR_DEP_WE: u64 = 14;
+const SALT_CLASS_INT_WD: u64 = 15;
+const SALT_CLASS_INT_WE: u64 = 16;
+const SALT_CLASS_IN: u64 = 17;
+const SALT_CLASS_OUT: u64 = 18;
+const SALT_CLASS_THR_WD: u64 = 19;
+const SALT_CLASS_THR_WE: u64 = 20;
+
+/// Fleet-composition shares as cumulative thresholds `[car, car+delivery]`
+/// (the remainder is HGV), drawn per trip against `u01`:
+///
+/// * **Urban (internal gravity trips):** Lieferwagen ≈ 9 %, schwere
+///   Nutzfahrzeuge ≈ 2 % of urban motorized traffic — BFS (2023),
+///   Gütertransportstatistik, and städtische Querschnittszählungen.
+/// * **Commuters (in/out):** commuting is passenger-car dominated; a small
+///   service-van share ≈ 5 % (Handwerker-Pendler), no HGV.
+/// * **A1 through:** HGV ≈ 10 % of motorway daily volume — ASTRA SASVZ
+///   Dauerzählstellen (Kategorie SNF), Lieferwagen ≈ 4 %.
+///
+/// The morning/evening legs of one commuter share a single draw (same
+/// vehicle both ways).
+const CLASS_SHARES_URBAN: [f32; 2] = [0.89, 0.98];
+const CLASS_SHARES_COMMUTE: [f32; 2] = [0.95, 1.0];
+const CLASS_SHARES_THROUGH: [f32; 2] = [0.86, 0.90];
+
+/// Draw a vehicle class for a trip of `segment` from uniform `u`.
+fn class_for(segment: u8, u: f32) -> u8 {
+    let shares = match segment {
+        SEGMENT_THROUGH => CLASS_SHARES_THROUGH,
+        SEGMENT_INTERNAL => CLASS_SHARES_URBAN,
+        _ => CLASS_SHARES_COMMUTE,
+    };
+    if u < shares[0] {
+        0
+    } else if u < shares[1] {
+        1
+    } else {
+        2
+    }
+}
 
 /// Bake configuration (mirrors the CLI flags).
 #[derive(Debug, Clone)]
@@ -113,14 +152,30 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
         let n_wd = stochastic_round(expected, u01(SEED, k as u64, SALT_INT_COUNT_WD));
         for _ in 0..n_wd {
             let u = u01(SEED, wd_dep_idx, SALT_INT_DEP_WD);
+            let class = class_for(SEGMENT_INTERNAL, u01(SEED, wd_dep_idx, SALT_CLASS_INT_WD));
             wd_dep_idx += 1;
-            weekday.push(rec(Profile::Workday, u, o_lane, d_lane, SEGMENT_INTERNAL));
+            weekday.push(rec(
+                Profile::Workday,
+                u,
+                o_lane,
+                d_lane,
+                SEGMENT_INTERNAL,
+                class,
+            ));
         }
         let n_we = stochastic_round(expected, u01(SEED, k as u64, SALT_INT_COUNT_WE));
         for _ in 0..n_we {
             let u = u01(SEED, we_dep_idx, SALT_INT_DEP_WE);
+            let class = class_for(SEGMENT_INTERNAL, u01(SEED, we_dep_idx, SALT_CLASS_INT_WE));
             we_dep_idx += 1;
-            weekend.push(rec(Profile::Weekend, u, o_lane, d_lane, SEGMENT_INTERNAL));
+            weekend.push(rec(
+                Profile::Weekend,
+                u,
+                o_lane,
+                d_lane,
+                SEGMENT_INTERNAL,
+                class,
+            ));
         }
     }
     let weekday_internal = weekday.len();
@@ -157,6 +212,9 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
         for _ in 0..n {
             if inbound {
                 let cell_lane = model.pick_dest_lane(u01(SEED, in_idx, SALT_IN_DEST));
+                // One draw per commuter: the morning and evening legs are the
+                // same physical vehicle.
+                let class = class_for(SEGMENT_INBOUND, u01(SEED, in_idx, SALT_CLASS_IN));
                 let morning = rec(
                     Profile::Morning,
                     u01(SEED, in_idx, SALT_IN_DEP),
@@ -165,6 +223,7 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
                         .expect("pick(Spawn) returned spawn lane"),
                     cell_lane,
                     SEGMENT_INBOUND,
+                    class,
                 );
                 let evening = rec(
                     Profile::Evening,
@@ -172,18 +231,21 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
                     cell_lane,
                     sink_gw.sink_lane.expect("pick(Sink) returned sink lane"),
                     SEGMENT_OUTBOUND,
+                    class,
                 );
                 weekday.push(morning);
                 weekday.push(evening);
                 in_idx += 1;
             } else {
                 let cell_lane = model.pick_origin_lane(u01(SEED, out_idx, SALT_OUT_ORIGIN));
+                let class = class_for(SEGMENT_OUTBOUND, u01(SEED, out_idx, SALT_CLASS_OUT));
                 let morning = rec(
                     Profile::Morning,
                     u01(SEED, out_idx, SALT_OUT_DEP),
                     cell_lane,
                     sink_gw.sink_lane.expect("pick(Sink) returned sink lane"),
                     SEGMENT_OUTBOUND,
+                    class,
                 );
                 let evening = rec(
                     Profile::Evening,
@@ -193,6 +255,7 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
                         .expect("pick(Spawn) returned spawn lane"),
                     cell_lane,
                     SEGMENT_INBOUND,
+                    class,
                 );
                 weekday.push(morning);
                 weekday.push(evening);
@@ -242,6 +305,7 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
         let n_wd = stochastic_round(expected, u01(SEED, e_idx as u64, SALT_THR_COUNT_WD));
         for _ in 0..n_wd {
             let u = u01(SEED, thr_wd_idx, SALT_THR_DEP_WD);
+            let class = class_for(SEGMENT_THROUGH, u01(SEED, thr_wd_idx, SALT_CLASS_THR_WD));
             thr_wd_idx += 1;
             weekday.push(rec(
                 Profile::Through,
@@ -249,11 +313,13 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
                 origin_lane,
                 dest_lane,
                 SEGMENT_THROUGH,
+                class,
             ));
         }
         let n_we = stochastic_round(expected, u01(SEED, e_idx as u64, SALT_THR_COUNT_WE));
         for _ in 0..n_we {
             let u = u01(SEED, thr_we_idx, SALT_THR_DEP_WE);
+            let class = class_for(SEGMENT_THROUGH, u01(SEED, thr_we_idx, SALT_CLASS_THR_WE));
             thr_we_idx += 1;
             weekend.push(rec(
                 Profile::Through,
@@ -261,6 +327,7 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
                 origin_lane,
                 dest_lane,
                 SEGMENT_THROUGH,
+                class,
             ));
         }
         *gateway_volumes.entry(from.node).or_insert(0) += n_wd as u64;
@@ -299,13 +366,20 @@ pub fn bake(cfg: &BakeConfig) -> Result<BakeStats, String> {
     })
 }
 
-fn rec(profile: Profile, u: f32, origin_lane: u32, dest_lane: u32, segment: u8) -> TripRecord {
+fn rec(
+    profile: Profile,
+    u: f32,
+    origin_lane: u32,
+    dest_lane: u32,
+    segment: u8,
+    vehicle_class: u8,
+) -> TripRecord {
     TripRecord {
         departure_s: profiles::sample_departure_s(profile, u),
         origin_lane,
         dest_lane,
         segment,
-        vehicle_class: 0,
+        vehicle_class,
     }
 }
 
@@ -546,6 +620,35 @@ fn pick_weighted(cum: &[f64], u: f32, lane_of: impl Fn(usize) -> u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The class draw reproduces the authored fleet composition per segment
+    /// (±1 % over 100k u01 draws) and stays inside the kernel's class table.
+    #[test]
+    fn class_shares_match_authored_composition() {
+        for (segment, shares) in [
+            (SEGMENT_INTERNAL, CLASS_SHARES_URBAN),
+            (SEGMENT_INBOUND, CLASS_SHARES_COMMUTE),
+            (SEGMENT_THROUGH, CLASS_SHARES_THROUGH),
+        ] {
+            let mut counts = [0u32; 3];
+            const N: u32 = 100_000;
+            for i in 0..N {
+                let class = class_for(segment, u01(SEED, u64::from(i), 999));
+                counts[class as usize] += 1;
+            }
+            let frac = |c: usize| counts[c] as f32 / N as f32;
+            assert!(
+                (frac(0) - shares[0]).abs() < 0.01,
+                "car share off: {}",
+                frac(0)
+            );
+            assert!(
+                (frac(0) + frac(1) - shares[1]).abs() < 0.01,
+                "delivery share off: {}",
+                frac(1)
+            );
+        }
+    }
 
     #[test]
     fn stochastic_round_floor_plus_bernoulli() {

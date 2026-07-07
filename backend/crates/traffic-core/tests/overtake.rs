@@ -157,11 +157,11 @@ fn fast_car_overtakes_slow_truck_and_returns_right() {
 
     // A slow "truck": crawling, in the RIGHT lane (index 0) of edge 0 at s=120.
     let truck = core
-        .spawn(lane_id(0, 0), 120.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 120.0, 0, &route_on_index(0, 0))
         .expect("spawn truck");
     // A fast car behind it in the same right lane at s=40, initialised at speed.
     let car = core
-        .spawn(lane_id(0, 0), 40.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 40.0, 0, &route_on_index(0, 0))
         .expect("spawn car");
     // Pin the truck slow by giving the car a head-start in speed; both use the
     // same IDM, but the car approaches and must decide to overtake.
@@ -231,15 +231,15 @@ fn safety_veto_blocks_change_into_fast_adjacent_traffic() {
     // left, but the LEFT lane has a fast car right beside/behind it, so the
     // safety criterion must veto the change.
     let leader = core
-        .spawn(lane_id(0, 0), 60.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 60.0, 0, &route_on_index(0, 0))
         .expect("leader");
     let boxed = core
-        .spawn(lane_id(0, 0), 40.0, &route_on_index(0, 0))
+        .spawn(lane_id(0, 0), 40.0, 0, &route_on_index(0, 0))
         .expect("boxed");
     // Fast car in the left lane just behind `boxed`'s position (small gap, high
     // speed) — cutting in front of it would force a hard brake.
     let fast_left = core
-        .spawn(lane_id(0, 1), 38.0, &route_on_index(0, 1))
+        .spawn(lane_id(0, 1), 38.0, 0, &route_on_index(0, 1))
         .expect("fast_left");
     core.fleet.v[leader as usize] = 3.0;
     core.fleet.v[boxed as usize] = 4.0;
@@ -284,7 +284,7 @@ fn crowded_core(seed: u64) -> Core {
         let idx = (k / 4) % 2;
         let s = 20.0 + (k as f32) * 11.0 % (SIDE - 20.0);
         let id = core
-            .spawn(lane_id(e, idx), s, &route_on_index(e, idx))
+            .spawn(lane_id(e, idx), s, 0, &route_on_index(e, idx))
             .expect("spawn crowded");
         core.fleet.v[id as usize] = 5.0 + (k as f32 * 1.7) % 12.0;
     }
@@ -319,4 +319,66 @@ fn deterministic_across_thread_counts_with_lane_changes() {
         })
     };
     assert_eq!(run(1), run(4), "thread count must not affect state hash");
+}
+
+/// Physical-fit regression (S2 collision on the real net): a MANDATORY
+/// lane change (waived comfort threshold) must never place a vehicle
+/// overlapping a leader already on the target lane. Two-lane edge where only
+/// lane 0 serves the route; the wrong-lane vehicle is forced to merge, but
+/// lane 0 is packed with a standing queue right at its merge position — the
+/// merge must be REFUSED (no overlap), not forced on top of the queue.
+#[test]
+fn mandatory_merge_never_overlaps_target_leader() {
+    let json = r#"{
+      "meta": {"anchor":{"lon":0.0,"lat":0.0},"laneWidth":3.5,"cellSize":1.0},
+      "nodes": [
+        {"id":0,"x":0,"z":0,"kind":"dead_end","signal":null},
+        {"id":1,"x":200,"z":0,"kind":"uncontrolled","signal":null},
+        {"id":2,"x":300,"z":0,"kind":"dead_end","signal":null}
+      ],
+      "edges": [
+        {"id":0,"from":0,"to":1,"speedMs":13.9,"laneCount":2,"priorityRoad":false,"lanes":[0,1]},
+        {"id":1,"from":1,"to":2,"speedMs":13.9,"laneCount":1,"priorityRoad":false,"lanes":[2]}
+      ],
+      "lanes": [
+        {"id":0,"edge":0,"index":0,"lengthM":200,"pts":[[0,0],[200,0]]},
+        {"id":1,"edge":0,"index":1,"lengthM":200,"pts":[[0,-3.5],[200,-3.5]]},
+        {"id":2,"edge":1,"index":0,"lengthM":100,"pts":[[200,0],[300,0]]}
+      ],
+      "turns": [
+        {"id":0,"fromLane":0,"toLane":2,"node":1,"conflictsWith":[],"yieldsTo":[]}
+      ]
+    }"#;
+    let net = traffic_net::load(json).expect("merge fixture must validate");
+    let mut core = Core::new(&net, 32, 0xC0DE);
+    // Pack lane 0 with a standing queue occupying the whole merge zone.
+    for k in 0..20u32 {
+        core.spawn(0, 5.0 + k as f32 * 6.0, 0, &[0u32, 2])
+            .expect("queue on serving lane");
+    }
+    // The wrong-lane vehicle: on lane 1, which has no turn to the exit.
+    core.spawn(1, 60.0, 0, &[1u32, 2])
+        .expect("wrong-lane vehicle");
+    core.reindex();
+
+    // Run; every tick the minimum bumper gap must stay positive (no overlap).
+    for t in 0..1500 {
+        core.tick(t);
+        // Min gap per lane across the fleet.
+        for lane in 0..3u32 {
+            let occ = core.index.on_lane(lane);
+            for w in occ.windows(2) {
+                let a = w[0] as usize; // higher s (leader)
+                let b = w[1] as usize; // lower s (follower)
+                let gap = core.fleet.s[a] - core.fleet.s[b] - core.fleet.len_m[a];
+                assert!(
+                    gap > -0.01,
+                    "overlap on lane {lane} at tick {t}: gap {gap:.2}"
+                );
+            }
+        }
+        if core.fleet.alive_count() == 0 {
+            break;
+        }
+    }
 }

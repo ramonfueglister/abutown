@@ -23,7 +23,8 @@ pub const SEGMENT_INBOUND: u8 = 1;
 pub const SEGMENT_OUTBOUND: u8 = 2;
 pub const SEGMENT_THROUGH: u8 = 3;
 
-/// One scheduled trip. `vehicle_class` is always 0 (car) in version 1.
+/// One scheduled trip. `vehicle_class` indexes the kernel's per-class IDM
+/// table: 0 car, 1 delivery van, 2 HGV (see `traffic_core::idm::N_CLASSES`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TripRecord {
     pub departure_s: u32,

@@ -113,7 +113,7 @@ fn seeded_core(seed: u64) -> Core {
         let perturbed = (base + 4.0 * (i as f32 * std::f32::consts::TAU / N_VEH as f32).sin())
             .rem_euclid(RING_LEN);
         let (lane, s_local) = global_to_lane(perturbed);
-        core.spawn(lane, s_local, &route_from(lane))
+        core.spawn(lane, s_local, 0, &route_from(lane))
             .expect("spawn within capacity");
     }
     core.reindex();
@@ -201,6 +201,119 @@ fn ring_no_collisions_and_stop_and_go() {
         overall_mean < core.v0() * 0.8,
         "expected mean speed < 0.8*v0 ({}), got {overall_mean}",
         core.v0() * 0.8
+    );
+}
+
+/// Build a ring Core with a CLASS-MIXED fleet (car/van/truck round-robin) on
+/// the per-class default calibrations (no uniform override).
+fn seeded_mixed_core(seed: u64) -> Core {
+    const N_MIXED: usize = 30;
+    let net = ring_net();
+    let mut core = Core::new(&net, N_MIXED + 4, seed);
+    for i in 0..N_MIXED {
+        let base = (i as f32) * (RING_LEN / N_MIXED as f32);
+        let (lane, s_local) = global_to_lane(base);
+        core.spawn(lane, s_local, (i % 3) as u8, &route_from(lane))
+            .expect("spawn within capacity");
+    }
+    core.reindex();
+    core
+}
+
+/// Class-aware minimum bumper-to-bumper gap: each pair's gap subtracts the
+/// LEADER's real length (12 m truck ≠ 4.5 m car).
+fn min_gap_mixed(core: &Core) -> f32 {
+    let mut vehicles: Vec<(f32, f32)> = Vec::new(); // (global pos, len)
+    for i in 0..core.fleet.slots() {
+        if core.fleet.alive[i] {
+            let g = core.fleet.lane[i] as f32 * SIDE + core.fleet.s[i];
+            vehicles.push((g, core.fleet.len_m[i]));
+        }
+    }
+    vehicles.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let n = vehicles.len();
+    let mut min = f32::INFINITY;
+    for k in 0..n {
+        let (cur, _) = vehicles[k];
+        let (lead_pos, lead_len) = if k + 1 < n {
+            vehicles[k + 1]
+        } else {
+            (vehicles[0].0 + RING_LEN, vehicles[0].1)
+        };
+        min = min.min(lead_pos - cur - lead_len);
+    }
+    min
+}
+
+/// Heterogeneous fleet: no collisions, thread-count-invariant hash, and the
+/// IDM class calibration is really wired through — a truck's mean equilibrium
+/// gap to its leader exceeds a car's (larger `s0` + longer `T` headway).
+#[test]
+fn ring_mixed_classes_no_collisions_and_truck_headway() {
+    let mut core = seeded_mixed_core(0xC1A55);
+
+    // Per-follower-class gap accumulators over the settled window.
+    let mut gap_sum = [0.0f64; 3];
+    let mut gap_n = [0u64; 3];
+
+    for t in 0..TICKS {
+        core.tick(t);
+        let g = min_gap_mixed(&core);
+        assert!(g > 0.0, "collision at tick {t}: min gap {g}");
+
+        if t >= TICKS - 300 {
+            // Ascending global order; each vehicle's leader is the next one.
+            let mut vehicles: Vec<(f32, f32, u8)> = Vec::new();
+            for i in 0..core.fleet.slots() {
+                if core.fleet.alive[i] {
+                    vehicles.push((
+                        core.fleet.lane[i] as f32 * SIDE + core.fleet.s[i],
+                        core.fleet.len_m[i],
+                        core.fleet.class[i],
+                    ));
+                }
+            }
+            vehicles.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            let n = vehicles.len();
+            for k in 0..n {
+                let (pos, _, class) = vehicles[k];
+                let (lead_pos, lead_len, _) = if k + 1 < n {
+                    vehicles[k + 1]
+                } else {
+                    (vehicles[0].0 + RING_LEN, vehicles[0].1, 0)
+                };
+                gap_sum[class as usize] += f64::from(lead_pos - pos - lead_len);
+                gap_n[class as usize] += 1;
+            }
+        }
+    }
+
+    let mean_gap = |c: usize| (gap_sum[c] / gap_n[c] as f64) as f32;
+    let car = mean_gap(0);
+    let truck = mean_gap(2);
+    assert!(
+        truck > car + 1.0,
+        "truck equilibrium gap must exceed car gap (truck {truck}, car {car})"
+    );
+
+    // Determinism with a mixed fleet across rayon thread counts.
+    let run = |threads: usize| -> u64 {
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            let mut core = seeded_mixed_core(0xC1A55);
+            for t in 0..500 {
+                core.tick(t);
+            }
+            core.state_hash()
+        })
+    };
+    assert_eq!(
+        run(1),
+        run(4),
+        "mixed-class fleet must stay thread-count invariant"
     );
 }
 
