@@ -503,10 +503,7 @@ fn assert_producer_keysets_match(world: &World) {
 /// The id MUST exist (it came from `layer.markets`, validated by the loader);
 /// fail loud on the impossible — a distance spec referencing an unknown market
 /// is an authoring error, not a runtime state to silently tolerate.
-fn market_node(
-    resolved: &[ResolvedMarketSite],
-    id: MarketId,
-) -> crate::routing::NodeId {
+fn market_node(resolved: &[ResolvedMarketSite], id: MarketId) -> crate::routing::NodeId {
     resolved
         .iter()
         .find(|(m, _, _)| *m == id)

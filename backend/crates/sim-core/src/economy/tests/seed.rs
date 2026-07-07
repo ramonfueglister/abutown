@@ -120,7 +120,11 @@ fn seed_adds_cross_town_markets_for_dormant_cross_flow() {
     let chunk_fb = *chunks.0.get(&MarketId(9_004)).expect("F_B chunk");
 
     assert_eq!(chunk_fa, ChunkCoord { x: 0, y: 1 }, "F_A bottom-left chunk");
-    assert_eq!(chunk_fb, ChunkCoord { x: 2, y: 1 }, "F_B bottom-right chunk");
+    assert_eq!(
+        chunk_fb,
+        ChunkCoord { x: 2, y: 1 },
+        "F_B bottom-right chunk"
+    );
     assert_ne!(chunk_fa, chunk_fb, "F_A and F_B in different chunks");
 
     // Supplier pool at F_A and consumer pool at F_B for GOOD_FOOD.

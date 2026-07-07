@@ -157,7 +157,10 @@ fn seed_populates_activity_waypoints_from_corridor() {
     let (home, dest) = north_corridor_ends(&bundle);
     let (world, _s) = seed::from_base_world_bundle(&bundle).expect("seed ok");
     let wp = world.resource::<sim_core::mobility::resources::ActivityWaypoints>();
-    assert_eq!(wp.0.get("activity:spawn:ped:north:home").copied(), Some(home));
+    assert_eq!(
+        wp.0.get("activity:spawn:ped:north:home").copied(),
+        Some(home)
+    );
     assert_eq!(
         wp.0.get("activity:spawn:ped:north:destination").copied(),
         Some(dest)

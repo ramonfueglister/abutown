@@ -1333,14 +1333,8 @@ async fn hydrate_rejects_agent_empty_lod_snapshot_and_reseeds_edge_graph() {
             .edge_by_legacy("link:walk:corridor:1")
             .expect("current east edge footway is reseeded"),
     );
-    assert_eq!(
-        east_edge.polyline.first().copied(),
-        Some((72.0, 8.0))
-    );
-    assert_eq!(
-        east_edge.polyline.last().copied(),
-        Some((72.0, 40.0))
-    );
+    assert_eq!(east_edge.polyline.first().copied(), Some((72.0, 8.0)));
+    assert_eq!(east_edge.polyline.last().copied(), Some((72.0, 40.0)));
     assert!(
         east_edge
             .polyline
@@ -1404,14 +1398,8 @@ async fn hydrate_rejects_routing_snapshot_with_demoted_pedestrians_and_reseeds()
             .edge_by_legacy("link:walk:corridor:1")
             .expect("current east edge footway is reseeded"),
     );
-    assert_eq!(
-        east_edge.polyline.first().copied(),
-        Some((72.0, 8.0))
-    );
-    assert_eq!(
-        east_edge.polyline.last().copied(),
-        Some((72.0, 40.0))
-    );
+    assert_eq!(east_edge.polyline.first().copied(), Some((72.0, 8.0)));
+    assert_eq!(east_edge.polyline.last().copied(), Some((72.0, 40.0)));
     assert!(
         east_edge
             .polyline

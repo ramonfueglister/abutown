@@ -900,24 +900,18 @@ mod tests {
     #[test]
     fn base_world_seed_uses_group_specific_activity_waypoints() {
         let mut bundle = walkability_bundle();
-        bundle
-            .transport
-            .pedestrian_corridors
-            .push(TransportPath {
-                id: "corridor:test-east".into(),
-                points: vec![
-                    NetworkPoint { x: 2.25, y: 2.0 },
-                    NetworkPoint { x: 3.25, y: 2.0 },
-                ],
-            });
-        bundle
-            .spawns
-            .pedestrian_groups
-            .push(PedestrianSpawnGroup {
-                id: "spawn:east".into(),
-                corridor_id: "corridor:test-east".into(),
-                agents_per_corridor: 1,
-            });
+        bundle.transport.pedestrian_corridors.push(TransportPath {
+            id: "corridor:test-east".into(),
+            points: vec![
+                NetworkPoint { x: 2.25, y: 2.0 },
+                NetworkPoint { x: 3.25, y: 2.0 },
+            ],
+        });
+        bundle.spawns.pedestrian_groups.push(PedestrianSpawnGroup {
+            id: "spawn:east".into(),
+            corridor_id: "corridor:test-east".into(),
+            agents_per_corridor: 1,
+        });
 
         let (world, _schedule) = from_base_world_bundle(&bundle).expect("base world seeds");
         let waypoints = world.resource::<crate::mobility::resources::ActivityWaypoints>();
@@ -927,10 +921,7 @@ mod tests {
             Some((0.25, 2.0))
         );
         assert_eq!(
-            waypoints
-                .0
-                .get("activity:spawn:test:destination")
-                .copied(),
+            waypoints.0.get("activity:spawn:test:destination").copied(),
             Some((1.25, 2.0))
         );
         assert_eq!(
@@ -938,10 +929,7 @@ mod tests {
             Some((2.25, 2.0))
         );
         assert_eq!(
-            waypoints
-                .0
-                .get("activity:spawn:east:destination")
-                .copied(),
+            waypoints.0.get("activity:spawn:east:destination").copied(),
             Some((3.25, 2.0))
         );
 
