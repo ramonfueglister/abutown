@@ -47,6 +47,12 @@ pub struct VehicleView {
 /// [`advance_route`] never advances its cursor while it waits.
 const STOP_LINE_EPS: f32 = 0.05;
 
+/// Minimum bumper gap (m) a lane change / side-reseat must leave to the nearest
+/// vehicle ahead and behind on the target lane. Strictly positive so a change
+/// never places two bodies overlapping; small so a mandatory correction still
+/// has room to squeeze into a real gap.
+const MIN_CHANGE_GAP_M: f32 = 1.0;
+
 /// Per-vehicle intent produced by phase 1 and consumed by phase 2.
 ///
 /// `lane`/`cursor` are the *longitudinal* result (route progression along the
@@ -887,12 +893,36 @@ impl Core {
             return false;
         }
 
+        // PHYSICAL FIT: the decider must not land overlapping a vehicle on the
+        // target lane. `lane_neighbourhood` zero-clamps its gaps, so an overlap
+        // hides as gap 0 and the follower's IDM-accel test alone can pass while
+        // the bodies interpenetrate (a discretionary MOBIL change is pre-vetted
+        // by its incentive eval, but a MANDATORY change and a forced
+        // side-reseat are not — they surfaced a real collision on the Gemeinde
+        // net). Require a strictly positive bumper gap to BOTH the nearest
+        // leader ahead and the nearest follower behind before anything else.
+        let my_len = self.fleet.len_m[slot];
+        for &other in self.index.on_lane(target) {
+            let j = other as usize;
+            let sj = self.fleet.s[j];
+            let gap = if sj >= s {
+                // Leader ahead: its rear minus the decider's front.
+                sj - self.fleet.len_m[j] - s
+            } else {
+                // Follower behind: the decider's rear minus the follower's front.
+                s - my_len - sj
+            };
+            if gap < MIN_CHANGE_GAP_M {
+                return false;
+            }
+        }
+
         // Re-find leader and follower on the target lane from live state.
         let nb = lane_neighbourhood(&self.fleet, &self.index, target, s, v, VehId::MAX);
 
         if let Some(f) = nb.follower {
-            // Gaps are zero-clamped by lane_neighbourhood; a would-be overlap yields
-            // gap 0 → IDM projects braking beyond b_safe → rejected by safety check below.
+            // Dynamic safety: the new follower must not be forced to brake
+            // harder than `b_safe` (on top of the physical-fit gate above).
             let a = crate::idm::idm_accel(
                 &self.params[f.class as usize],
                 f.v,
