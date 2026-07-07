@@ -153,7 +153,11 @@ pub async fn run_world(args: WorldArgs) -> anyhow::Result<()> {
         {
             // Skip if the previous write is still in flight (coalesce).
             if !write_in_flight.swap(true, Ordering::AcqRel) {
-                let snap = world_core::persist::extract(&world); // sync, consistent
+                let mut snap = world_core::persist::extract(&world); // sync, consistent
+                // world-core can't see the traffic crate's ReplanningRes, so
+                // splice the harvested S4 plan memories into the opaque field
+                // here (sync, same consistent read as extract).
+                snap.replanning = shell::harvest_replanning(&world);
                 let store = Arc::clone(&persist.store);
                 let world_id = persist.world_id.clone();
                 let flag = Arc::clone(&write_in_flight);

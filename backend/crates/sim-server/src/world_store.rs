@@ -155,6 +155,7 @@ mod tests {
             citizens: Vec::new(),
             building_states: Vec::new(),
             econ: EconSnap::default(),
+            replanning: None,
         };
         let json = serde_json::to_vec(&snap).unwrap();
         let z = compress_snapshot(&snap).unwrap();

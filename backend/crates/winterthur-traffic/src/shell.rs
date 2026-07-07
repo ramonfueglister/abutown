@@ -136,6 +136,19 @@ pub struct StrandedLedger {
 #[derive(Resource)]
 pub struct ReplanningRes(pub ReplanningState);
 
+/// Harvest the S4 plan memories for the world snapshot (persistence seam).
+///
+/// `world_core::persist::extract` cannot see this resource — `ReplanningRes`
+/// lives in the traffic crate — so the sim-server orchestrator calls this
+/// after `extract` and stores the result in the snapshot's opaque `replanning`
+/// field. Returns `None` on a fresh (unlearned) world, keeping the snapshot
+/// field absent until there is something to persist.
+pub fn harvest_replanning(world: &World) -> Option<serde_json::Value> {
+    world
+        .get_resource::<ReplanningRes>()
+        .and_then(|r| r.0.to_snapshot_value())
+}
+
 /// The last world day the between-day replanning pass ran for; the pass fires
 /// once when [`WorldClock::world_day`] advances past it.
 #[derive(Resource, Default)]
@@ -332,6 +345,12 @@ pub fn build_sim(
         Some(snap) => snap.clock,
         None => world_clock_anchored(&clock),
     };
+    // S4 plan-memory resume: grab the opaque replanning blob off the snapshot
+    // before it is moved into `install_world_resources_with_snapshot` below.
+    let replan_blob = ext
+        .as_ref()
+        .and_then(|e| e.snapshot.as_ref())
+        .and_then(|s| s.replanning.clone());
     let spawner = TripSpawner::new(trips, clock, cfg, seed, &world_clock);
     let measure = EdgeMeasure::new(&net);
 
@@ -353,7 +372,7 @@ pub fn build_sim(
     world.insert_resource(StrandedLedger::default());
     // S4 replanning: calibrated for trip-only scoring (logit θ matched to the
     // small trip-utility scale; route-choice only in v1). Seeded off SimSeed.
-    world.insert_resource(ReplanningRes(ReplanningState::new(
+    let mut replanning = ReplanningState::new(
         seed ^ 0x5417,
         ReplanParams {
             replan_share: 0.1,
@@ -362,7 +381,17 @@ pub fn build_sim(
             ..ReplanParams::default()
         },
         ScoreParams::default(),
-    )));
+    );
+    // Resume the learned equilibrium if the snapshot carried plan memories; a
+    // decode miss degrades benignly to "agents re-learn" (see the method doc).
+    if let Some(blob) = &replan_blob {
+        let restored = replanning.restore_from_snapshot_value(blob);
+        tracing::info!(
+            restored_trip_memories = restored,
+            "replanning memory resumed"
+        );
+    }
+    world.insert_resource(ReplanningRes(replanning));
     world.insert_resource(LastWorldDay::default());
     // The trip-bridge counters exist in both modes so `book_citizen_cars`-
     // free traffic-only code never has to branch (they just stay 0).

@@ -40,6 +40,12 @@ fn snapshot(tick: u64) -> WorldCoreSnapshot {
         ],
         building_states: vec![(2, world_core::BuildingLifecycle::Vacant)],
         econ: EconSnap::default(),
+        // A representative S4 plan-memory blob (opaque `Vec<((day_kind,
+        // trip_index), PlanMemory)>` shape) so the write→read round-trip proves
+        // the v2 field survives zstd compression + the Postgres column.
+        replanning: Some(serde_json::json!([
+            [[0, 7], { "plans": [{ "route": [1, 2, 3], "departure_offset_s": 0, "score": -1.5 }], "selected": 0 }]
+        ])),
     }
 }
 
