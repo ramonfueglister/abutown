@@ -1,6 +1,29 @@
 # Traffic SOTA S4 — Day-to-day replanning (MATSim co-evolution)
 
-**Status:** design spec (unimplemented). Depends on PR #147 (S1–S3) landing.
+**Status:** core + convergence proof IMPLEMENTED (branch
+`claude/traffic-sota-s4-spec`, stacked on PR #147); shell integration
+remaining. Depends on PR #147 (S1–S3) landing before merge.
+
+**Done:**
+- `winterthur_traffic::replanning` — pure Charypar-Nagel scoring, bounded
+  `PlanMemory` (EWMA scores, worst-scored eviction, unscored-plan
+  protection), deterministic logit selection, `decide_action` /
+  `time_mutation_offset`, all pure `u01`-driven. 6 unit tests.
+- `tests/replanning_convergence.rs` — BPR two-route fixture proving the
+  day-to-day loop reaches Wardrop equilibrium (day-0 ~180% imbalance →
+  ~5% tail-averaged, both routes used, faster route carries more) +
+  determinism. Key finding: logit θ must match the trip-utility scale
+  (MATSim's default θ=2 assumes full-day activity scores; trip-only
+  scoring needs θ≈12).
+
+**Remaining (shell integration, on the merged base):** `PlanMemory` as a
+per-trip ECS resource keyed by the spawner's trip identity; a between-day
+system at the world-midnight wrap the spawner already detects; per-agent
+realized travel-time feedback (spawn→despawn tick tracking); snapshot
+serialization alongside citizens/economy; ReRoute wired to `Router::route`
+on `EdgeMeasure` realized weights. Recommended off-by-default behind an
+opt-in resource until validated on the real net through `--bin calibrate`
+extended to iterate days.
 
 ## Goal
 
