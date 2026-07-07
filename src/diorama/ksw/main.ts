@@ -228,10 +228,14 @@ async function boot(): Promise<void> {
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
-  // ?traffic=1 enables the live instanced car layer (WS to the winterthur-traffic
-  // gateway). ?trafficWs=… overrides the endpoint (default ws://localhost:8790/traffic).
-  const trafficEnabled = params.get('traffic') === '1';
-  const trafficWsUrl = params.get('trafficWs') ?? DEFAULT_TRAFFIC_WS;
+  // ?traffic=1 (or a configured VITE_TRAFFIC_WS) enables the live instanced car
+  // layer (WS to the winterthur-traffic / sim-server gateway). Endpoint
+  // resolution: ?trafficWs=… URL override > VITE_TRAFFIC_WS env > localhost
+  // default. The env path is what lets a static deploy (Vercel) point the car
+  // layer at the deployed backend without a URL param — mirrors VITE_LIVE_WS.
+  const envTrafficWs = (import.meta.env.VITE_TRAFFIC_WS as string | undefined) || undefined;
+  const trafficEnabled = params.get('traffic') === '1' || envTrafficWs !== undefined;
+  const trafficWsUrl = params.get('trafficWs') ?? envTrafficWs ?? DEFAULT_TRAFFIC_WS;
   // ?live=1 (or a configured VITE_LIVE_WS) enables the live world channel
   // (citizens AOI + vitals HUD, Task 15). URL override > env > default.
   const envLiveWs = (import.meta.env.VITE_LIVE_WS as string | undefined) || undefined;
