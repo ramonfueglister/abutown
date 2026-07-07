@@ -3,7 +3,8 @@
 //! `postgres://…@127.0.0.1:5432/abutown_m1_test`), sonst sauberer Skip.
 //!
 //! Prozess-intern statt Prozess-kill: Runtime 1 lässt den Welt-Loop laufen,
-//! bis der Store eine Snapshot-Zeile trägt (Persist-Flush alle 50 Ticks),
+//! bis der Store eine Snapshot-Zeile trägt (Persist-Flush alle
+//! `PERSIST_EVERY_N_TICKS` Ticks),
 //! wird gedroppt (harter Abbruch aller Tasks), dann bootet Runtime 2 mit
 //! demselben Store: der Resume-Pfad (`WorldStore::read` → Snapshot →
 //! `log_resume`) muss greifen — beweisbar am Verhalten: die ersten Vitals
@@ -27,7 +28,7 @@ use abutown_protocol::live::{LiveClientMsg, LiveServerMsg};
 use demand_gen::output;
 use sim_server::app::{self, WorldHealth};
 use sim_server::db::connect_shared_pool;
-use sim_server::world::{PersistTarget, WorldArgs, run_world};
+use sim_server::world::{PERSIST_EVERY_N_TICKS, PersistTarget, WorldArgs, run_world};
 use sim_server::world_store::WorldStore;
 use winterthur_traffic::clock::{WallClock, parse_hhmm};
 use winterthur_traffic::demand::TripSchedule;
@@ -127,8 +128,11 @@ fn world_resumes_from_persisted_snapshot_across_runtimes() {
             run_world(args).await.expect("world runtime must boot");
         });
 
-        // Flush-Kadenz ist 50 Ticks (5 s); grosszügige Frist fürs erste Upsert.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        // Erstes Upsert kommt nach PERSIST_EVERY_N_TICKS Ticks bei 10 Hz;
+        // Frist grosszügig darüber, damit der langsamste CI-Runner es schafft
+        // (aus der Konstante abgeleitet, nicht hart kodiert).
+        let persist_secs = PERSIST_EVERY_N_TICKS / 10; // 10 Hz Tick-Loop
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(persist_secs + 20);
         loop {
             if let Some(snap) = store.read(&world_id).await.expect("read") {
                 break snap.clock.world_tick;

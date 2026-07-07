@@ -31,8 +31,15 @@ use world_core::{AuditStatus, SeedParams, SimWorld, WorldClock, WorldCorePlugin}
 use crate::app::WorldHealth;
 use crate::world_store::WorldStore;
 
-/// Snapshot the world every 50 ticks = every 5 s at the 10 Hz tick rate.
-pub const PERSIST_EVERY_N_TICKS: u64 = 50;
+/// Snapshot the world every 300 ticks = every 30 s at the 10 Hz tick rate.
+///
+/// Raised from 50 (5 s) to cut Supabase write bandwidth ~6× — the full-payload
+/// snapshot is ~1–2.5 MB, so at 5 s it wrote ~40 GB/day for no resilience gain:
+/// the frozen-time model resumes from the last snapshot tick, so a crash costs
+/// at most one interval of world progress (30 s real = 3 world-minutes), which
+/// the sim simply replays. SFC conservation holds from whichever tick is
+/// persisted, so a coarser cadence is purely a write-cost win.
+pub const PERSIST_EVERY_N_TICKS: u64 = 300;
 
 /// Where snapshots go: the Postgres store plus this deployment's world id.
 pub struct PersistTarget {
