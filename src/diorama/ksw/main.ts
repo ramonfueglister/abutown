@@ -73,7 +73,12 @@ import { allArchetypes } from './geo/treeArchetypes';
 import { windAmpU } from './windUniform';
 import { applyCityLod, cityLodState, type CityLodRefs } from './geo/lod';
 import type { PersonRole } from './floorPlan';
-import { TrafficClient, DEFAULT_TRAFFIC_WS, buildDefaultCellGrid } from '../traffic/trafficClient';
+import {
+  TrafficClient,
+  DEFAULT_TRAFFIC_WS,
+  PROD_TRAFFIC_WS,
+  buildDefaultCellGrid,
+} from '../traffic/trafficClient';
 import { createCarLayer } from '../traffic/carLayer';
 import { createFlowLayer } from '../traffic/flowLayer';
 import { poseAt } from '../traffic/deadReckon';
@@ -235,10 +240,21 @@ async function boot(): Promise<void> {
   // ?agents=N scales the crowd (clamped; default = the authored plan people)
   const agentsRaw = Number.parseInt(params.get('agents') ?? '', 10);
   const agentTarget = Number.isNaN(agentsRaw) ? undefined : Math.min(Math.max(agentsRaw, 1), kswAgents.maxAgents);
-  // ?traffic=1 enables the live instanced car layer (WS to the winterthur-traffic
-  // gateway). ?trafficWs=… overrides the endpoint (default ws://localhost:8790/traffic).
-  const trafficEnabled = params.get('traffic') === '1';
-  const trafficWsUrl = params.get('trafficWs') ?? DEFAULT_TRAFFIC_WS;
+  // Live instanced car layer (WS to the sim-server /traffic gateway). Cars must
+  // ALWAYS appear on a deployed site, so on any non-localhost host traffic is
+  // ON by default and points at the production backend — no URL param, no env
+  // var required. On localhost it stays opt-in (?traffic=1 / VITE_TRAFFIC_WS)
+  // so the dev server does not spam WS connection errors when no local backend
+  // is running. Explicit ?traffic=0 force-disables; ?traffic=1 / VITE_TRAFFIC_WS
+  // force-enable. Endpoint resolution: ?trafficWs= > VITE_TRAFFIC_WS env >
+  // host-aware default (localhost gateway in dev, PROD_TRAFFIC_WS when deployed).
+  const isLocalDev = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
+  const envTrafficWs = (import.meta.env.VITE_TRAFFIC_WS as string | undefined) || undefined;
+  const trafficDefaultWs = isLocalDev ? DEFAULT_TRAFFIC_WS : PROD_TRAFFIC_WS;
+  const trafficEnabled =
+    params.get('traffic') !== '0' &&
+    (params.get('traffic') === '1' || envTrafficWs !== undefined || !isLocalDev);
+  const trafficWsUrl = params.get('trafficWs') ?? envTrafficWs ?? trafficDefaultWs;
   // ?live=1 (or a configured VITE_LIVE_WS) enables the live world channel
   // (citizens AOI + vitals HUD, Task 15). URL override > env > default.
   const envLiveWs = (import.meta.env.VITE_LIVE_WS as string | undefined) || undefined;
