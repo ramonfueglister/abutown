@@ -31,6 +31,35 @@ describe('tiles', () => {
     expect(t.height.length).toBe(21 * 21);
     expect(id).toBe('L0/0_0');
   });
+  it('#143 M4: partielle t_family-Präsenz wirft (kein stilles Feld-Droppen)', () => {
+    const g = tileGridFor(boundary, 4000);
+    const tiles = assignToTiles(g, { buildings: [], trees: [], landuse: [], graph: { edgeA: [], edgePtOffset: [], edgePtX: [], edgePtZ: [], edgePtY: [], edgeClass: [], edgeWidth: [] } });
+    const bucket = tiles.get('L0/0_0');
+    // Ein Baum mit family, einer ohne → gemischte Präsenz = Datenfehler.
+    bucket.trees = [
+      { x: 1, z: 1, h: 5, r: 2, kind: 0, family: 0 },
+      { x: 2, z: 2, h: 5, r: 2, kind: 0 },
+    ];
+    expect(() => encodeTile(bucket, dem)).toThrow(/t_family/);
+  });
+
+  it('#143 M4: einheitliche t_family-Präsenz wird geschrieben, komplette Abwesenheit bleibt leer', () => {
+    const g = tileGridFor(boundary, 4000);
+    const mkBucket = () => {
+      const tiles = assignToTiles(g, { buildings: [], trees: [], landuse: [], graph: { edgeA: [], edgePtOffset: [], edgePtX: [], edgePtZ: [], edgePtY: [], edgeClass: [], edgeWidth: [] } });
+      return tiles.get('L0/0_0');
+    };
+    const withFam = mkBucket();
+    withFam.trees = [{ x: 1, z: 1, h: 5, r: 2, kind: 0, family: 0 }, { x: 2, z: 2, h: 5, r: 2, kind: 1, family: 3 }];
+    const decodedWith = fromBinary(WorldTileSchema, encodeTile(withFam, dem));
+    expect(Array.from(decodedWith.tFamily)).toEqual([0, 3]);
+
+    const noFam = mkBucket();
+    noFam.trees = [{ x: 1, z: 1, h: 5, r: 2, kind: 0 }, { x: 2, z: 2, h: 5, r: 2, kind: 1 }];
+    const decodedNo = fromBinary(WorldTileSchema, encodeTile(noFam, dem));
+    expect(decodedNo.tFamily.length).toBe(0);
+  });
+
   it('is byte-deterministic', () => {
     const g = tileGridFor(boundary, 4000);
     const mk = () => {

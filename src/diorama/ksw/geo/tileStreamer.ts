@@ -101,6 +101,13 @@ export function planStep(
 
 const MAX_PARALLEL_FETCHES = 4;
 const MAX_ATTEMPTS = 2; // 1 initial try + 1 retry
+// #143 M3: how many update() ticks a tile stays "failed" before it becomes
+// eligible for a fresh attempt. Without an expiry a tile that fails its 2
+// attempts was a permanent session hole (skipped forever until a reload); with
+// it a transient blip self-heals. update() advances the tick only when the
+// camera moves (~2 Hz), so this is "ticks of active navigation", not seconds —
+// enough to avoid hammering a genuinely-missing tile, short enough to recover.
+const DEFAULT_FAILED_COOLDOWN_TICKS = 120;
 
 export type TileStreamerOptions = {
   all: TileMeta[];
@@ -109,13 +116,20 @@ export type TileStreamerOptions = {
   onReady: (meta: TileMeta, tile: unknown) => void;
   onUnload: (key: TileKey) => void;
   onError?: (meta: TileMeta, err: unknown) => void;
+  /** #143 M3: ticks a tile stays failed before a fresh attempt (default 120). */
+  failedCooldownTicks?: number;
 };
 
 /**
  * IO layer over the pure ring policy (`planStep`): owns the live tile
  * bookkeeping, an in-order fetch queue capped at 4 concurrent requests, a
- * single retry per tile before giving up (`failed`), and stale-drop handling
- * for tiles that fall out of the desired set while their fetch is in flight.
+ * single retry per tile before giving up, and stale-drop handling for tiles
+ * that fall out of the desired set while their fetch is in flight.
+ *
+ * A tile that exhausts its attempts is NOT failed forever (#143 M3): it enters
+ * a cooldown (`failedUntil`, keyed on the streamer tick) and is retried once
+ * the cooldown lapses, or immediately if the camera leaves and re-approaches
+ * it — so a transient error is a momentary gap, never a permanent hole.
  */
 export class TileStreamer {
   private readonly all: TileMeta[];
@@ -130,7 +144,11 @@ export class TileStreamer {
   private readonly inflight = new Map<TileKey, { meta: TileMeta; attempt: number }>();
   private readonly queue: TileMeta[] = [];
   private readonly queuedKeys = new Set<TileKey>();
-  private readonly failedSet = new Set<TileKey>();
+  // #143 M3: TileKey → streamer tick at which the cooldown lapses. A tile in
+  // this map with `state.tick < until` is currently failed (skipped from the
+  // load set); once `state.tick >= until` it becomes eligible again.
+  private readonly failedUntil = new Map<TileKey, number>();
+  private readonly failedCooldownTicks: number;
   private readonly retryAttempt = new Map<TileKey, number>();
   private lastCam: [number, number] | null = null;
 
@@ -141,6 +159,7 @@ export class TileStreamer {
     this.onReadyCb = opts.onReady;
     this.onUnloadCb = opts.onUnload;
     this.onErrorCb = opts.onError;
+    this.failedCooldownTicks = opts.failedCooldownTicks ?? DEFAULT_FAILED_COOLDOWN_TICKS;
     for (const m of this.all) this.metaByKey.set(m.key, m);
   }
 
@@ -148,8 +167,13 @@ export class TileStreamer {
     return this.state.live.size;
   }
 
+  /** Keys currently in failure cooldown (tick < until) — a debug/telemetry
+   * probe (`__stream`). Expired-but-not-yet-swept entries are excluded. */
   get failed(): ReadonlySet<TileKey> {
-    return this.failedSet;
+    const now = this.state.tick;
+    const out = new Set<TileKey>();
+    for (const [k, until] of this.failedUntil) if (now < until) out.add(k);
+    return out;
   }
 
   /** Anzahl noch nicht abgeschlossener Ladevorgänge (gequeued + in flight).
@@ -177,8 +201,22 @@ export class TileStreamer {
       this.onUnloadCb(key);
     }
 
+    // #143 M3 reset: a failed tile that is no longer desired (camera moved
+    // away) clears its cooldown immediately, so re-approaching it retries at
+    // once instead of waiting out the timer — a transient failure never
+    // outlives the view that hit it.
+    for (const key of this.failedUntil.keys()) {
+      const meta = this.metaByKey.get(key);
+      if (!meta || !desiredLevel(camX, camZ, meta, this.cfg)) this.failedUntil.delete(key);
+    }
+
     for (const meta of load) {
-      if (this.failedSet.has(meta.key)) continue;
+      // #143 M3 expiry: still in cooldown → skip; lapsed → sweep and re-queue.
+      const until = this.failedUntil.get(meta.key);
+      if (until !== undefined) {
+        if (this.state.tick < until) continue;
+        this.failedUntil.delete(meta.key);
+      }
       if (this.state.live.has(meta.key)) continue;
       if (this.inflight.has(meta.key)) continue;
       if (this.queuedKeys.has(meta.key)) continue;
@@ -215,6 +253,7 @@ export class TileStreamer {
 
   private onFetchResolved(meta: TileMeta, tile: unknown): void {
     this.inflight.delete(meta.key);
+    this.failedUntil.delete(meta.key); // a success clears any lingering cooldown
     if (this.isStillDesired(meta)) {
       this.state.live.set(meta.key, { lastNear: this.state.tick });
       this.onReadyCb(meta, tile);
@@ -233,7 +272,8 @@ export class TileStreamer {
       this.queuedKeys.add(meta.key);
       this.pump();
     } else {
-      this.failedSet.add(meta.key);
+      // #143 M3: enter cooldown rather than fail permanently — see failedUntil.
+      this.failedUntil.set(meta.key, this.state.tick + this.failedCooldownTicks);
       this.onErrorCb?.(meta, err);
       this.pump();
     }
