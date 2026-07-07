@@ -16,14 +16,55 @@ remaining. Depends on PR #147 (S1–S3) landing before merge.
   (MATSim's default θ=2 assumes full-day activity scores; trip-only
   scoring needs θ≈12).
 
-**Remaining (shell integration, on the merged base):** `PlanMemory` as a
-per-trip ECS resource keyed by the spawner's trip identity; a between-day
-system at the world-midnight wrap the spawner already detects; per-agent
-realized travel-time feedback (spawn→despawn tick tracking); snapshot
-serialization alongside citizens/economy; ReRoute wired to `Router::route`
-on `EdgeMeasure` realized weights. Recommended off-by-default behind an
-opt-in resource until validated on the real net through `--bin calibrate`
-extended to iterate days.
+**Shell manager DONE** (branch `s4-shell-integration`): `ReplanningState` —
+`BTreeMap<(day_kind, trip_index), PlanMemory>` (recurring census-trip
+identity), in-flight `veh → (trip, spawn_tick)` tracking, and
+`planned_route` / `note_spawn` / `note_despawn` /
+`between_day(world_day, edge_of_lane, reroute_closure)`. Route-choice-only
+v1 (TimeMutate collapses to Select). 3 unit tests. Unwired library API.
+
+**ECS wiring DONE** (branch `s4-shell-integration`): spawner consults
+`planned_route` and runs the learned route (else fresh census routing);
+`SpawnRecord`/`QueuedEntry` carry `day_kind`; shell resources `ReplanningRes`
++ `LastWorldDay`; `spawn_trips` calls `note_spawn`; `replan_reap` scores
+arrivals over `in_flight` (all despawn paths); `replan_between_day` fires on
+the world-midnight wrap before spawns, re-routing on realized router weights;
+both schedule chains wired; θ=12. Integration test (`s4_replanning_shell.rs`,
+2000 ticks real net over midnight): between-day fires, memories accumulate, no
+collision / conservation break, seed-reproducible. All 43 existing
+winterthur-traffic tests still green (incl. real-net collision test with
+replanning active); clippy `-D warnings` clean incl. sim-server. **S4 is now
+live in the sim-server.**
+
+**Only remaining — snapshot serialization (own PR, gated on delta-snapshots):**
+serialize `ReplanningRes` alongside citizens/economy so plan memory survives a
+server restart. Deferred because full-payload snapshots are the production OOM
+root cause (memory note); until delta-snapshots land, plan memory resets on
+resume and agents re-learn — a documented, benign degradation. At
+`WORLD_BG_DEMAND_SCALE = 0.2` the fleet is ~2-3 k so the added payload would be
+tolerable, but delta-snapshots are the clean path.
+
+**Historical wiring checklist (now done):**
+1. `ReplanningState` as a `#[derive(Resource)]` wrapper.
+2. **Spawner** (`spawn_trip`): consult `planned_route(day_kind, index)` and
+   spawn on the learned route when present, else route from the census OD
+   (current behaviour), then `note_spawn(...)`. Pass the spawner an
+   `Option<&mut ReplanningState>` so traffic-only builds stay `None`.
+3. **Despawn scoring**: a system after `core_tick` calling `note_despawn`
+   for each `core.despawned_last_tick()` slot — before the slot can be
+   reused (mirror the `arrivals_system` slot-reuse ordering).
+4. **Between-day**: a system firing when `world_clock.world_day()` increments
+   (stored last-day resource), calling `between_day(day, |l|
+   net.lanes[l].edge, |o,d| router.route(net, o, d))`. After the spawner.
+5. **Determinism guard**: a ≥3-world-day soak integration test asserting
+   `state_hash` thread-count invariance with replanning active, that plan
+   memories evolve, and conservation holds.
+6. **Snapshot** (LAST, gated on delta-snapshots): serialize `ReplanningState`
+   alongside citizens/economy. Deferred — per-trip plan memory would grow the
+   full-payload snapshot (the production OOM root cause). At
+   `WORLD_BG_DEMAND_SCALE = 0.2` the fleet is ~2-3 k so it is tolerable, but
+   delta-snapshots are the clean path. Until then, plan memory resets on
+   resume (agents re-learn — documented, benign degradation).
 
 ## Goal
 
