@@ -132,8 +132,7 @@ fn world_resumes_from_persisted_snapshot_across_runtimes() {
         // Frist grosszügig darüber, damit der langsamste CI-Runner es schafft
         // (aus der Konstante abgeleitet, nicht hart kodiert).
         let persist_secs = PERSIST_EVERY_N_TICKS / 10; // 10 Hz Tick-Loop
-        let deadline =
-            tokio::time::Instant::now() + Duration::from_secs(persist_secs + 20);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(persist_secs + 20);
         loop {
             if let Some(snap) = store.read(&world_id).await.expect("read") {
                 break snap.clock.world_tick;
