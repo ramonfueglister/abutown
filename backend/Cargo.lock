@@ -2469,6 +2469,7 @@ dependencies = [
  "uuid",
  "winterthur-traffic",
  "world-core",
+ "zstd",
 ]
 
 [[package]]
