@@ -31,9 +31,10 @@ use crate::audit::Conservation;
 use crate::clock::WallClock;
 use crate::demand::TripSchedule;
 use crate::measure::EdgeMeasure;
+use crate::replanning::{ReplanParams, ReplanningState, ScoreParams};
 use crate::spawner::{MAX_CONCURRENT, SpawnRecord, SpawnerCfg, TripSpawner};
 use bevy_ecs::prelude::*;
-use traffic_core::{Core, u01};
+use traffic_core::{Core, DT, u01};
 use traffic_net::TrafficNet;
 use world_core::econ::{AccountBook, MarketGoods, Markets};
 use world_core::persist::WorldCoreSnapshot;
@@ -128,6 +129,17 @@ pub struct StrandedLedger {
     /// Removed: no reachable next edge routes to the trip's destination.
     pub despawned_unroutable: u64,
 }
+
+/// S4 day-to-day replanning state: per-recurring-trip plan memories + the
+/// in-flight bookkeeping that scores arrivals. Present in both traffic-only
+/// and world-sim runs (census trips exist in both).
+#[derive(Resource)]
+pub struct ReplanningRes(pub ReplanningState);
+
+/// The last world day the between-day replanning pass ran for; the pass fires
+/// once when [`WorldClock::world_day`] advances past it.
+#[derive(Resource, Default)]
+pub struct LastWorldDay(pub u64);
 
 /// Base seed for all deterministic draws (spawner + re-route sampling).
 #[derive(Resource, Clone, Copy)]
@@ -339,6 +351,19 @@ pub fn build_sim(
     world.insert_resource(LiveHook::default());
     world.insert_resource(Conservation::default());
     world.insert_resource(StrandedLedger::default());
+    // S4 replanning: calibrated for trip-only scoring (logit θ matched to the
+    // small trip-utility scale; route-choice only in v1). Seeded off SimSeed.
+    world.insert_resource(ReplanningRes(ReplanningState::new(
+        seed ^ 0x5417,
+        ReplanParams {
+            replan_share: 0.1,
+            reroute_share: 1.0,
+            logit_theta: 12.0,
+            ..ReplanParams::default()
+        },
+        ScoreParams::default(),
+    )));
+    world.insert_resource(LastWorldDay::default());
     // The trip-bridge counters exist in both modes so `book_citizen_cars`-
     // free traffic-only code never has to branch (they just stay 0).
     world.insert_resource(CitizenCarCounters::default());
@@ -351,10 +376,12 @@ pub fn build_sim(
             schedule.add_systems(
                 (
                     advance_world_clock_system,
+                    replan_between_day,
                     drain_commands,
                     spawn_trips,
                     core_tick,
                     rescue_stranded,
+                    replan_reap,
                     measure_edges,
                     publish_snapshot,
                 )
@@ -374,6 +401,7 @@ pub fn build_sim(
                 (
                     (
                         advance_world_clock_system,
+                        replan_between_day,
                         drain_commands,
                         spawn_trips,
                         rhythm_system,
@@ -382,6 +410,7 @@ pub fn build_sim(
                         core_tick,
                         rescue_stranded,
                         arrivals_system::<CoreRes>,
+                        replan_reap,
                     )
                         .chain(),
                     econ_systems(),
@@ -473,21 +502,65 @@ fn spawn_trips(
     mut registry: ResMut<TripRegistry>,
     mut scratch: ResMut<SpawnScratch>,
     mut conservation: ResMut<Conservation>,
+    mut replan: ResMut<ReplanningRes>,
 ) {
     scratch.0.clear();
+    // The spawner consults the learned plan route per trip (immutable read);
+    // note_spawn (which seeds new memories) happens below, after the borrow.
     spawner.0.step(
         &mut core.0,
         &net.0,
         &router.0,
         clock.tick,
         &world_clock,
+        Some(&replan.0),
         &mut scratch.0,
     );
     for rec in &scratch.0 {
         registry.record(rec.veh, rec.dest_edge);
+        // Seed/track the trip's plan memory with the route it actually spawned
+        // on (read from the fresh vehicle), and mark it in-flight for scoring.
+        let route = core.0.fleet.route_slice(rec.veh as usize).to_vec();
+        replan
+            .0
+            .note_spawn(rec.veh, rec.day_kind, rec.trip_index, clock.tick, &route);
     }
     conservation.spawned += scratch.0.len() as u64;
     conservation.skipped_no_route = spawner.0.counters().skipped_no_route;
+}
+
+/// S4 arrival scoring: retire every in-flight vehicle no longer alive in the
+/// kernel (arrivals from any despawn path this tick), scoring its executed
+/// plan by realized travel time. Runs after all despawn-producing systems and
+/// before the next spawn, so a freed slot is scored before reuse.
+fn replan_reap(core: Res<CoreRes>, clock: Res<SimClock>, mut replan: ResMut<ReplanningRes>) {
+    replan
+        .0
+        .reap_arrivals(clock.tick, DT, |veh| core.0.vehicle_view(veh).is_some());
+}
+
+/// S4 between-day replanning: once per world-day wrap (before the day's trips
+/// are spawned), replan every trip memory on the previous day's realized edge
+/// weights (the router already carries MSA-smoothed times via `measure_edges`).
+fn replan_between_day(
+    net: Res<TrafficNetRes>,
+    router: Res<RouterRes>,
+    world_clock: Res<WorldClock>,
+    mut replan: ResMut<ReplanningRes>,
+    mut last_day: ResMut<LastWorldDay>,
+) {
+    let day = world_clock.world_day();
+    if day <= last_day.0 {
+        return;
+    }
+    last_day.0 = day;
+    let net = &net.0;
+    let router = &router.0;
+    replan.0.between_day(
+        day,
+        |lane| net.lanes[lane as usize].edge,
+        |o, d| router.route(net, o, d),
+    );
 }
 
 /// Fold the citizen-trip bridge's kernel spawns/manual despawns into the

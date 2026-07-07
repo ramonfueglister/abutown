@@ -172,6 +172,9 @@ pub struct SpawnRecord {
     pub dest_edge: u32,
     /// The trip's block-local record index (deterministic identity).
     pub trip_index: u32,
+    /// Day block (0 = workday, 1 = weekend) — with `trip_index`, the recurring
+    /// trip identity S4 replanning keys plan memories on.
+    pub day_kind: u8,
 }
 
 /// Monotonic outcome counters over the spawner's lifetime.
@@ -227,6 +230,7 @@ struct QueuedEntry {
     trip: Trip,
     route: Vec<u32>,
     dest_edge: u32,
+    day_kind: u8,
     /// Tick the trip was first blocked; gives up after
     /// [`ENTRY_MAX_WAIT_TICKS`].
     since: u64,
@@ -291,6 +295,7 @@ impl TripSpawner {
     /// `[last_world_s, world.s_of_world_day())`, thinned by `demand_scale`.
     /// Successful spawns are appended to `spawned`; returns the count placed
     /// this tick.
+    #[allow(clippy::too_many_arguments)]
     pub fn step(
         &mut self,
         core: &mut Core,
@@ -298,6 +303,7 @@ impl TripSpawner {
         router: &Router,
         t: u64,
         world: &WorldClock,
+        replan: Option<&crate::replanning::ReplanningState>,
         spawned: &mut Vec<SpawnRecord>,
     ) -> usize {
         let mut n = 0;
@@ -325,6 +331,7 @@ impl TripSpawner {
                             veh,
                             dest_edge: q.dest_edge,
                             trip_index: q.trip.index,
+                            day_kind: q.day_kind,
                         });
                         false
                     }
@@ -341,7 +348,8 @@ impl TripSpawner {
             while self.warm_next < self.warm.len() && self.warm[self.warm_next].0 <= t {
                 let trip = self.warm[self.warm_next].1;
                 self.warm_next += 1;
-                if self.spawn_trip(core, net, router, trip, t, spawned) {
+                let day = self.clock.day_kind(t);
+                if self.spawn_trip(core, net, router, trip, day, t, replan, spawned) {
                     n += 1;
                 }
             }
@@ -356,10 +364,10 @@ impl TripSpawner {
         if start != end {
             let day = self.clock.day_kind(t);
             if end > start {
-                n += self.release_window(core, net, router, day, start..end, t, spawned);
+                n += self.release_window(core, net, router, day, start..end, t, replan, spawned);
             } else {
-                n += self.release_window(core, net, router, day, start..DAY_S, t, spawned);
-                n += self.release_window(core, net, router, day, 0..end, t, spawned);
+                n += self.release_window(core, net, router, day, start..DAY_S, t, replan, spawned);
+                n += self.release_window(core, net, router, day, 0..end, t, replan, spawned);
             }
             self.last_world_s = end;
             // The window closed with this tick: flush the suppression log
@@ -389,6 +397,7 @@ impl TripSpawner {
         day: DayKind,
         window: core::ops::Range<u32>,
         t: u64,
+        replan: Option<&crate::replanning::ReplanningState>,
         spawned: &mut Vec<SpawnRecord>,
     ) -> usize {
         // Copy the thinned window into a reusable buffer so the schedule
@@ -405,7 +414,7 @@ impl TripSpawner {
 
         let mut n = 0;
         for &trip in &pending {
-            if self.spawn_trip(core, net, router, trip, t, spawned) {
+            if self.spawn_trip(core, net, router, trip, day, t, replan, spawned) {
                 n += 1;
             }
         }
@@ -415,13 +424,16 @@ impl TripSpawner {
 
     /// Route and place one trip. Returns `true` iff a vehicle was spawned;
     /// every failure path increments exactly one counter.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_trip(
         &mut self,
         core: &mut Core,
         net: &TrafficNet,
         router: &Router,
         trip: Trip,
+        day: DayKind,
         t: u64,
+        replan: Option<&crate::replanning::ReplanningState>,
         spawned: &mut Vec<SpawnRecord>,
     ) -> bool {
         if core.fleet.alive_count() >= MAX_CONCURRENT {
@@ -432,18 +444,28 @@ impl TripSpawner {
 
         let origin_edge = lane_edge(net, trip.origin_lane);
         let dest_edge = lane_edge(net, trip.dest_lane);
-        let Some(route) = router.route(net, origin_edge, dest_edge) else {
-            self.counters.skipped_no_route += 1;
-            // Rate-limited: log only at power-of-two counts (1, 2, 4, 8, …).
-            if self.counters.skipped_no_route.is_power_of_two() {
-                tracing::warn!(
-                    origin_edge,
-                    dest_edge,
-                    total = self.counters.skipped_no_route,
-                    "trip skipped: no route (rate-limited log)"
-                );
+        // S4: execute the trip's LEARNED plan route if it has one (agents run
+        // their chosen plan, which is what produces the stochastic user
+        // equilibrium); otherwise route fresh from the census OD as before.
+        let day_u8 = day_kind_u8(day);
+        let route = match replan.and_then(|r| r.planned_route(day_u8, trip.index)) {
+            Some(r) => r,
+            None => {
+                let Some(r) = router.route(net, origin_edge, dest_edge) else {
+                    self.counters.skipped_no_route += 1;
+                    // Rate-limited: log only at power-of-two counts (1,2,4,8,…).
+                    if self.counters.skipped_no_route.is_power_of_two() {
+                        tracing::warn!(
+                            origin_edge,
+                            dest_edge,
+                            total = self.counters.skipped_no_route,
+                            "trip skipped: no route (rate-limited log)"
+                        );
+                    }
+                    return false;
+                };
+                r
             }
-            return false;
         };
 
         // A micro-connector start lane can never host a spawn — immediate,
@@ -460,6 +482,7 @@ impl TripSpawner {
                     veh,
                     dest_edge,
                     trip_index: trip.index,
+                    day_kind: day_u8,
                 });
                 true
             }
@@ -475,6 +498,7 @@ impl TripSpawner {
                     trip,
                     route,
                     dest_edge,
+                    day_kind: day_u8,
                     since: t,
                 });
                 false
@@ -519,6 +543,15 @@ fn try_place(core: &mut Core, net: &TrafficNet, route: &[u32], vehicle_class: u8
     };
     core.fleet.v[veh as usize] = v0;
     PlaceOutcome::Placed(veh)
+}
+
+/// Day block as a `u8` (0 = workday, 1 = weekend) for the S4 replanning trip
+/// key. Kept local so the wire/format stays independent of the enum layout.
+fn day_kind_u8(d: DayKind) -> u8 {
+    match d {
+        DayKind::Workday => 0,
+        DayKind::Weekend => 1,
+    }
 }
 
 /// The deterministic thinning gate: pure in `(seed, day block, trip index)`,
@@ -688,7 +721,7 @@ mod tests {
         for t in 0..ticks {
             wc.advance();
             recs.clear();
-            spawner.step(&mut core, &net, &router, t, &wc, &mut recs);
+            spawner.step(&mut core, &net, &router, t, &wc, None, &mut recs);
             indices.extend(recs.iter().map(|r| r.trip_index));
             core.tick(t);
         }
@@ -862,7 +895,7 @@ mod tests {
         let mut recs = Vec::new();
         for t in 0..600 {
             wc.advance();
-            spawner.step(&mut core, &net, &router, t, &wc, &mut recs);
+            spawner.step(&mut core, &net, &router, t, &wc, None, &mut recs);
             core.tick(t);
         }
         let indices: Vec<u32> = recs.iter().map(|r| r.trip_index).collect();
@@ -895,7 +928,7 @@ mod tests {
             for t in 0..20 {
                 wc.advance();
                 // No core.tick: the pre-placed leader must stay put.
-                sp.step(core, &net, &router, t, &wc, &mut recs);
+                sp.step(core, &net, &router, t, &wc, None, &mut recs);
             }
             assert_eq!(recs.len(), 1, "the single trip must spawn");
             recs[0].veh
@@ -972,7 +1005,7 @@ mod tests {
         // Release happens while blocked: nothing spawns, nothing is dropped.
         for t in 0..40 {
             world.advance();
-            spawner.step(&mut core, &net, &router, t, &world, &mut out);
+            spawner.step(&mut core, &net, &router, t, &world, None, &mut out);
         }
         assert_eq!(spawner.counters().spawned, 0, "entry is blocked");
         assert_eq!(
@@ -986,7 +1019,7 @@ mod tests {
         let mut spawned_at = None;
         for t in 40..200 {
             world.advance();
-            spawner.step(&mut core, &net, &router, t, &world, &mut out);
+            spawner.step(&mut core, &net, &router, t, &world, None, &mut out);
             if spawner.counters().spawned == 1 {
                 spawned_at = Some(t);
                 break;

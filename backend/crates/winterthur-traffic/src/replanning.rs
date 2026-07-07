@@ -410,6 +410,25 @@ impl ReplanningState {
         }
     }
 
+    /// Score and retire every in-flight vehicle no longer alive in the kernel
+    /// (arrival), whatever despawn path removed it — kernel end-of-route, the
+    /// stranded rescue, or a manual arrival despawn. `is_alive(veh)` is the
+    /// kernel's liveness check; `tick` is the current sim tick. Robust to
+    /// slot-reuse as long as it runs each tick AFTER all despawns and BEFORE
+    /// the next spawn (mirrors `arrivals_system` ordering), so a freed slot is
+    /// scored before it can be re-occupied.
+    pub fn reap_arrivals(&mut self, tick: u64, dt: f32, is_alive: impl Fn(u32) -> bool) {
+        let dead: Vec<u32> = self
+            .in_flight
+            .keys()
+            .copied()
+            .filter(|&veh| !is_alive(veh))
+            .collect();
+        for veh in dead {
+            self.note_despawn(veh, tick, dt);
+        }
+    }
+
     /// Number of trips with a plan memory (for telemetry / tests).
     pub fn tracked_trips(&self) -> usize {
         self.memories.len()
@@ -578,9 +597,11 @@ mod tests {
 
     #[test]
     fn state_reroute_adds_and_selects_new_route_on_realized_weights() {
-        let mut rp = ReplanParams::default();
-        rp.replan_share = 1.0; // force everyone to replan this test
-        rp.reroute_share = 1.0; // force ReRoute
+        let rp = ReplanParams {
+            replan_share: 1.0,  // force everyone to replan this test
+            reroute_share: 1.0, // force ReRoute
+            ..ReplanParams::default()
+        };
         let mut st = ReplanningState::new(0x9, rp, ScoreParams::default());
         st.note_spawn(veh(1), 0, 1, 0, &[10, 11]); // route ends on lanes 10..11
         // edge_of_lane: lane/10 (so lane 10→edge 1, lane 11→edge 1, dest via last).
