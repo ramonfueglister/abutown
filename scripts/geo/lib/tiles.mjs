@@ -374,6 +374,17 @@ export function encodeTile(bucket, demSampler) {
     if (t.family !== undefined) tFamily.push(t.family);
   }
   Object.assign(msg, { tX, tZ, tH, tR, tKind });
+  // #143 M4: t_family is all-or-nothing per tile — every tree carries it, or
+  // none do ("leer = Alt-Bake"). PARTIAL presence means the source lost family
+  // on some trees: dropping the field silently would discard the family the
+  // rest DID carry (tileTreeSpecs then renders them family-undefined). Fail
+  // loudly instead of a silent field drop (project rule: no silent fallback).
+  if (tFamily.length > 0 && tFamily.length !== trees.length) {
+    throw new Error(
+      `encodeTile: partial t_family presence (${tFamily.length}/${trees.length} trees carry it) — ` +
+        `t_family must be present on all trees or none. Fix the tree source, do not drop the field.`,
+    );
+  }
   if (tFamily.length === trees.length && trees.length > 0) Object.assign(msg, { tFamily });
 
   return toBinary(WorldTileSchema, create(WorldTileSchema, msg));
