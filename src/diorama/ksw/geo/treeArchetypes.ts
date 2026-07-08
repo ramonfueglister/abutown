@@ -126,10 +126,12 @@ const BRANCH_R = 0.014; // level-1 branch radius; level 2 is thinner
 const BRANCH_LEN: [number, number] = [0.24, 0.38]; // level-1 length band (kept
 // short enough that the branch stubs stay tucked inside the puff crown mass)
 const L2_LEN_FACTOR = 0.5; // level-2 length relative to its parent
-// Detail 2 (162 welded verts/puff, was 1/42): the coarse silhouette read as
-// hard "broccoli facets" at street range. Only 20 archetype geometries exist
-// (instanced), so the vertex cost is negligible (SOTA pass 2026-07-06).
-const PUFF_DETAIL = 2;
+// Detail 1 (80 faces/puff): SOTA-2026 low-poly pass wants CRISP faceted
+// icospheres (Dorfromantik / Synty POLYGON look), not the earlier detail-2
+// smooth clay blob. Flat per-face shading (flatShadeGeometry, below) turns each
+// facet into a visible plane. Only 20 archetype geometries exist (instanced),
+// so the vertex cost is negligible.
+const PUFF_DETAIL = 1;
 const STRUT_SEGMENTS = 5; // branch cylinders — open-ended, ends hide in puffs/trunk
 const WOOD_FLAG = -1; // aPuff.w for trunk/branch vertices
 
@@ -332,34 +334,23 @@ export function buildArchetype(family: TreeFamily, seed: number): TreeArchetype 
     ? buildConifer(params, rng)
     : buildBroad(params, rng);
   const { crownRadius, s, minY } = normalizeTree(geometry);
-  bendCrownNormals(geometry);
-  return { family, seed, geometry, crownRadius, crownBaseY: (params.crownBaseY - minY) * s };
+  const flat = flatShadeGeometry(geometry);
+  return { family, seed, geometry: flat, crownRadius, crownBaseY: (params.crownBaseY - minY) * s };
 }
 
-// Cozy crown shading (SOTA pass 2026-07-06): re-aim every crown-vertex normal
-// at its puff center, so each blob shades like a soft sphere ("fruit") instead
-// of a faceted icosahedron shell — the Tiny-Glade-style bent-normal foliage
-// trick. Static geometry work: the impostor atlas bakes from the same
-// geometry, so the far field inherits the soft shading for free. Wood
-// vertices (aPuff.w < 0) keep their cylinder normals. Runs AFTER
-// normalizeTree so positions and puff centers share the normalized space.
-function bendCrownNormals(geo: THREE.BufferGeometry): void {
-  const p = geo.getAttribute('position').array as Float32Array;
-  const nrm = geo.getAttribute('normal').array as Float32Array;
-  const ap = geo.getAttribute('aPuff').array as Float32Array;
-  const n = p.length / 3;
-  for (let i = 0; i < n; i++) {
-    if (ap[i * 4 + 3] < 0) continue; // wood
-    const dx = p[i * 3] - ap[i * 4];
-    const dy = p[i * 3 + 1] - ap[i * 4 + 1];
-    const dz = p[i * 3 + 2] - ap[i * 4 + 2];
-    const len = Math.hypot(dx, dy, dz);
-    if (len < 1e-6) continue;
-    nrm[i * 3] = dx / len;
-    nrm[i * 3 + 1] = dy / len;
-    nrm[i * 3 + 2] = dz / len;
-  }
-  geo.getAttribute('normal').needsUpdate = true;
+// Low-poly flat shading (SOTA-2026 pass): split every triangle onto its own
+// vertices and give it a single per-FACE normal, so each icosphere/cone facet
+// reads as a crisp flat plane — the Dorfromantik / Synty POLYGON foliage look.
+// Replaces the earlier soft bent-normal "clay fruit" shading. Non-indexed
+// output; toNonIndexed carries aPuff through, so wind/jitter still identify
+// crown (w≥0) vs wood (w<0). The impostor atlas bakes from this same geometry,
+// so the far field inherits the faceted look for free. Runs AFTER normalizeTree
+// so the flat geometry is already in the normalized y0..1 space.
+function flatShadeGeometry(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  const flat = geo.toNonIndexed();
+  flat.computeVertexNormals(); // non-indexed → one face normal per triangle
+  flat.computeBoundingSphere();
+  return flat;
 }
 
 let cache: TreeArchetype[] | null = null;
