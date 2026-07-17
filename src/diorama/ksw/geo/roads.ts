@@ -4,7 +4,7 @@
 // footpaths, rail on its ballast band — each on its own height so junctions
 // never flicker.
 import * as THREE from 'three/webgpu';
-import { float, mix, vec3 } from 'three/tsl';
+import { Fn, float, mix, vec3 } from 'three/tsl';
 import { kswCity, nightGlow } from '../../designTokens';
 import { clayMat } from '../props';
 import { lampGlowU } from '../glowUniform';
@@ -12,6 +12,7 @@ import type { RoadPath } from './geoData';
 import { corridorWidths, type TrafficNetDoc } from '../../traffic/corridorWidths';
 import trafficNetJson from '../../../../data/winterthur/trafficnet.json';
 import { MASK_CELL_M, roadMaskHalfWidth, railMaskHalfWidth } from './groundSampler';
+import { outsideDiscardRegion } from './corridorDiscardRegion';
 
 /** Optional per-vertex ground draping. `groundYAt(x,z)` returns the visible
  * (shifted) terrain height at a world point; the ribbon vertex y becomes that
@@ -439,10 +440,29 @@ function apronMat(color: number, polygonOffsetUnits: number): THREE.MeshPhysical
 /** Apron material for the skirts: the ribbon clay color darkened ×0.8, rendered
  * DoubleSide so the vertical strip is visible from outside the corridor and
  * from above (where the terrain shader discarded the ground). No polygonOffset
- * — the skirt is genuinely vertical, not coplanar with any ribbon. */
+ * — the skirt is genuinely vertical, not coplanar with any ribbon.
+ *
+ * The skirt exists only to close the corridor the terrain discard opened, so it
+ * renders only where that discard is active (corridorDiscardRegion). The road
+ * platform is ONE Gemeinde-wide mesh draped on fine heights, but beyond the
+ * fine ring the visible ground is the coarse L1/L0 backdrop sitting up to ~20 m
+ * off it — an ungated skirt there closes nothing and instead stands clear of
+ * the terrain as a bare vertical wall, unlit end-on: the black rectangle/line
+ * chains along the far ring. Inside the region the wall is load-bearing; the
+ * cut-over is invisible because it happens over pure L2 terrain, where the
+ * platform matches the ground within centimetres and the skirt is buried
+ * anyway.
+ *
+ * The discard MUST sit inside an `Fn(() => …)()` — a bare top-level `Discard()`
+ * attaches to no fragment stack and is SILENTLY DROPPED (same trap terrain.ts
+ * and cityMassing.ts document). */
 function skirtMat(color: number): THREE.MeshPhysicalMaterial {
   const m = clayMat(darken(color, 0.8)).clone();
-  m.colorNode = nightDimNode(darken(color, 0.8));
+  const lit = nightDimNode(darken(color, 0.8));
+  m.colorNode = Fn(() => {
+    outsideDiscardRegion().discard();
+    return lit;
+  })() as THREE.MeshPhysicalMaterial['colorNode'];
   m.side = THREE.DoubleSide;
   return m;
 }
