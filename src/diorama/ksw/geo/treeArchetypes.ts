@@ -128,9 +128,9 @@ const BRANCH_LEN: [number, number] = [0.24, 0.38]; // level-1 length band (kept
 const L2_LEN_FACTOR = 0.5; // level-2 length relative to its parent
 // Detail 1 (80 faces/puff): SOTA-2026 low-poly pass wants CRISP faceted
 // icospheres (Dorfromantik / Synty POLYGON look), not the earlier detail-2
-// smooth clay blob. Flat per-face shading (flatShadeGeometry, below) turns each
-// facet into a visible plane. Only 20 archetype geometries exist (instanced),
-// so the vertex cost is negligible.
+// smooth clay blob. The facets are shaded flat by the DRAW material
+// (treeLayer's `flatShading = true`), not by unwelding here — see
+// normalizeTree's note on why the geometry stays indexed.
 const PUFF_DETAIL = 1;
 const STRUT_SEGMENTS = 5; // branch cylinders — open-ended, ends hide in puffs/trunk
 const WOOD_FLAG = -1; // aPuff.w for trunk/branch vertices
@@ -334,23 +334,8 @@ export function buildArchetype(family: TreeFamily, seed: number): TreeArchetype 
     ? buildConifer(params, rng)
     : buildBroad(params, rng);
   const { crownRadius, s, minY } = normalizeTree(geometry);
-  const flat = flatShadeGeometry(geometry);
-  return { family, seed, geometry: flat, crownRadius, crownBaseY: (params.crownBaseY - minY) * s };
-}
-
-// Low-poly flat shading (SOTA-2026 pass): split every triangle onto its own
-// vertices and give it a single per-FACE normal, so each icosphere/cone facet
-// reads as a crisp flat plane — the Dorfromantik / Synty POLYGON foliage look.
-// Replaces the earlier soft bent-normal "clay fruit" shading. Non-indexed
-// output; toNonIndexed carries aPuff through, so wind/jitter still identify
-// crown (w≥0) vs wood (w<0). The impostor atlas bakes from this same geometry,
-// so the far field inherits the faceted look for free. Runs AFTER normalizeTree
-// so the flat geometry is already in the normalized y0..1 space.
-function flatShadeGeometry(geo: THREE.BufferGeometry): THREE.BufferGeometry {
-  const flat = geo.toNonIndexed();
-  flat.computeVertexNormals(); // non-indexed → one face normal per triangle
-  flat.computeBoundingSphere();
-  return flat;
+  geometry.computeBoundingSphere();
+  return { family, seed, geometry, crownRadius, crownBaseY: (params.crownBaseY - minY) * s };
 }
 
 let cache: TreeArchetype[] | null = null;

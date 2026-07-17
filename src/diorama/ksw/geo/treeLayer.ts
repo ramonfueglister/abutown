@@ -252,6 +252,14 @@ function treeMaterial(arch: TreeArchetype, aTintNode: TSLNode): THREE.MeshPhysic
   // tinted green, so the crowns hold their saturation (SOTA pass 2026-07-06).
   mat.sheen = 0.2;
   mat.sheenColor = new THREE.Color(kswCity.treeGreen);
+  // SOTA-2026 low-poly foliage: every icosphere/cone facet reads as a crisp
+  // flat plane (Dorfromantik / Synty POLYGON look) instead of a smooth clay
+  // blob. Per-face normals at draw time, exactly as tintedClay does it for the
+  // building facets — unwelding the archetype geometry instead would triple its
+  // vertices (the < 1500 budget in treeArchetypes.test.ts is the guard), and
+  // the wind in positionNode below displaces the crown per frame, so derived
+  // normals follow the deformed surface where baked face normals could not.
+  mat.flatShading = true;
 
   // aPuff (vec4): xyz = puff center (normalized), w = puff index (>=0 crown) or
   // -1 (wood/trunk). The archetype geometry stamps it per vertex.
