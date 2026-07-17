@@ -493,12 +493,16 @@ export const facadeLook = {
   curtain: 0xdcc6a4, // warm interior curtain
 } as const;
 
-// Tree size policy (SOTA pass 2026-07-06): the baked OSM/estimate heights are
-// data-honest (median 12.5 m, q95 20 m) but park giants of 27 m dwarf the
-// 2–3-storey Winterthur stock and the crowns read as fat broccoli at the city
-// framing. Cap the outliers and slim every crown — height stays believable
-// (cozy games keep trees TALL relative to houses), the silhouette gets airier.
-export const treeLook = { maxH: 19, crownSlim: 0.8 } as const;
+// Tree size policy. Baked OSM/estimate heights are data-honest (median 12.5 m,
+// q95 20 m); maxH caps the 27 m park giants that dwarf the 2–3-storey stock.
+// crownSlim scales crown WIDTH: the baked radii are far too narrow for the
+// heights (raw r p50 3.1 m against h 12.5 m → a 0.4:1 cypress spike, not a
+// broadleaf canopy), so crownSlim > 1 widens them toward the ~1.3–1.5:1
+// height:width of a real crown. Shared by the near instancing AND the impostor
+// bake framing (effectiveTreeSize), so the 150 m LOD handoff stays seamless.
+// Retuned 2026-07-08 (was maxH 19 / crownSlim 0.8 — trees read as pale
+// oversized spikes towering over the houses).
+export const treeLook = { maxH: 16, crownSlim: 1.35 } as const;
 
 // Terrain landcover tint table (geo terrain tiles, Task 11). Anchored to the
 // existing city-nature palette: meadow reuses kswCity.parkGreen exactly,

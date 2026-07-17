@@ -122,13 +122,18 @@ export function applyCityEnvironment(t: CityEnvironmentTargets, env: Environment
   // over the dark city — real crowns are mostly shadowed then. Fade the sun
   // term in with elevation (full above ~20°).
   const sunElevW = isDay ? Math.min(1, Math.max(0, env.sunDir[1] / 0.35)) : 1;
-  const sunW = 0.7 * Math.min(1, t.sun.intensity) * (isDay ? sunElevW : 0.3);
+  // Weights retuned 2026-07-08: the far impostors read markedly PALER/brighter
+  // than the shaded near crowns at the LOD handoff — a directional-sun scene
+  // multiplies the average near crown to ~0.7 (lit + hemi-only shadowed faces),
+  // but the flat impostor light was clamping toward white (~1.15 sum). Drop the
+  // sun+hemi weights so the midday far field lands near that shaded mid-tone.
+  const sunW = 0.5 * Math.min(1, t.sun.intensity) * (isDay ? sunElevW : 0.3);
   // Night factor 0.22: the night hemi runs hot (1.3) to keep the CITY readable
   // under AgX; feeding that raw into the unlit impostor atlas made every far
   // tree glow teal brighter than the lamps. The hemi term ALSO ramps with sun
   // elevation by day — at dawn/dusk the physically-lit scene sits in the AgX
   // toe while a flat 0.48 hemi painted the far trees as pastel confetti.
-  const hemiW = 1.6 * t.hemi.intensity * (isDay ? 0.35 + 0.65 * sunElevW : 0.22);
+  const hemiW = 1.1 * t.hemi.intensity * (isDay ? 0.35 + 0.65 * sunElevW : 0.22);
   impostorLightU.value.setRGB(
     Math.min(1, t.sun.color.r * sunW + t.hemi.color.r * hemiW),
     Math.min(1, t.sun.color.g * sunW + t.hemi.color.g * hemiW),

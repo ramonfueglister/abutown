@@ -58,7 +58,8 @@ import { buildRoads } from './geo/roads';
 import { makeCorridorGround } from './geo/groundSampler';
 import { cityBuildings, cityMeta, cityNature, cityRails, cityRoads, kswBuildings } from './geo/geoData';
 import { loadWorld, anchorGroundHeight, makeHeightSampler, fetchTileBin, decodeTileBin, type DecodedTile } from './geo/worldData';
-import { buildL0Backdrop, updateTerrainDiscardAnchor } from './geo/terrain';
+import { buildL0Backdrop } from './geo/terrain';
+import { updateCorridorDiscardAnchor } from './geo/corridorDiscardRegion';
 import { loadCorridorMask } from './geo/corridorMask';
 import { DEFAULT_RINGS, TileStreamer, tileCenter, type TileKey, type TileMeta } from './geo/tileStreamer';
 import { materializeTile, subCellKey, type TileContent } from './geo/tileContent';
@@ -1848,7 +1849,8 @@ async function boot(): Promise<void> {
       // #144 distance-limited corridor discard: anchored to the SAME camera
       // position the streamer rings use, radius safely INSIDE the fine (L2)
       // ring so the discard never reaches the L2/L1 seam (see terrain.ts).
-      updateTerrainDiscardAnchor(cx, cz, DEFAULT_RINGS.r2 * 0.8);
+      // Drives the terrain holes AND the skirt walls that close them.
+      updateCorridorDiscardAnchor(cx, cz, DEFAULT_RINGS.r2 * 0.8);
       const dx = cx - lastTreeCamX;
       const dz = cz - lastTreeCamZ;
       const moved2 = dx * dx + dz * dz;

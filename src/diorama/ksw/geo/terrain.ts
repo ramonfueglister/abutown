@@ -12,6 +12,7 @@ import { groundTintMat, terrainDetailTint, vertexTintMat } from './nature';
 import type { DecodedTile } from './worldData';
 import { Landcover } from '../../../proto/world_pb';
 import { corridorMaskDataTexture, type CorridorMask } from './corridorMask';
+import { insideDiscardRegion } from './corridorDiscardRegion';
 
 const landcoverColor: Record<number, number> = {
   [Landcover.MEADOW]: terrainLook.meadow,
@@ -71,7 +72,7 @@ function buildTileGeometry(tile: DecodedTile['tile']): THREE.BufferGeometry {
 }
 
 /**
- * Camera anchor + radius for the distance-limited corridor discard (#144).
+ * The distance-limited corridor discard (#144) lives in corridorDiscardRegion:
  * Level-gating (only L2 tiles get the discard material) removes the coarse-LOD
  * divergence, but at the fine ring's OUTER rim the discard holes of edge L2
  * tiles look through to the offset L1 surfaces behind them — a dashed bright
@@ -80,17 +81,10 @@ function buildTileGeometry(tile: DecodedTile['tile']): THREE.BufferGeometry {
  * the discard→no-discard transition happens over pure L2 terrain, where the
  * corridor-snapped surface matches the platform within centimetres — no gap
  * for a ray to slip through. Beyond it, terrain simply covers the corridors.
+ *
+ * The skirts that close these holes read the SAME region (roads.ts skirtMat),
+ * so a hole and its wall always begin and end together.
  */
-const discardCamU = uniform(new THREE.Vector2(0, 0));
-const discardRadiusU = uniform(1e9);
-
-/** Per-frame update of the discard anchor/radius — call from the render loop
- * with the SAME position the tile streamer uses and a radius safely inside
- * its fine (L2) ring. */
-export function updateTerrainDiscardAnchor(x: number, z: number, radiusM: number): void {
-  (discardCamU.value as THREE.Vector2).set(x, z);
-  discardRadiusU.value = radiusM;
-}
 
 /**
  * Terrain material with the corridor-discard (Task 5e, spec §5). Starts from
@@ -135,9 +129,8 @@ function terrainDiscardMat(mask: CorridorMask): THREE.MeshPhysicalMaterial {
     const v = positionWorld.z.sub(float(mask.originZ)).add(halfCell).div(spanZ);
     const inside = texture(tex, vec2(u, v)).r.greaterThan(float(0.5));
     // Distance limit (#144): only discard well inside the fine ring — see
-    // updateTerrainDiscardAnchor above.
-    const near = positionWorld.xz.sub(discardCamU).length().lessThan(discardRadiusU);
-    inside.and(near).discard();
+    // corridorDiscardRegion.
+    inside.and(insideDiscardRegion()).discard();
     // tint² on purpose — see groundTintMat (nature.ts): the approved ground
     // look was curated under the accidental double-multiply.
     return terrainDetailTint(tint.mul(tint));
